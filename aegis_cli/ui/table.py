@@ -116,12 +116,12 @@ class Table:
 
         if total_width > term_width:
             shrinkable = [i for i, col in enumerate(self.columns) if not col.no_wrap]
-            if not shrinkable:
-                shrinkable = list(range(col_count))
-            widest_idx = max(shrinkable, key=lambda idx: widths[idx])
-            excess = total_width - term_width
-            min_w = self.columns[widest_idx].min_width
-            widths[widest_idx] = max(min_w, widths[widest_idx] - excess)
+            if shrinkable:
+                widest_idx = max(shrinkable, key=lambda idx: widths[idx])
+                excess = total_width - term_width
+                min_w = self.columns[widest_idx].min_width
+                widths[widest_idx] = max(min_w, widths[widest_idx] - excess)
+
 
         lines: list[str] = []
         if self.title:

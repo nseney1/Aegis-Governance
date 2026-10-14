@@ -124,13 +124,27 @@ def _run_list(args: argparse.Namespace) -> int:
         print("No matching rules found.")
         return 0
 
-    print(f"Active Rules ({len(rules)} found):")
-    print(f"  {'Rule ID':<36} {'Type':<12} {'Enforcement':<12} {'Fitness':<8}")
-    print("  " + "─" * 70)
+    from aegis_cli.ui.table import Table
+    from aegis_cli.ui.theme import OutputContext
+
+    existing_ui = getattr(args, "ui", None)
+    ui = existing_ui if isinstance(existing_ui, OutputContext) else OutputContext.from_env_and_args(args)
+
+    tbl = Table(ctx=ui)
+    tbl.add_column("Rule ID", no_wrap=True)
+    tbl.add_column("Type", no_wrap=True)
+    tbl.add_column("Enforcement", no_wrap=True)
+    tbl.add_column("Fitness", justify="right", no_wrap=True)
     for r in rules:
-        score_str = f"{r['score']:.2f}" if r["score"] is not None else "—"
-        print(f"  {r['id']:<36} {r['type']:<12} {r['enforcement']:<12} {score_str:<8}")
+        score_str = ui.color_fitness(float(r["score"])) if isinstance(r.get("score"), (int, float)) else "—"
+        type_str = ui.color_rule_type(str(r["type"]))
+        tbl.add_row(str(r["id"]), type_str, str(r["enforcement"]), score_str)
+
+    print(f"Active Rules ({len(rules)} found):")
+    for line in tbl.render(ui).splitlines():
+        print(f"  {line}")
     return 0
+
 
 
 def _run_promote(args: argparse.Namespace) -> int:
@@ -530,7 +544,6 @@ class RuleCommand(AegisCommand):
         p_prom = sub.add_parser("promote", help="Promote a rule up lifecycle tiers")
         p_prom.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to promote")
         p_prom.add_argument("--rule", default=None, help="Rule identifier to promote")
-        p_prom.add_argument("--cell", default=None, help="Rule identifier alias")
         p_prom.add_argument("--reason", help="Audit explanation for promotion")
         p_prom.add_argument("--force", action="store_true", help="Bypass evidence threshold checks")
         p_prom.add_argument("--tier-check", action="store_true", help="Evaluate enforcement tier transitions")
@@ -540,10 +553,10 @@ class RuleCommand(AegisCommand):
         p_dem = sub.add_parser("demote", help="Demote a rule down lifecycle tiers")
         p_dem.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to demote")
         p_dem.add_argument("--rule", default=None, help="Rule identifier to demote")
-        p_dem.add_argument("--cell", default=None, help="Rule identifier alias")
         p_dem.add_argument("--reason", help="Audit explanation for demotion")
         p_dem.add_argument("--force", action="store_true", help="Force demotion")
         p_dem.add_argument("--dry-run", action="store_true", help="Preview demotion without moving files")
+
 
         # archive
         p_arch = sub.add_parser("archive", help="Archive decayed or extinct rules")

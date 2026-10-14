@@ -264,3 +264,51 @@ class TestStatus:
         assert "Adaptive Traps:  2 active" in summary
         assert "Archived Rules:  1 archived" in summary
 
+    def test_status_branded_aegis_header_and_no_soma(self, tmp_path, capsys):
+        """v3.0.0: status prints Aegis Workspace Status, token budget bar, and zero 'Soma' references."""
+        (tmp_path / "rules").mkdir()
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+        args = argparse.Namespace(_root=tmp_path)
+        ret = run_status(args)
+        assert ret == 0
+        out = capsys.readouterr().out
+        assert "Aegis Workspace Status" in out
+        assert "Token budget:" in out
+        assert "soma" not in out.lower()
+        assert "aegis init" in out
+
+    def test_status_groups_rules_by_type_and_colors_fitness(self, tmp_path, capsys):
+        """v3.0.0: rules are grouped by modern rule type with colored fitness in TTY and zero ANSI in plain mode."""
+        from aegis_cli.ui.theme import OutputContext
+
+        rules_dir = tmp_path / ".aegis" / "rules"
+        (rules_dir / "invariants").mkdir(parents=True)
+        (rules_dir / "traps").mkdir(parents=True)
+        (rules_dir / "invariants" / "inv-auth.md").write_text(
+            "---\nid: inv-auth\ntype: wall\nfitness:\n  score: 0.92\n---\n# Auth Invariant\n",
+            encoding="utf-8",
+        )
+        (rules_dir / "traps" / "trap-retry.md").write_text(
+            "---\nid: trap-retry\ntype: vacuole\nfitness:\n  score: 0.42\n---\n# Retry Trap\n",
+            encoding="utf-8",
+        )
+
+        tty_ui = OutputContext(color_enabled=True, emoji_enabled=True, plain=False)
+        args_tty = argparse.Namespace(_root=tmp_path, ui=tty_ui)
+        assert run_status(args_tty) == 0
+        out_tty = capsys.readouterr().out
+        assert "🛡️ Aegis Workspace Status" in out_tty
+        assert "\x1b[" in out_tty
+        assert "0.92" in out_tty
+        assert "0.42" in out_tty
+        assert "wall" not in out_tty.lower()
+        assert "vacuole" not in out_tty.lower()
+
+        plain_ui = OutputContext(color_enabled=False, emoji_enabled=False, plain=True)
+        args_plain = argparse.Namespace(_root=tmp_path, plain=True, ui=plain_ui)
+        assert run_status(args_plain) == 0
+        out_plain = capsys.readouterr().out
+        assert "\x1b[" not in out_plain
+        assert "soma" not in out_plain.lower()
+
+
