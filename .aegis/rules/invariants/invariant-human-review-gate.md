@@ -1,5 +1,5 @@
 ---
-id: wall-human-review-gate
+id: invariant-human-review-gate
 domain: governance
 type: invariant
 enforcement: gate
@@ -21,11 +21,11 @@ tags:
   - human-in-the-loop
 created: 2026-10-07
 fitness:
-  triggers: 50
-  true_positives: 5.3404
+  triggers: 51
+  true_positives: 5.3804
   false_positives: 5.6804
   score: 1.0
-  last_trigger_date: "2026-10-14T19:09:13Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 # Wall: Human Review Gate Enforcement

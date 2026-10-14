@@ -1,5 +1,5 @@
 ---
-id: wall-dogfood-own-tools
+id: invariant-dogfood-own-tools
 domain: governance
 type: invariant
 enforcement: gate
@@ -28,10 +28,10 @@ tags:
 fitness:
   score: 0.6
   impact_weight: 1.0
-  triggers: 77
-  true_positives: 36.198
+  triggers: 79
+  true_positives: 38.198
   false_positives: 31.8419
-  last_trigger_date: "2026-10-14T19:36:50Z"
+  last_trigger_date: "2026-10-14T19:45:33Z"
 ---
 
 When performing lifecycle operations on Soma's own cells (create, promote,

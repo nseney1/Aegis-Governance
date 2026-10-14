@@ -1,5 +1,5 @@
 ---
-id: wall-deterministic-arbitration
+id: invariant-deterministic-arbitration
 domain: governance
 type: invariant
 enforcement: gate
@@ -27,10 +27,10 @@ tags:
 fitness:
   score: 0.75
   impact_weight: 1.0
-  triggers: 68
-  true_positives: 13.0931
+  triggers: 69
+  true_positives: 13.2718
   false_positives: 8.989
-  last_trigger_date: "2026-10-14T19:26:54Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 Review finding arbitration MUST go through the deterministic arbiter, not

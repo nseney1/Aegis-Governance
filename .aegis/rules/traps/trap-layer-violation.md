@@ -26,10 +26,10 @@ tags:
 fitness:
   score: 0.6
   impact_weight: 1.0
-  triggers: 74
-  true_positives: 19.8078
+  triggers: 75
+  true_positives: 20.3877
   false_positives: 17.423
-  last_trigger_date: "2026-10-14T19:36:50Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 Supercell C5 incident: `aegis_mcp/tools.py` imported `_check_test_coverage`,

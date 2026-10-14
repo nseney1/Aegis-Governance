@@ -1,5 +1,5 @@
 ---
-id: wall-oracles
+id: invariant-oracles
 domain: governance
 type: invariant
 enforcement: gate

@@ -26,10 +26,10 @@ tags:
 fitness:
   score: 0.5
   impact_weight: 0.9
-  triggers: 68
-  true_positives: 11.7598
+  triggers: 69
+  true_positives: 11.9385
   false_positives: 8.3225
-  last_trigger_date: "2026-10-14T19:26:54Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 Every CLI flag registered in argparse MUST be consumed by the handler function.
