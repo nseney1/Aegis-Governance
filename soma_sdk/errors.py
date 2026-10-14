@@ -14,16 +14,41 @@ T = TypeVar('T')
 from soma_core.errors import SomaError
 
 
+__all__ = [
+    "SomaError",
+    "AegisError",
+    "CellParseError",
+    "RuleParseError",
+    "CellNotFoundError",
+    "RuleNotFoundError",
+    "CellPathTraversalError",
+    "RulePathTraversalError",
+    "FitnessError",
+    "ScoringError",
+    "Result",
+]
+
+
 class CellParseError(SomaError):
     """Raised when a cell file cannot be parsed (missing/malformed frontmatter)."""
+
+
+RuleParseError = CellParseError
 
 
 class CellNotFoundError(SomaError):
     """Raised when a cell file does not exist."""
 
 
+RuleNotFoundError = CellNotFoundError
+
+
 class CellPathTraversalError(SomaError):
     """Raised when a cell_id or path attempts directory traversal."""
+
+
+RulePathTraversalError = CellPathTraversalError
+AegisError = SomaError
 
 
 class FitnessError(SomaError):

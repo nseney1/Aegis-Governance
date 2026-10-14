@@ -1,7 +1,7 @@
 # Soma
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square)](LICENSE)
-[![Core Rules](https://img.shields.io/badge/Core_Rules-19-green?style=flat-square)](#-core-rules)
+[![Core Rules](https://img.shields.io/badge/Core_Rules-18-green?style=flat-square)](#-core-rules)
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-15-purple?style=flat-square)](#-agent-skills)
 [![Architecture](https://img.shields.io/badge/Architecture-Pure_Python-blue?style=flat-square)](#-core-architecture)
 [![Version](https://img.shields.io/badge/Version-1.5.1-informational?style=flat-square)](docs/project/CHANGELOG.md)
@@ -107,7 +107,6 @@ The system's foundational rules — 19 inherited behavioral defaults:
 | [core-change-protocol](genome/core-change-protocol.md) | model_decision | Approval gates for genome/enzyme modifications |
 | [tdd-protocol](genome/.oracles/tdd-protocol.md) | model_decision | Test-driven development with sequential phase gates |
 | [optional-import-guard](genome/.oracles/optional-import-guard.md) | model_decision | try/except guards on optional dependencies |
-| [hgt-resource-consolidation](genome/hgt-resource-consolidation-hgt.md) | model_decision | Cross-project rule sharing governance |
 | [ci-green-before-release](genome/ci-green-before-release.md) | model_decision | Requires green CI before release or deployment |
 | [gitflow-review-gate](genome/gitflow-review-gate.md) | model_decision | Enforces reviewed Gitflow branch transitions |
 | [no-pre-existing-excuse](genome/no-pre-existing-excuse.md) | model_decision | Requires fixing relevant pre-existing failures instead of dismissing them |

@@ -278,7 +278,10 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
             return _error(req_id, -32602, "Tool arguments must be an object.")
 
         client_token = params.get("_sessionToken") or (args.get("_sessionToken") if isinstance(args, dict) else None)
-        require_token = os.environ.get("SOMA_REQUIRE_SESSION_TOKEN") == "1"
+        require_token = (
+            os.environ.get("AEGIS_REQUIRE_SESSION_TOKEN") == "1"
+            or os.environ.get("SOMA_REQUIRE_SESSION_TOKEN") == "1"
+        )
 
         if client_token is not None:
             from soma_core.receipts import _safe_compare
@@ -497,7 +500,8 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
 
 def _on_session_close(workspace: Optional[str] = None) -> None:
     """Trigger background ACE outcome reflection upon session termination."""
-    if os.environ.get("SOMA_REFLECT_ON_CLOSE", "1") == "0":
+    reflect_close = os.environ.get("AEGIS_REFLECT_ON_CLOSE") or os.environ.get("SOMA_REFLECT_ON_CLOSE", "1")
+    if reflect_close == "0":
         return
     ws = workspace or _canonical_workspace
     if not ws:
@@ -514,7 +518,7 @@ def run_stdio_server():
     global _canonical_workspace
     global _execution_enabled
 
-    workspace_env = os.environ.get("SOMA_WORKSPACE") or os.getcwd()
+    workspace_env = os.environ.get("AEGIS_WORKSPACE") or os.environ.get("SOMA_WORKSPACE") or os.getcwd()
     try:
         from .security import Workspace
         _canonical_workspace = Workspace.confine(workspace_env)
@@ -522,7 +526,10 @@ def run_stdio_server():
         print(f"Error: Invalid canonical workspace: {e}", file=sys.stderr)
         return 1
         
-    _execution_enabled = os.environ.get("SOMA_EXECUTION_ENABLED") == "1"
+    _execution_enabled = (
+        os.environ.get("AEGIS_EXECUTION_ENABLED") == "1"
+        or os.environ.get("SOMA_EXECUTION_ENABLED") == "1"
+    )
     requests_processed = 0
 
     try:

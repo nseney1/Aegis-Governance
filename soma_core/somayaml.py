@@ -87,8 +87,11 @@ class SomaDocument(collections.abc.Mapping):
         if "kind" in self._metadata:
             return str(self._metadata["kind"]).strip().lower()
 
-        # Auto-Inference for Active Cells and Skills
-        cell_types = {"wall", "membrane", "vacuole", "chloroplast", "plasmodesma"}
+        # Auto-Inference for Active Cells, Rules, and Skills
+        cell_types = {
+            "wall", "membrane", "vacuole", "chloroplast", "plasmodesma", "plasmodesmata",
+            "invariant", "boundary", "trap", "persona", "contract", "gate"
+        }
         m_type = str(self._metadata.get("type", "")).lower()
         if m_type in cell_types:
             return "rule"

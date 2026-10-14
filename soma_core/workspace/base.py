@@ -59,27 +59,48 @@ class Workspace(os.PathLike[str]):
 
     @property
     def soma_dir(self) -> Path:
-        """Path to .soma directory."""
+        """Path to .aegis or .soma directory."""
+        if (self.root / ".aegis").exists():
+            return self.root / ".aegis"
         return self.root / ".soma"
 
     @property
+    def aegis_dir(self) -> Path:
+        """Alias for soma_dir."""
+        return self.soma_dir
+
+    @property
     def cells_dir(self) -> Path:
-        """Path to .soma/cells directory."""
-        return self.root / ".soma" / "cells"
+        """Path to active rules/cells directory."""
+        if (self.root / ".aegis" / "rules").exists():
+            return self.root / ".aegis" / "rules"
+        if (self.soma_dir / "rules").exists():
+            return self.soma_dir / "rules"
+        return self.soma_dir / "cells"
+
+    @property
+    def rules_dir(self) -> Path:
+        """Path to active rules directory (alias for cells_dir)."""
+        return self.cells_dir
 
     @property
     def metrics_dir(self) -> Path:
-        """Path to .soma/metrics directory."""
-        return self.root / ".soma" / "metrics"
+        """Path to metrics directory."""
+        return self.soma_dir / "metrics"
 
     @property
     def evidence_dir(self) -> Path:
-        """Path to .soma/evidence directory."""
-        return self.root / ".soma" / "evidence"
+        """Path to evidence directory."""
+        return self.soma_dir / "evidence"
+
+    @property
+    def locks_dir(self) -> Path:
+        """Path to locks directory."""
+        return self.soma_dir / "locks"
 
     @property
     def signals_file(self) -> Path:
-        """Path to .soma/evidence/signals.jsonl file."""
+        """Path to signals.jsonl file."""
         return self.evidence_dir / "signals.jsonl"
 
     @property
@@ -89,8 +110,13 @@ class Workspace(os.PathLike[str]):
 
     @property
     def is_soma_repo(self) -> bool:
-        """True if this workspace is the core Soma Governance repository."""
+        """True if this workspace is the core Soma/Aegis Governance repository."""
         return is_soma_repo(self.root)
+
+    @property
+    def is_aegis_repo(self) -> bool:
+        """Alias for is_soma_repo."""
+        return self.is_soma_repo
 
     def __fspath__(self) -> str:
         return str(self.root)

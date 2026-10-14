@@ -28,10 +28,18 @@ def _stdlib_parse_frontmatter(yaml_text: str) -> dict:
 __all__ = [
     "Cell",
     "CellFitness",
+    "Rule",
+    "RuleFitness",
     "parse_cell_file",
+    "parse_rule_file",
+    "write_cell_frontmatter",
+    "write_rule_frontmatter",
     "save_cell_file",
+    "save_rule_file",
     "load_cell",
+    "load_rule",
     "dump_cell",
+    "dump_rule",
 ]
 
 
@@ -248,20 +256,31 @@ def load_cell(
     cell_id = _sanitize_cell_id(cell_id)
 
     if cells_dir is None:
-        # Walk up from CWD to find .soma/cells/
+        # Walk up from CWD to find .aegis/rules/ or .soma/cells/
         cwd = os.getcwd()
-        candidate = os.path.join(cwd, '.soma', 'cells')
-        if os.path.isdir(candidate):
-            cells_dir = candidate
+        cand_aegis = os.path.join(cwd, '.aegis', 'rules')
+        cand_soma_rules = os.path.join(cwd, '.soma', 'rules')
+        cand_soma = os.path.join(cwd, '.soma', 'cells')
+        if os.path.isdir(cand_aegis):
+            cells_dir = cand_aegis
+        elif os.path.isdir(cand_soma_rules):
+            cells_dir = cand_soma_rules
+        elif os.path.isdir(cand_soma):
+            cells_dir = cand_soma
         else:
             raise CellNotFoundError(
-                f"Cannot find .soma/cells/ from {cwd}"
+                f"Cannot find .aegis/rules/ or .soma/cells/ from {cwd}"
             )
 
-    # Fast-path: check standard cell subdirectories directly before recursive walk
+    # Fast-path: check standard cell and rule subdirectories directly before recursive walk
     target_fname = f"{cell_id}.md"
     found_path = None
-    for subdir in ("walls", "vacuoles", "membranes", "chloroplasts", "plasmodesmata", "ribosomes", "nuclei", ""):
+    standard_subdirs = (
+        "walls", "vacuoles", "membranes", "chloroplasts", "plasmodesmata",
+        "invariants", "traps", "boundaries", "personas", "contracts",
+        "ribosomes", "nuclei", ""
+    )
+    for subdir in standard_subdirs:
         candidate_file = os.path.join(cells_dir, subdir, target_fname) if subdir else os.path.join(cells_dir, target_fname)
         if os.path.isfile(candidate_file):
             found_path = candidate_file
@@ -315,4 +334,27 @@ def load_cell(
         return cell_inst
 
     raise CellNotFoundError(f"Cell not found: {cell_id}")
+
+
+# Backward-compatible and canonical engineering aliases
+Rule = Cell
+RuleFitness = CellFitness
+load_rule = load_cell
+write_rule_frontmatter = write_cell_frontmatter
+save_cell_file = write_cell_frontmatter
+save_rule_file = write_cell_frontmatter
+parse_rule_file = parse_cell_file
+
+
+def dump_cell(frontmatter: dict, body: str = "") -> str:
+    """Dump cell/rule dictionary and body to markdown with frontmatter."""
+    from soma_core.somayaml import dump_frontmatter
+    yaml_text = dump_frontmatter(frontmatter)
+    content = f"---\n{yaml_text.strip()}\n---\n"
+    if body:
+        content += body
+    return content
+
+
+dump_rule = dump_cell
 

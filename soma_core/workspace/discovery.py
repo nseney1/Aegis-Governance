@@ -15,25 +15,29 @@ from soma_core.errors import WorkspaceNotFoundError
 
 
 def _is_workspace_dir(d: str) -> bool:
-    """Check if directory contains a Soma workspace marker (.soma/cells or .soma)."""
-    if os.path.isdir(os.path.join(d, ".soma", "cells")):
+    """Check if directory contains a workspace marker (.aegis/rules, .soma/cells, .aegis, .soma)."""
+    if (
+        os.path.isdir(os.path.join(d, ".aegis", "rules"))
+        or os.path.isdir(os.path.join(d, ".soma", "cells"))
+        or os.path.isdir(os.path.join(d, ".soma", "rules"))
+    ):
         return True
     try:
         home_str = str(Path.home())
     except Exception:
         home_str = ""
     if d not in ("/tmp", "/var/tmp", home_str):
-        if os.path.isdir(os.path.join(d, ".soma")):
+        if os.path.isdir(os.path.join(d, ".aegis")) or os.path.isdir(os.path.join(d, ".soma")):
             return True
     return False
 
 
 def is_soma_repo(root: Path) -> bool:
-    """Compound check to verify if a workspace root is the core Soma repository.
+    """Compound check to verify if a workspace root is the core Soma/Aegis repository.
 
     Requires:
-    1. pyproject.toml containing non-commented name = 'soma-governance'
-    2. Both soma_core/ and soma_cli/ directories exist.
+    1. pyproject.toml containing non-commented name = 'soma-governance' or 'aegis-governance'
+    2. Both core/ and cli/ directories exist (soma_* or aegis_*).
     """
     pyproject = root / "pyproject.toml"
     if not pyproject.is_file():
@@ -41,13 +45,17 @@ def is_soma_repo(root: Path) -> bool:
 
     try:
         content = pyproject.read_text(encoding="utf-8", errors="replace")
-        # Match non-commented name = "soma-governance" or name = 'soma-governance'
-        if not re.search(r'^[ \t]*name[ \t]*=[ \t]*["\']soma-governance["\']', content, re.MULTILINE):
+        if not re.search(r'^[ \t]*name[ \t]*=[ \t]*["\'](?:soma|aegis)-governance["\']', content, re.MULTILINE):
             return False
     except OSError:
         return False
 
-    return (root / "soma_core").is_dir() and (root / "soma_cli").is_dir()
+    has_core = (root / "soma_core").is_dir() or (root / "aegis_core").is_dir()
+    has_cli = (root / "soma_cli").is_dir() or (root / "aegis_cli").is_dir()
+    return has_core and has_cli
+
+
+is_aegis_repo = is_soma_repo
 
 
 def resolve_workspace_root(
@@ -55,43 +63,51 @@ def resolve_workspace_root(
     caller_file: str | Path | os.PathLike[str] | None = None,
     strict_env: bool = False,
 ) -> Path:
-    """Find the project root containing .soma/cells/ or .soma/.
+    """Find the project root containing .aegis/rules/, .soma/cells/, or workspace marker.
 
     Resolution order:
-    1. SOMA_WORKSPACE env var (if set)
-       - If directory has .soma/cells, returns Path.
-       - If strict_env is True and .soma/cells is missing, raises WorkspaceNotFoundError.
+    1. AEGIS_WORKSPACE / SOMA_WORKSPACE env var (if set)
+       - If directory has rules/cells, returns Path.
+       - If strict_env is True and missing, raises WorkspaceNotFoundError.
        - If directory exists, returns Path.
-    2. SOMA_ROOT env var (if set)
-       - If directory has .soma/cells, returns Path.
-       - If strict_env is True and .soma/cells is missing, raises WorkspaceNotFoundError.
+    2. AEGIS_ROOT / SOMA_ROOT env var (if set)
+       - If directory has rules/cells, returns Path.
+       - If strict_env is True and missing, raises WorkspaceNotFoundError.
        - If directory exists, returns Path.
     3. Explicit start parameter (walks up from start)
-    4. CWD (check if CWD has .soma/cells or .soma)
+    4. CWD (check if CWD has workspace marker)
     5. Walk up from CWD
     6. Walk up from caller_file, skipping vendor/ directories
     7. Fallback to CWD
     """
-    # 1. SOMA_WORKSPACE env var
-    soma_ws = os.environ.get("SOMA_WORKSPACE")
+    # 1. AEGIS_WORKSPACE / SOMA_WORKSPACE env var
+    soma_ws = os.environ.get("AEGIS_WORKSPACE") or os.environ.get("SOMA_WORKSPACE")
     if soma_ws:
-        if os.path.isdir(os.path.join(soma_ws, ".soma", "cells")):
+        if (
+            os.path.isdir(os.path.join(soma_ws, ".aegis", "rules"))
+            or os.path.isdir(os.path.join(soma_ws, ".soma", "cells"))
+            or os.path.isdir(os.path.join(soma_ws, ".soma", "rules"))
+        ):
             return Path(soma_ws).resolve()
         elif strict_env:
             raise WorkspaceNotFoundError(
-                f"SOMA_WORKSPACE is set to {soma_ws} but no .soma/cells found there."
+                f"SOMA_WORKSPACE/AEGIS_WORKSPACE is set to {soma_ws} but no .soma/cells found there (missing valid rules)."
             )
         elif os.path.isdir(soma_ws):
             return Path(soma_ws).resolve()
 
-    # 2. SOMA_ROOT env var
-    soma_root = os.environ.get("SOMA_ROOT")
+    # 2. AEGIS_ROOT / SOMA_ROOT env var
+    soma_root = os.environ.get("AEGIS_ROOT") or os.environ.get("SOMA_ROOT")
     if soma_root:
-        if os.path.isdir(os.path.join(soma_root, ".soma", "cells")):
+        if (
+            os.path.isdir(os.path.join(soma_root, ".aegis", "rules"))
+            or os.path.isdir(os.path.join(soma_root, ".soma", "cells"))
+            or os.path.isdir(os.path.join(soma_root, ".soma", "rules"))
+        ):
             return Path(soma_root).resolve()
         elif strict_env:
             raise WorkspaceNotFoundError(
-                f"SOMA_ROOT is set to {soma_root} but no .soma/cells found there."
+                f"SOMA_ROOT/AEGIS_ROOT is set to {soma_root} but no .soma/cells found there (missing valid rules)."
             )
         elif os.path.isdir(soma_root):
             return Path(soma_root).resolve()

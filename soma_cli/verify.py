@@ -259,6 +259,37 @@ def format_layer2_summary(result) -> str:
     return "\n".join(lines)
 
 
+def _is_dirty(line: str) -> bool:
+    """Check if a porcelain git status line represents a dirty code change."""
+    parts = line.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return False
+    path = parts[1].strip()
+    # Ignore soma/aegis runtime evidence, metrics, and telemetry
+    if (
+        path.startswith(".soma/evidence") or "/.soma/evidence" in path
+        or path.startswith(".aegis/evidence") or "/.aegis/evidence" in path
+        or path.startswith(".soma/metrics") or "/.soma/metrics" in path
+        or path.startswith(".aegis/metrics") or "/.aegis/metrics" in path
+        or path.startswith(".soma/telemetry") or "/.soma/telemetry" in path
+        or path.startswith(".aegis/telemetry") or "/.aegis/telemetry" in path
+        or path.startswith(".soma/cells") or "/.soma/cells" in path
+        or path.startswith(".aegis/rules") or "/.aegis/rules" in path
+        or path.startswith(".soma/governance") or "/.soma/governance" in path
+        or path.startswith(".aegis/governance") or "/.aegis/governance" in path
+        or path in (".soma/human_insights.jsonl", ".aegis/human_insights.jsonl")
+        or path.endswith("/.soma/human_insights.jsonl")
+        or path.endswith("/.aegis/human_insights.jsonl")
+    ):
+        return False
+    # Ignore test runners and python cache artifacts
+    if "__pycache__" in path or path.endswith(".pyc"):
+        return False
+    if ".pytest_cache" in path:
+        return False
+    return True
+
+
 def verify_release_gate(repo_root: str) -> tuple[bool, str]:
     """Check Release Gate 4.5: assert latest arbitration evidence is a valid SHIP receipt.
 
@@ -269,7 +300,7 @@ def verify_release_gate(repo_root: str) -> tuple[bool, str]:
 
     cycle_num, data = get_latest_arbitration_evidence(repo_root)
     if not data or cycle_num == 0:
-        return False, "Release Gate 4.5 FAIL: No arbitration evidence found in .soma/evidence/. Run 'soma verify' first."
+        return False, "Release Gate 4.5 FAIL: No arbitration evidence found in .aegis/evidence/ or .soma/evidence/. Run 'soma verify' or 'aegis verify' first."
 
     verdict = str(data.get("verdict", "")).lower()
     if verdict != "ship":
@@ -287,28 +318,6 @@ def verify_release_gate(repo_root: str) -> tuple[bool, str]:
         )
         if status_res.returncode != 0:
             return False, f"Release Gate 4.5 FAIL: git status check failed: {status_res.stderr.strip()}"
-        def _is_dirty(line: str) -> bool:
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) < 2:
-                return False
-            path = parts[1].strip()
-            # Ignore soma runtime evidence, metrics, and telemetry
-            if path.startswith(".soma/evidence") or "/.soma/evidence" in path:
-                return False
-            if path.startswith(".soma/metrics") or "/.soma/metrics" in path:
-                return False
-            if path.startswith(".soma/telemetry") or "/.soma/telemetry" in path:
-                return False
-            if path.startswith(".soma/cells") or "/.soma/cells" in path:
-                return False
-            if path == ".soma/human_insights.jsonl" or path.endswith("/.soma/human_insights.jsonl"):
-                return False
-            # Ignore test runners and python cache artifacts
-            if "__pycache__" in path or path.endswith(".pyc"):
-                return False
-            if ".pytest_cache" in path:
-                return False
-            return True
 
         dirty_lines = [line for line in status_res.stdout.splitlines() if line.strip() and _is_dirty(line)]
         if dirty_lines:
@@ -333,7 +342,7 @@ def verify_release_gate(repo_root: str) -> tuple[bool, str]:
             return False, f"Release Gate 4.5 FAIL: git rev-parse HEAD^{{tree}} failed: {tree_res.stderr.strip()}"
         current_tree = tree_res.stdout.strip()
         if current_tree != recorded_tree:
-            # Check if differences are strictly within .soma/evidence or .soma/cells (e.g. committing the receipt)
+            # Check if differences are strictly within evidence, cells, or rules (e.g. committing the receipt)
             diff_res = subprocess.run(
                 ["git", "diff-tree", "--name-only", "-r", recorded_tree, current_tree],
                 capture_output=True, text=True, cwd=repo_root, timeout=5,
@@ -342,8 +351,14 @@ def verify_release_gate(repo_root: str) -> tuple[bool, str]:
                 diff_files = [f.strip() for f in diff_res.stdout.splitlines() if f.strip()]
                 non_evidence = [
                     f for f in diff_files
-                    if not (f.startswith(".soma/evidence") or "/.soma/evidence" in f
-                            or f.startswith(".soma/cells") or "/.soma/cells" in f)
+                    if not (
+                        f.startswith(".soma/evidence") or "/.soma/evidence" in f
+                        or f.startswith(".aegis/evidence") or "/.aegis/evidence" in f
+                        or f.startswith(".soma/cells") or "/.soma/cells" in f
+                        or f.startswith(".aegis/rules") or "/.aegis/rules" in f
+                        or f.startswith(".soma/governance") or "/.soma/governance" in f
+                        or f.startswith(".aegis/governance") or "/.aegis/governance" in f
+                    )
                 ]
                 if non_evidence:
                     return False, (

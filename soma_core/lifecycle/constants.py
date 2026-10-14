@@ -32,7 +32,16 @@ GLOBAL_DEMOTION_PATH = {"genome": "wall", "wall": "vacuole"}
 LOCAL_DEMOTION_PATH = {"gate": "wall", "wall": "vacuole"}
 DEMOTION_PATH = GLOBAL_DEMOTION_PATH
 
-TYPE_TO_DIR = {"vacuole": "vacuoles", "wall": "walls", "gate": "gates"}
+TYPE_TO_DIR = {
+    "vacuole": "vacuoles",
+    "wall": "walls",
+    "gate": "gates",
+    "trap": "traps",
+    "invariant": "invariants",
+    "boundary": "boundaries",
+    "persona": "personas",
+    "contract": "contracts",
+}
 
 EXTINCTION_THRESHOLD = 0.15
 PROMOTION_THRESHOLD = 0.85
@@ -52,6 +61,12 @@ VALID_TYPES = {
     "membrane": "membranes",
     "plasmodesmata": "plasmodesmata",
     "gate": "gates",
+    # Engineering types
+    "trap": "traps",
+    "persona": "personas",
+    "invariant": "invariants",
+    "boundary": "boundaries",
+    "contract": "contracts",
 }
 
 

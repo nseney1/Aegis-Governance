@@ -13,15 +13,21 @@ from soma_core.evidence import aggregate_signals
 
 HARDCODED_PATH_RE = re.compile(r'''(?:"|')(/home/|/Users/|/tmp/)''')
 SKIP_DIRS = {
-    "__pycache__", ".git", ".soma", "node_modules", ".venv", "venv",
+    "__pycache__", ".git", ".soma", ".aegis", "node_modules", ".venv", "venv",
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", "egg-info",
 }
 DIR_TO_TYPE = {
-    "vacuoles": "vacuole",
-    "walls": "wall",
-    "chloroplasts": "chloroplast",
-    "membranes": "membrane",
-    "plasmodesmata": "plasmodesmata",
+    "vacuoles": ("vacuole", "trap"),
+    "walls": ("wall", "invariant"),
+    "chloroplasts": ("chloroplast", "persona"),
+    "membranes": ("membrane", "boundary"),
+    "plasmodesmata": ("plasmodesmata", "contract"),
+    # Engineering canonical directories
+    "traps": ("trap", "vacuole"),
+    "invariants": ("invariant", "wall"),
+    "personas": ("persona", "chloroplast"),
+    "boundaries": ("boundary", "membrane"),
+    "contracts": ("contract", "plasmodesmata"),
 }
 
 
@@ -157,7 +163,12 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
     stem = rel_path.stem
     if len(parts) >= 2:
         top_pkg = parts[0]
-        clean_pkg = top_pkg[5:] if top_pkg.startswith("soma_") else top_pkg
+        if top_pkg.startswith("aegis_"):
+            clean_pkg = top_pkg[6:]
+        elif top_pkg.startswith("soma_"):
+            clean_pkg = top_pkg[5:]
+        else:
+            clean_pkg = top_pkg
         subparts = parts[1:-1]
         candidates.append(test_dir.joinpath(clean_pkg, *subparts, f"test_{stem}.py"))
         candidates.append(test_dir.joinpath(top_pkg, *subparts, f"test_{stem}.py"))
@@ -172,7 +183,7 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / f"test_{parent_name}.py")
         candidates.append(test_dir / f"test_{parent_name}_{stem}.py")
         if len(parts) >= 2:
-            clean_pkg = parts[0][5:] if parts[0].startswith("soma_") else parts[0]
+            clean_pkg = parts[0][6:] if parts[0].startswith("aegis_") else (parts[0][5:] if parts[0].startswith("soma_") else parts[0])
             candidates.append(test_dir / f"test_{clean_pkg}_{parent_name}.py")
             candidates.append(test_dir / f"test_{parent_name}_adapters.py")
             candidates.append(test_dir / f"test_{clean_pkg}_{parent_name}_adapters.py")
@@ -180,15 +191,15 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
 
     # 3. Domain and legacy suite mappings resolved dynamically
     top_dir = parts[0] if parts else ""
-    if top_dir == "soma_cli":
+    if top_dir in ("soma_cli", "aegis_cli"):
         candidates.append(test_dir / f"test_cli_{stem}.py")
         candidates.append(test_dir / "test_platforms.py")
         candidates.append(test_dir / "test_platform_adapters.py")
-    elif top_dir == "soma_core":
+    elif top_dir in ("soma_core", "aegis_core"):
         candidates.append(test_dir / f"test_core_{stem}.py")
-    elif top_dir == "soma_mcp":
+    elif top_dir in ("soma_mcp", "aegis_mcp"):
         candidates.append(test_dir / f"test_mcp_{stem}.py")
-    elif top_dir == "soma_sdk":
+    elif top_dir in ("soma_sdk", "aegis_sdk"):
         candidates.append(test_dir / f"test_sdk_{stem}.py")
 
     if stem.startswith("genesis_"):
@@ -461,12 +472,15 @@ def check_cell_conventions(root: Path) -> list[dict]:
         if os.path.basename(entry.relative_path) == "README.md":
             continue
         parts = entry.relative_path.split("/")
-        if len(parts) < 4 or parts[:2] != [".soma", "cells"]:
+        if len(parts) < 4 or (parts[:2] != [".soma", "cells"] and parts[:2] != [".aegis", "rules"]):
             continue
         type_dir_name = parts[2]
-        expected_type = DIR_TO_TYPE.get(type_dir_name)
-        if expected_type is None:
+        allowed_types = DIR_TO_TYPE.get(type_dir_name)
+        if allowed_types is None:
             continue
+        if isinstance(allowed_types, str):
+            allowed_types = (allowed_types,)
+        expected_type = allowed_types[0]
         rel = entry.relative_path
         try:
             content = entry.content.decode("utf-8")
@@ -520,7 +534,7 @@ def check_cell_conventions(root: Path) -> list[dict]:
             continue
 
         required = ["id", "domain", "type"]
-        if expected_type in ("wall", "vacuole"):
+        if any(t in ("wall", "vacuole", "invariant", "trap") for t in allowed_types):
             required.append("enforcement")
         for field in required:
             if field not in meta:
@@ -530,22 +544,22 @@ def check_cell_conventions(root: Path) -> list[dict]:
                     "message": f"{rel}: missing required field '{field}'",
                 })
         cell_type = meta.get("type", "")
-        if cell_type != expected_type:
+        if cell_type not in allowed_types:
             issues.append({
                 "check": "cell_conventions",
                 "file": rel,
                 "message": (
                     f"{rel}: type '{cell_type}' doesn't match directory "
-                    f"'{type_dir_name}' (expected '{expected_type}')"
+                    f"'{type_dir_name}' (expected one of {allowed_types})"
                 ),
             })
-        if expected_type == "wall" and meta.get("enforcement") != "gate":
+        if cell_type in ("wall", "invariant") and meta.get("enforcement") != "gate":
             issues.append({
                 "check": "cell_conventions",
                 "file": rel,
                 "message": (
-                    f"{rel}: wall enforcement is '{meta.get('enforcement')}' "
-                    "but walls must use 'gate'"
+                    f"{rel}: wall/invariant enforcement is '{meta.get('enforcement')}' "
+                    "but must use 'gate'"
                 ),
             })
         stem = os.path.splitext(os.path.basename(entry.relative_path))[0]

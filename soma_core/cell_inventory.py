@@ -151,25 +151,38 @@ def _empty_inventory() -> CellInventory:
 
 
 def inventory_cells(workspace: str) -> CellInventory:
-    """Capture every ``.md`` below ``.soma/cells`` without following links.
+    """Capture every ``.md`` below ``.aegis/rules`` or ``.soma/cells`` without following links.
 
     The returned content bytes are the same bytes used to calculate each entry
     digest and the aggregate fingerprint. Directory and file metadata are
     checked before and after capture so concurrent changes fail closed.
     """
     workspace_abs = os.path.abspath(os.fspath(workspace))
+    aegis_dir = os.path.join(workspace_abs, ".aegis")
+    aegis_rules_dir = os.path.join(aegis_dir, "rules")
     soma_dir = os.path.join(workspace_abs, ".soma")
-    cells_dir = os.path.join(soma_dir, "cells")
+    soma_rules_dir = os.path.join(soma_dir, "rules")
+    soma_cells_dir = os.path.join(soma_dir, "cells")
+
+    if os.path.isdir(aegis_rules_dir):
+        parent_dir = aegis_dir
+        cells_dir = aegis_rules_dir
+    elif os.path.isdir(soma_rules_dir):
+        parent_dir = soma_dir
+        cells_dir = soma_rules_dir
+    else:
+        parent_dir = soma_dir
+        cells_dir = soma_cells_dir
 
     workspace_info = _optional_stat(workspace_abs)
     if workspace_info is None:
         return _empty_inventory()
     _require_directory(workspace_abs, workspace_info)
 
-    soma_info = _optional_stat(soma_dir)
-    if soma_info is None:
+    parent_info = _optional_stat(parent_dir)
+    if parent_info is None:
         return _empty_inventory()
-    _require_directory(soma_dir, soma_info)
+    _require_directory(parent_dir, parent_info)
 
     cells_info = _optional_stat(cells_dir)
     if cells_info is None:
@@ -178,7 +191,7 @@ def inventory_cells(workspace: str) -> CellInventory:
 
     ancestor_identities = {
         workspace_abs: _identity_signature(workspace_info),
-        soma_dir: _identity_signature(soma_info),
+        parent_dir: _identity_signature(parent_info),
     }
     directory_signatures = {}  # type: dict[str, Tuple[int, int, int, int, int, int]]
     cell_paths = []  # type: List[str]
@@ -335,13 +348,27 @@ def find_matching_cells(
 
 from soma_core.somayaml import parse_frontmatter
 
+# Backward-compatible and canonical engineering aliases
+RuleInventory = CellInventory
+RuleInventoryEntry = CellInventoryEntry
+RuleInventoryError = CellInventoryError
+RuleMatch = CellMatch
+inventory_rules = inventory_cells
+find_matching_rules = find_matching_cells
+
 __all__ = [
     "CellInventory",
     "CellInventoryEntry",
     "CellInventoryError",
     "CellMatch",
+    "RuleInventory",
+    "RuleInventoryEntry",
+    "RuleInventoryError",
+    "RuleMatch",
     "find_matching_cells",
+    "find_matching_rules",
     "inventory_cells",
+    "inventory_rules",
     "parse_frontmatter",
 ]
 

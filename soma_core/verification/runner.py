@@ -69,7 +69,7 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
     stem = os.path.splitext(os.path.basename(filepath))[0]
     test_name = f"test_{stem}.py"
     parent = os.path.basename(os.path.dirname(filepath))
-    clean_parent = parent[5:] if parent.startswith("soma_") else parent
+    clean_parent = parent[6:] if parent.startswith("aegis_") else (parent[5:] if parent.startswith("soma_") else parent)
 
     candidates = [
         test_name,

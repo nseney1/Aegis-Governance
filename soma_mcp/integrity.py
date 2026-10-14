@@ -134,8 +134,16 @@ _KEY_FILENAME = "manifest.key"
 
 
 def _key_path(workspace: str) -> str:
-    """Return the path to .soma/keys/manifest.key."""
-    return os.path.join(workspace, ".soma", _KEY_DIR, _KEY_FILENAME)
+    """Return the path to .aegis/keys/manifest.key or .soma/keys/manifest.key."""
+    aegis_key = os.path.join(workspace, ".aegis", _KEY_DIR, _KEY_FILENAME)
+    if os.path.exists(aegis_key):
+        return aegis_key
+    soma_key = os.path.join(workspace, ".soma", _KEY_DIR, _KEY_FILENAME)
+    if os.path.exists(soma_key):
+        return soma_key
+    if os.path.isdir(os.path.join(workspace, ".aegis")):
+        return aegis_key
+    return soma_key
 
 
 def generate_key(workspace: str) -> str:
@@ -219,12 +227,28 @@ def verify_signature(manifest: dict, key: bytes) -> bool:
 # ── Manifest I/O ─────────────────────────────────────────────────────
 
 
+def _manifest_path(workspace: str) -> str:
+    """Return the path to .aegis/rules/manifest.json or .soma/cells/manifest.json."""
+    aegis_cand = os.path.join(workspace, ".aegis", "rules", _MANIFEST_FILENAME)
+    if os.path.isfile(aegis_cand):
+        return aegis_cand
+    soma_rules = os.path.join(workspace, ".soma", "rules", _MANIFEST_FILENAME)
+    if os.path.isfile(soma_rules):
+        return soma_rules
+    soma_cells = os.path.join(workspace, ".soma", "cells", _MANIFEST_FILENAME)
+    if os.path.isfile(soma_cells):
+        return soma_cells
+    if os.path.isdir(os.path.join(workspace, ".aegis")):
+        return aegis_cand
+    return soma_cells
+
+
 def load_manifest(workspace: str) -> dict | None:
-    """Load the cell manifest from ``.soma/cells/manifest.json``.
+    """Load the cell/rule manifest from ``.aegis/rules/manifest.json`` or ``.soma/cells/manifest.json``.
 
     Returns None if the manifest file does not exist.
     """
-    manifest_path = os.path.join(workspace, ".soma", "cells", _MANIFEST_FILENAME)
+    manifest_path = _manifest_path(workspace)
     if not os.path.isfile(manifest_path):
         return None
     try:
@@ -236,14 +260,14 @@ def load_manifest(workspace: str) -> dict | None:
 
 
 def save_manifest(workspace: str, manifest: dict) -> None:
-    """Save a manifest to ``.soma/cells/manifest.json``.
+    """Save a manifest to ``.aegis/rules/manifest.json`` or ``.soma/cells/manifest.json``.
 
     If an HMAC key exists, the manifest is automatically signed before saving.
     """
     key = load_key(workspace)
     if key is not None:
         manifest["signature"] = sign_manifest(manifest, key)
-    manifest_path = os.path.join(workspace, ".soma", "cells", _MANIFEST_FILENAME)
+    manifest_path = _manifest_path(workspace)
     os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
     manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
     from soma_core.storage import atomic_write_bytes

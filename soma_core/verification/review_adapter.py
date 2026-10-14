@@ -240,7 +240,9 @@ def get_next_cycle_number(workspace: str | os.PathLike) -> int:
 
 def get_latest_arbitration_evidence(workspace: str | os.PathLike) -> tuple[int, dict | None]:
     """Retrieve the latest arbitration cycle record and cycle number."""
-    evidence_dir = Path(workspace) / ".soma" / "evidence"
+    evidence_dir = Path(workspace) / ".aegis" / "evidence"
+    if not evidence_dir.is_dir():
+        evidence_dir = Path(workspace) / ".soma" / "evidence"
     if not evidence_dir.is_dir():
         return 0, None
 
