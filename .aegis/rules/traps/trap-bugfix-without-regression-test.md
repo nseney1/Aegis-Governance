@@ -28,10 +28,10 @@ tags:
 fitness:
   score: null
   impact_weight: 1.2
-  triggers: 68
-  true_positives: 17.4969
+  triggers: 69
+  true_positives: 18.3431
   false_positives: 19.2032
-  last_trigger_date: "2026-10-14T08:55:31Z"
+  last_trigger_date: "2026-10-14T08:55:41Z"
 ---
 
 v0.81 origin: Bugs 1-3 in outcome_engine.py and sync.py were fixed without

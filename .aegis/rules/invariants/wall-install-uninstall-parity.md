@@ -22,10 +22,10 @@ tags:
 fitness:
   score: null
   impact_weight: 1.0
-  triggers: 56
-  true_positives: 2.1126
+  triggers: 57
+  true_positives: 2.1561
   false_positives: 1.8187
-  last_trigger_date: "2026-10-14T08:55:31Z"
+  last_trigger_date: "2026-10-14T08:55:41Z"
 ---
 
 The install and uninstall scripts must support the same set of platforms. When adding

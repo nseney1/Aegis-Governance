@@ -24,10 +24,10 @@ tags:
 fitness:
   score: 0.3333
   impact_weight: 1.0
-  triggers: 53
-  true_positives: 12.9162
+  triggers: 54
+  true_positives: 13.2495
   false_positives: 10.8334
-  last_trigger_date: "2026-10-14T08:55:31Z"
+  last_trigger_date: "2026-10-14T08:55:41Z"
 ---
 
 Supercell doc-drift incident: Adding "→ Supercell" to the architecture diagram

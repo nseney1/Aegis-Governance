@@ -22,10 +22,10 @@ tags:
 fitness:
   score: 0.7273
   impact_weight: 1.0
-  triggers: 40
-  true_positives: 24.6
+  triggers: 41
+  true_positives: 25.1
   false_positives: 9.6
-  last_trigger_date: "2026-10-14T08:55:31Z"
+  last_trigger_date: "2026-10-14T08:55:41Z"
 ---
 
 Version consistency is enforced across 3 sources:

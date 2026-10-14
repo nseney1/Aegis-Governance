@@ -23,11 +23,11 @@ tags:
   - parity
   - cross-service
 fitness:
-  triggers: 53
-  true_positives: 6.0785
+  triggers: 54
+  true_positives: 6.1674
   false_positives: 3.2159
   score: 0.6667
-  last_trigger_date: "2026-10-14T08:55:31Z"
+  last_trigger_date: "2026-10-14T08:55:41Z"
 ---
 
 The MCP server (aegis_mcp/tools.py) is the API contract for external agents.

@@ -29,10 +29,10 @@ tags:
 fitness:
   score: null
   impact_weight: 1.0
-  triggers: 24
-  true_positives: 5.8312
+  triggers: 25
+  true_positives: 6.0464
   false_positives: 6.7256
-  last_trigger_date: "2026-10-14T08:55:31Z"
+  last_trigger_date: "2026-10-14T08:55:41Z"
 ---
 
 # Wall: Prefer Subagent Delegation Protocol

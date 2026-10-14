@@ -24,10 +24,10 @@ tags:
 fitness:
   score: 0.625
   impact_weight: 1.0
-  triggers: 77
-  true_positives: 30.2383
+  triggers: 78
+  true_positives: 31.2383
   false_positives: 29.9993
-  last_trigger_date: "2026-10-14T08:55:31Z"
+  last_trigger_date: "2026-10-14T08:55:41Z"
 ---
 
 Supercell S2 incident: `aegis_cli/verify.py` accepted `--files ../../etc/passwd`
