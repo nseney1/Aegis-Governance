@@ -36,7 +36,7 @@ def is_soma_repo(root: Path) -> bool:
     """Compound check to verify if a workspace root is the core Soma/Aegis repository.
 
     Requires:
-    1. pyproject.toml containing non-commented name = 'aegis-code', 'aegis-governance', or 'soma-governance'
+    1. pyproject.toml containing non-commented name = 'aegis-guardrails', 'aegis-governance', or 'soma-governance'
     2. Both core/ and cli/ directories exist (soma_* or aegis_*).
     """
     pyproject = root / "pyproject.toml"
@@ -45,7 +45,7 @@ def is_soma_repo(root: Path) -> bool:
 
     try:
         content = pyproject.read_text(encoding="utf-8", errors="replace")
-        if not re.search(r'^[ \t]*name[ \t]*=[ \t]*["\'](?:aegis-code|(?:soma|aegis)-governance)["\']', content, re.MULTILINE):
+        if not re.search(r'^[ \t]*name[ \t]*=[ \t]*["\'](?:aegis-guardrails|(?:soma|aegis)-governance)["\']', content, re.MULTILINE):
             return False
     except OSError:
         return False

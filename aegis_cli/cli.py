@@ -29,7 +29,7 @@ def _version() -> str:
             pass
     try:
         from importlib.metadata import PackageNotFoundError, version
-        for pkg_name in ("aegis-code", "aegis-governance", "soma-governance"):
+        for pkg_name in ("aegis-guardrails", "aegis-governance", "soma-governance"):
             try:
                 return version(pkg_name)
             except PackageNotFoundError:

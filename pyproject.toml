@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aegis-code"
+name = "aegis-guardrails"
 version = "2.0.0"
 description = "Governance framework that makes AI coding agents trustworthy"
 
@@ -43,9 +43,9 @@ keyring = ["keyring>=23.0.0"]
 dev = ["pytest", "pytest-xdist>=3.5.0", "ruff", "hypothesis>=6.100.0", "coverage", "pyyaml", "anyio"]
 
 [project.urls]
-Homepage = "https://github.com/nseney1/Aegis-Code"
-Documentation = "https://github.com/nseney1/Aegis-Code/tree/main/docs"
-Changelog = "https://github.com/nseney1/Aegis-Code/blob/main/docs/project/CHANGELOG.md"
+Homepage = "https://github.com/nseney1/Aegis-Guardrails"
+Documentation = "https://github.com/nseney1/Aegis-Guardrails/tree/main/docs"
+Changelog = "https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/project/CHANGELOG.md"
 
 
 
