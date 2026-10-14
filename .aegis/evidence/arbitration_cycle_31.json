@@ -1,6 +1,6 @@
 {
   "cycle": 31,
-  "timestamp": "2026-10-14T19:53:31.056346+00:00",
+  "timestamp": "2026-10-14T20:00:59.023908+00:00",
   "verdict": "ship",
   "divergence_count": 0,
   "convergence_count": 4,
@@ -14,6 +14,7 @@
   ],
   "divergences": [],
   "target_files": [
+    ".aegis/evidence/arbitration_cycle_31.json",
     ".aegis/rules/README.md",
     ".aegis/rules/boundaries/boundary-enzymes.md",
     ".aegis/rules/boundaries/boundary-genome-mutations.md",
@@ -59,6 +60,7 @@
     ".aegis/rules/traps/trap-unregistered-bug-fix.md",
     ".aegis/rules/traps/trap-unverified-delegation.md",
     ".aegis/rules/traps/trap-version-drift.md",
+    ".github/scripts/wheel_smoke.py",
     "README.md",
     "SECURITY.md",
     "VERSION",
@@ -342,6 +344,6 @@
     "tests/unit/verification/test_verifier_architecture.py",
     "tests/unit/verification/test_worker_lifecycle.py"
   ],
-  "commit_sha": "31155a092c0752e47d7fa0c896439d75f2c78094",
-  "tree_hash": "c188c5012e9dde5745046b38d7ac3b6c5ed22294"
+  "commit_sha": "436e0e9fb7fcddb8bacadbf2c57af08fa3c44d94",
+  "tree_hash": "af347fcb7ffd2de981f98deb1f6d0bd6894ce0af"
 }
