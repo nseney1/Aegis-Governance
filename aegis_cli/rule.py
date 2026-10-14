@@ -533,15 +533,24 @@ class RuleCommand(AegisCommand):
     help = "Manage rule lifecycle (list, promote, demote, archive, clean)"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
+        common = argparse.ArgumentParser(add_help=False)
+        common.add_argument("--plain", action="store_true", default=argparse.SUPPRESS)
+        common.add_argument("--no-emoji", action="store_true", default=argparse.SUPPRESS)
+        common.add_argument("--format", choices=["text", "json", "mermaid"], default=argparse.SUPPRESS)
+        common.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
+        common.add_argument("-q", "--quiet", action="store_true", default=argparse.SUPPRESS)
+        common.add_argument("--workspace", type=str, default=argparse.SUPPRESS)
+
         sub = parser.add_subparsers(dest="rule_action", metavar="ACTION")
 
         # list
-        p_list = sub.add_parser("list", help="List active rules and fitness metrics")
+        p_list = sub.add_parser("list", parents=[common], help="List active rules and fitness metrics")
         p_list.add_argument("--type", choices=["invariant", "trap", "boundary", "persona", "contract", "wall"], help="Filter by rule type")
         p_list.add_argument("--min-fitness", type=float, help="Filter by minimum fitness score")
 
         # promote
-        p_prom = sub.add_parser("promote", help="Promote a rule up lifecycle tiers")
+        p_prom = sub.add_parser("promote", parents=[common], help="Promote a rule up lifecycle tiers")
         p_prom.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to promote")
         p_prom.add_argument("--rule", default=None, help="Rule identifier to promote")
         p_prom.add_argument("--reason", help="Audit explanation for promotion")
@@ -550,22 +559,21 @@ class RuleCommand(AegisCommand):
         p_prom.add_argument("--dry-run", action="store_true", help="Preview promotion without moving files")
 
         # demote
-        p_dem = sub.add_parser("demote", help="Demote a rule down lifecycle tiers")
+        p_dem = sub.add_parser("demote", parents=[common], help="Demote a rule down lifecycle tiers")
         p_dem.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to demote")
         p_dem.add_argument("--rule", default=None, help="Rule identifier to demote")
         p_dem.add_argument("--reason", help="Audit explanation for demotion")
         p_dem.add_argument("--force", action="store_true", help="Force demotion")
         p_dem.add_argument("--dry-run", action="store_true", help="Preview demotion without moving files")
 
-
         # archive
-        p_arch = sub.add_parser("archive", help="Archive decayed or extinct rules")
+        p_arch = sub.add_parser("archive", parents=[common], help="Archive decayed or extinct rules")
         p_arch.add_argument("rule_id", nargs="?", help="Specific rule ID to archive")
         p_arch.add_argument("--dry-run", action="store_true", help="Preview rules to archive")
         p_arch.add_argument("--apply", action="store_true", default=True, help="Apply archive movements")
 
         # clean
-        p_clean = sub.add_parser("clean", help="Clean redundant or leaked rules")
+        p_clean = sub.add_parser("clean", parents=[common], help="Clean redundant or leaked rules")
         p_clean.add_argument("--dry-run", action="store_true", help="Show purge candidates without deleting")
         p_clean.add_argument("--apply", action="store_true", help="Apply cleanup deletions")
 
