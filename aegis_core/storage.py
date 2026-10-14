@@ -152,12 +152,35 @@ def read_text_utf8(path: Path | str) -> str:
     return p.read_text(encoding="utf-8-sig")
 
 
+def atomic_write_and_unlink(
+    source_path: Path | str,
+    target_path: Path | str,
+    new_content: str,
+) -> None:
+    """Write new_content to target_path atomically and unlink source_path with rollback."""
+    src = Path(source_path)
+    dst = Path(target_path)
+    atomic_write_text(dst, new_content)
+    try:
+        if src != dst and src.exists():
+            src.unlink()
+    except Exception:
+        if dst.exists() and src.exists():
+            try:
+                os.remove(dst)
+            except Exception as ex:
+                raise RuntimeError(f"Rollback failed: duplicate rule remains at {dst}") from ex
+        raise
+
+
 __all__ = [
     "async_atomic_write_text",
+    "atomic_write_and_unlink",
     "atomic_write_bytes",
     "atomic_write_file",
     "atomic_write_text",
     "fsync_dir",
     "read_text_utf8",
 ]
+
 

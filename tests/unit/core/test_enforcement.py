@@ -1,9 +1,9 @@
-"""Unit tests for soma_core.enforcement."""
+"""Unit tests for aegis_core.enforcement."""
 import os
 import tempfile
 import pytest
 
-from soma_core.enforcement import (
+from aegis_core.enforcement import (
     load_bug_registry,
     bug_status,
     verify_bug_schema,
@@ -16,7 +16,7 @@ from soma_core.enforcement import (
 
 
 def test_enforcement_ci_report_generation(tmp_path):
-    cells_dir = tmp_path / ".soma" / "cells"
+    cells_dir = tmp_path / ".aegis" / "rules"
     cells_dir.mkdir(parents=True)
     cell_path = cells_dir / "membrane-test.md"
     cell_path.write_text(
@@ -48,7 +48,7 @@ def test_enforcement_credit_weights_conservation():
 
 
 def test_gate_assertion_injection_sanitization():
-    from soma_core.enforcement import generate_gate_assertion
+    from aegis_core.enforcement import generate_gate_assertion
     import ast
 
     malicious_name = "cell\nmalicious_header_injection"
@@ -66,15 +66,15 @@ def test_gate_assertion_injection_sanitization():
 
 
 def test_enforcement_load_cells(tmp_path):
-    from soma_core.enforcement import load_cells
+    from aegis_core.enforcement import load_cells
 
-    cells_dir = tmp_path / ".soma" / "cells" / "walls"
+    cells_dir = tmp_path / ".aegis" / "rules" / "walls"
     cells_dir.mkdir(parents=True)
     (cells_dir / "wall-1.md").write_text(
         "---\nid: wall-1\ntype: wall\nhypothesis: test\n---\nbody",
         encoding="utf-8",
     )
-    cells = load_cells(str(tmp_path / ".soma" / "cells"))
+    cells = load_cells(str(tmp_path / ".aegis" / "rules"))
     assert len(cells) == 1
     assert cells[0]["id"] == "wall-1"
 

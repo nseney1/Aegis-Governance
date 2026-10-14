@@ -1,40 +1,31 @@
-"""Shared test helpers for cell lifecycle tests.
+"""Shared test helpers for rule lifecycle tests.
 
-Provides factory functions for creating cell files and JSONL evidence
-used by test_cli_promote.py, test_cli_demote.py, test_cli_oracle.py,
-test_lifecycle.py, and test_oracle_checkpoint.py.
+Provides factory functions for creating rule files and JSONL evidence
+used by lifecycle, fitness, and checkpoint tests.
 """
 import json
 import os
 from datetime import datetime, timedelta
 
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 __all__ = [
     "make_cell",
+    "make_rule",
     "write_cell_with_fitness",
+    "write_rule_with_fitness",
     "make_cell_dict",
+    "make_rule_dict",
     "soma_workspace",
+    "aegis_workspace",
     "write_evidence",
 ]
 
 
-def make_cell(cells_dir, name, cell_type="vacuole", created_days_ago=10,
+def make_rule(cells_dir, name, cell_type="trap", created_days_ago=10,
               expiry_days=365, expiry_sessions=100):
-    """Create a minimal cell markdown file with YAML frontmatter.
-
-    Args:
-        cells_dir: Directory to write the cell file into.
-        name: Cell ID and filename stem.
-        cell_type: One of vacuole, wall, genome.
-        created_days_ago: How old the cell should appear.
-        expiry_days: Days until cell expires.
-        expiry_sessions: Sessions until cell expires.
-
-    Returns:
-        Path to the created cell file.
-    """
+    """Create a minimal rule markdown file with YAML frontmatter."""
     created = (datetime.now() - timedelta(days=created_days_ago)).strftime("%Y-%m-%d")
     fm = {
         'id': name,
@@ -57,28 +48,13 @@ def make_cell(cells_dir, name, cell_type="vacuole", created_days_ago=10,
     return cell_file
 
 
-def write_cell_with_fitness(cells_dir, name, enforcement="advisory",
-                            triggers=0, tp=0, fp=0, cell_type="vacuole",
+make_cell = make_rule
+
+
+def write_rule_with_fitness(cells_dir, name, enforcement="advisory",
+                            triggers=0, tp=0, fp=0, cell_type="trap",
                             hypothesis=None):
-    """Write a cell markdown file with fitness data in YAML frontmatter.
-
-    Unlike ``make_cell``, this helper embeds fitness counters (triggers, tp,
-    fp, score) and supports arbitrary enforcement tiers, which is needed by
-    integration tests that exercise decay and tier-check logic.
-
-    Args:
-        cells_dir: Directory (pathlib.Path or str) to write the cell into.
-        name: Cell filename stem.
-        enforcement: Enforcement tier (advisory, mechanical, gate).
-        triggers: Number of triggers.
-        tp: True positives.
-        fp: False positives.
-        cell_type: Cell type (vacuole, wall, chloroplast, etc).
-        hypothesis: Optional hypothesis text; defaults to cell name.
-
-    Returns:
-        Path to the created cell file.
-    """
+    """Write a rule markdown file with fitness data in YAML frontmatter."""
     score = tp / max(triggers, 1)
     hyp = hypothesis or f"Test cell {name}"
     content = (
@@ -100,37 +76,46 @@ def write_cell_with_fitness(cells_dir, name, enforcement="advisory",
     return cell_path
 
 
-def make_cell_dict(tp=0, triggers=0, fp=0, impact_weight=1.0, score=None):
-    """Build a minimal in-memory cell dict matching the frontmatter structure.
+write_cell_with_fitness = write_rule_with_fitness
 
-    Used for testing ``jit_engine.get_fitness_score()`` and similar functions
-    that operate on cell metadata dicts rather than on-disk files.
-    """
+
+def make_rule_dict(tp=0, triggers=0, fp=0, impact_weight=1.0, score=None):
+    """Build a minimal in-memory rule dict matching the frontmatter structure."""
     fitness = {'true_positives': tp, 'triggers': triggers, 'false_positives': fp}
     if score is not None:
         fitness['score'] = score
     return {'fitness': fitness, 'impact_weight': impact_weight}
 
 
+make_cell_dict = make_rule_dict
+
+
+@pytest.fixture
+def aegis_workspace(tmp_path):
+    """Create a minimal Aegis workspace with rules and metrics directories."""
+    workspace = tmp_path / "project"
+    rules_dir = workspace / ".aegis" / "rules"
+    rules_dir.mkdir(parents=True)
+    metrics_dir = workspace / ".aegis" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    (workspace / "aegis.conf").write_text("TOTAL_SESSIONS=100\n")
+    return workspace
+
+
 @pytest.fixture
 def soma_workspace(tmp_path):
-    """Create a minimal Soma workspace with cells and metrics directories.
-
-    Returns a ``pathlib.Path`` pointing at the workspace root.  Tests that
-    need specific cell files should create them via ``make_cell``,
-    ``write_cell_with_fitness``, or direct writes.
-    """
+    """Create a minimal workspace with rules and metrics directories."""
     workspace = tmp_path / "project"
-    cells_dir = workspace / ".soma" / "cells"
-    cells_dir.mkdir(parents=True)
-    metrics_dir = workspace / ".soma" / "metrics"
+    rules_dir = workspace / ".aegis" / "rules"
+    rules_dir.mkdir(parents=True)
+    metrics_dir = workspace / ".aegis" / "metrics"
     metrics_dir.mkdir(parents=True)
-    (workspace / "soma.conf").write_text("TOTAL_SESSIONS=100\n")
+    (workspace / "aegis.conf").write_text("TOTAL_SESSIONS=100\n")
     return workspace
 
 
 def write_evidence(evidence_dir, cell_id, triggers=0, tp=0, fp=0):
-    """Write canonical trigger and outcome signals for one cell."""
+    """Write canonical trigger and outcome signals for one rule."""
     evidence_dir = str(evidence_dir)
     signals_file = os.path.join(evidence_dir, "signals.jsonl")
 
@@ -151,3 +136,4 @@ def write_evidence(evidence_dir, cell_id, triggers=0, tp=0, fp=0):
             f.write(json.dumps({
                 "cell": cell_id, "signal": "fp", "source": "manual",
             }) + "\n")
+

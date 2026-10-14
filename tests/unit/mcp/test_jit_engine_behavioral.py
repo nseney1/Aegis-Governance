@@ -8,13 +8,13 @@ import os
 import sys
 import time
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_mcp.jit_engine import (
+from aegis_mcp.jit_engine import (
     express,
     get_fitness_score,
     rank_cells,
@@ -31,7 +31,7 @@ def _make_cell(workspace, cell_id, cell_type='vacuole', target_paths=None,
                expired=False):
     """Create a minimal cell file in workspace."""
     type_map = {'vacuole': 'vacuoles', 'wall': 'walls', 'membrane': 'membranes'}
-    cells_dir = os.path.join(workspace, '.soma', 'cells',
+    cells_dir = os.path.join(workspace, '.aegis', "rules",
                              type_map.get(cell_type, 'vacuoles'))
     os.makedirs(cells_dir, exist_ok=True)
     fm = {
@@ -182,7 +182,7 @@ class TestExpress:
 
     def test_empty_workspace_no_crash(self, tmp_path):
         ws = str(tmp_path)
-        os.makedirs(os.path.join(ws, '.soma', 'cells'), exist_ok=True)
+        os.makedirs(os.path.join(ws, '.aegis', "rules"), exist_ok=True)
         result = express(ws)
         assert 'relevant_cells' in result
         assert 'stats' in result
@@ -223,7 +223,7 @@ class TestExpress:
 
     def test_stats_has_required_keys(self, tmp_path):
         ws = str(tmp_path)
-        os.makedirs(os.path.join(ws, '.soma', 'cells'), exist_ok=True)
+        os.makedirs(os.path.join(ws, '.aegis', "rules"), exist_ok=True)
         result = express(ws)
         stats = result['stats']
         assert 'total_cells' in stats
@@ -247,14 +247,14 @@ class TestExpress:
         ws = str(tmp_path)
         for i in range(10):
             _make_cell(ws, f'budget-cell-{i}', target_paths=['src/*.py'])
-        monkeypatch.setenv('SOMA_CONTEXT_BUDGET', '2')
+        monkeypatch.setenv('AEGIS_CONTEXT_BUDGET', '2')
         result = express(ws, changed_files=['src/foo.py'])
         # Mandatory cells can exceed budget, but non-mandatory should respect it
         assert result['stats']['budget'] == 2
 
 # ── Phase 4: C3 — Mandatory Cells Fitness Score ──────────────────────────
 
-from tests.helpers_cell import write_cell_with_fitness, soma_workspace
+from tests.helpers_rule import write_cell_with_fitness, soma_workspace
 
 class TestMandatoryCellsFitnessScore:
     """Verify mandatory wall/gate cells have their fitness score computed."""
@@ -262,7 +262,7 @@ class TestMandatoryCellsFitnessScore:
     @pytest.fixture
     def populated_workspace(self, soma_workspace):
         """Workspace with a wall cell and an advisory cell for fitness tests."""
-        cells_dir = soma_workspace / ".soma" / "cells"
+        cells_dir = soma_workspace / ".aegis" / "rules"
         write_cell_with_fitness(cells_dir, "wall-auth", cell_type="wall",
                                triggers=50, tp=48, fp=1,
                                hypothesis="Auth check")
@@ -273,7 +273,7 @@ class TestMandatoryCellsFitnessScore:
 
     def test_mandatory_cells_have_nonzero_fitness(self, populated_workspace):
         """Wall cells must have their fitness computed, not default to 0."""
-        from soma_mcp.jit_engine import express
+        from aegis_mcp.jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=5)
 
         for cell in result['relevant_cells']:
@@ -284,7 +284,7 @@ class TestMandatoryCellsFitnessScore:
 
     def test_all_expressed_cells_have_fitness(self, populated_workspace):
         """Every expressed cell (mandatory or candidate) must have fitness."""
-        from soma_mcp.jit_engine import express
+        from aegis_mcp.jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=5)
 
         for cell in result['relevant_cells']:

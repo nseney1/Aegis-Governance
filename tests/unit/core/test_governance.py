@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
-from soma_sdk.governance import Governance
+from aegis_sdk.governance import Governance
 
 def test_governance_fitness_landscape_in_process(tmp_path):
     _populate_governed_workspace(tmp_path)
@@ -10,27 +10,27 @@ def test_governance_fitness_landscape_in_process(tmp_path):
     assert isinstance(res, list)
     assert len(res) == 5
     cell_names = {c['cell'] for c in res}
-    assert "vacuole-test-trap.md" in cell_names
+    assert "trap-test-trap.md" in cell_names
 
 
 def _populate_governed_workspace(root: Path):
-    cells_dir = root / ".soma" / "cells"
-    for d in ["vacuoles", "walls", "chloroplasts", "membranes", "plasmodesmata"]:
+    cells_dir = root / ".aegis" / "rules"
+    for d in ["traps", "invariants", "personas", "boundaries", "contracts"]:
         (cells_dir / d).mkdir(parents=True, exist_ok=True)
-    (cells_dir / "vacuoles" / "vacuole-test-trap.md").write_text(
-        "---\ntype: vacuole\nhypothesis: test trap\n---\nBody\n", encoding="utf-8"
+    (cells_dir / "traps" / "trap-test-trap.md").write_text(
+        "---\ntype: trap\nhypothesis: test trap\n---\nBody\n", encoding="utf-8"
     )
-    (cells_dir / "walls" / "wall-test-guard.md").write_text(
-        "---\ntype: wall\nhypothesis: test guard\n---\nBody\n", encoding="utf-8"
+    (cells_dir / "invariants" / "invariant-test-guard.md").write_text(
+        "---\ntype: invariant\nhypothesis: test guard\n---\nBody\n", encoding="utf-8"
     )
-    (cells_dir / "chloroplasts" / "chloroplast-test-persona.md").write_text(
-        "---\ntype: chloroplast\nhypothesis: test persona\n---\nBody\n", encoding="utf-8"
+    (cells_dir / "personas" / "persona-test-persona.md").write_text(
+        "---\ntype: persona\nhypothesis: test persona\n---\nBody\n", encoding="utf-8"
     )
-    (cells_dir / "membranes" / "membrane-test-boundary.md").write_text(
-        "---\ntype: membrane\nhypothesis: test boundary\n---\nBody\n", encoding="utf-8"
+    (cells_dir / "boundaries" / "boundary-test-boundary.md").write_text(
+        "---\ntype: boundary\nhypothesis: test boundary\n---\nBody\n", encoding="utf-8"
     )
-    (cells_dir / "plasmodesmata" / "plasmodesmata-test-bridge.md").write_text(
-        "---\ntype: plasmodesmata\nhypothesis: test bridge\n---\nBody\n", encoding="utf-8"
+    (cells_dir / "contracts" / "contract-test-bridge.md").write_text(
+        "---\ntype: contract\nhypothesis: test bridge\n---\nBody\n", encoding="utf-8"
     )
 
 
@@ -43,14 +43,14 @@ def test_list_cells_with_cell_type_filter(tmp_path):
     assert len(all_cells) == 5
 
     # Filter by canonical type
-    vacuoles = gov.list_cells(cell_type="vacuole")
-    assert len(vacuoles) == 1
-    assert vacuoles[0]["_name"] == "vacuole-test-trap"
+    traps = gov.list_cells(cell_type="trap")
+    assert len(traps) == 1
+    assert traps[0]["_name"] == "trap-test-trap"
 
     # Filter by porcelain alias
-    traps = gov.list_cells(cell_type="learned-trap")
-    assert len(traps) == 1
-    assert traps[0]["_name"] == "vacuole-test-trap"
+    traps_alias = gov.list_cells(cell_type="learned-trap")
+    assert len(traps_alias) == 1
+    assert traps_alias[0]["_name"] == "trap-test-trap"
 
 
 def test_list_rules_porcelain_facade(tmp_path):
@@ -62,19 +62,19 @@ def test_list_rules_porcelain_facade(tmp_path):
 
     guards = gov.list_rules(rule_type="safety-guard")
     assert len(guards) == 1
-    assert guards[0]["_name"] == "wall-test-guard"
+    assert guards[0]["_name"] == "invariant-test-guard"
 
     personas = gov.list_rules(rule_type="agent-persona")
     assert len(personas) == 1
-    assert personas[0]["_name"] == "chloroplast-test-persona"
+    assert personas[0]["_name"] == "persona-test-persona"
 
     boundaries = gov.list_rules(rule_type="escalation-boundary")
     assert len(boundaries) == 1
-    assert boundaries[0]["_name"] == "membrane-test-boundary"
+    assert boundaries[0]["_name"] == "boundary-test-boundary"
 
     bridges = gov.list_rules(rule_type="contract-bridge")
     assert len(bridges) == 1
-    assert bridges[0]["_name"] == "plasmodesmata-test-bridge"
+    assert bridges[0]["_name"] == "contract-test-bridge"
 
 
 def test_record_outcome_in_process(tmp_path):
@@ -83,18 +83,18 @@ def test_record_outcome_in_process(tmp_path):
     gov = Governance(project_root=tmp_path)
 
     res = gov.record_outcome(
-        rule_id="vacuole-test-trap",
+        rule_id="trap-test-trap",
         success=True,
         metric={"test_metric": 99}
     )
     assert isinstance(res, dict)
     assert res.get("signal") == "tp" or res.get("signal_type") == "tp"
 
-    signals_file = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     assert signals_file.exists()
     lines = [json.loads(line) for line in signals_file.read_text(encoding="utf-8").strip().splitlines()]
     assert len(lines) >= 1
-    assert lines[-1]["cell"] == "vacuole-test-trap"
+    assert lines[-1]["cell"] == "trap-test-trap"
     assert lines[-1]["signal"] == "tp"
 
 
@@ -104,21 +104,21 @@ def test_record_outcome_fp_and_source_validation(tmp_path, monkeypatch):
     gov = Governance(project_root=tmp_path)
 
     # Test failure outcome emits fp
-    res_fp = gov.record_outcome("vacuole-test-trap", success=False, source="ci")
+    res_fp = gov.record_outcome("trap-test-trap", success=False, source="ci")
     assert isinstance(res_fp, dict)
     assert res_fp.get("signal") == "fp"
 
     # Test invalid source raises ValueError
     with pytest.raises(ValueError, match="Invalid telemetry source"):
-        gov.record_outcome("vacuole-test-trap", success=True, source="invalid_src")
+        gov.record_outcome("trap-test-trap", success=True, source="invalid_src")
 
     # Test fallback guarantees dict return
     def _raise(*args, **kwargs):
         raise RuntimeError("simulated telemetry failure")
 
-    monkeypatch.setattr("soma_core.telemetry.append_signal", _raise)
+    monkeypatch.setattr("aegis_core.telemetry.append_signal", _raise)
     monkeypatch.setattr(gov, "signal", lambda *a, **k: "legacy stdout string")
-    fallback_res = gov.record_outcome("vacuole-test-trap", success=True)
+    fallback_res = gov.record_outcome("trap-test-trap", success=True)
     assert isinstance(fallback_res, dict)
     assert fallback_res["status"] == "fallback_recorded"
     assert fallback_res["signal"] == "tp"
@@ -129,19 +129,19 @@ def test_list_cells_corrupted_isolation(tmp_path):
     _populate_governed_workspace(tmp_path)
     gov = Governance(project_root=tmp_path)
 
-    # Add corrupted vacuole cell
-    corrupted_file = tmp_path / ".soma" / "cells" / "vacuoles" / "corrupted_trap.md"
+    # Add corrupted trap cell
+    corrupted_file = tmp_path / ".aegis" / "rules" / "traps" / "corrupted_trap.md"
     corrupted_file.write_bytes(b"\xff\xfe\x00\x00")
 
     # Full list returns diagnostic error record
     all_cells = gov.list_cells()
     assert any(c.get("_name") == "corrupted_trap" and "_error" in c for c in all_cells)
 
-    # Wall filter must isolate and NOT leak corrupted vacuole
-    wall_cells = gov.list_cells(cell_type="wall")
-    assert not any(c.get("_name") == "corrupted_trap" for c in wall_cells)
-    assert len(wall_cells) == 1
-    assert wall_cells[0]["_name"] == "wall-test-guard"
+    # Invariant filter must isolate and NOT leak corrupted trap
+    inv_cells = gov.list_cells(cell_type="invariant")
+    assert not any(c.get("_name") == "corrupted_trap" for c in inv_cells)
+    assert len(inv_cells) == 1
+    assert inv_cells[0]["_name"] == "invariant-test-guard"
 
 
 def test_record_outcome_idempotency_forwarding(tmp_path):
@@ -150,7 +150,7 @@ def test_record_outcome_idempotency_forwarding(tmp_path):
     gov = Governance(project_root=tmp_path)
 
     res = gov.record_outcome(
-        rule_id="vacuole-test-trap",
+        rule_id="trap-test-trap",
         success=True,
         metric={"test_metric": 42},
         principal="test-agent",
@@ -160,10 +160,10 @@ def test_record_outcome_idempotency_forwarding(tmp_path):
     assert res.get("event_id") is not None
     assert res.get("payload_digest") is not None
 
-    signals_file = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     lines = [json.loads(line) for line in signals_file.read_text(encoding="utf-8").strip().splitlines()]
     last = lines[-1]
-    assert last["cell"] == "vacuole-test-trap"
+    assert last["cell"] == "trap-test-trap"
     assert last["event_id"] == res["event_id"]
     assert last["payload_digest"] == res["payload_digest"]
 
@@ -185,7 +185,7 @@ def test_create_rule_and_type_translation(tmp_path):
     gov = Governance(project_root=tmp_path)
     created = gov.create_rule("Safety check test", type="safety-guard")
     assert Path(created).exists()
-    assert "/walls/" in Path(created).as_posix()
+    assert "/invariants/" in Path(created).as_posix()
 
 
 def test_rule_fitness_alias(tmp_path, monkeypatch):
@@ -197,39 +197,39 @@ def test_rule_fitness_alias(tmp_path, monkeypatch):
 
 
 def test_sdk_exports():
-    from soma_sdk import Governance, Cell, CellFitness, SomaError
+    from aegis_sdk import Governance, Rule, RuleFitness, AegisError
     assert Governance is not None
-    assert Cell is not None
-    assert CellFitness is not None
-    assert issubclass(SomaError, Exception)
+    assert Rule is not None
+    assert RuleFitness is not None
+    assert issubclass(AegisError, Exception)
 
 
 def test_sdk_scoring_reexports():
-    from soma_sdk.scoring import calculate_snr, calculate_composite_fitness, compute_cell_fitness
+    from aegis_sdk.scoring import calculate_snr, calculate_composite_fitness, compute_cell_fitness
     assert calculate_snr(10, 2) is not None
     assert calculate_composite_fitness is compute_cell_fitness
 
 
 def test_cell_fitness_snr_db_delegation():
-    from soma_sdk.cells import CellFitness
-    from soma_core.scoring import calculate_snr
+    from aegis_sdk.rules import RuleFitness
+    from aegis_core.scoring import calculate_snr
 
-    cf = CellFitness(true_positives=10, false_positives=2)
+    cf = RuleFitness(true_positives=10, false_positives=2)
     assert cf.snr_db == calculate_snr(10, 2)
 
-    cf_inf = CellFitness(true_positives=5, false_positives=0)
+    cf_inf = RuleFitness(true_positives=5, false_positives=0)
     assert cf_inf.snr_db is None
 
-    cf_zero = CellFitness(true_positives=0, false_positives=5)
+    cf_zero = RuleFitness(true_positives=0, false_positives=5)
     assert cf_zero.snr_db == -99.0
 
 
 def test_write_cell_frontmatter_zero_dep_fallback(tmp_path, monkeypatch):
-    import soma_sdk.cells as sdk_cells
+    import aegis_sdk.rules as sdk_cells
     monkeypatch.setattr(sdk_cells, "yaml", None)
 
     target_file = tmp_path / "cell_zero_dep.md"
-    sdk_cells.write_cell_frontmatter(
+    sdk_cells.write_rule_frontmatter(
         str(target_file),
         {"name": "test-cell", "type": "wall"},
         "## Hypothesis\nZero dep fallback.\n",

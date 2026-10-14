@@ -40,7 +40,7 @@ def test_bug_038_enzyme_console_encoding():
 
 
 def test_bug_042_immune_sweep_env():
-    """BUG-042: SOMA_DATA_DIR unbound variable in immune_sweep.sh."""
+    """BUG-042: AEGIS_DATA_DIR unbound variable in immune_sweep.sh."""
     assert not (ROOT / "enzymes" / "immune_sweep.sh").exists()
 
 
@@ -81,12 +81,12 @@ def test_bug_063_uninstall_sed_rules():
 
 def test_bug_019_epoch_migration_purged():
     """BUG-019: epoch migration purged in v0.103.0."""
-    assert not (ROOT / "soma_cli" / "migration.py").exists()
+    assert not (ROOT / "aegis_cli" / "migration.py").exists()
 
 
 def test_bug_025_migration_lock_purged():
     """BUG-025: migration locks purged in v0.103.0."""
-    assert not (ROOT / "soma_cli" / "migration.py").exists()
+    assert not (ROOT / "aegis_cli" / "migration.py").exists()
 
 
 def test_bug_014_powershell_installer_purged():

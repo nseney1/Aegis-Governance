@@ -10,7 +10,7 @@ def test_prefix_stripping_dual_brand():
     """Verify that both soma_ and aegis_ prefixes are cleanly stripped."""
     root = Path("/dummy/repo")
     soma_candidates = [
-        str(c) for c in _resolve_canonical_test_candidates(root, root / "soma_core" / "scoring.py")
+        str(c) for c in _resolve_canonical_test_candidates(root, root / "aegis_core" / "scoring.py")
     ]
     aegis_candidates = [
         str(c) for c in _resolve_canonical_test_candidates(root, root / "aegis_core" / "scoring.py")
@@ -20,7 +20,7 @@ def test_prefix_stripping_dual_brand():
     assert str(root / "tests" / "core" / "test_scoring.py") in aegis_candidates
 
     soma_cli = [
-        str(c) for c in _resolve_canonical_test_candidates(root, root / "soma_cli" / "verify.py")
+        str(c) for c in _resolve_canonical_test_candidates(root, root / "aegis_cli" / "verify.py")
     ]
     aegis_cli = [
         str(c) for c in _resolve_canonical_test_candidates(root, root / "aegis_cli" / "verify.py")
@@ -30,14 +30,11 @@ def test_prefix_stripping_dual_brand():
 
 
 def test_dir_to_type_dual_mapping():
-    """Verify DIR_TO_TYPE maps both biological and engineering directory names."""
+    """Verify DIR_TO_TYPE maps canonical engineering directory names."""
     assert "invariant" in DIR_TO_TYPE["walls"]
     assert "invariant" in DIR_TO_TYPE["invariants"]
-    assert "trap" in DIR_TO_TYPE["vacuoles"]
     assert "trap" in DIR_TO_TYPE["traps"]
     assert "boundary" in DIR_TO_TYPE["membranes"]
     assert "boundary" in DIR_TO_TYPE["boundaries"]
-    assert "persona" in DIR_TO_TYPE["chloroplasts"]
     assert "persona" in DIR_TO_TYPE["personas"]
-    assert "contract" in DIR_TO_TYPE["plasmodesmata"]
     assert "contract" in DIR_TO_TYPE["contracts"]

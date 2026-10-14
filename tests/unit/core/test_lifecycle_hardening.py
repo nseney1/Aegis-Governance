@@ -7,13 +7,13 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
 
-from soma_sdk.cells import Cell, CellFitness, load_cell
+from aegis_sdk.rules import Rule, RuleFitness, load_rule
 from aegis_cli.rule import _force_promote, _force_demote, run_promote
 
 
 def test_is_promotable_with_age_fails_closed_on_invalid_date():
     """Unparseable or invalid created_date MUST return False, not True."""
-    c = Cell(name="test", type="vacuole", fitness=CellFitness(triggers=20, true_positives=19))
+    c = Rule(name="test", type="vacuole", fitness=RuleFitness(triggers=20, true_positives=19))
     
     # Unparseable string date
     c.created_date = "invalid-date-format"
@@ -25,16 +25,16 @@ def test_is_promotable_with_age_fails_closed_on_invalid_date():
 
 
 def test_load_cell_populates_created_date(tmp_path):
-    """load_cell must populate created_date on the loaded Cell instance."""
-    cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+    """load_rule must populate created_date on the loaded Rule instance."""
+    cells_dir = tmp_path / ".aegis" / "rules" / "traps"
     cells_dir.mkdir(parents=True)
     cell_file = cells_dir / "test-cell.md"
     cell_file.write_text(
-        "---\nname: test-cell\ntype: vacuole\ncreated_date: '2026-01-01T00:00:00Z'\n---\nHypothesis\n",
+        "---\nname: test-cell\ntype: trap\ncreated_date: '2026-01-01T00:00:00Z'\n---\nHypothesis\n",
         encoding="utf-8"
     )
 
-    cell = load_cell("test-cell", cells_dir=str(tmp_path / ".soma" / "cells"))
+    cell = load_rule("test-cell", cells_dir=str(tmp_path / ".aegis" / "rules"))
     assert hasattr(cell, "created_date")
     assert cell.created_date is not None
     assert isinstance(cell.created_date, (datetime, str))
@@ -44,9 +44,9 @@ def test_force_promote_handles_genome_cells(tmp_path, capsys):
     """Promoting a cell already in genome must report terminal status, not 'not found'."""
     genome_dir = tmp_path / "genome"
     genome_dir.mkdir()
-    (tmp_path / "soma_core").mkdir(parents=True)
-    (tmp_path / "soma_cli").mkdir(parents=True)
-    (tmp_path / "pyproject.toml").write_text('name = "soma-governance"\n', encoding="utf-8")
+    (tmp_path / "aegis_core").mkdir(parents=True)
+    (tmp_path / "aegis_cli").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text('name = "aegis-governance"\n', encoding="utf-8")
     cell_file = genome_dir / "rule-law.md"
     cell_file.write_text("---\nname: rule-law\ntype: genome\n---\nLaw body\n", encoding="utf-8")
 
@@ -58,14 +58,14 @@ def test_force_promote_handles_genome_cells(tmp_path, capsys):
 
 def test_force_promote_rollback_on_unlink_failure(tmp_path, monkeypatch):
     """If cell_path.unlink() fails after target_path is written, target_path must be cleaned up."""
-    cells_dir = tmp_path / ".soma" / "cells"
-    vac_dir = cells_dir / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules"
+    vac_dir = cells_dir / "traps"
     vac_dir.mkdir(parents=True)
-    wall_dir = cells_dir / "walls"
+    wall_dir = cells_dir / "invariants"
     wall_dir.mkdir(parents=True)
 
     cell_file = vac_dir / "test-cell.md"
-    cell_file.write_text("---\nname: test-cell\ntype: vacuole\n---\nHypothesis\n", encoding="utf-8")
+    cell_file.write_text("---\nname: test-cell\ntype: trap\n---\nHypothesis\n", encoding="utf-8")
 
     def mock_unlink(self, *args, **kwargs):
         raise OSError("Permission denied / disk locked")

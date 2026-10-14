@@ -10,7 +10,7 @@ from aegis_core.workspace import (
     Workspace,
     confine_path,
     confine_workspace,
-    validate_cell_names,
+    validate_rule_names,
 )
 
 __all__ = [
@@ -18,5 +18,5 @@ __all__ = [
     "Workspace",
     "confine_path",
     "confine_workspace",
-    "validate_cell_names",
+    "validate_rule_names",
 ]

@@ -13,7 +13,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_core.inference_provider import resolve_key, read_config_key
+from aegis_core.inference_provider import resolve_key, read_config_key
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -27,8 +27,8 @@ def no_env(monkeypatch):
 
 @pytest.fixture
 def tmp_workspace(tmp_path):
-    """Create a minimal workspace with a soma.conf containing a test key."""
-    conf = tmp_path / "soma.conf"
+    """Create a minimal workspace with a aegis.conf containing a test key."""
+    conf = tmp_path / "aegis.conf"
     conf.write_text('TEST_CONFIG_VAL="config-value-123"\nTEST_API_KEY="leaked-secret"\n', encoding="utf-8")
     return str(tmp_path)
 
@@ -52,12 +52,12 @@ class TestResolveKeyKeyring:
         with patch.dict("sys.modules", {"keyring": mock_keyring}):
             # Re-import to pick up the mocked keyring
             import importlib
-            from soma_core import inference_provider as mod
+            from aegis_core import inference_provider as mod
             importlib.reload(mod)
             try:
                 result = mod.resolve_key(str(tmp_path), ["TEST_API_KEY"])
                 assert result == "keyring-secret-456"
-                mock_keyring.get_password.assert_called_with("soma", "TEST_API_KEY")
+                mock_keyring.get_password.assert_called_with("aegis", "TEST_API_KEY")
             finally:
                 importlib.reload(mod)
 
@@ -71,7 +71,7 @@ class TestResolveKeyConfigFallback:
         mock_keyring.get_password.return_value = None
         with patch.dict("sys.modules", {"keyring": mock_keyring}):
             import importlib
-            from soma_core import inference_provider as mod
+            from aegis_core import inference_provider as mod
             importlib.reload(mod)
             try:
                 result = mod.resolve_key(tmp_workspace, ["TEST_CONFIG_VAL"])
@@ -89,7 +89,7 @@ class TestResolveKeyNone:
         mock_keyring.get_password.return_value = None
         with patch.dict("sys.modules", {"keyring": mock_keyring}):
             import importlib
-            from soma_core import inference_provider as mod
+            from aegis_core import inference_provider as mod
             importlib.reload(mod)
             try:
                 result = mod.resolve_key(str(tmp_path), ["TEST_API_KEY"])
@@ -105,7 +105,7 @@ class TestResolveKeyNoKeyringPackage:
         """When keyring is not installed, fall back to config without error."""
         with patch.dict("sys.modules", {"keyring": None}):
             import importlib
-            from soma_core import inference_provider as mod
+            from aegis_core import inference_provider as mod
             importlib.reload(mod)
             try:
                 result = mod.resolve_key(tmp_workspace, ["TEST_CONFIG_VAL"])
@@ -123,7 +123,7 @@ class TestResolveKeyKeyringException:
         mock_keyring.get_password.side_effect = RuntimeError("dbus not available")
         with patch.dict("sys.modules", {"keyring": mock_keyring}):
             import importlib
-            from soma_core import inference_provider as mod
+            from aegis_core import inference_provider as mod
             importlib.reload(mod)
             try:
                 result = mod.resolve_key(tmp_workspace, ["TEST_CONFIG_VAL"])
@@ -142,7 +142,7 @@ class TestResolveKeyPriorityEnvOverKeyring:
         mock_keyring.get_password.return_value = "keyring-loses"
         with patch.dict("sys.modules", {"keyring": mock_keyring}):
             import importlib
-            from soma_core import inference_provider as mod
+            from aegis_core import inference_provider as mod
             importlib.reload(mod)
             try:
                 result = mod.resolve_key(tmp_workspace, ["TEST_CONFIG_VAL"])
@@ -154,15 +154,15 @@ class TestResolveKeyPriorityEnvOverKeyring:
 
 class TestResolveKeySecretIgnoresConfig:
     def test_api_keys_ignore_config_file(self, no_env, tmp_workspace):
-        """Even if an API key is in soma.conf, resolve_key must ignore it and return None."""
+        """Even if an API key is in aegis.conf, resolve_key must ignore it and return None."""
         mock_keyring = MagicMock()
         mock_keyring.get_password.return_value = None
         with patch.dict("sys.modules", {"keyring": mock_keyring}):
             import importlib
-            from soma_core import inference_provider as mod
+            from aegis_core import inference_provider as mod
             importlib.reload(mod)
             try:
-                # The fixture puts TEST_API_KEY="leaked-secret" in soma.conf
+                # The fixture puts TEST_API_KEY="leaked-secret" in aegis.conf
                 result = mod.resolve_key(tmp_workspace, ["TEST_API_KEY"])
                 assert result is None  # Must ignore the config file!
             finally:
@@ -178,7 +178,7 @@ class TestResolveKeyPriorityKeyringOverConfig:
         mock_keyring.get_password.return_value = "keyring-wins"
         with patch.dict("sys.modules", {"keyring": mock_keyring}):
             import importlib
-            from soma_core import inference_provider as mod
+            from aegis_core import inference_provider as mod
             importlib.reload(mod)
             try:
                 result = mod.resolve_key(tmp_workspace, ["TEST_API_KEY"])

@@ -2,9 +2,9 @@
 from pathlib import Path
 import pytest
 
-from soma_core.ast.runner import ASTDriverRegistry, ASTDriverRunner
-from soma_core.ast.schema import NormalizedAST
-from soma_core.verification.call_graph import check_normalized
+from aegis_core.ast.runner import ASTDriverRegistry, ASTDriverRunner
+from aegis_core.ast.schema import NormalizedAST
+from aegis_core.verification.call_graph import check_normalized
 
 
 RUST_CODE = """// Sample Rust Code for AST Driver testing

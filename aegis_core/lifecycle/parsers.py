@@ -9,7 +9,8 @@ import re
 import shutil
 from typing import Any, Optional, Tuple
 
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink
+from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter, parse_rule_frontmatter
 from aegis_core.workspace import Workspace
 from .constants import (
     TYPE_TO_DIR,
@@ -58,7 +59,7 @@ def generate_slug(hypothesis: str, id_override: str | None = None) -> str:
 
 
 def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Optional[Path], Optional[str]]:
-    """Locate a cell across .aegis/rules/, .soma/cells/, and rules/ or genome/ directories."""
+    """Locate a cell across .aegis/rules/ and rules/ or genome/ directories."""
     clean_id = sanitize_cell_id(cell_id)
     if not clean_id:
         return None, None
@@ -67,9 +68,7 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
     candidate_dirs = [
-        ws.root / ".aegis" / "rules",
-        ws.cells_dir,
-        ws.root / ".soma" / "cells",
+        ws.rules_dir,
     ]
     rules_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
 
@@ -83,7 +82,7 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
             if candidate.is_file():
                 return candidate, type_name
 
-    if ws.is_soma_repo:
+    if ws.is_aegis_repo:
         candidate = rules_dir / f"{clean_id}.md"
         if candidate.is_file():
             return candidate, "genome"
@@ -95,7 +94,7 @@ def find_cell(workspace: Workspace | Path | str, cell_id: str) -> Optional[str]:
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    for cand_dir in (ws.root / ".aegis" / "rules", ws.cells_dir, ws.root / ".soma" / "cells"):
+    for cand_dir in (ws.rules_dir,):
         if not cand_dir.is_dir():
             continue
         matches = glob.glob(os.path.join(str(cand_dir), "**", f"*{cell_id}*"), recursive=True)
@@ -109,8 +108,7 @@ def parse_cell(file_path: Path | str) -> tuple[Optional[dict], str]:
     try:
         content = Path(file_path).read_text(encoding="utf-8")
         meta = parse_frontmatter(content)
-        end_idx = content.find("---", 3)
-        body = content[end_idx + 3:].lstrip() if end_idx != -1 else ""
+        body = _get_body(content).lstrip()
         return meta, body
     except Exception:
         return None, ""
@@ -118,7 +116,7 @@ def parse_cell(file_path: Path | str) -> tuple[Optional[dict], str]:
 
 def get_type_plural(cell_type: str) -> str:
     cell_type = cell_type.lower()
-    return VALID_TYPES.get(cell_type, "vacuoles")
+    return VALID_TYPES.get(cell_type, "traps")
 
 
 def _naive_utc(timestamp: Any) -> Optional[datetime]:
@@ -141,8 +139,7 @@ def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    aegis_ev = ws.root / ".aegis" / "evidence"
-    evidence_dir = str(aegis_ev if aegis_ev.is_dir() else ws.evidence_dir)
+    evidence_dir = str(ws.evidence_dir)
     aggregation = aggregate_signals(evidence_dir)
     return {
         cell_id: {
@@ -157,7 +154,7 @@ def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any
 
 
 def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
-    """Load cell metadata from .aegis/rules/**/*.md, .soma/cells/**/*.md, and genome/**/*.md files.
+    """Load cell metadata from .aegis/rules/**/*.md and rules/**/*.md files.
 
     Returns:
         List of cell metadata dicts with at minimum: id, type, created, source_path.
@@ -166,12 +163,8 @@ def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
     cells = []
-    scan_roots = []
-    for cand in (ws.root / ".aegis" / "rules", ws.cells_dir, ws.root / ".soma" / "cells"):
-        cand_str = str(cand)
-        if cand_str not in scan_roots:
-            scan_roots.append(cand_str)
-    if ws.is_soma_repo:
+    scan_roots = [str(ws.rules_dir)]
+    if ws.is_aegis_repo:
         rules_root = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
         if str(rules_root) not in scan_roots:
             scan_roots.append(str(rules_root))
@@ -197,7 +190,7 @@ def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
                 continue
 
             cell_id = meta.get("id", os.path.splitext(os.path.basename(md_path))[0])
-            cell_type = meta.get("type", "vacuole")
+            cell_type = meta.get("type", "trap")
             created = meta.get("created", "")
 
             cells.append({
@@ -227,85 +220,20 @@ def _cell_age_days(cell: dict) -> int:
 
 
 def _transform_frontmatter_type(content: str, new_type: str) -> str:
-    """Update type field in cell frontmatter preserving body and comments."""
-    content = content.lstrip("\ufeff")
-    end_idx = content.find("---", 3)
-    if end_idx == -1:
+    """Update type field in cell frontmatter preserving body."""
+    try:
+        meta, body = parse_rule_frontmatter(content)
+    except Exception:
         return content
 
-    frontmatter = content[3:end_idx]
-    body = content[end_idx:]
+    meta["type"] = new_type
+    if new_type in ("wall", "gate", "invariant"):
+        meta["enforcement"] = "gate"
+    elif new_type == "trap":
+        meta.pop("enforcement", None)
+        meta.pop("enforcement_artifact", None)
 
-    lines = frontmatter.splitlines()
-    new_lines = []
-    type_updated = False
-    enforcement_updated = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("type:"):
-            indent = line[:len(line) - len(line.lstrip())]
-            new_lines.append(f"{indent}type: {new_type}")
-            type_updated = True
-        elif stripped.startswith("enforcement:"):
-            if new_type in ("wall", "gate", "invariant"):
-                indent = line[:len(line) - len(line.lstrip())]
-                new_lines.append(f"{indent}enforcement: gate")
-                enforcement_updated = True
-            elif new_type in ("vacuole", "trap"):
-                pass
-            else:
-                new_lines.append(line)
-        elif stripped.startswith("enforcement_artifact:"):
-            if new_type in ("vacuole", "trap"):
-                pass
-            else:
-                new_lines.append(line)
-        else:
-            new_lines.append(line)
-
-    if not type_updated:
-        new_lines.append(f"type: {new_type}")
-
-    if new_type in ("wall", "gate", "invariant") and not enforcement_updated:
-        new_lines.append("enforcement: gate")
-
-    return "---\n" + "\n".join(new_lines).strip() + "\n" + body
-
-
-def _atomic_write_and_unlink(
-    source_path: Path,
-    target_path: Path,
-    new_content: str,
-) -> None:
-    """Write new_content to target_path atomically and unlink source_path with rollback."""
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_target = target_path.with_name(f"{target_path.name}.tmp.{os.getpid()}")
-    try:
-        with open(tmp_target, "w", encoding="utf-8") as fh:
-            fh.write(new_content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        try:
-            os.replace(tmp_target, target_path)
-        except OSError:
-            shutil.move(str(tmp_target), str(target_path))
-        try:
-            if source_path != target_path and source_path.exists():
-                source_path.unlink()
-        except Exception:
-            if target_path.exists() and source_path.exists():
-                try:
-                    os.remove(target_path)
-                except Exception as ex:
-                    raise RuntimeError(f"Rollback failed: duplicate cell remains at {target_path}") from ex
-            raise
-    except Exception:
-        if tmp_target.exists():
-            try:
-                os.remove(tmp_target)
-            except OSError:
-                pass
-        raise
+    return dump_frontmatter(meta, body=body)
 
 
 def resolve_metrics_dir(workspace: Path | str) -> Path:

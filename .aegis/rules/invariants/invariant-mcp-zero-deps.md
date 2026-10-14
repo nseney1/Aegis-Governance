@@ -1,5 +1,5 @@
 ---
-id: wall-mcp-zero-deps
+id: invariant-mcp-zero-deps
 domain: correctness
 type: invariant
 enforcement: gate
@@ -21,10 +21,10 @@ tags:
 fitness:
   score: 0.0
   impact_weight: 1.0
-  triggers: 56
-  true_positives: 4.2646
+  triggers: 60
+  true_positives: 5.0162
   false_positives: 3.8075
-  last_trigger_date: "2026-10-14T08:55:41Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 The MCP stdio server is the primary entry point for Claude Code, Cursor, and other

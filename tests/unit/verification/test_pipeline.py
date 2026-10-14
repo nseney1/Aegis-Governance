@@ -5,15 +5,15 @@ import json
 from pathlib import Path
 import pytest
 
-from soma_core.verification import (
+from aegis_core.verification import (
     AgentBackend,
     ArbitrationResult,
     Claim,
     RiskCategory,
     Verdict,
 )
-from soma_core.verification.pipeline import VerificationPipeline
-from soma_core.workspace import Workspace
+from aegis_core.verification.pipeline import VerificationPipeline
+from aegis_core.workspace import Workspace
 
 
 class FakeUnparseableBackend(AgentBackend):
@@ -60,7 +60,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         )
 
         assert res.verdict == Verdict.SHIP
-        ev_file = tmp_path / ".soma" / "evidence" / "arbitration_cycle_1.json"
+        ev_file = tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json"
         assert ev_file.exists(), "Arbitration evidence must be persisted by VerificationPipeline.run"
         assert res.evidence_path == str(ev_file)
         assert res.persistence_error is None
@@ -88,7 +88,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
             task_plan="None",
             layer1_only=True,
         )
-        assert not (tmp_path / ".soma" / "evidence" / "arbitration_cycle_1.json").exists()
+        assert not (tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json").exists()
 
     def test_pipeline_evidence_persistence_failure_logs_warning(self, tmp_path, monkeypatch, caplog):
         import logging
@@ -97,7 +97,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         pipeline = VerificationPipeline()
         def _raise(*args, **kwargs):
             raise OSError("disk full")
-        monkeypatch.setattr("soma_core.verification.review_adapter.save_arbitration_evidence", _raise)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.save_arbitration_evidence", _raise)
         rebuttal = [
             {"category": "missing_coverage", "claim": "Tested", "evidence_file": "auth.py", "evidence_line": 1, "tests_covering": []},
             {"category": "unguarded_transition", "claim": "Guarded", "evidence_file": "auth.py", "evidence_line": 1, "tests_covering": []},
@@ -154,7 +154,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         assert not res.passed
 
     def test_pipeline_reusable_layer1_evidence_and_discovery(self, tmp_path):
-        from soma_core.verification import ToolEvidence
+        from aegis_core.verification import ToolEvidence
         f = tmp_path / "module.py"
         f.write_text("def run():\n    return 42\n", encoding="utf-8")
         test_f = tmp_path / "test_module.py"
@@ -178,7 +178,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         assert res.layer1_evidence == l1_ev
 
     def test_pipeline_explicit_test_evidence_skips_discovery(self, tmp_path, monkeypatch):
-        from soma_core.verification import ToolEvidence
+        from aegis_core.verification import ToolEvidence
         f = tmp_path / "module.py"
         f.write_text("def run():\n    return 42\n", encoding="utf-8")
 
@@ -186,7 +186,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         def _mock_disc(*a, **kw):
             discovered.append(True)
             return ([], "")
-        monkeypatch.setattr("soma_core.verification.test_runner.discover_test_evidence", _mock_disc)
+        monkeypatch.setattr("aegis_core.verification.test_runner.discover_test_evidence", _mock_disc)
 
         pipeline = VerificationPipeline()
         backend = lambda p: "[]"
@@ -203,13 +203,13 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         assert len(discovered) == 0, "Explicit test_names/test_results must skip discover_test_evidence"
 
     def test_pipeline_test_evidence_discovery_exception_handled_gracefully(self, tmp_path, monkeypatch):
-        from soma_core.verification import ToolEvidence
+        from aegis_core.verification import ToolEvidence
         f = tmp_path / "module.py"
         f.write_text("def run():\n    return 42\n", encoding="utf-8")
 
         def _raise_err(*a, **kw):
             raise RuntimeError("test discovery failure simulation")
-        monkeypatch.setattr("soma_core.verification.test_runner.discover_test_evidence", _raise_err)
+        monkeypatch.setattr("aegis_core.verification.test_runner.discover_test_evidence", _raise_err)
 
         pipeline = VerificationPipeline()
         backend = lambda p: "[]"
@@ -223,7 +223,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         assert res.verdict == Verdict.SHIP
 
     def test_pipeline_partial_test_evidence_triggers_discovery_for_missing(self, tmp_path, monkeypatch):
-        from soma_core.verification import ToolEvidence
+        from aegis_core.verification import ToolEvidence
         f = tmp_path / "module.py"
         f.write_text("def run():\n    return 42\n", encoding="utf-8")
 
@@ -231,7 +231,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         def _mock_disc(*a, **kw):
             discovered.append(True)
             return (["disc_test"], "discovered test output")
-        monkeypatch.setattr("soma_core.verification.test_runner.discover_test_evidence", _mock_disc)
+        monkeypatch.setattr("aegis_core.verification.test_runner.discover_test_evidence", _mock_disc)
 
         captured_kwargs = {}
         def mock_verify(**kwargs):

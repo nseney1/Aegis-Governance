@@ -17,7 +17,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_core.verification import ToolEvidence
+from aegis_core.verification import ToolEvidence
 
 
 class TestBranchCoverageContract:
@@ -25,7 +25,7 @@ class TestBranchCoverageContract:
 
     def test_returns_tool_evidence(self, tmp_path):
         """check() must return passing ToolEvidence for fully covered code."""
-        from soma_core.verification import branch_coverage
+        from aegis_core.verification import branch_coverage
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -59,7 +59,7 @@ class TestBranchCoverageContract:
 
     def test_full_coverage_passes(self, tmp_path):
         """When all branches are covered, verdict=True and no uncovered lines."""
-        from soma_core.verification import branch_coverage
+        from aegis_core.verification import branch_coverage
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -90,7 +90,7 @@ class TestBranchCoverageContract:
 
     def test_dead_branch_detected(self, tmp_path):
         """Uncovered branches must produce verdict=False with specific lines."""
-        from soma_core.verification import branch_coverage
+        from aegis_core.verification import branch_coverage
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -127,7 +127,7 @@ class TestBranchCoverageContract:
 
     def test_reports_uncovered_lines(self, tmp_path):
         """Result must include the specific uncovered line number."""
-        from soma_core.verification import branch_coverage
+        from aegis_core.verification import branch_coverage
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -165,7 +165,7 @@ class TestParseCoverageMissingBranches:
 
     def test_parse_coverage_includes_missing_branches(self, tmp_path):
         """missing_branches entries should appear in the returned line list."""
-        from soma_core.verification.branch_coverage import _parse_coverage
+        from aegis_core.verification.branch_coverage import _parse_coverage
 
         # Build a mock coverage JSON with both missing_lines and missing_branches
         report = tmp_path / "coverage.json"
@@ -195,7 +195,7 @@ class TestParseCoverageMissingBranches:
 
     def test_parse_coverage_branches_only(self, tmp_path):
         """When missing_lines is empty, branches alone should populate result."""
-        from soma_core.verification.branch_coverage import _parse_coverage
+        from aegis_core.verification.branch_coverage import _parse_coverage
 
         report = tmp_path / "coverage.json"
         report.write_text(json.dumps({
@@ -218,7 +218,7 @@ class TestSubprocessTimeout:
     def test_subprocess_timeout_returns_false(self, monkeypatch):
         """_try_pytest_cov must return False on TimeoutExpired, not raise."""
         import subprocess as sp
-        from soma_core.verification.branch_coverage import _try_pytest_cov
+        from aegis_core.verification.branch_coverage import _try_pytest_cov
 
         def mock_run(*args, **kwargs):
             raise sp.TimeoutExpired(cmd="pytest", timeout=120)
@@ -231,7 +231,7 @@ class TestSubprocessTimeout:
     def test_coverage_module_timeout_returns_false(self, monkeypatch):
         """_try_coverage_module must return False on TimeoutExpired."""
         import subprocess as sp
-        from soma_core.verification.branch_coverage import _try_coverage_module
+        from aegis_core.verification.branch_coverage import _try_coverage_module
 
         def mock_run(*args, **kwargs):
             raise sp.TimeoutExpired(cmd="coverage", timeout=120)
@@ -246,7 +246,7 @@ class TestBranchCoverageTargetLines:
     """Test target_lines parameter on branch_coverage.check()."""
 
     def test_target_lines_filters_uncovered_lines(self, tmp_path):
-        from soma_core.verification import branch_coverage
+        from aegis_core.verification import branch_coverage
 
         src = tmp_path / "mod.py"
         src.write_text("def a():\n    return 1\ndef b():\n    return 2\n")
@@ -269,7 +269,7 @@ class TestBranchCoverageFilteringAndFallback:
     """Test branch target filtering and stdlib trace fallback."""
 
     def test_parse_coverage_filters_negative_and_backward_branches(self, tmp_path):
-        from soma_core.verification.branch_coverage import _parse_coverage
+        from aegis_core.verification.branch_coverage import _parse_coverage
 
         report = tmp_path / "coverage.json"
         report.write_text(json.dumps({
@@ -292,7 +292,7 @@ class TestBranchCoverageFilteringAndFallback:
         assert missing == [35]
 
     def test_run_trace_fallback_execution(self, tmp_path):
-        from soma_core.verification.branch_coverage import _run_trace_fallback
+        from aegis_core.verification.branch_coverage import _run_trace_fallback
 
         src = tmp_path / "calc.py"
         src.write_text("def add(a, b):\n    return a + b\n")
@@ -304,7 +304,7 @@ class TestBranchCoverageFilteringAndFallback:
         assert missing == []
 
     def test_parse_coverage_filters_jump_tokens_and_handles_walk(self, tmp_path, monkeypatch):
-        from soma_core.verification.branch_coverage import _parse_coverage
+        from aegis_core.verification.branch_coverage import _parse_coverage
 
         sub = tmp_path / "sub"
         sub.mkdir(parents=True)
@@ -328,7 +328,7 @@ class TestBranchCoverageFilteringAndFallback:
         assert missing == [5]
 
     def test_parse_coverage_open_exception_handled(self, tmp_path, monkeypatch):
-        from soma_core.verification.branch_coverage import _parse_coverage
+        from aegis_core.verification.branch_coverage import _parse_coverage
 
         src = tmp_path / "unreadable.py"
         src.write_text("x = 1\n")

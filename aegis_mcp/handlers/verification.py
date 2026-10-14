@@ -43,7 +43,7 @@ def _handle_verify_changes(args: dict, gov) -> dict:
     layer1_only = args.get("layer1_only", True)
     async_mode = args.get("async_mode", False)
     if async_mode:
-        from aegis_core.verification_jobs import submit_verification_job
+        from aegis_core.verification.jobs import submit_verification_job
 
         ws_str = str(getattr(workspace, "root", workspace))
         job = submit_verification_job(
@@ -56,15 +56,15 @@ def _handle_verify_changes(args: dict, gov) -> dict:
         return {
             "status": "QUEUED",
             "job_id": job.job_id,
-            "message": "Verification job enqueued. Poll with soma_poll_verification.",
+            "message": "Verification job enqueued. Poll with aegis_poll_verification.",
             "created_at": job.created_at,
         }
 
     try:
-        __import__("soma_core.verification")
+        __import__("aegis_core.verification")
         from aegis_core.verification import VerificationPipeline, runner
     except ImportError as exc:
-        return {"error": f"soma_core.verification is not importable: {exc}", "status": _STATUS_FAIL}
+        return {"error": f"aegis_core.verification is not importable: {exc}", "status": _STATUS_FAIL}
 
     rebuttal = args.get("rebuttal")
     task_plan = args.get("task_plan", "")
@@ -158,7 +158,7 @@ def _handle_poll_verification(args: dict, gov) -> dict:
     job_id = args.get("job_id")
     if not job_id:
         return {"error": "Missing required argument 'job_id'", "status": _STATUS_FAIL}
-    from aegis_core.verification_jobs import get_job
+    from aegis_core.verification.jobs import get_job
 
     job = get_job(job_id)
     if job is None:

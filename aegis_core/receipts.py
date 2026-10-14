@@ -10,7 +10,7 @@ import hmac
 from pathlib import Path
 from typing import Dict, Any, Iterable, List, Optional
 
-from aegis_core.cell_inventory import inventory_cells
+from aegis_core.rule_inventory import inventory_cells
 from aegis_core.workspace import Workspace, confine_path
 
 

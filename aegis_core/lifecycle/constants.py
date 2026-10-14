@@ -24,12 +24,12 @@ PROTECTED_RULES = frozenset({
     "desktop-automation",
 })
 
-GLOBAL_PROMOTION_PATH = {"vacuole": "wall", "wall": "genome"}
-LOCAL_PROMOTION_PATH = {"vacuole": "wall", "wall": "gate"}
+GLOBAL_PROMOTION_PATH = {"trap": "invariant", "invariant": "genome", "wall": "genome"}
+LOCAL_PROMOTION_PATH = {"trap": "invariant", "invariant": "gate", "wall": "gate"}
 PROMOTION_PATH = GLOBAL_PROMOTION_PATH
 
-GLOBAL_DEMOTION_PATH = {"genome": "wall", "wall": "vacuole"}
-LOCAL_DEMOTION_PATH = {"gate": "wall", "wall": "vacuole"}
+GLOBAL_DEMOTION_PATH = {"genome": "invariant", "invariant": "trap", "wall": "trap"}
+LOCAL_DEMOTION_PATH = {"gate": "invariant", "invariant": "trap", "wall": "trap"}
 DEMOTION_PATH = GLOBAL_DEMOTION_PATH
 
 MODERN_GLOBAL_PROMOTION_PATH = {"trap": "invariant", "invariant": "genome"}
@@ -37,17 +37,14 @@ MODERN_LOCAL_PROMOTION_PATH = {"trap": "invariant", "invariant": "gate"}
 MODERN_DEMOTION_PATH = {"invariant": "trap"}
 
 TYPE_TO_DIR = {
-    "vacuole": "vacuoles",
-    "wall": "walls",
-    "gate": "gates",
-    "membrane": "membranes",
-    "chloroplast": "chloroplasts",
-    "plasmodesmata": "plasmodesmata",
     "trap": "traps",
     "invariant": "invariants",
+    "gate": "gates",
     "boundary": "boundaries",
     "persona": "personas",
     "contract": "contracts",
+    "wall": "walls",
+    "membrane": "membranes",
 }
 
 DIR_TO_TYPE = {v: k for k, v in TYPE_TO_DIR.items()}
@@ -64,46 +61,35 @@ MAX_FP_RATE_FOR_DEMOTION = 0.5
 DORMANT_DAYS_THRESHOLD = 90
 
 VALID_TYPES = {
-    "vacuole": "vacuoles",
-    "chloroplast": "chloroplasts",
-    "wall": "walls",
-    "membrane": "membranes",
-    "plasmodesmata": "plasmodesmata",
-    "gate": "gates",
-    # Engineering types
     "trap": "traps",
     "persona": "personas",
     "invariant": "invariants",
     "boundary": "boundaries",
     "contract": "contracts",
+    "gate": "gates",
+    "wall": "walls",
+    "membrane": "membranes",
 }
 
 
 def get_promotion_path(ws: object) -> dict[str, str]:
-    """Return promotion path based on whether workspace is a Soma repository."""
-    is_soma = getattr(ws, "is_soma_repo", False)
-    return GLOBAL_PROMOTION_PATH if is_soma else LOCAL_PROMOTION_PATH
+    """Return promotion path based on whether workspace is an Aegis repository."""
+    is_aegis = getattr(ws, "is_aegis_repo", False)
+    return GLOBAL_PROMOTION_PATH if is_aegis else LOCAL_PROMOTION_PATH
 
 
 def get_demotion_path(ws: object) -> dict[str, str]:
-    """Return demotion path based on whether workspace is a Soma repository."""
-    is_soma = getattr(ws, "is_soma_repo", False)
-    return GLOBAL_DEMOTION_PATH if is_soma else LOCAL_DEMOTION_PATH
+    """Return demotion path based on whether workspace is an Aegis repository."""
+    is_aegis = getattr(ws, "is_aegis_repo", False)
+    return GLOBAL_DEMOTION_PATH if is_aegis else LOCAL_DEMOTION_PATH
 
 
 VALID_ENFORCEMENT = ("advisory", "mechanical", "gate")
 
 METAMORPHOSIS_PATHS = {
-    "vacuole": [
-        {"target": "wall", "min_fitness": 0.8, "min_sessions": 20},
-        {"target": "membrane", "min_fitness": 0.7, "min_sessions": 15},
-    ],
     "trap": [
         {"target": "invariant", "min_fitness": 0.8, "min_sessions": 20},
         {"target": "boundary", "min_fitness": 0.7, "min_sessions": 15},
-    ],
-    "chloroplast": [
-        {"target": "rule", "min_fitness": 0.9, "min_sessions": 30},
     ],
     "persona": [
         {"target": "rule", "min_fitness": 0.9, "min_sessions": 30},

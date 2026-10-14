@@ -1,4 +1,4 @@
-"""Behavioral contract and security tests for soma_core.command_safety (AC-01 through AC-35).
+"""Behavioral contract and security tests for aegis_core.command_safety (AC-01 through AC-35).
 
 Verifies zero-dependency AST/token command safety analyzer across happy paths,
 edge cases, evasion attempts, Thorns adversarial vectors, and latency bounds.
@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 import pytest
 
-from soma_core.command_safety import (
+from aegis_core.command_safety import (
     CommandAnalyzer,
     REASON_CHMOD_777,
     REASON_CMD_DELETE,

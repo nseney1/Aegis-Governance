@@ -15,9 +15,9 @@ from aegis_core.workspace import Workspace
 @pytest.fixture
 def initialized_ws(tmp_path: Path) -> Workspace:
     ws_dir = tmp_path / "init_project"
-    (ws_dir / ".soma" / "cells" / "walls").mkdir(parents=True)
-    (ws_dir / ".soma" / "evidence").mkdir(parents=True)
-    (ws_dir / ".soma" / "cells" / "walls" / "test.md").write_text("---\ntype: wall\n---\n")
+    (ws_dir / ".aegis" / "rules" / "walls").mkdir(parents=True)
+    (ws_dir / ".aegis" / "evidence").mkdir(parents=True)
+    (ws_dir / ".aegis" / "rules" / "walls" / "test.md").write_text("---\ntype: wall\n---\n")
     return Workspace(root=ws_dir)
 
 
@@ -45,7 +45,7 @@ class TestCliWorkspaceRootResolution:
             assert getattr(args, "ws", None) is None
 
     def test_root_resolution_for_init_uninitialized_directory(self, tmp_path: Path):
-        """soma init resolves via Workspace.for_init without requiring .soma/cells/."""
+        """soma init resolves via Workspace.for_init without requiring .aegis/rules/."""
         blank_dir = tmp_path / "blank_repo"
         blank_dir.mkdir()
 
@@ -56,7 +56,7 @@ class TestCliWorkspaceRootResolution:
             args = mock_init.call_args[0][0]
             assert isinstance(args.ws, Workspace)
             assert args.ws.root == blank_dir.resolve()
-            assert not (args.ws.root / ".soma" / "cells").exists()
+            assert not (args.ws.root / ".aegis" / "rules").exists()
 
     def test_root_resolution_argument_precedence(self, tmp_path: Path, initialized_ws: Workspace):
         """Workspace is resolved canonical via --workspace, and legacy --repo-root is rejected."""

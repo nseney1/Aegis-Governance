@@ -18,11 +18,11 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_core.verification import (
+from aegis_core.verification import (
     ArbitrationResult, Claim, Prediction, RiskCategory,
     Severity, ToolEvidence, Verdict,
 )
-from soma_core.verification.arbiter import arbitrate, format_report
+from aegis_core.verification.arbiter import arbitrate, format_report
 
 
 # ── Arbiter: Core Set Logic ───────────────────────────────────────────────

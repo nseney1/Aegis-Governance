@@ -11,7 +11,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_core.verification.mutation_tester import check
+from aegis_core.verification.mutation_tester import check
 
 
 # --- Fixture functions for mutation testing ---

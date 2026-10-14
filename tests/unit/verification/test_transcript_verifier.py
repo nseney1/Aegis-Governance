@@ -16,7 +16,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_core.verification import ToolEvidence
+from aegis_core.verification import ToolEvidence
 
 
 class TestMetricExtraction:
@@ -24,7 +24,7 @@ class TestMetricExtraction:
 
     def test_counts_pytest_runs(self, tmp_path):
         """Must count the number of distinct pytest invocations."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -37,7 +37,7 @@ class TestMetricExtraction:
 
     def test_counts_multiple_pytest_runs(self, tmp_path):
         """Multiple pytest invocations should all be counted."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -52,7 +52,7 @@ class TestMetricExtraction:
 
     def test_extracts_first_run_results(self, tmp_path):
         """Must capture pass/fail counts from the FIRST pytest run."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -66,7 +66,7 @@ class TestMetricExtraction:
 
     def test_extracts_final_run_results(self, tmp_path):
         """Must capture pass/fail counts from the LAST pytest run."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -80,7 +80,7 @@ class TestMetricExtraction:
 
     def test_counts_file_writes(self, tmp_path):
         """Must count write_to_file, replace_file_content, and multi_replace operations."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -96,7 +96,7 @@ class TestMetricExtraction:
 
     def test_computes_fix_cycles(self, tmp_path):
         """fix_cycles = number of write operations AFTER the first failed test run."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -112,7 +112,7 @@ class TestMetricExtraction:
 
     def test_zero_fix_cycles_on_first_pass(self, tmp_path):
         """A lane that passes first try should have 0 fix cycles."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -131,7 +131,7 @@ class TestClaimVerification:
 
     def test_honest_first_pass_verified(self, tmp_path):
         """When subagent claims first-pass and transcript confirms, verdict=True."""
-        from soma_core.verification.transcript_verifier import extract_metrics, verify_claim
+        from aegis_core.verification.transcript_verifier import extract_metrics, verify_claim
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -151,7 +151,7 @@ class TestClaimVerification:
 
     def test_false_first_pass_caught(self, tmp_path):
         """When subagent claims first-pass but had failures, verdict=False."""
-        from soma_core.verification.transcript_verifier import extract_metrics, verify_claim
+        from aegis_core.verification.transcript_verifier import extract_metrics, verify_claim
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -174,7 +174,7 @@ class TestClaimVerification:
 
     def test_inflated_test_count_caught(self, tmp_path):
         """When subagent claims more tests passed than actually did, verdict=False."""
-        from soma_core.verification.transcript_verifier import extract_metrics, verify_claim
+        from aegis_core.verification.transcript_verifier import extract_metrics, verify_claim
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([
@@ -217,7 +217,7 @@ class TestRealTranscripts:
     )
     def test_lane_a_was_genuine_first_pass(self):
         """Lane A (mutation_tester) claimed first-pass — verify from transcript."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         metrics = extract_metrics(self._transcript_path(self.LANE_A_ID))
         assert metrics.pytest_runs == 1, f"Expected 1 pytest run, got {metrics.pytest_runs}"
@@ -232,7 +232,7 @@ class TestRealTranscripts:
     )
     def test_lane_b_was_not_first_pass(self):
         """Lane B (branch_coverage) should show iteration — verify from transcript."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         metrics = extract_metrics(self._transcript_path(self.LANE_B_ID))
         assert metrics.pytest_runs >= 2, f"Expected >=2 pytest runs, got {metrics.pytest_runs}"
@@ -247,7 +247,7 @@ class TestRealTranscripts:
     )
     def test_lane_c_was_genuine_first_pass(self):
         """Lane C (immune_verify) claimed first-pass — verify from transcript."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         metrics = extract_metrics(self._transcript_path(self.LANE_C_ID))
         assert metrics.pytest_runs == 1, f"Expected 1 pytest run, got {metrics.pytest_runs}"
@@ -260,7 +260,7 @@ class TestFix22aMissingFile:
 
     def test_extract_metrics_missing_file_returns_empty(self):
         """Calling extract_metrics with a non-existent path should return empty SubagentMetrics."""
-        from soma_core.verification.transcript_verifier import extract_metrics, SubagentMetrics
+        from aegis_core.verification.transcript_verifier import extract_metrics, SubagentMetrics
 
         result = extract_metrics("/tmp/definitely_does_not_exist_transcript.jsonl")
         assert isinstance(result, SubagentMetrics)
@@ -278,7 +278,7 @@ class TestFix22bWriteStepFalsePositive:
 
     def test_write_step_ignores_content_mentions(self):
         """A PLANNER_RESPONSE mentioning 'write_to_file' in content should NOT count as a write."""
-        from soma_core.verification.transcript_verifier import _is_write_step
+        from aegis_core.verification.transcript_verifier import _is_write_step
 
         step = {
             "type": "PLANNER_RESPONSE",
@@ -288,7 +288,7 @@ class TestFix22bWriteStepFalsePositive:
 
     def test_write_step_detects_tool_calls(self):
         """A step with tool_calls containing write_to_file must be detected as a write."""
-        from soma_core.verification.transcript_verifier import _is_write_step
+        from aegis_core.verification.transcript_verifier import _is_write_step
 
         step = {
             "type": "TOOL_USE",
@@ -303,14 +303,14 @@ class TestFix22cCollectionErrors:
 
     def test_collection_error_returns_sentinel(self):
         """Content with 'collection error' must return (-1, -1) sentinel."""
-        from soma_core.verification.transcript_verifier import _parse_test_counts
+        from aegis_core.verification.transcript_verifier import _parse_test_counts
 
         result = _parse_test_counts("ERROR collecting tests/test_foo.py - collection error")
         assert result == (-1, -1)
 
     def test_errors_marker_returns_sentinel(self):
         """Content with 'ERRORS' must return (-1, -1) sentinel."""
-        from soma_core.verification.transcript_verifier import _parse_test_counts
+        from aegis_core.verification.transcript_verifier import _parse_test_counts
 
         result = _parse_test_counts("===== ERRORS =====\nImportError in test_bar.py")
         assert result == (-1, -1)
@@ -321,7 +321,7 @@ class TestFix22dMultiRunNoFalsePositive:
 
     def test_multi_run_all_passing_no_divergence(self, tmp_path):
         """Two passing pytest runs with 0 fix cycles should verify as first-pass."""
-        from soma_core.verification.transcript_verifier import extract_metrics, verify_claim
+        from aegis_core.verification.transcript_verifier import extract_metrics, verify_claim
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text('\n'.join([

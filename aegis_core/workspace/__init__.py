@@ -24,8 +24,10 @@ from aegis_core.workspace.confinement import (
     validate_workspace_path,
 )
 from aegis_core.workspace.discovery import (
+    LEGACY_SOMA_UPGRADE_MSG,
     _is_workspace_dir,
-    is_soma_repo,
+    check_legacy_soma_sentinel,
+    is_aegis_repo,
     resolve_workspace_root,
 )
 from aegis_core.workspace.git import GitWorkspace, _parse_worktree_porcelain
@@ -38,7 +40,7 @@ def resolve_workspace(
     caller_file: str | Path | os.PathLike[str] | None = None,
     strict_env: bool = False,
 ) -> str:
-    """Find the project root containing .soma/cells/ or .soma/."""
+    """Find the project root containing .aegis/rules/ or .aegis/."""
     return str(Workspace.resolve(start=start, caller_file=caller_file, strict_env=strict_env).root)
 
 
@@ -49,7 +51,6 @@ def resolve_workspace_path(
 ) -> Path:
     """Return workspace root as a resolved Path object."""
     return Workspace.resolve(start=start, caller_file=caller_file, strict_env=strict_env).root
-
 
 
 def as_workspace(workspace: str | Path | os.PathLike[str] | Workspace | None = None) -> Workspace:
@@ -79,28 +80,31 @@ def confine_path(
     return Workspace.resolve(start=workspace).confine_path(untrusted_path)
 
 
-def validate_cell_names(
-    cell_names: list[str],
+def validate_rule_names(
+    rule_names: list[str],
     workspace: str | Path | os.PathLike[str] | Workspace,
 ) -> list[str]:
-    """Validate that cell names reference cells that actually exist."""
+    """Validate that rule names reference rules that actually exist."""
     ws = workspace if isinstance(workspace, Workspace) else Workspace.resolve(start=workspace)
-    return ws.validate_cell_names(cell_names)
+    return ws.validate_rule_names(rule_names)
 
 
 __all__ = [
     "GitWorkspace",
+    "LEGACY_SOMA_UPGRADE_MSG",
     "Workspace",
     "as_workspace",
+    "check_legacy_soma_sentinel",
     "confine_path",
     "confine_workspace",
-    "is_soma_repo",
+    "is_aegis_repo",
     "resolve_git_hooks_dir",
     "resolve_workspace",
     "resolve_workspace_path",
-    "validate_cell_names",
+    "validate_rule_names",
     "_WINDOWS_DEVICE_NAMES",
     "_find_git_dirs",
     "_is_workspace_dir",
     "_parse_worktree_porcelain",
 ]
+

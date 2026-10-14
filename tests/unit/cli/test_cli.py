@@ -221,7 +221,7 @@ class TestMCPConfig:
         mcp_file = tmp_path / ".mcp.json"
         data = json.loads(mcp_file.read_text())
         soma_cfg = data["mcpServers"].get("aegis") or data["mcpServers"].get("soma")
-        # Check cwd and SOMA_ROOT are relative (not absolute)
+        # Check cwd and AEGIS_ROOT are relative (not absolute)
         cfg_str = json.dumps(soma_cfg)
         assert "/home/" not in cfg_str, f"Absolute path detected in MCP config: {cfg_str}"
 
@@ -327,22 +327,22 @@ class TestPorcelainCLIFacade:
         assert args.quiet is True
 
     def test_subparsers_use_soma_parser_class(self):
-        from aegis_cli.cli import _build_parser, SomaParser
+        from aegis_cli.cli import _build_parser, AegisParser
         parser = _build_parser()
         for action in parser._actions:
             if hasattr(action, "choices") and isinstance(action.choices, dict):
                 for subparser in action.choices.values():
-                    assert isinstance(subparser, SomaParser)
+                    assert isinstance(subparser, AegisParser)
 
 
 def test_cli_registry_fallback_dispatch(tmp_path):
     # If a command is in registry but not in COMMANDS dict
     import argparse
     from unittest.mock import MagicMock, patch
-    from aegis_cli.base import CommandCategory, SomaCommand
+    from aegis_cli.base import CommandCategory, AegisCommand
     from aegis_cli.registry import CommandRegistry
 
-    class CustomTestCommand(SomaCommand):
+    class CustomTestCommand(AegisCommand):
         name = "custom-test"
         category = CommandCategory.WORKFLOW
         help = "Custom test command"

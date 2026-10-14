@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from soma_mcp.jit_engine import (
+from aegis_mcp.jit_engine import (
     compress_to_atomic_directive,
     pack_two_tier_context,
 )

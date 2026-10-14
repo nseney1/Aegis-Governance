@@ -21,10 +21,10 @@ def _write_cell(path, cell_id="cell-a"):
 
 
 def test_inventory_is_stable_and_captures_exact_bytes(tmp_path):
-    from soma_core.cell_inventory import inventory_cells
+    from aegis_core.rule_inventory import inventory_cells
 
-    first_path = tmp_path / ".soma" / "cells" / "walls" / "b.md"
-    second_path = tmp_path / ".soma" / "cells" / "vacuoles" / "a.md"
+    first_path = tmp_path / ".aegis" / "rules" / "walls" / "b.md"
+    second_path = tmp_path / ".aegis" / "rules" / "vacuoles" / "a.md"
     _write_cell(first_path, "b")
     _write_cell(second_path, "a")
 
@@ -32,8 +32,8 @@ def test_inventory_is_stable_and_captures_exact_bytes(tmp_path):
     second = inventory_cells(str(tmp_path))
 
     assert [entry.relative_path for entry in first.entries] == [
-        ".soma/cells/vacuoles/a.md",
-        ".soma/cells/walls/b.md",
+        ".aegis/rules/vacuoles/a.md",
+        ".aegis/rules/walls/b.md",
     ]
     assert first.fingerprint == second.fingerprint
     assert first.entries == second.entries
@@ -48,9 +48,9 @@ def test_cell_edited_after_creation_is_inventoried(tmp_path):
     """BUG-035: on Windows os.stat reports st_ctime as creation time but
     os.fstat reports it as last-change time, so any cell edited after it was
     created was rejected as 'changed before it was opened'."""
-    from soma_core.cell_inventory import inventory_cells
+    from aegis_core.rule_inventory import inventory_cells
 
-    cell = tmp_path / ".soma" / "cells" / "walls" / "edited.md"
+    cell = tmp_path / ".aegis" / "rules" / "walls" / "edited.md"
     _write_cell(cell, "edited")
     time.sleep(0.05)
     with open(cell, "a", encoding="utf-8") as f:
@@ -58,14 +58,14 @@ def test_cell_edited_after_creation_is_inventoried(tmp_path):
 
     inventory = inventory_cells(str(tmp_path))
     assert [entry.relative_path for entry in inventory.entries] == [
-        ".soma/cells/walls/edited.md"
+        ".aegis/rules/walls/edited.md"
     ]
     assert inventory.entries[0].content == cell.read_bytes()
     assert b"Edited after creation." in inventory.entries[0].content
 
 
 def test_missing_cells_directory_has_stable_empty_inventory(tmp_path):
-    from soma_core.cell_inventory import inventory_cells
+    from aegis_core.rule_inventory import inventory_cells
 
     inventory = inventory_cells(str(tmp_path))
     assert inventory.entries == ()
@@ -73,11 +73,11 @@ def test_missing_cells_directory_has_stable_empty_inventory(tmp_path):
 
 
 def test_symlinked_cell_is_rejected(tmp_path):
-    from soma_core.cell_inventory import CellInventoryError, inventory_cells
+    from aegis_core.rule_inventory import CellInventoryError, inventory_cells
 
     outside = tmp_path / "outside.md"
     _write_cell(outside, "outside")
-    link = tmp_path / ".soma" / "cells" / "walls" / "linked.md"
+    link = tmp_path / ".aegis" / "rules" / "walls" / "linked.md"
     link.parent.mkdir(parents=True)
     try:
         link.symlink_to(outside)
@@ -89,13 +89,13 @@ def test_symlinked_cell_is_rejected(tmp_path):
 
 
 def test_symlinked_directory_that_would_feed_jit_is_rejected(tmp_path):
-    from soma_mcp.cell_cache import CellCacheError
-    from soma_mcp.jit_engine import CellCache, express
-    import soma_mcp.jit_engine as jit_engine
+    from aegis_mcp.rule_cache import CellCacheError
+    from aegis_mcp.jit_engine import CellCache, express
+    import aegis_mcp.jit_engine as jit_engine
 
     outside = tmp_path / "outside" / "walls"
     _write_cell(outside / "external.md", "external")
-    cells_dir = tmp_path / "workspace" / ".soma" / "cells"
+    cells_dir = tmp_path / "workspace" / ".aegis" / "rules"
     cells_dir.mkdir(parents=True)
     link = cells_dir / "external-rules"
     try:
@@ -113,8 +113,8 @@ def test_symlinked_directory_that_would_feed_jit_is_rejected(tmp_path):
 
 
 def test_find_matching_cells(tmp_path):
-    from soma_core.cell_inventory import find_matching_cells
-    cells_dir = tmp_path / ".soma" / "cells"
+    from aegis_core.rule_inventory import find_matching_cells
+    cells_dir = tmp_path / ".aegis" / "rules"
     _write_cell(cells_dir / "walls" / "test_wall.md", "test-wall")
 
     matches = find_matching_cells(cells_dir, ["src/index.py"])
@@ -130,7 +130,7 @@ def test_find_matching_cells(tmp_path):
 
 
 def test_inventory_aegis_rules_and_soma_rules(tmp_path):
-    from soma_core.cell_inventory import inventory_cells, inventory_rules
+    from aegis_core.rule_inventory import inventory_cells, inventory_rules
 
     # Test .aegis/rules
     ws_aegis = tmp_path / "ws_aegis"
@@ -139,9 +139,9 @@ def test_inventory_aegis_rules_and_soma_rules(tmp_path):
     inv = inventory_rules(str(ws_aegis))
     assert [e.relative_path for e in inv.entries] == [".aegis/rules/invariants/inv1.md"]
 
-    # Test .soma/rules
+    # Test .aegis/rules
     ws_soma_rules = tmp_path / "ws_soma_rules"
-    rule_soma = ws_soma_rules / ".soma" / "rules" / "invariants" / "inv2.md"
+    rule_soma = ws_soma_rules / ".aegis" / "rules" / "invariants" / "inv2.md"
     _write_cell(rule_soma, "inv2")
     inv2 = inventory_cells(str(ws_soma_rules))
-    assert [e.relative_path for e in inv2.entries] == [".soma/rules/invariants/inv2.md"]
+    assert [e.relative_path for e in inv2.entries] == [".aegis/rules/invariants/inv2.md"]

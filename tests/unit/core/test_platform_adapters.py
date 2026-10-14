@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import pytest
 
-from soma_cli.platforms import (
+from aegis_cli.platforms import (
     PlatformAdapter,
     PlatformInstallResult,
     GeminiAdapter,

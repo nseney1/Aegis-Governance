@@ -134,20 +134,12 @@ _KEY_FILENAME = "manifest.key"
 
 
 def _key_path(workspace: str) -> str:
-    """Return the path to .aegis/keys/manifest.key or .soma/keys/manifest.key."""
-    aegis_key = os.path.join(workspace, ".aegis", _KEY_DIR, _KEY_FILENAME)
-    if os.path.exists(aegis_key):
-        return aegis_key
-    soma_key = os.path.join(workspace, ".soma", _KEY_DIR, _KEY_FILENAME)
-    if os.path.exists(soma_key):
-        return soma_key
-    if os.path.isdir(os.path.join(workspace, ".aegis")) or not os.path.isdir(os.path.join(workspace, ".soma")):
-        return aegis_key
-    return soma_key
+    """Return the path to .aegis/keys/manifest.key."""
+    return os.path.join(workspace, ".aegis", _KEY_DIR, _KEY_FILENAME)
 
 
 def generate_key(workspace: str) -> str:
-    """Generate a 256-bit HMAC key and store it in .soma/keys/manifest.key.
+    """Generate a 256-bit HMAC key and store it in .aegis/keys/manifest.key.
 
     Returns the key file path. Raises FileExistsError if a key already exists
     (prevents accidental key rotation — use ``rotate_key`` instead).
@@ -164,7 +156,7 @@ def generate_key(workspace: str) -> str:
 
 
 def load_key(workspace: str) -> bytes | None:
-    """Load the HMAC key from .soma/keys/manifest.key.
+    """Load the HMAC key from .aegis/keys/manifest.key.
 
     Returns the key as bytes, or None if no key file exists
     (graceful degradation for unsigned workflows).
@@ -228,23 +220,12 @@ def verify_signature(manifest: dict, key: bytes) -> bool:
 
 
 def _manifest_path(workspace: str) -> str:
-    """Return the path to .aegis/rules/manifest.json or .soma/cells/manifest.json."""
-    aegis_cand = os.path.join(workspace, ".aegis", "rules", _MANIFEST_FILENAME)
-    if os.path.isfile(aegis_cand):
-        return aegis_cand
-    soma_rules = os.path.join(workspace, ".soma", "rules", _MANIFEST_FILENAME)
-    if os.path.isfile(soma_rules):
-        return soma_rules
-    soma_cells = os.path.join(workspace, ".soma", "cells", _MANIFEST_FILENAME)
-    if os.path.isfile(soma_cells):
-        return soma_cells
-    if os.path.isdir(os.path.join(workspace, ".aegis")) or not os.path.isdir(os.path.join(workspace, ".soma")):
-        return aegis_cand
-    return soma_cells
+    """Return the path to .aegis/rules/manifest.json."""
+    return os.path.join(workspace, ".aegis", "rules", _MANIFEST_FILENAME)
 
 
 def load_manifest(workspace: str) -> dict | None:
-    """Load the cell/rule manifest from ``.aegis/rules/manifest.json`` or ``.soma/cells/manifest.json``.
+    """Load the rule manifest from ``.aegis/rules/manifest.json``.
 
     Returns None if the manifest file does not exist.
     """
@@ -260,7 +241,7 @@ def load_manifest(workspace: str) -> dict | None:
 
 
 def save_manifest(workspace: str, manifest: dict) -> None:
-    """Save a manifest to ``.aegis/rules/manifest.json`` or ``.soma/cells/manifest.json``.
+    """Save a manifest to ``.aegis/rules/manifest.json``.
 
     If an HMAC key exists, the manifest is automatically signed before saving.
     """

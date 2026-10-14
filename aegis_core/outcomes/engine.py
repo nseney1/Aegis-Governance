@@ -8,7 +8,7 @@ import subprocess
 import sys
 from typing import Any, Optional
 
-from aegis_core.cell_inventory import find_matching_cells
+from aegis_core.rule_inventory import find_matching_cells
 from aegis_core.workspace import Workspace, as_workspace, resolve_workspace
 
 __all__ = ["match_cells_to_changes", "run_outcome_engine", "main"]
@@ -43,7 +43,7 @@ def _get_changed_files(workspace: str) -> list[str]:
 
 def match_cells_to_changes(workspace: Workspace | Path | str, changed_files: list[str]) -> list[dict]:
     ws = as_workspace(workspace)
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     matches = find_matching_cells(str(cells_dir), changed_files, allow_basename_match=True)
     triggered = []
     for m in matches:
@@ -69,7 +69,7 @@ def run_outcome_engine(workspace: Optional[Workspace | Path | str] = None, mod: 
     resolve_ws = getattr(m, "resolve_workspace", resolve_workspace)
     raw_ws = workspace if workspace is not None else resolve_ws()
     ws = as_workspace(raw_ws)
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     if not cells_dir.is_dir():
         return 0
 

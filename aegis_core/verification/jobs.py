@@ -328,17 +328,11 @@ def persist_jobs_state(workspace: str) -> str:
 
 
 def _resolve_jobs_state_file(ws: Path) -> Path:
-    if (ws / ".aegis" / "jobs_state.json").is_file():
-        return ws / ".aegis" / "jobs_state.json"
-    if (ws / ".soma" / "jobs_state.json").is_file():
-        return ws / ".soma" / "jobs_state.json"
-    if (ws / ".aegis").is_dir() or not (ws / ".soma").is_dir():
-        return ws / ".aegis" / "jobs_state.json"
-    return ws / ".soma" / "jobs_state.json"
+    return ws / ".aegis" / "jobs_state.json"
 
 
 def restore_jobs_state(workspace: str) -> list[VerificationJob]:
-    """Load previously persisted jobs from .aegis/jobs_state.json or .soma/jobs_state.json into memory."""
+    """Load previously persisted jobs from .aegis/jobs_state.json into memory."""
     import json
     from pathlib import Path
     from aegis_core.storage import read_text_utf8

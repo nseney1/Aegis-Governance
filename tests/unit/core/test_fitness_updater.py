@@ -11,10 +11,10 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 # Will fail until implementation exists — that's the TDD red phase
-from soma_core.telemetry import (
+from aegis_core.telemetry import (
     detect_platform,
     extract_modified_files,
     match_cells,
@@ -61,7 +61,7 @@ def _make_cell(cells_dir, name, target_paths, subdir="vacuoles"):
 
 def _make_evidence_dir(tmp_path):
     """Create the evidence directory structure."""
-    evidence = tmp_path / ".soma" / "evidence"
+    evidence = tmp_path / ".aegis" / "evidence"
     evidence.mkdir(parents=True, exist_ok=True)
     return evidence
 

@@ -144,7 +144,7 @@ class TestComplianceDetection:
     compliant or non-compliant for each rule."""
 
     def test_detects_read_before_write_compliance(self, compliant_transcript):
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             compliant_transcript, rule_id="read-before-write"
@@ -153,7 +153,7 @@ class TestComplianceDetection:
         assert results["non_compliant_count"] == 0
 
     def test_detects_read_before_write_violation(self, non_compliant_transcript):
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             non_compliant_transcript, rule_id="read-before-write"
@@ -162,7 +162,7 @@ class TestComplianceDetection:
         assert results["compliant_count"] == 0
 
     def test_detects_mixed_compliance(self, mixed_transcript):
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             mixed_transcript, rule_id="read-before-write"
@@ -171,7 +171,7 @@ class TestComplianceDetection:
         assert results["non_compliant_count"] >= 1, "Should detect non-compliant write to b.py"
 
     def test_empty_transcript_returns_zero(self, empty_transcript):
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             empty_transcript, rule_id="read-before-write"
@@ -180,7 +180,7 @@ class TestComplianceDetection:
         assert results["non_compliant_count"] == 0
 
     def test_unknown_rule_returns_zero(self, compliant_transcript):
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             compliant_transcript, rule_id="nonexistent-rule-xyz"
@@ -192,7 +192,7 @@ class TestComplianceDetection:
         """Creating new files (write_to_file) should NOT count as a
         read-before-write violation — the rule applies to modifications
         of existing files (replace_file_content / multi_replace_file_content)."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             write_only_transcript, rule_id="read-before-write"
@@ -203,7 +203,7 @@ class TestComplianceDetection:
 
     def test_grep_search_counts_as_read(self, mixed_transcript):
         """grep_search on a file's path should satisfy the 'read' requirement."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             mixed_transcript, rule_id="read-before-write"
@@ -219,7 +219,7 @@ class TestEvidenceAggregation:
     """Given per-session compliance data, produce valid aggregate statistics."""
 
     def test_evidence_has_required_fields(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "read-before-write", "compliant": True,
@@ -239,7 +239,7 @@ class TestEvidenceAggregation:
         assert "rework_multiplier" in rbw
 
     def test_correct_sample_count(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": True,
@@ -253,7 +253,7 @@ class TestEvidenceAggregation:
         assert evidence["r1"]["samples"] == 3
 
     def test_correct_averages(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": True,
@@ -271,7 +271,7 @@ class TestEvidenceAggregation:
         assert r["non_compliant_fpsr"] == pytest.approx(0.20)
 
     def test_rework_multiplier_calculation(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": True,
@@ -284,7 +284,7 @@ class TestEvidenceAggregation:
         assert evidence["r1"]["rework_multiplier"] == pytest.approx(3.0)
 
     def test_confidence_low_with_few_samples(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": True,
@@ -294,7 +294,7 @@ class TestEvidenceAggregation:
         assert evidence["r1"]["confidence"] == "low"
 
     def test_confidence_high_with_many_samples(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": (i % 3 != 0),
@@ -305,7 +305,7 @@ class TestEvidenceAggregation:
         assert evidence["r1"]["confidence"] == "high"
 
     def test_multiple_rules_segregated(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": True,
@@ -320,7 +320,7 @@ class TestEvidenceAggregation:
         assert evidence["r2"]["samples"] == 1
 
     def test_empty_observations(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         evidence = aggregate_evidence([])
         assert evidence == {}
@@ -328,7 +328,7 @@ class TestEvidenceAggregation:
     def test_all_compliant_no_division_error(self):
         """When all observations are compliant, non_compliant fields
         should have safe defaults (not raise ZeroDivisionError)."""
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": True,
@@ -351,7 +351,7 @@ class TestSecurityInvariant:
     or diff content in its output."""
 
     def test_evidence_contains_no_file_paths(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "read-before-write", "compliant": True,
@@ -364,7 +364,7 @@ class TestSecurityInvariant:
         assert "/src/" not in serialized
 
     def test_evidence_contains_no_code(self):
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": True,
@@ -379,7 +379,7 @@ class TestSecurityInvariant:
     def test_check_compliance_returns_only_counts(self, compliant_transcript):
         """check_compliance must return only aggregate counts, not
         file paths or code content from the transcript."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             compliant_transcript, rule_id="read-before-write"
@@ -399,7 +399,7 @@ class TestAdversarialPathMatching:
     def test_root_grep_does_not_match_all_writes(self, tmp_path):
         """grep_search on '/' must NOT satisfy read-before-write for
         every subsequent file modification."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -426,7 +426,7 @@ class TestAdversarialPathMatching:
     def test_near_root_close_write_accepted(self, tmp_path):
         """grep_search on '/repo' writing to '/repo/src/main.py' is
         only 1 directory level — within MAX_ANCESTOR_DISTANCE."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -453,7 +453,7 @@ class TestAdversarialPathMatching:
     def test_directory_ancestor_read_at_sufficient_depth(self, tmp_path):
         """grep_search on '/repo/src' (depth 2) SHOULD satisfy compliance
         for writes to files within /repo/src/."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -479,7 +479,7 @@ class TestAdversarialPathMatching:
     def test_repo_root_at_realistic_depth_rejected(self, tmp_path):
         """grep_search on a deep repo root like '/home/user/project' must
         NOT blanket-approve all writes within the project."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -506,7 +506,7 @@ class TestAdversarialPathMatching:
     def test_close_ancestor_accepted(self, tmp_path):
         """grep_search on a directory 2 levels above write SHOULD
         count as compliant."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -536,7 +536,7 @@ class TestMultiReplaceAndEdgeCases:
 
     def test_multi_replace_detected(self, tmp_path):
         """multi_replace_file_content should be treated as a write."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -555,7 +555,7 @@ class TestMultiReplaceAndEdgeCases:
     def test_many_edits_same_file_stay_compliant(self, tmp_path):
         """Reading a file once then editing it 20 times must count as
         20 compliant writes, not 5 compliant + 15 non-compliant."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -586,7 +586,7 @@ class TestMultiReplaceAndEdgeCases:
 
     def test_str_path_accepted(self, compliant_transcript):
         """check_compliance must accept str paths (not just Path objects)."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         results = check_compliance(
             str(compliant_transcript), rule_id="read-before-write"
@@ -595,7 +595,7 @@ class TestMultiReplaceAndEdgeCases:
 
     def test_all_non_compliant_observations(self):
         """All-non-compliant observations must not crash."""
-        from soma_core.evidence_collector import aggregate_evidence
+        from aegis_core.evidence_collector import aggregate_evidence
 
         observations = [
             {"rule_id": "r1", "compliant": False,
@@ -610,7 +610,7 @@ class TestMultiReplaceAndEdgeCases:
 
     def test_quoted_path_arguments(self, tmp_path):
         """Tool arguments with surrounding quotes must be handled."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -645,7 +645,7 @@ class TestBuildObservation:
     def test_build_observation_bridges_schema(self, tmp_path):
         """build_observation() transforms check_compliance output into
         aggregate_evidence format."""
-        from soma_core.evidence_collector import build_observation
+        from aegis_core.evidence_collector import build_observation
 
         transcript = _write_transcript(tmp_path, [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -670,7 +670,7 @@ class TestBuildObservation:
 
     def test_build_observation_compliant_when_zero_violations(self, tmp_path):
         """compliant=True when non_compliant_count == 0 and compliant_count > 0."""
-        from soma_core.evidence_collector import build_observation
+        from aegis_core.evidence_collector import build_observation
 
         transcript = _write_transcript(tmp_path, [
             {"step_index": 0},
@@ -683,7 +683,7 @@ class TestBuildObservation:
 
     def test_build_observation_non_compliant_when_violations(self, tmp_path):
         """compliant=False when non_compliant_count > 0."""
-        from soma_core.evidence_collector import build_observation
+        from aegis_core.evidence_collector import build_observation
 
         transcript = _write_transcript(tmp_path, [
             {"step_index": 0},
@@ -695,7 +695,7 @@ class TestBuildObservation:
 
     def test_build_observation_extracts_step_count(self, tmp_path):
         """session_steps should equal the number of steps in the transcript."""
-        from soma_core.evidence_collector import build_observation
+        from aegis_core.evidence_collector import build_observation
 
         transcript = _write_transcript(tmp_path, [
             {"step_index": i} for i in range(7)
@@ -707,7 +707,7 @@ class TestBuildObservation:
 
     def test_build_observation_skips_inactive_rules(self, tmp_path):
         """Returns None when both counts are 0 (rule had no activity)."""
-        from soma_core.evidence_collector import build_observation
+        from aegis_core.evidence_collector import build_observation
 
         transcript = _write_transcript(tmp_path, [{"step_index": 0}])
         compliance = {"compliant_count": 0, "non_compliant_count": 0}
@@ -724,7 +724,7 @@ class TestTBIDetector:
 
     def test_tbi_detector_compliant_when_test_before_impl(self, tmp_path):
         """Compliant when test file write precedes implementation file write."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -747,7 +747,7 @@ class TestTBIDetector:
 
     def test_tbi_detector_non_compliant_when_impl_before_test(self, tmp_path):
         """Non-compliant when implementation write has no preceding test write."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -772,7 +772,7 @@ class TestHardcodedPathsDetector:
 
     def test_hardcoded_paths_detects_home_dir(self, tmp_path):
         """Non-compliant when /home/username paths appear in write tool calls."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",
@@ -788,7 +788,7 @@ class TestHardcodedPathsDetector:
 
     def test_hardcoded_paths_clean_when_relative(self, tmp_path):
         """Compliant when only relative paths used."""
-        from soma_core.evidence_collector import check_compliance
+        from aegis_core.evidence_collector import check_compliance
 
         steps = [
             {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE",

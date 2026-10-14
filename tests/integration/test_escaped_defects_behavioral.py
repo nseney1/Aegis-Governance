@@ -16,15 +16,15 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.cells import CellFitness
-from soma_sdk.analysis import antifragile_bonus
+from aegis_sdk.rules import RuleFitness
+from aegis_sdk.analysis import antifragile_bonus
 
 
 class TestAntifragileBonus:
     """Tests for the antifragile bonus calculation."""
 
     def test_zero_stress_no_bonus(self):
-        """Cell with 0 stress events gets no bonus (multiplier = 1.0)."""
+        """Rule with 0 stress events gets no bonus (multiplier = 1.0)."""
         assert antifragile_bonus(0) == 1.0
 
     def test_one_stress_event(self):
@@ -46,13 +46,13 @@ class TestAntifragileBonus:
         assert abs(antifragile_bonus(10, cap=5) - 1.25) < 0.001
 
     def test_cell_fitness_stress_survived_field(self):
-        """CellFitness.stress_survived defaults to 0."""
-        f = CellFitness()
+        """RuleFitness.stress_survived defaults to 0."""
+        f = RuleFitness()
         assert f.stress_survived == 0
 
     def test_cell_fitness_stress_survived_custom(self):
-        """CellFitness.stress_survived can be set."""
-        f = CellFitness(stress_survived=3)
+        """RuleFitness.stress_survived can be set."""
+        f = RuleFitness(stress_survived=3)
         bonus = antifragile_bonus(f.stress_survived)
         assert abs(bonus - 1.15) < 0.001
 
@@ -63,8 +63,8 @@ class TestEscapedDefectRecording:
     def _create_workspace_with_cell(self):
         """Create a temp workspace with a minimal cell and metrics dir."""
         workspace = tempfile.mkdtemp()
-        cells_dir = os.path.join(workspace, '.soma', 'cells', 'vacuoles')
-        metrics_dir = os.path.join(workspace, '.soma', 'metrics')
+        cells_dir = os.path.join(workspace, '.aegis', "rules", 'vacuoles')
+        metrics_dir = os.path.join(workspace, '.aegis', 'metrics')
         os.makedirs(cells_dir)
         os.makedirs(metrics_dir)
 
@@ -91,7 +91,7 @@ class TestEscapedDefectRecording:
         """Recording an escaped defect appends to escaped_defects.jsonl."""
         workspace = self._create_workspace_with_cell()
         try:
-            from soma_core.defects import record_escaped_defect
+            from aegis_core.defects import record_escaped_defect
 
             cell_dict = {
                 '_name': 'trap-test',
@@ -106,7 +106,7 @@ class TestEscapedDefectRecording:
                 workspace=workspace
             )
 
-            jsonl_path = os.path.join(workspace, '.soma', 'metrics', 'escaped_defects.jsonl')
+            jsonl_path = os.path.join(workspace, '.aegis', 'metrics', 'escaped_defects.jsonl')
             assert os.path.exists(jsonl_path), "JSONL file should be created"
 
             with open(jsonl_path, encoding='utf-8') as f:

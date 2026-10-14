@@ -6,43 +6,41 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Mapping, Optional
 
-from aegis_core.errors import SomaValidationError
-from aegis_core.yaml import SomaYAML
+from aegis_core.errors import AegisValidationError
+from aegis_core.yaml import AegisYAML
 
 __all__ = ["SlotResolutionError", "SlotRegistry", "SLOT_REF_PATTERN"]
 
 SLOT_REF_PATTERN = re.compile(r"\$\{(?:SLOT|RULE)\.([A-Za-z0-9_\-]+)\}|\$\{([A-Za-z0-9_\-]+)\}")
 
 
-class SlotResolutionError(SomaValidationError):
+class SlotResolutionError(AegisValidationError):
     """Raised when a required skill slot cannot be resolved fail-closed."""
 
 
 class SlotRegistry:
-    """Manages repository slot bindings from .soma/slots.yaml."""
+    """Manages repository slot bindings from .aegis/slots.yaml."""
 
     def __init__(self, slots: Optional[Mapping[str, Any]] = None) -> None:
         self._slots: Dict[str, str] = {str(k): str(v) for k, v in (slots or {}).items() if v is not None}
 
     @classmethod
     def load(cls, workspace_root: Path | str) -> SlotRegistry:
-        """Load slot definitions from .soma/slots.yaml or return empty registry."""
+        """Load slot definitions from .aegis/slots.yaml or return empty registry."""
         root = Path(workspace_root)
         slots_file = root / ".aegis" / "slots.yaml"
-        if not slots_file.exists():
-            slots_file = root / ".soma" / "slots.yaml"
         if not slots_file.exists():
             return cls({})
 
         try:
             content = slots_file.read_text(encoding="utf-8")
-            doc = SomaYAML.parse_text(content)
+            doc = AegisYAML.parse_text(content)
             raw_slots = doc.get("slots", {})
             if isinstance(raw_slots, Mapping):
                 return cls(raw_slots)
             return cls({})
         except Exception as exc:
-            raise SlotResolutionError(f"Failed to parse .soma/slots.yaml: {exc}") from exc
+            raise SlotResolutionError(f"Failed to parse .aegis/slots.yaml: {exc}") from exc
 
     def get(self, key: str, default: Optional[str] = None) -> Optional[str]:
         return self._slots.get(key, default)

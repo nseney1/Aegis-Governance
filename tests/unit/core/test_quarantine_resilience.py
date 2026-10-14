@@ -1,4 +1,4 @@
-"""Tests for self-healing corrupt file quarantine (soma_core.quarantine)."""
+"""Tests for self-healing corrupt file quarantine (aegis_core.quarantine)."""
 from __future__ import annotations
 
 import json
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.quarantine import (
+from aegis_core.quarantine import (
     quarantine_file,
     safe_parse_cell_file,
     safe_read_jsonl,
@@ -19,7 +19,7 @@ class TestCorruptFileQuarantine:
 
     def test_quarantines_corrupt_yaml_cell(self, tmp_path: Path):
         """Corrupted YAML frontmatter in a cell is isolated and logged cleanly."""
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
         bad_cell = cells_dir / "bad_rule.md"
         bad_cell.write_text(
@@ -36,7 +36,7 @@ class TestCorruptFileQuarantine:
         assert status == "quarantined"
         assert not bad_cell.exists()
 
-        quarantine_dir = tmp_path / ".soma" / QUARANTINE_DIR
+        quarantine_dir = tmp_path / ".aegis" / QUARANTINE_DIR
         assert quarantine_dir.exists()
         quarantined_files = list(quarantine_dir.glob("bad_rule.*.corrupt"))
         assert len(quarantined_files) == 1
@@ -69,7 +69,7 @@ class TestCorruptFileQuarantine:
 
     def test_safe_read_jsonl_quarantines_completely_corrupted_file(self, tmp_path: Path):
         """Completely binary garbage in a JSONL file is quarantined."""
-        ev_dir = tmp_path / ".soma" / "evidence"
+        ev_dir = tmp_path / ".aegis" / "evidence"
         ev_dir.mkdir(parents=True)
         corrupt_jsonl = ev_dir / "corrupted_ledger.jsonl"
         corrupt_jsonl.write_bytes(b"\x00\x01\x02\xff\xfe\x00\x00NOT_JSON_AT_ALL")
@@ -78,7 +78,7 @@ class TestCorruptFileQuarantine:
         assert status == "quarantined"
         assert records == []
         assert not corrupt_jsonl.exists()
-        quarantine_dir = tmp_path / ".soma" / QUARANTINE_DIR
+        quarantine_dir = tmp_path / ".aegis" / QUARANTINE_DIR
         assert any(quarantine_dir.glob("corrupted_ledger.*.corrupt"))
 
     def test_safe_read_jsonl_whitespace_only_not_quarantined(self, tmp_path: Path):
@@ -89,7 +89,7 @@ class TestCorruptFileQuarantine:
         assert status == "ok"
         assert records == []
         assert jsonl_file.exists()
-        assert not (tmp_path / ".soma" / QUARANTINE_DIR).exists()
+        assert not (tmp_path / ".aegis" / QUARANTINE_DIR).exists()
 
     def test_safe_parse_cell_without_frontmatter_preserves_thematic_breaks(self, tmp_path: Path):
         """Markdown cell without frontmatter preserves entire body including thematic breaks."""

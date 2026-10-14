@@ -6,16 +6,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from soma_mcp.jit_engine import express, estimate_tokens
+from aegis_mcp.jit_engine import express, estimate_tokens
 
 
 class TestJITContextBudgetClamping(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix="soma_test_jit_budget_")
         self.ws = Path(self.test_dir)
-        self.cells_dir = self.ws / ".soma" / "cells"
-        (self.cells_dir / "vacuoles").mkdir(parents=True, exist_ok=True)
-        (self.cells_dir / "walls").mkdir(parents=True, exist_ok=True)
+        self.rules_dir = self.ws / ".aegis" / "rules"
+        (self.rules_dir / "vacuoles").mkdir(parents=True, exist_ok=True)
+        (self.rules_dir / "walls").mkdir(parents=True, exist_ok=True)
 
         # Helper to create a cell with custom length
         self._create_cell(
@@ -59,7 +59,7 @@ class TestJITContextBudgetClamping(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def _create_cell(self, subtype: str, filename: str, frontmatter: dict, body: str):
-        path = self.cells_dir / subtype / filename
+        path = self.rules_dir / subtype / filename
         fm_lines = ["---"]
         for k, v in frontmatter.items():
             if isinstance(v, list):
@@ -84,7 +84,7 @@ class TestJITContextBudgetClamping(unittest.TestCase):
     def test_default_token_budget_is_2000(self):
         """When not specified, max_tokens_budget should default to 2000."""
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("SOMA_MAX_JIT_TOKENS", None)
+            os.environ.pop("AEGIS_MAX_JIT_TOKENS", None)
             res = express(str(self.ws), changed_files=["main.py"], budget=10)
             stats = res["stats"]
             self.assertEqual(stats.get("max_tokens_budget"), 2000)
@@ -100,8 +100,8 @@ class TestJITContextBudgetClamping(unittest.TestCase):
         self.assertTrue(stats.get("clamped"))
 
     def test_env_var_overrides_token_budget(self):
-        """SOMA_MAX_JIT_TOKENS environment variable should set default budget."""
-        with patch.dict(os.environ, {"SOMA_MAX_JIT_TOKENS": "120"}):
+        """AEGIS_MAX_JIT_TOKENS environment variable should set default budget."""
+        with patch.dict(os.environ, {"AEGIS_MAX_JIT_TOKENS": "120"}):
             res = express(str(self.ws), changed_files=["main.py"])
             stats = res["stats"]
             self.assertEqual(stats.get("max_tokens_budget"), 120)
@@ -109,11 +109,11 @@ class TestJITContextBudgetClamping(unittest.TestCase):
             self.assertTrue(stats.get("clamped"))
 
     def test_config_file_sets_token_budget(self):
-        """max_jit_tokens setting in soma.conf should be respected."""
-        conf_path = self.ws / "soma.conf"
+        """max_jit_tokens setting in aegis.conf should be respected."""
+        conf_path = self.ws / "aegis.conf"
         conf_path.write_text("max_jit_tokens=180\n", encoding="utf-8")
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("SOMA_MAX_JIT_TOKENS", None)
+            os.environ.pop("AEGIS_MAX_JIT_TOKENS", None)
             res = express(str(self.ws), changed_files=["main.py"])
             stats = res["stats"]
             self.assertEqual(stats.get("max_tokens_budget"), 180)

@@ -109,12 +109,21 @@ class CheckCommand(AegisCommand):
             help="Run pre-commit quality checkpoint checks",
         )
         parser.add_argument(
+            "--all",
+            dest="all_files",
+            action="store_true",
+            default=False,
+            help="Check all workspace files",
+        )
+        parser.add_argument(
             "--require-arbitration",
             action="store_true",
             help="Require Layer 2 arbitration evidence",
         )
         parser.add_argument(
             "--full",
+            "--deep",
+            dest="full",
             action="store_true",
             help="Run full verification (Layer 1 deterministic + Layer 2 adversarial LLM pair)",
         )
@@ -125,6 +134,7 @@ class CheckCommand(AegisCommand):
             action="store_true",
             help="Evaluate Release Gate 4.5 and verify signed SHIP arbitration receipt",
         )
+
         parser.add_argument(
             "--layer1-only",
             action="store_true",

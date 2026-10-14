@@ -41,14 +41,14 @@ DANGEROUS_FLAGS: tuple[str, ...] = ("-f", "--force", "-D", "-d", "-M", "--output
 
 def _find_gate_log_dir(workspace: Path) -> Path:
     """Locate the canonical directory for gate event logging."""
-    env_logs = os.environ.get("SOMA_LOGS_DIR")
+    env_logs = os.environ.get("AEGIS_LOGS_DIR")
     if env_logs:
         return Path(env_logs) / "governance"
     home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
     candidate = home / ".gemini" / "antigravity" / "scratch" / "ai-conversation-logs" / "governance"
     if candidate.parent.exists():
         return candidate
-    return workspace / ".soma" / "governance"
+    return workspace / ".aegis" / "governance"
 
 
 def log_gate_event(cmd: str, decision: str, reason: str, workspace: Path) -> None:

@@ -5,14 +5,14 @@ import json
 from pathlib import Path
 import pytest
 
-from soma_core.ast.schema import (
+from aegis_core.ast.schema import (
     CallSiteNode,
     DefinitionNode,
     ImportNode,
     MutationPoint,
     NormalizedAST,
 )
-from soma_core.ast.drivers.python import parse_python_ast
+from aegis_core.ast.drivers.python import parse_python_ast
 
 
 def test_schema_roundtrip_dict_and_json():

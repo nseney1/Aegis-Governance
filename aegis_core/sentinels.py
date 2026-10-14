@@ -241,7 +241,6 @@ def check_membrane_overrides(
 
     candidate_roots = [
         ws_path / ".aegis" / "rules",
-        ws_path / ".soma" / "cells",
     ]
     for cells_dir in candidate_roots:
         if not cells_dir.is_dir():
@@ -415,7 +414,7 @@ def write_frontmatter(filepath: str, metadata: dict[str, Any], body: str) -> Non
 
 def run_last_gasp(workspace: Path | None = None) -> int:
     ws = str(workspace or Path.cwd())
-    cells_dir = os.path.join(ws, ".soma", "cells")
+    cells_dir = os.path.join(ws, ".aegis", "rules")
     if not os.path.exists(cells_dir):
         return 0
 
@@ -466,9 +465,9 @@ def run_last_gasp(workspace: Path | None = None) -> int:
             metadata["fitness"]["stress_survived"] = metadata["fitness"].get("stress_survived", 0) + 1
 
             raw_type = str(metadata.get("type", "wall")).rstrip("s")
-            allowed_types = {"wall", "membrane", "vacuole", "chloroplast", "ribosome", "nucleus"}
+            allowed_types = {"invariant", "boundary", "trap", "persona", "contract", "wall", "membrane", "ribosome", "nucleus"}
             cell_type = raw_type if raw_type in allowed_types else "wall"
-            parent_type = cell_type + "s"
+            parent_type = "boundaries" if cell_type == "boundary" else cell_type + "s"
             target_dir = os.path.abspath(os.path.join(cells_dir, parent_type))
             abs_cells_dir = os.path.abspath(cells_dir)
             if not target_dir.startswith(abs_cells_dir) or os.path.commonpath([abs_cells_dir, target_dir]) != abs_cells_dir:

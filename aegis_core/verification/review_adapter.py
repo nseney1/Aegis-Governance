@@ -188,20 +188,7 @@ def _scan_highest_cycle(evidence_dir: Path) -> int:
 
 
 def _resolve_evidence_dir(workspace: str | os.PathLike) -> Path:
-    ws_path = Path(workspace)
-    aegis_ev = ws_path / ".aegis" / "evidence"
-    if aegis_ev.is_dir():
-        return aegis_ev
-    soma_ev = ws_path / ".soma" / "evidence"
-    if soma_ev.is_dir():
-        return soma_ev
-    if (ws_path / ".aegis").is_dir():
-        return aegis_ev
-    if (ws_path / ".soma").is_dir():
-        return soma_ev
-    if os.environ.get("AEGIS_WORKSPACE"):
-        return aegis_ev
-    return soma_ev
+    return Path(workspace) / ".aegis" / "evidence"
 
 
 def get_next_cycle_number(workspace: str | os.PathLike) -> int:

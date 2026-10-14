@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import pytest
 
-from soma_core.scoring import (
+from aegis_core.scoring import (
     SALIENT_DECAY_FLOOR,
     SALIENT_EXPLORATION_PRIOR,
     SALIENT_GATE_UNTESTED,

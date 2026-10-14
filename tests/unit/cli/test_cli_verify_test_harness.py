@@ -11,8 +11,8 @@ import sys
 from unittest.mock import MagicMock, patch
 import pytest
 
-from soma_cli import verify
-from soma_core.verification import ToolEvidence, Verdict
+from aegis_cli import verify
+from aegis_core.verification import ToolEvidence, Verdict
 
 
 class TestVerifyTestHarnessDiscovery:
@@ -83,9 +83,9 @@ class TestVerifyCLIWiringWithTestHarness:
         mock_provider = MagicMock()
         mock_provider.generate = MagicMock(return_value="[]")
 
-        monkeypatch.setattr("soma_core.verification.pipeline.VerificationPipeline.run", mock_pipeline_run)
-        monkeypatch.setattr("soma_cli.verify.resolve_cli_provider", lambda a, r: mock_provider)
-        monkeypatch.setattr("soma_core.verification.runner.run_layer1", lambda *a, **kw: [
+        monkeypatch.setattr("aegis_core.verification.pipeline.VerificationPipeline.run", mock_pipeline_run)
+        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda a, r: mock_provider)
+        monkeypatch.setattr("aegis_core.verification.runner.run_layer1", lambda *a, **kw: [
             ToolEvidence("call_graph", "service.py", True, "ok")
         ])
 

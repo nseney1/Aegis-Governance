@@ -10,7 +10,7 @@ import argparse
 import json
 from datetime import datetime, timedelta, timezone
 
-from soma_cli.report import run_report
+from aegis_cli.report import run_report
 
 
 def _create_event(cell: str, triggered_at: datetime) -> dict:
@@ -23,8 +23,8 @@ def _create_event(cell: str, triggered_at: datetime) -> dict:
 
 
 def _write_ledger(tmp_path, events: list[dict]) -> None:
-    """Helper to write events into <tmp_path>/.soma/evidence/signals.jsonl."""
-    ledger = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+    """Helper to write events into <tmp_path>/.aegis/evidence/signals.jsonl."""
+    ledger = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     ledger.parent.mkdir(parents=True, exist_ok=True)
     with open(ledger, "w", encoding="utf-8") as f:
         f.writelines(json.dumps(ev) + "\n" for ev in events)
@@ -43,7 +43,7 @@ class TestReportEmpty:
 
     def test_report_empty_file(self, tmp_path, capsys):
         """Empty file → prints 'No session data', returns 0."""
-        ledger = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+        ledger = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
         ledger.parent.mkdir(parents=True, exist_ok=True)
         ledger.write_text("")
 
@@ -216,7 +216,7 @@ class TestReportEdgeCases:
 
     def test_report_corrupted_lines_skipped(self, tmp_path, capsys):
         """Corrupted or malformed lines are safely skipped."""
-        ledger = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+        ledger = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
         ledger.parent.mkdir(parents=True, exist_ok=True)
         ledger.write_text(
             "\n"
@@ -250,13 +250,42 @@ class TestReportEdgeCases:
 
     def test_report_command_contract(self):
         from unittest.mock import patch
-        from soma_cli.report import ReportCommand
+        from aegis_cli.report import ReportCommand
         cmd = ReportCommand()
         parser = argparse.ArgumentParser()
         cmd.configure_parser(parser)
         parsed = parser.parse_args(["--session", "2"])
         assert parsed.session == 2
 
-        with patch("soma_cli.report.run_report", return_value=0) as mock_run:
+        with patch("aegis_cli.report.run_report", return_value=0) as mock_run:
             assert cmd.execute(parsed) == 0
             mock_run.assert_called_once_with(parsed)
+
+    def test_report_json_and_plain_modes(self, tmp_path, capsys):
+        """v3.0.0: report supports --json and --plain without leaking ANSI or Unicode emojis."""
+        base_time = datetime(2026, 9, 30, 14, 0, 0, tzinfo=timezone.utc)
+        _write_ledger(
+            tmp_path,
+            [
+                _create_event("providence", base_time),
+                _create_event("providence", base_time + timedelta(minutes=1)),
+            ],
+        )
+
+        # JSON mode
+        assert run_report(argparse.Namespace(session=-1, _root=tmp_path, json=True)) == 0
+        raw_json = capsys.readouterr().out
+        assert "\x1b[" not in raw_json
+        payload = json.loads(raw_json)
+        assert payload["total_events"] == 2
+        assert payload["rules_triggered"] == 1
+        assert any(r["rule"] == "providence" and r["fires"] == 2 for r in payload["rules"])
+
+        # Plain mode
+        assert run_report(argparse.Namespace(session=-1, _root=tmp_path, plain=True)) == 0
+        out_plain = capsys.readouterr().out
+        assert "\x1b[" not in out_plain
+        assert "📊" not in out_plain
+        assert "🛡️" not in out_plain
+        assert "Rules triggered:    1 of 5" in out_plain
+

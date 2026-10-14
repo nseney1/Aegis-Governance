@@ -50,7 +50,7 @@ def test_detect_fix_provisions_slots(tmp_path, capsys):
     code = main(["system", "drivers", "--workspace", str(tmp_path), "--fix"])
     assert code == 0
 
-    slots_path = tmp_path / ".soma" / "slots.yaml"
+    slots_path = tmp_path / ".aegis" / "slots.yaml"
     assert slots_path.is_file()
     content = slots_path.read_text(encoding="utf-8")
     assert "ast_driver_rs" in content
@@ -59,7 +59,7 @@ def test_detect_fix_provisions_slots(tmp_path, capsys):
     code_again = main(["system", "drivers", "--workspace", str(tmp_path)])
     assert code_again == 0
     out = capsys.readouterr().out
-    assert "configured: {python} .soma/drivers/rust_ast.py" in out
+    assert "configured: {python} .aegis/drivers/rust_ast.py" in out
     assert ".rs" in out
 
 

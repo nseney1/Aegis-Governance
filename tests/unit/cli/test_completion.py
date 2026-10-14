@@ -1,6 +1,6 @@
 """Tests for `soma completion {bash,zsh,fish}`.
 
-The scripts are generated from soma_cli.cli._build_parser() at runtime, so
+The scripts are generated from aegis_cli.cli._build_parser() at runtime, so
 these tests enumerate the parser independently and require every subcommand,
 option, and choice value to appear in each shell's output.
 """
@@ -43,7 +43,7 @@ def _fish_flag(opt):
 
 
 def _script(shell):
-    from soma_cli.completion import generate
+    from aegis_cli.completion import generate
     return generate(_build_parser(), shell)
 
 
@@ -205,7 +205,7 @@ def _hostile_parser(word):
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("word", ["$(touch PWNED)", "`touch PWNED`", "a'b", "a b", 'a"b'])
 def test_unsafe_completion_words_are_rejected(shell, word):
-    from soma_cli.completion import generate
+    from aegis_cli.completion import generate
     with pytest.raises(ValueError):
         generate(_hostile_parser(word), shell)
 
@@ -229,13 +229,13 @@ def test_zsh_colons_in_descriptions_are_escaped():
 def test_completion_command_contract():
     import argparse
     from unittest.mock import patch
-    from soma_cli.completion import CompletionCommand
+    from aegis_cli.completion import CompletionCommand
     cmd = CompletionCommand()
     parser = argparse.ArgumentParser()
     cmd.configure_parser(parser)
     parsed = parser.parse_args(["bash"])
     assert parsed.shell == "bash"
 
-    with patch("soma_cli.completion.run_completion", return_value=0) as mock_run:
+    with patch("aegis_cli.completion.run_completion", return_value=0) as mock_run:
         assert cmd.execute(parsed) == 0
         mock_run.assert_called_once_with(parsed)

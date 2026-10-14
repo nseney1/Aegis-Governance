@@ -18,17 +18,11 @@ class AegisError(Exception):
         return self.message if self.message else super().__str__()
 
 
-SomaError = AegisError
-
-
 class AegisValidationError(AegisError, ValueError):
     """Raised when data validation fails against Aegis contracts or schemas."""
 
     def __init__(self, message: str = "", code: str = "VALIDATION_ERROR", **kwargs: Any) -> None:
         super().__init__(message, code=code, **kwargs)
-
-
-SomaValidationError = AegisValidationError
 
 
 class RuleCorruptError(AegisError):
@@ -46,9 +40,6 @@ class RuleCorruptError(AegisError):
         super().__init__(message, code=code, cell_id=actual_id, rule_id=actual_id, **kwargs)
         self.cell_id = actual_id
         self.rule_id = actual_id
-
-
-CellCorruptError = RuleCorruptError
 
 
 class ReceiptExpiredError(AegisError, KeyError):
@@ -87,7 +78,7 @@ class WorkspaceError(AegisValidationError):
 
 
 class WorkspaceNotFoundError(WorkspaceError):
-    """Raised when no valid soma workspace root can be located."""
+    """Raised when no valid aegis workspace root can be located."""
 
     def __init__(
         self,
@@ -161,7 +152,6 @@ class HandoffAuthorizationError(AegisError):
 __all__ = [
     "AegisError",
     "AegisValidationError",
-    "CellCorruptError",
     "HandoffAuthorizationError",
     "InvalidHandoffPayloadError",
     "LockTimeoutError",
@@ -169,8 +159,6 @@ __all__ = [
     "PathTraversalError",
     "ReceiptExpiredError",
     "RuleCorruptError",
-    "SomaError",
-    "SomaValidationError",
     "WorkspaceBareRepoError",
     "WorkspaceError",
     "WorkspaceNotFoundError",

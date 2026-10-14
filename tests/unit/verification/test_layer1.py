@@ -15,10 +15,10 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_core.verification import ToolEvidence
-from soma_core.verification import persistence_checker
-from soma_core.verification import call_graph
-from soma_core.verification import runner
+from aegis_core.verification import ToolEvidence
+from aegis_core.verification import persistence_checker
+from aegis_core.verification import call_graph
+from aegis_core.verification import runner
 from unittest.mock import patch, MagicMock
 
 
@@ -264,7 +264,7 @@ class TestGetModifiedLines:
     """Test git diff modified line extraction helper."""
 
     def test_get_modified_lines_parses_hunks(self, monkeypatch):
-        from soma_core.verification.runner import _get_modified_lines
+        from aegis_core.verification.runner import _get_modified_lines
         import subprocess
 
         fake_diff = "@@ -10,0 +15,5 @@\n+line1\n+line2\n"
@@ -276,7 +276,7 @@ class TestGetModifiedLines:
         assert lines == {15, 16, 17, 18, 19}
 
     def test_get_modified_lines_empty_when_no_hunks(self, monkeypatch):
-        from soma_core.verification.runner import _get_modified_lines
+        from aegis_core.verification.runner import _get_modified_lines
         import subprocess
 
         def mock_run(cmd, *args, **kwargs):
@@ -286,7 +286,7 @@ class TestGetModifiedLines:
         assert _get_modified_lines("app.py", "/repo") is None
 
     def test_get_modified_lines_with_github_base_ref(self, monkeypatch):
-        from soma_core.verification.runner import _get_modified_lines
+        from aegis_core.verification.runner import _get_modified_lines
         import subprocess
 
         monkeypatch.setenv("GITHUB_BASE_REF", "develop")
@@ -305,7 +305,7 @@ class TestGetModifiedLines:
         assert any("origin/develop...HEAD" in c for c in observed_cmds)
 
     def test_get_modified_lines_exception_handled(self, monkeypatch):
-        from soma_core.verification.runner import _get_modified_lines
+        from aegis_core.verification.runner import _get_modified_lines
         import subprocess
 
         def mock_run(cmd, *args, **kwargs):
@@ -319,7 +319,7 @@ class TestRunnerCoverageEnhancements:
     """Tests for edge cases in runner.py discovery and mapping."""
 
     def test_find_test_file_runner_mapping(self):
-        from soma_core.verification.runner import _find_test_file
+        from aegis_core.verification.runner import _find_test_file
         test_file = _find_test_file("soma_core/verification/runner.py", REPO_ROOT)
         assert test_file is not None
         assert test_file.endswith("test_layer1.py")
@@ -350,7 +350,7 @@ class TestRunnerCoverageEnhancements:
         assert artifacts_test is not None and artifacts_test.endswith("test_skills_and_handoff.py")
 
     def test_discover_functions_with_target_lines(self, tmp_path):
-        from soma_core.verification.runner import _discover_functions
+        from aegis_core.verification.runner import _discover_functions
         code = textwrap.dedent("""\
             def func_a():
                 return 1
@@ -374,7 +374,7 @@ class TestRunnerCoverageEnhancements:
     def test_runner_run_layer2_forwarding(self, tmp_path):
         """runner.run_layer2 emits DeprecationWarning and forwards to AdversarialVerifier + Arbiter."""
         import warnings
-        from soma_core.verification import runner, ToolEvidence, Verdict
+        from aegis_core.verification import runner, ToolEvidence, Verdict
         f = tmp_path / "mod.py"
         f.write_text("def work(): return 1\n")
         mock_backend = lambda p: "[]"
@@ -392,7 +392,7 @@ class TestRunnerCoverageEnhancements:
 
     def test_runner_run_layer2_empty_files_fallback(self, tmp_path):
         """runner.run_layer2 fallback ArbitrationResult when changed_files is empty."""
-        from soma_core.verification import runner, Verdict, ArbitrationResult
+        from aegis_core.verification import runner, Verdict, ArbitrationResult
         res = runner.run_layer2(
             changed_files=[],
             repo_root=str(tmp_path),
@@ -405,12 +405,12 @@ class TestRunnerCoverageEnhancements:
 
     def test_run_layer1_polyglot_call_graph(self, tmp_path):
         """run_layer1 invokes call_graph on polyglot files if a driver is resolved."""
-        from soma_core.verification import runner
+        from aegis_core.verification import runner
         ts_file = tmp_path / "app.ts"
         ts_file.write_text("export function run() {}\n")
 
-        with patch("soma_core.ast.runner.ASTDriverRegistry.resolve_driver", return_value="node driver.js"), \
-             patch("soma_core.verification.call_graph.check") as mock_cg:
+        with patch("aegis_core.ast.runner.ASTDriverRegistry.resolve_driver", return_value="node driver.js"), \
+             patch("aegis_core.verification.call_graph.check") as mock_cg:
             mock_cg.return_value = ToolEvidence("call_graph", str(ts_file), True, "0 orphans")
             results = runner.run_layer1(
                 changed_files=["app.ts"],
@@ -422,7 +422,7 @@ class TestRunnerCoverageEnhancements:
 
     def test_get_modified_lines_uses_diff_base_and_head_fallback(self, tmp_path):
         """_get_modified_lines prioritizes explicit diff_base and falls back to HEAD~1."""
-        from soma_core.verification import runner
+        from aegis_core.verification import runner
         import subprocess
 
         called_cmds = []

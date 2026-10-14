@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JIT Cell Expression Engine — Soma v0.30
+"""JIT Rule Expression Engine — Soma v0.30
 
 Implements just-in-time governance delivery based on context engineering research:
 - Gloaguen et al. (2026): Static context files don't improve task success
@@ -28,7 +28,7 @@ import fnmatch
 
 yaml = None  # Backward-compatible sentinel: zero-dependency runtime
 
-from aegis_mcp.cell_cache import CellCache
+from aegis_mcp.rule_cache import CellCache
 
 # Module-level singleton — persists across MCP tool invocations
 _cell_cache = CellCache()
@@ -82,32 +82,31 @@ def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -
         except (ValueError, TypeError):
             pass
 
-    # 2. Environment variable AEGIS_MAX_JIT_TOKENS (with SOMA_MAX_JIT_TOKENS fallback)
-    env_val = os.environ.get("AEGIS_MAX_JIT_TOKENS") or os.environ.get("SOMA_MAX_JIT_TOKENS")
+    # 2. Environment variable AEGIS_MAX_JIT_TOKENS
+    env_val = os.environ.get("AEGIS_MAX_JIT_TOKENS")
     if env_val:
         try:
             return int(env_val.strip())
         except (ValueError, TypeError):
             pass
 
-    # 3. Workspace aegis.conf or soma.conf configuration
+    # 3. Workspace aegis.conf configuration
     if workspace:
-        for conf_name in ("aegis.conf", "soma.conf"):
-            conf_path = os.path.join(workspace, conf_name)
-            if os.path.isfile(conf_path):
-                try:
-                    with open(conf_path, encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith("#"):
-                                continue
-                            lowered = line.lower()
-                            if lowered.startswith("max_jit_tokens=") or lowered.startswith("max_jit_tokens:"):
-                                sep = "=" if "=" in line else ":"
-                                val = line.split(sep, 1)[1].strip().strip('"').strip("'")
-                                return int(val)
-                except Exception:
-                    pass
+        conf_path = os.path.join(workspace, "aegis.conf")
+        if os.path.isfile(conf_path):
+            try:
+                with open(conf_path, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("#"):
+                            continue
+                        lowered = line.lower()
+                        if lowered.startswith("max_jit_tokens=") or lowered.startswith("max_jit_tokens:"):
+                            sep = "=" if "=" in line else ":"
+                            val = line.split(sep, 1)[1].strip().strip('"').strip("'")
+                            return int(val)
+            except Exception:
+                pass
 
     # 4. Default fallback: 2000 tokens
     return 2000
@@ -131,11 +130,9 @@ def get_git_diff_files(workspace: str) -> list[str]:
 
 
 def load_all_cells(workspace: str) -> list[dict[str, object]]:
-    """Load all cells from .aegis/rules/ or .soma/cells/ using stdlib parser."""
+    """Load all rules from .aegis/rules/ using stdlib parser."""
     cells = []
     cells_dir = os.path.join(workspace, '.aegis', 'rules')
-    if not os.path.isdir(cells_dir):
-        cells_dir = os.path.join(workspace, '.soma', 'cells')
     if not os.path.isdir(cells_dir):
         return cells
 
@@ -293,26 +290,20 @@ def format_cell_guidance(cell: dict[str, object]) -> dict[str, object]:
     type_emoji = {
         'wall': '🧱',
         'invariant': '🧱',
-        'vacuole': '🧫',
         'trap': '🧫',
         'membrane': '🔬',
         'boundary': '🔬',
-        'chloroplast': '🌿',
         'persona': '🌿',
-        'plasmodesmata': '🔗',
         'contract': '🔗',
     }.get(ctype, '📋')
 
     type_label = {
         'wall': 'INVARIANT (must not violate)',
         'invariant': 'INVARIANT (must not violate)',
-        'vacuole': 'ANTI-PATTERN TRAP (watch out)',
         'trap': 'ANTI-PATTERN TRAP (watch out)',
         'membrane': 'ESCALATION GATE (needs review)',
         'boundary': 'ESCALATION GATE (needs review)',
-        'chloroplast': 'BEST PRACTICE (follow this pattern)',
         'persona': 'BEST PRACTICE (follow this pattern)',
-        'plasmodesmata': 'CONTRACT (cross-service agreement)',
         'contract': 'CONTRACT (cross-service agreement)',
     }.get(ctype, ctype.upper())
 
@@ -523,7 +514,7 @@ def load_genome_rules(workspace: str, changed_files: list[str]) -> list[dict[str
     try:
         from aegis_core.workspace import Workspace
         ws = Workspace.resolve(workspace)
-        if not ws.is_soma_repo:
+        if not ws.is_aegis_repo:
             return []
     except Exception:
         return []
@@ -594,7 +585,7 @@ def express(
     token_budget = resolve_token_budget(workspace, max_tokens)
 
     if budget is None:
-        budget = int(os.environ.get('SOMA_CONTEXT_BUDGET', '3'))
+        budget = int(os.environ.get('AEGIS_CONTEXT_BUDGET', '3'))
 
     if not changed_files:
         changed_files = get_git_diff_files(workspace)
@@ -655,7 +646,7 @@ def express(
     mandatory = []
     candidates = []
     for cell in matched:
-        cell_type = cell.get('type', 'vacuole')
+        cell_type = cell.get('type', 'trap')
         enforcement = cell.get('enforcement', 'advisory')
         if cell_type in ('wall', 'invariant') or enforcement == 'gate':
             mandatory.append(cell)

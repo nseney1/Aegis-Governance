@@ -9,7 +9,7 @@ import sys
 from unittest.mock import patch
 import pytest
 
-from soma_cli import sanitize_display
+from aegis_cli import sanitize_display
 
 
 def test_sanitize_display_c1_control_codes():
@@ -35,9 +35,9 @@ def test_sanitize_display_dcs_sequences():
 
 
 def test_verify_out_of_tree_warning_sanitized(capsys):
-    """soma_cli.verify.resolve_target_files must sanitize out-of-tree filenames printed to stderr."""
+    """aegis_cli.verify.resolve_target_files must sanitize out-of-tree filenames printed to stderr."""
     from argparse import Namespace
-    from soma_cli.verify import resolve_target_files
+    from aegis_cli.verify import resolve_target_files
 
     malicious_filename = "bad\x1b[2J\x9b31mfile.py"
     args = Namespace(files=[malicious_filename], repo_root="/tmp/fake_repo")

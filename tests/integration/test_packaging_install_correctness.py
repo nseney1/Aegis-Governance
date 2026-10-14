@@ -12,7 +12,7 @@ from conftest import REPO_ROOT, read
 
 
 def test_python_init_mcp_merge_targets_project(tmp_path):
-    from soma_cli.init import generate_mcp_config
+    from aegis_cli.init import generate_mcp_config
 
     config = tmp_path / ".mcp.json"
     config.write_text(
@@ -28,11 +28,11 @@ def test_python_init_mcp_merge_targets_project(tmp_path):
     assert merged["mcpServers"]["other"] == {"command": "keep"}
     soma = merged["mcpServers"]["soma"]
     assert soma["cwd"] == str(tmp_path)
-    assert soma["env"] == {"SOMA_WORKSPACE": str(tmp_path)}
+    assert soma["env"] == {"AEGIS_WORKSPACE": str(tmp_path)}
 
 
 def test_python_init_invalid_mcp_json_is_unchanged(tmp_path):
-    from soma_cli.init import generate_mcp_config
+    from aegis_cli.init import generate_mcp_config
 
     config = tmp_path / ".mcp.json"
     invalid = b"{ definitely not json\n"
@@ -46,8 +46,8 @@ def test_packaging_excludes_private_soma_state_and_includes_genome_package():
     manifest = read(os.path.join(REPO_ROOT, "MANIFEST.in"))
     assert "recursive-include .soma" not in manifest
     assert "prune .soma" in manifest
-    assert ".soma/evidence" not in manifest
-    assert ".soma/dreams" not in manifest
+    assert ".aegis/evidence" not in manifest
+    assert ".aegis/dreams" not in manifest
 
     pyproject = read(os.path.join(REPO_ROOT, "pyproject.toml"))
     assert '"rules*"' in pyproject or '"genome*"' in pyproject

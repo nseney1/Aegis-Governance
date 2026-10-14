@@ -32,12 +32,12 @@ def _literal_assignment(path, name):
 def _readme_mcp_row(readme, label):
     section = readme.split("### MCP Server (Recommended)", 1)[1].split("### SDK", 1)[0]
     row = next(line for line in section.splitlines() if line.startswith(f"| {label}"))
-    return set(re.findall(r"`(soma_[a-z_]+)`", row))
+    return set(re.findall(r"`(aegis_[a-z_]+)`", row))
 
 
 def _script_groups():
-    core_dir = (ROOT / "aegis_core") if (ROOT / "aegis_core").is_dir() else (ROOT / "soma_core")
-    cli_dir = (ROOT / "aegis_cli") if (ROOT / "aegis_cli").is_dir() else (ROOT / "soma_cli")
+    core_dir = (ROOT / "aegis_core") if (ROOT / "aegis_core").is_dir() else (ROOT / "aegis_core")
+    cli_dir = (ROOT / "aegis_cli") if (ROOT / "aegis_cli").is_dir() else (ROOT / "aegis_cli")
     sdk_dir = (ROOT / "aegis_sdk") if (ROOT / "aegis_sdk").is_dir() else (ROOT / "soma_sdk")
     mcp_dir = (ROOT / "aegis_mcp") if (ROOT / "aegis_mcp").is_dir() else (ROOT / "soma_mcp")
     launcher = (ROOT / "aegis") if (ROOT / "aegis").exists() else (ROOT / "soma")
@@ -93,7 +93,7 @@ def _tool_definition_names(path):
 def test_readme_mcp_tool_inventory_matches_code():
     readme = read(str(ROOT / "README.md"))
     section = readme.split("### MCP Server (Recommended)", 1)[1].split("### SDK", 1)[0]
-    documented = set(re.findall(r"`(soma_[a-z_]+)`", section))
+    documented = set(re.findall(r"`(aegis_[a-z_]+)`", section))
     tools_path = ROOT / "aegis_mcp" / "tools.py" if (ROOT / "aegis_mcp").exists() else ROOT / "soma_mcp" / "tools.py"
     expected = _tool_definition_names(tools_path)
     assert documented == expected

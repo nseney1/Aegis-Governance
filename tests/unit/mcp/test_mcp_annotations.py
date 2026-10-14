@@ -5,33 +5,33 @@ soma_mcp/tools.py; see docs/project/CHANGELOG.md for rationale.
 """
 import pytest
 
-import soma_mcp.server as server_module
-from soma_mcp.server import handle_request
+import aegis_mcp.server as server_module
+from aegis_mcp.server import handle_request
 
 _HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 
 # (readOnly, destructive, idempotent, openWorld)
 _EXPECTED = {
-    "soma_scan": (True, False, True, False),
-    "soma_list_cells": (True, False, True, False),
-    "soma_grade": (True, False, True, False),
-    "soma_coverage": (True, False, True, False),
-    "soma_fitness": (True, False, True, False),
-    "soma_create_cell": (False, False, True, False),
-    "soma_propose_change": (False, False, True, True),
-    "soma_audit_security": (True, False, True, False),
-    "soma_audit_performance": (True, False, True, False),
-    "soma_checkpoint": (False, False, True, False),
-    "soma_verify_changes": (False, False, True, False),
-    "soma_request_receipt": (False, False, False, False),
-    "soma_report_outcome": (False, False, True, False),
-    "soma_capture_insight": (False, False, False, False),
-    "soma_generate_manifest": (False, True, True, False),
-    "soma_poll_verification": (True, False, True, False),
-    "soma_create_rule": (False, False, True, False),
-    "soma_list_rules": (True, False, True, False),
-    "soma_rule_fitness": (True, False, True, False),
-    "soma_handoff": (False, False, False, False),
+    "aegis_scan": (True, False, True, False),
+    "aegis_list_cells": (True, False, True, False),
+    "aegis_grade": (True, False, True, False),
+    "aegis_coverage": (True, False, True, False),
+    "aegis_fitness": (True, False, True, False),
+    "aegis_create_cell": (False, False, True, False),
+    "aegis_propose_change": (False, False, True, True),
+    "aegis_audit_security": (True, False, True, False),
+    "aegis_audit_performance": (True, False, True, False),
+    "aegis_checkpoint": (False, False, True, False),
+    "aegis_verify_changes": (False, False, True, False),
+    "aegis_request_receipt": (False, False, False, False),
+    "aegis_report_outcome": (False, False, True, False),
+    "aegis_capture_insight": (False, False, False, False),
+    "aegis_generate_manifest": (False, True, True, False),
+    "aegis_poll_verification": (True, False, True, False),
+    "aegis_create_rule": (False, False, True, False),
+    "aegis_list_rules": (True, False, True, False),
+    "aegis_rule_fitness": (True, False, True, False),
+    "aegis_handoff": (False, False, False, False),
 }
 
 
@@ -40,7 +40,7 @@ def tools():
     # Properly initialize the server to set the session token
     # instead of mutating private module state directly
     import os
-    os.environ["SOMA_EXECUTION_ENABLED"] = "1"
+    os.environ["AEGIS_EXECUTION_ENABLED"] = "1"
     server_module._execution_enabled = True # Keep for now as there's no setup fn
     handle_request({"jsonrpc": "2.0", "id": 0, "method": "initialize"})
     resp = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})

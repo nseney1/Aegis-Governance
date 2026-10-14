@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_cli.status import run_status
+from aegis_cli.status import run_status
 
 REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
 GENOME = (REPO_ROOT / "rules") if (REPO_ROOT / "rules").is_dir() else (REPO_ROOT / "genome")

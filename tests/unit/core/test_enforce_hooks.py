@@ -59,7 +59,7 @@ class TestWallHookGeneration:
     
     def _get_wall_hook(self, name='test-wall', target_paths=None, hypothesis='Test hypothesis'):
         """Generate a wall hook script using cell_enforce."""
-        from soma_core.enforcement import generate_precommit_check
+        from aegis_core.enforcement import generate_precommit_check
         cell = {
             '_name': name,
             'type': 'wall',
@@ -109,7 +109,7 @@ class TestMembraneHookGeneration:
     """Test membrane-type cell hook generation."""
     
     def _get_membrane_hook(self, name='test-membrane', target_paths=None):
-        from soma_core.enforcement import generate_precommit_check
+        from aegis_core.enforcement import generate_precommit_check
         cell = {
             '_name': name,
             'type': 'membrane',
@@ -136,7 +136,7 @@ class TestVacuoleHookGeneration:
     """Test vacuole-type (default) cell hook generation."""
     
     def _get_vacuole_hook(self, name='test-vacuole', target_paths=None):
-        from soma_core.enforcement import generate_precommit_check
+        from aegis_core.enforcement import generate_precommit_check
         cell = {
             '_name': name,
             'type': 'vacuole',

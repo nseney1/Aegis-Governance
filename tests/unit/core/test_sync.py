@@ -1,7 +1,7 @@
-"""Unit tests for soma_core.sync."""
+"""Unit tests for aegis_core.sync."""
 import json
 import pytest
-from soma_core.sync import (
+from aegis_core.sync import (
     check_liveness,
     classify_file,
     is_test_file,
@@ -37,7 +37,7 @@ def test_sync_hgt_mock_translation():
 
 
 def test_run_push_member_id_traversal_rejected(tmp_path):
-    from soma_core.sync import run_push
+    from aegis_core.sync import run_push
 
     team_repo = tmp_path / "team"
     repo = tmp_path / "repo"
@@ -53,8 +53,8 @@ def test_run_push_member_id_traversal_rejected(tmp_path):
 
 def test_sync_sentinel_exports(tmp_path):
     from pathlib import Path
-    from soma_core.sync import set_review_mode, write_frontmatter, resolve_home
-    from soma_core.somayaml import parse_frontmatter
+    from aegis_core.sync import set_review_mode, write_frontmatter, resolve_home
+    from aegis_core.yaml import parse_frontmatter
     # Test set_review_mode
     conf = tmp_path / "steering.conf"
     conf.write_text("REVIEW_MODE=breeze\nOTHER=true\n", encoding="utf-8")
@@ -92,14 +92,14 @@ def test_sync_liveness_check_naive_datetime():
 def test_sync_command_contract():
     import argparse
     from unittest.mock import patch
-    from soma_cli.sync import SyncCommand
+    from aegis_cli.sync import SyncCommand
     cmd = SyncCommand()
     parser = argparse.ArgumentParser()
     cmd.configure_parser(parser)
     parsed = parser.parse_args(["--dry-run"])
     assert parsed.dry_run is True
 
-    with patch("soma_cli.sync.run_sync", return_value=0) as mock_run:
+    with patch("aegis_cli.sync.run_sync", return_value=0) as mock_run:
         assert cmd.execute(parsed) == 0
         mock_run.assert_called_once_with(parsed)
 

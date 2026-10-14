@@ -5,7 +5,7 @@ Validates:
 2. Spurious/dismissed predictions attribute False Positives (FP) to matching cells.
 3. Fallback inference maps cell ID and tags to RiskCategory taxonomy.
 4. Attribution updates cell markdown frontmatter (triggers, true_positives, false_positives, last_trigger_date).
-5. Attribution appends structured signal records to .soma/evidence/signals.jsonl.
+5. Attribution appends structured signal records to .aegis/evidence/signals.jsonl.
 6. VerificationPipeline auto-invokes attribution on verified runs.
 """
 from __future__ import annotations
@@ -14,12 +14,12 @@ import json
 from pathlib import Path
 import pytest
 
-from soma_core.attribution import (
+from aegis_core.attribution import (
     attribute_verification_outcome,
     infer_cell_risk_categories,
 )
-from soma_core.somayaml import parse_frontmatter
-from soma_core.verification import (
+from aegis_core.yaml import parse_frontmatter
+from aegis_core.verification import (
     ArbitrationResult,
     Claim,
     Divergence,
@@ -29,7 +29,7 @@ from soma_core.verification import (
     ToolEvidence,
     Verdict,
 )
-from soma_core.verification.pipeline import (
+from aegis_core.verification.pipeline import (
     DeterministicVerifier,
     VerificationPipeline,
 )
@@ -38,10 +38,10 @@ from soma_core.verification.pipeline import (
 @pytest.fixture
 def workspace_with_cells(tmp_path: Path) -> Path:
     """Create a minimal mock workspace with governance cells and evidence directory."""
-    cells_dir = tmp_path / ".soma" / "cells"
+    cells_dir = tmp_path / ".aegis" / "rules"
     walls_dir = cells_dir / "walls"
     walls_dir.mkdir(parents=True)
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True)
 
     # Cell 1: Explicit risk_categories
@@ -128,7 +128,7 @@ class TestClosedLoopAttribution:
         assert tp_sig["risk_category"] == "boundary_violation"
 
         # Verify cell frontmatter updated on disk
-        cell_path = workspace_with_cells / ".soma" / "cells" / "walls" / "wall-import-boundary.md"
+        cell_path = workspace_with_cells / ".aegis" / "rules" / "walls" / "wall-import-boundary.md"
         fm = parse_frontmatter(cell_path.read_text(encoding="utf-8"))
         fitness = fm["fitness"]
         assert fitness["true_positives"] == 1
@@ -136,7 +136,7 @@ class TestClosedLoopAttribution:
         assert "last_trigger_date" in fitness
 
         # Verify written to signals.jsonl
-        signals_file = workspace_with_cells / ".soma" / "evidence" / "signals.jsonl"
+        signals_file = workspace_with_cells / ".aegis" / "evidence" / "signals.jsonl"
         assert signals_file.is_file()
         lines = signals_file.read_text(encoding="utf-8").strip().split("\n")
         assert any("wall-import-boundary" in line and "TP" in line for line in lines)
@@ -177,7 +177,7 @@ class TestClosedLoopAttribution:
         assert fp_sig["risk_category"] == "persistence_gap"
 
         # Verify cell frontmatter updated
-        cell_path = workspace_with_cells / ".soma" / "cells" / "walls" / "wall-persistence-gap.md"
+        cell_path = workspace_with_cells / ".aegis" / "rules" / "walls" / "wall-persistence-gap.md"
         fm = parse_frontmatter(cell_path.read_text(encoding="utf-8"))
         fitness = fm["fitness"]
         assert fitness["triggers"] == 3  # Initial 2 + 1
@@ -198,7 +198,7 @@ class TestClosedLoopAttribution:
         # Layer 1 failed because of unguarded import
         assert not res.layer1_passed
         # Check signals file for attribution
-        signals_file = workspace_with_cells / ".soma" / "evidence" / "signals.jsonl"
+        signals_file = workspace_with_cells / ".aegis" / "evidence" / "signals.jsonl"
         assert signals_file.is_file()
         content = signals_file.read_text(encoding="utf-8")
         assert "wall-import-boundary" in content

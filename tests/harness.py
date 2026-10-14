@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
-from aegis_core.yaml import dump_frontmatter, parse_cell_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_rule_frontmatter
 
 
 CELL_TYPE_DIRS = {
@@ -26,7 +26,7 @@ CELL_TYPE_DIRS = {
 class AegisTestHarness:
     """Isolated sandbox fixture for testing Aegis Governance lifecycle, telemetry, and CLI."""
 
-    def __init__(self, workspace: Path, use_aegis: bool = False) -> None:
+    def __init__(self, workspace: Path, use_aegis: bool = True) -> None:
         self.workspace = Path(workspace).resolve()
         self.use_aegis = use_aegis
         if use_aegis or (self.workspace / ".aegis").is_dir():
@@ -42,7 +42,7 @@ class AegisTestHarness:
         self._init_workspace()
 
     def _init_workspace(self) -> None:
-        """Initialize standard Soma directory layout inside the isolated workspace."""
+        """Initialize standard Aegis directory layout inside the isolated workspace."""
         for subdir in CELL_TYPE_DIRS.values():
             (self.cells_dir / subdir).mkdir(parents=True, exist_ok=True)
         self.locks_dir.mkdir(parents=True, exist_ok=True)
@@ -94,7 +94,7 @@ class AegisTestHarness:
         session_id: str = "test-session",
         details: Mapping[str, Any] | None = None,
     ) -> None:
-        """Append an event line to .soma/signals.jsonl."""
+        """Append an event line to .aegis/signals.jsonl."""
         signals_file = self.soma_dir / "signals.jsonl"
         payload = {
             "event_id": str(uuid.uuid4()),
@@ -114,10 +114,10 @@ class AegisTestHarness:
         check: bool = True,
         timeout: float = 30.0,
     ) -> subprocess.CompletedProcess[str]:
-        """Execute a soma CLI command out-of-process via subprocess."""
+        """Execute an aegis CLI command out-of-process via subprocess."""
         merged_env = dict(os.environ)
         merged_env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
-        merged_env["SOMA_WORKSPACE"] = str(self.workspace)
+        merged_env["AEGIS_WORKSPACE"] = str(self.workspace)
         if env:
             merged_env.update(env)
 
@@ -133,11 +133,8 @@ class AegisTestHarness:
         )
 
 
-SomaTestHarness = AegisTestHarness
-
-
 __all__ = [
     "AegisTestHarness",
     "CELL_TYPE_DIRS",
-    "SomaTestHarness",
 ]
+

@@ -1,5 +1,5 @@
 ---
-id: membrane-genome-mutations
+id: boundary-genome-mutations
 domain: governance
 type: boundary
 enforcement: advisory

@@ -178,7 +178,7 @@ def test_no_infinity_emitted_in_json_payloads():
 
 def test_soma_mcp_has_no_unguarded_third_party_imports():
     """SOMA-C01: a bare `import yaml` in soma_mcp/ stopped the server from
-    starting at all, violating .soma/cells/walls/wall-mcp-zero-deps.md."""
+    starting at all, violating .aegis/rules/walls/wall-mcp-zero-deps.md."""
     offenders = []
     for path in iter_source_files(os.path.join(REPO_ROOT, "soma_mcp"), (".py",)):
         lines = read(path).splitlines()
@@ -198,7 +198,7 @@ def test_soma_mcp_has_no_unguarded_third_party_imports():
 def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
     """SOMA-C01 end to end: initialize + tools/list must return valid JSON on a
     bare interpreter. Regression: ModuleNotFoundError, exit 1, 0 bytes stdout."""
-    (tmp_path / ".soma" / "cells").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     requests = (
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n"
         + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}) + "\n"
@@ -229,7 +229,7 @@ def test_entire_runtime_has_zero_third_party_imports():
     Only Python standard library modules and internal modules are permitted at runtime.
     Optional inference providers must be strictly guarded by try/except."""
     import ast
-    from soma_core.verification.import_guard import _get_stdlib_modules
+    from aegis_core.verification.import_guard import _get_stdlib_modules
 
     stdlib = set(_get_stdlib_modules()) | set(sys.builtin_module_names)
     internal_prefixes = ("soma_", "aegis_", "install", "genome", "rules")
@@ -329,7 +329,7 @@ def test_version_is_single_sourced():
     try:
         from aegis_mcp.server import _server_version
     except ImportError:
-        from soma_mcp.server import _server_version
+        from aegis_mcp.server import _server_version
     assert _server_version() == version_file, (
         f"MCP runtime ({_server_version()}) != VERSION ({version_file})"
     )
@@ -358,7 +358,7 @@ def test_version_is_single_sourced():
 def test_cli_exits_nonzero_on_unknown_command():
     """SOMA-M03: main() returned None on the unknown-command path, so the
     console script produced exit 0 while printing an error."""
-    proc = run([sys.executable, '-m', 'soma_cli.cli',
+    proc = run([sys.executable, '-m', 'aegis_cli.cli',
                 'definitely-not-a-command'])
     assert proc.returncode != 0, (
         f"CLI reported an unknown command but exited 0:\n{proc.stdout}{proc.stderr}"
@@ -391,7 +391,7 @@ def test_make_validate_fails_on_broken_shell_script(tmp_path):
 # ── Static Import & Documentation Integrity ─────────────────────────────
 
 def test_no_undefined_names_in_python_code():
-    """Verify zero F821 undefined names across soma_core, soma_cli, soma_sdk."""
+    """Verify zero F821 undefined names across soma_core, soma_cli, aegis_sdk."""
     import shutil
     ruff_bin = shutil.which("ruff") or os.path.expanduser("~/.local/bin/ruff")
     if not os.path.exists(ruff_bin):

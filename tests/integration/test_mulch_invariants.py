@@ -1,7 +1,7 @@
 """Automated regression verification for all 6 Mulch Invariants from v0.96.0 Tempest Review.
 
 Invariants:
-1. Architectural Layer Decoupling: soma_core must never import from soma_sdk or enzymes.
+1. Architectural Layer Decoupling: soma_core must never import from aegis_sdk or enzymes.
 2. Symbol Authority: All symbols exported in soma_core module __all__ lists must be resolvable.
 3. Single-Use Receipts: HMAC verification receipts cannot be redeemed twice, reused across sessions/workspaces, or validated with incorrect byte types.
 4. Fail-Closed Confinement: Workspace path confinement rejects relative traversal, absolute traversal, Windows device names, and Alternate Data Streams.
@@ -20,15 +20,15 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.receipts import issue_receipt, verify_receipt, _safe_compare
-from soma_core.workspace import confine_path, resolve_workspace
-from soma_core.enforcement import (
+from aegis_core.receipts import issue_receipt, verify_receipt, _safe_compare
+from aegis_core.workspace import confine_path, resolve_workspace
+from aegis_core.enforcement import (
     load_bug_registry,
     verify_bug_schema,
     verify_bug_tests,
     verify_unique_ids,
 )
-import soma_mcp.server as mcp_server
+import aegis_mcp.server as mcp_server
 
 
 REPO_ROOT = Path(resolve_workspace(__file__))
@@ -38,7 +38,7 @@ class TestInvariant1_LayerDecoupling:
     """Invariant 1: aegis_core must be strictly layered and never import upward."""
 
     def test_core_has_zero_upward_imports(self):
-        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "soma_core"
+        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "aegis_core"
         python_files = list(core_dir.glob("*.py"))
         assert len(python_files) > 0, "core files not found"
 
@@ -70,7 +70,7 @@ class TestInvariant2_SymbolAuthority:
     """Invariant 2: All symbols declared in __all__ across core modules must be resolvable."""
 
     def test_all_symbols_resolvable(self):
-        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "soma_core"
+        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "aegis_core"
         pkg = "aegis_core" if (REPO_ROOT / "aegis_core").exists() else "soma_core"
         python_files = [f for f in core_dir.glob("*.py") if f.name != "__init__.py"]
 
@@ -100,7 +100,7 @@ class TestInvariant3_ReceiptSafety:
     def test_receipt_single_use_enforcement(self, tmp_path):
         workspace = str(tmp_path)
         session_id = "session-invariant-3"
-        op = "soma_verify_changes"
+        op = "aegis_verify_changes"
         args = {"files": ["src/main.py"]}
         file_digest = "digest-file-123"
         cell_digest = "digest-cell-456"
@@ -211,7 +211,7 @@ class TestInvariant3_ReceiptSafety:
     def test_tripartite_negative_burn_on_malformed_payload(self, tmp_path):
         workspace = str(tmp_path)
         session_id = "session-tripartite"
-        op = "soma_verify_changes"
+        op = "aegis_verify_changes"
         args = {"files": ["src/main.py"]}
         file_digest = "digest-file-123"
         cell_digest = "digest-cell-456"
@@ -267,14 +267,14 @@ class TestInvariant5_IngressConcurrency:
 
     def test_invalid_poll_does_not_consume_rate_limit(self):
         with mcp_server._rate_limit_lock:
-            mcp_server._tool_call_times["soma_poll_verification"] = []
+            mcp_server._tool_call_times["aegis_poll_verification"] = []
 
         req = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "soma_poll_verification",
+                "name": "aegis_poll_verification",
                 "arguments": {"job_id": "nonexistent-job-xyz"},
             },
         }
@@ -283,10 +283,10 @@ class TestInvariant5_IngressConcurrency:
 
         # Counter should not be charged
         with mcp_server._rate_limit_lock:
-            assert len(mcp_server._tool_call_times.get("soma_poll_verification", [])) == 0
+            assert len(mcp_server._tool_call_times.get("aegis_poll_verification", [])) == 0
 
     def test_rate_limit_rollback_zero_sibling_lease_eviction(self):
-        tool = "soma_verify_changes"
+        tool = "aegis_verify_changes"
         with mcp_server._rate_limit_lock:
             mcp_server._tool_call_times[tool] = [("lease-sibling-1", time.monotonic())]
 
