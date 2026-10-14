@@ -82,7 +82,7 @@ def test_report_outcome_writes_canonical_signal_without_fcntl(tmp_path):
     proc = _run_without_fcntl("""
         import json
         from aegis_mcp.tools import execute_tool
-        result = execute_tool("soma_report_outcome",
+        result = execute_tool("aegis_report_outcome",
                               {"outcome": "success", "cells_used": ["trap-example"],
                                "idempotency_key": "no-fcntl-report"})
         print(json.dumps(result))

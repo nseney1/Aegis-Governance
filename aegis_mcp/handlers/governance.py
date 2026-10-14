@@ -30,7 +30,7 @@ def _handle_create_cell(args: dict, gov) -> dict:
         prompt = build_cell_create_prompt(
             description=args.get("description"),
             domain_hint=args.get("domain"),
-            cell_type=args.get("cell_type"),
+            cell_type=args.get("rule_type") or args.get("cell_type"),
             args=args,
         )
     except ValueError as exc:
@@ -48,7 +48,7 @@ def _handle_create_cell(args: dict, gov) -> dict:
 
 
 def _handle_list_cells(args: dict, gov):
-    cell_type = args.get("cell_type")
+    cell_type = args.get("rule_type") or args.get("cell_type")
     if gov:
         try:
             return gov.list_cells(cell_type=cell_type)

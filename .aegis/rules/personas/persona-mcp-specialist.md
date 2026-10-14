@@ -17,11 +17,11 @@ tags:
   - api-surface
 created: 2026-09-28
 fitness:
-  triggers: 59
-  true_positives: 6.4411
+  triggers: 60
+  true_positives: 6.5587
   false_positives: 3.8075
   score: 0.6667
-  last_trigger_date: "2026-10-14T19:09:13Z"
+  last_trigger_date: "2026-10-14T19:26:54Z"
 ---
 
 # Persona: MCP Specialist

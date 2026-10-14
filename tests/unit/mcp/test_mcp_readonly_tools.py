@@ -36,7 +36,7 @@ def _call(name, args=None):
     return handle_request(req)
 
 def test_soma_grade_executes_real_governance_engine():
-    resp = _call("soma_grade")
+    resp = _call("aegis_grade")
     assert "error" not in resp, resp.get("error")
     # Should return a valid JSON string with a grade (likely empty/default for empty workspace)
     result_text = resp["result"]["content"][0]["text"]
@@ -44,14 +44,14 @@ def test_soma_grade_executes_real_governance_engine():
     assert "coverage" in data
 
 def test_soma_coverage_executes_real_governance_engine():
-    resp = _call("soma_coverage")
+    resp = _call("aegis_coverage")
     assert "error" not in resp, resp.get("error")
     result_text = resp["result"]["content"][0]["text"]
     data = json.loads(result_text)
     assert "coverage_pct" in data
 
 def test_soma_list_cells_executes_real_governance_engine():
-    resp = _call("soma_list_cells")
+    resp = _call("aegis_list_cells")
     assert "error" not in resp, resp.get("error")
     result_text = resp["result"]["content"][0]["text"]
     data = json.loads(result_text)

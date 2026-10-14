@@ -107,7 +107,7 @@ class TestResponseProjection:
         monkeypatch.chdir(tmp_path)
         # Test audit tool with fields projection
         res = execute_tool(
-            "soma_audit_security",
+            "aegis_audit_security",
             {
                 "proposed_content": "x = 1\n",
                 "file_path": "test.py",

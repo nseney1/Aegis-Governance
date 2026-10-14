@@ -53,13 +53,9 @@ _VALID_OUTCOMES = ("success", "partial", "failure", "tp", "fp", "pass", "fail")
 _VERDICT_RE = re.compile(r"^\s*VERDICT:\s*([A-Z_]+)")
 _PASSING_VERDICTS = ("APPROVED", "PASS", "SUCCESS", "OK")
 
-_CANONICAL_TOOL_MAP: dict[str, str] = {}
-_CANONICAL_ARG_MAP: dict[str, str] = {}
-_TYPE_TRANSLATION_MAP: dict[str, str] = {}
-
 # Disabled-by-Default Policy
 DISABLED_BY_DEFAULT_TOOLS: frozenset[str] = frozenset({
-    "soma_propose_change",
+    "aegis_propose_change",
 })
 
 
@@ -123,8 +119,6 @@ def _matches_cell_type_filter(rel: str, cell_type: Optional[str] = None) -> bool
 
 def _list_cells_stdlib(workspace, cell_type=None):
     """List cells from one canonical byte snapshot using the shared parser."""
-    if cell_type:
-        cell_type = _TYPE_TRANSLATION_MAP.get(cell_type, cell_type)
     tools_mod = sys.modules.get("aegis_mcp.tools")
     inv_fn = getattr(tools_mod, "inventory_cells", inventory_cells) if tools_mod else inventory_cells
     try:
@@ -256,7 +250,7 @@ Generate ONLY the complete markdown cell file content. Start with --- for the YA
 
 TOOL_DEFINITIONS = [
     {
-        "name": "soma_request_receipt",
+        "name": "aegis_request_receipt",
         "description": "Request an execution receipt for a privileged tool. Required before calling any write tools, or execution tools (if execution is enabled).",
         "annotations": {
             "readOnlyHint": False,
@@ -277,7 +271,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_create_cell",
+        "name": "aegis_create_cell",
         "description": "Takes a natural language description and builds an advisory prompt proposal to create a governance cell (does not directly modify the filesystem).",
         "annotations": {
             "readOnlyHint": False,
@@ -300,7 +294,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_list_cells",
+        "name": "aegis_list_cells",
         "description": "List all active governance cells and their metadata.",
         "annotations": {
             "readOnlyHint": True,
@@ -319,7 +313,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_create_rule",
+        "name": "aegis_create_rule",
         "description": "Takes a natural language description and builds a prompt to create a governance rule.",
         "annotations": {
             "readOnlyHint": False,
@@ -335,7 +329,7 @@ TOOL_DEFINITIONS = [
                 "rule_type": {"type": "string", "description": "Optional rule type hint (learned-trap, safety-guard, agent-persona)"},
                 "domain": {"type": "string", "description": "Optional domain hint"},
                 "dry_run": {"type": "boolean", "description": "Optional dry run flag"},
-                "receipt": {"type": "string", "description": "Execution receipt ID obtained from soma_request_receipt"},
+                "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt"},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
@@ -343,7 +337,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_list_rules",
+        "name": "aegis_list_rules",
         "description": "Lists all governance rules with their type, hypothesis, and fitness data.",
         "annotations": {
             "readOnlyHint": True,
@@ -362,7 +356,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_propose_change",
+        "name": "aegis_propose_change",
         "description": "Propose a code change for safety evaluation against all active cells (Layer 2 TTC Verifier).",
         "annotations": {
             "readOnlyHint": False,
@@ -383,7 +377,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_audit_security",
+        "name": "aegis_audit_security",
         "description": "Static security analysis checking for common OWASP vulnerabilities and exposed credentials.",
         "annotations": {
             "readOnlyHint": True,
@@ -404,7 +398,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_audit_performance",
+        "name": "aegis_audit_performance",
         "description": "Static performance analysis checking for inefficient operations and anti-patterns.",
         "annotations": {
             "readOnlyHint": True,
@@ -425,7 +419,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_verify_changes",
+        "name": "aegis_verify_changes",
         "description": "Run verification pipeline on a set of modified files.",
         "annotations": {
             "readOnlyHint": False,
@@ -450,7 +444,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_poll_verification",
+        "name": "aegis_poll_verification",
         "description": "Poll status or retrieve results for an asynchronous verification job.",
         "annotations": {
             "readOnlyHint": True,
@@ -462,7 +456,7 @@ TOOL_DEFINITIONS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "job_id": {"type": "string", "description": "Job ID returned by soma_verify_changes(async_mode=True)."},
+                "job_id": {"type": "string", "description": "Job ID returned by aegis_verify_changes(async_mode=True)."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
@@ -470,7 +464,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_checkpoint",
+        "name": "aegis_checkpoint",
         "description": "Run deterministic quality checks against project files.",
         "annotations": {
             "readOnlyHint": False,
@@ -488,7 +482,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_scan",
+        "name": "aegis_scan",
         "description": "Scan files against active cells to express JIT rules and compute salience.",
         "annotations": {
             "readOnlyHint": True,
@@ -507,7 +501,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_report_outcome",
+        "name": "aegis_report_outcome",
         "description": "Report verification outcome signal for cell fitness tracking.",
         "annotations": {
             "readOnlyHint": False,
@@ -532,7 +526,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_capture_insight",
+        "name": "aegis_capture_insight",
         "description": "Capture human developer insight and optionally scaffold a Wall cell.",
         "annotations": {
             "readOnlyHint": False,
@@ -557,7 +551,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_generate_manifest",
+        "name": "aegis_generate_manifest",
         "description": "Generate integrity manifest of all cells in project.",
         "annotations": {
             "readOnlyHint": False,
@@ -576,7 +570,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_grade",
+        "name": "aegis_grade",
         "description": "Report project governance grading metrics.",
         "annotations": {
             "readOnlyHint": True,
@@ -594,7 +588,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_coverage",
+        "name": "aegis_coverage",
         "description": "Report cell coverage across codebase files.",
         "annotations": {
             "readOnlyHint": True,
@@ -612,7 +606,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_fitness",
+        "name": "aegis_fitness",
         "description": "Report cell fitness landscape and Bayesian scores.",
         "annotations": {
             "readOnlyHint": True,
@@ -631,7 +625,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_rule_fitness",
+        "name": "aegis_rule_fitness",
         "description": "Returns fitness landscape showing rule health and evolution.",
         "annotations": {
             "readOnlyHint": True,
@@ -650,7 +644,7 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "soma_handoff",
+        "name": "aegis_handoff",
         "description": "Execute typed handoff between swarm skills and write a file-buffered ticket (<150 tokens).",
         "annotations": {
             "readOnlyHint": False,

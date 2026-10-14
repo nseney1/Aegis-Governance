@@ -32,7 +32,7 @@ def test_tools_call_rejects_missing_session_token_when_required(monkeypatch):
         "id": 2,
         "method": "tools/call",
         "params": {
-            "name": "soma_list_cells",
+            "name": "aegis_list_cells",
             "arguments": {}
         }
     }
@@ -55,7 +55,7 @@ def test_tools_call_accepts_valid_session_token(monkeypatch):
         "id": 2,
         "method": "tools/call",
         "params": {
-            "name": "soma_list_cells",
+            "name": "aegis_list_cells",
             "_sessionToken": token,
             "arguments": {}
         }
@@ -76,7 +76,7 @@ def test_unauthenticated_caller_does_not_inherit_server_session_token(monkeypatc
         "id": 2,
         "method": "tools/call",
         "params": {
-            "name": "soma_list_cells",
+            "name": "aegis_list_cells",
             "arguments": {}
         }
     }

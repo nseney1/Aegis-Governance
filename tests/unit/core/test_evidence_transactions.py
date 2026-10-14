@@ -69,15 +69,15 @@ def test_report_outcome_batch_failure_then_same_key_retries_once(tmp_path, monke
     monkeypatch.setattr(telemetry, "_validate_event", fail_on_second)
     args = {"outcome": "success", "cells_used": ["cell-a", "cell-b"],
             "idempotency_key": "caller-operation-1"}
-    result = execute_tool("soma_report_outcome", args)
+    result = execute_tool("aegis_report_outcome", args)
     ledger = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     assert result["status"] == "FAIL"
     assert _rows(ledger) == []
     assert not (ledger.parent / "outcomes.jsonl").exists()
 
     monkeypatch.setattr(telemetry, "_validate_event", real_validate)
-    assert execute_tool("soma_report_outcome", args)["status"] == "recorded"
-    assert execute_tool("soma_report_outcome", args)["status"] == "recorded"
+    assert execute_tool("aegis_report_outcome", args)["status"] == "recorded"
+    assert execute_tool("aegis_report_outcome", args)["status"] == "recorded"
     rows = _rows(ledger)
     assert sorted(row["cell"] for row in rows) == ["cell-a", "cell-b"]
     assert len(rows) == 2

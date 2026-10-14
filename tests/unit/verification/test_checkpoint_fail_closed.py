@@ -113,7 +113,7 @@ def _run_mcp(root, monkeypatch):
     from aegis_mcp.tools import execute_tool
 
     monkeypatch.setattr('aegis_mcp.tools.confine_workspace', lambda path: str(root))
-    return execute_tool('soma_checkpoint', {'workspace': str(root)})
+    return execute_tool('aegis_checkpoint', {'workspace': str(root)})
 
 
 @pytest.mark.parametrize('runner', ['cli', 'mcp'])

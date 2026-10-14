@@ -100,7 +100,7 @@ class TestInvariant3_ReceiptSafety:
     def test_receipt_single_use_enforcement(self, tmp_path):
         workspace = str(tmp_path)
         session_id = "session-invariant-3"
-        op = "soma_verify_changes"
+        op = "aegis_verify_changes"
         args = {"files": ["src/main.py"]}
         file_digest = "digest-file-123"
         cell_digest = "digest-cell-456"
@@ -211,7 +211,7 @@ class TestInvariant3_ReceiptSafety:
     def test_tripartite_negative_burn_on_malformed_payload(self, tmp_path):
         workspace = str(tmp_path)
         session_id = "session-tripartite"
-        op = "soma_verify_changes"
+        op = "aegis_verify_changes"
         args = {"files": ["src/main.py"]}
         file_digest = "digest-file-123"
         cell_digest = "digest-cell-456"
@@ -267,14 +267,14 @@ class TestInvariant5_IngressConcurrency:
 
     def test_invalid_poll_does_not_consume_rate_limit(self):
         with mcp_server._rate_limit_lock:
-            mcp_server._tool_call_times["soma_poll_verification"] = []
+            mcp_server._tool_call_times["aegis_poll_verification"] = []
 
         req = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "soma_poll_verification",
+                "name": "aegis_poll_verification",
                 "arguments": {"job_id": "nonexistent-job-xyz"},
             },
         }
@@ -283,10 +283,10 @@ class TestInvariant5_IngressConcurrency:
 
         # Counter should not be charged
         with mcp_server._rate_limit_lock:
-            assert len(mcp_server._tool_call_times.get("soma_poll_verification", [])) == 0
+            assert len(mcp_server._tool_call_times.get("aegis_poll_verification", [])) == 0
 
     def test_rate_limit_rollback_zero_sibling_lease_eviction(self):
-        tool = "soma_verify_changes"
+        tool = "aegis_verify_changes"
         with mcp_server._rate_limit_lock:
             mcp_server._tool_call_times[tool] = [("lease-sibling-1", time.monotonic())]
 

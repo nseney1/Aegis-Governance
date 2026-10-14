@@ -56,15 +56,15 @@ def _handle_verify_changes(args: dict, gov) -> dict:
         return {
             "status": "QUEUED",
             "job_id": job.job_id,
-            "message": "Verification job enqueued. Poll with soma_poll_verification.",
+            "message": "Verification job enqueued. Poll with aegis_poll_verification.",
             "created_at": job.created_at,
         }
 
     try:
-        __import__("soma_core.verification")
+        __import__("aegis_core.verification")
         from aegis_core.verification import VerificationPipeline, runner
     except ImportError as exc:
-        return {"error": f"soma_core.verification is not importable: {exc}", "status": _STATUS_FAIL}
+        return {"error": f"aegis_core.verification is not importable: {exc}", "status": _STATUS_FAIL}
 
     rebuttal = args.get("rebuttal")
     task_plan = args.get("task_plan", "")

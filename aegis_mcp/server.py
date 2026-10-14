@@ -19,9 +19,6 @@ from .tools import (
     TOOL_DEFINITIONS,
     execute_tool,
     normalize_tool_call,
-    _CANONICAL_TOOL_MAP,
-    _CANONICAL_ARG_MAP,
-    _TYPE_TRANSLATION_MAP,
 )
 from .security import Workspace
 from aegis_core.receipts import (
@@ -40,28 +37,28 @@ _execution_enabled = False
 
 
 _READ_TOOLS = frozenset({
-    "soma_scan", "soma_list_cells", "soma_grade", "soma_coverage", "soma_fitness",
-    "soma_request_receipt", "soma_audit_security", "soma_audit_performance",
-    "soma_poll_verification", "soma_list_rules", "soma_rule_fitness",
+    "aegis_scan", "aegis_list_cells", "aegis_grade", "aegis_coverage", "aegis_fitness",
+    "aegis_request_receipt", "aegis_audit_security", "aegis_audit_performance",
+    "aegis_poll_verification", "aegis_list_rules", "aegis_rule_fitness",
 })
 _WRITE_TOOLS = frozenset({
-    "soma_report_outcome", "soma_capture_insight", "soma_create_cell", "soma_create_rule",
-    "soma_handoff",
+    "aegis_report_outcome", "aegis_capture_insight", "aegis_create_cell", "aegis_create_rule",
+    "aegis_handoff",
 })
 _EXECUTE_TOOLS = frozenset({
-    "soma_propose_change", "soma_verify_changes", "soma_checkpoint",
-    "soma_generate_manifest",
+    "aegis_propose_change", "aegis_verify_changes", "aegis_checkpoint",
+    "aegis_generate_manifest",
 })
 
 _tool_call_times = defaultdict(list)
 _RATE_LIMITS = {
-    "soma_request_receipt": (60, 60),
-    "soma_propose_change": (5, 60),
-    "soma_report_outcome": (20, 60),
-    "soma_verify_changes": (5, 60),
-    "soma_checkpoint": (3, 60),
-    "soma_poll_verification": (60, 60),
-    "soma_handoff": (20, 60),
+    "aegis_request_receipt": (60, 60),
+    "aegis_propose_change": (5, 60),
+    "aegis_report_outcome": (20, 60),
+    "aegis_verify_changes": (5, 60),
+    "aegis_checkpoint": (3, 60),
+    "aegis_poll_verification": (60, 60),
+    "aegis_handoff": (20, 60),
 }
 
 
@@ -235,7 +232,7 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
                     "tools": {}
                 },
                 "serverInfo": {
-                    "name": "soma-mcp",
+                    "name": "aegis-mcp",
                     "version": _server_version(),
                     "_sessionToken": new_token
                 }
@@ -300,34 +297,30 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
         else:
             active_session_id = "default"
 
-        if name == "soma_request_receipt":
-            if not _check_rate_limit("soma_request_receipt", session_id=active_session_id):
-                limit_info = _RATE_LIMITS.get("soma_request_receipt", (60, 60))
+        if name == "aegis_request_receipt":
+            if not _check_rate_limit("aegis_request_receipt", session_id=active_session_id):
+                limit_info = _RATE_LIMITS.get("aegis_request_receipt", (60, 60))
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "error": {
                         "code": -32000,
-                        "message": f"Rate limit exceeded for 'soma_request_receipt': max {limit_info[0]} calls per {limit_info[1]}s"
+                        "message": f"Rate limit exceeded for 'aegis_request_receipt': max {limit_info[0]} calls per {limit_info[1]}s"
                     }
                 }
             operation = args.get("operation")
-            if operation:
-                canonical_op = _CANONICAL_TOOL_MAP.get(operation, operation)
-                operation = canonical_op
-                args["operation"] = canonical_op
             if "arguments" in args and isinstance(args["arguments"], dict):
                 _, args["arguments"] = normalize_tool_call(operation, args["arguments"])
 
             if operation not in _EXECUTE_TOOLS and operation not in _WRITE_TOOLS:
-                _rollback_rate_limit("soma_request_receipt", session_id=active_session_id)
+                _rollback_rate_limit("aegis_request_receipt", session_id=active_session_id)
                 return _error(req_id, -32602,
                               f"Tool '{operation}' does not require a receipt or does not exist.")
             if operation in _EXECUTE_TOOLS and not _execution_enabled:
-                _rollback_rate_limit("soma_request_receipt", session_id=active_session_id)
+                _rollback_rate_limit("aegis_request_receipt", session_id=active_session_id)
                 return _error(req_id, -32600, "Execution capabilities are disabled.")
             if not _canonical_workspace:
-                _rollback_rate_limit("soma_request_receipt", session_id=active_session_id)
+                _rollback_rate_limit("aegis_request_receipt", session_id=active_session_id)
                 return _error(req_id, -32600, "Server workspace is not configured.")
 
             # Bind the receipt to exactly what will be dispatched: the client
@@ -377,9 +370,9 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
                 }
             }
 
-        # Pre-validate read tools with specific requirements (e.g. soma_poll_verification)
+        # Pre-validate read tools with specific requirements (e.g. aegis_poll_verification)
         # to ensure unauthenticated invalid requests do not drain rate limit quotas
-        if name == "soma_poll_verification":
+        if name == "aegis_poll_verification":
             job_id = args.get("job_id")
             if not job_id or not isinstance(job_id, str):
                 _rollback_rate_limit(name, session_id=active_session_id)

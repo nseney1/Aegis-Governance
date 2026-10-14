@@ -19,7 +19,7 @@ def test_execute_tool_requires_receipt():
         "id": 1,
         "method": "tools/call",
         "params": {
-            "name": "soma_propose_change",
+            "name": "aegis_propose_change",
             "arguments": {
                 "file_path": "test.txt",
                 "proposed_content": "new"
@@ -36,7 +36,7 @@ def test_write_tool_requires_receipt():
         "id": 2,
         "method": "tools/call",
         "params": {
-            "name": "soma_report_outcome",
+            "name": "aegis_report_outcome",
             "arguments": {
                 "outcome": "success"
             }
@@ -52,9 +52,9 @@ def test_soma_request_receipt_issues_receipt():
         "id": 3,
         "method": "tools/call",
         "params": {
-            "name": "soma_request_receipt",
+            "name": "aegis_request_receipt",
             "arguments": {
-                "operation": "soma_report_outcome",
+                "operation": "aegis_report_outcome",
                 "arguments": {
                     "outcome": "success"
                 }
@@ -76,9 +76,9 @@ def test_dispatch_flow_with_receipt(tmp_path, monkeypatch):
         "id": 4,
         "method": "tools/call",
         "params": {
-            "name": "soma_request_receipt",
+            "name": "aegis_request_receipt",
             "arguments": {
-                "operation": "soma_create_cell",
+                "operation": "aegis_create_cell",
                 "arguments": {
                     "description": "Add security check"
                 }
@@ -96,7 +96,7 @@ def test_dispatch_flow_with_receipt(tmp_path, monkeypatch):
         "id": 5,
         "method": "tools/call",
         "params": {
-            "name": "soma_create_cell",
+            "name": "aegis_create_cell",
             "arguments": {
                 "description": "Add security check",
                 "receipt": receipt_id
@@ -116,7 +116,7 @@ def test_invalid_receipt_is_rejected():
         "id": 6,
         "method": "tools/call",
         "params": {
-            "name": "soma_report_outcome",
+            "name": "aegis_report_outcome",
             "arguments": {
                 "outcome": "success",
                 "receipt": "bad-receipt"
@@ -134,7 +134,7 @@ def test_porcelain_create_rule_requires_receipt():
         "id": 7,
         "method": "tools/call",
         "params": {
-            "name": "soma_create_rule",
+            "name": "aegis_create_rule",
             "arguments": {
                 "description": "Rule without receipt"
             }
@@ -154,9 +154,9 @@ def test_porcelain_create_rule_dispatch_flow_with_receipt(tmp_path, monkeypatch)
         "id": 8,
         "method": "tools/call",
         "params": {
-            "name": "soma_request_receipt",
+            "name": "aegis_request_receipt",
             "arguments": {
-                "operation": "soma_create_rule",
+                "operation": "aegis_create_rule",
                 "arguments": {
                     "description": "Add security check",
                     "rule_type": "safety-guard"
@@ -175,7 +175,7 @@ def test_porcelain_create_rule_dispatch_flow_with_receipt(tmp_path, monkeypatch)
         "id": 9,
         "method": "tools/call",
         "params": {
-            "name": "soma_create_rule",
+            "name": "aegis_create_rule",
             "arguments": {
                 "description": "Add security check",
                 "rule_type": "safety-guard",
@@ -202,7 +202,7 @@ def test_porcelain_list_rules_dispatch(tmp_path, monkeypatch):
         "id": 10,
         "method": "tools/call",
         "params": {
-            "name": "soma_list_rules",
+            "name": "aegis_list_rules",
             "arguments": {}
         }
     }
@@ -224,7 +224,7 @@ def test_porcelain_rule_fitness_dispatch(tmp_path, monkeypatch):
         "id": 11,
         "method": "tools/call",
         "params": {
-            "name": "soma_rule_fitness",
+            "name": "aegis_rule_fitness",
             "arguments": {}
         }
     }
@@ -244,7 +244,7 @@ def test_invalid_receipt_does_not_consume_rate_limit(tmp_path, monkeypatch):
         "id": 12,
         "method": "tools/call",
         "params": {
-            "name": "soma_checkpoint",
+            "name": "aegis_checkpoint",
             "arguments": {
                 "receipt": "bogus-unauthenticated-receipt"
             }
@@ -257,7 +257,7 @@ def test_invalid_receipt_does_not_consume_rate_limit(tmp_path, monkeypatch):
         assert "Invalid, expired, or mismatched receipt" in resp["error"]["message"]
 
     # Verify quota was rolled back and is not exhausted
-    assert server_module._tool_call_times["soma_checkpoint"] == []
+    assert server_module._tool_call_times["aegis_checkpoint"] == []
 
 
 def test_canonical_create_cell_with_porcelain_args_redemption(tmp_path, monkeypatch):
@@ -269,9 +269,9 @@ def test_canonical_create_cell_with_porcelain_args_redemption(tmp_path, monkeypa
         "id": 13,
         "method": "tools/call",
         "params": {
-            "name": "soma_request_receipt",
+            "name": "aegis_request_receipt",
             "arguments": {
-                "operation": "soma_create_cell",
+                "operation": "aegis_create_cell",
                 "arguments": {
                     "description": "Add boundary check",
                     "rule_type": "safety-guard"
@@ -290,7 +290,7 @@ def test_canonical_create_cell_with_porcelain_args_redemption(tmp_path, monkeypa
         "id": 14,
         "method": "tools/call",
         "params": {
-            "name": "soma_create_cell",
+            "name": "aegis_create_cell",
             "arguments": {
                 "description": "Add boundary check",
                 "rule_type": "safety-guard",
@@ -316,9 +316,9 @@ def test_report_outcome_with_rules_alias(tmp_path, monkeypatch):
         "id": 15,
         "method": "tools/call",
         "params": {
-            "name": "soma_request_receipt",
+            "name": "aegis_request_receipt",
             "arguments": {
-                "operation": "soma_report_outcome",
+                "operation": "aegis_report_outcome",
                 "arguments": {
                     "idempotency_key": "test-key-1",
                     "rules": ["wall-test"],
@@ -338,7 +338,7 @@ def test_report_outcome_with_rules_alias(tmp_path, monkeypatch):
         "id": 16,
         "method": "tools/call",
         "params": {
-            "name": "soma_report_outcome",
+            "name": "aegis_report_outcome",
             "arguments": {
                 "idempotency_key": "test-key-1",
                 "rules": ["wall-test"],
@@ -356,14 +356,14 @@ def test_report_outcome_with_rules_alias(tmp_path, monkeypatch):
 
 def test_request_receipt_invalid_rolls_back_rate_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))
-    server_module._tool_call_times["soma_request_receipt"] = []
+    server_module._tool_call_times["aegis_request_receipt"] = []
     # Invalid operation request
     req = {
         "jsonrpc": "2.0",
         "id": 17,
         "method": "tools/call",
         "params": {
-            "name": "soma_request_receipt",
+            "name": "aegis_request_receipt",
             "arguments": {
                 "operation": "nonexistent_tool"
             }
@@ -373,12 +373,12 @@ def test_request_receipt_invalid_rolls_back_rate_limit(tmp_path, monkeypatch):
         resp = handle_request(req)
         assert resp["error"]["code"] == -32602
     # Verify rate limit was rolled back
-    assert server_module._tool_call_times["soma_request_receipt"] == []
+    assert server_module._tool_call_times["aegis_request_receipt"] == []
 
 
 def test_state_digests_error_rolls_back_rate_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))
-    server_module._tool_call_times["soma_checkpoint"] = []
+    server_module._tool_call_times["aegis_checkpoint"] = []
     def _fail_digests(args):
         raise RuntimeError("simulated filesystem error")
     monkeypatch.setattr(server_module, "_state_digests", _fail_digests)
@@ -388,7 +388,7 @@ def test_state_digests_error_rolls_back_rate_limit(tmp_path, monkeypatch):
         "id": 18,
         "method": "tools/call",
         "params": {
-            "name": "soma_checkpoint",
+            "name": "aegis_checkpoint",
             "arguments": {
                 "receipt": "some-receipt"
             }
@@ -397,7 +397,7 @@ def test_state_digests_error_rolls_back_rate_limit(tmp_path, monkeypatch):
     resp = handle_request(req)
     assert resp["error"]["code"] == -32602
     assert "simulated filesystem error" in resp["error"]["message"]
-    assert server_module._tool_call_times["soma_checkpoint"] == []
+    assert server_module._tool_call_times["aegis_checkpoint"] == []
 
 
 def test_multi_session_token_validation():
@@ -419,7 +419,7 @@ def test_multi_session_token_validation():
         "id": 102,
         "method": "tools/call",
         "params": {
-            "name": "soma_scan",
+            "name": "aegis_scan",
             "arguments": {},
             "_sessionToken": "tampered_token"
         }
@@ -434,7 +434,7 @@ def test_multi_session_token_validation():
         "id": 103,
         "method": "tools/call",
         "params": {
-            "name": "soma_scan",
+            "name": "aegis_scan",
             "arguments": {},
             "_sessionToken": token_a
         }
@@ -448,7 +448,7 @@ def test_multi_session_token_validation():
         "id": 104,
         "method": "tools/call",
         "params": {
-            "name": "soma_scan",
+            "name": "aegis_scan",
             "arguments": {},
             "_sessionToken": token_b
         }
@@ -470,14 +470,14 @@ def test_session_partitioned_rate_limiting():
         "id": 202,
         "method": "tools/call",
         "params": {
-            "name": "soma_propose_change",
+            "name": "aegis_propose_change",
             "arguments": {"receipt": "fake"},
             "_sessionToken": token_a
         }
     }
     # Simulate 5 calls consumed in rate limit table for token_a
     import time
-    server_module._tool_call_times[(token_a, "soma_propose_change")] = [
+    server_module._tool_call_times[(token_a, "aegis_propose_change")] = [
         ("lease-1", time.monotonic()),
         ("lease-2", time.monotonic()),
         ("lease-3", time.monotonic()),
@@ -496,7 +496,7 @@ def test_session_partitioned_rate_limiting():
         "id": 203,
         "method": "tools/call",
         "params": {
-            "name": "soma_propose_change",
+            "name": "aegis_propose_change",
             "arguments": {"receipt": "fake"},
             "_sessionToken": token_b
         }
@@ -512,7 +512,7 @@ def test_lease_contextvar_cleaned_up_finally():
         "id": 300,
         "method": "tools/call",
         "params": {
-            "name": "soma_scan",
+            "name": "aegis_scan",
             "arguments": {}
         }
     }

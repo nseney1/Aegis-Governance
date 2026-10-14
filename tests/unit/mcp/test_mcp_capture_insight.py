@@ -24,7 +24,7 @@ class TestMCPCaptureInsight:
         os.makedirs(os.path.join(workspace, ".aegis", "rules"), exist_ok=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
-        result = execute_tool("soma_capture_insight", {
+        result = execute_tool("aegis_capture_insight", {
             "insight": "Check the aspect ratio",
             "context_files": ["images/sprites.py"],
             "category": "attention_gap",
@@ -42,7 +42,7 @@ class TestMCPCaptureInsight:
         os.makedirs(os.path.join(workspace, ".aegis", "rules"), exist_ok=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
-        result = execute_tool("soma_capture_insight", {
+        result = execute_tool("aegis_capture_insight", {
             "insight": "Something",
             "context_files": [],
         })
@@ -57,7 +57,7 @@ class TestMCPCaptureInsight:
         os.makedirs(os.path.join(workspace, ".aegis", "rules"), exist_ok=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
-        execute_tool("soma_capture_insight", {
+        execute_tool("aegis_capture_insight", {
             "insight": "Test persistence",
             "context_files": ["a.py"],
         })

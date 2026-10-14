@@ -95,7 +95,7 @@ class TestReceiptsWorkspaceInteroperability:
         rid = issue_receipt(
             session_id="test_session",
             workspace=ws,
-            operation="soma_propose_change",
+            operation="aegis_propose_change",
             args={"file_path": "hello.py"},
             file_digest=file_digest,
             cell_digest=cell_digest,
@@ -108,7 +108,7 @@ class TestReceiptsWorkspaceInteroperability:
             receipt_id=rid,
             session_id="test_session",
             workspace=ws,
-            operation="soma_propose_change",
+            operation="aegis_propose_change",
             args={"file_path": "hello.py"},
             file_digest=file_digest,
             cell_digest=cell_digest,
@@ -149,7 +149,7 @@ class TestMCPSecurityAndToolsWorkspace:
 
     def test_mcp_execute_tool_with_workspace_object(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
-        result = execute_tool("soma_list_cells", {"workspace": ws})
+        result = execute_tool("aegis_list_cells", {"workspace": ws})
         data = json.loads(result) if isinstance(result, str) else result
         assert isinstance(data, list)
         assert any(c.get("name") == "sample-rule" or c.get("_name") == "sample_rule" for c in data)

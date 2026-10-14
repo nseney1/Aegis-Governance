@@ -25,7 +25,7 @@ class TestMCPVerifyChanges:
         """soma_verify_changes must be handled by execute_tool without raising ValueError."""
         from aegis_mcp.tools import execute_tool
         # Should not raise "Unknown tool" ValueError
-        result = execute_tool("soma_verify_changes", {"files": [], "workspace": "/tmp"})
+        result = execute_tool("aegis_verify_changes", {"files": [], "workspace": "/tmp"})
         assert isinstance(result, dict)
 
     def test_verify_changes_clean_file_returns_pass(self, tmp_path, monkeypatch):
@@ -43,7 +43,7 @@ class TestMCPVerifyChanges:
         """))
 
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_verify_changes", {
+        result = execute_tool("aegis_verify_changes", {
             "files": ["clean.py"],
             "workspace": str(tmp_path),
         })
@@ -61,7 +61,7 @@ class TestMCPVerifyChanges:
         bad_file.write_text("import nonexistent_forbidden_package_xyz\n")
 
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_verify_changes", {
+        result = execute_tool("aegis_verify_changes", {
             "files": ["broken.py"],
             "workspace": str(tmp_path),
         })
@@ -77,7 +77,7 @@ class TestMCPVerifyChanges:
         code_file.write_text("def hello(): return 'world'\n")
 
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_verify_changes", {
+        result = execute_tool("aegis_verify_changes", {
             "files": ["simple.py"],
             "workspace": str(tmp_path),
         })
@@ -92,7 +92,7 @@ class TestMCPVerifyChanges:
 
         (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_verify_changes", {
+        result = execute_tool("aegis_verify_changes", {
             "files": [],
             "workspace": str(tmp_path),
         })
@@ -105,7 +105,7 @@ class TestMCPVerifyChanges:
 
         (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_verify_changes", {
+        result = execute_tool("aegis_verify_changes", {
             "files": [],
             "workspace": str(tmp_path),
             "layer1_only": True,
@@ -125,7 +125,7 @@ class TestMCPCheckpoint:
         from aegis_mcp.tools import execute_tool
 
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_checkpoint", {"workspace": str(tmp_path)})
+        result = execute_tool("aegis_checkpoint", {"workspace": str(tmp_path)})
         assert isinstance(result, dict)
 
     def test_checkpoint_clean_workspace_returns_pass(self, tmp_path, monkeypatch):
@@ -134,7 +134,7 @@ class TestMCPCheckpoint:
 
         (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_checkpoint", {"workspace": str(tmp_path)})
+        result = execute_tool("aegis_checkpoint", {"workspace": str(tmp_path)})
 
         assert result["status"] == "PASS"
         assert result["issue_count"] == 0
@@ -145,7 +145,7 @@ class TestMCPCheckpoint:
 
         (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_checkpoint", {"workspace": str(tmp_path)})
+        result = execute_tool("aegis_checkpoint", {"workspace": str(tmp_path)})
 
         assert "issues" in result
         assert isinstance(result["issues"], list)
@@ -155,7 +155,7 @@ class TestMCPCheckpoint:
         from aegis_mcp.tools import execute_tool
 
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: "/nonexistent/dir/xyz")
-        result = execute_tool("soma_checkpoint", {
+        result = execute_tool("aegis_checkpoint", {
             "workspace": "/nonexistent/dir/xyz",
         })
 
@@ -172,7 +172,7 @@ class TestMCPCheckpoint:
         bad_file.write_text('DB_PATH = "/home/user/data/production.db"\n')
 
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
-        result = execute_tool("soma_checkpoint", {"workspace": str(tmp_path)})
+        result = execute_tool("aegis_checkpoint", {"workspace": str(tmp_path)})
 
         assert result["status"] == "FAIL"
         assert result["issue_count"] > 0

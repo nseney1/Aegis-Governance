@@ -115,11 +115,11 @@ def _handle_capture_insight(args: dict, gov) -> dict:
         return {"error": str(exc), "status": _STATUS_FAIL}
     try:
         import sys
-        if sys.modules.get("soma_core.insights") is None and "soma_core.insights" in sys.modules:
-            raise ImportError("soma_core.insights is not importable.")
+        if sys.modules.get("aegis_core.insights") is None and "aegis_core.insights" in sys.modules:
+            raise ImportError("aegis_core.insights is not importable.")
         from aegis_core.insights import capture_insight
     except ImportError:
-        return {"error": "soma_core.insights is not importable.", "status": _STATUS_FAIL}
+        return {"error": "aegis_core.insights is not importable.", "status": _STATUS_FAIL}
     try:
         context_files_arg = args.get("context_files") or []
         if not isinstance(context_files_arg, (list, tuple)) or not all(isinstance(f, str) for f in context_files_arg):

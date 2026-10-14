@@ -39,21 +39,21 @@ class TestAsyncVerificationToolDefinitions:
     """Verify tool metadata, schemas, and m8ven hints."""
 
     def test_soma_poll_verification_registered(self):
-        tool = next((t for t in TOOL_DEFINITIONS if t["name"] == "soma_poll_verification"), None)
+        tool = next((t for t in TOOL_DEFINITIONS if t["name"] == "aegis_poll_verification"), None)
         assert tool is not None, "soma_poll_verification must be registered in TOOL_DEFINITIONS"
         assert tool["annotations"]["readOnlyHint"] is True
         assert "job_id" in tool["inputSchema"]["properties"]
         assert "job_id" in tool["inputSchema"]["required"]
 
     def test_soma_verify_changes_has_async_mode(self):
-        tool = next((t for t in TOOL_DEFINITIONS if t["name"] == "soma_verify_changes"), None)
+        tool = next((t for t in TOOL_DEFINITIONS if t["name"] == "aegis_verify_changes"), None)
         assert tool is not None, "soma_verify_changes must be registered in TOOL_DEFINITIONS"
         props = tool["inputSchema"]["properties"]
         assert "async_mode" in props
         assert props["async_mode"]["type"] == "boolean"
 
     def test_poll_tool_is_read_tool_in_server(self):
-        assert "soma_poll_verification" in _READ_TOOLS, "soma_poll_verification must be in _READ_TOOLS"
+        assert "aegis_poll_verification" in _READ_TOOLS, "soma_poll_verification must be in _READ_TOOLS"
 
 
 class TestVerificationJobStore:
@@ -108,7 +108,7 @@ class TestMcpAsyncExecutionAndPolling:
 
         # 1. Enqueue job via soma_verify_changes
         res_queue = execute_tool(
-            "soma_verify_changes",
+            "aegis_verify_changes",
             {
                 "workspace": str(tmp_path),
                 "files": [],
@@ -129,7 +129,7 @@ class TestMcpAsyncExecutionAndPolling:
         res_poll = None
 
         while time.time() - start < timeout:
-            res_poll = execute_tool("soma_poll_verification", {"job_id": job_id})
+            res_poll = execute_tool("aegis_poll_verification", {"job_id": job_id})
             if res_poll.get("status") == "COMPLETED":
                 completed = True
                 break
@@ -144,12 +144,12 @@ class TestMcpAsyncExecutionAndPolling:
         assert res_poll.get("receipt") == "mock-receipt-123"
 
     def test_poll_unknown_job_id(self):
-        res = execute_tool("soma_poll_verification", {"job_id": "vjob_nonexistent"})
+        res = execute_tool("aegis_poll_verification", {"job_id": "vjob_nonexistent"})
         assert res.get("status") == "FAIL"
         assert "not found" in res.get("error", "").lower()
 
     def test_poll_missing_job_id_argument(self):
-        res = execute_tool("soma_poll_verification", {})
+        res = execute_tool("aegis_poll_verification", {})
         assert res.get("status") == "FAIL"
         assert "missing required argument" in res.get("error", "").lower()
 
@@ -158,7 +158,7 @@ class TestMcpAsyncExecutionAndPolling:
         (tmp_path / ".aegis" / "rules").mkdir(parents=True)
 
         res = execute_tool(
-            "soma_verify_changes",
+            "aegis_verify_changes",
             {
                 "workspace": str(tmp_path),
                 "files": [],
@@ -212,7 +212,7 @@ class TestMcpAsyncExecutionAndPolling:
         import aegis_mcp.server as s_mod
 
         # Reset rate limit counter for poll tool
-        s_mod._tool_call_times["soma_poll_verification"].clear()
+        s_mod._tool_call_times["aegis_poll_verification"].clear()
 
         # Initialize server session
         init_req = {
@@ -230,7 +230,7 @@ class TestMcpAsyncExecutionAndPolling:
                 "id": 100 + i,
                 "method": "tools/call",
                 "params": {
-                    "name": "soma_poll_verification",
+                    "name": "aegis_poll_verification",
                     "arguments": {"job_id": f"bogus-job-{i}"}
                 }
             }
@@ -246,7 +246,7 @@ class TestMcpAsyncExecutionAndPolling:
             "id": 999,
             "method": "tools/call",
             "params": {
-                "name": "soma_poll_verification",
+                "name": "aegis_poll_verification",
                 "arguments": {"job_id": real_job.job_id}
             }
         }
