@@ -63,8 +63,8 @@ def compute_token_census(workspace: Workspace | Path | str | None = None, model:
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace.resolve(workspace) if workspace is not None else Workspace.resolve()
     )
-    rules_dir = ws.root / "genome"
-    skills_dir = ws.root / "organs"
+    rules_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
+    skills_dir = (ws.root / "skills") if (ws.root / "skills").is_dir() else (ws.root / "organs")
 
     results = []
     total_words = 0
@@ -109,7 +109,7 @@ def compute_token_census(workspace: Workspace | Path | str | None = None, model:
             total_words += w_full
             total_tokens += t_active
             results.append({
-                "filename": f"genome/{fpath.name}",
+                "filename": f"{rules_dir.name}/{fpath.name}",
                 "type": c_type,
                 "idle_words": w_idle,
                 "idle_tokens": t_idle,

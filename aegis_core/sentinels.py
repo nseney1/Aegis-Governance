@@ -79,7 +79,9 @@ HIGH_PATTERNS = [
 
 MEDIUM_PATTERNS = [
     r"genome/.*\.md$",
+    r"rules/.*\.md$",
     r"organs/.*/SKILL\.md$",
+    r"skills/.*/SKILL\.md$",
     r"steering\.conf",
     r"\.py$|\.js$|\.ts$|\.go$",
 ]

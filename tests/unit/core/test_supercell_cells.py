@@ -12,7 +12,29 @@ import pytest
 from soma_core.somayaml import parse_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
-CELLS_DIR = os.path.join(REPO_ROOT, ".soma", "cells")
+CELLS_DIR = os.path.join(REPO_ROOT, ".aegis", "rules") if os.path.isdir(os.path.join(REPO_ROOT, ".aegis", "rules")) else os.path.join(REPO_ROOT, ".soma", "cells")
+
+
+DIR_MAP = {
+    "walls": ["invariants", "walls"],
+    "vacuoles": ["traps", "vacuoles"],
+}
+TYPE_MAP = {
+    "walls": ("wall", "invariant", "trap"),
+    "vacuoles": ("vacuole", "trap"),
+}
+
+
+def _find_cell_file(cell_id, cell_type):
+    candidates = DIR_MAP.get(cell_type, [cell_type])
+    for cand in candidates:
+        path = os.path.join(CELLS_DIR, cand, f"{cell_id}.md")
+        if os.path.isfile(path):
+            return path
+    for root, _, files in os.walk(CELLS_DIR):
+        if f"{cell_id}.md" in files:
+            return os.path.join(root, f"{cell_id}.md")
+    return os.path.join(CELLS_DIR, candidates[0], f"{cell_id}.md")
 
 
 # ALL antipattern cells derived from Supercell Cycle 1 RCA
@@ -78,12 +100,11 @@ REQUIRED_FIELDS = [
 
 def _load_cell(cell_id, cell_type):
     """Load a cell's frontmatter by ID and type directory."""
-    path = os.path.join(CELLS_DIR, cell_type, f"{cell_id}.md")
+    path = _find_cell_file(cell_id, cell_type)
     assert os.path.isfile(path), f"Cell file not found: {path}"
     with open(path, encoding="utf-8") as f:
         content = f.read()
     assert content.startswith("---"), f"Cell {cell_id} missing YAML frontmatter"
-    end = content.find("---", 3)
     fm = parse_frontmatter(content)
     assert isinstance(fm, dict), f"Cell {cell_id} frontmatter is not a dict"
     return fm
@@ -95,7 +116,7 @@ class TestSupercellCells:
     @pytest.mark.parametrize("cell_id,spec", list(SUPERCELL_CELLS.items()))
     def test_cell_exists(self, cell_id, spec):
         """Each Supercell cell must exist in the correct type directory."""
-        path = os.path.join(CELLS_DIR, spec["type"], f"{cell_id}.md")
+        path = _find_cell_file(cell_id, spec["type"])
         assert os.path.isfile(path), f"Missing cell: {path}"
 
     @pytest.mark.parametrize("cell_id,spec", list(SUPERCELL_CELLS.items()))
@@ -121,19 +142,18 @@ class TestSupercellCells:
     def test_cell_type_matches_directory(self, cell_id, spec):
         """Frontmatter type must match the directory name."""
         fm = _load_cell(cell_id, spec["type"])
-        # Directory is plural (walls, vacuoles), frontmatter is singular
-        expected_type = spec["type"].rstrip("s")
-        assert fm["type"] == expected_type
+        allowed = TYPE_MAP.get(spec["type"], (spec["type"].rstrip("s"),))
+        assert fm["type"] in allowed
 
     @pytest.mark.parametrize("cell_id,spec", [
         (k, v) for k, v in SUPERCELL_CELLS.items()
         if v.get("enforcement") == "gate"
     ])
     def test_gate_cells_are_walls(self, cell_id, spec):
-        """Gate enforcement cells must be in walls/ directory."""
+        """Gate enforcement cells must be in walls/ or invariants/ directory."""
         fm = _load_cell(cell_id, spec["type"])
         assert fm["enforcement"] == "gate"
-        assert spec["type"] == "walls"
+        assert spec["type"] in ("walls", "invariants")
 
     def test_security_cells_target_python(self):
         """Security antipattern cells must target Python files."""

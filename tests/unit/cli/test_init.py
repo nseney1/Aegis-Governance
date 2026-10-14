@@ -499,5 +499,68 @@ class TestPolyglotInit:
         assert not (home_dir / ".claude").exists(), "Home directory was unexpectedly modified in local mode!"
 
 
+class TestRuleDiscovery:
+    """Tests for _get_soma_root and _discover_full_rules."""
+
+    def test_discover_full_rules_empty(self, monkeypatch, tmp_path):
+        from aegis_cli.init import _discover_full_rules
+        monkeypatch.setattr("aegis_cli.init._get_soma_root", lambda: tmp_path)
+        assert _discover_full_rules() == []
+
+    def test_discover_full_rules_rules_dir(self, monkeypatch, tmp_path):
+        from aegis_cli.init import _discover_full_rules
+        rules_dir = tmp_path / "rules"
+        rules_dir.mkdir()
+        (rules_dir / "rule1.md").write_text("# Rule 1", encoding="utf-8")
+        (rules_dir / "META.md").write_text("# Meta", encoding="utf-8")
+        (rules_dir / "README.md").write_text("# Readme", encoding="utf-8")
+        oracles = rules_dir / ".oracles"
+        oracles.mkdir()
+        (oracles / "oracle1.md").write_text("# Oracle 1", encoding="utf-8")
+
+        monkeypatch.setattr("aegis_cli.init._get_soma_root", lambda: tmp_path)
+        discovered = _discover_full_rules()
+        names = [f.name for f in discovered]
+        assert "rule1.md" in names
+        assert "oracle1.md" in names
+        assert "META.md" not in names
+        assert "README.md" not in names
+
+    def test_discover_full_rules_genome_dir(self, monkeypatch, tmp_path):
+        from aegis_cli.init import _discover_full_rules
+        genome_dir = tmp_path / "genome"
+        genome_dir.mkdir()
+        (genome_dir / "rule2.md").write_text("# Rule 2", encoding="utf-8")
+        oracles = genome_dir / ".oracles"
+        oracles.mkdir()
+        (oracles / "oracle2.md").write_text("# Oracle 2", encoding="utf-8")
+
+        monkeypatch.setattr("aegis_cli.init._get_soma_root", lambda: tmp_path)
+        discovered = _discover_full_rules()
+        names = [f.name for f in discovered]
+        assert "rule2.md" in names
+        assert "oracle2.md" in names
+
+    def test_get_soma_root_fallbacks(self, monkeypatch, tmp_path):
+        from aegis_cli import init as init_mod
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
+        monkeypatch.setattr("importlib.resources.files", lambda mod: empty_dir / "pkg")
+        assert init_mod._get_soma_root() == tmp_path
+
+        # Case with genome in pkg_root
+        pkg_with_genome = tmp_path / "pkg_root_genome"
+        (pkg_with_genome / "genome").mkdir(parents=True)
+        monkeypatch.setattr("importlib.resources.files", lambda mod: pkg_with_genome / "aegis_cli")
+        assert init_mod._get_soma_root() == pkg_with_genome
+
+        # Case with rules in pkg_root
+        pkg_with_rules = tmp_path / "pkg_root_rules"
+        (pkg_with_rules / "rules").mkdir(parents=True)
+        monkeypatch.setattr("importlib.resources.files", lambda mod: pkg_with_rules / "aegis_cli")
+        assert init_mod._get_soma_root() == pkg_with_rules
+
+
 
 

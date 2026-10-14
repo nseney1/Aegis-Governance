@@ -102,3 +102,27 @@ class TestArbitrationCore:
 
     def test_self_test_verifier(self):
         assert self_test_verifier() == 0
+
+    def test_load_oracles_missing_dir(self, tmp_path: Path):
+        assert load_oracles(tmp_path) == []
+
+    def test_load_oracles_rules_dir(self, tmp_path: Path):
+        oracles_dir = tmp_path / "rules" / ".oracles"
+        oracles_dir.mkdir(parents=True)
+        (oracles_dir / "b_oracle.md").write_text("# Oracle B", encoding="utf-8")
+        (oracles_dir / "a_oracle.md").write_text("# Oracle A", encoding="utf-8")
+        (oracles_dir / "ignore.txt").write_text("not markdown", encoding="utf-8")
+
+        res = load_oracles(str(tmp_path))
+        assert len(res) == 2
+        assert res[0] == ("a_oracle.md", "# Oracle A")
+        assert res[1] == ("b_oracle.md", "# Oracle B")
+
+    def test_load_oracles_genome_fallback(self, tmp_path: Path):
+        oracles_dir = tmp_path / "genome" / ".oracles"
+        oracles_dir.mkdir(parents=True)
+        (oracles_dir / "fallback.md").write_text("# Fallback Oracle", encoding="utf-8")
+
+        res = load_oracles(tmp_path)
+        assert len(res) == 1
+        assert res[0] == ("fallback.md", "# Fallback Oracle")

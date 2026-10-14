@@ -155,16 +155,19 @@ def test_scripts_reference_counts_match_unique_source_paths():
 
 
 def test_readme_core_rule_count_and_inventory_match_genome():
+    rules_dir = (ROOT / "rules") if (ROOT / "rules").is_dir() else (ROOT / "genome")
     rules = {
         path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "genome").rglob("*.md")
+        for path in rules_dir.rglob("*.md")
         if path.name not in {"META.md", "README.md"}
     }
     readme = read(str(ROOT / "README.md"))
     assert f"Core_Rules-{len(rules)}-" in readme
     section = readme.split("## 📐 Core Rules", 1)[1].split("## 🔧 Agent Skills", 1)[0]
-    linked = {target for target in re.findall(r"\]\((genome/[^)]+\.md)\)", section)}
-    assert linked == rules
+    linked = {target for target in re.findall(r"\]\(((?:genome|rules)/[^)]+\.md)\)", section)}
+    normalized_rules = {r.replace("rules/", "").replace("genome/", "") for r in rules}
+    normalized_linked = {l.replace("rules/", "").replace("genome/", "") for l in linked}
+    assert normalized_linked == normalized_rules
 
 
 def test_readme_m8ven_trust_badge_exists():

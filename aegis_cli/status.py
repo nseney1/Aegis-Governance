@@ -148,7 +148,9 @@ def _genome_heading_map(root: Path) -> dict[str, str]:
     """Map each packaged rule's H1 to its id, so merged bodies (which lost
     their frontmatter) still match trigger counts."""
     mapping: dict[str, str] = {}
-    genome_dir = root / "genome"
+    genome_dir = root / "rules"
+    if not genome_dir.is_dir():
+        genome_dir = root / "genome"
     for d in (genome_dir, genome_dir / ".oracles"):
         if not d.is_dir():
             continue
@@ -348,7 +350,7 @@ def run_status(args: argparse.Namespace) -> int:
     # Fallback: scan genome/ from the resolved root — never when CLAUDE.md
     # holds Soma content, or a 1-rule install reports the genome count.
     if not core_files and not has_merged_soma:
-        genome_dir = root / "genome"
+        genome_dir = (root / "rules") if (root / "rules").is_dir() else (root / "genome")
         if genome_dir.is_dir():
             for p in sorted(genome_dir.glob("*.md")):
                 if p.is_file() and p.name.lower() != "readme.md":
@@ -359,16 +361,16 @@ def run_status(args: argparse.Namespace) -> int:
                 if p.is_file() and p.name.lower() != "readme.md":
                     core_files.append(p)
 
-    # 2. Count adaptive rules: .md files in .soma/cells/ recursively (exclude README.md)
+    # 2. Count adaptive rules: .md files in .aegis/rules/ or .soma/cells/ recursively (exclude README.md)
     adaptive_files: list[Path] = []
-    cells_dir = proj / ".soma" / "cells"
+    cells_dir = (proj / ".aegis" / "rules") if (proj / ".aegis" / "rules").is_dir() else (proj / ".soma" / "cells")
     if cells_dir.is_dir():
         for p in sorted(cells_dir.rglob("*.md")):
             if p.is_file() and p.name.lower() != "readme.md":
                 adaptive_files.append(p)
 
-    # 3. Read canonical trigger counts from .soma/evidence/signals.jsonl
-    evidence_dir = proj / ".soma" / "evidence"
+    # 3. Read canonical trigger counts from .aegis/evidence or .soma/evidence/signals.jsonl
+    evidence_dir = (proj / ".aegis" / "evidence") if (proj / ".aegis" / "evidence").is_dir() else (proj / ".soma" / "evidence")
     trigger_counts = _read_trigger_counts(evidence_dir)
 
     # 4. Process all rules and calculate character overhead

@@ -17,9 +17,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
-GENOME_DIR = REPO_ROOT / "genome"
+GENOME_DIR = REPO_ROOT / "rules" if (REPO_ROOT / "rules").is_dir() else (REPO_ROOT / "genome")
 ORACLES_DIR = GENOME_DIR / ".oracles"
-CELLS_DIR = REPO_ROOT / ".soma" / "cells"
+CELLS_DIR = REPO_ROOT / ".aegis" / "rules" if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".soma" / "cells")
 
 # Fields required for the evidence enrichment pipeline
 REQUIRED_FIELDS = {"id", "domain"}
@@ -224,16 +224,16 @@ def _jit_parse(path: Path) -> dict | None:
 
 
 def _get_vacuoles() -> list[Path]:
-    """All vacuole cell files."""
-    vac_dir = CELLS_DIR / "vacuoles"
+    """All vacuole/trap cell files."""
+    vac_dir = CELLS_DIR / "traps" if (CELLS_DIR / "traps").exists() else (CELLS_DIR / "vacuoles")
     if not vac_dir.exists():
         return []
     return sorted(p for p in vac_dir.glob("*.md") if p.name not in SKIP_FILES)
 
 
 def _get_walls() -> list[Path]:
-    """All wall cell files."""
-    wall_dir = CELLS_DIR / "walls"
+    """All wall/invariant cell files."""
+    wall_dir = CELLS_DIR / "invariants" if (CELLS_DIR / "invariants").exists() else (CELLS_DIR / "walls")
     if not wall_dir.exists():
         return []
     return sorted(p for p in wall_dir.glob("*.md") if p.name not in SKIP_FILES)
@@ -286,8 +286,8 @@ def test_vacuole_has_required_fields(rule_file):
         assert field in fm, (
             f"{rule_file.name} missing required vacuole field '{field}'"
         )
-    assert fm["type"] == "vacuole", (
-        f"{rule_file.name} type is '{fm['type']}', expected 'vacuole'"
+    assert fm["type"] in ("vacuole", "trap"), (
+        f"{rule_file.name} type is '{fm['type']}', expected 'vacuole' or 'trap'"
     )
 
 
@@ -358,12 +358,12 @@ def test_jit_matches_new_genome_files():
     """New genome rules should match when their activation paths are touched."""
     from soma_mcp.jit_engine import load_all_cells, match_cells_to_files
     cells = load_all_cells(str(REPO_ROOT))
-    # Touching soma_core should match cells with soma_core in target_paths
-    matched = match_cells_to_files(cells, ["soma_core/telemetry.py"])
+    test_path = "aegis_core/telemetry.py" if (REPO_ROOT / "aegis_core").is_dir() else "soma_core/telemetry.py"
+    matched = match_cells_to_files(cells, [test_path])
     matched_ids = {c["id"] for c in matched}
-    # At minimum, trap-schema-contract-drift targets soma_core/*.py
+    # At minimum, trap-schema-contract-drift targets aegis_core/*.py
     assert "trap-schema-contract-drift" in matched_ids, (
-        f"trap-schema-contract-drift should match soma_core/telemetry.py "
+        f"trap-schema-contract-drift should match {test_path} "
         f"but matched: {matched_ids}"
     )
 
@@ -372,10 +372,11 @@ def test_jit_matches_vacuole_on_python_files():
     """trap-future-annotations targets **/*.py — should match any .py file."""
     from soma_mcp.jit_engine import load_all_cells, match_cells_to_files
     cells = load_all_cells(str(REPO_ROOT))
-    matched = match_cells_to_files(cells, ["soma_cli/status.py"])
+    test_path = "aegis_cli/status.py" if (REPO_ROOT / "aegis_cli").is_dir() else "soma_cli/status.py"
+    matched = match_cells_to_files(cells, [test_path])
     matched_ids = {c["id"] for c in matched}
     assert "trap-future-annotations" in matched_ids, (
-        f"trap-future-annotations should match soma_cli/status.py "
+        f"trap-future-annotations should match {test_path} "
         f"but matched: {matched_ids}"
     )
 
@@ -384,8 +385,8 @@ def test_jit_matches_vacuole_on_python_files():
 
 
 def _get_membranes() -> list[Path]:
-    """All membrane cell files."""
-    mem_dir = CELLS_DIR / "membranes"
+    """All membrane/boundary cell files."""
+    mem_dir = CELLS_DIR / "boundaries" if (CELLS_DIR / "boundaries").exists() else (CELLS_DIR / "membranes")
     if not mem_dir.exists():
         return []
     return sorted(p for p in mem_dir.glob("*.md") if p.name not in SKIP_FILES)
@@ -406,11 +407,11 @@ def test_membrane_has_hypothesis(rule_file):
 @pytest.mark.parametrize("rule_file", _get_membranes(),
                          ids=lambda p: f"membranes/{p.name}")
 def test_membrane_type_is_correct(rule_file):
-    """Membrane files must declare type: membrane."""
+    """Membrane files must declare type: membrane or boundary."""
     fm = _jit_parse(rule_file)
     assert fm, f"{rule_file.name} has no parseable frontmatter"
-    assert fm.get("type") == "membrane", (
-        f"{rule_file.name} type is '{fm.get('type')}', expected 'membrane'"
+    assert fm.get("type") in ("membrane", "boundary"), (
+        f"{rule_file.name} type is '{fm.get('type')}', expected 'membrane' or 'boundary'"
     )
 
 
@@ -418,8 +419,8 @@ def test_membrane_type_is_correct(rule_file):
 
 
 def _get_chloroplasts() -> list[Path]:
-    """All chloroplast cell files."""
-    chl_dir = CELLS_DIR / "chloroplasts"
+    """All chloroplast/persona cell files."""
+    chl_dir = CELLS_DIR / "personas" if (CELLS_DIR / "personas").exists() else (CELLS_DIR / "chloroplasts")
     if not chl_dir.exists():
         return []
     return sorted(p for p in chl_dir.glob("*.md") if p.name not in SKIP_FILES)
@@ -440,11 +441,11 @@ def test_chloroplast_has_hypothesis(rule_file):
 @pytest.mark.parametrize("rule_file", _get_chloroplasts(),
                          ids=lambda p: f"chloroplasts/{p.name}")
 def test_chloroplast_type_is_correct(rule_file):
-    """Chloroplast files must declare type: chloroplast."""
+    """Chloroplast files must declare type: chloroplast or persona."""
     fm = _jit_parse(rule_file)
     assert fm, f"{rule_file.name} has no parseable frontmatter"
-    assert fm.get("type") == "chloroplast", (
-        f"{rule_file.name} type is '{fm.get('type')}', expected 'chloroplast'"
+    assert fm.get("type") in ("chloroplast", "persona"), (
+        f"{rule_file.name} type is '{fm.get('type')}', expected 'chloroplast' or 'persona'"
     )
 
 
@@ -452,8 +453,8 @@ def test_chloroplast_type_is_correct(rule_file):
 
 
 def _get_plasmodesmata() -> list[Path]:
-    """All plasmodesmata cell files."""
-    pla_dir = CELLS_DIR / "plasmodesmata"
+    """All plasmodesmata/contract cell files."""
+    pla_dir = CELLS_DIR / "contracts" if (CELLS_DIR / "contracts").exists() else (CELLS_DIR / "plasmodesmata")
     if not pla_dir.exists():
         return []
     return sorted(p for p in pla_dir.glob("*.md") if p.name not in SKIP_FILES)
@@ -474,11 +475,11 @@ def test_plasmodesmata_has_hypothesis(rule_file):
 @pytest.mark.parametrize("rule_file", _get_plasmodesmata(),
                          ids=lambda p: f"plasmodesmata/{p.name}")
 def test_plasmodesmata_type_is_correct(rule_file):
-    """Plasmodesmata files must declare type: plasmodesmata."""
+    """Plasmodesmata files must declare type: plasmodesmata or contract."""
     fm = _jit_parse(rule_file)
     assert fm, f"{rule_file.name} has no parseable frontmatter"
-    assert fm.get("type") == "plasmodesmata", (
-        f"{rule_file.name} type is '{fm.get('type')}', expected 'plasmodesmata'"
+    assert fm.get("type") in ("plasmodesmata", "contract"), (
+        f"{rule_file.name} type is '{fm.get('type')}', expected 'plasmodesmata' or 'contract'"
     )
 
 

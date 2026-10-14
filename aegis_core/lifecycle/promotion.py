@@ -239,7 +239,7 @@ def promote_cell(
                 "status": "error",
                 "message": "Cannot promote to genome in non-soma repository",
             }
-        target_dir = ws.root / "genome"
+        target_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
     else:
         target_dir = ws.cells_dir / TYPE_TO_DIR[next_type]
 
@@ -559,7 +559,7 @@ def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) ->
 
     if new_type == "rule":
         if ws.is_soma_repo:
-            target_dir = ws.root / "genome"
+            target_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
             target_path = target_dir / f"rule-{cell_path.name}"
         else:
             target_dir = cells_dir / "gates"

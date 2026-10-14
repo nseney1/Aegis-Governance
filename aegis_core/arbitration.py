@@ -194,7 +194,9 @@ def load_oracles(workspace: Workspace | Path | str) -> List[Tuple[str, str]]:
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    oracles_dir = ws.root / "genome" / ".oracles"
+    oracles_dir = ws.root / "rules" / ".oracles"
+    if not oracles_dir.is_dir():
+        oracles_dir = ws.root / "genome" / ".oracles"
     oracles: List[Tuple[str, str]] = []
     if not oracles_dir.is_dir():
         return oracles

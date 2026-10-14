@@ -234,3 +234,19 @@ class TestStatus:
         captured = capsys.readouterr()
         assert "2 active" in captured.out
 
+    def test_genome_heading_map_coverage(self, tmp_path):
+        from aegis_cli.status import _genome_heading_map
+        # Test fallback to genome
+        g_dir = tmp_path / "fallback" / "genome"
+        g_dir.mkdir(parents=True)
+        (g_dir / "r1.md").write_text("# R1 Heading\nBody", encoding="utf-8")
+        mapping = _genome_heading_map(tmp_path / "fallback")
+        assert mapping.get("R1 Heading") == "r1"
+
+        # Test rules dir
+        r_dir = tmp_path / "primary" / "rules"
+        r_dir.mkdir(parents=True)
+        (r_dir / "r2.md").write_text("# R2 Heading\nBody", encoding="utf-8")
+        mapping2 = _genome_heading_map(tmp_path / "primary")
+        assert mapping2.get("R2 Heading") == "r2"
+

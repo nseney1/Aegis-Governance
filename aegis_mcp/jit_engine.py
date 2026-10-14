@@ -130,9 +130,11 @@ def get_git_diff_files(workspace: str) -> list[str]:
 
 
 def load_all_cells(workspace: str) -> list[dict[str, object]]:
-    """Load all cells from .soma/cells/ using stdlib parser."""
+    """Load all cells from .aegis/rules/ or .soma/cells/ using stdlib parser."""
     cells = []
-    cells_dir = os.path.join(workspace, '.soma', 'cells')
+    cells_dir = os.path.join(workspace, '.aegis', 'rules')
+    if not os.path.isdir(cells_dir):
+        cells_dir = os.path.join(workspace, '.soma', 'cells')
     if not os.path.isdir(cells_dir):
         return cells
 
@@ -515,7 +517,9 @@ def load_genome_rules(workspace: str, changed_files: list[str]) -> list[dict[str
     except Exception:
         return []
 
-    genome_dir = os.path.join(workspace, 'genome')
+    genome_dir = os.path.join(workspace, 'rules')
+    if not os.path.isdir(genome_dir):
+        genome_dir = os.path.join(workspace, 'genome')
     if not os.path.isdir(genome_dir):
         return []
 

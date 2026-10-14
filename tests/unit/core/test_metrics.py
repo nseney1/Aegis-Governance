@@ -75,6 +75,24 @@ def test_compute_token_census(tmp_path: Path) -> None:
     assert census["subtotals"]["skills_idle_tokens"] > 0
 
 
+def test_compute_token_census_rules_and_skills(tmp_path: Path) -> None:
+    (tmp_path / "aegis_core").mkdir()
+    (tmp_path / "aegis_cli").mkdir()
+    (tmp_path / "pyproject.toml").write_text('name = "aegis-governance"\n', encoding="utf-8")
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    (rules / "rule1.md").write_text("---\ntrigger: always_on\n---\nRule content with several words.", encoding="utf-8")
+
+    skills = tmp_path / "skills" / "sample-skill"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("---\nname: sample\n---\nSkill documentation here.", encoding="utf-8")
+
+    census = compute_token_census(tmp_path)
+    assert len(census["files"]) == 2
+    assert census["grand_total_idle"] > 0
+    assert census["files"][0]["filename"].startswith("rules/")
+
+
 def test_evaluate_quorum_sub_threshold(tmp_path: Path) -> None:
     cells_dir = tmp_path / "cells"
     cells_dir.mkdir()

@@ -181,36 +181,35 @@ def _get_soma_root() -> Path:
     """
     try:
         pkg_root = Path(str(importlib.resources.files("aegis_cli"))).parent
+        if (pkg_root / "rules").is_dir():
+            return pkg_root
         if (pkg_root / "genome").is_dir():
             return pkg_root
     except (TypeError, FileNotFoundError):
         pass
-    cwd = Path.cwd()
-    if (cwd / "genome").is_dir():
-        return cwd
-    return cwd
+    return Path.cwd()
 
 
 def _discover_full_rules() -> list[Path]:
-    """Discover all genome rule .md files for the full preset.
+    """Discover all canonical rule .md files for the full preset.
 
-    Scans genome/ and genome/.oracles/, skipping META.md and README.md.
+    Scans rules/ (or genome/) and .oracles/, skipping META.md and README.md.
     """
     soma_root = _get_soma_root()
-    genome_dir = soma_root / "genome"
-    if not genome_dir.is_dir():
+    rules_dir = (soma_root / "rules") if (soma_root / "rules").is_dir() else (soma_root / "genome")
+    if not rules_dir.is_dir():
         return []
 
     skip = {"META.md", "README.md"}
     results: list[Path] = []
 
-    # Top-level genome/*.md
-    for f in sorted(genome_dir.glob("*.md")):
+    # Top-level rules/*.md
+    for f in sorted(rules_dir.glob("*.md")):
         if f.is_file() and f.name not in skip:
             results.append(f)
 
-    # genome/.oracles/*.md
-    oracles_dir = genome_dir / ".oracles"
+    # .oracles/*.md
+    oracles_dir = rules_dir / ".oracles"
     if oracles_dir.is_dir():
         for f in sorted(oracles_dir.glob("*.md")):
             if f.is_file() and f.name not in skip:

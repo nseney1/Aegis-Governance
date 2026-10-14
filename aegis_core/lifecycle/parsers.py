@@ -67,7 +67,7 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
     cells_dir = ws.cells_dir
-    genome_dir = ws.root / "genome"
+    rules_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
 
     for type_name, dir_name in TYPE_TO_DIR.items():
         candidate = cells_dir / dir_name / f"{clean_id}.md"
@@ -75,7 +75,7 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
             return candidate, type_name
 
     if ws.is_soma_repo:
-        candidate = genome_dir / f"{clean_id}.md"
+        candidate = rules_dir / f"{clean_id}.md"
         if candidate.is_file():
             return candidate, "genome"
 
@@ -154,7 +154,8 @@ def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
     cells = []
     scan_roots = [str(ws.cells_dir)]
     if ws.is_soma_repo:
-        scan_roots.append(str(ws.root / "genome"))
+        rules_root = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
+        scan_roots.append(str(rules_root))
 
     for cells_root in scan_roots:
         if not os.path.isdir(cells_root):

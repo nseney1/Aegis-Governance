@@ -41,10 +41,10 @@ class PlatformAdapter(ABC):
 
     def get_source_rules(self) -> list[Path]:
         """Locate genome rules in repository workspace or bundled starter_rules."""
-        genome_dir = self.workspace / "genome"
-        if genome_dir.is_dir():
-            rules = [p for p in genome_dir.glob("*.md") if p.name not in {"META.md", "README.md"}]
-            oracles_dir = genome_dir / ".oracles"
+        rules_dir = (self.workspace / "rules") if (self.workspace / "rules").is_dir() else (self.workspace / "genome")
+        if rules_dir.is_dir():
+            rules = [p for p in rules_dir.glob("*.md") if p.name not in {"META.md", "README.md"}]
+            oracles_dir = rules_dir / ".oracles"
             if oracles_dir.is_dir():
                 rules.extend([p for p in oracles_dir.glob("*.md") if p.name not in {"META.md", "README.md"}])
             if rules:
@@ -63,12 +63,12 @@ class PlatformAdapter(ABC):
         return []
 
     def get_source_skills(self) -> list[Path]:
-        """Locate organs/skills in repository workspace."""
-        organs_dir = self.workspace / "organs"
-        if not organs_dir.is_dir():
+        """Locate skills/organs in repository workspace."""
+        skills_dir = (self.workspace / "skills") if (self.workspace / "skills").is_dir() else (self.workspace / "organs")
+        if not skills_dir.is_dir():
             return []
         skills = []
-        for d in organs_dir.iterdir():
+        for d in skills_dir.iterdir():
             if d.is_dir() and (d / "SKILL.md").is_file():
                 skills.append(d)
         return sorted(skills)
