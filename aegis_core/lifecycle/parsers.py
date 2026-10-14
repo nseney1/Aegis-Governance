@@ -9,7 +9,8 @@ import re
 import shutil
 from typing import Any, Optional, Tuple
 
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink
+from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter, parse_rule_frontmatter
 from aegis_core.workspace import Workspace
 from .constants import (
     TYPE_TO_DIR,
@@ -109,8 +110,7 @@ def parse_cell(file_path: Path | str) -> tuple[Optional[dict], str]:
     try:
         content = Path(file_path).read_text(encoding="utf-8")
         meta = parse_frontmatter(content)
-        end_idx = content.find("---", 3)
-        body = content[end_idx + 3:].lstrip() if end_idx != -1 else ""
+        body = _get_body(content).lstrip()
         return meta, body
     except Exception:
         return None, ""
@@ -227,85 +227,20 @@ def _cell_age_days(cell: dict) -> int:
 
 
 def _transform_frontmatter_type(content: str, new_type: str) -> str:
-    """Update type field in cell frontmatter preserving body and comments."""
-    content = content.lstrip("\ufeff")
-    end_idx = content.find("---", 3)
-    if end_idx == -1:
+    """Update type field in cell frontmatter preserving body."""
+    try:
+        meta, body = parse_rule_frontmatter(content)
+    except Exception:
         return content
 
-    frontmatter = content[3:end_idx]
-    body = content[end_idx:]
+    meta["type"] = new_type
+    if new_type in ("wall", "gate", "invariant"):
+        meta["enforcement"] = "gate"
+    elif new_type in ("vacuole", "trap"):
+        meta.pop("enforcement", None)
+        meta.pop("enforcement_artifact", None)
 
-    lines = frontmatter.splitlines()
-    new_lines = []
-    type_updated = False
-    enforcement_updated = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("type:"):
-            indent = line[:len(line) - len(line.lstrip())]
-            new_lines.append(f"{indent}type: {new_type}")
-            type_updated = True
-        elif stripped.startswith("enforcement:"):
-            if new_type in ("wall", "gate", "invariant"):
-                indent = line[:len(line) - len(line.lstrip())]
-                new_lines.append(f"{indent}enforcement: gate")
-                enforcement_updated = True
-            elif new_type in ("vacuole", "trap"):
-                pass
-            else:
-                new_lines.append(line)
-        elif stripped.startswith("enforcement_artifact:"):
-            if new_type in ("vacuole", "trap"):
-                pass
-            else:
-                new_lines.append(line)
-        else:
-            new_lines.append(line)
-
-    if not type_updated:
-        new_lines.append(f"type: {new_type}")
-
-    if new_type in ("wall", "gate", "invariant") and not enforcement_updated:
-        new_lines.append("enforcement: gate")
-
-    return "---\n" + "\n".join(new_lines).strip() + "\n" + body
-
-
-def _atomic_write_and_unlink(
-    source_path: Path,
-    target_path: Path,
-    new_content: str,
-) -> None:
-    """Write new_content to target_path atomically and unlink source_path with rollback."""
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_target = target_path.with_name(f"{target_path.name}.tmp.{os.getpid()}")
-    try:
-        with open(tmp_target, "w", encoding="utf-8") as fh:
-            fh.write(new_content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        try:
-            os.replace(tmp_target, target_path)
-        except OSError:
-            shutil.move(str(tmp_target), str(target_path))
-        try:
-            if source_path != target_path and source_path.exists():
-                source_path.unlink()
-        except Exception:
-            if target_path.exists() and source_path.exists():
-                try:
-                    os.remove(target_path)
-                except Exception as ex:
-                    raise RuntimeError(f"Rollback failed: duplicate cell remains at {target_path}") from ex
-            raise
-    except Exception:
-        if tmp_target.exists():
-            try:
-                os.remove(tmp_target)
-            except OSError:
-                pass
-        raise
+    return dump_frontmatter(meta, body=body)
 
 
 def resolve_metrics_dir(workspace: Path | str) -> Path:

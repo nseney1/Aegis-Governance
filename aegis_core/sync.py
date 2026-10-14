@@ -518,44 +518,10 @@ def aggregate_evidence(evidence_dir: str) -> dict[str, dict]:
     return aggregate_signals(evidence_dir).counts
 
 
-def _fsync_dir(directory: str) -> None:
-    """Best-effort directory fsync after a replace on POSIX."""
-    if os.name != "posix":
-        return
-    try:
-        fd = os.open(directory, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
 def _atomic_write_cell(path: str, content: str) -> None:
     """Atomically replace path using a durable same-directory temp file."""
-    import tempfile
-    directory = os.path.dirname(path) or "."
-    fd, tmp_path = tempfile.mkstemp(
-        dir=directory,
-        prefix=f".{os.path.basename(path)}.",
-        suffix=".tmp",
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-    _fsync_dir(directory)
+    from aegis_core.storage import atomic_write_text
+    atomic_write_text(path, content)
 
 
 def sync_frontmatter(

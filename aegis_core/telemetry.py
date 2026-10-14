@@ -221,20 +221,8 @@ def _read_existing_events(log_path: str) -> tuple[bytes, dict[str, dict]]:
     return raw, by_id
 
 
-def _fsync_dir(directory: str) -> None:
-    if os.name == 'nt':
-        return
-    try:
-        dir_fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    except OSError:
-        pass
-
-
 def _atomic_replace_bytes(path: str, data: bytes) -> None:
+    from aegis_core.storage import fsync_dir
     parent = os.path.dirname(os.path.abspath(path))
     os.makedirs(parent, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(prefix='.signals.', suffix='.tmp', dir=parent)
@@ -244,7 +232,7 @@ def _atomic_replace_bytes(path: str, data: bytes) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp_path, path)
-        _fsync_dir(parent)
+        fsync_dir(parent)
     except BaseException:
         try:
             os.unlink(tmp_path)
