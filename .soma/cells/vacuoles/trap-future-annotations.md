@@ -24,10 +24,10 @@ tags:
 fitness:
   score: 0.6
   impact_weight: 0.8
-  triggers: 49
-  true_positives: 17.5561
+  triggers: 51
+  true_positives: 17.9099
   false_positives: 19.4203
-  last_trigger_date: "2026-10-09T13:40:49Z"
+  last_trigger_date: "2026-10-14T04:44:03Z"
 ---
 
 Any Python file using `X | None`, `list[str] | None`, or similar PEP 604
