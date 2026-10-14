@@ -58,6 +58,7 @@ docs/postmortem-work-sessions.md
 .soma/governance/
 .soma/metrics/
 .soma/keys/
+.soma/locks/
 .soma/human_insights.jsonl
 docs/internal/
 .hypothesis/

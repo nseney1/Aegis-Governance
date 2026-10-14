@@ -11,13 +11,16 @@ enforcement: gate
 
 > **Role**: Mandates aggressive task delegation to subagents to protect the main context window and parallelize execution.
 
-## 1. Context Protection Mandate
-- **Protect the Context Window**: The primary conversation's context window is expensive and should only contain high-level reasoning and coordination. 
-- **Aggressive Delegation**: Do not perform long, context-heavy tasks yourself if they can be delegated. Spin up subagents for:
-  1. Deep-diving into unfamiliar documentation or APIs.
-  2. Broad codebase research or dependency mapping.
-  3. Isolated refactors or boilerplate generation that do not require full system context.
-  4. Bulk media triage, visual dataset exploration, or screenshot classification across >5 images.
+## 1. Context Protection & Delegation-First Mandate
+- **Protect the Context Window**: The primary conversation's context window is expensive and should only contain high-level reasoning, system architecture, cross-module integration, and test verification.
+- **Delegation-First by Default**: Whenever an implementation plan or task involves $\ge 2$ independent files or disjoint modules, the orchestrator **must delegate** them to subagents under the Disjoint Lane Protocol rather than writing code serially in the main thread.
+- **Aggressive Delegation**: Spin up subagents for:
+  1. Isolated feature implementation lanes.
+  2. Scripts, automation tools, and configuration generators.
+  3. Deep-diving into unfamiliar documentation or APIs.
+  4. Broad codebase research or dependency mapping.
+  5. Bulk media triage, visual dataset exploration, or screenshot classification across >5 images.
+- **Single-Call Fan-Out**: When multiple disjoint lanes exist, dispatch them simultaneously in a single `invoke_subagent` tool call to maximize parallelism.
 - **Delegation Floor**: For engineering tasks exceeding ~75 steps, the orchestrator must have delegated at least one standalone module to a subagent. If step 75 is reached with zero delegations, halt and decompose.
 
 ## 2. Parallel Execution

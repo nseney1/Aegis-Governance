@@ -76,6 +76,7 @@ def test_dependabot_updates_actions_and_pip_weekly():
         assert ecosystem in updates, f"dependabot must cover {ecosystem}"
         assert updates[ecosystem]["directory"] == "/"
         assert updates[ecosystem]["schedule"]["interval"] == "weekly"
+        assert updates[ecosystem].get("target-branch") == "develop"
 
 
 def test_validate_audits_dependencies_with_pip_audit():

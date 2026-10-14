@@ -22,10 +22,10 @@ expiry_sessions: 30
 fitness:
   score: 0.5
   impact_weight: 1.0
-  triggers: 48
-  true_positives: 15.6324
+  triggers: 49
+  true_positives: 15.7093
   false_positives: 20.6198
-  last_trigger_date: "2026-10-09T13:40:49Z"
+  last_trigger_date: "2026-10-14T04:36:35Z"
 ---
 
 ## Trap: Local Green ≠ CI Green

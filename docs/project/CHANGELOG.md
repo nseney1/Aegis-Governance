@@ -5,6 +5,25 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-10-14 — "Subagent Delegation Governance & CI Supply Chain Hardening"
+
+### CI Supply Chain & Dependabot Pipeline Hardening
+- **Artifact Action Security Bumps**:
+  - Bumped `actions/upload-artifact` from v7.0.1 (`043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`) to v7.0.2 (`cf430e030ddbb5b0abf93d22962f4752f3646cd9`).
+  - Bumped `actions/download-artifact` from v8.0.1 (`3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c`) to v8.0.2 (`9000827ccba6bdab643e8b6fd33ac0654aef8333`).
+- **Dependabot Workflow Routing**:
+  - Configured `target-branch: "develop"` in `.github/dependabot.yml` across `github-actions` and `pip` package ecosystems.
+  - Ensured automated dependency PRs build and validate against `develop` without triggering PR-to-main Release Gate 4.5 arbitration checks.
+  - Extended `tests/integration/test_ci_workflows.py` to assert `target-branch: "develop"` is preserved.
+
+### Governance & Architecture
+- **Prefer Subagent Delegation Governance Cell (`wall-prefer-subagent-delegation`)**:
+  - Established `.soma/cells/walls/wall-prefer-subagent-delegation.md` enforcing the Delegation-First Mandate for implementation tasks spanning $\ge 2$ disjoint files or independent modules.
+  - Preserves primary orchestrator context for system architecture, cross-module integration, test verification, and staff synthesis.
+  - Codifies Disjoint Lane Execution (explicit non-overlapping file scopes, model tiering, single-call fan-out, and verification against cheap-talk self-reports).
+- **Genome Alignment**:
+  - Updated Section 1 of `genome/subagent-delegation.md` to incorporate the Delegation-First Mandate and Single-Call Fan-Out protocol.
+
 ## [1.5.0] — 2026-10-09 — "Lifecycle Parity & Diagnostic Transparency"
 
 ### Developer Experience, Full Lifecycle Parity & Mutation Diagnostics
