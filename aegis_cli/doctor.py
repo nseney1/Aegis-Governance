@@ -88,8 +88,9 @@ def _check_rules(platform: str | None, project_root: Path | None = None) -> bool
 
 
 def _check_evidence_dir(project_root: Path | None = None) -> bool:
-    """Check .soma/evidence/ exists and is writable (read-only check)."""
-    evidence = (project_root or Path.cwd()) / ".soma" / "evidence"
+    """Check .aegis/evidence/ or .soma/evidence/ exists and is writable (read-only check)."""
+    base = project_root or Path.cwd()
+    evidence = (base / ".aegis" / "evidence") if (base / ".aegis").is_dir() or not (base / ".soma" / "evidence").is_dir() else (base / ".soma" / "evidence")
     if evidence.is_dir():
         if os.access(str(evidence), os.W_OK):
             print(f"  ✅ Evidence directory writable ({evidence})")
@@ -124,10 +125,7 @@ def _check_cli_resolvable() -> bool:
 # MCP configs start the server as `python3 -m aegis_mcp`. The import probe runs
 # without -I so user site-packages count, but drops the implicit CWD entry so
 # doctor never imports (executes) a aegis_mcp that happens to sit in the cwd.
-_IMPORT_PROBE = (
-    "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; "
-    "try:\n    import aegis_mcp\nexcept ImportError:\n    import soma_mcp"
-)
+_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __import__('aegis_mcp' if __import__('importlib.util').util.find_spec('aegis_mcp') else 'soma_mcp')"
 
 
 def probe_mcp_launcher(path_env: str | None = None,

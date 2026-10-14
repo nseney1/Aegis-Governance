@@ -187,13 +187,30 @@ def _scan_highest_cycle(evidence_dir: Path) -> int:
     return max_cycle
 
 
+def _resolve_evidence_dir(workspace: str | os.PathLike) -> Path:
+    ws_path = Path(workspace)
+    aegis_ev = ws_path / ".aegis" / "evidence"
+    if aegis_ev.is_dir():
+        return aegis_ev
+    soma_ev = ws_path / ".soma" / "evidence"
+    if soma_ev.is_dir():
+        return soma_ev
+    if (ws_path / ".aegis").is_dir():
+        return aegis_ev
+    if (ws_path / ".soma").is_dir():
+        return soma_ev
+    if os.environ.get("AEGIS_WORKSPACE"):
+        return aegis_ev
+    return soma_ev
+
+
 def get_next_cycle_number(workspace: str | os.PathLike) -> int:
     """Find the next arbitration cycle number atomically under file lock.
 
-    Maintains `.soma/evidence/.cycle_counter` to avoid O(N) filesystem sweeps,
+    Maintains `.aegis/evidence/.cycle_counter` to avoid O(N) filesystem sweeps,
     with fallback recovery scanning existing cycles if the counter file is absent or corrupt.
     """
-    evidence_dir = Path(workspace) / ".soma" / "evidence"
+    evidence_dir = _resolve_evidence_dir(workspace)
     try:
         evidence_dir.mkdir(parents=True, exist_ok=True)
     except OSError:  # pragma: no cover
@@ -240,9 +257,7 @@ def get_next_cycle_number(workspace: str | os.PathLike) -> int:
 
 def get_latest_arbitration_evidence(workspace: str | os.PathLike) -> tuple[int, dict | None]:
     """Retrieve the latest arbitration cycle record and cycle number."""
-    evidence_dir = Path(workspace) / ".aegis" / "evidence"
-    if not evidence_dir.is_dir():
-        evidence_dir = Path(workspace) / ".soma" / "evidence"
+    evidence_dir = _resolve_evidence_dir(workspace)
     if not evidence_dir.is_dir():
         return 0, None
 
@@ -277,7 +292,7 @@ def save_arbitration_evidence(
     cycle: int | None = None,
     target_files: list[str] | None = None,
 ) -> str:
-    """Persist arbitration result to .soma/evidence/ for checkpoint verification.
+    """Persist arbitration result to .aegis/evidence/ for checkpoint verification.
 
     The checkpoint gate checks for this file to prevent bypassing the arbiter.
     Uses atomic write (tempfile + rename) to prevent corruption on crash.
@@ -292,7 +307,7 @@ def save_arbitration_evidence(
         if cycle < 1:
             raise ValueError(f"cycle must be a positive integer, got {cycle}")
 
-    evidence_dir = Path(workspace) / ".soma" / "evidence"
+    evidence_dir = _resolve_evidence_dir(workspace)
     evidence_dir.mkdir(parents=True, exist_ok=True)
     target = evidence_dir / f"arbitration_cycle_{cycle}.json"
 

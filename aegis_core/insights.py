@@ -269,7 +269,8 @@ def create_cell_from_insight_cluster(cluster: dict, workspace: str) -> str:
  
     filepath = os.path.join(target_dir, filename)
     if os.path.isfile(filepath):
-        evidence_dir = os.path.join(workspace, ".soma", "evidence")
+        aegis_ev = os.path.join(workspace, ".aegis", "evidence")
+        evidence_dir = aegis_ev if os.path.isdir(aegis_ev) else os.path.join(workspace, ".soma", "evidence")
         signal_counts = aggregate_signals(evidence_dir).counts
         c_id = frontmatter.get("id", "")
         if signal_counts.get(c_id, {}).get("has_triggers", False):

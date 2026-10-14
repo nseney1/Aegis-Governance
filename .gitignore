@@ -61,6 +61,12 @@ docs/postmortem-work-sessions.md
 .soma/keys/
 .soma/locks/
 .soma/human_insights.jsonl
+.soma/evidence/.signals.lock
+.soma/evidence/.evidence.lock
+.soma/evidence/.cycle_counter
+.soma/evidence/signals.jsonl
+.soma/evidence/fitness.jsonl
+.soma/evidence/sessions_processed.jsonl
 .aegis/rules/fitness.jsonl
 .aegis/rules/archived/
 .aegis/credentials.conf

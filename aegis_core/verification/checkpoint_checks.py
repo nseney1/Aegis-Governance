@@ -421,7 +421,9 @@ def check_assertion_density(root: Path) -> list[dict]:
 
 def check_cell_fitness(root: Path) -> list[dict]:
     issues = []  # type: List[dict]
-    evidence_dir = root / ".soma" / "evidence"
+    evidence_dir = root / ".aegis" / "evidence"
+    if not evidence_dir.is_dir():
+        evidence_dir = root / ".soma" / "evidence"
     aggregation = aggregate_signals(evidence_dir)
 
     for error in aggregation.errors:
@@ -577,7 +579,9 @@ def check_cell_conventions(root: Path) -> list[dict]:
 
 def check_arbitration_evidence(root: Path, strict: bool = False) -> list[dict]:
     issues = []  # type: List[dict]
-    evidence_dir = root / ".soma" / "evidence"
+    evidence_dir = root / ".aegis" / "evidence"
+    if not evidence_dir.is_dir():
+        evidence_dir = root / ".soma" / "evidence"
     try:
         info = os.stat(evidence_dir, follow_symlinks=False)
     except FileNotFoundError:
@@ -701,7 +705,11 @@ def check_arbitration_evidence(root: Path, strict: bool = False) -> list[dict]:
 def check_paper_walls(root: Path, strict: bool = False) -> list[dict]:
     """Verify that all wall cells have 'gate' enforcement and valid frontmatter."""
     issues = []
-    walls_dir = root / ".soma" / "cells" / "walls"
+    walls_dir = root / ".aegis" / "rules" / "invariants"
+    if not walls_dir.is_dir():
+        walls_dir = root / ".aegis" / "rules" / "walls"
+    if not walls_dir.is_dir():
+        walls_dir = root / ".soma" / "cells" / "walls"
     if not walls_dir.is_dir():
         return issues
 

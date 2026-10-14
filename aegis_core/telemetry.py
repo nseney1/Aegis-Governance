@@ -49,13 +49,45 @@ class StaleGenerationError(RuntimeError):
 _lock_tls = threading.local()
 
 
+def _resolve_evidence_dir(workspace: str) -> str:
+    """Resolve canonical evidence directory (.aegis/evidence or fallback .soma/evidence)."""
+    ws = str(workspace)
+    aegis_evidence = os.path.join(ws, '.aegis', 'evidence')
+    soma_evidence = os.path.join(ws, '.soma', 'evidence')
+    if os.path.isdir(aegis_evidence):
+        return aegis_evidence
+    if os.path.isdir(soma_evidence):
+        return soma_evidence
+    if os.path.isdir(os.path.join(ws, '.aegis')):
+        return aegis_evidence
+    if os.path.isdir(os.path.join(ws, '.soma')):
+        return soma_evidence
+    if os.environ.get("AEGIS_WORKSPACE"):
+        return aegis_evidence
+    return soma_evidence
+
+
+def _resolve_governance_dir(workspace: str) -> str:
+    """Resolve canonical governance directory (.aegis or fallback .soma)."""
+    ws = str(workspace)
+    aegis_dir = os.path.join(ws, '.aegis')
+    soma_dir = os.path.join(ws, '.soma')
+    if os.path.isdir(aegis_dir):
+        return aegis_dir
+    if os.path.isdir(soma_dir):
+        return soma_dir
+    if os.environ.get("AEGIS_WORKSPACE"):
+        return aegis_dir
+    return soma_dir
+
+
 @contextmanager
 def evidence_lock(workspace: str):
     """Context manager acquiring both the per-process thread lock and the OS file lock.
 
     Reentrant within the same thread to prevent POSIX flock self-deadlock.
     """
-    evidence_dir = os.path.join(workspace, '.soma', 'evidence')
+    evidence_dir = _resolve_evidence_dir(workspace)
     os.makedirs(evidence_dir, exist_ok=True)
     lock_path = os.path.realpath(os.path.join(evidence_dir, LOCK_FILENAME))
     thread_lock = _get_thread_lock(lock_path)
@@ -88,10 +120,17 @@ def evidence_lock(workspace: str):
 
 
 def read_generation(workspace: str) -> int:
-    """Read the current epoch generation integer from .soma/epoch_generation."""
-    gen_path = os.path.join(workspace, '.soma', EPOCH_FILENAME)
-    if not os.path.isfile(gen_path):
-        return DEFAULT_GENERATION
+    """Read the current epoch generation integer from .aegis/epoch_generation (or .soma/epoch_generation)."""
+    ws = str(workspace)
+    aegis_gen = os.path.join(ws, '.aegis', EPOCH_FILENAME)
+    if os.path.isfile(aegis_gen):
+        gen_path = aegis_gen
+    else:
+        soma_gen = os.path.join(ws, '.soma', EPOCH_FILENAME)
+        if os.path.isfile(soma_gen):
+            gen_path = soma_gen
+        else:
+            return DEFAULT_GENERATION
     try:
         with open(gen_path, 'r', encoding='utf-8') as f:
             content = f.read().strip()
@@ -110,18 +149,21 @@ def increment_generation(workspace: str) -> int:
     ws = str(workspace)
     with evidence_lock(ws):
         gen = read_generation(ws) + 1
-        epoch_file = os.path.join(ws, '.soma', EPOCH_FILENAME)
+        if os.path.isfile(os.path.join(ws, '.soma', EPOCH_FILENAME)) and not os.path.isfile(os.path.join(ws, '.aegis', EPOCH_FILENAME)):
+            epoch_file = os.path.join(ws, '.soma', EPOCH_FILENAME)
+        else:
+            epoch_file = os.path.join(ws, '.aegis', EPOCH_FILENAME)
         os.makedirs(os.path.dirname(epoch_file), exist_ok=True)
         _atomic_replace_bytes(epoch_file, f"{gen}\n".encode("utf-8"))
         return gen
 
 
 def get_signals_path(workspace: str) -> str:
-    return os.path.join(workspace, '.soma', 'evidence', SIGNALS_FILENAME)
+    return os.path.join(_resolve_evidence_dir(workspace), SIGNALS_FILENAME)
 
 
 def get_lock_path(workspace: str) -> str:
-    return os.path.join(workspace, '.soma', 'evidence', LOCK_FILENAME)
+    return os.path.join(_resolve_evidence_dir(workspace), LOCK_FILENAME)
 
 
 def read_signals(workspace: str) -> list[dict]:
@@ -215,6 +257,8 @@ def _migration_in_progress(workspace: str) -> bool:
     return (
         os.path.exists(os.path.join(workspace, '.soma', 'migration.lock'))
         or os.path.exists(os.path.join(workspace, '.soma', 'evidence', '.migration.lock'))
+        or os.path.exists(os.path.join(workspace, '.aegis', 'migration.lock'))
+        or os.path.exists(os.path.join(workspace, '.aegis', 'evidence', '.migration.lock'))
     )
 
 
@@ -280,8 +324,8 @@ def append_signals(workspace: str, events: list[dict], expected_generation: Opti
     if not event_specs:
         return []
 
-    evidence_dir = os.path.join(workspace, '.soma', 'evidence')
-    log_path = os.path.join(evidence_dir, SIGNALS_FILENAME)
+    evidence_dir = _resolve_evidence_dir(workspace)
+    log_path = get_signals_path(workspace)
 
     with evidence_lock(workspace):
         if _migration_in_progress(workspace):

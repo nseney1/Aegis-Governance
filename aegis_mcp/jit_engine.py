@@ -82,31 +82,32 @@ def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -
         except (ValueError, TypeError):
             pass
 
-    # 2. Environment variable SOMA_MAX_JIT_TOKENS
-    env_val = os.environ.get("SOMA_MAX_JIT_TOKENS")
+    # 2. Environment variable AEGIS_MAX_JIT_TOKENS (with SOMA_MAX_JIT_TOKENS fallback)
+    env_val = os.environ.get("AEGIS_MAX_JIT_TOKENS") or os.environ.get("SOMA_MAX_JIT_TOKENS")
     if env_val:
         try:
             return int(env_val.strip())
         except (ValueError, TypeError):
             pass
 
-    # 3. Workspace soma.conf configuration
+    # 3. Workspace aegis.conf or soma.conf configuration
     if workspace:
-        conf_path = os.path.join(workspace, "soma.conf")
-        if os.path.isfile(conf_path):
-            try:
-                with open(conf_path, encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith("#"):
-                            continue
-                        lowered = line.lower()
-                        if lowered.startswith("max_jit_tokens=") or lowered.startswith("max_jit_tokens:"):
-                            sep = "=" if "=" in line else ":"
-                            val = line.split(sep, 1)[1].strip().strip('"').strip("'")
-                            return int(val)
-            except Exception:
-                pass
+        for conf_name in ("aegis.conf", "soma.conf"):
+            conf_path = os.path.join(workspace, conf_name)
+            if os.path.isfile(conf_path):
+                try:
+                    with open(conf_path, encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line.startswith("#"):
+                                continue
+                            lowered = line.lower()
+                            if lowered.startswith("max_jit_tokens=") or lowered.startswith("max_jit_tokens:"):
+                                sep = "=" if "=" in line else ":"
+                                val = line.split(sep, 1)[1].strip().strip('"').strip("'")
+                                return int(val)
+                except Exception:
+                    pass
 
     # 4. Default fallback: 2000 tokens
     return 2000

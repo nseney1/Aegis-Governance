@@ -25,8 +25,8 @@ __all__ = ["run_sync", "SyncCommand"]
 def run_sync(args: argparse.Namespace) -> int:
     """CLI entrypoint for soma sync."""
     root = resolve_root(args)
-    evidence_dir = str(root / ".soma" / "evidence")
-    cells_dir = str(root / ".soma" / "cells")
+    evidence_dir = str((root / ".aegis" / "evidence") if (root / ".aegis" / "evidence").is_dir() else (root / ".soma" / "evidence"))
+    cells_dir = str((root / ".aegis" / "rules") if (root / ".aegis" / "rules").is_dir() else ((root / ".soma" / "rules") if (root / ".soma" / "rules").is_dir() else (root / ".soma" / "cells")))
 
     dry_run = getattr(args, "dry_run", False)
     as_json = getattr(args, "json", False)
@@ -41,7 +41,7 @@ def run_sync(args: argparse.Namespace) -> int:
                 "dry_run": dry_run,
             }, indent=2))
         else:
-            print("No evidence found in .soma/evidence/")
+            print(f"No evidence found in {evidence_dir}")
         return 0
 
     if errors:
