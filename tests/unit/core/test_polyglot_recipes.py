@@ -7,15 +7,15 @@ import subprocess
 from pathlib import Path
 import pytest
 
-from soma_core.ast.runner import ASTDriverRegistry, ASTDriverRunner
-from soma_core.ast.schema import (
+from aegis_core.ast.runner import ASTDriverRegistry, ASTDriverRunner
+from aegis_core.ast.schema import (
     CallSiteNode,
     DefinitionNode,
     ImportNode,
     MutationPoint,
     NormalizedAST,
 )
-from soma_core.verification import mutation_tester
+from aegis_core.verification import mutation_tester
 
 
 class TestMutationPointApplication:

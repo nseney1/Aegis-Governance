@@ -6,32 +6,32 @@ import os
 from pathlib import Path
 import pytest
 
-from soma_mcp.handlers.audit import (
+from aegis_mcp.handlers.audit import (
     _handle_audit_security,
     _handle_audit_performance,
     _handle_scan,
 )
-from soma_mcp.handlers.governance import (
+from aegis_mcp.handlers.governance import (
     _handle_create_cell,
     _handle_list_cells,
     _handle_propose_change,
     _handle_generate_manifest,
     _handle_soma_handoff,
 )
-from soma_mcp.handlers.telemetry import (
+from aegis_mcp.handlers.telemetry import (
     _handle_report_outcome,
     _handle_capture_insight,
     _handle_grade,
     _handle_coverage,
     _handle_fitness,
 )
-from soma_mcp.handlers.verification import (
+from aegis_mcp.handlers.verification import (
     _handle_verify_changes,
     _handle_poll_verification,
     _handle_checkpoint,
     _handle_request_receipt,
 )
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 @pytest.fixture
@@ -186,8 +186,8 @@ def test_governance_propose_change(mcp_workspace: Path, monkeypatch):
     assert res_no_file["status"] == "FAIL"
 
     # soma_propose_change is None
-    import soma_mcp.handlers.governance
-    monkeypatch.setattr(soma_mcp.handlers.governance, "soma_propose_change", None)
+    import aegis_mcp.handlers.governance
+    monkeypatch.setattr(aegis_mcp.handlers.governance, "soma_propose_change", None)
     assert _handle_propose_change({"workspace": ws, "file_path": "src/main.py"}, None) == {"error": "soma_propose_change not available"}
     monkeypatch.undo()
 
@@ -305,8 +305,8 @@ def test_telemetry_report_outcome(mcp_workspace: Path, monkeypatch):
     assert res_rule_id["status"] == "recorded"
 
     # append_signals exception branch
-    import soma_core.telemetry
-    monkeypatch.setattr(soma_core.telemetry, "append_signals", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("disk full")))
+    import aegis_core.telemetry
+    monkeypatch.setattr(aegis_core.telemetry, "append_signals", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("disk full")))
     res_fail = _handle_report_outcome({
         "workspace": ws,
         "outcome": "success",
@@ -341,7 +341,7 @@ def test_telemetry_capture_insight(mcp_workspace: Path, monkeypatch):
 
     # ImportError on capture_insight
     import sys
-    monkeypatch.setitem(sys.modules, "soma_core.insights", None)
+    monkeypatch.setitem(sys.modules, "aegis_core.insights", None)
     res_imp_err = _handle_capture_insight({"workspace": ws}, None)
     assert res_imp_err["status"] == "FAIL"
     assert "not importable" in res_imp_err["error"]
@@ -360,19 +360,19 @@ def test_telemetry_grade_and_coverage_and_fitness(mcp_workspace: Path, monkeypat
     assert isinstance(res_grade, dict)
 
     # Grade None result fallback
-    import soma_core.telemetry
-    monkeypatch.setattr(soma_core.telemetry, "calculate_immune_grade", lambda *a, **kw: None)
+    import aegis_core.telemetry
+    monkeypatch.setattr(aegis_core.telemetry, "calculate_immune_grade", lambda *a, **kw: None)
     res_none_grade = _handle_grade({"workspace": ws}, None)
     assert res_none_grade["status"] == "PASS"
     assert res_none_grade["overall"]["grade"] == "F"
 
     # Grade exception branch
-    monkeypatch.setattr(soma_core.telemetry, "calculate_immune_grade", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("grade err")))
+    monkeypatch.setattr(aegis_core.telemetry, "calculate_immune_grade", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("grade err")))
     res_grade_err = _handle_grade({"workspace": ws}, None)
     assert res_grade_err["status"] == "FAIL"
 
     # Grade non-dict result branch
-    monkeypatch.setattr(soma_core.telemetry, "calculate_immune_grade", lambda *a, **kw: "string error")
+    monkeypatch.setattr(aegis_core.telemetry, "calculate_immune_grade", lambda *a, **kw: "string error")
     assert _handle_grade({"workspace": ws}, None)["status"] == "FAIL"
 
     # Coverage with gov
@@ -386,11 +386,11 @@ def test_telemetry_grade_and_coverage_and_fitness(mcp_workspace: Path, monkeypat
     assert isinstance(res_cov, dict)
 
     # Coverage exception branch
-    monkeypatch.setattr(soma_core.telemetry, "calculate_coverage", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("cov err")))
+    monkeypatch.setattr(aegis_core.telemetry, "calculate_coverage", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("cov err")))
     assert _handle_coverage({"workspace": ws}, None)["status"] == "FAIL"
 
     # Coverage non-dict branch
-    monkeypatch.setattr(soma_core.telemetry, "calculate_coverage", lambda *a, **kw: "non-dict")
+    monkeypatch.setattr(aegis_core.telemetry, "calculate_coverage", lambda *a, **kw: "non-dict")
     assert _handle_coverage({"workspace": ws}, None)["status"] == "FAIL"
 
     # Fitness with gov
@@ -404,12 +404,12 @@ def test_telemetry_grade_and_coverage_and_fitness(mcp_workspace: Path, monkeypat
     assert isinstance(res_fit, (dict, list))
 
     # Fitness exception branch
-    import soma_core.lifecycle
-    monkeypatch.setattr(soma_core.lifecycle, "compute_cells_fitness", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("fit err")))
+    import aegis_core.lifecycle
+    monkeypatch.setattr(aegis_core.lifecycle, "compute_cells_fitness", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("fit err")))
     assert _handle_fitness({"workspace": ws}, None)["status"] == "FAIL"
 
     # Fitness dict with error key
-    monkeypatch.setattr(soma_core.lifecycle, "compute_cells_fitness", lambda *a, **kw: {"error": "computation failed"})
+    monkeypatch.setattr(aegis_core.lifecycle, "compute_cells_fitness", lambda *a, **kw: {"error": "computation failed"})
     res_fit_err = _handle_fitness({"workspace": ws}, None)
     assert res_fit_err["status"] == "FAIL"
 
@@ -438,8 +438,8 @@ def test_verification_handlers(mcp_workspace: Path, monkeypatch):
     # verify_changes ImportError without corrupting sys.modules
     orig_import = __import__
     def fake_import(name, *args, **kwargs):
-        if name == "soma_core.verification":
-            raise ImportError("soma_core.verification is not importable")
+        if name == "aegis_core.verification":
+            raise ImportError("aegis_core.verification is not importable")
         return orig_import(name, *args, **kwargs)
     monkeypatch.setattr("builtins.__import__", fake_import)
     assert "not importable" in _handle_verify_changes({"workspace": ws, "files": ["src/main.py"]}, None)["error"]
@@ -480,10 +480,10 @@ def test_verification_handlers(mcp_workspace: Path, monkeypatch):
         def run(self, *a, **kw):
             return mock_pipeline_res
 
-    import soma_core.verification
-    import soma_core.outcomes
-    monkeypatch.setattr(soma_core.verification, "VerificationPipeline", MockPipeline)
-    monkeypatch.setattr(soma_core.outcomes, "record_verification_telemetry", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("telemetry fail")))
+    import aegis_core.verification
+    import aegis_core.outcomes
+    monkeypatch.setattr(aegis_core.verification, "VerificationPipeline", MockPipeline)
+    monkeypatch.setattr(aegis_core.outcomes, "record_verification_telemetry", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("telemetry fail")))
     res_adv = _handle_verify_changes({"workspace": ws, "files": ["src/main.py"], "layer1_only": False}, None)
     assert res_adv["status"] == "PASS"
     assert "evidence_file" in res_adv
@@ -494,8 +494,8 @@ def test_verification_handlers(mcp_workspace: Path, monkeypatch):
     assert isinstance(res_verify, dict)
 
     # checkpoint when _run_checkpoint_checks is None
-    import soma_mcp.handlers.verification
-    monkeypatch.setattr(soma_mcp.handlers.verification, "_run_checkpoint_checks", None)
+    import aegis_mcp.handlers.verification
+    monkeypatch.setattr(aegis_mcp.handlers.verification, "_run_checkpoint_checks", None)
     assert _handle_checkpoint({"workspace": ws}, None)["status"] == "FAIL"
     monkeypatch.undo()
 
@@ -519,17 +519,17 @@ def test_verification_handlers(mcp_workspace: Path, monkeypatch):
         started_at: Optional[str] = "2026-01-01T00:00:00Z"
         created_at: Optional[str] = "2026-01-01T00:00:00Z"
 
-    import soma_core.verification_jobs
-    monkeypatch.setattr(soma_core.verification_jobs, "get_job", lambda jid: MockJob(jid, "COMPLETED", result={"passed": True}))
+    import aegis_core.verification.jobs
+    monkeypatch.setattr(aegis_core.verification.jobs, "get_job", lambda jid: MockJob(jid, "COMPLETED", result={"passed": True}))
     assert _handle_poll_verification({"workspace": ws, "job_id": "j1"}, None)["status"] == "COMPLETED"
 
-    monkeypatch.setattr(soma_core.verification_jobs, "get_job", lambda jid: MockJob(jid, "FAILED", error="job crashed"))
+    monkeypatch.setattr(aegis_core.verification.jobs, "get_job", lambda jid: MockJob(jid, "FAILED", error="job crashed"))
     assert _handle_poll_verification({"workspace": ws, "job_id": "j2"}, None)["status"] == "FAILED"
 
-    monkeypatch.setattr(soma_core.verification_jobs, "get_job", lambda jid: MockJob(jid, "RUNNING"))
+    monkeypatch.setattr(aegis_core.verification.jobs, "get_job", lambda jid: MockJob(jid, "RUNNING"))
     assert _handle_poll_verification({"workspace": ws, "job_id": "j3"}, None)["status"] == "RUNNING"
 
-    monkeypatch.setattr(soma_core.verification_jobs, "get_job", lambda jid: MockJob(jid, "QUEUED"))
+    monkeypatch.setattr(aegis_core.verification.jobs, "get_job", lambda jid: MockJob(jid, "QUEUED"))
     assert _handle_poll_verification({"workspace": ws, "job_id": "j4"}, None)["status"] == "QUEUED"
 
     # checkpoint invalid workspace
@@ -552,10 +552,10 @@ def test_verification_handlers(mcp_workspace: Path, monkeypatch):
     assert res_rr["status"] == "ISSUED"
 
     # request_receipt digest computation failure
-    import soma_core.receipts
-    monkeypatch.setattr(soma_core.receipts, "compute_file_digest", lambda *a, **kw: (_ for _ in ()).throw(ValueError("digest failed")))
+    import aegis_core.receipts
+    monkeypatch.setattr(aegis_core.receipts, "compute_file_digest", lambda *a, **kw: (_ for _ in ()).throw(ValueError("digest failed")))
     assert _handle_request_receipt({"workspace": ws, "operation": "test_op"}, None)["status"] == "FAIL"
 
-    soma_core.verification_jobs.clear_all_jobs()
+    aegis_core.verification.jobs.clear_all_jobs()
 
 

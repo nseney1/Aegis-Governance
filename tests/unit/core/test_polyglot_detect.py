@@ -2,12 +2,12 @@
 from pathlib import Path
 import pytest
 
-from soma_core.ast.detect import (
+from aegis_core.ast.detect import (
     detect_project_languages,
     resolve_recommended_drivers,
     provision_ast_driver_slots,
 )
-from soma_core.skills.slots import SlotRegistry
+from aegis_core.skills.slots import SlotRegistry
 
 
 def test_detect_project_languages_python(tmp_path: Path):

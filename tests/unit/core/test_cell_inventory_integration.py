@@ -42,8 +42,8 @@ def _symlinked_cell_directory(tmp_path):
 
 
 def test_sdk_and_mcp_direct_list_reject_symlinked_directory(tmp_path, monkeypatch):
-    from soma_sdk.governance import Governance
-    import soma_mcp.tools as tools
+    from aegis_sdk.governance import Governance
+    import aegis_mcp.tools as tools
 
     workspace = _symlinked_cell_directory(tmp_path)
 
@@ -58,8 +58,8 @@ def test_sdk_and_mcp_direct_list_reject_symlinked_directory(tmp_path, monkeypatc
 
 
 def test_mcp_transport_marks_inventory_failure_as_error(tmp_path, monkeypatch):
-    import soma_mcp.server as server
-    import soma_mcp.tools as tools
+    import aegis_mcp.server as server
+    import aegis_mcp.tools as tools
 
     workspace = _symlinked_cell_directory(tmp_path)
     monkeypatch.setattr(server, "_session_token", "inventory-test")
@@ -80,8 +80,8 @@ def test_mcp_transport_marks_inventory_failure_as_error(tmp_path, monkeypatch):
 
 
 def test_same_size_restored_mtime_edit_is_visible_to_sdk_and_mcp(tmp_path, monkeypatch):
-    from soma_sdk.governance import Governance
-    import soma_mcp.tools as tools
+    from aegis_sdk.governance import Governance
+    import aegis_mcp.tools as tools
 
     cell_path = _write_cell(tmp_path, "alpha", "first")
     governance = Governance(project_root=tmp_path)
@@ -103,8 +103,8 @@ def test_same_size_restored_mtime_edit_is_visible_to_sdk_and_mcp(tmp_path, monke
 
 
 def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypatch):
-    from soma_sdk.governance import Governance
-    import soma_mcp.tools as tools
+    from aegis_sdk.governance import Governance
+    import aegis_mcp.tools as tools
 
     bad_path = tmp_path / ".soma" / "cells" / "walls" / "bad.md"
     bad_path.parent.mkdir(parents=True)
@@ -126,8 +126,8 @@ def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypa
 
 
 def test_create_prompt_uses_inventory_bytes_without_reopen(tmp_path, monkeypatch):
-    from soma_core.cell_inventory import inventory_cells
-    import soma_mcp.tools as tools
+    from aegis_core.cell_inventory import inventory_cells
+    import aegis_mcp.tools as tools
 
     cell_path = _write_cell(tmp_path, "snapshot", "captured hypothesis")
     snapshot = inventory_cells(str(tmp_path))
@@ -146,8 +146,8 @@ def test_create_prompt_uses_inventory_bytes_without_reopen(tmp_path, monkeypatch
 
 
 def test_create_prompt_rejects_outside_symlinked_example(tmp_path):
-    from soma_core.cell_inventory import CellInventoryError
-    from soma_mcp.tools import build_cell_create_prompt
+    from aegis_core.cell_inventory import CellInventoryError
+    from aegis_mcp.tools import build_cell_create_prompt
 
     workspace = _symlinked_cell_directory(tmp_path)
     with pytest.raises(CellInventoryError, match="symlink"):
@@ -155,8 +155,8 @@ def test_create_prompt_rejects_outside_symlinked_example(tmp_path):
 
 
 def test_mcp_fallback_parses_inventory_when_yaml_is_absent(tmp_path, monkeypatch):
-    import soma_mcp.jit_engine as jit_engine
-    import soma_mcp.tools as tools
+    import aegis_mcp.jit_engine as jit_engine
+    import aegis_mcp.tools as tools
 
     _write_cell(tmp_path, "fallback", "stdlib parser")
     monkeypatch.setattr(tools, "_HAS_SDK", False)

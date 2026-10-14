@@ -1,11 +1,11 @@
-"""Unit tests for soma_core.arbitration."""
+"""Unit tests for aegis_core.proposals."""
 from __future__ import annotations
 
 import os
 from pathlib import Path
 import pytest
 
-from soma_core.arbitration import (
+from aegis_core.proposals import (
     TTCVerifier,
     VERDICT_APPROVED,
     VERDICT_REJECTED,

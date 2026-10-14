@@ -21,7 +21,7 @@ def _write_cell(path, cell_id="cell-a"):
 
 
 def test_inventory_is_stable_and_captures_exact_bytes(tmp_path):
-    from soma_core.cell_inventory import inventory_cells
+    from aegis_core.cell_inventory import inventory_cells
 
     first_path = tmp_path / ".soma" / "cells" / "walls" / "b.md"
     second_path = tmp_path / ".soma" / "cells" / "vacuoles" / "a.md"
@@ -48,7 +48,7 @@ def test_cell_edited_after_creation_is_inventoried(tmp_path):
     """BUG-035: on Windows os.stat reports st_ctime as creation time but
     os.fstat reports it as last-change time, so any cell edited after it was
     created was rejected as 'changed before it was opened'."""
-    from soma_core.cell_inventory import inventory_cells
+    from aegis_core.cell_inventory import inventory_cells
 
     cell = tmp_path / ".soma" / "cells" / "walls" / "edited.md"
     _write_cell(cell, "edited")
@@ -65,7 +65,7 @@ def test_cell_edited_after_creation_is_inventoried(tmp_path):
 
 
 def test_missing_cells_directory_has_stable_empty_inventory(tmp_path):
-    from soma_core.cell_inventory import inventory_cells
+    from aegis_core.cell_inventory import inventory_cells
 
     inventory = inventory_cells(str(tmp_path))
     assert inventory.entries == ()
@@ -73,7 +73,7 @@ def test_missing_cells_directory_has_stable_empty_inventory(tmp_path):
 
 
 def test_symlinked_cell_is_rejected(tmp_path):
-    from soma_core.cell_inventory import CellInventoryError, inventory_cells
+    from aegis_core.cell_inventory import CellInventoryError, inventory_cells
 
     outside = tmp_path / "outside.md"
     _write_cell(outside, "outside")
@@ -89,9 +89,9 @@ def test_symlinked_cell_is_rejected(tmp_path):
 
 
 def test_symlinked_directory_that_would_feed_jit_is_rejected(tmp_path):
-    from soma_mcp.cell_cache import CellCacheError
-    from soma_mcp.jit_engine import CellCache, express
-    import soma_mcp.jit_engine as jit_engine
+    from aegis_mcp.cell_cache import CellCacheError
+    from aegis_mcp.jit_engine import CellCache, express
+    import aegis_mcp.jit_engine as jit_engine
 
     outside = tmp_path / "outside" / "walls"
     _write_cell(outside / "external.md", "external")
@@ -113,7 +113,7 @@ def test_symlinked_directory_that_would_feed_jit_is_rejected(tmp_path):
 
 
 def test_find_matching_cells(tmp_path):
-    from soma_core.cell_inventory import find_matching_cells
+    from aegis_core.cell_inventory import find_matching_cells
     cells_dir = tmp_path / ".soma" / "cells"
     _write_cell(cells_dir / "walls" / "test_wall.md", "test-wall")
 
@@ -130,7 +130,7 @@ def test_find_matching_cells(tmp_path):
 
 
 def test_inventory_aegis_rules_and_soma_rules(tmp_path):
-    from soma_core.cell_inventory import inventory_cells, inventory_rules
+    from aegis_core.cell_inventory import inventory_cells, inventory_rules
 
     # Test .aegis/rules
     ws_aegis = tmp_path / "ws_aegis"

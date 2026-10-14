@@ -10,8 +10,8 @@ import sys
 import subprocess
 import pytest
 
-from aegis_core.somayaml import parse_frontmatter
-from tests.helpers_cell import soma_workspace, write_cell_with_fitness
+from aegis_core.yaml import parse_frontmatter
+from tests.helpers_rule import soma_workspace, write_cell_with_fitness
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)

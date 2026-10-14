@@ -1,4 +1,4 @@
-"""Tests for soma_core.lifecycle — canonical cell state transitions, scoring, and operations."""
+"""Tests for aegis_core.lifecycle — canonical cell state transitions, scoring, and operations."""
 from __future__ import annotations
 
 import os
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.lifecycle import (
+from aegis_core.lifecycle import (
     PROTECTED_RULES,
     STATUS_ADAPT,
     STATUS_APOPTOSIS,

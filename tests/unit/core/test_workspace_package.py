@@ -1,7 +1,7 @@
 """Behavioral tests verifying the modular soma_core/workspace/ package architecture.
 
 Validates:
-1. soma_core.workspace is a proper package with __init__.py.
+1. aegis_core.workspace is a proper package with __init__.py.
 2. Direct submodule imports: base, git, discovery, confinement, scaffold, hooks.
 3. Canonical symbols re-exported at package root.
 4. Workspace.is_soma_repo compound property.
@@ -18,27 +18,27 @@ class TestWorkspacePackageArchitecture:
     """Verifies that soma_core/workspace is a clean modular package."""
 
     def test_workspace_is_a_package(self):
-        import soma_core.workspace
-        assert soma_core.workspace.__file__ is not None
-        assert soma_core.workspace.__file__.endswith("__init__.py")
+        import aegis_core.workspace
+        assert aegis_core.workspace.__file__ is not None
+        assert aegis_core.workspace.__file__.endswith("__init__.py")
 
     def test_direct_submodule_imports(self):
-        import soma_core.workspace.base
-        import soma_core.workspace.git
-        import soma_core.workspace.discovery
-        import soma_core.workspace.confinement
-        import soma_core.workspace.scaffold
-        import soma_core.workspace.hooks
+        import aegis_core.workspace.base
+        import aegis_core.workspace.git
+        import aegis_core.workspace.discovery
+        import aegis_core.workspace.confinement
+        import aegis_core.workspace.scaffold
+        import aegis_core.workspace.hooks
 
-        assert hasattr(soma_core.workspace.base, "Workspace")
-        assert hasattr(soma_core.workspace.git, "GitWorkspace")
-        assert hasattr(soma_core.workspace.discovery, "is_soma_repo")
-        assert hasattr(soma_core.workspace.confinement, "confine_path_internal")
-        assert hasattr(soma_core.workspace.scaffold, "scaffold_workspace")
-        assert hasattr(soma_core.workspace.hooks, "resolve_git_hooks_dir")
+        assert hasattr(aegis_core.workspace.base, "Workspace")
+        assert hasattr(aegis_core.workspace.git, "GitWorkspace")
+        assert hasattr(aegis_core.workspace.discovery, "is_soma_repo")
+        assert hasattr(aegis_core.workspace.confinement, "confine_path_internal")
+        assert hasattr(aegis_core.workspace.scaffold, "scaffold_workspace")
+        assert hasattr(aegis_core.workspace.hooks, "resolve_git_hooks_dir")
 
     def test_package_re_exports_canonical_symbols(self):
-        from soma_core.workspace import (
+        from aegis_core.workspace import (
             GitWorkspace,
             Workspace,
             as_workspace,
@@ -58,7 +58,7 @@ class TestWorkspacePackageArchitecture:
         assert callable(resolve_workspace)
 
     def test_is_soma_repo_compound_fingerprint(self, tmp_path):
-        from soma_core.workspace import Workspace
+        from aegis_core.workspace import Workspace
 
         # Dummy foreign repository
         foreign = tmp_path / "foreign"
@@ -87,7 +87,7 @@ class TestWorkspacePackageArchitecture:
         assert ws_soma.is_soma_repo
 
     def test_backward_compatibility_facades_work_unchanged(self, tmp_path):
-        from soma_core.workspace import (
+        from aegis_core.workspace import (
             Workspace,
             resolve_workspace,
             confine_workspace,

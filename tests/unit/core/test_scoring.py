@@ -1,11 +1,11 @@
-"""Unit tests for soma_core.scoring (Layer 0 Core)."""
+"""Unit tests for aegis_core.scoring (Layer 0 Core)."""
 from __future__ import annotations
 
 import math
 from fractions import Fraction
 import pytest
 
-from soma_core.scoring import (
+from aegis_core.scoring import (
     _to_num,
     _wilson_interval,
     bayesian_posterior,

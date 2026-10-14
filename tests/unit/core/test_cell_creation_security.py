@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 def test_load_cell_uses_created_field(tmp_path):
     """load_cell must read 'created' field from cell frontmatter."""
-    from soma_sdk.cells import load_cell
+    from aegis_sdk.cells import load_cell
     cell_file = tmp_path / ".soma" / "cells" / "vacuoles" / "created-test.md"
     cell_file.parent.mkdir(parents=True, exist_ok=True)
     cell_file.write_text("""---
@@ -32,7 +32,7 @@ body
 
 def test_cell_enforce_handles_null_target_paths():
     """generate_precommit_check must handle target_paths=None without crashing."""
-    from soma_core.enforcement import generate_precommit_check
+    from aegis_core.enforcement import generate_precommit_check
     cell = {
         "_name": "test-null-targets",
         "type": "wall",
@@ -44,7 +44,7 @@ def test_cell_enforce_handles_null_target_paths():
 
 def test_pathcheck_on_path_handles_windows_colons():
     """on_path with sep=';' should not corrupt Windows drive paths containing colons."""
-    from soma_cli.pathcheck import on_path
+    from aegis_cli.pathcheck import on_path
     path_env = r"C:\Python312\Scripts;C:\Windows\System32"
     assert on_path(r"C:\Python312\Scripts", path_env, sep=";", casefold=True)
 

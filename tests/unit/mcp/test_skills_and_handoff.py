@@ -7,8 +7,8 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from soma_core.errors import HandoffAuthorizationError, InvalidHandoffPayloadError, SomaValidationError
-from soma_core.schemas.artifacts import (
+from aegis_core.errors import HandoffAuthorizationError, InvalidHandoffPayloadError, SomaValidationError
+from aegis_core.schemas.artifacts import (
     ArtifactEnvelope,
     ArtifactRegistry,
     ChargeSheet,
@@ -17,11 +17,11 @@ from soma_core.schemas.artifacts import (
     TestVerdict,
     validate_artifact_production,
 )
-from soma_core.skills.graph import SkillGraph, SkillNode
-from soma_core.skills.handoff import HandoffRouter, HandoffTicket, soma_handoff
-from soma_core.skills.slots import SlotRegistry, SlotResolutionError
-from soma_core.somayaml import SomaYAML
-from soma_core.workspace import Workspace
+from aegis_core.skills.graph import SkillGraph, SkillNode
+from aegis_core.skills.handoff import HandoffRouter, HandoffTicket, soma_handoff
+from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
+from aegis_core.yaml import SomaYAML
+from aegis_core.workspace import Workspace
 
 
 class TestSlotRegistry:
@@ -459,7 +459,7 @@ class TestArtifactsAndSkillsBranchHardening:
         assert "A" * 100 in block
 
         # _get_tree_hash returncode == 0
-        from soma_core.skills.handoff import _get_tree_hash
+        from aegis_core.skills.handoff import _get_tree_hash
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess([], 0, stdout="treehash12345\n"))
         assert _get_tree_hash(tmp_path) == "treehash12345"
 
@@ -537,15 +537,15 @@ class TestArtifactsAndSkillsBranchHardening:
             reg2.resolve("Hello ${missing}")
 
     def test_skill_node_from_doc_mutant_kills(self):
-        from soma_core.skills.graph import SkillNode
-        from soma_core.somayaml import SomaDocument
+        from aegis_core.skills.graph import SkillNode
+        from aegis_core.yaml import SomaDocument
         doc = SomaDocument(metadata={"id": "skill-custom", "tier": "specialist", "description": "desc"})
         node = SkillNode.from_doc(doc)
         assert node.tier == "specialist"
         assert node.tier != "method"
 
     def test_handoff_ticket_format_prompt_block_slice(self):
-        from soma_core.skills.handoff import HandoffTicket
+        from aegis_core.skills.handoff import HandoffTicket
         ticket = HandoffTicket(
             ticket_id="t1",
             artifact_type="diff",
@@ -562,7 +562,7 @@ class TestArtifactsAndSkillsBranchHardening:
         assert "[HMAC]: 0123456789abc..." not in block
 
     def test_get_ast_driver_branch_coverage_and_mutant_kills(self):
-        from soma_core.skills.slots import SlotRegistry
+        from aegis_core.skills.slots import SlotRegistry
         reg = SlotRegistry({
             "ast_driver_ts": "node install/drivers/ts_ast.js",
             "ast_driver": "default-runner",

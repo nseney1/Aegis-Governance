@@ -12,8 +12,8 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.scoring import bayesian_posterior, laplace_score, _wilson_interval
-from soma_sdk.cells import Cell, CellFitness
+from aegis_sdk.scoring import bayesian_posterior, laplace_score, _wilson_interval
+from aegis_sdk.cells import Cell, CellFitness
 
 
 class TestLaplaceThresholds:

@@ -16,7 +16,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_core.verification import ToolEvidence
+from aegis_core.verification import ToolEvidence
 from unittest.mock import patch, MagicMock
 
 
@@ -25,7 +25,7 @@ class TestMutationTesterContract:
 
     def test_returns_tool_evidence(self, tmp_path):
         """check() must return a passing ToolEvidence for a well-tested function."""
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -55,7 +55,7 @@ class TestMutationTesterContract:
 
     def test_catches_tautological_test(self, tmp_path):
         """A test that passes regardless of implementation should FAIL."""
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -86,7 +86,7 @@ class TestMutationTesterContract:
 
     def test_real_test_passes(self, tmp_path):
         """A test that validates behavior should PASS (no survivors)."""
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -119,7 +119,7 @@ class TestMutationTesterContract:
 
     def test_reports_survival_count(self, tmp_path):
         """Result detail must include numeric survived vs total counts."""
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -147,7 +147,7 @@ class TestMutationTesterContract:
 
     def test_empty_function_passes(self, tmp_path):
         """A function with no mutable operations should pass trivially."""
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -177,7 +177,7 @@ class TestMutationTesterBudget:
 
     def test_respects_max_mutations(self, tmp_path):
         """Must not generate more mutations than the budget allows."""
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -227,7 +227,7 @@ class TestMutationTesterFailsClosed:
         return src
 
     def test_unrunnable_test_file_fails_closed(self, tmp_path):
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = self._target(tmp_path)
         test = tmp_path / "test_target.py"
@@ -245,7 +245,7 @@ class TestMutationTesterFailsClosed:
         assert result.lines == [-1]
 
     def test_baseline_assertion_failure_fails_closed(self, tmp_path):
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = self._target(tmp_path)
         test = tmp_path / "test_target.py"
@@ -268,7 +268,7 @@ class TestMutationTesterAppliesEveryCollectedMutation:
     check them still reported verdict=True ("0/2 survived")."""
 
     def test_unchecked_comparison_survives(self, tmp_path):
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -289,7 +289,7 @@ class TestMutationTesterAppliesEveryCollectedMutation:
         assert result.detail == "2/2 survived"
 
     def test_checked_boolean_logic_kills_mutants(self, tmp_path):
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -313,7 +313,7 @@ class TestMutationTesterAppliesEveryCollectedMutation:
     def test_docstring_and_return_none_are_not_mutated(self, tmp_path):
         """Deleting a docstring or turning `return None` into `return None`
         changes nothing, so no test could kill those mutants."""
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent('''\
@@ -347,7 +347,7 @@ class TestMutationTesterBoolAndTargetLines:
     """Tests for boolean constant mutation and target_lines scoping."""
 
     def test_bool_constant_mutated(self, tmp_path):
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -368,7 +368,7 @@ class TestMutationTesterBoolAndTargetLines:
         assert "survived" in result.detail
 
     def test_target_lines_filtering(self, tmp_path):
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         src = tmp_path / "target.py"
         src.write_text(textwrap.dedent("""\
@@ -400,8 +400,8 @@ class TestPolyglotMutationTesterCoverage:
     """Branch and line coverage for apply_mutation_point, collect_mutations_from_ast, and non-python check()."""
 
     def test_apply_mutation_point_coverage(self):
-        from soma_core.ast.schema import MutationPoint
-        from soma_core.verification.mutation_tester import apply_mutation_point
+        from aegis_core.ast.schema import MutationPoint
+        from aegis_core.verification.mutation_tester import apply_mutation_point
 
         # 1. No original op
         pt_empty = MutationPoint(line=1, col=0, original_op="", replacement_op="", mutation_type="cmpop")
@@ -442,8 +442,8 @@ class TestPolyglotMutationTesterCoverage:
         assert apply_mutation_point(source, pt_missing) is None
 
     def test_collect_mutations_from_ast_coverage(self):
-        from soma_core.ast.schema import MutationPoint, NormalizedAST
-        from soma_core.verification.mutation_tester import collect_mutations_from_ast
+        from aegis_core.ast.schema import MutationPoint, NormalizedAST
+        from aegis_core.verification.mutation_tester import collect_mutations_from_ast
 
         # Empty points
         ast_empty = NormalizedAST(file_path="f.ts", language="typescript", mutation_points=())
@@ -461,7 +461,7 @@ class TestPolyglotMutationTesterCoverage:
         assert collect_mutations_from_ast(ast_pts, target_function="bar") == [p2]
 
     def test_check_non_python_runner_error(self, tmp_path):
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
 
         ts_file = tmp_path / "app.ts"
         ts_file.write_text("export function test() {}")
@@ -476,8 +476,8 @@ class TestPolyglotMutationTesterCoverage:
         assert "Failed to parse NormalizedAST" in ev.detail
 
     def test_check_non_python_no_mutations_on_lines(self, tmp_path):
-        from soma_core.ast.schema import MutationPoint, NormalizedAST
-        from soma_core.verification import mutation_tester
+        from aegis_core.ast.schema import MutationPoint, NormalizedAST
+        from aegis_core.verification import mutation_tester
 
         ts_file = tmp_path / "app.ts"
         ts_file.write_text("export function test() { return 1; }")
@@ -494,8 +494,8 @@ class TestPolyglotMutationTesterCoverage:
         assert ev.detail == "No mutations on modified lines"
 
     def test_check_non_python_baseline_fail_and_survived_and_killed(self, tmp_path):
-        from soma_core.ast.schema import MutationPoint, NormalizedAST
-        from soma_core.verification import mutation_tester
+        from aegis_core.ast.schema import MutationPoint, NormalizedAST
+        from aegis_core.verification import mutation_tester
 
         ts_file = tmp_path / "app.ts"
         ts_file.write_text("export function test() { return 1 + 2; }")
@@ -509,27 +509,27 @@ class TestPolyglotMutationTesterCoverage:
         mock_runner.parse_file.return_value = mock_ast
 
         # 1. Baseline tests fail
-        with patch("soma_core.verification.mutation_tester._run_tests", return_value=False):
+        with patch("aegis_core.verification.mutation_tester._run_tests", return_value=False):
             ev = mutation_tester.check(str(ts_file), "test", str(test_file), ast_runner=mock_runner)
             assert ev.verdict is False
             assert "Baseline tests fail" in ev.detail
 
         # 2. Mutant survives (test passes against mutant)
-        with patch("soma_core.verification.mutation_tester._run_tests", return_value=True):
+        with patch("aegis_core.verification.mutation_tester._run_tests", return_value=True):
             ev = mutation_tester.check(str(ts_file), "test", str(test_file), max_mutations=2, ast_runner=mock_runner)
             assert ev.verdict is False
             assert "1/2 survived" in ev.detail
 
         # 3. Mutant killed (baseline passes, mutant fails)
         run_results = [True, False]  # first baseline passes, then mutant fails
-        with patch("soma_core.verification.mutation_tester._run_tests", side_effect=run_results):
+        with patch("aegis_core.verification.mutation_tester._run_tests", side_effect=run_results):
             ev = mutation_tester.check(str(ts_file), "test", str(test_file), max_mutations=1, ast_runner=mock_runner)
             assert ev.verdict is True
             assert "0/1 survived" in ev.detail
 
     def test_mutation_tester_reports_diagnostic_baseline_reasons(self, tmp_path, monkeypatch):
         """BUG-095: Mutation tester must report why baseline check failed."""
-        from soma_core.verification import mutation_tester
+        from aegis_core.verification import mutation_tester
         import subprocess
 
         src = tmp_path / "target.py"
@@ -538,7 +538,7 @@ class TestPolyglotMutationTesterCoverage:
         test.write_text("def test_inc():\n    assert inc(1) == 2\n")
 
         # 1. Missing runner
-        with patch("soma_core.verification.test_runner.resolve_pytest_cmd", return_value=None):
+        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=None):
             ev = mutation_tester.check(str(src), "inc", str(test))
             assert ev.verdict is False
             assert "pytest executable could not be resolved" in ev.detail
@@ -548,7 +548,7 @@ class TestPolyglotMutationTesterCoverage:
             raise subprocess.TimeoutExpired("pytest", 30)
 
         monkeypatch.setattr(subprocess, "run", mock_timeout)
-        with patch("soma_core.verification.test_runner.resolve_pytest_cmd", return_value=["pytest"]):
+        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=["pytest"]):
             ev = mutation_tester.check(str(src), "inc", str(test))
             assert ev.verdict is False
             assert "timed out after 30s" in ev.detail
@@ -560,7 +560,7 @@ class TestPolyglotMutationTesterCoverage:
             )
 
         monkeypatch.setattr(subprocess, "run", mock_fail)
-        with patch("soma_core.verification.test_runner.resolve_pytest_cmd", return_value=["pytest"]):
+        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=["pytest"]):
             ev = mutation_tester.check(str(src), "inc", str(test))
             assert ev.verdict is False
             assert "exit code 1" in ev.detail
@@ -571,13 +571,13 @@ class TestPolyglotMutationTesterCoverage:
             raise OSError("disk read failure")
 
         monkeypatch.setattr(subprocess, "run", mock_err)
-        with patch("soma_core.verification.test_runner.resolve_pytest_cmd", return_value=["pytest"]):
+        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=["pytest"]):
             ev = mutation_tester.check(str(src), "inc", str(test))
             assert ev.verdict is False
             assert "execution error: disk read failure" in ev.detail
 
         # 5. Empty detail fallback
-        with patch("soma_core.verification.mutation_tester._check_tests",
+        with patch("aegis_core.verification.mutation_tester._check_tests",
                    return_value=mutation_tester.TestRunResult(passed=False, status="fail", detail="")):
             passed, detail = mutation_tester._run_baseline(str(test))
             assert passed is False

@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 import pytest
-from soma_core.somayaml import dump_frontmatter, parse_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
@@ -24,8 +24,8 @@ class TestPromotionZeroTriggerGuard:
 
     def test_normalize_fitness_zero_triggers_not_promoted(self, tmp_path):
         """A cell with 0 triggers must not be promotable via lifecycle evaluation."""
-        from soma_core.lifecycle import evaluate_promotions
-        from tests.helpers_cell import make_cell
+        from aegis_core.lifecycle import evaluate_promotions
+        from tests.helpers_rule import make_cell
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -40,8 +40,8 @@ class TestPromotionZeroTriggerGuard:
 
     def test_normalize_fitness_high_triggers_preserves_data(self, tmp_path):
         """A high-quality cell with 50 triggers (48 TP, 1 FP) must be promoted."""
-        from soma_core.lifecycle import evaluate_promotions
-        from tests.helpers_cell import make_cell, write_evidence
+        from aegis_core.lifecycle import evaluate_promotions
+        from tests.helpers_rule import make_cell, write_evidence
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)

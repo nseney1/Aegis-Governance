@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.errors import (
+from aegis_core.errors import (
     PathTraversalError,
     SomaError,
     SomaValidationError,
     WorkspaceError,
     WorkspaceNotFoundError,
 )
-from soma_core.workspace import (
+from aegis_core.workspace import (
     Workspace,
     confine_path,
     confine_workspace,

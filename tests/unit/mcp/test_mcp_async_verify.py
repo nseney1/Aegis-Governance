@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.verification_jobs import (
+from aegis_core.verification.jobs import (
     JOB_STATUS_COMPLETED,
     JOB_STATUS_FAILED,
     JOB_STATUS_QUEUED,
@@ -24,8 +24,8 @@ from soma_core.verification_jobs import (
     list_jobs,
     submit_verification_job,
 )
-from soma_mcp.server import _READ_TOOLS
-from soma_mcp.tools import TOOL_DEFINITIONS, execute_tool
+from aegis_mcp.server import _READ_TOOLS
+from aegis_mcp.tools import TOOL_DEFINITIONS, execute_tool
 
 
 @pytest.fixture(autouse=True)
@@ -194,7 +194,7 @@ class TestMcpAsyncExecutionAndPolling:
         assert "missing" in finished.result.get("layer2_error", "").lower()
 
     def test_max_jobs_prunes_oldest(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        from soma_core import verification_jobs
+        from aegis_core.verification import jobs as verification_jobs
         monkeypatch.setattr(verification_jobs, "MAX_JOBS", 5)
         created_ids = []
         for i in range(7):
@@ -208,8 +208,8 @@ class TestMcpAsyncExecutionAndPolling:
 
     def test_poll_verification_bogus_job_id_does_not_exhaust_rate_limit(self):
         """C-03: Repeated bogus job_ids must roll back rate limit and not lock out legitimate callers."""
-        from soma_mcp.server import handle_request
-        import soma_mcp.server as s_mod
+        from aegis_mcp.server import handle_request
+        import aegis_mcp.server as s_mod
 
         # Reset rate limit counter for poll tool
         s_mod._tool_call_times["soma_poll_verification"].clear()

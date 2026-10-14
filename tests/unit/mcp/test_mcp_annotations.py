@@ -5,8 +5,8 @@ soma_mcp/tools.py; see docs/project/CHANGELOG.md for rationale.
 """
 import pytest
 
-import soma_mcp.server as server_module
-from soma_mcp.server import handle_request
+import aegis_mcp.server as server_module
+from aegis_mcp.server import handle_request
 
 _HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 

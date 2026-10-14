@@ -8,7 +8,7 @@ disable AFC in its generate_content config.
 import sys
 from unittest.mock import MagicMock, patch
 
-from soma_core.inference_provider import GeminiProvider
+from aegis_core.inference_provider import GeminiProvider
 
 
 def test_gemini_provider_disables_automatic_function_calling():

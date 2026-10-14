@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from soma_mcp.jit_engine import express, estimate_tokens
+from aegis_mcp.jit_engine import express, estimate_tokens
 
 
 class TestJITContextBudgetClamping(unittest.TestCase):

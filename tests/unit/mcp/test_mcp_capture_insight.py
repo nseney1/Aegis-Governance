@@ -18,11 +18,11 @@ class TestMCPCaptureInsight:
 
     def test_records_valid_insight(self, tmp_path, monkeypatch):
         """Valid insight returns status=recorded."""
-        from soma_mcp.tools import execute_tool
+        from aegis_mcp.tools import execute_tool
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma", "cells"), exist_ok=True)
-        monkeypatch.setattr("soma_mcp.tools.resolve_workspace", lambda args=None: workspace)
+        monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
         result = execute_tool("soma_capture_insight", {
             "insight": "Check the aspect ratio",
@@ -36,11 +36,11 @@ class TestMCPCaptureInsight:
 
     def test_rejects_empty_files(self, tmp_path, monkeypatch):
         """Empty context_files returns an error."""
-        from soma_mcp.tools import execute_tool
+        from aegis_mcp.tools import execute_tool
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma", "cells"), exist_ok=True)
-        monkeypatch.setattr("soma_mcp.tools.resolve_workspace", lambda args=None: workspace)
+        monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
         result = execute_tool("soma_capture_insight", {
             "insight": "Something",
@@ -51,11 +51,11 @@ class TestMCPCaptureInsight:
 
     def test_persists_to_jsonl(self, tmp_path, monkeypatch):
         """Insight is persisted to .soma/human_insights.jsonl."""
-        from soma_mcp.tools import execute_tool
+        from aegis_mcp.tools import execute_tool
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma", "cells"), exist_ok=True)
-        monkeypatch.setattr("soma_mcp.tools.resolve_workspace", lambda args=None: workspace)
+        monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
         execute_tool("soma_capture_insight", {
             "insight": "Test persistence",

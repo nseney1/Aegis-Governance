@@ -1,4 +1,4 @@
-"""Tests for soma_core.somayaml — Pure-Python SomaYAML engine & unified domain model."""
+"""Tests for aegis_core.yaml — Pure-Python SomaYAML engine & unified domain model."""
 from __future__ import annotations
 
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from conftest import symlink_or_skip
-from soma_core.somayaml import (
+from aegis_core.yaml import (
     SomaYAML,
     SomaDocument,
     SomaYAMLError,
@@ -21,7 +21,7 @@ from soma_core.somayaml import (
     MAX_LINES,
     MAX_DEPTH,
 )
-from soma_core.workspace import Workspace
+from aegis_core.workspace import Workspace
 
 
 class TestSomaYAMLCoreParsing:
@@ -324,12 +324,12 @@ class TestBackwardCompatibilityParity:
 
 
 from tests.unit.core.test_frontmatter_engine import TestFrontmatterParser, TestFrontmatterDumper
-from soma_core.somayaml import write_frontmatter
+from aegis_core.yaml import write_frontmatter
 import datetime
 
 
 class TestSomaYAMLBranchHardening:
-    """Systematic branch coverage hardening for soma_core.somayaml."""
+    """Systematic branch coverage hardening for aegis_core.yaml."""
 
     def test_soma_document_comprehensive_properties(self, tmp_path: Path):
         doc = SomaDocument(metadata={"kind": "skill", "id": "s1", "type": "wall"}, body="body text", source_path="/tmp/doc.md")
@@ -590,7 +590,7 @@ items:
             parse_yaml_subset(f"key: {deep_flow}")
 
         # Unterminated / mismatched quote scalar in _parse_scalar
-        from soma_core.somayaml import _parse_scalar
+        from aegis_core.yaml import _parse_scalar
         with pytest.raises(FrontmatterError, match="unterminated quoted scalar"):
             _parse_scalar("\"mismatched'")
 
@@ -599,11 +599,11 @@ items:
         assert res_bad_big_u["key"] == "U000000ZZ"
 
         # CRLF line continuation
-        from soma_core.somayaml import _unescape_double
+        from aegis_core.yaml import _unescape_double
         assert _unescape_double("line1\\\r\n  line2") == "line1  line2"
 
         # _strip_comment quote escaping
-        from soma_core.somayaml import _strip_comment, _is_quote_closed, _parse_flow
+        from aegis_core.yaml import _strip_comment, _is_quote_closed, _parse_flow
         assert _strip_comment(r'key: "val \"with\" quotes" # c') == r'key: "val \"with\" quotes" '
         assert _strip_comment("key: 'it''s awesome' # c") == "key: 'it''s awesome' "
 
@@ -660,7 +660,7 @@ items:
             parse_yaml_subset("items:\n  - \"unclosed\n  - sibling")
 
         # Depth limits on helper functions directly
-        from soma_core.somayaml import _parse_flow_map, _parse_block_map, _parse_block_seq
+        from aegis_core.yaml import _parse_flow_map, _parse_block_map, _parse_block_seq
         with pytest.raises(SomaYAMLError, match="nesting depth"):
             _parse_flow("a", 0, depth=35)
         with pytest.raises(SomaYAMLError, match="nesting depth"):

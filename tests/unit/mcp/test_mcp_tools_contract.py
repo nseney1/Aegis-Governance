@@ -7,13 +7,13 @@ import os
 import sys
 import json
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_mcp.tools import execute_tool
+from aegis_mcp.tools import execute_tool
 
 
 def _setup_workspace(tmp_path):

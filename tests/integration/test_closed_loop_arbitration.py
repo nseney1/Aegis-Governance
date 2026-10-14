@@ -18,9 +18,9 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from soma_cli.checkpoint import run_checkpoint
-from soma_cli.verify import run_verify, verify_release_gate
-from soma_core.verification import Verdict
+from aegis_cli.checkpoint import run_checkpoint
+from aegis_cli.verify import run_verify, verify_release_gate
+from aegis_core.verification import Verdict
 
 
 def _setup_git_workspace(tmp_path: Path) -> Path:
@@ -81,7 +81,7 @@ class TestClosedLoopArbitrationCircuit:
             def generate(self, prompt: str) -> str:
                 return json.dumps([])
 
-        from soma_cli import verify as cli_verify
+        from aegis_cli import verify as cli_verify
         monkeypatch.setattr(cli_verify, "resolve_cli_provider", lambda args, root: MockProvider())
 
         # Run soma verify with plan
@@ -142,7 +142,7 @@ class TestClosedLoopArbitrationCircuit:
             def generate(self, prompt: str) -> str:
                 return json.dumps([])
 
-        from soma_cli import verify as cli_verify
+        from aegis_cli import verify as cli_verify
         monkeypatch.setattr(cli_verify, "resolve_cli_provider", lambda args, root: MockProvider())
 
         args = argparse.Namespace(

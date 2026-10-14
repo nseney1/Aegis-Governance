@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from soma_cli.doctor import _check_mcp_launcher, probe_mcp_launcher
+from aegis_cli.doctor import _check_mcp_launcher, probe_mcp_launcher
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="sh stubs need POSIX exec")
 

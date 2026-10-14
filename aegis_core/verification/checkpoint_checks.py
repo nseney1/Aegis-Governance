@@ -261,6 +261,12 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
     if stem in ("arbitration", "proposals"):
         candidates.append(test_dir / "test_arbitration.py")
         candidates.append(test_dir / "test_proposals.py")
+    if stem in ("cell_inventory", "rule_inventory"):
+        candidates.append(test_dir / "test_cell_inventory.py")
+        candidates.append(test_dir / "test_rule_inventory.py")
+    if stem in ("cell_cache", "rule_cache"):
+        candidates.append(test_dir / "test_cell_cache.py")
+        candidates.append(test_dir / "test_rule_cache.py")
     if stem == "integrity":
         candidates.append(test_dir / "test_evidence_integrity.py")
     if stem == "server":

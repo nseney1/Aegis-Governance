@@ -14,10 +14,10 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_core.verification import ToolEvidence
+from aegis_core.verification import ToolEvidence
 
 try:
-    from soma_core.verification.quality_gate import (
+    from aegis_core.verification.quality_gate import (
         check_assertion_density,
         check_no_bare_pass,
         check_behavioral_coverage,

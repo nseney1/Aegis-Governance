@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 import pytest
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
@@ -46,7 +46,7 @@ def _cell(path: Path, cell_id: str, cell_type: str = "vacuole", age_days: int = 
 
 
 def test_aggregate_signals_reports_errors_preserves_dimensions_and_weights(tmp_path):
-    from soma_core.evidence import aggregate_signals
+    from aegis_core.evidence import aggregate_signals
 
     evidence = tmp_path / ".soma" / "evidence"
     evidence.mkdir(parents=True)
@@ -75,7 +75,7 @@ def test_aggregate_signals_reports_errors_preserves_dimensions_and_weights(tmp_p
 
 
 def test_sync_fails_on_malformed_complete_signal_row(tmp_path, monkeypatch, capsys):
-    import soma_cli.sync as sync
+    import aegis_cli.sync as sync
 
     evidence = tmp_path / ".soma" / "evidence"
     evidence.mkdir(parents=True)
@@ -90,8 +90,8 @@ def test_sync_fails_on_malformed_complete_signal_row(tmp_path, monkeypatch, caps
 
 
 def test_report_and_status_use_canonical_triggers_not_legacy(tmp_path, capsys):
-    from soma_cli.report import run_report
-    from soma_cli.status import run_status
+    from aegis_cli.report import run_report
+    from aegis_cli.status import run_status
 
     (tmp_path / "genome").mkdir()
     (tmp_path / "genome" / "canonical.md").write_text("# canonical\n", encoding="utf-8")
@@ -114,8 +114,8 @@ def test_report_and_status_use_canonical_triggers_not_legacy(tmp_path, capsys):
 
 
 def test_oracle_and_lifecycle_use_weighted_canonical_signals(tmp_path):
-    from soma_core.arbitration import generate_checkpoint
-    from soma_core.lifecycle import evaluate_promotions
+    from aegis_core.proposals import generate_checkpoint
+    from aegis_core.lifecycle import evaluate_promotions
 
     cells = tmp_path / ".soma" / "cells" / "vacuoles"
     _cell(cells / "canonical.md", "canonical")
@@ -133,7 +133,7 @@ def test_oracle_and_lifecycle_use_weighted_canonical_signals(tmp_path):
 
 
 def test_checkpoint_fails_closed_and_uses_weighted_outcomes(tmp_path):
-    from soma_core.verification.checkpoint_checks import check_cell_fitness
+    from aegis_core.verification.checkpoint_checks import check_cell_fitness
 
     evidence = tmp_path / ".soma" / "evidence"
     evidence.mkdir(parents=True)
@@ -170,7 +170,7 @@ def test_owned_production_has_no_active_legacy_evidence_paths():
 
 
 def test_sync_malformed_ledger_does_not_apply_partial_counts(tmp_path, monkeypatch, capsys):
-    import soma_cli.sync as sync
+    import aegis_cli.sync as sync
 
     cell = tmp_path / ".soma" / "cells" / "vacuoles" / "mixed.md"
     _cell(cell, "mixed")
@@ -189,7 +189,7 @@ def test_sync_malformed_ledger_does_not_apply_partial_counts(tmp_path, monkeypat
 
 
 def test_lifecycle_does_not_infer_zero_triggers_from_outcome_only_data(tmp_path):
-    from soma_core.lifecycle import evaluate_demotions
+    from aegis_core.lifecycle import evaluate_demotions
 
     cell = tmp_path / ".soma" / "cells" / "walls" / "outcome-only.md"
     _cell(cell, "outcome-only", cell_type="wall", age_days=120)
@@ -202,7 +202,7 @@ def test_lifecycle_does_not_infer_zero_triggers_from_outcome_only_data(tmp_path)
 
 
 def test_invalid_present_credit_weight_is_a_structured_error(tmp_path):
-    from soma_core.evidence import aggregate_signals
+    from aegis_core.evidence import aggregate_signals
 
     evidence = tmp_path / ".soma" / "evidence"
     _write_jsonl(evidence / "signals.jsonl", [_signal("bad-weight", "tp", weight="NaN")])
@@ -215,7 +215,7 @@ def test_invalid_present_credit_weight_is_a_structured_error(tmp_path):
 
 
 def test_negative_or_excessive_credit_weight_rejected(tmp_path):
-    from soma_core.evidence import aggregate_signals
+    from aegis_core.evidence import aggregate_signals
 
     evidence = tmp_path / ".soma" / "evidence"
     _write_jsonl(evidence / "signals.jsonl", [

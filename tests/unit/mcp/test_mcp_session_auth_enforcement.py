@@ -7,7 +7,7 @@
    to redeem receipts issued to authenticated sessions).
 """
 import pytest
-from soma_mcp import server
+from aegis_mcp import server
 
 
 @pytest.fixture(autouse=True)

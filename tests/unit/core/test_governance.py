@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
-from soma_sdk.governance import Governance
+from aegis_sdk.governance import Governance
 
 def test_governance_fitness_landscape_in_process(tmp_path):
     _populate_governed_workspace(tmp_path)
@@ -116,7 +116,7 @@ def test_record_outcome_fp_and_source_validation(tmp_path, monkeypatch):
     def _raise(*args, **kwargs):
         raise RuntimeError("simulated telemetry failure")
 
-    monkeypatch.setattr("soma_core.telemetry.append_signal", _raise)
+    monkeypatch.setattr("aegis_core.telemetry.append_signal", _raise)
     monkeypatch.setattr(gov, "signal", lambda *a, **k: "legacy stdout string")
     fallback_res = gov.record_outcome("vacuole-test-trap", success=True)
     assert isinstance(fallback_res, dict)
@@ -197,7 +197,7 @@ def test_rule_fitness_alias(tmp_path, monkeypatch):
 
 
 def test_sdk_exports():
-    from soma_sdk import Governance, Cell, CellFitness, SomaError
+    from aegis_sdk import Governance, Cell, CellFitness, SomaError
     assert Governance is not None
     assert Cell is not None
     assert CellFitness is not None
@@ -205,14 +205,14 @@ def test_sdk_exports():
 
 
 def test_sdk_scoring_reexports():
-    from soma_sdk.scoring import calculate_snr, calculate_composite_fitness, compute_cell_fitness
+    from aegis_sdk.scoring import calculate_snr, calculate_composite_fitness, compute_cell_fitness
     assert calculate_snr(10, 2) is not None
     assert calculate_composite_fitness is compute_cell_fitness
 
 
 def test_cell_fitness_snr_db_delegation():
-    from soma_sdk.cells import CellFitness
-    from soma_core.scoring import calculate_snr
+    from aegis_sdk.cells import CellFitness
+    from aegis_core.scoring import calculate_snr
 
     cf = CellFitness(true_positives=10, false_positives=2)
     assert cf.snr_db == calculate_snr(10, 2)
@@ -225,7 +225,7 @@ def test_cell_fitness_snr_db_delegation():
 
 
 def test_write_cell_frontmatter_zero_dep_fallback(tmp_path, monkeypatch):
-    import soma_sdk.cells as sdk_cells
+    import aegis_sdk.cells as sdk_cells
     monkeypatch.setattr(sdk_cells, "yaml", None)
 
     target_file = tmp_path / "cell_zero_dep.md"

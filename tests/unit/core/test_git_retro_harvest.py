@@ -17,7 +17,7 @@ import subprocess
 
 import pytest
 
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def _init_git_repo(ws: Path) -> None:
@@ -60,8 +60,8 @@ def git_workspace(tmp_path: Path) -> Path:
 
 def test_harvest_git_history_seeds_baseline(git_workspace: Path):
     """harvest_git_history should inspect commits and write signals for matched cells."""
-    from soma_core.outcomes import harvest_git_history
-    from soma_core.evidence import aggregate_signals
+    from aegis_core.outcomes import harvest_git_history
+    from aegis_core.evidence import aggregate_signals
 
     _create_cell(git_workspace, "cell-parser", ["parser/*.py"])
     _create_cell(git_workspace, "cell-docs", ["docs/*.md"])
@@ -84,7 +84,7 @@ def test_harvest_git_history_seeds_baseline(git_workspace: Path):
 
 def test_harvest_git_history_dry_run_does_not_write(git_workspace: Path):
     """--dry-run must not create or modify signals.jsonl."""
-    from soma_core.outcomes import harvest_git_history
+    from aegis_core.outcomes import harvest_git_history
 
     _create_cell(git_workspace, "cell-parser", ["*.py"])
     _commit_file(git_workspace, "foo.py", "x = 1\n", "init")
@@ -98,8 +98,8 @@ def test_harvest_git_history_dry_run_does_not_write(git_workspace: Path):
 
 def test_harvest_git_history_idempotent(git_workspace: Path):
     """Running harvest twice must not duplicate signals."""
-    from soma_core.outcomes import harvest_git_history
-    from soma_core.evidence import aggregate_signals
+    from aegis_core.outcomes import harvest_git_history
+    from aegis_core.evidence import aggregate_signals
 
     _create_cell(git_workspace, "cell-parser", ["*.py"])
     _commit_file(git_workspace, "foo.py", "x = 1\n", "init")
@@ -131,7 +131,7 @@ def test_cli_harvest_git_command(git_workspace: Path):
 
 def test_capture_git_signals(git_workspace: Path):
     """Test capture_git_signals with reverts and rework."""
-    from soma_core.outcomes.harvest import capture_git_signals
+    from aegis_core.outcomes.harvest import capture_git_signals
     # Commit a file, then revert it
     _commit_file(git_workspace, "rework.py", "v1\n", "v1")
     _commit_file(git_workspace, "rework.py", "v2\n", "v2 rework")
@@ -144,14 +144,14 @@ def test_capture_git_signals(git_workspace: Path):
 
 def test_capture_git_signals_invalid_dir(tmp_path: Path):
     """Test capture_git_signals on non-git dir."""
-    from soma_core.outcomes.harvest import capture_git_signals
+    from aegis_core.outcomes.harvest import capture_git_signals
     signals = capture_git_signals(str(tmp_path))
     assert signals == {"reverts": 0, "rework_files": []}
 
 
 def test_harvest_git_history_no_cells_dir(tmp_path: Path):
     """Test harvest_git_history on workspace without cells dir."""
-    from soma_core.outcomes.harvest import harvest_git_history
+    from aegis_core.outcomes.harvest import harvest_git_history
     res = harvest_git_history(str(tmp_path))
     assert res["commits_inspected"] == 0
     assert res["signals_minted"] == 0
@@ -159,7 +159,7 @@ def test_harvest_git_history_no_cells_dir(tmp_path: Path):
 
 def test_harvest_git_history_git_error(tmp_path: Path):
     """Test harvest_git_history when git fails."""
-    from soma_core.outcomes.harvest import harvest_git_history
+    from aegis_core.outcomes.harvest import harvest_git_history
     cells_dir = tmp_path / ".soma" / "cells"
     cells_dir.mkdir(parents=True)
     res = harvest_git_history(str(tmp_path))
@@ -169,7 +169,7 @@ def test_harvest_git_history_git_error(tmp_path: Path):
 
 def test_harvest_git_history_exception(tmp_path: Path, monkeypatch):
     """Test harvest_git_history when subprocess raises Exception."""
-    from soma_core.outcomes.harvest import harvest_git_history
+    from aegis_core.outcomes.harvest import harvest_git_history
     import subprocess
     cells_dir = tmp_path / ".soma" / "cells"
     cells_dir.mkdir(parents=True)

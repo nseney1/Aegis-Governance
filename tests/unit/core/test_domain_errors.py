@@ -1,9 +1,9 @@
-"""Tests for standardized typed SomaError hierarchy (soma_core.errors)."""
+"""Tests for standardized typed SomaError hierarchy (aegis_core.errors)."""
 from __future__ import annotations
 
 import pytest
 
-from soma_core.errors import (
+from aegis_core.errors import (
     SomaError,
     SomaValidationError,
     CellCorruptError,

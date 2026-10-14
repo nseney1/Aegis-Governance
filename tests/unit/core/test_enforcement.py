@@ -1,9 +1,9 @@
-"""Unit tests for soma_core.enforcement."""
+"""Unit tests for aegis_core.enforcement."""
 import os
 import tempfile
 import pytest
 
-from soma_core.enforcement import (
+from aegis_core.enforcement import (
     load_bug_registry,
     bug_status,
     verify_bug_schema,
@@ -48,7 +48,7 @@ def test_enforcement_credit_weights_conservation():
 
 
 def test_gate_assertion_injection_sanitization():
-    from soma_core.enforcement import generate_gate_assertion
+    from aegis_core.enforcement import generate_gate_assertion
     import ast
 
     malicious_name = "cell\nmalicious_header_injection"
@@ -66,7 +66,7 @@ def test_gate_assertion_injection_sanitization():
 
 
 def test_enforcement_load_cells(tmp_path):
-    from soma_core.enforcement import load_cells
+    from aegis_core.enforcement import load_cells
 
     cells_dir = tmp_path / ".soma" / "cells" / "walls"
     cells_dir.mkdir(parents=True)

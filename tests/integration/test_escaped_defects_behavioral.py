@@ -16,8 +16,8 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.cells import CellFitness
-from soma_sdk.analysis import antifragile_bonus
+from aegis_sdk.cells import CellFitness
+from aegis_sdk.analysis import antifragile_bonus
 
 
 class TestAntifragileBonus:
@@ -91,7 +91,7 @@ class TestEscapedDefectRecording:
         """Recording an escaped defect appends to escaped_defects.jsonl."""
         workspace = self._create_workspace_with_cell()
         try:
-            from soma_core.defects import record_escaped_defect
+            from aegis_core.defects import record_escaped_defect
 
             cell_dict = {
                 '_name': 'trap-test',

@@ -305,7 +305,7 @@ class TestPostSessionHook:
             called.append((transcript_path, repo_root))
             return 0
 
-        monkeypatch.setattr("soma_core.sync.run_post_session_hook", fake_hook)
+        monkeypatch.setattr("aegis_core.sync.run_post_session_hook", fake_hook)
         args = Namespace(phase="post-session", workspace=str(tmp_path), transcript=str(transcript_file))
         rc = run_hook(args)
         assert rc == 0

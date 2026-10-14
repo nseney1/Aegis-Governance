@@ -15,7 +15,7 @@ def _jsonl(path):
         return [json.loads(line) for line in f if line.strip()]
 
 def test_report_outcome_writes_only_canonical_signal(tmp_path, monkeypatch):
-    from soma_mcp.tools import execute_tool
+    from aegis_mcp.tools import execute_tool
     ws = _workspace_with_cell(tmp_path)
     monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
     result = execute_tool(
@@ -33,7 +33,7 @@ def test_report_outcome_writes_only_canonical_signal(tmp_path, monkeypatch):
 
 
 def test_report_outcome_accepts_tp_and_fp(tmp_path, monkeypatch):
-    from soma_mcp.tools import execute_tool, TOOL_DEFINITIONS
+    from aegis_mcp.tools import execute_tool, TOOL_DEFINITIONS
     ws = _workspace_with_cell(tmp_path, cell="trap-tp")
     monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
 
@@ -59,13 +59,13 @@ def test_report_outcome_accepts_tp_and_fp(tmp_path, monkeypatch):
 
 
 def test_soma_create_cell_description_clarifies_advisory():
-    from soma_mcp.tools import TOOL_DEFINITIONS
+    from aegis_mcp.tools import TOOL_DEFINITIONS
     tool_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "soma_create_cell")
     assert "advisory" in tool_def["description"].lower()
 
 
 def test_report_outcome_accepts_pass_and_fail(tmp_path, monkeypatch):
-    from soma_mcp.tools import execute_tool, TOOL_DEFINITIONS
+    from aegis_mcp.tools import execute_tool, TOOL_DEFINITIONS
     ws = _workspace_with_cell(tmp_path, cell="trap-pass-fail")
     monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
 

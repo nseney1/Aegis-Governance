@@ -1,10 +1,10 @@
-"""Unit tests for SlotRegistry in soma_core.skills.slots."""
+"""Unit tests for SlotRegistry in aegis_core.skills.slots."""
 from __future__ import annotations
 
 from pathlib import Path
 import pytest
 
-from soma_core.skills.slots import (
+from aegis_core.skills.slots import (
     SlotRegistry,
     SlotResolutionError,
     SLOT_REF_PATTERN,

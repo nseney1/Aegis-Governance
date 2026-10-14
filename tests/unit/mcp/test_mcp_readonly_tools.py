@@ -2,8 +2,8 @@ from pathlib import Path
 import json
 import os
 import pytest
-from soma_mcp.server import handle_request
-import soma_mcp.server as server_module
+from aegis_mcp.server import handle_request
+import aegis_mcp.server as server_module
 
 @pytest.fixture(autouse=True)
 def setup_server_globals(monkeypatch, tmp_path):
@@ -13,7 +13,7 @@ def setup_server_globals(monkeypatch, tmp_path):
     monkeypatch.setattr(server_module, "_canonical_workspace", workspace)
     monkeypatch.setattr(server_module, "_execution_enabled", True)
     
-    # Expose PYTHONPATH so Governance engine subprocesses can import soma_sdk
+    # Expose PYTHONPATH so Governance engine subprocesses can import aegis_sdk
     repo_root = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
     monkeypatch.setenv("PYTHONPATH", repo_root)
     

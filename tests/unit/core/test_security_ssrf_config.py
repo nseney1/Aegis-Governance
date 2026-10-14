@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 
-from soma_core.inference_provider import resolve_key, resolve_provider, OpenAIProvider
+from aegis_core.inference_provider import resolve_key, resolve_provider, OpenAIProvider
 
 
 def test_workspace_conf_cannot_override_base_url(tmp_path: Path):

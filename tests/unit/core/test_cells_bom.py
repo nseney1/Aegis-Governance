@@ -1,5 +1,5 @@
-"""soma_sdk.cells.parse_cell_file must tolerate a UTF-8 BOM (PowerShell 5.1)."""
-from soma_sdk.cells import parse_cell_file
+"""aegis_sdk.cells.parse_cell_file must tolerate a UTF-8 BOM (PowerShell 5.1)."""
+from aegis_sdk.cells import parse_cell_file
 
 
 def test_bom_prefixed_cell_parses(tmp_path):
@@ -20,7 +20,7 @@ def test_bomless_cell_unchanged(tmp_path):
 
 def test_stdlib_parse_frontmatter_nested(monkeypatch):
     import pytest
-    import soma_sdk.cells as sdk_cells
+    import aegis_sdk.cells as sdk_cells
     monkeypatch.setattr(sdk_cells, "yaml", None)
     yaml_text = "id: test\ntags:\n  - a\n  - b\nfitness:\n  tp: 1\n"
     res = sdk_cells._stdlib_parse_frontmatter(yaml_text)
@@ -31,7 +31,7 @@ def test_stdlib_parse_frontmatter_nested(monkeypatch):
 
 def test_stdlib_parse_frontmatter_invalid(monkeypatch):
     import pytest
-    import soma_sdk.cells as sdk_cells
+    import aegis_sdk.cells as sdk_cells
     monkeypatch.setattr(sdk_cells, "yaml", None)
     with pytest.raises(sdk_cells.CellParseError):
         sdk_cells._stdlib_parse_frontmatter("\tkey: invalid tab")

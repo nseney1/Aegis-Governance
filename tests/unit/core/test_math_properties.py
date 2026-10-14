@@ -9,9 +9,9 @@ import pytest
 pytest.importorskip("hypothesis")
 from hypothesis import given, settings, strategies as st
 
-from soma_sdk.scoring import laplace_score, wilson_lower_bound, bayesian_posterior, bayesian_score
-from soma_sdk.cells import CellFitness
-from soma_core.lifecycle import (
+from aegis_sdk.scoring import laplace_score, wilson_lower_bound, bayesian_posterior, bayesian_score
+from aegis_sdk.cells import CellFitness
+from aegis_core.lifecycle import (
     calculate_fitness_status,
     apply_exponential_decay,
     STATUS_NEW,

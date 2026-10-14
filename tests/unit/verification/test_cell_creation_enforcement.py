@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.somayaml import parse_frontmatter
-from soma_core.lifecycle.creation import create_cell
+from aegis_core.yaml import parse_frontmatter
+from aegis_core.lifecycle.creation import create_cell
 
 
 class TestCellCreationEnforcement:
@@ -69,7 +69,7 @@ class TestCellCreationEnforcement:
 
     def test_generated_cells_pass_checkpoint_cell_conventions(self, tmp_path: Path):
         """Cells created via create_cell pass checkpoint cell_conventions checks."""
-        from soma_core.verification.checkpoint_checks import check_cell_conventions
+        from aegis_core.verification.checkpoint_checks import check_cell_conventions
 
         # Create one vacuole and one wall
         create_cell(

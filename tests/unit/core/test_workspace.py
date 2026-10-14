@@ -1,4 +1,4 @@
-"""Unit tests for soma_core.workspace (Layer 0 Core)."""
+"""Unit tests for aegis_core.workspace (Layer 0 Core)."""
 from __future__ import annotations
 
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.workspace import (
+from aegis_core.workspace import (
     Workspace,
     confine_path,
     confine_workspace,

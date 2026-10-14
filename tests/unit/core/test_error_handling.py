@@ -1,5 +1,5 @@
 from pathlib import Path
-"""Behavioral tests for typed exception hierarchy in soma_sdk.errors.
+"""Behavioral tests for typed exception hierarchy in aegis_sdk.errors.
 
 Verifies that all soma error types follow the correct inheritance chain
 and that public APIs raise the correct exception types.
@@ -12,7 +12,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.errors import (
+from aegis_sdk.errors import (
     SomaError,
     CellParseError,
     CellNotFoundError,
@@ -20,7 +20,7 @@ from soma_sdk.errors import (
     FitnessError,
     ScoringError,
 )
-from soma_sdk.cells import parse_cell_file, load_cell, _sanitize_cell_id
+from aegis_sdk.cells import parse_cell_file, load_cell, _sanitize_cell_id
 
 
 class TestErrorHierarchy:

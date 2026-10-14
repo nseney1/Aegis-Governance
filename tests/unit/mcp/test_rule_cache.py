@@ -1,5 +1,5 @@
 from pathlib import Path
-"""Tests for soma_mcp.cell_cache — mtime-based in-memory cell cache.
+"""Tests for aegis_mcp.cell_cache — mtime-based in-memory cell cache.
 
 v0.83 'Fast Path': eliminates redundant disk I/O in MCP hot path.
 """
@@ -9,13 +9,13 @@ import sys
 import time
 
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_mcp.cell_cache import CellCache
+from aegis_mcp.cell_cache import CellCache
 
 
 def _make_cell(cells_dir, subdir, name, target_paths=None):
@@ -176,8 +176,8 @@ class TestCellCacheContentFingerprint:
         assert cells2[0]['id'] == 'trap-two'
 
     def test_stat_failure_after_warm_cache_raises(self, tmp_path, monkeypatch):
-        import soma_core.cell_inventory as inventory
-        from soma_mcp.cell_cache import CellCacheError
+        import aegis_core.cell_inventory as inventory
+        from aegis_mcp.cell_cache import CellCacheError
 
         cells_dir = str(tmp_path / '.soma' / 'cells')
         cell_path = _make_cell(cells_dir, 'walls', 'trap-test')
@@ -196,8 +196,8 @@ class TestCellCacheContentFingerprint:
         assert warmed[0]['id'] == 'trap-test'
 
     def test_open_failure_after_warm_cache_raises(self, tmp_path, monkeypatch):
-        import soma_core.cell_inventory as inventory
-        from soma_mcp.cell_cache import CellCacheError
+        import aegis_core.cell_inventory as inventory
+        from aegis_mcp.cell_cache import CellCacheError
 
         cells_dir = str(tmp_path / '.soma' / 'cells')
         cell_path = _make_cell(cells_dir, 'walls', 'trap-test')
@@ -215,7 +215,7 @@ class TestCellCacheContentFingerprint:
             cache.get_cells(str(tmp_path))
 
     def test_load_uses_inventory_bytes_without_second_open(self, tmp_path, monkeypatch):
-        import soma_core.cell_inventory as inventory
+        import aegis_core.cell_inventory as inventory
 
         cells_dir = str(tmp_path / '.soma' / 'cells')
         _make_cell(cells_dir, 'walls', 'trap-test')
@@ -232,8 +232,8 @@ class TestCellCacheContentFingerprint:
         assert cells[0]['id'] == 'trap-test'
 
     def test_manifest_tampering_invalidates_cache_and_raises(self, tmp_path):
-        from soma_mcp.integrity import generate_key, generate_manifest, save_manifest
-        from soma_mcp.cell_cache import CellCacheError
+        from aegis_mcp.integrity import generate_key, generate_manifest, save_manifest
+        from aegis_mcp.cell_cache import CellCacheError
 
         cells_dir = str(tmp_path / '.soma' / 'cells')
         _make_cell(cells_dir, 'walls', 'trap-test')

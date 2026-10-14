@@ -8,13 +8,13 @@ import os
 import sys
 import time
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_mcp.jit_engine import (
+from aegis_mcp.jit_engine import (
     express,
     get_fitness_score,
     rank_cells,
@@ -254,7 +254,7 @@ class TestExpress:
 
 # ── Phase 4: C3 — Mandatory Cells Fitness Score ──────────────────────────
 
-from tests.helpers_cell import write_cell_with_fitness, soma_workspace
+from tests.helpers_rule import write_cell_with_fitness, soma_workspace
 
 class TestMandatoryCellsFitnessScore:
     """Verify mandatory wall/gate cells have their fitness score computed."""
@@ -273,7 +273,7 @@ class TestMandatoryCellsFitnessScore:
 
     def test_mandatory_cells_have_nonzero_fitness(self, populated_workspace):
         """Wall cells must have their fitness computed, not default to 0."""
-        from soma_mcp.jit_engine import express
+        from aegis_mcp.jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=5)
 
         for cell in result['relevant_cells']:
@@ -284,7 +284,7 @@ class TestMandatoryCellsFitnessScore:
 
     def test_all_expressed_cells_have_fitness(self, populated_workspace):
         """Every expressed cell (mandatory or candidate) must have fitness."""
-        from soma_mcp.jit_engine import express
+        from aegis_mcp.jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=5)
 
         for cell in result['relevant_cells']:

@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timedelta
 
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
@@ -66,14 +66,14 @@ class TestOracleCheckpointBasics:
     """Core checkpoint functionality."""
 
     def test_empty_workspace_returns_safe_report(self, workspace):
-        from soma_core.arbitration import generate_checkpoint
+        from aegis_core.proposals import generate_checkpoint
         report = generate_checkpoint(str(workspace))
         assert isinstance(report, dict)
         assert report['total_cells'] == 0
         assert report['classifications'] == {}
 
     def test_cell_with_no_evidence_is_unobserved(self, workspace):
-        from soma_core.arbitration import generate_checkpoint
+        from aegis_core.proposals import generate_checkpoint
         cells_dir = str(workspace / ".soma" / "cells")
         make_cell(cells_dir, "new-cell")
         report = generate_checkpoint(str(workspace))
@@ -82,7 +82,7 @@ class TestOracleCheckpointBasics:
         assert 'new-cell' in [c['cell_id'] for c in report['classifications']['unobserved']]
 
     def test_cell_with_triggers_is_healthy(self, workspace):
-        from soma_core.arbitration import generate_checkpoint
+        from aegis_core.proposals import generate_checkpoint
         cells_dir = str(workspace / ".soma" / "cells")
         make_cell(cells_dir, "good-cell")
         evidence_dir = str(workspace / ".soma" / "evidence")
@@ -100,7 +100,7 @@ class TestOracleCheckpointClassifications:
     """Verify specific cell health classifications."""
 
     def test_noisy_cell_flagged(self, workspace):
-        from soma_core.arbitration import generate_checkpoint
+        from aegis_core.proposals import generate_checkpoint
         cells_dir = str(workspace / ".soma" / "cells")
         make_cell(cells_dir, "noisy-cell")
         evidence_dir = str(workspace / ".soma" / "evidence")
@@ -126,7 +126,7 @@ class TestOracleCheckpointClassifications:
         assert len(noisy) == 1
 
     def test_expired_cell_flagged(self, workspace):
-        from soma_core.arbitration import generate_checkpoint
+        from aegis_core.proposals import generate_checkpoint
         cells_dir = str(workspace / ".soma" / "cells")
         make_cell(cells_dir, "old-cell", created_days_ago=100, expiry_days=30)
         report = generate_checkpoint(str(workspace))
@@ -138,7 +138,7 @@ class TestOracleCheckpointRecommendations:
     """Verify actionable recommendations are produced."""
 
     def test_report_includes_recommendations(self, workspace):
-        from soma_core.arbitration import generate_checkpoint
+        from aegis_core.proposals import generate_checkpoint
         cells_dir = str(workspace / ".soma" / "cells")
         make_cell(cells_dir, "stale-cell", created_days_ago=100, expiry_days=30)
         make_cell(cells_dir, "fresh-cell", created_days_ago=1, expiry_days=60)
@@ -147,7 +147,7 @@ class TestOracleCheckpointRecommendations:
         assert len(report['recommendations']) > 0
 
     def test_healthy_workspace_has_no_critical_recommendations(self, workspace):
-        from soma_core.arbitration import generate_checkpoint
+        from aegis_core.proposals import generate_checkpoint
         cells_dir = str(workspace / ".soma" / "cells")
         make_cell(cells_dir, "good-cell", created_days_ago=1, expiry_days=60)
         evidence_dir = str(workspace / ".soma" / "evidence")
@@ -159,7 +159,7 @@ class TestOracleCheckpointRecommendations:
         assert len(critical) == 0
 
     def test_checkpoint_returns_required_keys(self, workspace):
-        from soma_core.arbitration import generate_checkpoint
+        from aegis_core.proposals import generate_checkpoint
         report = generate_checkpoint(str(workspace))
         assert "workspace" in report
         assert "healthy_count" in report
@@ -168,7 +168,7 @@ class TestOracleCheckpointRecommendations:
         assert "dormant_count" in report
 
     def test_cli_checkpoint_terminal_mode(self, workspace, capsys):
-        from soma_core.arbitration import cli_checkpoint
+        from aegis_core.proposals import cli_checkpoint
         rc = cli_checkpoint([str(workspace)])
         assert rc == 0
         captured = capsys.readouterr()

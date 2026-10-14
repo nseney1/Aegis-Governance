@@ -1,8 +1,8 @@
-"""Unit tests for soma_sdk.analysis utilities."""
+"""Unit tests for aegis_sdk.analysis utilities."""
 from __future__ import annotations
 
 import pytest
-from soma_sdk.analysis import (
+from aegis_sdk.analysis import (
     shannon_diversity,
     letter_grade,
     specificity_penalty,

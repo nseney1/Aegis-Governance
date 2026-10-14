@@ -1,8 +1,8 @@
 """Canary test verifying workspace confinement and discovery for .aegis and .soma."""
 from pathlib import Path
-from soma_core.workspace.confinement import validate_workspace_path, confine_path_internal
-from soma_core.workspace.discovery import is_soma_repo, is_aegis_repo, resolve_workspace_root
-from soma_core.workspace.base import Workspace
+from aegis_core.workspace.confinement import validate_workspace_path, confine_path_internal
+from aegis_core.workspace.discovery import is_soma_repo, is_aegis_repo, resolve_workspace_root
+from aegis_core.workspace.base import Workspace
 
 
 def test_confinement_accepts_aegis_rules(tmp_path: Path):

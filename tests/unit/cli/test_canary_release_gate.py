@@ -1,7 +1,7 @@
 """Canary test verifying release gate allowlist and evidence discovery for .aegis."""
 from pathlib import Path
-from soma_cli.verify import _is_dirty
-from soma_core.verification.review_adapter import get_latest_arbitration_evidence
+from aegis_cli.verify import _is_dirty
+from aegis_core.verification.review_adapter import get_latest_arbitration_evidence
 
 
 def test_is_dirty_ignores_aegis_evidence():

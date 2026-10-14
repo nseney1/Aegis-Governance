@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def _create_cell(workspace: Path, cell_id: str, target_paths: list[str]) -> Path:
@@ -44,8 +44,8 @@ def test_workspace(tmp_path: Path) -> Path:
 
 def test_record_verification_telemetry_appends_signals(test_workspace: Path):
     """record_verification_telemetry should match cells and append trigger + outcome signals."""
-    from soma_core.outcomes import record_verification_telemetry
-    from soma_core.evidence import aggregate_signals
+    from aegis_core.outcomes import record_verification_telemetry
+    from aegis_core.evidence import aggregate_signals
 
     _create_cell(test_workspace, "cell-math", ["math_*.py", "calc.py"])
     _create_cell(test_workspace, "cell-ui", ["ui_*.py"])
@@ -82,8 +82,8 @@ def test_record_verification_telemetry_appends_signals(test_workspace: Path):
 
 def test_record_verification_telemetry_handles_failure(test_workspace: Path):
     """When verification fails, record_verification_telemetry should emit fp signal."""
-    from soma_core.outcomes import record_verification_telemetry
-    from soma_core.evidence import aggregate_signals
+    from aegis_core.outcomes import record_verification_telemetry
+    from aegis_core.evidence import aggregate_signals
 
     _create_cell(test_workspace, "cell-auth", ["auth.py"])
 
@@ -104,7 +104,7 @@ def test_record_verification_telemetry_handles_failure(test_workspace: Path):
 
 def test_cli_verify_emits_telemetry_ambiently(test_workspace: Path, monkeypatch):
     """Running soma verify via CLI must emit ambient telemetry for verified files."""
-    from soma_cli.verify import run_verify
+    from aegis_cli.verify import run_verify
 
     _create_cell(test_workspace, "cell-core", ["core.py"])
     test_file = test_workspace / "core.py"
@@ -132,7 +132,7 @@ def test_cli_verify_emits_telemetry_ambiently(test_workspace: Path, monkeypatch)
 
 def test_mcp_verify_changes_emits_telemetry_ambiently(test_workspace: Path):
     """MCP soma_verify_changes must emit ambient telemetry without explicit report_outcome."""
-    from soma_mcp.tools import _handle_verify_changes
+    from aegis_mcp.tools import _handle_verify_changes
 
     _create_cell(test_workspace, "cell-api", ["api.py"])
     (test_workspace / "api.py").write_text('__all__ = ["ping"]\n\ndef ping(): pass\n', encoding="utf-8")

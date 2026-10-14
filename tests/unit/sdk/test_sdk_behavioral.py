@@ -13,13 +13,13 @@ import tempfile
 import textwrap
 
 import pytest
-from soma_core.somayaml import dump_frontmatter, parse_yaml_subset
+from aegis_core.yaml import dump_frontmatter, parse_yaml_subset
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.cells import Cell, CellFitness, parse_cell_file, write_cell_frontmatter
-from soma_sdk.errors import CellPathTraversalError, CellParseError
+from aegis_sdk.cells import Cell, CellFitness, parse_cell_file, write_cell_frontmatter
+from aegis_sdk.errors import CellPathTraversalError, CellParseError
 
 
 class TestCellFitnessBaseline:
@@ -213,19 +213,19 @@ class TestPathTraversal:
     def test_load_cell_path_traversal(self):
         """Attempting to load '../etc/passwd' raises CellPathTraversalError."""
         with pytest.raises(CellPathTraversalError):
-            # This function will be added to soma_sdk.cells
-            from soma_sdk.cells import load_cell
+            # This function will be added to aegis_sdk.cells
+            from aegis_sdk.cells import load_cell
             load_cell('../etc/passwd')
 
     def test_load_cell_absolute_path_traversal(self):
         """Attempting to load '/etc/passwd' raises CellPathTraversalError."""
         with pytest.raises(CellPathTraversalError):
-            from soma_sdk.cells import load_cell
+            from aegis_sdk.cells import load_cell
             load_cell('/etc/passwd')
 
 def test_load_cell_uses_created_field(tmp_path):
     """load_cell must read 'created' field from cell frontmatter."""
-    from soma_sdk.cells import load_cell
+    from aegis_sdk.cells import load_cell
     cell_file = tmp_path / ".soma" / "cells" / "vacuoles" / "created-test.md"
     cell_file.parent.mkdir(parents=True, exist_ok=True)
     cell_file.write_text("""---

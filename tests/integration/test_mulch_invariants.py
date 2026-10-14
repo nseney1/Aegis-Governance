@@ -1,7 +1,7 @@
 """Automated regression verification for all 6 Mulch Invariants from v0.96.0 Tempest Review.
 
 Invariants:
-1. Architectural Layer Decoupling: soma_core must never import from soma_sdk or enzymes.
+1. Architectural Layer Decoupling: soma_core must never import from aegis_sdk or enzymes.
 2. Symbol Authority: All symbols exported in soma_core module __all__ lists must be resolvable.
 3. Single-Use Receipts: HMAC verification receipts cannot be redeemed twice, reused across sessions/workspaces, or validated with incorrect byte types.
 4. Fail-Closed Confinement: Workspace path confinement rejects relative traversal, absolute traversal, Windows device names, and Alternate Data Streams.
@@ -20,15 +20,15 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.receipts import issue_receipt, verify_receipt, _safe_compare
-from soma_core.workspace import confine_path, resolve_workspace
-from soma_core.enforcement import (
+from aegis_core.receipts import issue_receipt, verify_receipt, _safe_compare
+from aegis_core.workspace import confine_path, resolve_workspace
+from aegis_core.enforcement import (
     load_bug_registry,
     verify_bug_schema,
     verify_bug_tests,
     verify_unique_ids,
 )
-import soma_mcp.server as mcp_server
+import aegis_mcp.server as mcp_server
 
 
 REPO_ROOT = Path(resolve_workspace(__file__))

@@ -10,7 +10,7 @@ import argparse
 import json
 from datetime import datetime, timedelta, timezone
 
-from soma_cli.report import run_report
+from aegis_cli.report import run_report
 
 
 def _create_event(cell: str, triggered_at: datetime) -> dict:
@@ -250,14 +250,14 @@ class TestReportEdgeCases:
 
     def test_report_command_contract(self):
         from unittest.mock import patch
-        from soma_cli.report import ReportCommand
+        from aegis_cli.report import ReportCommand
         cmd = ReportCommand()
         parser = argparse.ArgumentParser()
         cmd.configure_parser(parser)
         parsed = parser.parse_args(["--session", "2"])
         assert parsed.session == 2
 
-        with patch("soma_cli.report.run_report", return_value=0) as mock_run:
+        with patch("aegis_cli.report.run_report", return_value=0) as mock_run:
             assert cmd.execute(parsed) == 0
             mock_run.assert_called_once_with(parsed)
 

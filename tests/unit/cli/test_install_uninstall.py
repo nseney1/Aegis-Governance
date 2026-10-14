@@ -3,8 +3,8 @@ import argparse
 from pathlib import Path
 import pytest
 
-from soma_cli.install import run_install, run_uninstall, InstallCommand, UninstallCommand
-from soma_cli.hooks.management import generate_hook_block
+from aegis_cli.install import run_install, run_uninstall, InstallCommand, UninstallCommand
+from aegis_cli.hooks.management import generate_hook_block
 
 
 def test_uninstall_command_contract():

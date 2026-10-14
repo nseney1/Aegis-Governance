@@ -12,7 +12,7 @@ from conftest import REPO_ROOT, read
 
 
 def test_python_init_mcp_merge_targets_project(tmp_path):
-    from soma_cli.init import generate_mcp_config
+    from aegis_cli.init import generate_mcp_config
 
     config = tmp_path / ".mcp.json"
     config.write_text(
@@ -32,7 +32,7 @@ def test_python_init_mcp_merge_targets_project(tmp_path):
 
 
 def test_python_init_invalid_mcp_json_is_unchanged(tmp_path):
-    from soma_cli.init import generate_mcp_config
+    from aegis_cli.init import generate_mcp_config
 
     config = tmp_path / ".mcp.json"
     invalid = b"{ definitely not json\n"

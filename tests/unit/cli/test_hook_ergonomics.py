@@ -36,7 +36,7 @@ from aegis_cli.hooks import (
     run_hook_uninstall,
     run_hook,
 )
-from soma_core.workspace import Workspace
+from aegis_core.workspace import Workspace
 
 
 def _setup_git_repo(tmp_path: Path) -> Path:

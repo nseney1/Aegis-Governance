@@ -3,7 +3,7 @@
 After `pip install --user`, the console script lands in the user scripts
 directory (~/.local/bin on Linux). zsh does not read ~/.profile, so on a stock
 oh-my-zsh setup `soma` is "command not found" and nothing said why.
-soma_cli.pathcheck detects that and prints a shell-specific remedy.
+aegis_cli.pathcheck detects that and prints a shell-specific remedy.
 """
 from __future__ import annotations
 
@@ -317,7 +317,7 @@ def test_build_hint_fish_venv_with_space_is_quoted(tmp_path):
 def test_build_hint_git_bash_venv_with_space_is_quoted(tmp_path):
     venv, text = _venv_hint(tmp_path, "my venv", "Scripts",
                             platform="win32", os_name="nt", shell="bash")
-    from soma_cli.pathcheck import _msys_path
+    from aegis_cli.pathcheck import _msys_path
     assert f"source '{_msys_path(str(venv))}/Scripts/activate'" in text
 
 

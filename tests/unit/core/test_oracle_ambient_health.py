@@ -16,7 +16,7 @@ import subprocess
 
 import pytest
 
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def _init_git_repo(ws: Path) -> None:
@@ -59,8 +59,8 @@ def clean_project(tmp_path: Path) -> Path:
 
 def test_oracle_transitions_from_unobserved_after_ambient_verification(clean_project: Path):
     """Running soma verify on changed files must transition matched cells from unobserved to healthy in soma oracle."""
-    from soma_core.arbitration import generate_checkpoint
-    from soma_cli.verify import run_verify
+    from aegis_core.proposals import generate_checkpoint
+    from aegis_cli.verify import run_verify
 
     # Setup 2 cells
     _create_cell(clean_project, "cell-math", ["math/*.py"])
@@ -103,7 +103,7 @@ def test_oracle_transitions_from_unobserved_after_ambient_verification(clean_pro
 
 def test_oracle_transitions_from_unobserved_after_git_harvest(clean_project: Path):
     """Running soma harvest --git must transition historical cells out of unobserved."""
-    from soma_core.arbitration import generate_checkpoint
+    from aegis_core.proposals import generate_checkpoint
     from aegis_core.outcomes import harvest_git_history
 
     _create_cell(clean_project, "cell-service", ["service/*.py"])

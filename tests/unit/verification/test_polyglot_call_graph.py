@@ -5,13 +5,13 @@ import json
 from pathlib import Path
 import pytest
 
-from soma_core.ast.schema import (
+from aegis_core.ast.schema import (
     CallSiteNode,
     DefinitionNode,
     ImportNode,
     NormalizedAST,
 )
-from soma_core.verification import call_graph
+from aegis_core.verification import call_graph
 
 
 def test_call_graph_all_functions_called_internally():

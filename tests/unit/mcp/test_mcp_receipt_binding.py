@@ -18,8 +18,8 @@ import time
 
 import pytest
 
-import soma_mcp.server as server
-from soma_core import receipts
+import aegis_mcp.server as server
+from aegis_core import receipts
 
 STALE_RECEIPT = "Invalid, expired, or mismatched receipt."
 
@@ -184,7 +184,7 @@ def test_receipt_is_single_use(workspaces):
 
 
 def test_receipt_digest_rejects_symlinked_cell(workspaces):
-    from soma_core.cell_inventory import CellInventoryError
+    from aegis_core.cell_inventory import CellInventoryError
 
     canonical, _ = workspaces
     target = canonical / '.soma' / 'cells' / 'vacuoles' / 'cell-canonical.md'

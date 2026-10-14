@@ -4,7 +4,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import argparse
 from enum import Enum
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
+
+if TYPE_CHECKING:
+    from aegis_cli.ui.theme import OutputContext
 
 __all__ = ["CommandCategory", "AegisCommand", "SomaCommand"]
 

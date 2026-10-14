@@ -1,6 +1,6 @@
-"""Unit tests for soma_core.homeostasis."""
+"""Unit tests for aegis_core.homeostasis."""
 import pytest
-from soma_core.homeostasis import (
+from aegis_core.homeostasis import (
     CoherenceSignal,
     check_coherence,
     calculate_internal_state,

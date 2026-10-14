@@ -8,8 +8,8 @@ import os
 import tempfile
 import unittest
 
-from soma_mcp import jit_engine
-from soma_mcp.tools import _handle_scan
+from aegis_mcp import jit_engine
+from aegis_mcp.tools import _handle_scan
 
 
 class TestJitPreseedConstraints(unittest.TestCase):

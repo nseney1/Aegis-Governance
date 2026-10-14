@@ -18,7 +18,7 @@ import shutil
 
 import pytest
 
-from tests.helpers_cell import (
+from tests.helpers_rule import (
     soma_workspace, write_cell_with_fitness, make_cell_dict,
 )
 
@@ -35,28 +35,28 @@ class TestBayesianFitnessScoring:
     def test_zero_triggers_returns_0_5(self):
         """A brand-new cell with no data should score 0.5 (maximally uncertain)."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         result = bayesian_fitness(tp=0, fp=0)
         assert result['mean'] == pytest.approx(0.5)
 
     def test_perfect_small_sample_not_1_0(self):
         """A cell with 1 TP / 0 FP should NOT score 1.0 — prior pulls it down."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         result = bayesian_fitness(tp=1, fp=0)
         assert result['mean'] < 1.0, "Perfect 1/0 must not score 1.0"
 
     def test_all_false_positives_below_0_5(self):
         """A cell with 0 TP / 5 FP should score well below 0.5."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         result = bayesian_fitness(tp=0, fp=5)
         assert result['mean'] < 0.15
 
     def test_large_sample_converges_to_raw(self):
         """At 100 observations, Bayesian and raw should be nearly identical."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         result = bayesian_fitness(tp=90, fp=10)
         raw = 90 / 100
         assert abs(result['mean'] - raw) < 0.01
@@ -64,21 +64,21 @@ class TestBayesianFitnessScoring:
     def test_certainty_low_for_small_samples(self):
         """Fewer than 5 observations -> certainty must be 'low'."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         result = bayesian_fitness(tp=1, fp=1)
         assert result['certainty'] == 'low'
 
     def test_certainty_medium_for_moderate_samples(self):
         """5-19 observations -> certainty must be 'medium'."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         result = bayesian_fitness(tp=5, fp=5)
         assert result['certainty'] == 'medium'
 
     def test_monotonicity_with_increasing_tp(self):
         """More true positives -> higher score, for fixed false positives."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         scores = [bayesian_fitness(tp=tp, fp=5)['mean'] for tp in range(11)]
         for i in range(len(scores) - 1):
             assert scores[i] < scores[i + 1], \
@@ -238,7 +238,7 @@ class TestNewDormantStatus:
     def test_zero_trigger_cell_returns_maximally_uncertain(self):
         """A brand-new cell with 0 triggers should score 0.5 (maximally uncertain)."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         result = bayesian_fitness(tp=0, fp=0)
         assert result['mean'] == pytest.approx(0.5)
         assert result['certainty'] == 'low'
@@ -246,7 +246,7 @@ class TestNewDormantStatus:
     def test_zero_trigger_cell_has_wide_confidence_interval(self):
         """Zero-trigger cells should have a wide 90% CI spanning nearly [0, 1]."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle import bayesian_fitness
         result = bayesian_fitness(tp=0, fp=0)
         assert result['lower_90'] < 0.2, f"Lower bound too high: {result['lower_90']}"
         assert result['upper_90'] > 0.8, f"Upper bound too low: {result['upper_90']}"
@@ -254,7 +254,7 @@ class TestNewDormantStatus:
     def test_decayed_fitness_returns_none_for_no_data(self):
         """decayed_fitness should return raw_score unchanged when no date is available."""
         sys.path.insert(0, os.path.join(REPO_ROOT, 'enzymes'))
-        from soma_core.lifecycle import decayed_fitness
+        from aegis_core.lifecycle import decayed_fitness
         assert decayed_fitness(None, None) is None
         assert decayed_fitness(0.8, None) == 0.8
 

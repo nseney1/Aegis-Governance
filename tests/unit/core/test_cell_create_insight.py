@@ -7,7 +7,7 @@ import os
 import sys
 import pytest
 
-from soma_core.insights import create_cell_from_insight_cluster
+from aegis_core.insights import create_cell_from_insight_cluster
 
 
 class TestCreateCellFromInsightCluster:

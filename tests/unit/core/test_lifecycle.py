@@ -22,7 +22,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from tests.helpers_cell import make_cell
+from tests.helpers_rule import make_cell
 
 
 def write_evidence(evidence_dir, cell_id, triggers=0, tp=0, fp=0):
@@ -49,11 +49,11 @@ class TestLifecycleImport:
     """Lifecycle engine must be importable."""
 
     def test_evaluate_promotions_importable(self):
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
         assert callable(evaluate_promotions)
 
     def test_evaluate_demotions_importable(self):
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
         assert callable(evaluate_demotions)
 
 
@@ -62,7 +62,7 @@ class TestPromotionCriteria:
 
     def test_promotes_qualifying_vacuole(self, tmp_path):
         """Vacuole with 25 triggers, 90% tp_rate, 45 days old → promote to wall."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -81,7 +81,7 @@ class TestPromotionCriteria:
 
     def test_rejects_too_few_triggers(self, tmp_path):
         """Only 10 triggers → not enough for promotion."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -97,7 +97,7 @@ class TestPromotionCriteria:
 
     def test_rejects_low_tp_rate(self, tmp_path):
         """tp_rate = 0.60 → below 0.85 threshold."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -113,7 +113,7 @@ class TestPromotionCriteria:
 
     def test_rejects_too_young(self, tmp_path):
         """Cell only 15 days old → must be > 30 days."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -129,7 +129,7 @@ class TestPromotionCriteria:
 
     def test_wall_promotes_to_genome(self, tmp_path):
         """Wall with strong evidence → promote to genome."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -149,7 +149,7 @@ class TestPromotionCriteria:
 
     def test_empty_workspace_returns_empty(self, tmp_path):
         """No cells → no promotion candidates."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         (tmp_path / ".soma" / "cells").mkdir(parents=True)
         (tmp_path / ".soma" / "evidence").mkdir(parents=True)
@@ -163,7 +163,7 @@ class TestDemotionCriteria:
 
     def test_demotes_noisy_cell(self, tmp_path):
         """fp_rate = 0.7 → demote."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -181,7 +181,7 @@ class TestDemotionCriteria:
 
     def test_demotes_dormant_cell(self, tmp_path):
         """Zero triggers for 90+ days → demote."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -199,7 +199,7 @@ class TestDemotionCriteria:
 
     def test_keeps_healthy_cell(self, tmp_path):
         """Cell with good metrics → no demotion."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -215,7 +215,7 @@ class TestDemotionCriteria:
 
     def test_wall_demotes_to_vacuole(self, tmp_path):
         """Demoted wall should become a vacuole."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -233,7 +233,7 @@ class TestDemotionCriteria:
 
     def test_empty_workspace_returns_empty(self, tmp_path):
         """No cells → no demotion candidates."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         (tmp_path / ".soma" / "cells").mkdir(parents=True)
         (tmp_path / ".soma" / "evidence").mkdir(parents=True)
@@ -247,7 +247,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_triggers_19_rejected(self, tmp_path):
         """19 triggers should NOT promote (need >=20)."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -264,7 +264,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_triggers_20_accepted(self, tmp_path):
         """Exactly 20 triggers should promote."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -282,7 +282,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_tp_rate_084_rejected(self, tmp_path):
         """0.84 tp_rate should NOT promote (need >=0.85)."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -299,7 +299,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_triggers_4_not_enough(self, tmp_path):
         """4 triggers too few for fp_rate demotion (need >=5)."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -318,7 +318,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_triggers_5_fp_demotes(self, tmp_path):
         """5 triggers with >50% FP should demote."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -337,7 +337,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_tp_rate_085_accepted(self, tmp_path):
         """Exactly 0.85 tp_rate should promote (inclusive >=)."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -356,7 +356,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_age_29_rejected(self, tmp_path):
         """29 days old should NOT promote (need >=30)."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -374,7 +374,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_age_30_accepted(self, tmp_path):
         """Exactly 30 days old should promote."""
-        from soma_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle import evaluate_promotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
         cells_dir.mkdir(parents=True)
@@ -392,7 +392,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_fp_rate_050_not_demoted(self, tmp_path):
         """fp_rate exactly 0.50 should NOT demote (need >0.50)."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -409,7 +409,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_dormancy_89_not_demoted(self, tmp_path):
         """89 days old with 0 triggers should NOT be demoted for dormancy (need >=90)."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)
@@ -426,7 +426,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_dormancy_90_demoted(self, tmp_path):
         """90 days old with 0 triggers should be demoted for dormancy."""
-        from soma_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".soma" / "cells" / "walls"
         cells_dir.mkdir(parents=True)

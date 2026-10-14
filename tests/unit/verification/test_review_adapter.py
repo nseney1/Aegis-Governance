@@ -5,8 +5,8 @@ import tempfile
 
 import pytest
 
-from soma_core.verification import RiskCategory, Severity, Verdict
-from soma_core.verification.review_adapter import (
+from aegis_core.verification import RiskCategory, Severity, Verdict
+from aegis_core.verification.review_adapter import (
     _classify_finding,
     findings_to_claims,
     findings_to_predictions,
@@ -300,7 +300,7 @@ class TestCycleHelpers:
             assert data is not None
 
     def test_save_arbitration_evidence_invalid_cycle(self):
-        from soma_core.verification import ArbitrationResult, Verdict
+        from aegis_core.verification import ArbitrationResult, Verdict
         res = ArbitrationResult(
             divergences=[],
             convergences=[],
@@ -314,7 +314,7 @@ class TestCycleHelpers:
                 save_arbitration_evidence(res, tmpdir, cycle=0)
 
     def test_save_arbitration_evidence_with_target_files(self):
-        from soma_core.verification import ArbitrationResult, Verdict
+        from aegis_core.verification import ArbitrationResult, Verdict
         res = ArbitrationResult(
             divergences=[],
             convergences=[],
@@ -337,7 +337,7 @@ class TestCycleHelpers:
             assert record["target_files"] == ["worker.py", "main.py"]
 
     def test_save_arbitration_evidence_cleanup_on_error(self, monkeypatch):
-        from soma_core.verification import ArbitrationResult, Verdict
+        from aegis_core.verification import ArbitrationResult, Verdict
         res = ArbitrationResult(
             divergences=[],
             convergences=[],
@@ -358,7 +358,7 @@ class TestCycleHelpers:
             assert leftover == []
 
     def test_save_arbitration_evidence_auto_cycle(self):
-        from soma_core.verification import ArbitrationResult, Verdict
+        from aegis_core.verification import ArbitrationResult, Verdict
         res = ArbitrationResult(
             divergences=[],
             convergences=[],
@@ -404,7 +404,7 @@ class TestCycleHelpers:
     def test_save_arbitration_evidence_git_metadata(self):
         from pathlib import Path
         import subprocess
-        from soma_core.verification import ArbitrationResult, Verdict
+        from aegis_core.verification import ArbitrationResult, Verdict
         res = ArbitrationResult(
             divergences=[],
             convergences=[],
@@ -432,7 +432,7 @@ class TestCycleHelpers:
 
     def test_save_arbitration_evidence_git_failure_graceful(self, monkeypatch):
         import subprocess
-        from soma_core.verification import ArbitrationResult, Verdict
+        from aegis_core.verification import ArbitrationResult, Verdict
         res = ArbitrationResult(
             divergences=[],
             convergences=[],

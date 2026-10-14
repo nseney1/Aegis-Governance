@@ -1,5 +1,5 @@
 from pathlib import Path
-"""BUG-008: soma_mcp and soma_sdk.telemetry must work where `fcntl` is unavailable.
+"""BUG-008: soma_mcp and aegis_sdk.telemetry must work where `fcntl` is unavailable.
 
 `fcntl` is POSIX-only, so on Windows an unconditional import crashed the MCP
 server at startup. Each test runs in a subprocess with `fcntl` blocked

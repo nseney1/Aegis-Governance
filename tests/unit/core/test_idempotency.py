@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.lifecycle import (
+from aegis_core.lifecycle import (
     apply_exponential_decay,
     is_promotable,
     is_extinct,
 )
-from soma_core.quarantine import safe_parse_cell_file
+from aegis_core.quarantine import safe_parse_cell_file
 
 
 class TestIdempotencyContracts:

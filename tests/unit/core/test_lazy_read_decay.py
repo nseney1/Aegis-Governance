@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def _create_cell(workspace: Path, cell_id: str, last_trigger_date: str | None = None) -> Path:
@@ -66,7 +66,7 @@ def workspace(tmp_path: Path) -> Path:
 
 def test_recently_active_cell_is_healthy(workspace: Path):
     """A cell active 2 days ago should be healthy."""
-    from soma_core.arbitration import generate_checkpoint
+    from aegis_core.proposals import generate_checkpoint
 
     cell_id = "fresh-cell"
     recent_ts = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -80,7 +80,7 @@ def test_recently_active_cell_is_healthy(workspace: Path):
 
 def test_inactive_cell_transitions_to_decaying(workspace: Path):
     """A cell with no activity for 45 days should dynamically decay to decaying/dormant on read."""
-    from soma_core.arbitration import generate_checkpoint
+    from aegis_core.proposals import generate_checkpoint
 
     cell_id = "stale-cell"
     old_ts = (datetime.now(timezone.utc) - timedelta(days=45)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -100,7 +100,7 @@ def test_inactive_cell_transitions_to_decaying(workspace: Path):
 
 def test_read_time_decay_does_not_mutate_evidence(workspace: Path):
     """Generating checkpoint must not alter signals.jsonl."""
-    from soma_core.arbitration import generate_checkpoint
+    from aegis_core.proposals import generate_checkpoint
 
     cell_id = "immutable-check-cell"
     ts = (datetime.now(timezone.utc) - timedelta(days=50)).strftime("%Y-%m-%dT%H:%M:%SZ")

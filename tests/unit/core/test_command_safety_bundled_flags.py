@@ -5,7 +5,7 @@ must be unwrapped by unwrap_command_stage() so that inner destructive commands
 (such as rm -rf /, git reset --hard, etc.) are properly inspected and flagged.
 """
 import pytest
-from soma_core.command_safety import (
+from aegis_core.command_safety import (
     CommandAnalyzer,
     REASON_RM_RF,
     REASON_GIT_RESET_HARD,

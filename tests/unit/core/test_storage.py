@@ -1,4 +1,4 @@
-"""Unit tests for soma_core.storage atomic operations and retry backoff."""
+"""Unit tests for aegis_core.storage atomic operations and retry backoff."""
 import asyncio
 import os
 from pathlib import Path
@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from soma_core.storage import (
+from aegis_core.storage import (
     atomic_write_text,
     atomic_write_bytes,
     async_atomic_write_text,
@@ -91,7 +91,7 @@ def test_read_text_utf8_strips_bom(tmp_path: Path):
 
 
 def test_atomic_write_file_polymorphic(tmp_path: Path):
-    from soma_core.storage import atomic_write_file
+    from aegis_core.storage import atomic_write_file
 
     # Text write
     txt_file = tmp_path / "poly_text.txt"
@@ -105,7 +105,7 @@ def test_atomic_write_file_polymorphic(tmp_path: Path):
 
 
 def test_atomic_write_retries_up_to_eight_times(tmp_path: Path):
-    from soma_core.storage import atomic_write_file
+    from aegis_core.storage import atomic_write_file
 
     target = tmp_path / "retry8.txt"
     attempts = 0

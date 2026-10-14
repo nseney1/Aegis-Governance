@@ -1,4 +1,4 @@
-"""Tests for soma_core.outcomes — Verifiable outcome reflection and credit assignment."""
+"""Tests for aegis_core.outcomes — Verifiable outcome reflection and credit assignment."""
 from __future__ import annotations
 
 from fractions import Fraction
@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import pytest
 
-from soma_core.outcomes import (
+from aegis_core.outcomes import (
     compute_credit_weights,
     compute_fitness_signals,
     detect_test_runner,
@@ -23,7 +23,7 @@ from soma_core.outcomes import (
     extract_modified_files,
     match_cells,
 )
-from soma_core.somayaml import dump_frontmatter, parse_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 
 
 def test_detect_test_runner_package_json(tmp_path: Path) -> None:

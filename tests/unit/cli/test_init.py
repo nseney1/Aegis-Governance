@@ -13,44 +13,44 @@ class TestDetectPlatform:
 
     def test_gemini_detected(self, tmp_path):
         (tmp_path / ".gemini").mkdir()
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         assert detect_platform(tmp_path) == "gemini"
 
     def test_claude_detected(self, tmp_path):
         (tmp_path / ".claude").mkdir()
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         assert detect_platform(tmp_path) == "claude"
 
     def test_cursor_detected_dir(self, tmp_path):
         (tmp_path / ".cursor").mkdir()
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         assert detect_platform(tmp_path) == "cursor"
 
     def test_cursor_detected_file(self, tmp_path):
         (tmp_path / ".cursorrules").write_text("")
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         assert detect_platform(tmp_path) == "cursor"
 
     def test_copilot_detected(self, tmp_path):
         gh = tmp_path / ".github" / "copilot"
         gh.mkdir(parents=True)
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         assert detect_platform(tmp_path) == "copilot"
 
     def test_kiro_detected(self, tmp_path):
         (tmp_path / ".kiro").mkdir()
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         assert detect_platform(tmp_path) == "kiro"
 
     def test_unknown_when_empty(self, tmp_path):
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         assert detect_platform(tmp_path) == "unknown"
 
     def test_gemini_takes_priority(self, tmp_path):
         """When multiple markers exist, gemini wins (most common)."""
         (tmp_path / ".gemini").mkdir()
         (tmp_path / ".cursor").mkdir()
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         assert detect_platform(tmp_path) == "gemini"
 
 
@@ -59,41 +59,41 @@ class TestDetectProjectType:
 
     def test_python_pyproject(self, tmp_path):
         (tmp_path / "pyproject.toml").write_text("")
-        from soma_cli.init import detect_project_type
+        from aegis_cli.init import detect_project_type
         assert detect_project_type(tmp_path) == "python"
 
     def test_python_setup_py(self, tmp_path):
         (tmp_path / "setup.py").write_text("")
-        from soma_cli.init import detect_project_type
+        from aegis_cli.init import detect_project_type
         assert detect_project_type(tmp_path) == "python"
 
     def test_python_setup_cfg(self, tmp_path):
         (tmp_path / "setup.cfg").write_text("")
-        from soma_cli.init import detect_project_type
+        from aegis_cli.init import detect_project_type
         assert detect_project_type(tmp_path) == "python"
 
     def test_javascript(self, tmp_path):
         (tmp_path / "package.json").write_text("{}")
-        from soma_cli.init import detect_project_type
+        from aegis_cli.init import detect_project_type
         assert detect_project_type(tmp_path) == "javascript"
 
     def test_rust(self, tmp_path):
         (tmp_path / "Cargo.toml").write_text("")
-        from soma_cli.init import detect_project_type
+        from aegis_cli.init import detect_project_type
         assert detect_project_type(tmp_path) == "rust"
 
     def test_go(self, tmp_path):
         (tmp_path / "go.mod").write_text("")
-        from soma_cli.init import detect_project_type
+        from aegis_cli.init import detect_project_type
         assert detect_project_type(tmp_path) == "go"
 
     def test_unknown_when_empty(self, tmp_path):
-        from soma_cli.init import detect_project_type
+        from aegis_cli.init import detect_project_type
         assert detect_project_type(tmp_path) == "unknown"
 
     def test_accepts_str_path(self, tmp_path):
         (tmp_path / "pyproject.toml").write_text("")
-        from soma_cli.init import detect_project_type
+        from aegis_cli.init import detect_project_type
         assert detect_project_type(str(tmp_path)) == "python"
 
 
@@ -101,32 +101,32 @@ class TestGetRulesDir:
     """Verify correct rules directory per platform."""
 
     def test_gemini_rules_dir(self, tmp_path):
-        from soma_cli.init import get_rules_dir
+        from aegis_cli.init import get_rules_dir
         result = get_rules_dir("gemini", tmp_path)
         assert result.parts[-3:] == (".gemini", "config", "rules")
 
     def test_cursor_rules_dir(self, tmp_path):
-        from soma_cli.init import get_rules_dir
+        from aegis_cli.init import get_rules_dir
         result = get_rules_dir("cursor", tmp_path)
         assert result.parts[-2:] == (".cursor", "rules")
 
     def test_claude_rules_dir(self, tmp_path):
-        from soma_cli.init import get_rules_dir
+        from aegis_cli.init import get_rules_dir
         result = get_rules_dir("claude", tmp_path)
         assert str(result).endswith(".claude")
 
     def test_kiro_rules_dir(self, tmp_path):
-        from soma_cli.init import get_rules_dir
+        from aegis_cli.init import get_rules_dir
         result = get_rules_dir("kiro", tmp_path)
         assert result.parts[-2:] == (".kiro", "steering")
 
     def test_unknown_raises(self, tmp_path):
-        from soma_cli.init import get_rules_dir
+        from aegis_cli.init import get_rules_dir
         with pytest.raises(ValueError, match="Unsupported platform"):
             get_rules_dir("unknown", tmp_path)
 
     def test_unknown_raises_local(self, tmp_path):
-        from soma_cli.init import get_rules_dir
+        from aegis_cli.init import get_rules_dir
         with pytest.raises(ValueError, match="Unsupported platform"):
             get_rules_dir("unknown", tmp_path, local=True)
 
@@ -135,14 +135,14 @@ class TestInstallStarterRules:
     """Verify starter rule installation."""
 
     def test_dry_run_creates_no_files(self, tmp_path):
-        from soma_cli.init import install_starter_rules
+        from aegis_cli.init import install_starter_rules
         rules_dir = tmp_path / "rules"
         installed = install_starter_rules(rules_dir, dry_run=True)
         assert len(installed) == 5
         assert not rules_dir.exists()
 
     def test_installs_five_rules(self, tmp_path):
-        from soma_cli.init import install_starter_rules
+        from aegis_cli.init import install_starter_rules
         rules_dir = tmp_path / "rules"
         installed = install_starter_rules(rules_dir, dry_run=False)
         assert len(installed) == 5
@@ -155,7 +155,7 @@ class TestInstallStarterRules:
             assert len(content) > 100, f"Rule {name} seems too short"
 
     def test_starter_rules_are_the_right_five(self, tmp_path):
-        from soma_cli.init import STARTER_RULES
+        from aegis_cli.init import STARTER_RULES
         assert len(STARTER_RULES) == 5
         expected = {"providence", "destructive-ops", "testing",
                     "cost-optimization", "git-workflow"}
@@ -185,7 +185,7 @@ class TestRunInit:
     """End-to-end init flow."""
 
     def test_init_dry_run(self, tmp_path, capsys):
-        from soma_cli.init import run_init
+        from aegis_cli.init import run_init
         (tmp_path / ".gemini").mkdir()
         (tmp_path / "pyproject.toml").write_text("")
         args = argparse.Namespace(
@@ -198,7 +198,7 @@ class TestRunInit:
         assert "Detected platform" in captured.out or "gemini" in captured.out.lower()
 
     def test_init_with_forced_platform(self, tmp_path, capsys):
-        from soma_cli.init import run_init
+        from aegis_cli.init import run_init
         (tmp_path / "pyproject.toml").write_text("")
         args = argparse.Namespace(
             dry_run=True, platform="claude", yes=True,
@@ -215,7 +215,7 @@ class TestSkipExistingAndForce:
 
     def test_skips_existing_rules(self, tmp_path):
         """Pre-existing rule with custom content is preserved without --force."""
-        from soma_cli.init import install_starter_rules
+        from aegis_cli.init import install_starter_rules
         rules_dir = tmp_path / "rules"
         rules_dir.mkdir()
         custom_content = "# My custom providence rule\nDo not touch."
@@ -227,7 +227,7 @@ class TestSkipExistingAndForce:
 
     def test_force_overwrites_existing(self, tmp_path):
         """Pre-existing rule is overwritten when force=True."""
-        from soma_cli.init import install_starter_rules
+        from aegis_cli.init import install_starter_rules
         rules_dir = tmp_path / "rules"
         rules_dir.mkdir()
         (rules_dir / "providence.md").write_text("old content")
@@ -244,7 +244,7 @@ class TestSymlinkGuard:
 
     def test_symlink_destination_skipped(self, tmp_path):
         """Symlink destinations in rules_dir are not followed."""
-        from soma_cli.init import install_starter_rules
+        from aegis_cli.init import install_starter_rules
         rules_dir = tmp_path / "rules"
         rules_dir.mkdir()
         target_file = tmp_path / "target.txt"
@@ -264,7 +264,7 @@ class TestCopilotInstructionsDetection:
 
     def test_copilot_detected_instructions_file(self, tmp_path):
         """copilot-instructions.md triggers copilot platform detection."""
-        from soma_cli.init import detect_platform
+        from aegis_cli.init import detect_platform
         gh_dir = tmp_path / ".github"
         gh_dir.mkdir()
         (gh_dir / "copilot-instructions.md").write_text("# Instructions")
@@ -277,7 +277,7 @@ class TestClaudeMd:
 
     def test_claude_md_created(self, tmp_path):
         """CLAUDE.md is created when installing for Claude platform."""
-        from soma_cli.init import _install_claude_md, install_starter_rules
+        from aegis_cli.init import _install_claude_md, install_starter_rules
         rules_dir = tmp_path / "claude_rules"
         install_starter_rules(rules_dir, dry_run=False)
         _install_claude_md(rules_dir)
@@ -291,7 +291,7 @@ class TestClaudeMd:
 
     def test_claude_md_appends_to_existing(self, tmp_path):
         """CLAUDE.md appends Soma section to existing content."""
-        from soma_cli.init import _install_claude_md, install_starter_rules
+        from aegis_cli.init import _install_claude_md, install_starter_rules
         rules_dir = tmp_path / "claude_rules"
         install_starter_rules(rules_dir, dry_run=False)
 
@@ -305,7 +305,7 @@ class TestClaudeMd:
 
     def test_claude_md_skips_without_force(self, tmp_path):
         """CLAUDE.md soma section not replaced without --force."""
-        from soma_cli.init import _install_claude_md, install_starter_rules
+        from aegis_cli.init import _install_claude_md, install_starter_rules
         rules_dir = tmp_path / "claude_rules"
         install_starter_rules(rules_dir, dry_run=False)
 
@@ -317,7 +317,7 @@ class TestClaudeMd:
 
     def test_claude_md_replaces_with_force(self, tmp_path):
         """CLAUDE.md soma section replaced with --force."""
-        from soma_cli.init import _install_claude_md, install_starter_rules
+        from aegis_cli.init import _install_claude_md, install_starter_rules
         rules_dir = tmp_path / "claude_rules"
         install_starter_rules(rules_dir, dry_run=False)
 
@@ -335,7 +335,7 @@ class TestConfirmation:
 
     def test_init_aborts_without_yes(self, tmp_path, monkeypatch, capsys):
         """Init aborts when user says no to confirmation."""
-        from soma_cli.init import run_init
+        from aegis_cli.init import run_init
         (tmp_path / ".gemini").mkdir()
         monkeypatch.setattr("builtins.input", lambda _: "n")
         args = argparse.Namespace(
@@ -348,7 +348,7 @@ class TestConfirmation:
 
     def test_init_proceeds_with_yes(self, tmp_path, capsys):
         """Init proceeds when --yes is passed."""
-        from soma_cli.init import run_init
+        from aegis_cli.init import run_init
         (tmp_path / ".gemini").mkdir()
         args = argparse.Namespace(
             dry_run=False, platform="gemini", yes=True, force=False,
@@ -363,8 +363,8 @@ class TestPolyglotInit:
     """Tests for zero-touch polyglot driver provisioning in soma init."""
 
     def test_init_polyglot_language_detection_and_provisioning(self, tmp_path, capsys):
-        from soma_cli.init import run_init
-        from soma_core.skills.slots import SlotRegistry
+        from aegis_cli.init import run_init
+        from aegis_core.skills.slots import SlotRegistry
 
         (tmp_path / "Cargo.toml").write_text("[package]\nname = 'rust_app'\n", encoding="utf-8")
         src = tmp_path / "src"
@@ -387,7 +387,7 @@ class TestPolyglotInit:
         assert (tmp_path / ".soma" / "drivers" / "rust_ast.py").is_file()
 
     def test_init_polyglot_dry_run(self, tmp_path, capsys):
-        from soma_cli.init import run_init
+        from aegis_cli.init import run_init
 
         (tmp_path / "Cargo.toml").write_text("[package]\nname = 'rust_app'\n", encoding="utf-8")
         src = tmp_path / "src"
@@ -406,7 +406,7 @@ class TestPolyglotInit:
         assert not (tmp_path / ".soma" / "slots.yaml").exists()
 
     def test_init_detected_project_type_fallback(self, tmp_path, capsys):
-        from soma_cli.init import run_init
+        from aegis_cli.init import run_init
 
         (tmp_path / "README.md").write_text("# Readme\n", encoding="utf-8")
         (tmp_path / ".git").mkdir()
@@ -422,7 +422,7 @@ class TestPolyglotInit:
 
     def test_init_command_contract(self):
         from unittest.mock import patch
-        from soma_cli.init import InitCommand
+        from aegis_cli.init import InitCommand
         cmd = InitCommand()
         parser = argparse.ArgumentParser()
         cmd.configure_parser(parser)
@@ -437,14 +437,14 @@ class TestPolyglotInit:
         assert parsed.yes is True
         assert parsed.force is True
 
-        with patch("soma_cli.init.run_init", return_value=0) as mock_run:
+        with patch("aegis_cli.init.run_init", return_value=0) as mock_run:
             assert cmd.execute(parsed) == 0
             mock_run.assert_called_once_with(parsed)
 
     def test_init_claude_uses_home_directory_not_project_root(self, tmp_path, monkeypatch):
         """BUG-089 (#143): soma init --platform claude must install to ~/.claude, not <project>/.claude."""
-        from soma_cli.init import run_init
-        from soma_core.workspace import Workspace
+        from aegis_cli.init import run_init
+        from aegis_core.workspace import Workspace
 
         project_dir = tmp_path / "project"
         project_dir.mkdir()
@@ -474,8 +474,8 @@ class TestPolyglotInit:
 
     def test_init_claude_local_installs_to_project_root(self, tmp_path, monkeypatch):
         """BUG-092: soma init --platform claude --local installs to <project>/.claude and <project>/CLAUDE.md."""
-        from soma_cli.init import run_init
-        from soma_core.workspace import Workspace
+        from aegis_cli.init import run_init
+        from aegis_core.workspace import Workspace
 
         project_dir = tmp_path / "project"
         project_dir.mkdir()

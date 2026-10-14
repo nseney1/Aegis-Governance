@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 import pytest
 
-from soma_cli.hooks import run_pre_commit
+from aegis_cli.hooks import run_pre_commit
 
 
 class TestPrecommitLayer1Verification:

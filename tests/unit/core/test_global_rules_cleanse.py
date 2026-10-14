@@ -18,7 +18,7 @@ from aegis_cli.rule import (
     clean_global_rules,
     run_clean_rules,
 )
-from aegis_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 @pytest.fixture

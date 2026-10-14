@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from soma_cli.doctor import (
+from aegis_cli.doctor import (
     _check_cli_resolvable,
     _check_python_version,
     _check_zero_dependencies,
@@ -49,10 +49,10 @@ def test_doctor_returns_zero_in_valid_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     # Mock get_rules_dir to return our fake rules dir
-    with patch("soma_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"):
-        from soma_cli.init import get_rules_dir as _orig  # noqa: F811
+    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"):
+        from aegis_cli.init import get_rules_dir as _orig  # noqa: F811
         with patch(
-            "soma_cli.init.get_rules_dir",
+            "aegis_cli.init.get_rules_dir",
             return_value=rules_dir,
         ):
             args = argparse.Namespace()
@@ -78,9 +78,9 @@ def test_doctor_returns_one_on_failure(tmp_path, monkeypatch):
     _VersionInfo = namedtuple("version_info", "major minor micro releaselevel serial")
     fake_version = _VersionInfo(3, 8, 0, "final", 0)
 
-    monkeypatch.setattr("soma_cli.doctor.sys.version_info", fake_version)
-    with patch("soma_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"), \
-         patch("soma_cli.init.get_rules_dir", return_value=rules_dir):
+    monkeypatch.setattr("aegis_cli.doctor.sys.version_info", fake_version)
+    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"), \
+         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace()
         result = run_doctor(args)
 
@@ -99,10 +99,10 @@ def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, ca
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.delenv("ZDOTDIR", raising=False)
-    monkeypatch.setattr("soma_cli.pathcheck.default_candidates", lambda: [str(bindir)])
-    monkeypatch.setattr("soma_cli.pathcheck.sys.platform", "linux")
-    with patch("soma_cli.doctor.shutil.which", return_value=None), \
-         patch("soma_cli.pathcheck.shutil.which", return_value=None):
+    monkeypatch.setattr("aegis_cli.pathcheck.default_candidates", lambda: [str(bindir)])
+    monkeypatch.setattr("aegis_cli.pathcheck.sys.platform", "linux")
+    with patch("aegis_cli.doctor.shutil.which", return_value=None), \
+         patch("aegis_cli.pathcheck.shutil.which", return_value=None):
         assert _check_cli_resolvable() is False
     out = capsys.readouterr().out
     assert "soma CLI not found on PATH" in out
@@ -111,14 +111,14 @@ def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, ca
 
 
 def test_cli_check_silent_remedy_when_resolvable(capsys):
-    with patch("soma_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"):
+    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"):
         assert _check_cli_resolvable() is True
     out = capsys.readouterr().out
     assert "export PATH" not in out
 
 
 def test_check_ast_drivers_native_when_no_slots(tmp_path, capsys):
-    from soma_cli.doctor import _check_ast_drivers
+    from aegis_cli.doctor import _check_ast_drivers
     assert _check_ast_drivers(tmp_path) is True
     out = capsys.readouterr().out
     assert "native Python stdlib" in out
@@ -133,25 +133,25 @@ def test_check_ast_drivers_native_when_no_slots(tmp_path, capsys):
 
 
 def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys):
-    from soma_cli.doctor import _check_ast_drivers
+    from aegis_cli.doctor import _check_ast_drivers
     slots_file = tmp_path / ".soma" / "slots.yaml"
     slots_file.parent.mkdir(parents=True)
     slots_file.write_text("slots:\n  ast_driver_ts: node runner.js\n  ast_driver: default_bin\n")
 
     # With both binaries resolvable
-    with patch("soma_cli.doctor.shutil.which", side_effect=lambda cmd: f"/bin/{cmd}"):
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd: f"/bin/{cmd}"):
         assert _check_ast_drivers(tmp_path) is True
     out = capsys.readouterr().out
     assert "AST driver (.ts): node resolvable" in out
 
     # With missing binary
-    with patch("soma_cli.doctor.shutil.which", return_value=None):
+    with patch("aegis_cli.doctor.shutil.which", return_value=None):
         assert _check_ast_drivers(tmp_path) is False
     out = capsys.readouterr().out
     assert "not found on PATH" in out
 
     # Corrupt slots.yaml raising exception
-    with patch("soma_core.skills.slots.SlotRegistry.load", side_effect=Exception("corrupt")):
+    with patch("aegis_core.skills.slots.SlotRegistry.load", side_effect=Exception("corrupt")):
         assert _check_ast_drivers(tmp_path) is False
 
 
@@ -167,8 +167,8 @@ def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsy
     slots_file.write_text("slots:\n  ast_driver_xyz: nonexistent_ast_binary_12345\n")
 
     monkeypatch.chdir(tmp_path)
-    with patch("soma_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else None), \
-         patch("soma_cli.init.get_rules_dir", return_value=rules_dir):
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else None), \
+         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace()
         result = run_doctor(args)
     assert result == 0
@@ -177,7 +177,7 @@ def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsy
 
 
 def test_check_ast_drivers_missing_driver_warns_and_fixes(tmp_path, capsys):
-    from soma_cli.doctor import _check_ast_drivers
+    from aegis_cli.doctor import _check_ast_drivers
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "index.ts").write_text("const x = 1;")
 
@@ -195,7 +195,7 @@ def test_check_ast_drivers_missing_driver_warns_and_fixes(tmp_path, capsys):
 
 
 def test_check_ast_drivers_missing_extension_slot_warns_and_fixes(tmp_path, capsys):
-    from soma_cli.doctor import _check_ast_drivers
+    from aegis_cli.doctor import _check_ast_drivers
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.rs").write_text("fn main() {}")
 
@@ -227,8 +227,8 @@ def test_run_doctor_with_fix_flag(tmp_path, monkeypatch, capsys):
     (tmp_path / "src" / "index.ts").write_text("console.log(1);")
 
     monkeypatch.chdir(tmp_path)
-    with patch("soma_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/node"), \
-         patch("soma_cli.init.get_rules_dir", return_value=rules_dir):
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/node"), \
+         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace(fix=True)
         res = run_doctor(args)
     assert res == 0
@@ -248,8 +248,8 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
     (tmp_path / "src" / "index.ts").write_text("console.log(1);")
 
     monkeypatch.chdir(tmp_path)
-    with patch("soma_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/node"), \
-         patch("soma_cli.init.get_rules_dir", return_value=rules_dir):
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/node"), \
+         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace()
         res = run_doctor(args)
     assert not (tmp_path / ".soma" / "slots.yaml").exists()
@@ -259,7 +259,7 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
 
 
 def test_run_doctor_drivers_flag(tmp_path):
-    with patch("soma_cli.doctor._check_ast_drivers") as mock_check:
+    with patch("aegis_cli.doctor._check_ast_drivers") as mock_check:
         mock_check.return_value = True
         args = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=False, fix_path=False, yes=False)
         assert run_doctor(args) == 0
@@ -272,7 +272,7 @@ def test_run_doctor_drivers_flag(tmp_path):
 
 
 def test_doctor_command_contract():
-    from soma_cli.doctor import DoctorCommand
+    from aegis_cli.doctor import DoctorCommand
     cmd = DoctorCommand()
     parser = argparse.ArgumentParser()
     cmd.configure_parser(parser)
@@ -282,7 +282,7 @@ def test_doctor_command_contract():
     assert parsed.fix_path is True
     assert parsed.yes is True
 
-    with patch("soma_cli.doctor.run_doctor", return_value=0) as mock_run:
+    with patch("aegis_cli.doctor.run_doctor", return_value=0) as mock_run:
         assert cmd.execute(parsed) == 0
         mock_run.assert_called_once_with(parsed)
 
@@ -301,7 +301,7 @@ def _rust_project_with_python3_slot(tmp_path, monkeypatch):
 def test_check_ast_drivers_python3_slot_resolves_without_python3_on_path(tmp_path, monkeypatch, capsys):
     """#144: python.org installs on Windows ship no python3.exe; the slot runs
     on the interpreter running soma, so doctor must not report it broken."""
-    from soma_cli.doctor import _check_ast_drivers
+    from aegis_cli.doctor import _check_ast_drivers
     _rust_project_with_python3_slot(tmp_path, monkeypatch)
 
     assert _check_ast_drivers(tmp_path) is True
@@ -311,7 +311,7 @@ def test_check_ast_drivers_python3_slot_resolves_without_python3_on_path(tmp_pat
 
 
 def test_check_ast_drivers_python3_slot_unresolvable_without_any_interpreter(tmp_path, monkeypatch, capsys):
-    from soma_cli.doctor import _check_ast_drivers
+    from aegis_cli.doctor import _check_ast_drivers
     _rust_project_with_python3_slot(tmp_path, monkeypatch)
     monkeypatch.setattr(sys, "executable", "")
 
@@ -350,8 +350,8 @@ def test_doctor_json_mode_and_warning_counts(tmp_path, monkeypatch, capsys):
     rules_dir.mkdir()
 
     monkeypatch.chdir(tmp_path)
-    with patch("soma_cli.doctor.shutil.which", return_value="/usr/local/bin/aegis"), \
-         patch("soma_cli.init.get_rules_dir", return_value=rules_dir):
+    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/aegis"), \
+         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         # 1. Text mode with missing rules -> fails with Fix: remediation and warning/fail summary
         rc_text = run_doctor(argparse.Namespace())
         assert rc_text == 1

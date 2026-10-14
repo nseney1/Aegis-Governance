@@ -19,21 +19,21 @@ class TestImportBanned:
     def test_catches_violation(self, tmp_path):
         """A file with a banned import triggers a violation."""
         source = tmp_path / 'bad.py'
-        source.write_text('from soma_sdk.cells import *\n', encoding='utf-8')
-        from soma_sdk.invariants import check_import_banned
+        source.write_text('from aegis_sdk.cells import *\n', encoding='utf-8')
+        from aegis_sdk.invariants import check_import_banned
         violation = check_import_banned(
-            pattern='from soma_sdk.* import *',
+            pattern='from aegis_sdk.* import *',
             file_path=str(source)
         )
         assert violation is not None
-        assert 'soma_sdk' in violation.message
+        assert 'aegis_sdk' in violation.message
 
     def test_allows_compliant(self, tmp_path):
         """A file with a specific named import (not wildcard *) passes clean."""
         source = tmp_path / 'good.py'
-        source.write_text('from soma_sdk.cells import parse_cell_file\n',
+        source.write_text('from aegis_sdk.cells import parse_cell_file\n',
                           encoding='utf-8')
-        from soma_sdk.invariants import check_import_banned
+        from aegis_sdk.invariants import check_import_banned
         violation = check_import_banned(
             pattern='from os.* import *',
             file_path=str(source)
@@ -44,9 +44,9 @@ class TestImportBanned:
         """Non-Python files are silently skipped."""
         source = tmp_path / 'data.json'
         source.write_text('{"key": "value"}', encoding='utf-8')
-        from soma_sdk.invariants import check_import_banned
+        from aegis_sdk.invariants import check_import_banned
         violation = check_import_banned(
-            pattern='from soma_sdk.* import *',
+            pattern='from aegis_sdk.* import *',
             file_path=str(source)
         )
         assert violation is None
@@ -55,9 +55,9 @@ class TestImportBanned:
         """Files with syntax errors don't crash the checker."""
         source = tmp_path / 'broken.py'
         source.write_text('def foo(\n', encoding='utf-8')
-        from soma_sdk.invariants import check_import_banned
+        from aegis_sdk.invariants import check_import_banned
         violation = check_import_banned(
-            pattern='from soma_sdk.* import *',
+            pattern='from aegis_sdk.* import *',
             file_path=str(source)
         )
         assert violation is None
@@ -72,7 +72,7 @@ class TestFileMustExist:
 
     def test_catches_missing(self, tmp_path):
         """Missing test file triggers violation."""
-        from soma_sdk.invariants import check_file_must_exist
+        from aegis_sdk.invariants import check_file_must_exist
         violation = check_file_must_exist(
             path_pattern='tests/test_foo.py',
             workspace=str(tmp_path)
@@ -85,7 +85,7 @@ class TestFileMustExist:
         (tmp_path / 'tests').mkdir()
         (tmp_path / 'tests' / 'test_foo.py').write_text('# test\n',
                                                          encoding='utf-8')
-        from soma_sdk.invariants import check_file_must_exist
+        from aegis_sdk.invariants import check_file_must_exist
         violation = check_file_must_exist(
             path_pattern='tests/test_foo.py',
             workspace=str(tmp_path)
@@ -102,13 +102,13 @@ class TestCheckInvariants:
 
     def test_no_invariants_passes(self):
         """Cell without invariants always passes."""
-        from soma_sdk.invariants import check_invariants
+        from aegis_sdk.invariants import check_invariants
         violations = check_invariants(invariant_specs=[], target_files=[], workspace='/tmp')
         assert violations == []
 
     def test_unknown_type_ignored(self, tmp_path):
         """Unknown invariant types are silently skipped, not errors."""
-        from soma_sdk.invariants import check_invariants
+        from aegis_sdk.invariants import check_invariants
         specs = [{'type': 'nonexistent_check', 'value': 'foo'}]
         violations = check_invariants(
             invariant_specs=specs,
@@ -122,7 +122,7 @@ class TestCheckInvariants:
         # Create a file with a banned import
         source = tmp_path / 'bad.py'
         source.write_text('from os import *\n', encoding='utf-8')
-        from soma_sdk.invariants import check_invariants
+        from aegis_sdk.invariants import check_invariants
         specs = [
             {'type': 'import_banned', 'pattern': 'from os import *'},
             {'type': 'file_must_exist', 'path': 'missing_file.py'},

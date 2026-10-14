@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.quarantine import (
+from aegis_core.quarantine import (
     safe_parse_cell_file,
     list_quarantine,
     inspect_quarantined_file,
     prune_quarantine,
     quarantine_file,
 )
-from soma_cli.cli import main as cli_main
+from aegis_cli.cli import main as cli_main
 
 
 @pytest.fixture

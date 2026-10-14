@@ -14,9 +14,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from soma_mcp.tools import _handle_verify_changes
-from soma_cli.verify import run_verify
-from soma_core.workspace import Workspace
+from aegis_mcp.tools import _handle_verify_changes
+from aegis_cli.verify import run_verify
+from aegis_core.workspace import Workspace
 
 
 class TestMCPDualModeVerify:

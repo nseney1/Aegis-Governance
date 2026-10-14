@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from conftest import symlink_or_skip
-from soma_core.errors import WorkspaceBareRepoError, WorkspaceError
-from soma_core.workspace import Workspace, resolve_git_hooks_dir
+from aegis_core.errors import WorkspaceBareRepoError, WorkspaceError
+from aegis_core.workspace import Workspace, resolve_git_hooks_dir
 
 
 class TestWorkspaceForInit:

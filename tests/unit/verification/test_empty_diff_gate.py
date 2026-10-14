@@ -1,6 +1,6 @@
 """Behavioral tests for empty diff clean gate handling in verification runner."""
 import pytest
-from soma_core.verification import runner
+from aegis_core.verification import runner
 
 
 def test_gate_verdict_empty_results_passes():

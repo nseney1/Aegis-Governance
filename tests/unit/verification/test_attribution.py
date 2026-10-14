@@ -14,12 +14,12 @@ import json
 from pathlib import Path
 import pytest
 
-from soma_core.attribution import (
+from aegis_core.attribution import (
     attribute_verification_outcome,
     infer_cell_risk_categories,
 )
-from soma_core.somayaml import parse_frontmatter
-from soma_core.verification import (
+from aegis_core.yaml import parse_frontmatter
+from aegis_core.verification import (
     ArbitrationResult,
     Claim,
     Divergence,
@@ -29,7 +29,7 @@ from soma_core.verification import (
     ToolEvidence,
     Verdict,
 )
-from soma_core.verification.pipeline import (
+from aegis_core.verification.pipeline import (
     DeterministicVerifier,
     VerificationPipeline,
 )

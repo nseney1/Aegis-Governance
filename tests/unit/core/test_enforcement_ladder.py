@@ -56,7 +56,7 @@ class TestAdvisory:
 
     def test_advisory_warns_no_block(self, tmp_path):
         """Advisory enforcement returns exit 0 even with violations."""
-        from soma_sdk.invariants import evaluate_enforcement
+        from aegis_sdk.invariants import evaluate_enforcement
         violations = [type('V', (), {'message': 'test violation', 'file': 'f.py'})()]
         result = evaluate_enforcement(
             violations=violations,
@@ -67,7 +67,7 @@ class TestAdvisory:
         assert len(result['violations']) == 1
 
     def test_advisory_no_violation_passes(self, tmp_path):
-        from soma_sdk.invariants import evaluate_enforcement
+        from aegis_sdk.invariants import evaluate_enforcement
         result = evaluate_enforcement(
             violations=[],
             enforcement='advisory'
@@ -81,7 +81,7 @@ class TestGate:
 
     def test_gate_blocks_ci(self, tmp_path):
         """Gate enforcement returns exit 1 on violations."""
-        from soma_sdk.invariants import evaluate_enforcement
+        from aegis_sdk.invariants import evaluate_enforcement
         violations = [type('V', (), {'message': 'banned import', 'file': 'f.py'})()]
         result = evaluate_enforcement(
             violations=violations,
@@ -91,7 +91,7 @@ class TestGate:
         assert result['action'] == 'block'
 
     def test_gate_no_violation_passes(self, tmp_path):
-        from soma_sdk.invariants import evaluate_enforcement
+        from aegis_sdk.invariants import evaluate_enforcement
         result = evaluate_enforcement(
             violations=[],
             enforcement='gate'
@@ -104,7 +104,7 @@ class TestMechanical:
     """Mechanical tier blocks commits (exit 1) on violations."""
 
     def test_mechanical_blocks_commit(self, tmp_path):
-        from soma_sdk.invariants import evaluate_enforcement
+        from aegis_sdk.invariants import evaluate_enforcement
         violations = [type('V', (), {'message': 'pattern match', 'file': 'f.py'})()]
         result = evaluate_enforcement(
             violations=violations,
@@ -114,7 +114,7 @@ class TestMechanical:
         assert result['action'] == 'block'
 
     def test_mechanical_no_violation_passes(self, tmp_path):
-        from soma_sdk.invariants import evaluate_enforcement
+        from aegis_sdk.invariants import evaluate_enforcement
         result = evaluate_enforcement(
             violations=[],
             enforcement='mechanical'
@@ -128,7 +128,7 @@ class TestEnforcementEdgeCases:
 
     def test_unknown_enforcement_defaults_to_advisory(self):
         """Unknown enforcement tier defaults to advisory behavior."""
-        from soma_sdk.invariants import evaluate_enforcement
+        from aegis_sdk.invariants import evaluate_enforcement
         violations = [type('V', (), {'message': 'test', 'file': 'f.py'})()]
         result = evaluate_enforcement(
             violations=violations,

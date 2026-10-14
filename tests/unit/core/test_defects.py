@@ -1,10 +1,10 @@
-"""Unit tests for soma_core.defects and soma_core.insights."""
+"""Unit tests for aegis_core.defects and aegis_core.insights."""
 import os
 import json
 import tempfile
 import pytest
 
-from soma_core.defects import (
+from aegis_core.defects import (
     BoostConfig,
     HotZoneReport,
     compute_hot_zones,
@@ -18,7 +18,7 @@ from soma_core.defects import (
     audit_expiry,
     prune_expired,
 )
-from soma_core.insights import (
+from aegis_core.insights import (
     capture_insight,
     cluster_insights,
     generate_cell_candidates,

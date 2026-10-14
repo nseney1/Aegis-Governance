@@ -12,26 +12,26 @@ from pathlib import Path
 import pytest
 import warnings
 
-from soma_core.arbitration import (
+from aegis_core.proposals import (
     generate_checkpoint,
     get_escalation_protocol,
     soma_propose_change,
 )
-from soma_core.defects import audit_expiry, load_registry
-from soma_core.enforcement import (
+from aegis_core.defects import audit_expiry, load_registry
+from aegis_core.enforcement import (
     _match_cells,
     generate_ci_report,
     verify_readme_claims,
     verify_regression_tests,
 )
-from soma_core.lifecycle.creation import create_cell, transfer_cell
-from soma_core.lifecycle.decay import compute_cells_fitness
-from soma_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
-from soma_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
-from soma_core.lifecycle.selection import run_cell_selection
-from soma_core.outcomes import harvest_git_history, run_outcome_engine
-from soma_core.sync import load_soma_config, run_post_session_hook
-from soma_core.workspace import Workspace
+from aegis_core.lifecycle.creation import create_cell, transfer_cell
+from aegis_core.lifecycle.decay import compute_cells_fitness
+from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
+from aegis_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
+from aegis_core.lifecycle.selection import run_cell_selection
+from aegis_core.outcomes import harvest_git_history, run_outcome_engine
+from aegis_core.sync import load_soma_config, run_post_session_hook
+from aegis_core.workspace import Workspace
 
 
 @pytest.fixture
@@ -90,10 +90,10 @@ class TestPurgedLegacyGetters:
     """Verify that legacy standalone path getters have been permanently purged in v0.120.0."""
 
     def test_legacy_getters_purged_from_workspace_module(self):
-        import soma_core.workspace as scw
+        import aegis_core.workspace as scw
         for getter in ("get_cells_dir", "get_metrics_dir", "get_signals_file", "get_outcomes_file"):
-            assert not hasattr(scw, getter), f"{getter} must be purged from soma_core.workspace"
-            assert getter not in scw.__all__, f"{getter} must not be in soma_core.workspace.__all__"
+            assert not hasattr(scw, getter), f"{getter} must be purged from aegis_core.workspace"
+            assert getter not in scw.__all__, f"{getter} must not be in aegis_core.workspace.__all__"
 
 
 class TestLifecycleWorkspaceInteroperability:

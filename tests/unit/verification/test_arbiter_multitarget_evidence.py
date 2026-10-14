@@ -6,8 +6,8 @@ the arbiter must treat that tool evidence as failing for the adjudicated categor
 preventing false convergences when one target passed but another target failed.
 """
 import pytest
-from soma_core.verification import ToolEvidence, Prediction, Claim, RiskCategory, Severity, Verdict
-from soma_core.verification.arbiter import arbitrate
+from aegis_core.verification import ToolEvidence, Prediction, Claim, RiskCategory, Severity, Verdict
+from aegis_core.verification.arbiter import arbitrate
 
 
 def test_multitarget_tool_failure_not_masked_by_passing_target():

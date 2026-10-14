@@ -1,4 +1,4 @@
-"""Tests for self-healing corrupt file quarantine (soma_core.quarantine)."""
+"""Tests for self-healing corrupt file quarantine (aegis_core.quarantine)."""
 from __future__ import annotations
 
 import json
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.quarantine import (
+from aegis_core.quarantine import (
     quarantine_file,
     safe_parse_cell_file,
     safe_read_jsonl,

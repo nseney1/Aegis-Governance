@@ -5,7 +5,7 @@ import os
 import time
 
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def _rows(path):
@@ -31,7 +31,7 @@ def _cell(workspace, cell_id, triggers=0, tp=0, fp=0, score=None):
 
 
 def test_append_signals_conflict_leaves_ledger_byte_identical(tmp_path):
-    from soma_sdk.telemetry import EventConflictError, append_signal, append_signals
+    from aegis_sdk.telemetry import EventConflictError, append_signal, append_signals
 
     append_signal(str(tmp_path), "cell-b", "tp", "mcp", metadata={"v": 1},
                   principal="mcp", idempotency_scope="batch", idempotency_key="same")
@@ -51,8 +51,8 @@ def test_append_signals_conflict_leaves_ledger_byte_identical(tmp_path):
 
 
 def test_report_outcome_batch_failure_then_same_key_retries_once(tmp_path, monkeypatch):
-    import soma_sdk.telemetry as telemetry
-    from soma_mcp.tools import execute_tool
+    import aegis_sdk.telemetry as telemetry
+    from aegis_mcp.tools import execute_tool
 
     _cell(tmp_path, "cell-a")
     _cell(tmp_path, "cell-b")
@@ -84,7 +84,7 @@ def test_report_outcome_batch_failure_then_same_key_retries_once(tmp_path, monke
 
 
 def test_fitness_updater_retry_completes_every_cell_once(tmp_path):
-    from soma_core.telemetry import update_fitness
+    from aegis_core.telemetry import update_fitness
 
     evidence = tmp_path / ".soma" / "evidence"
     cells = [{"cell_id": "cell-a", "matched_files": ["a.py"]}]
@@ -97,8 +97,8 @@ def test_fitness_updater_retry_completes_every_cell_once(tmp_path):
 
 
 def test_sync_outcome_only_preserves_trigger_dimension(tmp_path):
-    from soma_cli.sync import aggregate_evidence, sync_frontmatter
-    from soma_sdk.cells import parse_cell_file
+    from aegis_cli.sync import aggregate_evidence, sync_frontmatter
+    from aegis_sdk.cells import parse_cell_file
 
     path = _cell(tmp_path, "cell-a", triggers=7, tp=1, fp=1, score=1 / 7)
     evidence = tmp_path / ".soma" / "evidence"
@@ -116,7 +116,7 @@ def test_sync_outcome_only_preserves_trigger_dimension(tmp_path):
 
 
 def test_sync_fractional_credit_uses_decimal_sum(tmp_path):
-    from soma_cli.sync import aggregate_evidence
+    from aegis_cli.sync import aggregate_evidence
 
     evidence = tmp_path / ".soma" / "evidence"
     evidence.mkdir(parents=True)
@@ -128,7 +128,7 @@ def test_sync_fractional_credit_uses_decimal_sum(tmp_path):
 
 
 def test_sync_replace_failure_returns_nonzero_without_claimed_change(tmp_path, monkeypatch, capsys):
-    import soma_cli.sync as sync_mod
+    import aegis_cli.sync as sync_mod
 
     _cell(tmp_path, "cell-a")
     evidence = tmp_path / ".soma" / "evidence"

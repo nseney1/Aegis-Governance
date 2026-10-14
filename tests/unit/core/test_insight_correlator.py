@@ -21,7 +21,7 @@ class TestClusterInsights:
 
     def test_clusters_by_category(self, tmp_path):
         """Insights with the same category are grouped."""
-        from soma_core.insights import cluster_insights
+        from aegis_core.insights import cluster_insights
 
         workspace = str(tmp_path)
         insights = [
@@ -41,7 +41,7 @@ class TestClusterInsights:
 
     def test_below_threshold_no_cluster(self, tmp_path):
         """Fewer insights than min_cluster_size produces no clusters."""
-        from soma_core.insights import cluster_insights
+        from aegis_core.insights import cluster_insights
 
         workspace = str(tmp_path)
         insights = [
@@ -57,7 +57,7 @@ class TestClusterInsights:
 
     def test_separate_categories_separate_clusters(self, tmp_path):
         """Different categories produce separate clusters."""
-        from soma_core.insights import cluster_insights
+        from aegis_core.insights import cluster_insights
 
         workspace = str(tmp_path)
         insights = [
@@ -78,7 +78,7 @@ class TestClusterInsights:
 
     def test_null_category_coerced(self, tmp_path):
         """Insights with category=None are grouped as 'uncategorized'."""
-        from soma_core.insights import cluster_insights
+        from aegis_core.insights import cluster_insights
 
         workspace = str(tmp_path)
         insights = [
@@ -94,7 +94,7 @@ class TestClusterInsights:
 
     def test_window_days_filters_old(self, tmp_path):
         """Insights older than window_days are excluded."""
-        from soma_core.insights import cluster_insights
+        from aegis_core.insights import cluster_insights
 
         workspace = str(tmp_path)
         insights = [
@@ -109,7 +109,7 @@ class TestClusterInsights:
 
     def test_empty_file_no_crash(self, tmp_path):
         """Empty or missing JSONL file returns empty list."""
-        from soma_core.insights import cluster_insights
+        from aegis_core.insights import cluster_insights
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
@@ -123,7 +123,7 @@ class TestGenerateCellCandidates:
 
     def test_produces_candidate_per_cluster(self, tmp_path):
         """Each cluster produces one cell candidate."""
-        from soma_core.insights import generate_cell_candidates
+        from aegis_core.insights import generate_cell_candidates
 
         workspace = str(tmp_path)
         clusters = [
@@ -144,7 +144,7 @@ class TestGenerateCellCandidates:
 
     def test_candidate_has_target_paths(self, tmp_path):
         """Candidate target_paths derived from cluster common_files."""
-        from soma_core.insights import generate_cell_candidates
+        from aegis_core.insights import generate_cell_candidates
 
         workspace = str(tmp_path)
         clusters = [
@@ -162,7 +162,7 @@ class TestGenerateCellCandidates:
 
     def test_empty_clusters_empty_candidates(self, tmp_path):
         """No clusters means no candidates."""
-        from soma_core.insights import generate_cell_candidates
+        from aegis_core.insights import generate_cell_candidates
 
         workspace = str(tmp_path)
         candidates = generate_cell_candidates([], workspace)

@@ -1,8 +1,8 @@
 import pytest
-from soma_mcp.server import handle_request, _session_token, _canonical_workspace, _execution_enabled
+from aegis_mcp.server import handle_request, _session_token, _canonical_workspace, _execution_enabled
 
 # Mock global state for testing handle_request directly
-import soma_mcp.server as server_module
+import aegis_mcp.server as server_module
 
 @pytest.fixture(autouse=True)
 def setup_server_globals(monkeypatch):
@@ -217,7 +217,7 @@ def test_porcelain_list_rules_dispatch(tmp_path, monkeypatch):
 def test_porcelain_rule_fitness_dispatch(tmp_path, monkeypatch):
     (tmp_path / ".soma" / "cells").mkdir(parents=True)
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))
-    from soma_sdk.governance import Governance
+    from aegis_sdk.governance import Governance
     monkeypatch.setattr(Governance, "fitness_landscape", lambda self, bayesian=False: [{"rule": "test", "score": 1.0}])
     req = {
         "jsonrpc": "2.0",

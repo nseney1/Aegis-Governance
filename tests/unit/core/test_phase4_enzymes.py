@@ -14,7 +14,7 @@ ENZYMES_DIR = Path(REPO_ROOT) / "enzymes"
 
 
 def test_cell_selection_evaluation(tmp_path):
-    from soma_core.lifecycle import run_cell_selection
+    from aegis_core.lifecycle import run_cell_selection
 
     cells_dir = tmp_path / ".soma" / "cells"
     walls_dir = cells_dir / "walls"
@@ -46,7 +46,7 @@ Test body
 
 
 def test_log_finding(tmp_path):
-    from soma_core.evidence import log_finding
+    from aegis_core.evidence import log_finding
 
     rc = log_finding(
         severity="warning",
@@ -66,7 +66,7 @@ def test_log_finding(tmp_path):
 
 
 def test_liveness_sentinel_scan():
-    from soma_core.sync import check_liveness
+    from aegis_core.sync import check_liveness
 
     payload = json.dumps({
         "agents": [
@@ -82,7 +82,7 @@ def test_liveness_sentinel_scan():
 
 
 def test_post_session_hook_execution(tmp_path):
-    from soma_core.sync import run_post_session_hook
+    from aegis_core.sync import run_post_session_hook
 
     transcript = tmp_path / "transcript.jsonl"
     step1 = {
@@ -125,7 +125,7 @@ def test_post_session_hook_execution(tmp_path):
 
 def test_match_cells_windows_backslash_paths(tmp_path):
     """Verify that match_cells matches Windows backslash paths against POSIX target_paths."""
-    from soma_core.telemetry import match_cells
+    from aegis_core.telemetry import match_cells
 
     cells_dir = tmp_path / ".soma" / "cells"
     walls_dir = cells_dir / "walls"

@@ -1,4 +1,4 @@
-"""Tests for soma_core.outcomes.insights — Developer insight reading and atomic cursor persistence."""
+"""Tests for aegis_core.outcomes.insights — Developer insight reading and atomic cursor persistence."""
 from __future__ import annotations
 
 import json
@@ -6,14 +6,14 @@ import os
 from pathlib import Path
 import pytest
 
-from soma_core.outcomes.insights import (
+from aegis_core.outcomes.insights import (
     _insight_cursor_path,
     _read_insight_cursor,
     commit_insight_cursor,
     capture_human_insight_signals,
     read_human_insight_signals,
 )
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def test_insight_cursor_path(tmp_path: Path):

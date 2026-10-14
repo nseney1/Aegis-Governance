@@ -3,9 +3,9 @@ import argparse
 from pathlib import Path
 import pytest
 
-from soma_cli.init import run_init
-from soma_core.skills.slots import SlotRegistry
-from soma_core.workspace import Workspace
+from aegis_cli.init import run_init
+from aegis_core.skills.slots import SlotRegistry
+from aegis_core.workspace import Workspace
 
 
 def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):

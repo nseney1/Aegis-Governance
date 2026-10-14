@@ -13,8 +13,8 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_mcp.security import confine_workspace, confine_path, validate_cell_names
-from soma_mcp.integrity import (
+from aegis_mcp.security import confine_workspace, confine_path, validate_cell_names
+from aegis_mcp.integrity import (
     generate_manifest,
     verify_manifest,
     load_manifest,
@@ -251,7 +251,7 @@ class TestIntegrityManifest:
 class TestKeyManagement:
     def test_generate_key_creates_file(self, soma_workspace):
         """Key generation creates .soma/keys/manifest.key."""
-        from soma_mcp.integrity import generate_key
+        from aegis_mcp.integrity import generate_key
 
         key_path = generate_key(str(soma_workspace))
         assert os.path.isfile(key_path)
@@ -262,7 +262,7 @@ class TestKeyManagement:
 
     def test_generate_key_rejects_overwrite(self, soma_workspace):
         """Second key generation raises FileExistsError."""
-        from soma_mcp.integrity import generate_key
+        from aegis_mcp.integrity import generate_key
 
         generate_key(str(soma_workspace))
         with pytest.raises(FileExistsError):
@@ -270,7 +270,7 @@ class TestKeyManagement:
 
     def test_rotate_key_backs_up_old(self, soma_workspace):
         """Key rotation creates .bak and new key differs."""
-        from soma_mcp.integrity import generate_key, rotate_key, load_key
+        from aegis_mcp.integrity import generate_key, rotate_key, load_key
 
         generate_key(str(soma_workspace))
         old_key = load_key(str(soma_workspace))
@@ -285,7 +285,7 @@ class TestKeyManagement:
 
     def test_load_key_returns_none_when_missing(self, soma_workspace):
         """No key file returns None, not an error."""
-        from soma_mcp.integrity import load_key
+        from aegis_mcp.integrity import load_key
 
         assert load_key(str(soma_workspace)) is None
 
@@ -293,7 +293,7 @@ class TestKeyManagement:
 class TestManifestSigning:
     def test_sign_manifest_deterministic(self, soma_workspace):
         """Same manifest + same key = same signature."""
-        from soma_mcp.integrity import generate_key, load_key, sign_manifest
+        from aegis_mcp.integrity import generate_key, load_key, sign_manifest
 
         generate_key(str(soma_workspace))
         key = load_key(str(soma_workspace))
@@ -305,7 +305,7 @@ class TestManifestSigning:
 
     def test_sign_manifest_different_key(self, soma_workspace):
         """Different key = different signature."""
-        from soma_mcp.integrity import sign_manifest
+        from aegis_mcp.integrity import sign_manifest
 
         cells_dir = str(soma_workspace / ".soma" / "cells")
         manifest = generate_manifest(cells_dir)
@@ -317,7 +317,7 @@ class TestManifestSigning:
 
     def test_verify_signature_valid(self, soma_workspace):
         """Valid signature verifies True."""
-        from soma_mcp.integrity import (
+        from aegis_mcp.integrity import (
             generate_key, load_key, sign_manifest, verify_signature,
         )
 
@@ -330,7 +330,7 @@ class TestManifestSigning:
 
     def test_verify_signature_tampered(self, soma_workspace):
         """Tampered manifest fails verification."""
-        from soma_mcp.integrity import (
+        from aegis_mcp.integrity import (
             generate_key, load_key, sign_manifest, verify_signature,
         )
 
@@ -345,7 +345,7 @@ class TestManifestSigning:
 
     def test_verify_signature_non_string_rejected(self, soma_workspace):
         """Non-string signature fails verification safely."""
-        from soma_mcp.integrity import (
+        from aegis_mcp.integrity import (
             generate_key, load_key, sign_manifest, verify_signature,
         )
 
@@ -361,7 +361,7 @@ class TestManifestSigning:
 
     def test_save_manifest_auto_signs(self, soma_workspace):
         """save_manifest includes signature when key exists."""
-        from soma_mcp.integrity import generate_key
+        from aegis_mcp.integrity import generate_key
 
         generate_key(str(soma_workspace))
         cells_dir = str(soma_workspace / ".soma" / "cells")
@@ -388,22 +388,22 @@ class TestManifestSigning:
 class TestSessionAuth:
     def test_read_tools_defined(self):
         """Read-only tools are classified."""
-        from soma_mcp.server import _READ_TOOLS
+        from aegis_mcp.server import _READ_TOOLS
 
         assert "soma_scan" in _READ_TOOLS
         assert "soma_list_cells" in _READ_TOOLS
 
     def test_write_and_execute_tools_defined(self):
         """Write and execute tools are classified."""
-        from soma_mcp.server import _WRITE_TOOLS, _EXECUTE_TOOLS
+        from aegis_mcp.server import _WRITE_TOOLS, _EXECUTE_TOOLS
 
         assert "soma_report_outcome" in _WRITE_TOOLS
         assert "soma_propose_change" in _EXECUTE_TOOLS
 
     def test_all_tool_definitions_classified(self):
         """Every tool in TOOL_DEFINITIONS appears in exactly one tier."""
-        from soma_mcp.server import _READ_TOOLS, _WRITE_TOOLS, _EXECUTE_TOOLS
-        from soma_mcp.tools import TOOL_DEFINITIONS
+        from aegis_mcp.server import _READ_TOOLS, _WRITE_TOOLS, _EXECUTE_TOOLS
+        from aegis_mcp.tools import TOOL_DEFINITIONS
 
         all_tiers = _READ_TOOLS | _WRITE_TOOLS | _EXECUTE_TOOLS
         for tool_def in TOOL_DEFINITIONS:
@@ -419,13 +419,13 @@ class TestSessionAuth:
 class TestRateLimiting:
     def setup_method(self):
         """Reset rate limiter state between tests."""
-        from soma_mcp import server
+        from aegis_mcp import server
 
         server._tool_call_times.clear()
 
     def test_allows_within_limit(self):
         """Calls within the window limit are allowed."""
-        from soma_mcp.server import _check_rate_limit
+        from aegis_mcp.server import _check_rate_limit
 
         # soma_checkpoint has a limit of 3 per 60s
         assert _check_rate_limit("soma_checkpoint") is True
@@ -434,7 +434,7 @@ class TestRateLimiting:
 
     def test_blocks_over_limit(self):
         """Calls exceeding the window limit are blocked."""
-        from soma_mcp.server import _check_rate_limit
+        from aegis_mcp.server import _check_rate_limit
 
         for _ in range(3):
             _check_rate_limit("soma_checkpoint")
@@ -442,7 +442,7 @@ class TestRateLimiting:
 
     def test_window_expires(self, monkeypatch):
         """Old entries are pruned when the window expires."""
-        from soma_mcp import server
+        from aegis_mcp import server
 
         mock_time = [100.0]
         monkeypatch.setattr(time, "monotonic", lambda: mock_time[0])
@@ -457,7 +457,7 @@ class TestRateLimiting:
 
     def test_unlimited_tools_always_pass(self):
         """Tools not in _RATE_LIMITS are never rate-limited."""
-        from soma_mcp.server import _check_rate_limit
+        from aegis_mcp.server import _check_rate_limit
 
         for _ in range(100):
             assert _check_rate_limit("soma_scan") is True

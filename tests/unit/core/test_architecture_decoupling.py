@@ -2,7 +2,7 @@
 
 Layer 0 Core (soma_core/) is the foundational, zero-dependency engine.
 It must NEVER import from Layer 2 (soma_mcp/ or soma_cli/) or Layer 1 (soma_sdk/).
-Specifically, checkpoint_checks.py must not import parse_frontmatter from soma_mcp.
+Specifically, checkpoint_checks.py must not import parse_frontmatter from aegis_mcp.
 """
 import ast
 import os
@@ -11,7 +11,7 @@ import pytest
 
 
 def test_soma_core_has_zero_upward_imports():
-    """All files in soma_core/ must have zero imports of soma_mcp, soma_cli, or soma_sdk."""
+    """All files in soma_core/ must have zero imports of soma_mcp, soma_cli, or aegis_sdk."""
     repo_root = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
     core_dir = repo_root / "soma_core"
 
@@ -38,8 +38,8 @@ def test_soma_core_has_zero_upward_imports():
 
 
 def test_parse_frontmatter_in_soma_core():
-    """parse_frontmatter must be available directly in soma_core."""
-    from soma_core.cell_inventory import parse_frontmatter
+    """parse_frontmatter must be available directly in aegis_core."""
+    from aegis_core.cell_inventory import parse_frontmatter
     content = "---\ntype: learned-trap\nname: test-trap\n---\nBody here"
     fm = parse_frontmatter(content)
     assert isinstance(fm, dict)
@@ -90,7 +90,7 @@ def test_zero_internal_calls_to_deprecated_workspace_getters():
                         violations.append(
                             f"{py_file.relative_to(repo_root)}:{node.lineno} calls deprecated attribute '{node.func.attr}'"
                         )
-                # Check imports: from soma_core.workspace import get_cells_dir
+                # Check imports: from aegis_core.workspace import get_cells_dir
                 elif isinstance(node, ast.ImportFrom):
                     for alias in node.names:
                         if alias.name in deprecated_symbols:
@@ -103,9 +103,9 @@ def test_zero_internal_calls_to_deprecated_workspace_getters():
 
 def test_purged_symbols_permanently_absent():
     """Verify that all purged legacy symbols and aliases are permanently absent."""
-    import soma_core.workspace
-    import soma_core.somayaml
-    import soma_cli.doctor
+    import aegis_core.workspace
+    import aegis_core.yaml
+    import aegis_cli.doctor
 
     purged_workspace_symbols = [
         "get_cells_dir",
@@ -115,8 +115,8 @@ def test_purged_symbols_permanently_absent():
         "find_workspace_root",
     ]
     for sym in purged_workspace_symbols:
-        assert not hasattr(soma_core.workspace, sym), f"soma_core.workspace should not have {sym}"
+        assert not hasattr(aegis_core.workspace, sym), f"aegis_core.workspace should not have {sym}"
 
-    assert not hasattr(soma_cli.doctor, "_check_pyyaml"), "soma_cli.doctor should not have _check_pyyaml"
-    assert not hasattr(soma_core.somayaml, "_parse_frontmatter"), "soma_core.somayaml should not have _parse_frontmatter"
+    assert not hasattr(aegis_cli.doctor, "_check_pyyaml"), "aegis_cli.doctor should not have _check_pyyaml"
+    assert not hasattr(aegis_core.yaml, "_parse_frontmatter"), "aegis_core.yaml should not have _parse_frontmatter"
 

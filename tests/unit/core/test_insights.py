@@ -1,9 +1,9 @@
-"""Unit tests for soma_core.insights."""
+"""Unit tests for aegis_core.insights."""
 import os
 import json
 import pytest
 
-from soma_core.insights import (
+from aegis_core.insights import (
     capture_insight,
     cluster_insights,
     generate_cell_candidates,
@@ -39,7 +39,7 @@ def test_capture_and_cluster_insights(tmp_path):
 
 
 def test_load_signal_weight_without_frontmatter(tmp_path):
-    from soma_core.insights import _load_signal_weight
+    from aegis_core.insights import _load_signal_weight
 
     ws = str(tmp_path)
     soma_dir = os.path.join(ws, ".soma")
@@ -50,7 +50,7 @@ def test_load_signal_weight_without_frontmatter(tmp_path):
 
 
 def test_load_signal_weight_with_bom(tmp_path):
-    from soma_core.insights import _load_signal_weight
+    from aegis_core.insights import _load_signal_weight
 
     ws = str(tmp_path)
     soma_dir = os.path.join(ws, ".soma")
@@ -76,7 +76,7 @@ def test_capture_insight_scaffold_wall(tmp_path):
     assert rec["wall_id"] == "wall-unhedged-subprocess"
     assert os.path.exists(rec["wall_file"])
 
-    from soma_core.somayaml import parse_frontmatter
+    from aegis_core.yaml import parse_frontmatter
     with open(rec["wall_file"], "r", encoding="utf-8") as f:
         content = f.read()
     meta = parse_frontmatter(content)
@@ -111,7 +111,7 @@ def test_capture_insight_scaffold_wall_default_id(tmp_path):
     assert rec["wall_id"] == f"wall-insight-{expected_h}"
     assert os.path.exists(rec["wall_file"])
 
-    from soma_core.somayaml import parse_frontmatter
+    from aegis_core.yaml import parse_frontmatter
     with open(rec["wall_file"], "r", encoding="utf-8") as f:
         meta = parse_frontmatter(f.read())
     assert meta["domain"] == "security"
@@ -129,7 +129,7 @@ def test_capture_insight_wall_id_only(tmp_path):
     assert rec["wall_id"] == "wall-my-custom-wall"
     assert os.path.exists(rec["wall_file"])
 
-    from soma_core.somayaml import parse_frontmatter
+    from aegis_core.yaml import parse_frontmatter
     with open(rec["wall_file"], "r", encoding="utf-8") as f:
         meta = parse_frontmatter(f.read())
     assert meta["domain"] == "concurrency"

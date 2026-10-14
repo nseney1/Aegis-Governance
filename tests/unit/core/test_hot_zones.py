@@ -1,5 +1,5 @@
 from pathlib import Path
-"""Tests for soma_sdk.hot_zones — bug registry → cell fitness boost."""
+"""Tests for aegis_sdk.hot_zones — bug registry → cell fitness boost."""
 import os
 import sys
 
@@ -9,7 +9,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.hot_zones import (
+from aegis_sdk.hot_zones import (
     BoostConfig,
     HotZoneReport,
     compute_cell_boost,

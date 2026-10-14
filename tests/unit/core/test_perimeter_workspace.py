@@ -1,8 +1,8 @@
 """Tests for Phase 16: Perimeter & Edge Workspace Adoption.
 
 Verifies that:
-1. soma_sdk.Governance initializes with and exposes Workspace instances.
-2. soma_core.receipts functions accept Workspace instances and behave identically.
+1. aegis_sdk.Governance initializes with and exposes Workspace instances.
+2. aegis_core.receipts functions accept Workspace instances and behave identically.
 3. soma_mcp server and tools operate with strongly-typed Workspace instances.
 """
 from __future__ import annotations
@@ -12,17 +12,17 @@ from pathlib import Path
 
 import pytest
 
-import soma_mcp.security as mcp_security
-from soma_core.receipts import (
+import aegis_mcp.security as mcp_security
+from aegis_core.receipts import (
     ReceiptStore,
     compute_cell_digest,
     compute_file_digest,
     issue_receipt,
     verify_receipt,
 )
-from soma_core.workspace import Workspace
-from soma_mcp.tools import execute_tool
-from soma_sdk import Governance
+from aegis_core.workspace import Workspace
+from aegis_mcp.tools import execute_tool
+from aegis_sdk import Governance
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def mock_soma_workspace(tmp_path: Path) -> Path:
 
 
 class TestGovernanceWorkspacePorcelain:
-    """Verifies soma_sdk.Governance integration with Workspace."""
+    """Verifies aegis_sdk.Governance integration with Workspace."""
 
     def test_governance_init_with_path_creates_workspace(self, mock_soma_workspace: Path):
         gov = Governance(project_root=mock_soma_workspace)
@@ -71,7 +71,7 @@ class TestGovernanceWorkspacePorcelain:
 
 
 class TestReceiptsWorkspaceInteroperability:
-    """Verifies soma_core.receipts handles Workspace value objects."""
+    """Verifies aegis_core.receipts handles Workspace value objects."""
 
     def test_compute_file_digest_with_workspace(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
@@ -155,7 +155,7 @@ class TestMCPSecurityAndToolsWorkspace:
         assert any(c.get("name") == "sample-rule" or c.get("_name") == "sample_rule" for c in data)
 
     def test_mcp_server_canonical_workspace_type(self, monkeypatch, mock_soma_workspace: Path):
-        from soma_mcp import server
+        from aegis_mcp import server
         ws = Workspace.confine(mock_soma_workspace)
         monkeypatch.setattr(server, "_canonical_workspace", ws)
         # Verify _state_digests uses Workspace cleanly

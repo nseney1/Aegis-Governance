@@ -123,7 +123,7 @@ def hermetic_environment_and_mcp_isolation():
     os.environ.update(old_env)
 
     # Reset MCP server singletons if aegis_mcp.server is loaded
-    for mod_name in ("aegis_mcp.server", "soma_mcp.server"):
+    for mod_name in ("aegis_mcp.server", "aegis_mcp.server"):
         if mod_name in sys.modules:
             mcp_server = sys.modules[mod_name]
             if hasattr(mcp_server, "_session_tokens") and isinstance(mcp_server._session_tokens, set):

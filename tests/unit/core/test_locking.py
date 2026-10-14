@@ -1,4 +1,4 @@
-"""Tests for cross-platform transactional workspace locking (soma_core.locking)."""
+"""Tests for cross-platform transactional workspace locking (aegis_core.locking)."""
 from __future__ import annotations
 
 import os
@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from soma_core.locking import (
+from aegis_core.locking import (
     workspace_lock,
     LockTimeoutError,
     LOCK_DIRNAME,
@@ -85,7 +85,7 @@ class TestWorkspaceLock:
 
     def test_unacquired_lock_release_not_called_on_timeout(self, tmp_path: Path, monkeypatch):
         """If OS lock acquisition fails, _release_os_lock must not be called (guards Windows CRT)."""
-        import soma_core.locking as locking_mod
+        import aegis_core.locking as locking_mod
 
         release_called = False
 

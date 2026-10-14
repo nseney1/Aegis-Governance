@@ -12,8 +12,8 @@ import os
 from pathlib import Path
 import pytest
 
-from soma_core.somayaml import dump_frontmatter, parse_frontmatter
-from soma_core.lifecycle.constants import (
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter
+from aegis_core.lifecycle.constants import (
     GLOBAL_PROMOTION_PATH,
     LOCAL_PROMOTION_PATH,
     GLOBAL_DEMOTION_PATH,
@@ -21,11 +21,11 @@ from soma_core.lifecycle.constants import (
     get_promotion_path,
     get_demotion_path,
 )
-from soma_core.lifecycle.parsers import find_cell_file, _load_cells
-from soma_core.lifecycle.promotion import promote_cell, demote_cell, metamorphose_cell
-from soma_core.metrics import compute_token_census
-from soma_core.workspace import Workspace
-from soma_mcp.jit_engine import load_genome_rules
+from aegis_core.lifecycle.parsers import find_cell_file, _load_cells
+from aegis_core.lifecycle.promotion import promote_cell, demote_cell, metamorphose_cell
+from aegis_core.metrics import compute_token_census
+from aegis_core.workspace import Workspace
+from aegis_mcp.jit_engine import load_genome_rules
 
 
 def test_promotion_paths_definition():

@@ -3,8 +3,8 @@ import argparse
 from pathlib import Path
 import pytest
 
-from soma_cli.doctor import run_doctor, _check_ast_drivers
-from soma_core.skills.slots import SlotRegistry
+from aegis_cli.doctor import run_doctor, _check_ast_drivers
+from aegis_core.skills.slots import SlotRegistry
 
 
 def test_doctor_detects_unconfigured_polyglot_language(tmp_path: Path):
@@ -56,8 +56,8 @@ def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch):
     )
 
     monkeypatch.chdir(tmp_path)
-    with patch("soma_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/go"), \
-         patch("soma_cli.init.get_rules_dir", return_value=rules_dir):
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/go"), \
+         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         exit_code = run_doctor(args)
     # Doctor exits 0 when health checks pass or are repaired
     registry = SlotRegistry.load(tmp_path)

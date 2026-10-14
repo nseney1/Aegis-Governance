@@ -10,7 +10,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_core.enforcement import (
+from aegis_core.enforcement import (
     load_registry,
     verify_regression_tests,
     verify_schema,
@@ -255,7 +255,7 @@ class TestRegressionRunBudget:
 
     def _batch_taking(self, seconds, monkeypatch):
         import subprocess
-        import soma_core.enforcement as vbr
+        import aegis_core.enforcement as vbr
 
         def fake_run(cmd, **kwargs):
             if kwargs["timeout"] < seconds:

@@ -13,7 +13,7 @@ class TestCaptureInsight:
 
     def test_creates_jsonl_file(self, tmp_path):
         """Capturing an insight creates .soma/human_insights.jsonl if missing."""
-        from soma_core.insights import capture_insight
+        from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
@@ -29,7 +29,7 @@ class TestCaptureInsight:
 
     def test_record_has_required_fields(self, tmp_path):
         """Each record must contain timestamp, insight, context_files, was_covered."""
-        from soma_core.insights import capture_insight
+        from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
@@ -48,7 +48,7 @@ class TestCaptureInsight:
 
     def test_appends_to_existing_file(self, tmp_path):
         """Multiple captures append to the same JSONL file."""
-        from soma_core.insights import capture_insight
+        from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
@@ -65,7 +65,7 @@ class TestCaptureInsight:
 
     def test_optional_category(self, tmp_path):
         """Category field is optional and included when provided."""
-        from soma_core.insights import capture_insight
+        from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
@@ -80,7 +80,7 @@ class TestCaptureInsight:
 
     def test_optional_source_conversation(self, tmp_path):
         """source_conversation field is optional and included when provided."""
-        from soma_core.insights import capture_insight
+        from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
@@ -95,7 +95,7 @@ class TestCaptureInsight:
 
     def test_covering_cells_detected(self, tmp_path):
         """When a cell's target_paths match context_files, it appears in covering_cells."""
-        from soma_core.insights import capture_insight
+        from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
         cells_dir = os.path.join(workspace, ".soma", "cells", "vacuoles")
@@ -128,7 +128,7 @@ Check API input validation.
 
     def test_uncovered_insight(self, tmp_path):
         """When no cells cover context_files, was_covered is False."""
-        from soma_core.insights import capture_insight
+        from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
@@ -143,7 +143,7 @@ Check API input validation.
 
     def test_empty_context_files_rejected(self, tmp_path):
         """Insights must reference at least one file."""
-        from soma_core.insights import capture_insight
+        from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
         os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
