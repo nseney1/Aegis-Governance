@@ -32,8 +32,6 @@ dependencies = []
 [project.scripts]
 aegis = "aegis_cli.cli:main"
 aegis-mcp = "aegis_mcp.server:main"
-soma = "aegis_cli.cli:main"
-soma-mcp = "aegis_mcp.server:main"
 
 [project.optional-dependencies]
 ai = ["google-genai>=1.0"]
@@ -51,8 +49,7 @@ Changelog = "https://github.com/nseney1/Soma-Governance/blob/main/docs/project/C
 [tool.setuptools.packages.find]
 include = [
     "aegis_cli*", "aegis_sdk*", "aegis_core*", "aegis_mcp*",
-    "soma_cli*", "soma_sdk*", "soma_core*", "soma_mcp*",
-    "genome*", "rules*"
+    "rules*"
 ]
 
 [tool.setuptools]
@@ -62,10 +59,6 @@ include-package-data = true
 aegis_sdk = ["py.typed"]
 aegis_cli = ["starter_rules/*.md"]
 aegis_core = ["ast/drivers/templates/*"]
-soma_sdk = ["py.typed"]
-soma_cli = ["starter_rules/*.md"]
-soma_core = ["ast/drivers/templates/*"]
-genome = ["*.md", ".oracles/*.md"]
 rules = ["*.md", ".oracles/*.md"]
 
 

@@ -18,11 +18,11 @@ tags:
   - correctness
 created: 2026-09-28
 fitness:
-  triggers: 38
-  true_positives: 3.6197
-  false_positives: 4.0288
+  triggers: 47
+  true_positives: 4.6199
+  false_positives: 4.5289
   score: 0.5
-  last_trigger_date: "2026-10-14T07:33:06Z"
+  last_trigger_date: "2026-10-14T08:55:31Z"
 ---
 
 # Trap: Install Paths Divergence

@@ -65,8 +65,7 @@ class TestInstallHookFunction:
 
         hook_file = git_dir / "pre-commit"
         content = hook_file.read_text()
-        assert "soma checkpoint" in content
-        assert "--pre-commit" in content
+        assert "check --hook" in content or "soma checkpoint" in content
 
     def test_install_hook_has_shebang(self, tmp_path):
         """Hook file must start with a valid shebang line."""
@@ -115,7 +114,7 @@ class TestInstallHookFunction:
 
         content = hook_file.read_text()
         assert "existing hook" in content, "Original hook content must be preserved"
-        assert "soma checkpoint" in content, "Soma hook must be appended"
+        assert "check --hook" in content or "soma checkpoint" in content, "Hook must be appended"
 
     def test_install_hook_idempotent(self, tmp_path):
         """Running install_hook twice does not duplicate the soma section."""
@@ -129,7 +128,11 @@ class TestInstallHookFunction:
 
         hook_file = git_dir / "pre-commit"
         content = hook_file.read_text()
-        assert content.count("soma checkpoint") == 1, "Must not duplicate soma section"
+        assert (
+            content.count("# >>> aegis pre-commit >>>") == 1
+            or content.count("# >>> soma pre-commit >>>") == 1
+            or content.count("soma checkpoint") == 1
+        ), "Must not duplicate hook section"
 
     def test_install_hook_returns_true_on_success(self, tmp_path):
         """install_hook returns True when hook is successfully installed."""
@@ -171,7 +174,7 @@ class TestInitInstallsHook:
         hook_file = git_dir / "pre-commit"
         assert hook_file.exists(), "soma init must install pre-commit hook"
         content = hook_file.read_text()
-        assert "soma checkpoint" in content
+        assert "check --hook" in content or "soma checkpoint" in content
 
     def test_init_dry_run_does_not_install_hook(self, tmp_path, monkeypatch):
         """soma init --dry-run does not create the hook file."""

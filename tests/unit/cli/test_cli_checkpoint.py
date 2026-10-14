@@ -11,7 +11,7 @@ the current changeset (no LLM required):
 - Supports --json (machine-readable output)
 - Supports --workspace (override target directory)
 
-Implementation will be in `soma_cli/checkpoint.py` with `run_checkpoint(args) -> int`.
+Implementation will be in `aegis_cli/checkpoint.py` with `run_checkpoint(args) -> int`.
 """
 import argparse
 import json
@@ -23,7 +23,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 sys.path.insert(0, REPO_ROOT)
 
 
-from soma_cli.checkpoint import run_checkpoint
+from aegis_cli.checkpoint import run_checkpoint
 
 
 def _setup_clean_workspace(root):
@@ -88,7 +88,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_subparser_registered(self):
         """'checkpoint' must be registered as a recognized subcommand."""
-        from soma_cli.cli import _build_parser
+        from aegis_cli.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(["checkpoint"])
@@ -96,7 +96,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_defaults(self):
         """Default arguments must match expected behavior (not pre-commit, not json)."""
-        from soma_cli.cli import _build_parser
+        from aegis_cli.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(["checkpoint"])
@@ -107,7 +107,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_pre_commit_flag(self):
         """--pre-commit flag should be accepted and set to True."""
-        from soma_cli.cli import _build_parser
+        from aegis_cli.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(["checkpoint", "--pre-commit"])
@@ -115,7 +115,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_json_flag(self):
         """--json flag should be accepted and set to True."""
-        from soma_cli.cli import _build_parser
+        from aegis_cli.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(["checkpoint", "--json"])
@@ -123,7 +123,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_workspace_option(self):
         """--workspace option should accept a path string."""
-        from soma_cli.cli import _build_parser
+        from aegis_cli.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(["checkpoint", "--workspace", "/custom/path"])
@@ -131,7 +131,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_strict_flag(self):
         """--strict flag should be accepted when specified."""
-        from soma_cli.cli import _build_parser
+        from aegis_cli.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(["checkpoint", "--strict"])
@@ -139,7 +139,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_all_flags_combined(self):
         """All checkpoint flags can be used together."""
-        from soma_cli.cli import _build_parser
+        from aegis_cli.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args([
@@ -157,7 +157,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_help_exits_zero(self):
         """'soma checkpoint --help' prints help and exits with status 0."""
-        from soma_cli.cli import main
+        from aegis_cli.cli import main
 
         with pytest.raises(SystemExit) as exc_info:
             main(["checkpoint", "--help"])
@@ -165,7 +165,7 @@ class TestCheckpointCLIParsing:
 
     def test_checkpoint_unknown_flag_exits_code_two(self):
         """Argparse rejects unrecognized flags with exit code 2."""
-        from soma_cli.cli import main
+        from aegis_cli.cli import main
 
         with pytest.raises(SystemExit) as exc_info:
             main(["checkpoint", "--invalid-flag-12345"])
@@ -178,14 +178,14 @@ class TestCheckpointImportAndDispatch:
     """Verify run_checkpoint exists and is wired to CLI dispatch."""
 
     def test_run_checkpoint_importable(self):
-        """run_checkpoint must be importable from soma_cli.checkpoint."""
-        from soma_cli.checkpoint import run_checkpoint
+        """run_checkpoint must be importable from aegis_cli.checkpoint."""
+        from aegis_cli.checkpoint import run_checkpoint
 
         assert callable(run_checkpoint)
 
     def test_checkpoint_in_cli_commands(self):
-        """COMMANDS dictionary in soma_cli.cli must include 'checkpoint'."""
-        from soma_cli.cli import COMMANDS
+        """COMMANDS dictionary in aegis_cli.cli must include 'checkpoint'."""
+        from aegis_cli.cli import COMMANDS
 
         assert "checkpoint" in COMMANDS
         assert callable(COMMANDS["checkpoint"])
@@ -198,7 +198,7 @@ class TestCheckpointCleanProject:
 
     def test_clean_project_run_checkpoint_returns_zero(self, tmp_path, capsys):
         """run_checkpoint on a compliant workspace returns exit 0."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         _setup_clean_workspace(tmp_path)
         args = argparse.Namespace(
@@ -215,7 +215,7 @@ class TestCheckpointCleanProject:
 
     def test_clean_project_main_invocation_returns_zero(self, tmp_path):
         """Calling main(['checkpoint', '--workspace', ...]) returns 0 for a clean project."""
-        from soma_cli.cli import main
+        from aegis_cli.cli import main
 
         _setup_clean_workspace(tmp_path)
         exit_code = main(["checkpoint", "--workspace", str(tmp_path)])
@@ -229,7 +229,7 @@ class TestCheckpointTestCoverage:
 
     def test_missing_test_coverage_returns_nonzero_by_default(self, tmp_path, capsys):
         """Implementation file with no corresponding test must fail in default/strict mode."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         src = tmp_path / "src"
         src.mkdir(parents=True)
@@ -251,7 +251,7 @@ class TestCheckpointTestCoverage:
 
     def test_missing_test_coverage_warn_mode_exits_zero(self, tmp_path, capsys):
         """In --pre-commit mode (without --strict), issues warn but exit code is 0."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         src = tmp_path / "src"
         src.mkdir(parents=True)
@@ -274,7 +274,7 @@ class TestCheckpointTestCoverage:
 
     def test_missing_test_coverage_pre_commit_strict_exits_nonzero(self, tmp_path):
         """In --pre-commit with --strict, issues cause exit code 1."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         src = tmp_path / "src"
         src.mkdir(parents=True)
@@ -299,7 +299,7 @@ class TestCheckpointDeterministicQualityChecks:
 
     def test_hardcoded_paths_detected(self, tmp_path, capsys):
         """Hardcoded absolute paths (/home, /Users, /tmp) must be flagged."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         _setup_clean_workspace(tmp_path)
         # Introduce a hardcoded path in implementation
@@ -329,7 +329,7 @@ class TestCheckpointDeterministicQualityChecks:
 
     def test_low_assertion_density_flagged(self, tmp_path, capsys):
         """Test files with zero assertions should be flagged."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         _setup_clean_workspace(tmp_path)
         # Create a test file without any assert statements
@@ -354,7 +354,7 @@ class TestCheckpointDeterministicQualityChecks:
 
     def test_unhealthy_cell_fitness_flagged(self, tmp_path, capsys):
         """Cell with high false positive rate in fitness evidence should be flagged."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         _setup_clean_workspace(tmp_path)
         evidence = tmp_path / ".soma" / "evidence"
@@ -402,7 +402,7 @@ class TestCheckpointJsonOutput:
 
     def test_json_output_clean_workspace(self, tmp_path, capsys):
         """Clean project with --json emits valid JSON reporting success."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         _setup_clean_workspace(tmp_path)
         args = argparse.Namespace(
@@ -422,7 +422,7 @@ class TestCheckpointJsonOutput:
 
     def test_json_output_with_violations(self, tmp_path, capsys):
         """Project with issues and --json emits structured JSON detailing failures."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         src = tmp_path / "src"
         src.mkdir(parents=True)
@@ -448,7 +448,7 @@ class TestCheckpointJsonOutput:
 
     def test_json_output_via_cli_main(self, tmp_path, capsys):
         """CLI main with ['checkpoint', '--json'] outputs parseable JSON."""
-        from soma_cli.cli import main
+        from aegis_cli.cli import main
 
         _setup_clean_workspace(tmp_path)
         main(["checkpoint", "--workspace", str(tmp_path), "--json"])
@@ -464,7 +464,7 @@ class TestCheckpointEdgeCases:
 
     def test_empty_workspace_returns_zero(self, tmp_path, capsys):
         """An empty workspace with no python files passes checkpoint cleanly."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         args = argparse.Namespace(
             workspace=str(tmp_path),
@@ -477,7 +477,7 @@ class TestCheckpointEdgeCases:
 
     def test_nonexistent_workspace_returns_nonzero(self, tmp_path, capsys):
         """Specifying a non-existent workspace path returns non-zero error."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
 
         bad_path = tmp_path / "does_not_exist"
         args = argparse.Namespace(
@@ -491,12 +491,12 @@ class TestCheckpointEdgeCases:
 
     def test_checkpoint_is_read_only(self, tmp_path, monkeypatch):
         """checkpoint must not call aggregate_evidence or sync_frontmatter."""
-        from soma_cli.checkpoint import run_checkpoint
+        from aegis_cli.checkpoint import run_checkpoint
         import argparse
 
         _setup_clean_workspace(tmp_path)
         
-        # We will mock soma_cli.sync to see if it's imported/called
+        # We will mock aegis_cli.sync to see if it's imported/called
         class SyncMock:
             called = False
             @staticmethod
@@ -518,11 +518,11 @@ class TestCheckpointEdgeCases:
         # If it tries to write, it will raise an exception
         # Let's mock aggregate_evidence directly if possible, or just rely on file modifications
         
-        # We can just monkeypatch soma_cli.sync if it exists
+        # We can just monkeypatch aegis_cli.sync if it exists
         try:
-            import soma_cli.sync
-            monkeypatch.setattr(soma_cli.sync, "aggregate_evidence", SyncMock.aggregate_evidence)
-            monkeypatch.setattr(soma_cli.sync, "sync_frontmatter", SyncMock.sync_frontmatter)
+            import aegis_cli.sync
+            monkeypatch.setattr(aegis_cli.sync, "aggregate_evidence", SyncMock.aggregate_evidence)
+            monkeypatch.setattr(aegis_cli.sync, "sync_frontmatter", SyncMock.sync_frontmatter)
         except ImportError:
             pass
 
@@ -627,7 +627,7 @@ class TestRequireArbitrationFlag:
 
     def test_checkpoint_command_contract(self):
         from unittest.mock import patch
-        from soma_cli.checkpoint import CheckpointCommand
+        from aegis_cli.checkpoint import CheckpointCommand
         cmd = CheckpointCommand()
         parser = argparse.ArgumentParser()
         cmd.configure_parser(parser)
@@ -636,7 +636,7 @@ class TestRequireArbitrationFlag:
         assert parsed.strict is True
         assert parsed.require_arbitration is True
 
-        with patch("soma_cli.checkpoint.run_checkpoint", return_value=0) as mock_run:
+        with patch("aegis_cli.checkpoint.run_checkpoint", return_value=0) as mock_run:
             assert cmd.execute(parsed) == 0
             mock_run.assert_called_once_with(parsed)
 

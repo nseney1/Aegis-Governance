@@ -28,7 +28,7 @@ from soma_core.lifecycle.creation import create_cell, transfer_cell
 from soma_core.lifecycle.decay import compute_cells_fitness
 from soma_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
 from soma_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
-from soma_core.lifecycle.selection import crossover_cells, run_cell_selection
+from soma_core.lifecycle.selection import run_cell_selection
 from soma_core.outcomes import harvest_git_history, run_outcome_engine
 from soma_core.sync import load_soma_config, run_post_session_hook
 from soma_core.workspace import Workspace
@@ -150,19 +150,6 @@ class TestLifecycleWorkspaceInteroperability:
 
         demotions = evaluate_demotions(mock_soma_workspace)
         assert isinstance(demotions, list)
-
-    def test_crossover_cells_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        # Create second cell for crossover
-        create_cell(
-            cell_type="vacuole",
-            hypothesis="Ensure all database transactions commit or rollback",
-            id_override="db-transactions",
-            workspace=mock_soma_workspace,
-        )
-        p1, p2, out = crossover_cells(mock_soma_workspace, "test-rule", "db-transactions")
-        assert p1 == "test-rule.md"
-        assert p2 == "db-transactions.md"
-        assert (mock_soma_workspace.cells_dir / "vacuoles" / out).is_file()
 
 
 class TestArbitrationWorkspaceInteroperability:

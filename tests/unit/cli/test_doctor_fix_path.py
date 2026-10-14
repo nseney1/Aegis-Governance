@@ -21,7 +21,7 @@ import pytest
 
 from conftest import REPO_ROOT, require_bash, run, symlink_or_skip
 
-from soma_cli.doctor import FIX_PATH_MARKER, fix_path
+from aegis_cli.doctor import FIX_PATH_MARKER, fix_path
 
 
 posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX rc files and modes")
@@ -259,10 +259,10 @@ def test_corrupt_manifest_aborts_before_editing_rc(env_layout):
 
 
 def test_cli_parser_accepts_fix_path_and_yes():
-    from soma_cli.cli import _build_parser
-    args = _build_parser().parse_args(["doctor", "--fix-path", "--yes"])
+    from aegis_cli.cli import _build_parser
+    args = _build_parser().parse_args(["system", "doctor", "--fix-path", "--yes"])
     assert args.fix_path is True and args.yes is True
-    args = _build_parser().parse_args(["doctor"])
+    args = _build_parser().parse_args(["system", "doctor"])
     assert args.fix_path is False
 
 

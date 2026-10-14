@@ -204,8 +204,9 @@ def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
         + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}) + "\n"
     )
     env = {"PYTHONPATH": REPO_ROOT}
+    mcp_pkg = "aegis_mcp" if os.path.exists(os.path.join(REPO_ROOT, "aegis_mcp")) else "soma_mcp"
     proc = subprocess.run(
-        [sys.executable, "-m", "soma_mcp"],
+        [sys.executable, "-m", mcp_pkg],
         cwd=str(tmp_path), input=requests, capture_output=True, text=True,
         timeout=120, env={**os.environ, **env},
     )
@@ -215,7 +216,7 @@ def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
     for ln in lines:
         json.loads(ln)  # every framed response must be valid JSON
     first = json.loads(lines[0])
-    assert first["result"]["serverInfo"]["name"] == "soma-mcp"
+    assert first["result"]["serverInfo"]["name"] in ("aegis-mcp", "soma-mcp")
     tools = json.loads(lines[1])["result"]["tools"]
     assert len(tools) >= 1
 
@@ -325,12 +326,16 @@ def test_version_is_single_sourced():
             f"Python SDK {sdk_pkg} ({sdk_match.group(1) if sdk_match else 'missing'}) != VERSION ({version_file})"
         )
 
-    from soma_mcp.server import _server_version
+    try:
+        from aegis_mcp.server import _server_version
+    except ImportError:
+        from soma_mcp.server import _server_version
     assert _server_version() == version_file, (
         f"MCP runtime ({_server_version()}) != VERSION ({version_file})"
     )
 
-    server = read(os.path.join(REPO_ROOT, "soma_mcp", "server.py"))
+    mcp_server_file = os.path.join(REPO_ROOT, "aegis_mcp", "server.py") if os.path.exists(os.path.join(REPO_ROOT, "aegis_mcp", "server.py")) else os.path.join(REPO_ROOT, "soma_mcp", "server.py")
+    server = read(mcp_server_file)
     assert f'"{version_file}"' not in server.replace('_server_version', ''), (
         "server.py still hardcodes the version string"
     )

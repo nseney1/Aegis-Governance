@@ -116,20 +116,14 @@ def test_harvest_git_history_idempotent(git_workspace: Path):
 
 
 def test_cli_harvest_git_command(git_workspace: Path):
-    """CLI 'soma harvest --git' should execute successfully."""
-    from soma_cli.harvest import run_harvest
+    """harvest_git_history should execute successfully."""
+    from aegis_core.outcomes.harvest import harvest_git_history
 
     _create_cell(git_workspace, "cell-backend", ["backend/*.py"])
     _commit_file(git_workspace, "backend/server.py", "app = None\n", "add server")
 
-    args = argparse.Namespace(
-        git=True,
-        limit=10,
-        dry_run=False,
-        workspace=str(git_workspace),
-    )
-    rc = run_harvest(args)
-    assert rc == 0
+    res = harvest_git_history(workspace=str(git_workspace), limit=10, dry_run=False)
+    assert res.get("commits_inspected", 0) >= 1
 
     sig_file = git_workspace / ".soma" / "evidence" / "signals.jsonl"
     assert sig_file.exists()

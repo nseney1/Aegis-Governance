@@ -13,12 +13,12 @@ import argparse
 from pathlib import Path
 import pytest
 
-from soma_cli.clean_rules import (
+from aegis_cli.rule import (
     UNIVERSAL_TENETS,
     clean_global_rules,
     run_clean_rules,
 )
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.somayaml import dump_frontmatter
 
 
 @pytest.fixture

@@ -27,10 +27,10 @@ tags:
 fitness:
   score: 0.5
   impact_weight: 0.9
-  triggers: 55
-  true_positives: 25.25
-  false_positives: 26.25
-  last_trigger_date: "2026-10-14T07:33:06Z"
+  triggers: 66
+  true_positives: 32.25
+  false_positives: 30.25
+  last_trigger_date: "2026-10-14T08:55:31Z"
 ---
 
 Every cell subdirectory under `.aegis/rules/` (vacuoles, walls, membranes,

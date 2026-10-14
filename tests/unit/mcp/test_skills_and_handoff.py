@@ -188,7 +188,8 @@ class TestSkillGraphAndHandoffRouter:
         assert len(block.split()) < 50  # Well under 150 tokens!
 
     def test_cli_skill_and_handoff_commands(self, tmp_path: Path, monkeypatch, capsys):
-        from soma_cli.cli import main
+        import argparse
+        from aegis_cli.skills import run_skill, run_handoff
         monkeypatch.chdir(tmp_path)
         ws = Workspace(tmp_path)
         ws.scaffold()
@@ -203,20 +204,24 @@ class TestSkillGraphAndHandoffRouter:
             encoding="utf-8",
         )
 
-        # Test soma skill list
-        rc = main(["skill", "list", "--json"])
+        # Test skill list
+        args_skill = argparse.Namespace(skill_action="list", ws=ws, json=True)
+        rc = run_skill(args_skill)
         assert rc == 0
         out = capsys.readouterr().out
         assert "scout" in out
 
-        # Test soma handoff
-        rc = main([
-            "handoff",
-            "--from", "scout",
-            "--to", "fixer",
-            "--artifact", "Finding",
-            "--payload", '{"issue": "test"}',
-        ])
+        # Test handoff
+        args_handoff = argparse.Namespace(
+            ws=ws,
+            from_skill="scout",
+            to_skill="fixer",
+            artifact="Finding",
+            payload='{"issue": "test"}',
+            cycle_id=None,
+            json=False,
+        )
+        rc = run_handoff(args_handoff)
         assert rc == 0
         out = capsys.readouterr().out
         assert "SOMA_HANDOFF_TICKET" in out

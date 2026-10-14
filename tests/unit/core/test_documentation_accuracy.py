@@ -36,23 +36,28 @@ def _readme_mcp_row(readme, label):
 
 
 def _script_groups():
+    core_dir = (ROOT / "aegis_core") if (ROOT / "aegis_core").is_dir() else (ROOT / "soma_core")
+    cli_dir = (ROOT / "aegis_cli") if (ROOT / "aegis_cli").is_dir() else (ROOT / "soma_cli")
+    sdk_dir = (ROOT / "aegis_sdk") if (ROOT / "aegis_sdk").is_dir() else (ROOT / "soma_sdk")
+    mcp_dir = (ROOT / "aegis_mcp") if (ROOT / "aegis_mcp").is_dir() else (ROOT / "soma_mcp")
+    launcher = (ROOT / "aegis") if (ROOT / "aegis").exists() else (ROOT / "soma")
     return {
         "Lifecycle Scripts (Hooks)": {ROOT / "install" / "hooks" / "pre-commit"},
         "Verification Scripts": {
-            path for path in (ROOT / "soma_core" / "verification").iterdir()
+            path for path in (core_dir / "verification").iterdir()
             if path.is_file() and path.suffix == ".py" and path.name != "__init__.py"
         },
-        "CLI Commands": {ROOT / "soma"} | {
-            path for path in (ROOT / "soma_cli").iterdir()
+        "CLI Commands": {launcher} | {
+            path for path in cli_dir.iterdir()
             if path.is_file() and path.suffix == ".py"
             and path.name not in {"__init__.py", "__main__.py"}
         },
         "SDK Modules": {
-            path for path in (ROOT / "soma_sdk").iterdir()
+            path for path in sdk_dir.iterdir()
             if path.is_file() and path.suffix == ".py" and path.name != "__init__.py"
         },
         "MCP and Core Modules": {
-            path for directory in (ROOT / "soma_mcp", ROOT / "soma_core")
+            path for directory in (mcp_dir, core_dir)
             for path in directory.iterdir()
             if path.is_file() and path.suffix == ".py"
             and path.name not in {"__init__.py", "__main__.py", "compat.py"}
@@ -89,14 +94,15 @@ def test_readme_mcp_tool_inventory_matches_code():
     readme = read(str(ROOT / "README.md"))
     section = readme.split("### MCP Server (Recommended)", 1)[1].split("### SDK", 1)[0]
     documented = set(re.findall(r"`(soma_[a-z_]+)`", section))
-    expected = _tool_definition_names(ROOT / "soma_mcp" / "tools.py")
+    tools_path = ROOT / "aegis_mcp" / "tools.py" if (ROOT / "aegis_mcp").exists() else ROOT / "soma_mcp" / "tools.py"
+    expected = _tool_definition_names(tools_path)
     assert documented == expected
     assert len(expected) == 20
 
 
 def test_readme_mcp_tiers_match_server_definitions():
     readme = read(str(ROOT / "README.md"))
-    source = ROOT / "soma_mcp" / "server.py"
+    source = ROOT / "aegis_mcp" / "server.py" if (ROOT / "aegis_mcp").exists() else ROOT / "soma_mcp" / "server.py"
     expected = {
         "Read (default)": _literal_assignment(source, "_READ_TOOLS"),
         "Write (default; receipt required)": _literal_assignment(source, "_WRITE_TOOLS"),
@@ -178,7 +184,7 @@ def test_readme_m8ven_trust_badge_exists():
 
 def test_readme_claims_registry_verification():
     """Ensure all claims in docs/project/CLAIM_REGISTRY.json are verified during local pytest."""
-    from soma_core.enforcement import verify_readme_claims
+    from aegis_core.enforcement import verify_readme_claims
     ok, failures = verify_readme_claims(str(ROOT))
     assert ok, f"README claims verification failed: {failures}"
 

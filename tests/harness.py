@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
-from soma_core.somayaml import dump_frontmatter, parse_cell_frontmatter
+from aegis_core.somayaml import dump_frontmatter, parse_cell_frontmatter
 
 
 CELL_TYPE_DIRS = {
@@ -111,7 +111,7 @@ class SomaTestHarness:
         if env:
             merged_env.update(env)
 
-        cmd = [sys.executable, "-m", "soma_cli.cli", *args]
+        cmd = [sys.executable, "-m", "aegis_cli.cli", *args]
         return subprocess.run(
             cmd,
             cwd=str(self.workspace),

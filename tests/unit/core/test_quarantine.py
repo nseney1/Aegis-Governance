@@ -90,44 +90,4 @@ def test_prune_quarantine(workspace_with_quarantine: Path):
     assert new_file.exists()
 
 
-def test_quarantine_cli_list_and_prune(workspace_with_quarantine: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture):
-    monkeypatch.chdir(workspace_with_quarantine)
-    monkeypatch.setenv("SOMA_WORKSPACE", str(workspace_with_quarantine))
 
-    bad_file = workspace_with_quarantine / "bad.txt"
-    bad_file.write_text("corrupted", encoding="utf-8")
-    q_path = quarantine_file(bad_file, reason="test failure", workspace=workspace_with_quarantine)
-
-    # Test 'soma quarantine list'
-    rc = cli_main(["quarantine", "list"])
-    assert rc == 0
-    captured = capsys.readouterr().out
-    assert q_path.name in captured
-
-    # Test 'soma quarantine inspect'
-    rc = cli_main(["quarantine", "inspect", q_path.name])
-    assert rc == 0
-    captured = capsys.readouterr().out
-    assert "test failure" in captured
-
-    # Test 'soma quarantine prune'
-    rc = cli_main(["quarantine", "prune", "--older-than-days", "0"])
-    assert rc == 0
-    captured = capsys.readouterr().out
-    assert "Pruned 1" in captured
-
-
-def test_quarantine_command_contract():
-    import argparse
-    from unittest.mock import patch
-    from soma_cli.quarantine import QuarantineCommand
-    cmd = QuarantineCommand()
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-    parsed = parser.parse_args(["prune", "--older-than-days", "7"])
-    assert parsed.quarantine_action == "prune"
-    assert parsed.older_than_days == 7
-
-    with patch("soma_cli.quarantine.run_quarantine", return_value=0) as mock_run:
-        assert cmd.execute(parsed) == 0
-        mock_run.assert_called_once_with(parsed)

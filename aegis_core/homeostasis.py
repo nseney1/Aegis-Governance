@@ -22,153 +22,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from aegis_core.workspace import resolve_workspace
 from aegis_core.somayaml import parse_frontmatter, _get_body
 
-# ── Soma Sleep Engine ──────────────────────────────────────────────────────
+# ── Signal Coherence & State Monitoring ───────────────────────────────────
 
 PRUNE_SCORE_THRESHOLD = 0.4
-RECENCY_WEIGHT = 2.0  # Today's outcomes count double
-
-
-def load_cells_for_sleep(workspace: str) -> list[dict]:
-    """Load all cells with metadata and body for offline consolidation."""
-    cells_dir = os.path.join(workspace, ".soma", "cells")
-    cells = []
-    for f in glob.glob(os.path.join(cells_dir, "**", "*.md"), recursive=True):
-        if os.path.basename(f) == "README.md":
-            continue
-        try:
-            with open(f, "r", encoding="utf-8-sig") as fh:
-                raw = fh.read()
-            metadata = parse_frontmatter(raw)
-            if not metadata or not isinstance(metadata, dict):
-                continue
-            metadata["_path"] = f
-            metadata["_body"] = _get_body(raw)
-            cells.append(metadata)
-        except Exception:
-            continue
-    return cells
-
-
-def load_session_outcomes(workspace: str) -> list[dict]:
-    """Load today's outcome signals from the immune log."""
-    outcomes_path = os.path.join(workspace, ".soma", "metrics", "outcomes.jsonl")
-    if not os.path.exists(outcomes_path):
-        return []
-    today = datetime.now(timezone.utc).date().isoformat()
-    outcomes = []
-    try:
-        with open(outcomes_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                entry = json.loads(line)
-                if entry.get("timestamp", "").startswith(today):
-                    outcomes.append(entry)
-    except Exception:
-        pass
-    return outcomes
-
-
-def phase1_experience_replay(cells: list[dict], session_outcomes: list[dict]) -> list[dict]:
-    """Apply recency-weighted fitness update."""
-    print("\n🌙 Phase 1: Experience Replay (REM)")
-    triggered_today = {o.get("cell_id") for o in session_outcomes}
-    updates = 0
-    for cell in cells:
-        cell_id = os.path.splitext(os.path.basename(cell["_path"]))[0]
-        if cell_id not in triggered_today:
-            continue
-        fitness = cell.get("fitness", {})
-        if not isinstance(fitness, dict):
-            fitness = {}
-        tp = fitness.get("true_positives", 0)
-        triggers = fitness.get("triggers", 0)
-        today_tp = sum(
-            1 for o in session_outcomes
-            if o.get("cell_id") == cell_id and o.get("outcome") == "pass"
-        )
-        today_fp = sum(
-            1 for o in session_outcomes
-            if o.get("cell_id") == cell_id and o.get("outcome") == "fail"
-        )
-        fitness["true_positives"] = tp + int(today_tp * RECENCY_WEIGHT)
-        fitness["triggers"] = triggers + int((today_tp + today_fp) * RECENCY_WEIGHT)
-        cell["fitness"] = fitness
-        updates += 1
-    print(f"   Recency-weighted {updates} cells touched this session.")
-    return cells
-
-
-def phase2_structural_pruning(cells: list[dict], session_outcomes: list[dict]) -> list[dict]:
-    """Aggressively prune cells not triggered today with low fitness."""
-    print("\n💤 Phase 2: Structural Pruning (Deep Sleep)")
-    triggered_today = {o.get("cell_id") for o in session_outcomes}
-    pruned = []
-    survivors = []
-    for cell in cells:
-        cell_id = os.path.splitext(os.path.basename(cell["_path"]))[0]
-        fitness = cell.get("fitness", {})
-        if not isinstance(fitness, dict):
-            fitness = {}
-        tp = fitness.get("true_positives", 0)
-        triggers = fitness.get("triggers", 1)
-        score = tp / triggers if triggers > 0 else 0.0
-        cell_type = cell.get("type", "vacuole")
-        if cell_type == "wall":
-            survivors.append(cell)
-            continue
-        if cell_id not in triggered_today and score < PRUNE_SCORE_THRESHOLD:
-            pruned.append(cell)
-            try:
-                os.remove(cell["_path"])
-            except Exception:
-                pass
-        else:
-            survivors.append(cell)
-    print(f"   Pruned {len(pruned)} low-fitness cells. {len(survivors)} survivors.")
-    return survivors
-
-
-def phase3_dream_compression(cells: list[dict], session_outcomes: list[dict], workspace: str) -> str:
-    """Write a compressed Dream Log for the next session."""
-    print("\n🌛 Phase 3: Dream Compression")
-    ranked = []
-    for cell in cells:
-        fitness = cell.get("fitness", {})
-        if not isinstance(fitness, dict):
-            fitness = {}
-        tp = fitness.get("true_positives", 0)
-        triggers = fitness.get("triggers", 1)
-        score = tp / triggers if triggers > 0 else 0.0
-        ranked.append((score, cell))
-    ranked.sort(key=lambda x: x[0], reverse=True)
-
-    top_3 = ranked[:3]
-    bottom_3 = [c for c in ranked[-3:] if c[0] < PRUNE_SCORE_THRESHOLD]
-
-    today = datetime.now(timezone.utc).date().isoformat()
-    dreams_dir = os.path.join(workspace, ".soma", "dreams")
-    os.makedirs(dreams_dir, exist_ok=True)
-    dream_path = os.path.join(dreams_dir, f"{today}.md")
-
-    with open(dream_path, "w", encoding="utf-8") as f:
-        f.write(f"# Dream Log — {today}\n\n")
-        f.write("*Read this at session start instead of the full genome.*\n\n")
-        f.write("## 🏆 Top Performers (reinforce these)\n")
-        for score, cell in top_3:
-            name = cell.get("name", os.path.basename(cell["_path"]))
-            hypothesis = cell.get("hypothesis", "No hypothesis recorded.")
-            f.write(f"- **{name}** (fitness: {score:.2f}) — {hypothesis}\n")
-        if bottom_3:
-            f.write("\n## ⚠️ Weak Signals (verify these are still valid)\n")
-            for score, cell in bottom_3:
-                name = cell.get("name", os.path.basename(cell["_path"]))
-                f.write(f"- **{name}** (fitness: {score:.2f}) — Low signal. Consider apoptosis.\n")
-        f.write(f"\n*Session outcomes logged: {len(session_outcomes)} signals.*\n")
-
-    print(f"   Dream Log written: {dream_path}")
-    return dream_path
+RECENCY_WEIGHT = 2.0  # Recent outcomes count double
 
 
 
@@ -400,11 +257,6 @@ Pause your current task. Before taking any further action, you must explicitly s
 __all__ = [
     "PRUNE_SCORE_THRESHOLD",
     "RECENCY_WEIGHT",
-    "load_cells_for_sleep",
-    "load_session_outcomes",
-    "phase1_experience_replay",
-    "phase2_structural_pruning",
-    "phase3_dream_compression",
     "CoherenceSignal",
     "CoherenceResult",
     "check_coherence",

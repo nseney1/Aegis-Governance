@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from aegis_cli.hooks.__main__ import main
 from aegis_cli.hooks.management import (
+    AEGIS_HOOK_FORMAT,
     CURRENT_HOOK_FORMAT_VERSION,
     SOMA_HOOK_FORMAT,
+    _AEGIS_HOOK_END,
+    _AEGIS_HOOK_START,
     _SOMA_HOOK_END,
     _SOMA_HOOK_START,
     _replace_hook_block,
@@ -48,6 +51,9 @@ __all__ = [
     "run_pre_invocation",
     "run_session_close",
     "run_pre_commit",
+    "_AEGIS_HOOK_START",
+    "_AEGIS_HOOK_END",
+    "AEGIS_HOOK_FORMAT",
     "_SOMA_HOOK_START",
     "_SOMA_HOOK_END",
     "SOMA_HOOK_FORMAT",

@@ -117,26 +117,6 @@ def run_session_close(workspace: Path | None = None) -> tuple[int, dict[str, Any
     except Exception:
         pass
 
-    # 4. Probabilistic crossover
-    try:
-        from aegis_core.evidence import aggregate_signals
-        from aegis_core.lifecycle import crossover_cells
-
-        evidence_dir = root / ".soma" / "evidence"
-        if evidence_dir.is_dir():
-            signal_counts = aggregate_signals(evidence_dir).counts
-            cell_triggers = {
-                cell_id: counts["triggers"]
-                for cell_id, counts in signal_counts.items()
-                if counts["has_triggers"]
-            }
-            high_fitness = [cid for cid, count in cell_triggers.items() if count >= 5]
-            if len(high_fitness) >= 2:
-                pair = random.sample(high_fitness, 2)
-                crossover_cells(root, pair[0], pair[1])
-    except Exception:
-        pass
-
     return 0, {}
 
 

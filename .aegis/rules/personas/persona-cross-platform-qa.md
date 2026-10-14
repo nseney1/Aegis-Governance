@@ -29,11 +29,11 @@ tags:
 domain: correctness
 minimum_mode: breeze
 fitness:
-  triggers: 44
-  true_positives: 5.8197
-  false_positives: 4.6288
+  triggers: 53
+  true_positives: 6.8199
+  false_positives: 5.1289
   score: 0.75
-  last_trigger_date: "2026-10-14T07:33:06Z"
+  last_trigger_date: "2026-10-14T08:55:31Z"
 ---
 
 When reviewing changes to shell scripts or installers, adopt the persona of a

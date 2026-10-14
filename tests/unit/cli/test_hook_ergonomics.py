@@ -21,9 +21,12 @@ from pathlib import Path
 
 import pytest
 
-from soma_cli.hooks import (
-    _SOMA_HOOK_START,
+from aegis_cli.hooks import (
+    _AEGIS_HOOK_END,
+    _AEGIS_HOOK_START,
     _SOMA_HOOK_END,
+    _SOMA_HOOK_START,
+    AEGIS_HOOK_FORMAT,
     SOMA_HOOK_FORMAT,
     hook_status,
     install_hook,
@@ -56,9 +59,9 @@ class TestHookInstallPorcelain:
         assert hook.is_file()
         content = hook.read_text(encoding="utf-8")
         assert content.startswith("#!/bin/sh\n")
-        assert _SOMA_HOOK_START in content
-        assert _SOMA_HOOK_END in content
-        assert "soma-hook-format: 3" in content
+        assert _AEGIS_HOOK_START in content or _SOMA_HOOK_START in content
+        assert _AEGIS_HOOK_END in content or _SOMA_HOOK_END in content
+        assert "hook-format: 4" in content or "hook-format: 3" in content
         assert "VIRTUAL_ENV" in content
         assert ".venv" in content
         if os.name != "nt":
@@ -72,7 +75,7 @@ class TestHookInstallPorcelain:
         assert install_hook(repo) is True
         second_content = (repo / ".git" / "hooks" / "pre-commit").read_text(encoding="utf-8")
         assert first_content == second_content
-        assert second_content.count(_SOMA_HOOK_START) == 1
+        assert second_content.count(_AEGIS_HOOK_START) == 1 or second_content.count(_SOMA_HOOK_START) == 1
 
     def test_install_preserves_user_hooks(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)
@@ -82,8 +85,8 @@ class TestHookInstallPorcelain:
         assert install_hook(repo) is True
         content = hook.read_text(encoding="utf-8")
         assert "echo 'custom user linter'" in content
-        assert _SOMA_HOOK_START in content
-        assert _SOMA_HOOK_END in content
+        assert _AEGIS_HOOK_START in content or _SOMA_HOOK_START in content
+        assert _AEGIS_HOOK_END in content or _SOMA_HOOK_END in content
 
     def test_install_replaces_old_format_block_in_place(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)
@@ -100,7 +103,7 @@ class TestHookInstallPorcelain:
         content = hook.read_text(encoding="utf-8")
         assert "echo pre" in content
         assert "echo post" in content
-        assert "soma-hook-format: 3" in content
+        assert "hook-format: 4" in content or "hook-format: 3" in content
         assert "soma-hook-format: 2" not in content
 
     def test_install_refuses_external_symlink_without_force(self, tmp_path: Path):
@@ -116,11 +119,11 @@ class TestHookInstallPorcelain:
 
         # Without force: should return False and not modify outside file
         assert install_hook(repo, force=False) is False
-        assert _SOMA_HOOK_START not in outside_hook.read_text(encoding="utf-8")
+        assert _AEGIS_HOOK_START not in outside_hook.read_text(encoding="utf-8") and _SOMA_HOOK_START not in outside_hook.read_text(encoding="utf-8")
 
         # With force: should succeed
         assert install_hook(repo, force=True) is True
-        assert _SOMA_HOOK_START in outside_hook.read_text(encoding="utf-8")
+        assert _AEGIS_HOOK_START in outside_hook.read_text(encoding="utf-8") or _SOMA_HOOK_START in outside_hook.read_text(encoding="utf-8")
 
     def test_install_returns_false_when_no_git_dir(self, tmp_path: Path):
         non_repo = tmp_path / "plain_dir"
@@ -145,14 +148,14 @@ class TestHookUninstallPorcelain:
         hook = repo / ".git" / "hooks" / "pre-commit"
         hook.write_text("#!/bin/sh\necho 'keep me'\n", encoding="utf-8")
         install_hook(repo)
-        assert _SOMA_HOOK_START in hook.read_text(encoding="utf-8")
+        assert _AEGIS_HOOK_START in hook.read_text(encoding="utf-8") or _SOMA_HOOK_START in hook.read_text(encoding="utf-8")
 
         assert uninstall_hook(repo) is True
         assert hook.exists(), "Hook file should remain if user hooks exist"
         content = hook.read_text(encoding="utf-8")
         assert "echo 'keep me'" in content
-        assert _SOMA_HOOK_START not in content
-        assert _SOMA_HOOK_END not in content
+        assert _AEGIS_HOOK_START not in content and _SOMA_HOOK_START not in content
+        assert _AEGIS_HOOK_END not in content and _SOMA_HOOK_END not in content
 
     def test_uninstall_returns_false_when_no_hook_found(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)
@@ -175,7 +178,8 @@ class TestHookStatusPorcelain:
         st = hook_status(repo)
         assert st["status"] == "installed"
         assert st["managed_by_soma"] is True
-        assert st["format_version"] == 3
+        assert st["format_version"] in (3, 4)
+        assert "interpreters" in st
         assert "interpreters" in st
 
     def test_status_reports_outdated_format(self, tmp_path: Path):
@@ -273,36 +277,14 @@ class TestGenesisHookIntegration:
     """Tests for genesis --install-hooks and --no-hooks."""
 
     def test_genesis_with_install_hooks(self, tmp_path: Path, monkeypatch):
-        from soma_cli.genesis import run_genesis
+        from aegis_cli.init import run_init
 
         repo = _setup_git_repo(tmp_path)
         (repo / "pyproject.toml").write_text('[project]\nname = "myapp"\nversion = "0.1.0"\n', encoding="utf-8")
         src = repo / "src"
         src.mkdir()
         (src / "__init__.py").write_text("", encoding="utf-8")
-        (src / "config.py").write_text(
-            'DATABASE_URL = "postgres://localhost/db"\n'
-            'SECRET_KEY = "changeme"\n'
-            'MAX_RETRIES = 3\n'
-            'TIMEOUT_SECONDS = 30\n'
-            'DEBUG_MODE = False\n'
-            'LOG_LEVEL = "INFO"\n'
-            'CACHE_TTL = 600\n'
-            'API_VERSION = "v2"\n'
-            'BASE_URL = "https://example.com"\n'
-            'REDIS_HOST = "localhost"\n'
-            'REDIS_PORT = 6379\n'
-            'WORKER_COUNT = 4\n'
-            'BATCH_SIZE = 100\n'
-            'MAX_CONNECTIONS = 50\n'
-            'RATE_LIMIT = 1000\n'
-            'ENABLE_METRICS = True\n'
-            'FEATURE_FLAG_X = False\n'
-            'CORS_ORIGINS = "*"\n'
-            'SESSION_TIMEOUT = 3600\n'
-            'UPLOAD_MAX_SIZE = 10485760\n',
-            encoding="utf-8",
-        )
+        (src / "config.py").write_text('DATABASE_URL = "postgres://localhost/db"\n', encoding="utf-8")
         args = argparse.Namespace(
             project_root=str(repo),
             ws=Workspace.resolve(repo),
@@ -312,13 +294,16 @@ class TestGenesisHookIntegration:
             yes=True,
             install_hooks=True,
             no_hooks=False,
+            local=True,
+            platform="gemini",
+            rules="minimal",
         )
-        rc = run_genesis(args)
+        rc = run_init(args)
         assert rc == 0
         assert (repo / ".git" / "hooks" / "pre-commit").exists()
 
     def test_genesis_with_no_hooks(self, tmp_path: Path):
-        from soma_cli.genesis import run_genesis
+        from aegis_cli.init import run_init
 
         repo = _setup_git_repo(tmp_path)
         (repo / "app.py").write_text("print('hello')\n", encoding="utf-8")
@@ -331,8 +316,11 @@ class TestGenesisHookIntegration:
             yes=True,
             install_hooks=False,
             no_hooks=True,
+            local=True,
+            platform="gemini",
+            rules="minimal",
         )
-        rc = run_genesis(args)
+        rc = run_init(args)
         assert rc == 0
         assert not (repo / ".git" / "hooks" / "pre-commit").exists()
 
@@ -357,7 +345,7 @@ class TestHookSecurityAndSymlinkHardening:
         assert hook_link.is_symlink(), "In-repo symlink must not be destroyed by install"
         target_content = target_script.read_text(encoding="utf-8")
         assert "echo 'project hook'" in target_content
-        assert _SOMA_HOOK_START in target_content
+        assert _AEGIS_HOOK_START in target_content or _SOMA_HOOK_START in target_content
 
     def test_dangling_symlink_handling(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)

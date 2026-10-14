@@ -97,7 +97,7 @@ def test_error_report_survives_cp1252_stdout(tmp_path):
 
     _make_registry(tmp_path, [_open_bug(), _open_bug()])
     proc = subprocess.run(
-        [sys.executable, "-c", "import sys; from soma_core.enforcement import cli_verify_bug_registry; sys.exit(cli_verify_bug_registry(sys.argv[1:]))",
+        [sys.executable, "-c", "import sys; from aegis_core.enforcement import cli_verify_bug_registry; sys.exit(cli_verify_bug_registry(sys.argv[1:]))",
          "--workspace", str(tmp_path)],
         capture_output=True, encoding="cp1252", errors="replace", timeout=60,
         env=dict(os.environ, PYTHONIOENCODING="cp1252"),

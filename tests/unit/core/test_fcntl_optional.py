@@ -57,7 +57,7 @@ def test_blocking_fcntl_really_raises_import_error():
 
 def test_mcp_server_modules_import_without_fcntl():
     proc = _run_without_fcntl("""
-        import soma_mcp.server, soma_mcp.tools, soma_sdk.telemetry
+        import aegis_mcp.server, aegis_mcp.tools, aegis_sdk.telemetry
         print("ok")
     """)
     assert proc.returncode == 0, proc.stderr
@@ -66,7 +66,7 @@ def test_mcp_server_modules_import_without_fcntl():
 
 def test_append_signal_writes_record_without_fcntl(tmp_path):
     proc = _run_without_fcntl(f"""
-        from soma_sdk.telemetry import append_signal
+        from aegis_sdk.telemetry import append_signal
         append_signal({str(tmp_path)!r}, "trap-example", "tp", "mcp")
     """)
     assert proc.returncode == 0, proc.stderr
@@ -81,7 +81,7 @@ def test_report_outcome_writes_canonical_signal_without_fcntl(tmp_path):
     workspace = _make_workspace(tmp_path)
     proc = _run_without_fcntl("""
         import json
-        from soma_mcp.tools import execute_tool
+        from aegis_mcp.tools import execute_tool
         result = execute_tool("soma_report_outcome",
                               {"outcome": "success", "cells_used": ["trap-example"],
                                "idempotency_key": "no-fcntl-report"})

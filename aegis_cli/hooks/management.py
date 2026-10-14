@@ -11,10 +11,13 @@ import subprocess
 import sys
 from typing import Any
 
+_AEGIS_HOOK_START = "# >>> aegis pre-commit >>>"
+_AEGIS_HOOK_END = "# <<< aegis pre-commit <<<"
 _SOMA_HOOK_START = "# >>> soma pre-commit >>>"
 _SOMA_HOOK_END = "# <<< soma pre-commit <<<"
+AEGIS_HOOK_FORMAT = "# aegis-hook-format:"
 SOMA_HOOK_FORMAT = "# soma-hook-format:"
-CURRENT_HOOK_FORMAT_VERSION = 3
+CURRENT_HOOK_FORMAT_VERSION = 4
 
 
 def generate_hook_block(python: str | None = None) -> str:
@@ -24,46 +27,58 @@ def generate_hook_block(python: str | None = None) -> str:
         py = py.replace("\\", "/")
     q = shlex.quote(py)
     return (
-        f"{_SOMA_HOOK_START}\n"
-        "# Installed by soma hook install\n"
-        f"{SOMA_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}\n"
-        "if command -v soma >/dev/null 2>&1; then\n"
-        "  soma checkpoint --pre-commit || exit $?\n"
+        f"{_AEGIS_HOOK_START}\n"
+        "# Installed by aegis system hook install\n"
+        f"{AEGIS_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}\n"
+        "if command -v aegis >/dev/null 2>&1; then\n"
+        "  exec aegis check --hook\n"
+        "elif command -v soma >/dev/null 2>&1; then\n"
+        "  exec soma check --hook\n"
+        'elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/bin/python" ] && "$VIRTUAL_ENV/bin/python" -c \'import aegis_cli\' >/dev/null 2>&1; then\n'
+        '  exec "$VIRTUAL_ENV/bin/python" -m aegis_cli check --hook\n'
+        'elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/Scripts/python.exe" ] && "$VIRTUAL_ENV/Scripts/python.exe" -c \'import aegis_cli\' >/dev/null 2>&1; then\n'
+        '  exec "$VIRTUAL_ENV/Scripts/python.exe" -m aegis_cli check --hook\n'
+        'elif [ -x "$PWD/.venv/bin/python" ] && "$PWD/.venv/bin/python" -c \'import aegis_cli\' >/dev/null 2>&1; then\n'
+        '  exec "$PWD/.venv/bin/python" -m aegis_cli check --hook\n'
+        'elif [ -x "$PWD/.venv/Scripts/python.exe" ] && "$PWD/.venv/Scripts/python.exe" -c \'import aegis_cli\' >/dev/null 2>&1; then\n'
+        '  exec "$PWD/.venv/Scripts/python.exe" -m aegis_cli check --hook\n'
+        f"elif {q} -c 'import aegis_cli' >/dev/null 2>&1; then\n"
+        f"  exec {q} -m aegis_cli check --hook\n"
+        "elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0)' 2>/dev/null && python3 -c 'import aegis_cli' >/dev/null 2>&1; then\n"
+        "  exec python3 -m aegis_cli check --hook\n"
         'elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/bin/python" ] && "$VIRTUAL_ENV/bin/python" -c \'import soma_cli\' >/dev/null 2>&1; then\n'
-        '  "$VIRTUAL_ENV/bin/python" -m soma_cli checkpoint --pre-commit || exit $?\n'
-        'elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/Scripts/python.exe" ] && "$VIRTUAL_ENV/Scripts/python.exe" -c \'import soma_cli\' >/dev/null 2>&1; then\n'
-        '  "$VIRTUAL_ENV/Scripts/python.exe" -m soma_cli checkpoint --pre-commit || exit $?\n'
-        'elif [ -x "$PWD/.venv/bin/python" ] && "$PWD/.venv/bin/python" -c \'import soma_cli\' >/dev/null 2>&1; then\n'
-        '  "$PWD/.venv/bin/python" -m soma_cli checkpoint --pre-commit || exit $?\n'
-        'elif [ -x "$PWD/.venv/Scripts/python.exe" ] && "$PWD/.venv/Scripts/python.exe" -c \'import soma_cli\' >/dev/null 2>&1; then\n'
-        '  "$PWD/.venv/Scripts/python.exe" -m soma_cli checkpoint --pre-commit || exit $?\n'
-        f"elif {q} -c 'import soma_cli' >/dev/null 2>&1; then\n"
-        f"  {q} -m soma_cli checkpoint --pre-commit || exit $?\n"
-        "elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0)' 2>/dev/null && python3 -c 'import soma_cli' >/dev/null 2>&1; then\n"
-        "  python3 -m soma_cli checkpoint --pre-commit || exit $?\n"
+        '  exec "$VIRTUAL_ENV/bin/python" -m soma_cli check --hook\n'
+        "elif python3 -c 'import soma_cli' >/dev/null 2>&1; then\n"
+        "  exec python3 -m soma_cli check --hook\n"
         "else\n"
-        '  echo "soma pre-commit: cannot execute quality checks." >&2\n'
-        '  echo "  Neither \'soma\' nor a Python interpreter with \'soma_cli\' installed was found on PATH." >&2\n'
-        '  echo "  Run \'soma hook status\' or \'soma doctor\' to diagnose environment resolution." >&2\n'
+        '  echo "aegis pre-commit: cannot execute quality checks." >&2\n'
+        '  echo "  Neither \'aegis\' nor a Python interpreter with \'aegis_cli\' installed was found on PATH." >&2\n'
+        '  echo "  Run \'aegis system hook status\' or \'aegis system doctor\' to diagnose environment resolution." >&2\n'
         "  exit 1\n"
         "fi\n"
-        f"{_SOMA_HOOK_END}\n"
+        f"{_AEGIS_HOOK_END}\n"
     )
 
 
 def _replace_hook_block(content: str, block: str) -> str | None:
     """content with its marked block swapped for block, or None if malformed."""
-    start = content.find(_SOMA_HOOK_START)
-    end = content.find(_SOMA_HOOK_END, start)
-    if start < 0 or end < 0:
-        return None
-    line_start = content.rfind("\n", 0, start) + 1
-    end += len(_SOMA_HOOK_END)
-    if content.startswith("\r\n", end):
-        end += 2
-    elif content.startswith("\n", end):
-        end += 1
-    return content[:line_start] + block + content[end:]
+    for start_m, end_m in (
+        (_AEGIS_HOOK_START, _AEGIS_HOOK_END),
+        (_SOMA_HOOK_START, _SOMA_HOOK_END),
+    ):
+        start = content.find(start_m)
+        if start >= 0:
+            end = content.find(end_m, start)
+            if end < 0:
+                return None
+            line_start = content.rfind("\n", 0, start) + 1
+            end += len(end_m)
+            if content.startswith("\r\n", end):
+                end += 2
+            elif content.startswith("\n", end):
+                end += 1
+            return content[:line_start] + block + content[end:]
+    return None
 
 
 def install_hook(
@@ -126,10 +141,10 @@ def install_hook(
 
     if target_file.exists():
         content = target_file.read_text(encoding="utf-8")
-        if _SOMA_HOOK_START in content:
+        if _AEGIS_HOOK_START in content or _SOMA_HOOK_START in content:
             updated = _replace_hook_block(content, block)
             if updated is None:
-                print(f"  ⚠️  {target_file} has an unterminated soma block; left unchanged", file=sys.stderr)
+                print(f"  ⚠️  {target_file} has an unterminated hook block; left unchanged", file=sys.stderr)
                 return True
             new_content = updated
         else:
@@ -214,24 +229,25 @@ def uninstall_hook(
             target_file = real_target
 
     content = target_file.read_text(encoding="utf-8")
-    if _SOMA_HOOK_START not in content:
+    if _AEGIS_HOOK_START not in content and _SOMA_HOOK_START not in content:
         return False
 
     if dry_run:
         return True
 
-    start = content.find(_SOMA_HOOK_START)
-    end = content.find(_SOMA_HOOK_END, start)
+    start_m, end_m = (_AEGIS_HOOK_START, _AEGIS_HOOK_END) if _AEGIS_HOOK_START in content else (_SOMA_HOOK_START, _SOMA_HOOK_END)
+    start = content.find(start_m)
+    end = content.find(end_m, start)
     if end >= 0:
         line_start = content.rfind("\n", 0, start) + 1
-        end += len(_SOMA_HOOK_END)
+        end += len(end_m)
         if content.startswith("\r\n", end):
             end += 2
         elif content.startswith("\n", end):
             end += 1
         remaining = content[:line_start] + content[end:]
     else:
-        print(f"  ⚠️  {target_file} has an unterminated soma block; left unchanged", file=sys.stderr)
+        print(f"  ⚠️  {target_file} has an unterminated hook block; left unchanged", file=sys.stderr)
         return False
 
     stripped_lines = [line.strip() for line in remaining.splitlines() if line.strip()]
@@ -296,9 +312,9 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
         else:
             try:
                 text = hook_file.read_text(encoding="utf-8", errors="replace")
-                if _SOMA_HOOK_START in text:
+                if _AEGIS_HOOK_START in text or _SOMA_HOOK_START in text:
                     managed_by_soma = True
-                    match = re.search(r"soma-hook-format:\s*(\d+)", text)
+                    match = re.search(r"(?:aegis|soma)-hook-format:\s*(\d+)", text)
                     if match:
                         format_version = int(match.group(1))
                     else:

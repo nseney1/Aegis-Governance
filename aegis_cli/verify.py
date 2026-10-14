@@ -454,6 +454,11 @@ def run_verify(args: argparse.Namespace) -> int:
             print(f"🔴 {msg}", file=sys.stderr)
             return 1
 
+    # ── Hook Mode (--hook) ─────────────────────────────────────────────
+    if getattr(args, 'hook', False):
+        from aegis_cli.check import run_check
+        return run_check(args)
+
     # Resolve target files
     target_files = resolve_target_files(args)
 
@@ -485,9 +490,11 @@ def run_verify(args: argparse.Namespace) -> int:
         return 0
 
     # ── Run Layer 1 ───────────────────────────────────────────────────
+    fast_mode = getattr(args, "fast", False) or getattr(args, "fast_mode", False) or getattr(args, "hook", False)
     results = runner.run_layer1(
         changed_files=target_files,
         repo_root=repo_root,
+        fast_mode=fast_mode,
         diff_base=getattr(args, "_diff_base", None),
     )
 
@@ -622,6 +629,11 @@ class VerifyCommand(SomaCommand):
             nargs="*",
             default=None,
             help="Explicit list of files to verify",
+        )
+        parser.add_argument(
+            "--hook",
+            action="store_true",
+            help="Run pre-commit fast gate (used by git pre-commit hook)",
         )
         parser.add_argument(
             "--layer1-only",

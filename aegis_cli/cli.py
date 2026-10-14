@@ -70,7 +70,7 @@ class SomaParser(argparse.ArgumentParser):
         return ns
 
 
-def _build_parser(prog: str = "soma") -> argparse.ArgumentParser:
+def _build_parser(prog: str = "aegis") -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument("--plumbing", "--internal", action="store_true",
                                default=argparse.SUPPRESS,
@@ -121,132 +121,44 @@ def cmd_status(args: argparse.Namespace) -> int:
     from aegis_cli.status import run_status
     return run_status(args)
 
-def cmd_report(args: argparse.Namespace) -> int:
-    from aegis_cli.report import run_report
-    return run_report(args)
-
-def cmd_doctor(args: argparse.Namespace) -> int:
-    from aegis_cli.doctor import run_doctor
-    return run_doctor(args)
-
-cmd_audit = cmd_doctor
-
-def cmd_detect(args: argparse.Namespace) -> int:
-    from aegis_cli.detect import run_detect
-    return run_detect(args)
+def cmd_check(args: argparse.Namespace) -> int:
+    from aegis_cli.check import run_check
+    return run_check(args)
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    from aegis_cli.verify import run_verify
-    return run_verify(args)
-
-cmd_check = cmd_verify
+    return cmd_check(args)
 
 def cmd_checkpoint(args: argparse.Namespace) -> int:
-    from aegis_cli.checkpoint import run_checkpoint
-    return run_checkpoint(args)
+    return cmd_check(args)
 
-def cmd_sync(args: argparse.Namespace) -> int:
-    from aegis_cli.sync import run_sync
-    return run_sync(args)
+def cmd_rule(args: argparse.Namespace) -> int:
+    from aegis_cli.rule import run_rule
+    return run_rule(args)
 
-def cmd_oracle(args: argparse.Namespace) -> int:
-    from aegis_cli.oracle import run_oracle
-    return run_oracle(args)
+def cmd_system(args: argparse.Namespace) -> int:
+    from aegis_cli.system import run_system
+    return run_system(args)
 
-def cmd_promote(args: argparse.Namespace) -> int:
-    from aegis_cli.promote import run_promote
-    return run_promote(args)
-
-def cmd_demote(args: argparse.Namespace) -> int:
-    from aegis_cli.demote import run_demote
-    return run_demote(args)
-
-def cmd_harvest(args: argparse.Namespace) -> int:
-    from aegis_cli.harvest import run_harvest
-    return run_harvest(args)
-
-def cmd_genesis(args: argparse.Namespace) -> int:
-    from aegis_cli.genesis import run_genesis
-    return run_genesis(args)
-
-cmd_analyze = cmd_genesis
+def cmd_agent(args: argparse.Namespace) -> int:
+    from aegis_cli.agent import run_agent
+    return run_agent(args)
 
 def cmd_completion(args: argparse.Namespace) -> int:
     from aegis_cli.completion import run_completion
     return run_completion(args)
-
-def cmd_hook(args: argparse.Namespace) -> int:
-    from aegis_cli.hooks import run_hook
-    return run_hook(args)
-
-def cmd_transfer(args: argparse.Namespace) -> int:
-    from aegis_cli.transfer import run_transfer
-    return run_transfer(args)
-
-def cmd_quarantine(args: argparse.Namespace) -> int:
-    from aegis_cli.quarantine import run_quarantine
-    return run_quarantine(args)
-
-def cmd_prune(args: argparse.Namespace) -> int:
-    from aegis_cli.prune import run_prune
-    return run_prune(args)
-
-def cmd_install(args: argparse.Namespace) -> int:
-    from aegis_cli.install import run_install
-    return run_install(args)
-
-def cmd_uninstall(args: argparse.Namespace) -> int:
-    from aegis_cli.install import run_uninstall
-    return run_uninstall(args)
-
-def cmd_clean_global_rules(args: argparse.Namespace) -> int:
-    from aegis_cli.clean_rules import run_clean_rules
-    return run_clean_rules(args)
-
-def cmd_capture_insight(args: argparse.Namespace) -> int:
-    from aegis_cli.capture_insight import run_capture_insight
-    return run_capture_insight(args)
-
-def cmd_skill(args: argparse.Namespace) -> int:
-    from aegis_cli.skills import run_skill
-    return run_skill(args)
-
-def cmd_handoff(args: argparse.Namespace) -> int:
-    from aegis_cli.skills import run_handoff
-    return run_handoff(args)
 
 
 COMMANDS = {
     "init": cmd_init,
     "status": cmd_status,
     "rules": cmd_status,
-    "report": cmd_report,
-    "doctor": cmd_doctor,
-    "audit": cmd_audit,
-    "detect": cmd_detect,
-    "languages": cmd_detect,
-    "drivers": cmd_detect,
-    "verify": cmd_verify,
     "check": cmd_check,
+    "verify": cmd_verify,
     "checkpoint": cmd_checkpoint,
-    "sync": cmd_sync,
-    "oracle": cmd_oracle,
-    "promote": cmd_promote,
-    "demote": cmd_demote,
-    "harvest": cmd_harvest,
-    "genesis": cmd_genesis,
-    "analyze": cmd_genesis,
+    "rule": cmd_rule,
+    "system": cmd_system,
+    "agent": cmd_agent,
     "completion": cmd_completion,
-    "hook": cmd_hook,
-    "transfer": cmd_transfer,
-    "quarantine": cmd_quarantine,
-    "prune": cmd_prune,
-    "install": cmd_install,
-    "uninstall": cmd_uninstall,
-    "clean-global-rules": cmd_clean_global_rules,
-    "capture-insight": cmd_capture_insight,
-    "skill": cmd_skill,
-    "handoff": cmd_handoff,
 }
 
 

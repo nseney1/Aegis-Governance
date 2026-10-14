@@ -53,24 +53,9 @@ _VALID_OUTCOMES = ("success", "partial", "failure", "tp", "fp", "pass", "fail")
 _VERDICT_RE = re.compile(r"^\s*VERDICT:\s*([A-Z_]+)")
 _PASSING_VERDICTS = ("APPROVED", "PASS", "SUCCESS", "OK")
 
-_CANONICAL_TOOL_MAP = {
-    "soma_create_rule": "soma_create_cell",
-    "soma_list_rules": "soma_list_cells",
-    "soma_rule_fitness": "soma_fitness",
-}
-_CANONICAL_ARG_MAP = {
-    "rule_type": "cell_type",
-    "rule_name": "cell_name",
-    "rules": "cells_used",
-    "rules_used": "cells_used",
-}
-_TYPE_TRANSLATION_MAP = {
-    "safety-guard": "wall",
-    "learned-trap": "vacuole",
-    "agent-persona": "chloroplast",
-    "escalation-boundary": "membrane",
-    "contract-bridge": "plasmodesmata",
-}
+_CANONICAL_TOOL_MAP: dict[str, str] = {}
+_CANONICAL_ARG_MAP: dict[str, str] = {}
+_TYPE_TRANSLATION_MAP: dict[str, str] = {}
 
 # Disabled-by-Default Policy
 DISABLED_BY_DEFAULT_TOOLS: frozenset[str] = frozenset({
@@ -113,21 +98,8 @@ def get_governance(args=None):
 
 
 def normalize_tool_call(tool_name: str, arguments: dict) -> Tuple[str, dict]:
-    """Normalize porcelain aliases into canonical plumbing tool name and arguments."""
-    canonical_name = _CANONICAL_TOOL_MAP.get(tool_name, tool_name)
-    normalized_args = {}
-    for k, v in (arguments or {}).items():
-        canon_k = _CANONICAL_ARG_MAP.get(k, k)
-        if canon_k == "cell_type" and isinstance(v, str):
-            v = _TYPE_TRANSLATION_MAP.get(v, v)
-        normalized_args[canon_k] = v
-    if "cell_id" in (arguments or {}) and "cells_used" not in normalized_args:
-        val = arguments["cell_id"]
-        normalized_args["cells_used"] = [val] if isinstance(val, str) else list(val)
-    if "rule_id" in (arguments or {}) and "cells_used" not in normalized_args:
-        val = arguments["rule_id"]
-        normalized_args["cells_used"] = [val] if isinstance(val, str) else list(val)
-    return canonical_name, normalized_args
+    """Identity pass-through for tool calls in Aegis v2.0."""
+    return tool_name, dict(arguments or {})
 
 
 def _cell_diagnostic(relative_path: str, message: str) -> dict:

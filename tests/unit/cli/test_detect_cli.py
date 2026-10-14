@@ -6,15 +6,15 @@ import json
 from pathlib import Path
 import pytest
 
-from soma_cli.cli import main
-from soma_cli.detect import run_detect
+from aegis_cli.cli import main
+from aegis_cli.detect import run_detect
 
 
 def test_detect_pure_python_repo(tmp_path, capsys):
     (tmp_path / "main.py").write_text("print('hello')\n", encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n", encoding="utf-8")
 
-    code = main(["detect", "--workspace", str(tmp_path)])
+    code = main(["system", "drivers", "--workspace", str(tmp_path)])
     assert code == 0
 
     out = capsys.readouterr().out
@@ -31,7 +31,7 @@ def test_detect_json_output(tmp_path, capsys):
     src.mkdir()
     (src / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
 
-    code = main(["detect", "--workspace", str(tmp_path), "--json"])
+    code = main(["system", "drivers", "--workspace", str(tmp_path), "--json"])
     assert code == 0
 
     out = capsys.readouterr().out
@@ -47,7 +47,7 @@ def test_detect_fix_provisions_slots(tmp_path, capsys):
     src.mkdir()
     (src / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
 
-    code = main(["detect", "--workspace", str(tmp_path), "--fix"])
+    code = main(["system", "drivers", "--workspace", str(tmp_path), "--fix"])
     assert code == 0
 
     slots_path = tmp_path / ".soma" / "slots.yaml"
@@ -56,7 +56,7 @@ def test_detect_fix_provisions_slots(tmp_path, capsys):
     assert "ast_driver_rs" in content
 
     # Running detect again shows it configured
-    code_again = main(["detect", "--workspace", str(tmp_path)])
+    code_again = main(["system", "drivers", "--workspace", str(tmp_path)])
     assert code_again == 0
     out = capsys.readouterr().out
     assert "configured: {python} .soma/drivers/rust_ast.py" in out
@@ -65,7 +65,7 @@ def test_detect_fix_provisions_slots(tmp_path, capsys):
 
 def test_doctor_drivers_flag_only_runs_ast_checks(tmp_path, capsys):
     (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
-    code = main(["doctor", "--drivers", "--workspace", str(tmp_path)])
+    code = main(["system", "doctor", "--drivers", "--workspace", str(tmp_path)])
     assert code == 0
 
     out = capsys.readouterr().out

@@ -19,11 +19,11 @@ tags:
   - scripting
 created: 2026-09-28
 fitness:
-  triggers: 28
-  true_positives: 4.5336
-  false_positives: 2.7671
+  triggers: 37
+  true_positives: 5.5338
+  false_positives: 3.2672
   score: 1.0
-  last_trigger_date: "2026-10-14T06:50:24Z"
+  last_trigger_date: "2026-10-14T08:55:31Z"
 ---
 
 # Persona: Bash Architect

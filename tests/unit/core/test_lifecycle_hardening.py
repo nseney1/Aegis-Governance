@@ -8,8 +8,7 @@ from pathlib import Path
 import pytest
 
 from soma_sdk.cells import Cell, CellFitness, load_cell
-from soma_cli.promote import _force_promote, run_promote
-from soma_cli.demote import _force_demote
+from aegis_cli.rule import _force_promote, _force_demote, run_promote
 
 
 def test_is_promotable_with_age_fails_closed_on_invalid_date():

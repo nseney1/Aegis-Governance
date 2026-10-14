@@ -35,15 +35,15 @@ REPO_ROOT = Path(resolve_workspace(__file__))
 
 
 class TestInvariant1_LayerDecoupling:
-    """Invariant 1: soma_core must be strictly layered and never import upward."""
+    """Invariant 1: aegis_core must be strictly layered and never import upward."""
 
     def test_core_has_zero_upward_imports(self):
-        core_dir = REPO_ROOT / "soma_core"
+        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "soma_core"
         python_files = list(core_dir.glob("*.py"))
-        assert len(python_files) > 0, "soma_core files not found"
+        assert len(python_files) > 0, "core files not found"
 
         violations = []
-        forbidden = ("soma_sdk", "enzymes", "soma_cli", "soma_mcp")
+        forbidden = ("aegis_sdk", "soma_sdk", "enzymes", "aegis_cli", "soma_cli", "aegis_mcp", "soma_mcp")
         for py_file in python_files:
             tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
             for node in ast.walk(tree):
@@ -62,20 +62,21 @@ class TestInvariant1_LayerDecoupling:
                         if node.args and isinstance(node.args[0], ast.Constant) and str(node.args[0].value).startswith(forbidden):
                             violations.append((py_file.name, node.lineno, node.args[0].value))
 
-        assert not violations, f"Forbidden upward imports found in soma_core: {violations}"
+        assert not violations, f"Forbidden upward imports found in core: {violations}"
 
 
 
 class TestInvariant2_SymbolAuthority:
-    """Invariant 2: All symbols declared in __all__ across soma_core modules must be resolvable."""
+    """Invariant 2: All symbols declared in __all__ across core modules must be resolvable."""
 
     def test_all_symbols_resolvable(self):
-        core_dir = REPO_ROOT / "soma_core"
+        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "soma_core"
+        pkg = "aegis_core" if (REPO_ROOT / "aegis_core").exists() else "soma_core"
         python_files = [f for f in core_dir.glob("*.py") if f.name != "__init__.py"]
 
         missing_symbols = []
         for py_file in python_files:
-            module_name = f"soma_core.{py_file.stem}"
+            module_name = f"{pkg}.{py_file.stem}"
             mod = importlib.import_module(module_name)
             assert hasattr(mod, "__all__"), f"{module_name} lacks __all__ declaration"
             exported = getattr(mod, "__all__", [])

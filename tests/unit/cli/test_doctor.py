@@ -316,3 +316,24 @@ def test_check_ast_drivers_python3_slot_unresolvable_without_any_interpreter(tmp
 
     assert _check_ast_drivers(tmp_path) is False
     assert "executable 'python3' not found on PATH" in capsys.readouterr().out
+
+
+def test_check_precommit_hook_all_branches(tmp_path, capsys):
+    from aegis_cli.doctor import _check_precommit_hook
+    git_dir = tmp_path / ".git" / "hooks"
+    git_dir.mkdir(parents=True)
+    hook_file = git_dir / "pre-commit"
+
+    # 1. Non-aegis hook
+    hook_file.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    assert _check_precommit_hook(tmp_path) is None
+
+    # 2. Current hook
+    hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\n# aegis-hook-format: 4\naegis check --hook\n", encoding="utf-8")
+    assert _check_precommit_hook(tmp_path) is True
+    assert "Pre-commit hook is current" in capsys.readouterr().out
+
+    # 3. Old hook format
+    hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\nsoma checkpoint --pre-commit\n# <<< aegis pre-commit <<<\n", encoding="utf-8")
+    assert _check_precommit_hook(tmp_path) is False
+    assert "Pre-commit hook uses an old block" in capsys.readouterr().out

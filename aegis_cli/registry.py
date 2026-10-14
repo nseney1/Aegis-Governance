@@ -66,8 +66,9 @@ class CommandRegistry:
 
     def format_categorized_help(self, prog: str = "soma") -> str:
         """Render standard grouped help message showing commands by logical category."""
+        prog_title = "Aegis" if prog == "aegis" else "Soma"
         lines = [
-            f"Soma Governance — make AI coding agents trustworthy",
+            f"{prog_title} Governance — make AI coding agents trustworthy",
             "",
             f"usage: {prog} <command> [options]",
             "",
@@ -113,68 +114,34 @@ _DEFAULT_REGISTRY: Optional[CommandRegistry] = None
 
 
 def create_default_registry() -> CommandRegistry:
-    """Create and populate a CommandRegistry with all standard Soma commands."""
+    """Create and populate a CommandRegistry with the 5 canonical verbs + plumbing."""
     reg = CommandRegistry()
 
     # Category 1: Setup & Environment
     from aegis_cli.init import InitCommand
-    from aegis_cli.detect import DetectCommand
-    from aegis_cli.doctor import DoctorCommand
-    from aegis_cli.install import InstallCommand, UninstallCommand
+    from aegis_cli.system import SystemCommand
 
     # Category 2: Daily Workflow & Verification
-    from aegis_cli.verify import VerifyCommand
+    from aegis_cli.check import CheckCommand
     from aegis_cli.status import StatusCommand
-    from aegis_cli.checkpoint import CheckpointCommand
-    from aegis_cli.report import ReportCommand
-    from aegis_cli.sync import SyncCommand
 
     # Category 3: Rule Evolution & Intelligence
-    from aegis_cli.genesis import GenesisCommand
-    from aegis_cli.oracle import OracleCommand
-    from aegis_cli.promote import PromoteCommand
-    from aegis_cli.demote import DemoteCommand
-    from aegis_cli.prune import PruneCommand
-    from aegis_cli.harvest import HarvestCommand
-    from aegis_cli.capture_insight import CaptureInsightCommand
+    from aegis_cli.rule import RuleCommand
 
-    # Category 4: Plumbing & Swarm Protocol
-    from aegis_cli.hooks import HookCommand
-    from aegis_cli.skills import SkillCommand, HandoffCommand
-    from aegis_cli.transfer import TransferCommand
-    from aegis_cli.quarantine import QuarantineCommand
-    from aegis_cli.clean_rules import CleanRulesCommand
+    # Category 4: Plumbing & Machine Protocol
+    from aegis_cli.agent import AgentCommand
     from aegis_cli.completion import CompletionCommand
+    from aegis_cli.hooks import HookCommand
 
     for cmd_cls in (
-        # Setup
         InitCommand,
-        DetectCommand,
-        DoctorCommand,
-        InstallCommand,
-        UninstallCommand,
-        # Workflow
-        VerifyCommand,
+        SystemCommand,
+        CheckCommand,
         StatusCommand,
-        CheckpointCommand,
-        ReportCommand,
-        SyncCommand,
-        # Lifecycle
-        GenesisCommand,
-        OracleCommand,
-        PromoteCommand,
-        DemoteCommand,
-        PruneCommand,
-        HarvestCommand,
-        CaptureInsightCommand,
-        # Plumbing
-        HookCommand,
-        SkillCommand,
-        HandoffCommand,
-        TransferCommand,
-        QuarantineCommand,
-        CleanRulesCommand,
+        RuleCommand,
+        AgentCommand,
         CompletionCommand,
+        HookCommand,
     ):
         reg.register(cmd_cls)
 

@@ -69,8 +69,6 @@ from .quorum import (
     is_promotable,
 )
 from .selection import (
-    cli_cell_crossover,
-    crossover_cells,
     prune_cells,
     run_cell_selection,
 )
@@ -123,8 +121,6 @@ __all__ = [
     "find_cell",
     "parse_cell",
     "get_type_plural",
-    "crossover_cells",
-    "cli_cell_crossover",
     "bayesian_fitness",
     "antifragile_bonus",
     "format_snr",

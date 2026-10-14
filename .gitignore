@@ -1,7 +1,6 @@
 # User-local configuration (copy from soma.conf.example)
 soma.conf
 aegis.conf
-.soma/
 
 # Generated hook configs (produced by install.sh)
 hooks.json
@@ -59,7 +58,7 @@ docs/postmortem-work-sessions.md
 .soma/enforcement/
 .soma/governance/
 .soma/metrics/
-.soma/keys/
+.soma/evidence/
 .soma/locks/
 .soma/human_insights.jsonl
 .aegis/rules/fitness.jsonl
@@ -70,6 +69,7 @@ docs/postmortem-work-sessions.md
 .aegis/governance/
 .aegis/metrics/
 .aegis/keys/
+.aegis/evidence/
 .aegis/locks/
 .aegis/human_insights.jsonl
 docs/internal/

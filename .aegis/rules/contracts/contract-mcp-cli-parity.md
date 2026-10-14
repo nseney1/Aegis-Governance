@@ -8,7 +8,7 @@ prediction: New enzyme features added without corresponding MCP tool updates cre
 falsification: MCP and CLI are intentionally divergent by design → reclassify
 target_paths:
   - aegis_mcp/tools.py
-  - aegis_cli/genesis.py
+  - aegis_cli/check.py
   - aegis_cli/verify.py
   - aegis_cli/report.py
   - aegis_core/telemetry.py
@@ -23,11 +23,11 @@ tags:
   - parity
   - cross-service
 fitness:
-  triggers: 41
-  true_positives: 5.6832
-  false_positives: 2.953
+  triggers: 53
+  true_positives: 6.0785
+  false_positives: 3.2159
   score: 0.6667
-  last_trigger_date: "2026-10-14T06:50:24Z"
+  last_trigger_date: "2026-10-14T08:55:31Z"
 ---
 
 The MCP server (aegis_mcp/tools.py) is the API contract for external agents.

@@ -42,7 +42,9 @@ class _Cmd:
                 continue
             if action.option_strings:
                 self.options.append(_Opt(action))
-            elif action.choices and not isinstance(action, argparse._SubParsersAction):
+            elif isinstance(action, argparse._SubParsersAction):
+                self.positional_choices.extend(action.choices.keys())
+            elif action.choices:
                 self.positional_choices.extend(str(c) for c in action.choices)
 
 

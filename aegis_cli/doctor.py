@@ -283,8 +283,14 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
 # ── Pre-commit hook (BUG-047) ────────────────────────────────────────────────
 
 def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
-    """False for a pre-BUG-047 soma hook block, True if current, None if absent."""
-    from aegis_cli.hooks import SOMA_HOOK_FORMAT, _SOMA_HOOK_START
+    """False for a pre-BUG-047 hook block, True if current, None if absent."""
+    from aegis_cli.hooks.management import (
+        AEGIS_HOOK_FORMAT,
+        CURRENT_HOOK_FORMAT_VERSION,
+        SOMA_HOOK_FORMAT,
+        _AEGIS_HOOK_START,
+        _SOMA_HOOK_START,
+    )
     from aegis_core.workspace import resolve_git_hooks_dir
 
     hooks_dir = resolve_git_hooks_dir(project_root)
@@ -295,14 +301,19 @@ def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
         text = hook.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    if _SOMA_HOOK_START not in text:
+    if _AEGIS_HOOK_START not in text and _SOMA_HOOK_START not in text:
         return None
-    if SOMA_HOOK_FORMAT in text:
+    if (
+        f"{AEGIS_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}" in text
+        or f"{SOMA_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}" in text
+        or AEGIS_HOOK_FORMAT in text
+        or SOMA_HOOK_FORMAT in text
+    ):
         print(f"  ✅ Pre-commit hook is current ({hook})")
         return True
-    print(f"  ❌ Pre-commit hook uses an old soma block ({hook}).\n"
-          "      It aborts commits with `soma: not found` when soma is not on the\n"
-          "      hook's PATH (BUG-047). Re-run `soma init` to refresh it.")
+    print(f"  ❌ Pre-commit hook uses an old block ({hook}).\n"
+          "      It aborts commits when the CLI is not on the\n"
+          "      hook's PATH (BUG-047). Re-run `aegis system hook install` to refresh it.")
     return False
 
 

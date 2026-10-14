@@ -27,10 +27,10 @@ tags:
 fitness:
   score: 0.7692
   impact_weight: 1.0
-  triggers: 67
-  true_positives: 21.9983
-  false_positives: 18.392
-  last_trigger_date: "2026-10-14T07:33:06Z"
+  triggers: 79
+  true_positives: 26.4969
+  false_positives: 20.9032
+  last_trigger_date: "2026-10-14T08:55:31Z"
 ---
 
 When modifying an enzyme that writes to a JSONL file (fitness.jsonl,

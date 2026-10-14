@@ -156,8 +156,11 @@ def get_rules_dir(
 # ── Pre-commit Hook (Delegated to aegis_cli.hooks) ───────────────────────────
 
 from aegis_cli.hooks import (
-    _SOMA_HOOK_START,
+    _AEGIS_HOOK_END,
+    _AEGIS_HOOK_START,
     _SOMA_HOOK_END,
+    _SOMA_HOOK_START,
+    AEGIS_HOOK_FORMAT,
     SOMA_HOOK_FORMAT,
     _replace_hook_block,
     generate_hook_block,
@@ -497,11 +500,13 @@ def run_init(args: argparse.Namespace) -> int:
         generate_mcp_config(project_root, dry_run=dry_run)
 
     # 7.5. Install pre-commit hook
-    hook_result = install_hook(project_root, dry_run=dry_run)
-    if hook_result and not dry_run:
-        print("    🪝 Pre-commit hook installed (.git/hooks/pre-commit)")
-    elif hook_result and dry_run:
-        print("    🪝 Would install pre-commit hook")
+    no_hooks = getattr(args, "no_hooks", False) or not getattr(args, "hooks", True)
+    if not no_hooks:
+        hook_result = install_hook(project_root, dry_run=dry_run)
+        if hook_result and not dry_run:
+            print("    🪝 Pre-commit hook installed (.git/hooks/pre-commit)")
+        elif hook_result and dry_run:
+            print("    🪝 Would install pre-commit hook")
 
     # 8. Claude-specific: concatenate rules into CLAUDE.md
     if platform == "claude" and installed and not dry_run:

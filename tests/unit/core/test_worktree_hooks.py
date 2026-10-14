@@ -8,9 +8,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from soma_cli.doctor import _check_precommit_hook
-from soma_cli.init import _SOMA_HOOK_START, SOMA_HOOK_FORMAT, install_hook
-from soma_core.workspace import resolve_git_hooks_dir
+from aegis_cli.doctor import _check_precommit_hook
+from aegis_cli.init import (
+    _AEGIS_HOOK_START,
+    _SOMA_HOOK_START,
+    AEGIS_HOOK_FORMAT,
+    SOMA_HOOK_FORMAT,
+    install_hook,
+)
+from aegis_core.workspace import resolve_git_hooks_dir
 
 
 def _setup_mock_worktree(tmp_path: Path) -> tuple[Path, Path]:
@@ -101,8 +107,8 @@ class TestWorktreeHookInstallation:
         assert installed is True
         assert expected_hook.is_file()
         content = expected_hook.read_text(encoding="utf-8")
-        assert _SOMA_HOOK_START in content
-        assert SOMA_HOOK_FORMAT in content
+        assert _AEGIS_HOOK_START in content or _SOMA_HOOK_START in content
+        assert AEGIS_HOOK_FORMAT in content or SOMA_HOOK_FORMAT in content
         assert os.access(expected_hook, os.X_OK)
 
     def test_doctor_detects_precommit_hook_in_worktree(self, tmp_path: Path):

@@ -1,6 +1,6 @@
 """Canary test verifying dual-brand prefix stripping and type directory mappings."""
 from pathlib import Path
-from soma_core.verification.checkpoint_checks import (
+from aegis_core.verification.checkpoint_checks import (
     _resolve_canonical_test_candidates,
     DIR_TO_TYPE,
 )
