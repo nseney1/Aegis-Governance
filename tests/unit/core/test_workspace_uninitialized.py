@@ -20,8 +20,8 @@ class TestWorkspaceForInit:
         ws = Workspace.for_init(blank_dir)
         assert isinstance(ws, Workspace)
         assert ws.root == blank_dir.resolve()
-        assert not ws.cells_dir.exists()
-        assert ws.cells_dir == blank_dir.resolve() / ".soma" / "cells"
+        assert not ws.rules_dir.exists()
+        assert ws.rules_dir == blank_dir.resolve() / ".aegis" / "rules"
 
     def test_for_init_rejects_symlink(self, tmp_path: Path):
         """Workspace.for_init rejects symlink paths to prevent directory traversal escapes."""
@@ -51,17 +51,17 @@ class TestWorkspaceForInit:
 
 class TestWorkspaceScaffold:
     def test_scaffold_default(self, tmp_path: Path):
-        """ws.scaffold creates standard cell tiers and evidence/metrics dirs."""
+        """ws.scaffold creates standard rule tiers and evidence/metrics dirs."""
         blank_dir = tmp_path / "new_project"
         blank_dir.mkdir()
         ws = Workspace.for_init(blank_dir)
 
         created = ws.scaffold(minimal=False, dry_run=False)
-        assert (ws.root / ".soma" / "cells" / "vacuoles").is_dir()
-        assert (ws.root / ".soma" / "cells" / "walls").is_dir()
-        assert (ws.root / ".soma" / "cells" / "gates").is_dir()
-        assert (ws.root / ".soma" / "evidence").is_dir()
-        assert (ws.root / ".soma" / "metrics").is_dir()
+        assert (ws.root / ".aegis" / "rules" / "traps").is_dir()
+        assert (ws.root / ".aegis" / "rules" / "invariants").is_dir()
+        assert (ws.root / ".aegis" / "rules" / "gates").is_dir()
+        assert (ws.root / ".aegis" / "evidence").is_dir()
+        assert (ws.root / ".aegis" / "metrics").is_dir()
         assert len(created) >= 4
 
     def test_scaffold_minimal(self, tmp_path: Path):
@@ -71,9 +71,9 @@ class TestWorkspaceScaffold:
         ws = Workspace.for_init(blank_dir)
 
         created = ws.scaffold(minimal=True, dry_run=False)
-        assert (ws.root / ".soma" / "cells" / "walls").is_dir()
-        assert (ws.root / ".soma" / "evidence").is_dir()
-        assert not (ws.root / ".soma" / "cells" / "vacuoles").exists()
+        assert (ws.root / ".aegis" / "rules" / "invariants").is_dir()
+        assert (ws.root / ".aegis" / "evidence").is_dir()
+        assert not (ws.root / ".aegis" / "rules" / "traps").exists()
 
     def test_scaffold_dry_run(self, tmp_path: Path):
         """ws.scaffold with dry_run=True returns paths without mutating filesystem."""
@@ -83,7 +83,7 @@ class TestWorkspaceScaffold:
 
         created = ws.scaffold(minimal=False, dry_run=True)
         assert len(created) >= 4
-        assert not (ws.root / ".soma").exists()
+        assert not (ws.root / ".aegis").exists()
 
     def test_scaffold_bare_git_repo_rejected(self, tmp_path: Path):
         """ws.scaffold rejects bare git repositories with WorkspaceBareRepoError."""

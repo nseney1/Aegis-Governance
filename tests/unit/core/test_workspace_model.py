@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 from aegis_core.errors import (
+    AegisError,
+    AegisValidationError,
     PathTraversalError,
-    SomaError,
-    SomaValidationError,
     WorkspaceError,
     WorkspaceNotFoundError,
 )
@@ -19,27 +19,27 @@ from aegis_core.workspace import (
     confine_workspace,
     resolve_workspace,
     resolve_workspace_path,
-    validate_cell_names,
+    validate_rule_names,
 )
 
 
 @pytest.fixture
-def soma_ws(tmp_path: Path) -> Path:
+def aegis_ws(tmp_path: Path) -> Path:
     ws = tmp_path / "valid_project"
-    (ws / ".soma" / "cells" / "walls").mkdir(parents=True)
-    (ws / ".soma" / "evidence").mkdir(parents=True)
-    (ws / ".soma" / "metrics").mkdir(parents=True)
-    (ws / ".soma" / "cells" / "walls" / "wall-test.md").write_text(
-        "---\ntype: wall\nenforcement: gate\n---\nTest rule.\n"
+    (ws / ".aegis" / "rules" / "invariants").mkdir(parents=True)
+    (ws / ".aegis" / "evidence").mkdir(parents=True)
+    (ws / ".aegis" / "metrics").mkdir(parents=True)
+    (ws / ".aegis" / "rules" / "invariants" / "invariant-test.md").write_text(
+        "---\ntype: invariant\nenforcement: gate\n---\nTest rule.\n"
     )
     return ws
 
 
 class TestWorkspaceExceptions:
     def test_exception_inheritance_and_codes(self):
-        assert issubclass(WorkspaceError, SomaValidationError)
+        assert issubclass(WorkspaceError, AegisValidationError)
         assert issubclass(WorkspaceError, ValueError)
-        assert issubclass(WorkspaceError, SomaError)
+        assert issubclass(WorkspaceError, AegisError)
 
         assert issubclass(WorkspaceNotFoundError, WorkspaceError)
         assert issubclass(WorkspaceNotFoundError, ValueError)
@@ -60,35 +60,35 @@ class TestWorkspaceExceptions:
 
 class TestWorkspaceModel:
 
-    def test_workspace_resolve_env(self, soma_ws: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("SOMA_WORKSPACE", str(soma_ws))
+    def test_workspace_resolve_env(self, aegis_ws: Path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("AEGIS_WORKSPACE", str(aegis_ws))
         ws = Workspace.resolve()
         assert isinstance(ws, Workspace)
-        assert ws.root == soma_ws.resolve()
-        assert str(ws) == str(soma_ws.resolve())
-        assert os.fspath(ws) == str(soma_ws.resolve())
-        assert Path(ws) == soma_ws.resolve()
+        assert ws.root == aegis_ws.resolve()
+        assert str(ws) == str(aegis_ws.resolve())
+        assert os.fspath(ws) == str(aegis_ws.resolve())
+        assert Path(ws) == aegis_ws.resolve()
 
     def test_workspace_resolve_strict_env_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("SOMA_WORKSPACE", str(tmp_path / "nonexistent"))
-        with pytest.raises(WorkspaceNotFoundError, match="no .soma/cells found"):
+        monkeypatch.setenv("AEGIS_WORKSPACE", str(tmp_path / "nonexistent"))
+        with pytest.raises(WorkspaceNotFoundError, match="no .aegis/rules found"):
             Workspace.resolve(strict_env=True)
 
-    def test_workspace_resolve_walkup(self, soma_ws: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delenv("SOMA_WORKSPACE", raising=False)
-        monkeypatch.delenv("SOMA_ROOT", raising=False)
+    def test_workspace_resolve_walkup(self, aegis_ws: Path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
+        monkeypatch.delenv("AEGIS_ROOT", raising=False)
 
-        sub = soma_ws / "deep" / "nested" / "dir"
+        sub = aegis_ws / "deep" / "nested" / "dir"
         sub.mkdir(parents=True)
 
         ws = Workspace.resolve(start=sub)
         assert isinstance(ws, Workspace)
-        assert ws.root == soma_ws.resolve()
+        assert ws.root == aegis_ws.resolve()
 
-    def test_workspace_confine_factory(self, soma_ws: Path, tmp_path: Path):
-        ws = Workspace.confine(soma_ws)
+    def test_workspace_confine_factory(self, aegis_ws: Path, tmp_path: Path):
+        ws = Workspace.confine(aegis_ws)
         assert isinstance(ws, Workspace)
-        assert ws.root == soma_ws.resolve()
+        assert ws.root == aegis_ws.resolve()
 
         with pytest.raises(WorkspaceError, match="must not be empty"):
             Workspace.confine("")
@@ -96,20 +96,20 @@ class TestWorkspaceModel:
         with pytest.raises(WorkspaceNotFoundError, match="does not exist"):
             Workspace.confine(tmp_path / "missing")
 
-        with pytest.raises(WorkspaceError, match="missing .soma/cells"):
+        with pytest.raises(WorkspaceError, match="missing .aegis/rules"):
             Workspace.confine(tmp_path)
 
-    def test_workspace_properties(self, soma_ws: Path):
-        ws = Workspace.resolve(soma_ws)
-        assert ws.soma_dir == ws.root / ".soma"
-        assert ws.cells_dir == ws.root / ".soma" / "cells"
-        assert ws.metrics_dir == ws.root / ".soma" / "metrics"
-        assert ws.evidence_dir == ws.root / ".soma" / "evidence"
-        assert ws.signals_file == ws.root / ".soma" / "evidence" / "signals.jsonl"
+    def test_workspace_properties(self, aegis_ws: Path):
+        ws = Workspace.resolve(aegis_ws)
+        assert ws.aegis_dir == ws.root / ".aegis"
+        assert ws.rules_dir == ws.root / ".aegis" / "rules"
+        assert ws.metrics_dir == ws.root / ".aegis" / "metrics"
+        assert ws.evidence_dir == ws.root / ".aegis" / "evidence"
+        assert ws.signals_file == ws.root / ".aegis" / "evidence" / "signals.jsonl"
         assert ws / "subdir" == ws.root / "subdir"
 
-    def test_workspace_pathlike_and_immutability(self, soma_ws: Path):
-        ws = Workspace.resolve(soma_ws)
+    def test_workspace_pathlike_and_immutability(self, aegis_ws: Path):
+        ws = Workspace.resolve(aegis_ws)
         assert isinstance(ws, os.PathLike)
 
         # Immutability
@@ -118,11 +118,11 @@ class TestWorkspaceModel:
 
         # os.path and Path interoperability
         joined = os.path.join(ws, "sub", "file.txt")
-        assert joined == str(soma_ws.resolve() / "sub" / "file.txt")
+        assert joined == str(aegis_ws.resolve() / "sub" / "file.txt")
 
-    def test_workspace_confine_path_success(self, soma_ws: Path):
-        ws = Workspace.resolve(soma_ws)
-        target = soma_ws / "src" / "main.py"
+    def test_workspace_confine_path_success(self, aegis_ws: Path):
+        ws = Workspace.resolve(aegis_ws)
+        target = aegis_ws / "src" / "main.py"
         target.parent.mkdir(parents=True)
         target.write_text("print('hello')")
 
@@ -130,8 +130,8 @@ class TestWorkspaceModel:
         assert abs_p == str(target.resolve())
         assert rel_p == os.path.join("src", "main.py")
 
-    def test_workspace_confine_path_failures(self, soma_ws: Path):
-        ws = Workspace.resolve(soma_ws)
+    def test_workspace_confine_path_failures(self, aegis_ws: Path):
+        ws = Workspace.resolve(aegis_ws)
 
         # Empty
         with pytest.raises(PathTraversalError, match="must not be empty"):
@@ -161,34 +161,34 @@ class TestWorkspaceModel:
         with pytest.raises(PathTraversalError, match="reserved Windows device name"):
             ws.confine_path("CON.txt")
 
-    def test_workspace_validate_cell_names(self, soma_ws: Path):
-        ws = Workspace.resolve(soma_ws)
-        assert ws.validate_cell_names(["wall-test"]) == []
-        assert ws.validate_cell_names(["wall-test", "wall-nonexistent"]) == ["wall-nonexistent"]
+    def test_workspace_validate_rule_names(self, aegis_ws: Path):
+        ws = Workspace.resolve(aegis_ws)
+        assert ws.validate_rule_names(["invariant-test"]) == []
+        assert ws.validate_rule_names(["invariant-test", "invariant-nonexistent"]) == ["invariant-nonexistent"]
 
 
 class TestWorkspaceBackwardCompatibilityFacades:
-    def test_standalone_functions_wrap_workspace(self, soma_ws: Path):
-        root_str = resolve_workspace(soma_ws)
+    def test_standalone_functions_wrap_workspace(self, aegis_ws: Path):
+        root_str = resolve_workspace(aegis_ws)
         assert isinstance(root_str, str)
-        assert root_str == str(soma_ws.resolve())
+        assert root_str == str(aegis_ws.resolve())
 
-        root_path = resolve_workspace_path(soma_ws)
+        root_path = resolve_workspace_path(aegis_ws)
         assert isinstance(root_path, Path)
-        assert root_path == soma_ws.resolve()
+        assert root_path == aegis_ws.resolve()
 
-        confined = confine_workspace(str(soma_ws))
-        assert confined == str(soma_ws.resolve())
+        confined = confine_workspace(str(aegis_ws))
+        assert confined == str(aegis_ws.resolve())
 
-        missing = validate_cell_names(["wall-test", "ghost"], soma_ws)
+        missing = validate_rule_names(["invariant-test", "ghost"], aegis_ws)
         assert missing == ["ghost"]
 
         # confine_path backward compatibility accepts str or Workspace
-        abs_p, rel_p = confine_path("src", soma_ws)
+        abs_p, rel_p = confine_path("src", aegis_ws)
         assert isinstance(abs_p, str)
         assert isinstance(rel_p, str)
 
-        ws_obj = Workspace.resolve(soma_ws)
+        ws_obj = Workspace.resolve(aegis_ws)
         abs_p2, rel_p2 = confine_path("src", ws_obj)
         assert abs_p2 == abs_p
         assert rel_p2 == rel_p

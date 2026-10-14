@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from aegis_core.errors import WorkspaceError
 from aegis_core.workspace.confinement import confine_path_internal, validate_workspace_path
-from aegis_core.workspace.discovery import is_soma_repo, resolve_workspace_root
+from aegis_core.workspace.discovery import is_aegis_repo, resolve_workspace_root
 from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
 from aegis_core.workspace.scaffold import scaffold_workspace
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, eq=False)
 class Workspace(os.PathLike[str]):
-    """Immutable, strongly-typed representation of a Soma project workspace.
+    """Immutable, strongly-typed representation of an Aegis project workspace.
 
     Implements os.PathLike[str] for seamless interoperability with open(),
     Path(), and os.path routines.
@@ -58,45 +58,39 @@ class Workspace(os.PathLike[str]):
         return hash(self.root)
 
     @property
-    def soma_dir(self) -> Path:
-        """Path to .aegis or .soma directory."""
-        if (self.root / ".aegis").exists():
-            return self.root / ".aegis"
-        return self.root / ".soma"
-
-    @property
     def aegis_dir(self) -> Path:
-        """Alias for soma_dir."""
-        return self.soma_dir
+        """Path to .aegis directory."""
+        return self.root / ".aegis"
 
     @property
-    def cells_dir(self) -> Path:
-        """Path to active rules/cells directory."""
-        if (self.root / ".aegis" / "rules").exists():
-            return self.root / ".aegis" / "rules"
-        if (self.soma_dir / "rules").exists():
-            return self.soma_dir / "rules"
-        return self.soma_dir / "cells"
+    def soma_dir(self) -> Path:
+        """Path to .aegis directory."""
+        return self.aegis_dir
 
     @property
     def rules_dir(self) -> Path:
-        """Path to active rules directory (alias for cells_dir)."""
-        return self.cells_dir
+        """Path to active rules directory (.aegis/rules)."""
+        return self.aegis_dir / "rules"
+
+    @property
+    def cells_dir(self) -> Path:
+        """Path to active rules directory (.aegis/rules)."""
+        return self.rules_dir
 
     @property
     def metrics_dir(self) -> Path:
         """Path to metrics directory."""
-        return self.soma_dir / "metrics"
+        return self.aegis_dir / "metrics"
 
     @property
     def evidence_dir(self) -> Path:
         """Path to evidence directory."""
-        return self.soma_dir / "evidence"
+        return self.aegis_dir / "evidence"
 
     @property
     def locks_dir(self) -> Path:
         """Path to locks directory."""
-        return self.soma_dir / "locks"
+        return self.aegis_dir / "locks"
 
     @property
     def signals_file(self) -> Path:
@@ -109,14 +103,14 @@ class Workspace(os.PathLike[str]):
         return (self.root / ".git").exists() or self.git_hooks_dir is not None
 
     @property
-    def is_soma_repo(self) -> bool:
-        """True if this workspace is the core Soma/Aegis Governance repository."""
-        return is_soma_repo(self.root)
+    def is_aegis_repo(self) -> bool:
+        """True if this workspace is the core Aegis Governance repository."""
+        return is_aegis_repo(self.root)
 
     @property
-    def is_aegis_repo(self) -> bool:
-        """Alias for is_soma_repo."""
-        return self.is_soma_repo
+    def is_soma_repo(self) -> bool:
+        """Alias for is_aegis_repo."""
+        return self.is_aegis_repo
 
     def __fspath__(self) -> str:
         return str(self.root)
@@ -132,7 +126,7 @@ class Workspace(os.PathLike[str]):
 
     @classmethod
     def for_init(cls, path: str | Path | os.PathLike[str]) -> Workspace:
-        """Construct a Workspace for initialization without requiring pre-existing .soma directory.
+        """Construct a Workspace for initialization without requiring pre-existing .aegis directory.
 
         Guards against symlink traversal escapes and non-directory files.
         Polymorphically returns GitWorkspace if a git repository is present.
@@ -151,14 +145,14 @@ class Workspace(os.PathLike[str]):
         return cls(root=resolved)
 
     def scaffold(self, minimal: bool = False, dry_run: bool = False) -> list[Path]:
-        """Scaffold standard directory structure for Soma governance.
+        """Scaffold standard directory structure for Aegis governance.
 
-        Creates .soma/cells/ and .soma/evidence/ (and .soma/metrics/).
+        Creates .aegis/rules/ and .aegis/evidence/ (and .aegis/metrics/).
         Guards against bare git repositories.
         """
         return scaffold_workspace(
             root=self.root,
-            cells_dir=self.cells_dir,
+            cells_dir=self.rules_dir,
             evidence_dir=self.evidence_dir,
             metrics_dir=self.metrics_dir,
             minimal=minimal,
@@ -172,7 +166,7 @@ class Workspace(os.PathLike[str]):
         caller_file: str | Path | os.PathLike[str] | None = None,
         strict_env: bool = False,
     ) -> Workspace:
-        """Find the project root containing .soma/cells/ or .soma/.
+        """Find the project root containing .aegis/rules/ or .aegis/.
 
         Polymorphically returns GitWorkspace if backed by a Git repository or worktree.
         """
@@ -205,7 +199,7 @@ class Workspace(os.PathLike[str]):
     ) -> Workspace:
         """Validate and confine a workspace path.
 
-        A valid workspace must exist as a directory and contain .soma/cells/.
+        A valid workspace must exist as a directory and contain .aegis/rules/.
         Returns a Workspace or GitWorkspace instance.
         """
         if isinstance(untrusted_workspace, Workspace):
@@ -227,25 +221,27 @@ class Workspace(os.PathLike[str]):
         """
         return confine_path_internal(self.root, untrusted_path)
 
-    def validate_cell_names(self, cell_names: list[str]) -> list[str]:
-        """Validate that cell names reference cells that actually exist.
+    def validate_rule_names(self, rule_names: list[str]) -> list[str]:
+        """Validate that rule names reference rules that actually exist.
 
         Returns a list of invalid names (empty list means all names are valid).
         """
-        if not cell_names:
+        if not rule_names:
             return []
 
-        cells_dir = self.cells_dir
-        if not cells_dir.is_dir():
-            return list(cell_names)
+        rules_dir = self.rules_dir
+        if not rules_dir.is_dir():
+            return list(rule_names)
 
         known = set()
-        for _dirpath, _dirnames, filenames in os.walk(str(cells_dir)):
+        for _dirpath, _dirnames, filenames in os.walk(str(rules_dir)):
             for fn in filenames:
                 if fn.endswith(".md") and fn != "README.md":
                     known.add(os.path.splitext(fn)[0])
 
-        return [name for name in cell_names if name not in known]
+        return [name for name in rule_names if name not in known]
+
+    validate_cell_names = validate_rule_names
 
 
 __all__ = ["Workspace"]

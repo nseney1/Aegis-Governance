@@ -103,10 +103,7 @@ def workspace_lock(
         Path to the active lock file.
     """
     ws = Path(workspace).resolve()
-    if (ws / ".aegis").is_dir() or not (ws / ".soma").is_dir():
-        locks_dir = ws / ".aegis" / LOCK_DIRNAME
-    else:
-        locks_dir = ws / ".soma" / LOCK_DIRNAME
+    locks_dir = ws / ".aegis" / LOCK_DIRNAME
     locks_dir.mkdir(parents=True, exist_ok=True)
     lock_file = locks_dir / f"{resource}.lock"
     str_path = str(lock_file)

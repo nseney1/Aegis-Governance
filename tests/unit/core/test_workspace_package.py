@@ -32,7 +32,7 @@ class TestWorkspacePackageArchitecture:
 
         assert hasattr(aegis_core.workspace.base, "Workspace")
         assert hasattr(aegis_core.workspace.git, "GitWorkspace")
-        assert hasattr(aegis_core.workspace.discovery, "is_soma_repo")
+        assert hasattr(aegis_core.workspace.discovery, "is_aegis_repo")
         assert hasattr(aegis_core.workspace.confinement, "confine_path_internal")
         assert hasattr(aegis_core.workspace.scaffold, "scaffold_workspace")
         assert hasattr(aegis_core.workspace.hooks, "resolve_git_hooks_dir")
@@ -47,7 +47,7 @@ class TestWorkspacePackageArchitecture:
             resolve_git_hooks_dir,
             resolve_workspace,
             resolve_workspace_path,
-            validate_cell_names,
+            validate_rule_names,
         )
 
         assert issubclass(GitWorkspace, Workspace)
@@ -56,35 +56,36 @@ class TestWorkspacePackageArchitecture:
         assert callable(confine_workspace)
         assert callable(resolve_git_hooks_dir)
         assert callable(resolve_workspace)
+        assert callable(validate_rule_names)
 
-    def test_is_soma_repo_compound_fingerprint(self, tmp_path):
+    def test_is_aegis_repo_compound_fingerprint(self, tmp_path):
         from aegis_core.workspace import Workspace
 
         # Dummy foreign repository
         foreign = tmp_path / "foreign"
         foreign.mkdir()
-        (foreign / ".soma" / "cells").mkdir(parents=True)
+        (foreign / ".aegis" / "rules").mkdir(parents=True)
         (foreign / "pyproject.toml").write_text('[project]\nname = "my-awesome-tool"\n', encoding="utf-8")
         ws_foreign = Workspace.resolve(foreign)
-        assert not ws_foreign.is_soma_repo
+        assert not ws_foreign.is_aegis_repo
 
-        # Fake repo with only pyproject.toml name but missing soma_core/soma_cli
+        # Fake repo with only pyproject.toml name but missing aegis_core/aegis_cli
         fake = tmp_path / "fake"
         fake.mkdir()
-        (fake / ".soma" / "cells").mkdir(parents=True)
-        (fake / "pyproject.toml").write_text('[project]\nname = "soma-governance"\n', encoding="utf-8")
+        (fake / ".aegis" / "rules").mkdir(parents=True)
+        (fake / "pyproject.toml").write_text('[project]\nname = "aegis-guardrails"\n', encoding="utf-8")
         ws_fake = Workspace.resolve(fake)
-        assert not ws_fake.is_soma_repo
+        assert not ws_fake.is_aegis_repo
 
-        # Valid Soma repository
-        soma_mock = tmp_path / "soma_mock"
-        soma_mock.mkdir()
-        (soma_mock / ".soma" / "cells").mkdir(parents=True)
-        (soma_mock / "pyproject.toml").write_text('[project]\nname = "soma-governance"\n', encoding="utf-8")
-        (soma_mock / "soma_core").mkdir()
-        (soma_mock / "soma_cli").mkdir()
-        ws_soma = Workspace.resolve(soma_mock)
-        assert ws_soma.is_soma_repo
+        # Valid Aegis repository
+        aegis_mock = tmp_path / "aegis_mock"
+        aegis_mock.mkdir()
+        (aegis_mock / ".aegis" / "rules").mkdir(parents=True)
+        (aegis_mock / "pyproject.toml").write_text('[project]\nname = "aegis-guardrails"\n', encoding="utf-8")
+        (aegis_mock / "aegis_core").mkdir()
+        (aegis_mock / "aegis_cli").mkdir()
+        ws_aegis = Workspace.resolve(aegis_mock)
+        assert ws_aegis.is_aegis_repo
 
     def test_backward_compatibility_facades_work_unchanged(self, tmp_path):
         from aegis_core.workspace import (
@@ -96,7 +97,7 @@ class TestWorkspacePackageArchitecture:
 
         repo = tmp_path / "project"
         repo.mkdir()
-        (repo / ".soma" / "cells").mkdir(parents=True)
+        (repo / ".aegis" / "rules").mkdir(parents=True)
         (repo / "file.py").write_text("print('test')", encoding="utf-8")
 
         # Facades
