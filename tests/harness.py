@@ -26,11 +26,19 @@ CELL_TYPE_DIRS = {
 class AegisTestHarness:
     """Isolated sandbox fixture for testing Aegis Governance lifecycle, telemetry, and CLI."""
 
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, use_aegis: bool = False) -> None:
         self.workspace = Path(workspace).resolve()
-        self.soma_dir = self.workspace / ".soma"
-        self.cells_dir = self.soma_dir / "cells"
-        self.locks_dir = self.soma_dir / "locks"
+        self.use_aegis = use_aegis
+        if use_aegis or (self.workspace / ".aegis").is_dir():
+            self.soma_dir = self.workspace / ".aegis"
+            self.cells_dir = self.soma_dir / "rules"
+            self.locks_dir = self.soma_dir / "locks"
+        else:
+            self.soma_dir = self.workspace / ".soma"
+            self.cells_dir = self.soma_dir / "cells"
+            self.locks_dir = self.soma_dir / "locks"
+        self.aegis_dir = self.soma_dir
+        self.rules_dir = self.cells_dir
         self._init_workspace()
 
     def _init_workspace(self) -> None:
@@ -75,6 +83,8 @@ class AegisTestHarness:
         content = dump_frontmatter(fm_data, body)
         target_file.write_text(content, encoding="utf-8")
         return target_file
+
+    create_rule = create_cell
 
     def record_signal(
         self,

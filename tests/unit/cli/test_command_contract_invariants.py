@@ -249,10 +249,11 @@ def test_category_4_plumbing_commands():
 def test_default_registry_completeness():
     reg = get_default_registry()
     commands = reg.list_commands()
-    assert len(commands) == 8
+    assert len(commands) == 9
 
     expected_verbs = {
         "init",
+        "migrate",
         "system",
         "sys",
         "check",
@@ -270,3 +271,4 @@ def test_default_registry_completeness():
         cmd = reg.get(verb)
         assert cmd is not None, f"Verb '{verb}' missing from default registry"
         assert callable(cmd.execute)
+
