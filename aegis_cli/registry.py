@@ -64,11 +64,24 @@ class CommandRegistry:
 
         return parsers
 
-    def format_categorized_help(self, prog: str = "soma") -> str:
+    def format_categorized_help(
+        self,
+        prog: str = "aegis",
+        ctx: Optional[Any] = None,
+    ) -> str:
         """Render standard grouped help message showing commands by logical category."""
+        from aegis_cli.ui.table import Grid
+        from aegis_cli.ui.theme import OutputContext
+
+        ui = ctx if isinstance(ctx, OutputContext) else OutputContext()
         prog_title = "Aegis" if prog == "aegis" else "Soma"
-        lines = [
+        title_line = ui.style(
             f"{prog_title} Governance — make AI coding agents trustworthy",
+            "bold",
+            "cyan",
+        )
+        lines = [
+            title_line,
             "",
             f"usage: {prog} <command> [options]",
             "",
@@ -81,7 +94,6 @@ class CommandRegistry:
             CommandCategory.PLUMBING,
         ]
 
-        # Calculate padding for alignment
         max_name_len = max((len(c.name) for c in self._commands.values()), default=12)
         col_width = max(max_name_len + 2, 14)
 
@@ -90,14 +102,19 @@ class CommandRegistry:
             if not cmds:
                 continue
 
-            lines.append(f"{cat.value}:")
+            lines.append(ui.style(f"{cat.value}:", "bold"))
+            grid = Grid(ctx=ui, padding=2)
+            grid.add_column(style="green")
+            grid.add_column()
             for cmd in sorted(cmds, key=lambda c: c.name):
                 alias_str = f" (aliases: {', '.join(cmd.aliases)})" if cmd.aliases else ""
-                lines.append(f"  {cmd.name:<{col_width}} {cmd.help}{alias_str}")
+                padded_name = f"  {cmd.name:<{col_width - 2}}"
+                grid.add_row(padded_name, f"{cmd.help}{alias_str}")
+            lines.append(grid.render(ui))
             lines.append("")
 
         lines.extend([
-            "Common Options:",
+            ui.style("Common Options:", "bold"),
             "  --workspace PATH   Target workspace directory (default: current directory)",
             "  --json             Output results as machine-readable JSON",
             "  --plain            Disable emoji and rich styling",
@@ -114,16 +131,19 @@ _DEFAULT_REGISTRY: Optional[CommandRegistry] = None
 
 
 def create_default_registry() -> CommandRegistry:
-    """Create and populate a CommandRegistry with the 5 canonical verbs + plumbing."""
+    """Create and populate a CommandRegistry with canonical verbs + plumbing."""
     reg = CommandRegistry()
 
     # Category 1: Setup & Environment
+    from aegis_cli.doctor import DoctorCommand
     from aegis_cli.init import InitCommand
+    from aegis_cli.install import InstallCommand, UninstallCommand
     from aegis_cli.migrate import MigrateCommand
     from aegis_cli.system import SystemCommand
 
     # Category 2: Daily Workflow & Verification
     from aegis_cli.check import CheckCommand
+    from aegis_cli.report import ReportCommand
     from aegis_cli.status import StatusCommand
 
     # Category 3: Rule Evolution & Intelligence
@@ -136,10 +156,14 @@ def create_default_registry() -> CommandRegistry:
 
     for cmd_cls in (
         InitCommand,
+        InstallCommand,
+        UninstallCommand,
         MigrateCommand,
+        DoctorCommand,
         SystemCommand,
         CheckCommand,
         StatusCommand,
+        ReportCommand,
         RuleCommand,
         AgentCommand,
         CompletionCommand,

@@ -249,13 +249,17 @@ def test_category_4_plumbing_commands():
 def test_default_registry_completeness():
     reg = get_default_registry()
     commands = reg.list_commands()
-    assert len(commands) == 9
+    assert len(commands) >= 13
 
     expected_verbs = {
         "init",
         "migrate",
         "system",
         "sys",
+        "doctor",
+        "report",
+        "install",
+        "uninstall",
         "check",
         "verify",
         "checkpoint",
@@ -271,4 +275,20 @@ def test_default_registry_completeness():
         cmd = reg.get(verb)
         assert cmd is not None, f"Verb '{verb}' missing from default registry"
         assert callable(cmd.execute)
+
+
+def test_aegis_command_and_parser_attach_output_context():
+    from aegis_cli.cli import _build_parser
+    from aegis_cli.ui.theme import OutputContext
+
+    parser = _build_parser(prog="aegis")
+    args = parser.parse_args(["status", "--plain"])
+    assert isinstance(getattr(args, "ui", None), OutputContext)
+    assert args.ui.plain is True
+    assert args.ui.color_enabled is False
+
+    cmd = DummyInitCommand()
+    ui = cmd.get_ui(args)
+    assert isinstance(ui, OutputContext)
+    assert ui.plain is True
 

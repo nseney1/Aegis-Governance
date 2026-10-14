@@ -30,6 +30,14 @@ class AegisCommand(ABC):
         """Return the primary command name and all registered aliases."""
         return (self.name, *self.aliases)
 
+    def get_ui(self, args: Optional[argparse.Namespace] = None) -> "OutputContext":
+        """Resolve or create the OutputContext for this command invocation."""
+        from aegis_cli.ui.theme import OutputContext
+        existing = getattr(args, "ui", None) if args is not None else None
+        if isinstance(existing, OutputContext):
+            return existing
+        return OutputContext.from_env_and_args(args)
+
     @abstractmethod
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         """Register command-specific flags and arguments onto its subparser."""

@@ -66,6 +66,8 @@ class AegisParser(argparse.ArgumentParser):
             ns.format = None
         if not hasattr(ns, "workspace"):
             ns.workspace = None
+        from aegis_cli.ui.theme import OutputContext
+        ns.ui = OutputContext.from_env_and_args(ns)
         return ns
 
 
