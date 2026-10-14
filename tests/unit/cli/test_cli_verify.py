@@ -633,7 +633,7 @@ class TestVerifyLayer2Execution:
         assert "Layer 2" in captured.out
         assert "SHIP" in captured.out
 
-        evidence_file = tmp_path / ".soma" / "evidence" / "arbitration_cycle_1.json"
+        evidence_file = tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json"
         assert evidence_file.exists(), "arbitration_cycle_1.json must be persisted"
         evidence_data = json.loads(evidence_file.read_text(encoding="utf-8"))
         assert evidence_data["cycle"] == 1
@@ -718,7 +718,7 @@ class TestVerifyLayer2Execution:
         captured = capsys.readouterr()
         assert "BLOCK" in captured.out or "BLOCK" in captured.err
 
-        evidence_file = tmp_path / ".soma" / "evidence" / "arbitration_cycle_1.json"
+        evidence_file = tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json"
         assert evidence_file.exists(), "arbitration_cycle_1.json must be persisted even on BLOCK"
         evidence_data = json.loads(evidence_file.read_text(encoding="utf-8"))
         assert evidence_data["cycle"] == 1
@@ -786,7 +786,7 @@ class TestReleaseGateCheck:
     def test_release_gate_block_verdict_exits_one(self, tmp_path, capsys):
         """Release gate check fails with code 1 if latest cycle verdict is BLOCK."""
         from aegis_cli.verify import run_verify
-        ev_dir = tmp_path / ".soma" / "evidence"
+        ev_dir = tmp_path / ".aegis" / "evidence"
         ev_dir.mkdir(parents=True)
         (ev_dir / "arbitration_cycle_1.json").write_text(
             json.dumps({"cycle": 1, "verdict": "block", "divergence_count": 2}),
@@ -802,7 +802,7 @@ class TestReleaseGateCheck:
     def test_release_gate_revise_verdict_exits_one(self, tmp_path, capsys):
         """Release gate check fails with code 1 if latest cycle verdict is REVISE."""
         from aegis_cli.verify import run_verify
-        ev_dir = tmp_path / ".soma" / "evidence"
+        ev_dir = tmp_path / ".aegis" / "evidence"
         ev_dir.mkdir(parents=True)
         (ev_dir / "arbitration_cycle_1.json").write_text(
             json.dumps({"cycle": 1, "verdict": "revise", "divergence_count": 1}),
@@ -820,7 +820,7 @@ class TestReleaseGateCheck:
         from aegis_cli.verify import run_verify
         import subprocess
 
-        ev_dir = tmp_path / ".soma" / "evidence"
+        ev_dir = tmp_path / ".aegis" / "evidence"
         ev_dir.mkdir(parents=True)
         (ev_dir / "arbitration_cycle_1.json").write_text(
             json.dumps({
@@ -852,7 +852,7 @@ class TestReleaseGateCheck:
 
     def test_release_gate_fails_when_scope_uncovered(self, tmp_path, capsys, monkeypatch):
         """Release gate check fails with code 1 if git diff has uncovered python files."""
-        ev_dir = tmp_path / ".soma" / "evidence"
+        ev_dir = tmp_path / ".aegis" / "evidence"
         ev_dir.mkdir(parents=True)
         (ev_dir / "arbitration_cycle_1.json").write_text(
             json.dumps({
@@ -994,11 +994,11 @@ class TestReleaseGateCheck:
         assert files == ["core/pr_feature.py"]
 
     def test_verify_release_gate_ignores_cells_and_evidence(self, tmp_path, monkeypatch):
-        """verify_release_gate ignores modifications in .soma/cells and .soma/evidence."""
+        """verify_release_gate ignores modifications in .aegis/rules and .aegis/evidence."""
         from aegis_cli.verify import verify_release_gate
         import subprocess
 
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
         (evidence_dir / "arbitration_cycle_1.json").write_text(json.dumps({
             "verdict": "ship",
@@ -1009,8 +1009,8 @@ class TestReleaseGateCheck:
 
         def mock_run(cmd, *args, **kwargs):
             if "status" in cmd:
-                # Dirty output containing .soma/cells and .soma/evidence
-                stdout = " M .soma/cells/walls/wall-human-review-gate.md\n?? .soma/evidence/arbitration_cycle_2.json\n"
+                # Dirty output containing .aegis/rules and .aegis/evidence
+                stdout = " M .aegis/rules/walls/wall-human-review-gate.md\n?? .aegis/evidence/arbitration_cycle_2.json\n"
                 return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
             if "rev-parse" in cmd:
                 return subprocess.CompletedProcess(cmd, 0, stdout="tree_abc123\n", stderr="")
@@ -1028,7 +1028,7 @@ class TestReleaseGateCheck:
         from aegis_cli.verify import verify_release_gate
         import subprocess
 
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
         (evidence_dir / "arbitration_cycle_1.json").write_text(json.dumps({
             "verdict": "ship",
@@ -1211,8 +1211,8 @@ class TestReleaseGateCheck:
                 if cmd[1] == "rev-parse":
                     return subprocess.CompletedProcess(cmd, 0, stdout="tree_current_222\n", stderr="")
                 if cmd[1] == "diff-tree":
-                    # Only .soma/evidence file committed
-                    return subprocess.CompletedProcess(cmd, 0, stdout=".soma/evidence/arbitration_cycle_1.json\n", stderr="")
+                    # Only .aegis/evidence file committed
+                    return subprocess.CompletedProcess(cmd, 0, stdout=".aegis/evidence/arbitration_cycle_1.json\n", stderr="")
                 if cmd[1] == "diff":
                     return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/runner.py\n", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1400,12 +1400,12 @@ class TestReleaseGateCheck:
 
         status_output = (
             "??\n"
-            "?? .soma/evidence/arbitration_cycle_1.json\n"
-            "?? .soma/evidence/.cycle_counter\n"
-            "?? .soma/metrics/escaped_defects.jsonl\n"
-            "?? .soma/telemetry/signals.jsonl\n"
-            "?? .soma/cells/fitness.jsonl\n"
-            "?? .soma/human_insights.jsonl\n"
+            "?? .aegis/evidence/arbitration_cycle_1.json\n"
+            "?? .aegis/evidence/.cycle_counter\n"
+            "?? .aegis/metrics/escaped_defects.jsonl\n"
+            "?? .aegis/telemetry/signals.jsonl\n"
+            "?? .aegis/rules/fitness.jsonl\n"
+            "?? .aegis/human_insights.jsonl\n"
             "?? __pycache__/runner.cpython-312.pyc\n"
             "?? .pytest_cache/v/cache/lastfailed\n"
         )

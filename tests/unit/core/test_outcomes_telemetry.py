@@ -1,4 +1,4 @@
-"""Tests for soma_core.outcomes.telemetry — Verifiable outcome reflection and ambient verification telemetry."""
+"""Tests for aegis_core.outcomes.telemetry — Verifiable outcome reflection and ambient verification telemetry."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from soma_core.outcomes.telemetry import (
+from aegis_core.outcomes.telemetry import (
     VERIFY_TIMEOUT,
     _run_verify,
     detect_test_runner,
@@ -16,7 +16,7 @@ from soma_core.outcomes.telemetry import (
     capture_mcp_outcomes,
     record_verification_telemetry,
 )
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def test_run_verify_success_and_failure(tmp_path: Path):
@@ -111,18 +111,18 @@ def test_capture_test_outcome(tmp_path: Path, monkeypatch):
     assert capture_test_outcome(ws)["verified"] is False
 
     # Mock detect_test_runner
-    monkeypatch.setattr("soma_core.outcomes.telemetry.detect_test_runner", lambda w: ("true", "mocktest"))
+    monkeypatch.setattr("aegis_core.outcomes.telemetry.detect_test_runner", lambda w: ("true", "mocktest"))
     res_pass = capture_test_outcome(ws)
     assert res_pass["verified"] is True
     assert res_pass["passed"] is True
 
-    monkeypatch.setattr("soma_core.outcomes.telemetry.detect_test_runner", lambda w: ("false", "mocktest"))
+    monkeypatch.setattr("aegis_core.outcomes.telemetry.detect_test_runner", lambda w: ("false", "mocktest"))
     res_fail = capture_test_outcome(ws)
     assert res_fail["verified"] is True
     assert res_fail["passed"] is False
 
     # Subprocess error
-    monkeypatch.setattr("soma_core.outcomes.telemetry._run_verify", lambda c, cwd: {"passed": None, "error": "broken"})
+    monkeypatch.setattr("aegis_core.outcomes.telemetry._run_verify", lambda c, cwd: {"passed": None, "error": "broken"})
     res_err = capture_test_outcome(ws)
     assert res_err["verified"] is False
 
@@ -134,7 +134,7 @@ def test_capture_build_outcome(tmp_path: Path, monkeypatch):
 
     # Package.json present
     (tmp_path / "package.json").write_text('{"scripts": {"build": "exit 0"}}', encoding="utf-8")
-    monkeypatch.setattr("soma_core.outcomes.telemetry._run_verify", lambda c, cwd: {"passed": True, "exit_code": 0})
+    monkeypatch.setattr("aegis_core.outcomes.telemetry._run_verify", lambda c, cwd: {"passed": True, "exit_code": 0})
     res = capture_build_outcome(ws)
     assert res["verified"] is True
     assert res["passed"] is True
@@ -145,7 +145,7 @@ def test_capture_mcp_outcomes(tmp_path: Path):
     # File missing
     assert capture_mcp_outcomes(ws) == []
 
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     signals_file = evidence_dir / "signals.jsonl"
 
@@ -178,7 +178,7 @@ def test_record_verification_telemetry(tmp_path: Path):
     # Missing cells_dir
     assert record_verification_telemetry(ws, ["src/foo.py"], passed=True) is False
 
-    cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_file = cells_dir / "test-cell.md"
     fm = {
@@ -242,7 +242,7 @@ def test_detect_test_runner_other_frameworks(tmp_path: Path, monkeypatch):
 
 def test_capture_build_outcome_cargo_and_go(tmp_path: Path, monkeypatch):
     ws = str(tmp_path)
-    monkeypatch.setattr("soma_core.outcomes.telemetry._run_verify", lambda c, cwd: {"passed": True, "exit_code": 0})
+    monkeypatch.setattr("aegis_core.outcomes.telemetry._run_verify", lambda c, cwd: {"passed": True, "exit_code": 0})
     (tmp_path / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
     res = capture_build_outcome(ws)
     assert res["verified"] is True
@@ -256,7 +256,7 @@ def test_capture_build_outcome_cargo_and_go(tmp_path: Path, monkeypatch):
 
 
 def test_telemetry_edge_cases_and_error_branches(tmp_path: Path, monkeypatch):
-    from soma_core.outcomes.telemetry import (
+    from aegis_core.outcomes.telemetry import (
         _run_verify,
         detect_test_runner,
         capture_mcp_outcomes,
@@ -284,14 +284,14 @@ def test_telemetry_edge_cases_and_error_branches(tmp_path: Path, monkeypatch):
     assert cmd is None and name is None
 
     # 3. lines 166-167: capture_mcp_outcomes exception handled
-    signals_file = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     signals_file.parent.mkdir(parents=True, exist_ok=True)
     signals_file.write_text("dummy\n", encoding="utf-8")
     assert capture_mcp_outcomes(ws) == []
     monkeypatch.undo()
 
     # 4. lines 259-261: record_verification_telemetry exception handled
-    cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_file = cells_dir / "test-cell.md"
     fm = {
@@ -303,7 +303,7 @@ def test_telemetry_edge_cases_and_error_branches(tmp_path: Path, monkeypatch):
     cell_file.write_text(f"---\n{dump_frontmatter(fm)}---\n\n# Body\n", encoding="utf-8")
     def mock_append_err(*args, **kwargs):
         raise RuntimeError("db error")
-    monkeypatch.setattr("soma_core.telemetry.append_signals", mock_append_err)
+    monkeypatch.setattr("aegis_core.telemetry.append_signals", mock_append_err)
     assert record_verification_telemetry(ws, ["src/foo.py"], passed=True) is False
 
 

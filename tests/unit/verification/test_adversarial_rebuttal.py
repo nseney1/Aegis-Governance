@@ -13,7 +13,7 @@ import os
 import sys
 import pytest
 
-from soma_core.verification import (
+from aegis_core.verification import (
     ArbitrationResult,
     Claim,
     Divergence,
@@ -23,7 +23,7 @@ from soma_core.verification import (
     ToolEvidence,
     Verdict,
 )
-from soma_core.verification import immune_verify, runner, arbiter
+from aegis_core.verification import immune_verify, runner, arbiter
 
 
 class TestAdversarialRebuttalPrompt:

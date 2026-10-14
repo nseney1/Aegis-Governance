@@ -1,4 +1,4 @@
-"""Tests for worker daemon lifecycle, shutdown, and persistence (soma_core.verification_jobs)."""
+"""Tests for worker daemon lifecycle, shutdown, and persistence (aegis_core.verification.jobs)."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.verification_jobs import (
+from aegis_core.verification.jobs import (
     create_job,
     get_job,
     list_jobs,
@@ -50,8 +50,8 @@ class TestWorkerLifecycleAndPersistence:
     def test_shutdown_during_running_pipeline_preserves_failed_status(self, tmp_path: Path, monkeypatch):
         """Worker thread completing pipeline cannot overwrite status if shutdown already occurred."""
         import threading
-        from soma_core.verification_jobs import submit_verification_job
-        from soma_core.verification import runner
+        from aegis_core.verification.jobs import submit_verification_job
+        from aegis_core.verification import runner
 
         started_evt = threading.Event()
         proceed_evt = threading.Event()
@@ -84,8 +84,8 @@ class TestWorkerLifecycleAndPersistence:
 
     def test_restore_in_flight_jobs_transitions_to_failed(self, tmp_path: Path):
         """Restoring persisted jobs that were queued or running must mark them failed to prevent infinite hangs."""
-        from soma_core.verification_jobs import _JOBS, _JOBS_LOCK
-        soma_dir = tmp_path / ".soma"
+        from aegis_core.verification.jobs import _JOBS, _JOBS_LOCK
+        soma_dir = tmp_path / ".aegis"
         soma_dir.mkdir(parents=True, exist_ok=True)
         state_file = soma_dir / "jobs_state.json"
 
@@ -120,5 +120,21 @@ class TestWorkerLifecycleAndPersistence:
         assert "interrupted" in (j1.error or "")
         assert j2.status == JOB_STATUS_FAILED
         assert "interrupted" in (j2.error or "")
+
+    def test_canonical_module_cohesion_paths(self):
+        """Verify verification_jobs moved to aegis_core/verification/jobs.py and arbitration renamed to aegis_core/proposals.py."""
+        from aegis_core.verification import jobs as v_jobs
+        from aegis_core import proposals
+
+        assert hasattr(v_jobs, "submit_verification_job")
+        assert hasattr(proposals, "TTCVerifier")
+        assert hasattr(proposals, "aegis_propose_change")
+
+        repo_root = Path(__file__).resolve().parents[3]
+        assert (repo_root / "aegis_core" / "verification" / "jobs.py").is_file()
+        assert (repo_root / "aegis_core" / "proposals.py").is_file()
+        assert not (repo_root / "aegis_core" / "verification_jobs.py").exists()
+        assert not (repo_root / "aegis_core" / "arbitration.py").exists()
+
 
 

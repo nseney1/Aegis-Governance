@@ -7,7 +7,7 @@ It must fall back to ast.unparse() to extract valid function signatures.
 from pathlib import Path
 import pytest
 
-from soma_core.verification.immune_verify import extract_signatures
+from aegis_core.verification.immune_verify import extract_signatures
 
 
 def test_extract_signatures_with_complex_defaults(tmp_path: Path):

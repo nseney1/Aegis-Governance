@@ -27,7 +27,7 @@ class TestExponentialDecay:
 
     def test_decay_reduces_counts(self):
         """A single decay step should reduce all counts."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {'triggers': 100, 'true_positives': 90, 'false_positives': 10}}
         result = apply_decay(meta)
         fitness = result['fitness']
@@ -37,7 +37,7 @@ class TestExponentialDecay:
 
     def test_decay_preserves_ratio_approximately(self):
         """Decay should roughly preserve the TP/trigger ratio."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {'triggers': 100, 'true_positives': 80, 'false_positives': 20}}
         original_ratio = 80 / 100
         result = apply_decay(meta)
@@ -49,7 +49,7 @@ class TestExponentialDecay:
 
     def test_decay_recomputes_bayesian_score(self):
         """Score should be recomputed using Bayesian formula after decay."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {
             'triggers': 100, 'true_positives': 90,
             'false_positives': 10, 'score': 0.9
@@ -61,7 +61,7 @@ class TestExponentialDecay:
 
     def test_decay_zero_triggers_is_noop(self):
         """Cells with zero triggers should not be modified."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {'triggers': 0, 'true_positives': 0, 'false_positives': 0}}
         result = apply_decay(meta)
         assert result['fitness']['triggers'] == 0
@@ -69,7 +69,7 @@ class TestExponentialDecay:
 
     def test_decay_floors_to_integers(self):
         """Decayed counts must be integers (can't have fractional triggers)."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {'triggers': 7, 'true_positives': 5, 'false_positives': 2}}
         result = apply_decay(meta)
         f = result['fitness']
@@ -80,7 +80,7 @@ class TestExponentialDecay:
     def test_20_decay_steps_reduce_1000_to_manageable(self):
         """After 20 decay steps (0.95^20 ≈ 0.36), 1000 triggers should
         drop to ~360. This is the 'effective memory window' test."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {'triggers': 1000, 'true_positives': 950, 'false_positives': 50}}
         for _ in range(20):
             meta['fitness'].pop('last_decay_epoch', None)  # simulate session gap
@@ -93,7 +93,7 @@ class TestExponentialDecay:
     def test_frozen_champion_can_be_displaced(self):
         """The critical test: a cell with Beta(1001, 1) should be displaceable
         after enough decay steps, even with no new observations."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {'triggers': 1000, 'true_positives': 1000, 'false_positives': 0}}
         for _ in range(50):
             meta['fitness'].pop('last_decay_epoch', None)  # simulate session gap
@@ -106,7 +106,7 @@ class TestExponentialDecay:
     def test_decay_triggers_never_below_1(self):
         """If a cell has data, triggers should floor at 1, not hit 0
         (which would erase all evidence)."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {'triggers': 2, 'true_positives': 1, 'false_positives': 1}}
         for _ in range(100):
             meta['fitness'].pop('last_decay_epoch', None)  # simulate session gap
@@ -118,7 +118,7 @@ class TestExponentialDecay:
         """apply_decay should return modified meta, not silently mutate
         the caller's dict in a surprising way... or if it does mutate,
         the return value should be the same object."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {'triggers': 100, 'true_positives': 90, 'false_positives': 10}}
         original_triggers = meta['fitness']['triggers']
         result = apply_decay(meta)
@@ -129,7 +129,7 @@ class TestExponentialDecay:
 
     def test_decay_missing_fitness_key(self):
         """Cells without a fitness key should be handled gracefully."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {}
         result = apply_decay(meta)
         # Should not crash, should return meta unchanged
@@ -144,7 +144,7 @@ class TestDecayIdempotency:
 
     def test_consecutive_decay_is_noop(self):
         """Two apply_decay calls within 1 hour should only decay once."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {
             'triggers': 100, 'true_positives': 90, 'false_positives': 10,
             'last_decay_epoch': int(time.time())  # just decayed
@@ -156,7 +156,7 @@ class TestDecayIdempotency:
 
     def test_decay_applies_after_gap(self):
         """Decay should apply if last_decay_epoch is > 1 hour ago."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {
             'triggers': 100, 'true_positives': 90, 'false_positives': 10,
             'last_decay_epoch': int(time.time()) - 7200  # 2 hours ago
@@ -167,7 +167,7 @@ class TestDecayIdempotency:
 
     def test_decay_sets_epoch_after_application(self):
         """After decaying, last_decay_epoch should be set to current time."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         before = int(time.time())
         meta = {'fitness': {
             'triggers': 100, 'true_positives': 90, 'false_positives': 10
@@ -180,7 +180,7 @@ class TestDecayIdempotency:
 
     def test_first_decay_no_epoch_applies(self):
         """Cells without last_decay_epoch (legacy) should still get decayed."""
-        from soma_core.lifecycle import apply_decay
+        from aegis_core.lifecycle import apply_decay
         meta = {'fitness': {
             'triggers': 100, 'true_positives': 90, 'false_positives': 10
             # no last_decay_epoch

@@ -18,14 +18,14 @@ import time
 
 import pytest
 
-import soma_mcp.server as server
-from soma_core import receipts
+import aegis_mcp.server as server
+from aegis_core import receipts
 
 STALE_RECEIPT = "Invalid, expired, or mismatched receipt."
 
 
 def _make_workspace(root, cell_name):
-    cells = root / ".soma" / "cells" / "vacuoles"
+    cells = root / ".aegis" / "rules" / "vacuoles"
     cells.mkdir(parents=True)
     (cells / f"{cell_name}.md").write_text(
         "---\n"
@@ -47,8 +47,8 @@ def workspaces(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_session_token", "session-test")
     monkeypatch.setattr(server, "_canonical_workspace", os.path.realpath(str(canonical)))
     monkeypatch.setattr(server, "_execution_enabled", True)
-    monkeypatch.setenv("SOMA_WORKSPACE", str(canonical))
-    monkeypatch.delenv("SOMA_ROOT", raising=False)
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(canonical))
+    monkeypatch.delenv("AEGIS_ROOT", raising=False)
     server._tool_call_times.clear()
     receipts.clear_receipts()
     yield canonical, other
@@ -63,7 +63,7 @@ def _call(name, arguments, req_id=1):
 
 
 def _request_receipt(operation, arguments):
-    resp = _call("soma_request_receipt", {"operation": operation, "arguments": arguments})
+    resp = _call("aegis_request_receipt", {"operation": operation, "arguments": arguments})
     assert "result" in resp, resp
     return json.loads(resp["result"]["content"][0]["text"])["receipt"]
 
@@ -82,18 +82,18 @@ def test_write_tool_cannot_be_redirected_to_another_workspace(workspaces):
         "workspace": str(other),
         "idempotency_key": "canonical-workspace-test",
     }
-    receipt = _request_receipt("soma_report_outcome", args)
-    resp = _call("soma_report_outcome", dict(args, receipt=receipt))
+    receipt = _request_receipt("aegis_report_outcome", args)
+    resp = _call("aegis_report_outcome", dict(args, receipt=receipt))
     assert "result" in resp and not resp["result"]["isError"], resp
-    assert (canonical / ".soma" / "evidence" / "signals.jsonl").exists()
-    assert not (other / ".soma" / "evidence").exists(), (
+    assert (canonical / ".aegis" / "evidence" / "signals.jsonl").exists()
+    assert not (other / ".aegis" / "evidence").exists(), (
         "write tool mutated a caller-selected workspace"
     )
 
 
 def test_read_tool_ignores_client_workspace(workspaces):
     canonical, other = workspaces
-    resp = _call("soma_list_cells", {"workspace": str(other)})
+    resp = _call("aegis_list_cells", {"workspace": str(other)})
     names = {c.get("_name") for c in json.loads(_text(resp))}
     assert "cell-canonical" in names
     assert "cell-other" not in names, "read tool served a caller-selected workspace"
@@ -101,8 +101,8 @@ def test_read_tool_ignores_client_workspace(workspaces):
 
 def test_write_tool_fails_closed_without_canonical_workspace(workspaces, monkeypatch):
     monkeypatch.setattr(server, "_canonical_workspace", None)
-    resp = _call("soma_request_receipt",
-                 {"operation": "soma_report_outcome", "arguments": {"outcome": "success"}})
+    resp = _call("aegis_request_receipt",
+                 {"operation": "aegis_report_outcome", "arguments": {"outcome": "success"}})
     assert "error" in resp, resp
 
 
@@ -111,7 +111,7 @@ def test_write_tool_fails_closed_without_canonical_workspace(workspaces, monkeyp
 def test_receipt_records_nonempty_state_digests(workspaces):
     canonical, _ = workspaces
     (canonical / "target.py").write_text("x = 1\n", encoding="utf-8")
-    receipt = _request_receipt("soma_propose_change",
+    receipt = _request_receipt("aegis_propose_change",
                                {"file_path": "target.py", "proposed_content": "x = 2\n"})
     stored = receipts._receipt_store[receipt]
     assert stored["file_digest"], "receipt is not bound to the target file"
@@ -122,8 +122,8 @@ def test_receipt_redeems_when_state_is_unchanged(workspaces):
     canonical, _ = workspaces
     (canonical / "target.py").write_text("x = 1\n", encoding="utf-8")
     args = {"file_path": "target.py", "proposed_content": "x = 2\n"}
-    receipt = _request_receipt("soma_propose_change", args)
-    resp = _call("soma_propose_change", dict(args, receipt=receipt))
+    receipt = _request_receipt("aegis_propose_change", args)
+    resp = _call("aegis_propose_change", dict(args, receipt=receipt))
     assert "result" in resp, resp
 
 
@@ -132,39 +132,39 @@ def test_receipt_is_stale_after_target_file_changes(workspaces):
     target = canonical / "target.py"
     target.write_text("x = 1\n", encoding="utf-8")
     args = {"file_path": "target.py", "proposed_content": "x = 2\n"}
-    receipt = _request_receipt("soma_propose_change", args)
+    receipt = _request_receipt("aegis_propose_change", args)
     target.write_text("x = 'changed after scan'\n", encoding="utf-8")
-    resp = _call("soma_propose_change", dict(args, receipt=receipt))
+    resp = _call("aegis_propose_change", dict(args, receipt=receipt))
     assert resp.get("error", {}).get("message") == STALE_RECEIPT, resp
 
 
 def test_receipt_is_stale_after_cells_change(workspaces):
     canonical, _ = workspaces
     args = {"outcome": "success", "cells_used": []}
-    receipt = _request_receipt("soma_report_outcome", args)
-    cell = canonical / ".soma" / "cells" / "vacuoles" / "cell-canonical.md"
+    receipt = _request_receipt("aegis_report_outcome", args)
+    cell = canonical / ".aegis" / "rules" / "vacuoles" / "cell-canonical.md"
     cell.write_text(cell.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
-    resp = _call("soma_report_outcome", dict(args, receipt=receipt))
+    resp = _call("aegis_report_outcome", dict(args, receipt=receipt))
     assert resp.get("error", {}).get("message") == STALE_RECEIPT, resp
-    assert not (canonical / ".soma" / "evidence" / "outcomes.jsonl").exists()
+    assert not (canonical / ".aegis" / "evidence" / "outcomes.jsonl").exists()
 
 
 def test_receipt_flow_works_after_cell_edited_since_creation(workspaces):
     """BUG-035: a cell edited after creation made every receipt request fail
     on Windows with an internal error, so no write tool could run."""
     canonical, _ = workspaces
-    cell = canonical / ".soma" / "cells" / "vacuoles" / "cell-canonical.md"
+    cell = canonical / ".aegis" / "rules" / "vacuoles" / "cell-canonical.md"
     time.sleep(0.05)
     cell.write_text(cell.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
     args = {"outcome": "success", "cells_used": [], "idempotency_key": "bug-035"}
-    receipt = _request_receipt("soma_report_outcome", args)
-    resp = _call("soma_report_outcome", dict(args, receipt=receipt))
+    receipt = _request_receipt("aegis_report_outcome", args)
+    resp = _call("aegis_report_outcome", dict(args, receipt=receipt))
     assert "result" in resp and not resp["result"]["isError"], resp
 
 
 def test_receipt_request_rejects_paths_outside_workspace(workspaces):
-    resp = _call("soma_request_receipt", {
-        "operation": "soma_propose_change",
+    resp = _call("aegis_request_receipt", {
+        "operation": "aegis_propose_change",
         "arguments": {"file_path": "../other/escape.py", "proposed_content": ""},
     })
     assert "error" in resp, resp
@@ -176,19 +176,19 @@ def test_receipt_is_single_use(workspaces):
         "cells_used": [],
         "idempotency_key": "single-use-test",
     }
-    receipt = _request_receipt("soma_report_outcome", args)
-    first = _call("soma_report_outcome", dict(args, receipt=receipt))
+    receipt = _request_receipt("aegis_report_outcome", args)
+    first = _call("aegis_report_outcome", dict(args, receipt=receipt))
     assert "result" in first and not first["result"]["isError"], first
-    second = _call("soma_report_outcome", dict(args, receipt=receipt))
+    second = _call("aegis_report_outcome", dict(args, receipt=receipt))
     assert "error" in second, "receipt was redeemed twice"
 
 
 def test_receipt_digest_rejects_symlinked_cell(workspaces):
-    from soma_core.cell_inventory import CellInventoryError
+    from aegis_core.rule_inventory import CellInventoryError
 
     canonical, _ = workspaces
-    target = canonical / '.soma' / 'cells' / 'vacuoles' / 'cell-canonical.md'
-    link = canonical / '.soma' / 'cells' / 'vacuoles' / 'linked.md'
+    target = canonical / '.aegis' / 'rules' / 'vacuoles' / 'cell-canonical.md'
+    link = canonical / '.aegis' / 'rules' / 'vacuoles' / 'linked.md'
     try:
         link.symlink_to(target)
     except (OSError, NotImplementedError):

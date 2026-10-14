@@ -12,7 +12,7 @@ from aegis_core.evidence import aggregate_signals
 
 __all__ = ["run_status", "StatusCommand"]
 
-from aegis_sdk.cells import parse_cell_file
+from aegis_sdk.rules import parse_rule_file
 
 
 def _repo_root(args: argparse.Namespace) -> Path:
@@ -31,7 +31,7 @@ def _parse_frontmatter(filepath: str) -> dict:
     Falls back to empty dict on any error.
     """
     try:
-        fm, _body = parse_cell_file(filepath)
+        fm, _body = parse_rule_file(filepath)
         return fm
     except Exception:
         return {}
@@ -348,19 +348,42 @@ def run_status(args: argparse.Namespace) -> int:
                 if p.is_file() and p.name.lower() != "readme.md":
                     core_files.append(p)
 
-    # 2. Count adaptive rules: .md files in .aegis/rules/ or .soma/cells/ recursively (exclude README.md)
+    # 2. Count adaptive rules: .md files in .aegis/rules/ recursively (exclude README.md)
     adaptive_files: list[Path] = []
-    cells_dir = (proj / ".aegis" / "rules") if (proj / ".aegis" / "rules").is_dir() else (proj / ".soma" / "cells")
+    cells_dir = proj / ".aegis" / "rules"
     if cells_dir.is_dir():
         for p in sorted(cells_dir.rglob("*.md")):
             if p.is_file() and p.name.lower() != "readme.md":
                 adaptive_files.append(p)
 
-    # 3. Read canonical trigger counts from .aegis/evidence or .soma/evidence/signals.jsonl
-    evidence_dir = (proj / ".aegis" / "evidence") if (proj / ".aegis" / "evidence").is_dir() else (proj / ".soma" / "evidence")
+    # 3. Read canonical trigger counts from .aegis/evidence/signals.jsonl
+    evidence_dir = proj / ".aegis" / "evidence"
     trigger_counts = _read_trigger_counts(evidence_dir)
 
     # 4. Process all rules and calculate character overhead
+    _type_norm = {
+        "wall": "invariant",
+        "invariants": "invariant",
+        "membrane": "boundary",
+        "boundaries": "boundary",
+        "traps": "trap",
+        "patterns": "trap",
+        "personas": "persona",
+        "contracts": "contract",
+        "genome": "core",
+        "core_rule": "core",
+        "cells": "trap",
+        "rules": "trap",
+    }
+    _type_order = {
+        "core": 0,
+        "invariant": 1,
+        "boundary": 2,
+        "contract": 3,
+        "persona": 4,
+        "trap": 5,
+    }
+
     total_chars = 0
     all_rules: list[dict] = []
 
@@ -373,8 +396,12 @@ def run_status(args: argparse.Namespace) -> int:
         fm = _parse_frontmatter(str(f))
         rule_name = sanitize_display(str(fm.get("id") or f.stem))
         triggers = trigger_counts.get(rule_name, trigger_counts.get(f.stem, 0))
+        fitness_block = fm.get("fitness", {})
+        score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
         all_rules.append({
             "name": rule_name,
+            "type": "core",
+            "score": score,
             "triggers": triggers,
             "expiry": "∞ (core)",
             "is_core": True,
@@ -385,6 +412,8 @@ def run_status(args: argparse.Namespace) -> int:
         rule_name = sanitize_display(str(r["name"]))
         all_rules.append({
             "name": rule_name,
+            "type": "core",
+            "score": None,
             "triggers": trigger_counts.get(rule_name, 0),
             "expiry": "∞ (core)",
             "is_core": True,
@@ -398,10 +427,16 @@ def run_status(args: argparse.Namespace) -> int:
         total_chars += len(content)
         fm = _parse_frontmatter(str(f))
         rule_name = sanitize_display(str(fm.get("id") or f.stem))
+        raw_type = str(fm.get("type") or f.parent.name).lower()
+        norm_type = _type_norm.get(raw_type, raw_type)
+        fitness_block = fm.get("fitness", {})
+        score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
         triggers = trigger_counts.get(rule_name, trigger_counts.get(f.stem, 0))
         expiry_str = _format_adaptive_expiry(fm.get("created"), fm.get("expiry_days"))
         all_rules.append({
             "name": rule_name,
+            "type": norm_type,
+            "score": score,
             "triggers": triggers,
             "expiry": expiry_str,
             "is_core": False,
@@ -410,8 +445,15 @@ def run_status(args: argparse.Namespace) -> int:
     # Context load: total characters / 4
     estimated_tokens = total_chars // 4
 
-    # Sort rules: triggers descending, then core rules first, then name
-    all_rules.sort(key=lambda r: (-r["triggers"], not r["is_core"], r["name"]))
+    # Sort rules grouped by modern type, then triggers descending, fitness descending, name
+    all_rules.sort(
+        key=lambda r: (
+            _type_order.get(r["type"], 99),
+            -r["triggers"],
+            -(float(r["score"]) if isinstance(r.get("score"), (int, float)) else -1.0),
+            r["name"],
+        )
+    )
 
     if getattr(args, "format", None) == "json" or getattr(args, "json", False):
         import json
@@ -424,30 +466,58 @@ def run_status(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    # Print summary
-    print("📊 Soma Status\n")
+    import os
+    from aegis_cli.ui.table import Table
+    from aegis_cli.ui.theme import OutputContext
+
+    existing_ui = getattr(args, "ui", None)
+    ui = existing_ui if isinstance(existing_ui, OutputContext) else OutputContext.from_env_and_args(args)
+    max_budget = int(os.environ.get("AEGIS_MAX_JIT_TOKENS", "2000"))
+
+    header_title = "🛡️ Aegis Workspace Status" if ui.emoji_enabled else "Aegis Workspace Status"
+    print(f"{ui.style(header_title, 'bold', 'cyan')}\n")
     print(f"  {'Core rules:':<16}{len(core_files) + len(merged_rules)} active")
     print(f"  {'Adaptive rules:':<16}{len(adaptive_files)} (traps/patterns)")
-    print(f"  {'Context load:':<16}~{estimated_tokens:,} tokens (pre-JIT max)\n")
+    print(f"  {'Context load:':<16}~{estimated_tokens:,} tokens (pre-JIT max)")
+    print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}\n")
 
     if not all_rules:
-        print("  No rules found. Run 'soma init' to set up governance rules.")
+        print("  No rules found. Run 'aegis init' to set up governance rules.")
         return 0
 
-    # Table formatting
-    rule_width = max(25, max((len(r["name"]) + 2 for r in all_rules), default=25))
-    sep_len = max(42, rule_width + 17)
+    tbl = Table(ctx=ui)
+    tbl.add_column("Rule", no_wrap=True)
+    tbl.add_column("Triggers", no_wrap=True)
+    tbl.add_column("Type", no_wrap=True)
+    tbl.add_column("Fitness", no_wrap=True)
+    tbl.add_column("Expiry", no_wrap=True)
 
-    print(f"  {'Rule':<{rule_width}}{'Triggers':<10}Expiry")
-    print(f"  {'─' * sep_len}")
+    last_type: str | None = None
     for r in all_rules:
-        print(f"  {r['name']:<{rule_width}}{str(r['triggers']):<10}{r['expiry']}")
+        r_type = str(r.get("type", "trap"))
+        if last_type is not None and r_type != last_type:
+            tbl.add_section()
+        last_type = r_type
+
+        score_val = r.get("score")
+        score_str = ui.color_fitness(float(score_val)) if isinstance(score_val, (int, float)) else "—"
+        type_str = ui.color_rule_type(r_type)
+        tbl.add_row(
+            str(r["name"]),
+            str(r["triggers"]),
+            type_str,
+            score_str,
+            str(r["expiry"]),
+        )
+
+    for line in tbl.render(ui).splitlines():
+        print(f"  {line}")
 
     return 0
 
 
 class StatusCommand(AegisCommand):
-    """Command to show active rules, cell inventory, and health stats."""
+    """Command to show active rules, rule inventory, and health stats."""
 
     name = "status"
     aliases = ("rules",)
@@ -455,7 +525,13 @@ class StatusCommand(AegisCommand):
     help = "Show active rules and stats"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        pass
+        parser.add_argument(
+            "--all",
+            action="store_true",
+            default=False,
+            help="Show all rules without truncation",
+        )
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_status(args)
+

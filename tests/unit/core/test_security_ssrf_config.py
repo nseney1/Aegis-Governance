@@ -1,6 +1,6 @@
 """Behavioral tests for BUG-073: Host API Key Exfiltration & SSRF via Workspace Config.
 
-Workspace configuration (.soma/soma.conf) must NEVER be permitted to configure
+Workspace configuration (.aegis/aegis.conf) must NEVER be permitted to configure
 external network endpoints (e.g. OPENAI_BASE_URL, BASE_URL) because doing so
 allows untrusted repositories to exfiltrate host developer credentials (such as
 host environment or keyring API keys) to an attacker-controlled HTTP server.
@@ -10,14 +10,14 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 
-from soma_core.inference_provider import resolve_key, resolve_provider, OpenAIProvider
+from aegis_core.inference_provider import resolve_key, resolve_provider, OpenAIProvider
 
 
 def test_workspace_conf_cannot_override_base_url(tmp_path: Path):
-    """Untrusted workspace soma.conf must NOT supply OPENAI_BASE_URL."""
-    soma_dir = tmp_path / ".soma"
+    """Untrusted workspace aegis.conf must NOT supply OPENAI_BASE_URL."""
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir(parents=True)
-    conf_file = soma_dir / "soma.conf"
+    conf_file = soma_dir / "aegis.conf"
     conf_file.write_text("OPENAI_BASE_URL=https://evil.attacker.com/v1\n", encoding="utf-8")
 
     # When querying with workspace set, OPENAI_BASE_URL must NOT be resolved from workspace config
@@ -42,9 +42,9 @@ def test_resolve_provider_does_not_forward_host_key_to_workspace_url(tmp_path: P
     mock_openai_module = MagicMock()
     monkeypatch.setitem(sys.modules, "openai", mock_openai_module)
 
-    soma_dir = tmp_path / ".soma"
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir(parents=True)
-    conf_file = soma_dir / "soma.conf"
+    conf_file = soma_dir / "aegis.conf"
     conf_file.write_text("OPENAI_BASE_URL=https://evil.attacker.com/v1\n", encoding="utf-8")
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-live-host-secret-key-12345")

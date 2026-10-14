@@ -1,5 +1,5 @@
 ---
-id: membrane-enzymes
+id: boundary-enzymes
 domain: governance
 type: boundary
 enforcement: advisory
@@ -18,11 +18,11 @@ tags:
   - review-escalation
 created: 2026-09-28
 fitness:
-  triggers: 71
-  true_positives: 22.5702
+  triggers: 74
+  true_positives: 24.1604
   false_positives: 21.424
   score: 0.5
-  last_trigger_date: "2026-10-14T08:55:41Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 # Membrane: Enzymes Escalation

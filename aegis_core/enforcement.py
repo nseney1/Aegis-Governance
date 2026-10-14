@@ -297,20 +297,11 @@ def load_cells_for_enforcement(cells_dir: str | Path | Workspace) -> List[Dict[s
     from aegis_core.yaml import parse_frontmatter, _get_body
 
     if isinstance(cells_dir, Workspace):
-        aegis_rules = cells_dir.root / ".aegis" / "rules"
-        soma_cells = cells_dir.root / ".soma" / "cells"
-        if aegis_rules.is_dir():
-            c_dir = str(aegis_rules)
-        elif soma_cells.is_dir():
-            c_dir = str(soma_cells)
-        else:
-            c_dir = str(cells_dir.cells_dir)
+        c_dir = str(cells_dir.rules_dir)
     else:
         p = Path(cells_dir)
         if (p / ".aegis" / "rules").is_dir():
             c_dir = str(p / ".aegis" / "rules")
-        elif (p / ".soma" / "cells").is_dir():
-            c_dir = str(p / ".soma" / "cells")
         else:
             c_dir = str(cells_dir)
 
@@ -338,7 +329,7 @@ _load_cells = load_cells_for_enforcement
 def generate_precommit_check(cell: Dict[str, Any], workspace: str | Path | Workspace = ".") -> str:
     """Generate a pre-commit check script for a 'mechanical' cell."""
     name = cell.get("_name") or cell.get("id") or cell.get("name", "unnamed")
-    cell_type = cell.get("type", "vacuole")
+    cell_type = cell.get("type", "trap")
     hypothesis = cell.get("hypothesis", "")
     target_paths = cell.get("target_paths") or []
 
@@ -349,7 +340,7 @@ def generate_precommit_check(cell: Dict[str, Any], workspace: str | Path | Works
     quoted_hyp = shlex.quote(hypothesis[:80])
     quoted_patterns = " ".join(shlex.quote(p) for p in target_paths)
 
-    if cell_type == "wall":
+    if cell_type in ("wall", "invariant"):
         check = f"""#!/bin/bash
 # Auto-generated enforcement artifact for: {clean_name}
 # Type: {cell_type} | Tier: mechanical
@@ -391,7 +382,7 @@ fi
 
 exit 0  # No match: allow commit
 """
-    elif cell_type == "membrane":
+    elif cell_type in ("membrane", "boundary"):
         check = f"""#!/bin/bash
 # Auto-generated enforcement artifact for: {clean_name}
 # Type: {cell_type} | Tier: mechanical
@@ -470,7 +461,7 @@ exit 0  # No match: allow commit
 def generate_gate_assertion(cell: Dict[str, Any], workspace: str | Path | Workspace = ".") -> str:
     """Generate a runtime assertion for a 'gate' cell."""
     name = cell.get("_name") or cell.get("id") or cell.get("name", "unnamed")
-    cell_type = cell.get("type", "vacuole")
+    cell_type = cell.get("type", "trap")
     hypothesis = cell.get("hypothesis", "")
     target_paths = cell.get("target_paths") or []
 
@@ -538,28 +529,14 @@ def update_cell_enforcement_artifact(cell: Dict[str, Any], artifact_path: str, w
 
     ws = as_workspace(workspace)
     rel_path = os.path.relpath(artifact_path, str(ws.root))
-    if not content.startswith("---"):
+    from aegis_core.yaml import dump_frontmatter, parse_rule_frontmatter
+    try:
+        fm, body = parse_rule_frontmatter(content)
+    except Exception:
         return
-    end_idx = content.find("---", 3)
-    if end_idx == -1:
-        return
 
-    yaml_block = content[3:end_idx]
-    body = content[end_idx:]
-
-    lines = yaml_block.split("\n")
-    new_lines = []
-    inserted = False
-    for line in lines:
-        new_lines.append(line)
-        if line.strip().startswith("enforcement:") and not inserted:
-            new_lines.append(f"enforcement_artifact: {rel_path}")
-            inserted = True
-
-    if not inserted:
-        new_lines.append(f"enforcement_artifact: {rel_path}")
-
-    new_content = "---" + "\n".join(new_lines) + body
+    fm["enforcement_artifact"] = rel_path
+    new_content = dump_frontmatter(fm, body=body)
     with open(cell_path, "w", encoding="utf-8") as f:
         f.write(new_content)
 
@@ -568,7 +545,7 @@ def update_cell_enforcement_artifact(cell: Dict[str, Any], artifact_path: str, w
 # ── CI Outcome Reporter ───────────────────────────────────────────────────
 
 
-def _parse_cell_frontmatter(filepath: str) -> Dict[str, Any]:
+def _parse_rule_frontmatter(filepath: str) -> Dict[str, Any]:
     """Parse YAML frontmatter from a cell markdown file using zero-dep parser."""
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -608,17 +585,10 @@ def _match_cells(workspace: str | Path | Workspace, changed_files: List[str]) ->
 
     Returns list of dicts with keys: cell, rule, type, target_match, path.
     """
-    from aegis_core.cell_inventory import find_matching_cells
+    from aegis_core.rule_inventory import find_matching_cells
 
     ws = as_workspace(workspace)
-    aegis_rules = ws.root / ".aegis" / "rules"
-    soma_cells = ws.root / ".soma" / "cells"
-    if aegis_rules.is_dir():
-        cells_dir = str(aegis_rules)
-    elif soma_cells.is_dir():
-        cells_dir = str(soma_cells)
-    else:
-        cells_dir = str(ws.cells_dir)
+    cells_dir = str(ws.rules_dir)
     matches = find_matching_cells(cells_dir, changed_files, allow_basename_match=True)
     matched = []
     for m in matches:
@@ -648,7 +618,7 @@ def _compute_credit_weights(matched_cells: List[Dict[str, Any]], changed_files: 
         cell_name = cell["cell"]
         cell_path = cell["path"]
         try:
-            fm = _parse_cell_frontmatter(cell_path)
+            fm = _parse_rule_frontmatter(cell_path)
         except Exception:
             fm = {}
         tp = fm.get("target_paths", [])

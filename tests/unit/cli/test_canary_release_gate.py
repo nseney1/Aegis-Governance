@@ -1,7 +1,7 @@
 """Canary test verifying release gate allowlist and evidence discovery for .aegis."""
 from pathlib import Path
-from soma_cli.verify import _is_dirty
-from soma_core.verification.review_adapter import get_latest_arbitration_evidence
+from aegis_cli.verify import _is_dirty
+from aegis_core.verification.review_adapter import get_latest_arbitration_evidence
 
 
 def test_is_dirty_ignores_aegis_evidence():
@@ -15,7 +15,7 @@ def test_is_dirty_ignores_aegis_evidence():
 
 
 def test_get_latest_arbitration_evidence_dual_brand(tmp_path: Path):
-    """Verify evidence discovery looks in .aegis/evidence before .soma/evidence."""
+    """Verify evidence discovery looks in .aegis/evidence before .aegis/evidence."""
     aegis_ev = tmp_path / ".aegis" / "evidence"
     aegis_ev.mkdir(parents=True)
     ev_file = aegis_ev / "arbitration_cycle_1.json"

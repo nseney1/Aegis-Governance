@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from soma_cli.doctor import _check_mcp_launcher, probe_mcp_launcher
+from aegis_cli.doctor import _check_mcp_launcher, probe_mcp_launcher
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="sh stubs need POSIX exec")
 
@@ -26,7 +26,7 @@ def make_stub(directory, body):
 
 def test_working_python_with_soma_mcp(tmp_path):
     d = tmp_path / "bin"
-    make_stub(d, 'case "$*" in *soma_mcp*) exit 0;; esac\necho 3\n')
+    make_stub(d, 'case "$*" in *aegis_mcp*) exit 0;; esac\necho 3\n')
     status, detail = probe_mcp_launcher(str(d))
     assert status == "ok", detail
 
@@ -54,7 +54,7 @@ def test_store_stub_message_without_output(tmp_path):
 
 def test_soma_mcp_not_importable(tmp_path):
     d = tmp_path / "bin"
-    make_stub(d, 'case "$*" in *soma_mcp*) exit 1;; esac\necho 3\n')
+    make_stub(d, 'case "$*" in *aegis_mcp*) exit 1;; esac\necho 3\n')
     status, _ = probe_mcp_launcher(str(d))
     assert status == "no_soma_mcp"
 
@@ -76,11 +76,11 @@ def test_hanging_interpreter_times_out(tmp_path):
 def test_probe_uses_isolated_flags(tmp_path):
     d = tmp_path / "bin"
     log = tmp_path / "args.log"
-    make_stub(d, f'echo "$*" >> "{log}"\ncase "$*" in *soma_mcp*) exit 0;; esac\necho 3\n')
+    make_stub(d, f'echo "$*" >> "{log}"\ncase "$*" in *aegis_mcp*) exit 0;; esac\necho 3\n')
     probe_mcp_launcher(str(d))
     calls = log.read_text(encoding="utf-8").splitlines()
     assert calls[0].startswith("-I -S -c"), calls
-    assert "soma_mcp" in calls[1] and "-I" not in calls[1].split(), calls
+    assert "aegis_mcp" in calls[1] and "-I" not in calls[1].split(), calls
 
 
 def test_store_stub_report_names_the_fix(tmp_path, capsys):
@@ -94,6 +94,6 @@ def test_store_stub_report_names_the_fix(tmp_path, capsys):
 
 def test_no_soma_mcp_report_gives_pip_guidance(tmp_path, capsys):
     d = tmp_path / "bin"
-    make_stub(d, 'case "$*" in *soma_mcp*) exit 1;; esac\necho 3\n')
+    make_stub(d, 'case "$*" in *aegis_mcp*) exit 1;; esac\necho 3\n')
     _check_mcp_launcher(path_env=str(d))
     assert "pip install" in capsys.readouterr().out

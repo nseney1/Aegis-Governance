@@ -65,6 +65,7 @@ def _check_platform(project_root: Path | None = None) -> str | None:
         print(f"  ✅ Platform detected: {platform}")
         return platform
     print("  ❌ No AI platform detected")
+    print("    Fix: Run 'aegis init' to initialize workspace governance rules.")
     return None
 
 
@@ -72,6 +73,7 @@ def _check_rules(platform: str | None, project_root: Path | None = None) -> bool
     """Check that rules directory has ≥1 .md file."""
     if platform is None:
         print("  ❌ Rules check skipped (no platform)")
+        print("    Fix: Run 'aegis init' to install starter rules.")
         return False
     from aegis_cli.init import get_rules_dir
 
@@ -84,18 +86,20 @@ def _check_rules(platform: str | None, project_root: Path | None = None) -> bool
         print(f"  ✅ Rules installed ({len(md_files)} .md files in {rules_dir})")
         return True
     print(f"  ❌ No .md rules found in {rules_dir}")
+    print("    Fix: Run 'aegis init' to install starter rules.")
     return False
 
 
 def _check_evidence_dir(project_root: Path | None = None) -> bool:
-    """Check .aegis/evidence/ or .soma/evidence/ exists and is writable (read-only check)."""
+    """Check .aegis/evidence/ exists and is writable (read-only check)."""
     base = project_root or Path.cwd()
-    evidence = (base / ".aegis" / "evidence") if (base / ".aegis").is_dir() or not (base / ".soma" / "evidence").is_dir() else (base / ".soma" / "evidence")
+    evidence = base / ".aegis" / "evidence"
     if evidence.is_dir():
         if os.access(str(evidence), os.W_OK):
             print(f"  ✅ Evidence directory writable ({evidence})")
             return True
         print(f"  ❌ Evidence directory not writable ({evidence})")
+        print(f"    Fix: Verify write permissions on {evidence}.")
         return False
     # Directory doesn't exist — check if parent is writable
     parent = evidence.parent
@@ -103,16 +107,18 @@ def _check_evidence_dir(project_root: Path | None = None) -> bool:
         print(f"  ✅ Evidence directory can be created ({evidence})")
         return True
     print(f"  ❌ Evidence directory does not exist ({evidence})")
+    print("    Fix: Run 'aegis init' to create workspace directories.")
     return False
 
 
+
 def _check_cli_resolvable() -> bool:
-    """Check that 'aegis' or 'soma' CLI is on PATH."""
-    path = shutil.which("aegis") or shutil.which("soma")
+    """Check that 'aegis' CLI is on PATH."""
+    path = shutil.which("aegis")
     if path:
-        print(f"  ✅ soma CLI resolvable ({path})")
+        print(f"  ✅ aegis CLI resolvable ({path})")
         return True
-    print("  ❌ soma CLI not found on PATH")
+    print("  ❌ aegis CLI not found on PATH")
     from aegis_cli.pathcheck import build_hint
     hint = build_hint()
     if hint:
@@ -125,7 +131,7 @@ def _check_cli_resolvable() -> bool:
 # MCP configs start the server as `python3 -m aegis_mcp`. The import probe runs
 # without -I so user site-packages count, but drops the implicit CWD entry so
 # doctor never imports (executes) a aegis_mcp that happens to sit in the cwd.
-_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __import__('aegis_mcp' if __import__('importlib.util').util.find_spec('aegis_mcp') else 'soma_mcp')"
+_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __import__('aegis_mcp')"
 
 
 def probe_mcp_launcher(path_env: str | None = None,
@@ -189,21 +195,21 @@ def _check_mcp_launcher(path_env: str | None = None) -> bool:
               "      (or make sure the real python3 comes first on PATH).")
     elif status == "no_soma_mcp":
         print(f"  ⚠️  MCP launcher: {detail} runs but cannot import aegis_mcp.\n"
-              f"      Install it for that interpreter: {detail} -m pip install --user soma-governance")
+              f"      Install it for that interpreter: {detail} -m pip install --user aegis-guardrails")
     else:
         print(f"  ⚠️  MCP launcher: {detail}")
     return False
 
 
 def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> bool:
-    """Check configured AST drivers in .soma/slots.yaml and verify their binaries."""
+    """Check configured AST drivers in .aegis/slots.yaml and verify their binaries."""
     import shlex
     from aegis_core.skills.slots import SlotRegistry
     from aegis_core.ast.detect import detect_project_languages, provision_ast_driver_slots
     from aegis_core.ast.runner import resolve_driver_executable
 
     ws_root = Path(project_root or Path.cwd())
-    slots_path = (ws_root / ".aegis" / "slots.yaml") if (ws_root / ".aegis" / "slots.yaml").exists() else (ws_root / ".soma" / "slots.yaml")
+    slots_path = ws_root / ".aegis" / "slots.yaml"
 
     detected_langs = detect_project_languages(ws_root)
     non_py_langs = {k: v for k, v in detected_langs.items() if k != "python"}
@@ -213,11 +219,11 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
             if fix:
                 new_slots, created = provision_ast_driver_slots(ws_root, detected_langs, copy_drivers=True)
                 if created:
-                    print(f"  ✅ Fixed: Auto-provisioned AST drivers in .soma/slots.yaml for {', '.join(k.title() for k in sorted(non_py_langs))}")
+                    print(f"  ✅ Fixed: Auto-provisioned AST drivers in .aegis/slots.yaml for {', '.join(k.title() for k in sorted(non_py_langs))}")
             else:
                 missing_exts = sorted(set().union(*(d.get("extensions", []) for d in non_py_langs.values())))
                 ext_str = ", ".join(missing_exts) if missing_exts else ", ".join(non_py_langs.keys())
-                print(f"  ⚠️  AST drivers: unconfigured driver for detected source language(s): {ext_str}. Run 'soma doctor --fix' to provision.")
+                print(f"  ⚠️  AST drivers: unconfigured driver for detected source language(s): {ext_str}. Run 'aegis doctor --fix' to provision.")
                 return False
         if not slots_path.is_file():
             print("  ✅ AST drivers: native Python stdlib (in-process)")
@@ -247,15 +253,16 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
         if fix:
             new_slots, created = provision_ast_driver_slots(ws_root, detected_langs, copy_drivers=True)
             if created:
-                print(f"  ✅ Fixed: Auto-provisioned missing AST driver slots in .soma/slots.yaml: {', '.join(missing)}")
+                print(f"  ✅ Fixed: Auto-provisioned missing AST driver slots in .aegis/slots.yaml: {', '.join(missing)}")
                 registry = SlotRegistry.load(ws_root)
                 for slot_name, slot_val in registry.to_dict().items():
                     if slot_name.startswith("ast_driver_"):
                         ext = slot_name[len("ast_driver_"):]
                         ast_drivers[f".{ext}"] = str(slot_val)
         else:
-            print(f"  ⚠️  AST drivers: unconfigured driver for detected source extension(s): {', '.join(missing)}. Run 'soma doctor --fix' to provision.")
+            print(f"  ⚠️  AST drivers: unconfigured driver for detected source extension(s): {', '.join(missing)}. Run 'aegis doctor --fix' to provision.")
             return False
+
 
     if not ast_drivers:
         print("  ✅ AST drivers: native Python stdlib (in-process)")
@@ -478,7 +485,7 @@ def fix_path(yes: bool = False, *,
             print("Not changed.")
             return 0
 
-    manifest_path = os.path.join(home, ".soma", "manifest.json")
+    manifest_path = os.path.join(home, ".aegis", "manifest.json")
     try:
         old_manifest = None
         if os.path.exists(manifest_path):
@@ -532,42 +539,72 @@ def run_doctor(args: argparse.Namespace) -> int:
         return fix_path(yes=getattr(args, "yes", False))
     if getattr(args, "yes", False):
         print("--yes only applies to --fix-path", file=sys.stderr)
+    import contextlib
+    import io
+    from aegis_cli.ui.theme import strip_ansi
     from aegis_core.workspace import Workspace
 
     ws_obj = getattr(args, "ws", None) or Workspace.resolve(
         getattr(args, "workspace", None) or getattr(args, "_project_root", None)
     )
     ws = ws_obj.root
+    use_json = bool(getattr(args, "json", False) or getattr(args, "format", None) == "json")
 
     if getattr(args, "drivers", False):
-        print(f"soma doctor — AST driver health check ({ws}):\n")
+        if not use_json:
+            print(f"aegis doctor — AST driver health check ({ws}):\n")
         fix = getattr(args, "fix", False)
         ok = _check_ast_drivers(ws, fix=fix)
         return 0 if ok else 1
 
-    print(f"soma doctor — running health checks ({ws}):\n")
-    results: list[bool] = []
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf) if use_json else contextlib.nullcontext():
+        if not use_json:
+            print(f"aegis doctor — running health checks ({ws}):\n")
+        results: list[bool] = []
 
-    results.append(_check_python_version())
-    results.append(_check_zero_dependencies())
-    platform = _check_platform(ws)
-    results.append(platform is not None)
-    results.append(_check_rules(platform, ws))
-    results.append(_check_evidence_dir(ws))
-    results.append(_check_cli_resolvable())
-    hook_ok = _check_precommit_hook(ws)
-    if hook_ok is not None:
-        results.append(hook_ok)
-    fix = getattr(args, "fix", False)
-    # Advisory: report configured AST drivers (polyglot drivers are optional)
-    _check_ast_drivers(ws, fix=fix)
-    # Advisory: only MCP users need it, so it does not fail the run.
-    _check_mcp_launcher()
+        results.append(_check_python_version())
+        results.append(_check_zero_dependencies())
+        platform = _check_platform(ws)
+        results.append(platform is not None)
+        results.append(_check_rules(platform, ws))
+        results.append(_check_evidence_dir(ws))
+        results.append(_check_cli_resolvable())
+        hook_ok = _check_precommit_hook(ws)
+        if hook_ok is not None:
+            results.append(hook_ok)
+        fix = getattr(args, "fix", False)
+        # Advisory: report configured AST drivers (polyglot drivers are optional)
+        ast_ok = _check_ast_drivers(ws, fix=fix)
+        # Advisory: only MCP users need it, so it does not fail the run.
+        mcp_ok = _check_mcp_launcher()
 
     passed = sum(results)
     total = len(results)
-    print(f"\n{passed}/{total} checks passed.")
+    failed = total - passed
+    warnings = (0 if ast_ok else 1) + (0 if mcp_ok else 1)
+
+    if use_json:
+        payload = {
+            "workspace": str(ws),
+            "passed": passed,
+            "warnings": warnings,
+            "failed": failed,
+            "total": total,
+            "ok": failed == 0,
+            "details": [
+                strip_ansi(line.strip())
+                for line in buf.getvalue().splitlines()
+                if line.strip()
+            ],
+        }
+        print(json.dumps(payload, indent=2))
+        return 0 if all(results) else 1
+
+    warn_label = "warning" if warnings == 1 else "warnings"
+    print(f"\n{passed}/{total} checks passed ({passed} passed, {warnings} {warn_label}, {failed} failed).")
     return 0 if all(results) else 1
+
 
 
 class DoctorCommand(AegisCommand):

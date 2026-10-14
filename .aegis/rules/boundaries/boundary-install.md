@@ -1,5 +1,5 @@
 ---
-id: membrane-install
+id: boundary-install
 domain: governance
 type: boundary
 enforcement: advisory

@@ -95,9 +95,9 @@ def run_detect(args: argparse.Namespace) -> int:
         if dry_run:
             print("\n  [dry-run] AST driver slots and recipes simulated without writing to disk.")
         elif created_files:
-            print(f"\n  ✅ Provisioned {len(created_files)} file(s) in .soma/drivers/ and updated .soma/slots.yaml")
+            print(f"\n  ✅ Provisioned {len(created_files)} file(s) in .aegis/drivers/ and updated .aegis/slots.yaml")
         else:
-            print("\n  ✅ AST driver slots are up-to-date in .soma/slots.yaml")
+            print("\n  ✅ AST driver slots are up-to-date in .aegis/slots.yaml")
     else:
         unconfigured = [
             lang for lang, info in detected.items()
@@ -126,7 +126,7 @@ class DetectCommand(AegisCommand):
             "--provision",
             action="store_true",
             dest="fix",
-            help="Automatically provision .soma/slots.yaml and stage driver recipes",
+            help="Automatically provision .aegis/slots.yaml and stage driver recipes",
         )
         parser.add_argument(
             "--dry-run",

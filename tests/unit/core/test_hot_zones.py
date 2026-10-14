@@ -1,5 +1,5 @@
 from pathlib import Path
-"""Tests for soma_sdk.hot_zones — bug registry → cell fitness boost."""
+"""Tests for aegis_sdk.hot_zones — bug registry → cell fitness boost."""
 import os
 import sys
 
@@ -9,7 +9,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.hot_zones import (
+from aegis_sdk.hot_zones import (
     BoostConfig,
     HotZoneReport,
     compute_cell_boost,
@@ -122,7 +122,7 @@ class TestComputeHotZones:
 
 
 class TestComputeCellBoost:
-    """Cell boost calculation."""
+    """Rule boost calculation."""
 
     def test_zero_boost_below_outcome_threshold(self):
         """Cells with too few outcomes get zero boost."""
@@ -135,7 +135,7 @@ class TestComputeCellBoost:
         assert compute_cell_boost(cell, report, outcome_count=2) == 0.0
 
     def test_file_boost_with_matching_target(self):
-        """Cell targeting a hot zone file gets file boost."""
+        """Rule targeting a hot zone file gets file boost."""
         report = HotZoneReport(
             file_heat={"enzymes/engine.py": 3},
             active_file_zones=["enzymes/engine.py"],
@@ -146,7 +146,7 @@ class TestComputeCellBoost:
         assert boost > 0.0
 
     def test_no_boost_without_matching_target(self):
-        """Cell not targeting hot zone files gets no file boost."""
+        """Rule not targeting hot zone files gets no file boost."""
         report = HotZoneReport(
             file_heat={"enzymes/engine.py": 3},
             active_file_zones=["enzymes/engine.py"],
@@ -168,7 +168,7 @@ class TestComputeCellBoost:
         assert boost <= 0.5
 
     def test_pattern_boost_with_matching_tag(self):
-        """Cell with tag matching hot pattern gets pattern boost."""
+        """Rule with tag matching hot pattern gets pattern boost."""
         report = HotZoneReport(
             pattern_heat={"path_error": 4},
             active_pattern_zones=["path_error"],

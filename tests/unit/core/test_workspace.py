@@ -1,4 +1,4 @@
-"""Unit tests for soma_core.workspace (Layer 0 Core)."""
+"""Unit tests for aegis_core.workspace (Layer 0 Core)."""
 from __future__ import annotations
 
 import os
@@ -6,37 +6,38 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.workspace import (
+from aegis_core.errors import WorkspaceError
+from aegis_core.workspace import (
     Workspace,
     confine_path,
     confine_workspace,
     resolve_workspace,
     resolve_workspace_path,
-    validate_cell_names,
+    validate_rule_names,
 )
 
 
 class TestWorkspaceCore:
     def test_resolve_workspace_with_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         ws = tmp_path / "my_project"
-        cells = ws / ".soma" / "cells"
-        cells.mkdir(parents=True)
+        rules = ws / ".aegis" / "rules"
+        rules.mkdir(parents=True)
 
-        monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
+        monkeypatch.setenv("AEGIS_WORKSPACE", str(ws))
         resolved = resolve_workspace()
         assert resolved == str(ws.resolve())
 
         # Test strict_env behavior
-        monkeypatch.setenv("SOMA_WORKSPACE", str(tmp_path / "nonexistent"))
-        with pytest.raises(ValueError, match="no .soma/cells found"):
+        monkeypatch.setenv("AEGIS_WORKSPACE", str(tmp_path / "nonexistent"))
+        with pytest.raises(ValueError, match="no .aegis/rules found"):
             resolve_workspace(strict_env=True)
 
     def test_resolve_workspace_walkup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delenv("SOMA_WORKSPACE", raising=False)
-        monkeypatch.delenv("SOMA_ROOT", raising=False)
+        monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
+        monkeypatch.delenv("AEGIS_ROOT", raising=False)
 
         ws = tmp_path / "root"
-        (ws / ".soma" / "cells").mkdir(parents=True)
+        (ws / ".aegis" / "rules").mkdir(parents=True)
         sub = ws / "subdir" / "deep"
         sub.mkdir(parents=True)
 
@@ -49,21 +50,34 @@ class TestWorkspaceCore:
 
     def test_directory_helpers(self, tmp_path: Path):
         ws = Workspace(root=tmp_path / "repo")
-        assert ws.cells_dir == tmp_path / "repo" / ".soma" / "cells"
-        assert ws.metrics_dir == tmp_path / "repo" / ".soma" / "metrics"
-        assert ws.signals_file == tmp_path / "repo" / ".soma" / "evidence" / "signals.jsonl"
+        assert ws.aegis_dir == tmp_path / "repo" / ".aegis"
+        assert ws.rules_dir == tmp_path / "repo" / ".aegis" / "rules"
+        assert ws.metrics_dir == tmp_path / "repo" / ".aegis" / "metrics"
+        assert ws.signals_file == tmp_path / "repo" / ".aegis" / "evidence" / "signals.jsonl"
 
     def test_confine_workspace(self, tmp_path: Path):
         ws = tmp_path / "valid"
-        (ws / ".soma" / "cells").mkdir(parents=True)
+        (ws / ".aegis" / "rules").mkdir(parents=True)
         assert confine_workspace(str(ws)) == str(ws.resolve())
 
-        with pytest.raises(ValueError, match="missing .soma/cells"):
+        with pytest.raises(ValueError, match="missing .aegis/rules"):
             confine_workspace(str(tmp_path))
+
+    def test_legacy_soma_workspace_raises_upgrade_sentinel(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
+        monkeypatch.delenv("AEGIS_ROOT", raising=False)
+        legacy_ws = tmp_path / "legacy_project"
+        (legacy_ws / ".soma" / "cells").mkdir(parents=True)
+
+        with pytest.raises(WorkspaceError, match="aegis migrate"):
+            confine_workspace(str(legacy_ws))
+
+        with pytest.raises(WorkspaceError, match="aegis migrate"):
+            resolve_workspace(start=legacy_ws)
 
     def test_confine_path(self, tmp_path: Path):
         ws = tmp_path / "sandbox"
-        (ws / ".soma" / "cells").mkdir(parents=True)
+        (ws / ".aegis" / "rules").mkdir(parents=True)
         target = ws / "sub" / "file.txt"
         target.parent.mkdir(parents=True)
         target.write_text("ok")
@@ -76,15 +90,15 @@ class TestWorkspaceCore:
         with pytest.raises(ValueError, match="path traversal blocked"):
             confine_path("../outside.txt", ws)
 
-    def test_validate_cell_names(self, tmp_path: Path):
-        ws = tmp_path / "cells_ws"
-        cells_dir = ws / ".soma" / "cells" / "walls"
-        cells_dir.mkdir(parents=True)
-        (cells_dir / "wall-alpha.md").write_text("# Wall")
-        (cells_dir / "wall-beta.md").write_text("# Wall")
+    def test_validate_rule_names(self, tmp_path: Path):
+        ws = tmp_path / "rules_ws"
+        rules_dir = ws / ".aegis" / "rules" / "invariants"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "invariant-alpha.md").write_text("# Rule")
+        (rules_dir / "invariant-beta.md").write_text("# Rule")
 
-        invalid = validate_cell_names(["wall-alpha", "wall-beta"], ws)
+        invalid = validate_rule_names(["invariant-alpha", "invariant-beta"], ws)
         assert invalid == []
 
-        invalid = validate_cell_names(["wall-alpha", "wall-gamma"], ws)
-        assert invalid == ["wall-gamma"]
+        invalid = validate_rule_names(["invariant-alpha", "invariant-gamma"], ws)
+        assert invalid == ["invariant-gamma"]

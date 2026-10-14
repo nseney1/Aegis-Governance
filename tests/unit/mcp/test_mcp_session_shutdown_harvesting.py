@@ -19,41 +19,41 @@ import pytest
 
 def test_on_session_close_invokes_outcome_engine(tmp_path: Path):
     """_on_session_close must call run_outcome_engine with the workspace."""
-    from soma_mcp.server import _on_session_close
+    from aegis_mcp.server import _on_session_close
 
     ws = tmp_path / "ws"
     ws.mkdir()
 
-    with patch("soma_core.outcomes.run_outcome_engine") as mock_engine:
+    with patch("aegis_core.outcomes.run_outcome_engine") as mock_engine:
         _on_session_close(str(ws))
         mock_engine.assert_called_once_with(str(ws))
 
 
 def test_on_session_close_survives_exceptions(tmp_path: Path):
     """_on_session_close must handle and swallow exceptions without bubbling."""
-    from soma_mcp.server import _on_session_close
+    from aegis_mcp.server import _on_session_close
 
     ws = tmp_path / "ws"
     ws.mkdir()
 
-    with patch("soma_core.outcomes.run_outcome_engine", side_effect=RuntimeError("disk full")):
+    with patch("aegis_core.outcomes.run_outcome_engine", side_effect=RuntimeError("disk full")):
         # Must not raise
         _on_session_close(str(ws))
 
 
 def test_stdio_server_triggers_shutdown_harvesting_on_eof(tmp_path: Path, monkeypatch):
     """run_stdio_server must call _on_session_close when sys.stdin reaches EOF."""
-    from soma_mcp.server import run_stdio_server
+    from aegis_mcp.server import run_stdio_server
 
     ws = tmp_path / "ws"
     ws.mkdir()
-    (ws / ".soma" / "cells").mkdir(parents=True)
-    monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
+    (ws / ".aegis" / "rules").mkdir(parents=True)
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(ws))
 
     # Empty stdin (immediate EOF)
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
 
-    with patch("soma_mcp.server._on_session_close") as mock_close:
+    with patch("aegis_mcp.server._on_session_close") as mock_close:
         rc = run_stdio_server()
         assert rc == 0
         mock_close.assert_called_once_with(str(ws.resolve()))

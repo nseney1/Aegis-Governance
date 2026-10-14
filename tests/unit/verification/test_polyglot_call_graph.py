@@ -5,13 +5,13 @@ import json
 from pathlib import Path
 import pytest
 
-from soma_core.ast.schema import (
+from aegis_core.ast.schema import (
     CallSiteNode,
     DefinitionNode,
     ImportNode,
     NormalizedAST,
 )
-from soma_core.verification import call_graph
+from aegis_core.verification import call_graph
 
 
 def test_call_graph_all_functions_called_internally():
@@ -186,10 +186,10 @@ def test_resolve_searchable_extensions_dynamic(tmp_path):
     exts = call_graph._resolve_searchable_extensions(str(tmp_path))
     assert exts == {".py"}
 
-    # 2. Configured slot in .soma/slots.yaml dynamically adds .rs
-    soma_dir = tmp_path / ".soma"
+    # 2. Configured slot in .aegis/slots.yaml dynamically adds .rs
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir()
-    (soma_dir / "slots.yaml").write_text("slots:\n  ast_driver_rs: python3 .soma/drivers/rust_ast.py\n", encoding="utf-8")
+    (soma_dir / "slots.yaml").write_text("slots:\n  ast_driver_rs: python3 .aegis/drivers/rust_ast.py\n", encoding="utf-8")
 
     exts_with_slot = call_graph._resolve_searchable_extensions(str(tmp_path))
     assert exts_with_slot == {".py", ".rs"}

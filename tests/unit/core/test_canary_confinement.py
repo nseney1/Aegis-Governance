@@ -1,8 +1,8 @@
 """Canary test verifying workspace confinement and discovery for .aegis and .soma."""
 from pathlib import Path
-from soma_core.workspace.confinement import validate_workspace_path, confine_path_internal
-from soma_core.workspace.discovery import is_soma_repo, is_aegis_repo, resolve_workspace_root
-from soma_core.workspace.base import Workspace
+from aegis_core.workspace.confinement import validate_workspace_path, confine_path_internal
+from aegis_core.workspace.discovery import is_aegis_repo, is_aegis_repo, resolve_workspace_root
+from aegis_core.workspace.base import Workspace
 
 
 def test_confinement_accepts_aegis_rules(tmp_path: Path):
@@ -23,10 +23,10 @@ def test_confinement_accepts_aegis_rules(tmp_path: Path):
 
 
 def test_confinement_accepts_soma_cells(tmp_path: Path):
-    """Verify validate_workspace_path accepts .soma/cells/ workspace."""
+    """Verify validate_workspace_path accepts .aegis/rules/ workspace."""
     ws = tmp_path / "my_project_soma"
     ws.mkdir()
-    soma_cells = ws / ".soma" / "cells" / "walls"
+    soma_cells = ws / ".aegis" / "rules" / "walls"
     soma_cells.mkdir(parents=True)
     cell_file = soma_cells / "test-cell.md"
     cell_file.write_text("---\nname: test\n---\n")
@@ -34,7 +34,7 @@ def test_confinement_accepts_soma_cells(tmp_path: Path):
     validated = validate_workspace_path(ws)
     assert validated == ws.resolve()
 
-    resolved_abs, rel = confine_path_internal(ws, ".soma/cells/walls/test-cell.md")
+    resolved_abs, rel = confine_path_internal(ws, ".aegis/rules/walls/test-cell.md")
     assert resolved_abs == str(cell_file.resolve())
 
 
@@ -53,5 +53,5 @@ def test_workspace_discovery_dual_brand(tmp_path: Path):
     (ws_aegis / "pyproject.toml").write_text('[project]\nname = "aegis-governance"\n')
     (ws_aegis / "aegis_core").mkdir()
     (ws_aegis / "aegis_cli").mkdir()
-    assert is_soma_repo(ws_aegis)
+    assert is_aegis_repo(ws_aegis)
     assert is_aegis_repo(ws_aegis)

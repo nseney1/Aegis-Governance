@@ -1,7 +1,7 @@
-"""Behavioral tests for soma_core.sweep_session."""
+"""Behavioral tests for aegis_core.sweep_session."""
 import json
 from pathlib import Path
-from soma_core.sweep_session import scan_transcript, to_session_metrics
+from aegis_core.sweep_session import scan_transcript, to_session_metrics
 
 
 def test_scan_empty_transcript(tmp_path):

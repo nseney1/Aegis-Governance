@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.workspace import GitWorkspace, Workspace, as_workspace
+from aegis_core.workspace import GitWorkspace, Workspace, as_workspace
 
 
 class TestGitWorkspaceHierarchy:

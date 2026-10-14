@@ -14,12 +14,12 @@ import os
 import sys
 
 import pytest
-from soma_core.somayaml import dump_frontmatter, parse_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_cli.sync import aggregate_evidence, sync_frontmatter, run_sync
+from aegis_cli.sync import aggregate_evidence, sync_frontmatter, run_sync
 
 
 CELL_TEMPLATE = """\
@@ -43,9 +43,9 @@ Test cell for sync tests.
 
 def _setup_workspace(tmp_path, cells, fitness_records, outcome_records=None):
     """Create a minimal .soma workspace with cells and evidence."""
-    cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True)
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True)
 
     for cell_id in cells:
@@ -133,7 +133,7 @@ class TestAggregateEvidence:
 
     def test_malformed_lines_skipped(self, tmp_path):
         """Malformed JSONL lines are skipped without crashing."""
-        evidence_dir = str(tmp_path / ".soma" / "evidence")
+        evidence_dir = str(tmp_path / ".aegis" / "evidence")
         os.makedirs(evidence_dir, exist_ok=True)
         with open(os.path.join(evidence_dir, "signals.jsonl"), "w") as f:
             f.write("not valid json\n")
@@ -164,7 +164,7 @@ class TestSyncFrontmatter:
         assert changes[0]["cell_id"] == "cell-a"
 
         # Verify file was updated
-        content = (tmp_path / ".soma" / "cells" / "vacuoles" / "cell-a.md").read_text()
+        content = (tmp_path / ".aegis" / "rules" / "vacuoles" / "cell-a.md").read_text()
         fm = parse_frontmatter(content)
         assert fm["fitness"]["triggers"] == 1
         assert fm["fitness"]["true_positives"] == 1
@@ -202,7 +202,7 @@ class TestSyncFrontmatter:
         assert len(changes) == 1  # reports the change
 
         # File should NOT be modified
-        content = (tmp_path / ".soma" / "cells" / "vacuoles" / "cell-a.md").read_text()
+        content = (tmp_path / ".aegis" / "rules" / "vacuoles" / "cell-a.md").read_text()
         fm = parse_frontmatter(content)
         assert fm["fitness"]["triggers"] == 0  # unchanged
 
@@ -240,8 +240,8 @@ class TestSyncFrontmatter:
 
     def test_sync_preserves_both_when_has_outcomes_is_false(self, tmp_path):
         """When ledger has only triggers (has_outcomes=False), tp and fp are preserved."""
-        from soma_sdk.cells import parse_cell_file
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        from aegis_sdk.rules import parse_rule_file
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
         cell_file = cells_dir / "cell-a.md"
         cell_file.write_text(
@@ -269,7 +269,7 @@ class TestSyncFrontmatter:
         assert len(changes) == 1
         assert changes[0]["triggers"] == "5 → 6"
 
-        fm, _ = parse_cell_file(str(cell_file))
+        fm, _ = parse_rule_file(str(cell_file))
         assert fm["fitness"]["triggers"] == 6
         assert fm["fitness"]["true_positives"] == 2
         assert fm["fitness"]["false_positives"] == 1
@@ -291,7 +291,7 @@ class TestRunSync:
         )
         args = argparse.Namespace(dry_run=False, json=False)
         # Monkey-patch resolve_root
-        import soma_cli.sync as sync_mod
+        import aegis_cli.sync as sync_mod
         original = sync_mod.resolve_root
         sync_mod.resolve_root = lambda a: tmp_path
         try:
@@ -306,12 +306,12 @@ class TestRunSync:
 
     def test_no_evidence(self, tmp_path, capsys):
         """No evidence prints friendly message."""
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
 
         args = argparse.Namespace(dry_run=False, json=False)
-        import soma_cli.sync as sync_mod
+        import aegis_cli.sync as sync_mod
         original = sync_mod.resolve_root
         sync_mod.resolve_root = lambda a: tmp_path
         try:
@@ -331,7 +331,7 @@ class TestRunSync:
             ],
         )
         args = argparse.Namespace(dry_run=False, json=True)
-        import soma_cli.sync as sync_mod
+        import aegis_cli.sync as sync_mod
         original = sync_mod.resolve_root
         sync_mod.resolve_root = lambda a: tmp_path
         try:
@@ -372,8 +372,8 @@ class TestBug4ScoreClobber:
     """sync.py must NOT clobber scores when no outcome data exists."""
 
     def test_score_preserved_when_no_outcomes(self, tmp_path):
-        """Cell with triggers but zero tp/fp keeps existing score."""
-        from soma_cli.sync import sync_frontmatter
+        """Rule with triggers but zero tp/fp keeps existing score."""
+        from aegis_cli.sync import sync_frontmatter
 
         cells_dir = str(tmp_path / 'cells')
         cell_path = _make_cell_file(
@@ -401,8 +401,8 @@ class TestBug4ScoreClobber:
         )
 
     def test_score_updated_when_outcomes_exist(self, tmp_path):
-        """Cell with both triggers and tp/fp gets correct score."""
-        from soma_cli.sync import sync_frontmatter
+        """Rule with both triggers and tp/fp gets correct score."""
+        from aegis_cli.sync import sync_frontmatter
 
         cells_dir = str(tmp_path / 'cells')
         cell_path = _make_cell_file(
@@ -427,8 +427,8 @@ class TestBug4ScoreClobber:
         assert fitness['score'] == 0.7  # 7/10
 
     def test_zero_triggers_score_is_none(self, tmp_path):
-        """Cell with 0 triggers → score = None."""
-        from soma_cli.sync import sync_frontmatter
+        """Rule with 0 triggers → score = None."""
+        from aegis_cli.sync import sync_frontmatter
 
         cells_dir = str(tmp_path / 'cells')
         cell_path = _make_cell_file(
@@ -452,7 +452,7 @@ class TestBug3SyncOutcomeMapping:
 
     def test_success_mapped_to_tp(self, tmp_path):
         """outcome='success' is counted as tp."""
-        from soma_cli.sync import aggregate_evidence
+        from aegis_cli.sync import aggregate_evidence
 
         evidence_dir = str(tmp_path)
         signals_file = tmp_path / 'signals.jsonl'
@@ -465,7 +465,7 @@ class TestBug3SyncOutcomeMapping:
 
     def test_failure_mapped_to_fp(self, tmp_path):
         """outcome='failure' is counted as fp."""
-        from soma_cli.sync import aggregate_evidence
+        from aegis_cli.sync import aggregate_evidence
 
         evidence_dir = str(tmp_path)
         signals_file = tmp_path / 'signals.jsonl'
@@ -478,7 +478,7 @@ class TestBug3SyncOutcomeMapping:
 
     def test_literal_tp_fp_still_work(self, tmp_path):
         """outcome='tp' and 'fp' still count correctly (backward compat)."""
-        from soma_cli.sync import aggregate_evidence
+        from aegis_cli.sync import aggregate_evidence
 
         evidence_dir = str(tmp_path)
         signals_file = tmp_path / 'signals.jsonl'
@@ -494,7 +494,7 @@ class TestBug3SyncOutcomeMapping:
 
     def test_partial_outcome_ignored(self, tmp_path):
         """outcome='partial' is neither tp nor fp."""
-        from soma_cli.sync import aggregate_evidence
+        from aegis_cli.sync import aggregate_evidence
 
         evidence_dir = str(tmp_path)
         signals_file = tmp_path / 'signals.jsonl'

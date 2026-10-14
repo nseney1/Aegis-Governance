@@ -20,7 +20,7 @@ class TestHumanInsightDetection:
 
     def test_counts_human_insight_events(self, tmp_path):
         """Transcript steps containing [HUMAN_INSIGHT] are counted."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript_path = str(tmp_path / "transcript.jsonl")
         _write_transcript(transcript_path, [
@@ -37,7 +37,7 @@ class TestHumanInsightDetection:
 
     def test_zero_insights_when_none_present(self, tmp_path):
         """Normal transcripts without HUMAN_INSIGHT have count 0."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript_path = str(tmp_path / "transcript.jsonl")
         _write_transcript(transcript_path, [
@@ -52,7 +52,7 @@ class TestHumanInsightDetection:
 
     def test_insight_in_system_message_not_counted(self, tmp_path):
         """Only USER_INPUT type steps count as human insights."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript_path = str(tmp_path / "transcript.jsonl")
         _write_transcript(transcript_path, [
@@ -65,7 +65,7 @@ class TestHumanInsightDetection:
 
     def test_partial_tag_not_counted(self, tmp_path):
         """Mentions of 'HUMAN_INSIGHT' without brackets are not counted."""
-        from soma_core.verification.transcript_verifier import extract_metrics
+        from aegis_core.verification.transcript_verifier import extract_metrics
 
         transcript_path = str(tmp_path / "transcript.jsonl")
         _write_transcript(transcript_path, [

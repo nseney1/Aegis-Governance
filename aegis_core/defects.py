@@ -3,7 +3,7 @@
 Consolidates:
 - Hot zone analysis and diagnostics (formerly aegis_sdk.hot_zones & enzymes/diagnose_hot_zones.py)
 - Escaped defect detection and prevention rate tracking (formerly enzymes/cell_escaped_defects.py)
-- Cell lifecycle expiry enforcement and pruning (formerly enzymes/cell_expiry.py)
+- Rule lifecycle expiry enforcement and pruning (formerly enzymes/cell_expiry.py)
 """
 from __future__ import annotations
 
@@ -435,7 +435,7 @@ def scan_git_for_defects(workspace: str, since: str) -> list[dict]:
 
 def generate_report(cells: list[dict], workspace: str) -> tuple[list[dict], int]:
     """Generate escaped defects report."""
-    metrics_dir = os.path.join(workspace, ".soma", "metrics")
+    metrics_dir = os.path.join(workspace, ".aegis", "metrics")
     log_path = os.path.join(metrics_dir, "escaped_defects.jsonl")
 
     cell_escapes: dict[str, int] = {}
@@ -480,7 +480,7 @@ def generate_report(cells: list[dict], workspace: str) -> tuple[list[dict], int]
 
 
 
-# ── Cell Expiry Enforcement ────────────────────────────────────────────────
+# ── Rule Expiry Enforcement ────────────────────────────────────────────────
 
 
 def audit_expiry(workspace: Workspace | Path | str, session_count: Optional[int] = None) -> list[dict]:
@@ -488,7 +488,7 @@ def audit_expiry(workspace: Workspace | Path | str, session_count: Optional[int]
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     if not cells_dir.is_dir():
         return []
 

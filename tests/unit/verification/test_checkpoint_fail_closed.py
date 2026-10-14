@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.verification import checkpoint_checks
+from aegis_core.verification import checkpoint_checks
 
 
 def _write_wall(root, content=None):
-    path = root / '.soma' / 'cells' / 'walls' / 'wall-test.md'
+    path = root / '.aegis' / 'rules' / 'walls' / 'wall-test.md'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content or (
         '---\n'
@@ -66,7 +66,7 @@ def test_hardcoded_path_read_failure_is_an_issue(tmp_path, monkeypatch):
 
 
 def test_cell_stat_failure_is_an_issue(tmp_path, monkeypatch):
-    import soma_core.cell_inventory as inventory
+    import aegis_core.rule_inventory as inventory
 
     cell = _write_wall(tmp_path)
     real_stat = inventory.os.stat
@@ -80,7 +80,7 @@ def test_cell_stat_failure_is_an_issue(tmp_path, monkeypatch):
     issues = checkpoint_checks.check_cell_conventions(tmp_path)
     assert any(
         issue['check'] == 'cell_conventions'
-        and issue.get('file') == '.soma/cells/walls/wall-test.md'
+        and issue.get('file') == '.aegis/rules/walls/wall-test.md'
         and 'stat' in issue['message'].lower()
         for issue in issues
     )
@@ -102,7 +102,7 @@ def test_malformed_cell_frontmatter_is_an_issue(tmp_path, content, expected):
 
 
 def _run_cli(root):
-    from soma_cli.checkpoint import run_checkpoint
+    from aegis_cli.checkpoint import run_checkpoint
 
     return run_checkpoint(argparse.Namespace(
         workspace=str(root), pre_commit=False, strict=True, json=False,
@@ -110,10 +110,10 @@ def _run_cli(root):
 
 
 def _run_mcp(root, monkeypatch):
-    from soma_mcp.tools import execute_tool
+    from aegis_mcp.tools import execute_tool
 
-    monkeypatch.setattr('soma_mcp.tools.confine_workspace', lambda path: str(root))
-    return execute_tool('soma_checkpoint', {'workspace': str(root)})
+    monkeypatch.setattr('aegis_mcp.tools.confine_workspace', lambda path: str(root))
+    return execute_tool('aegis_checkpoint', {'workspace': str(root)})
 
 
 @pytest.mark.parametrize('runner', ['cli', 'mcp'])
@@ -123,7 +123,7 @@ def test_checkpoint_is_recursively_read_only_on_pass_and_fail(
 ):
     content = '---\nid: [unterminated\n---\nbody\n' if malformed else None
     _write_wall(tmp_path, content)
-    evidence_dir = tmp_path / '.soma' / 'evidence'
+    evidence_dir = tmp_path / '.aegis' / 'evidence'
     evidence_dir.mkdir(parents=True, exist_ok=True)
     (evidence_dir / 'arbitration_cycle_1.json').write_text(
         '{"verdict": "ship", "cycle": 1}', encoding='utf-8'
@@ -151,10 +151,10 @@ def test_checkpoint_is_recursively_read_only_on_pass_and_fail(
 
 def test_resolve_canonical_test_candidates(tmp_path: Path):
     """Verify deterministic test candidate resolution supports mirrored, subpackage, and fallback paths."""
-    from soma_core.verification.checkpoint_checks import _resolve_canonical_test_candidates
+    from aegis_core.verification.checkpoint_checks import _resolve_canonical_test_candidates
 
     # Subpackage file
-    sub_src = tmp_path / "soma_core" / "schemas" / "cells.py"
+    sub_src = tmp_path / "aegis_core" / "schemas" / "cells.py"
     candidates = [p.as_posix() for p in _resolve_canonical_test_candidates(tmp_path, sub_src)]
 
     # Must include canonical mirrored path and subpackage grouped test
@@ -162,7 +162,7 @@ def test_resolve_canonical_test_candidates(tmp_path: Path):
     assert any("tests/test_schemas.py" in c for c in candidates)
 
     # Standard module
-    cli_src = tmp_path / "soma_cli" / "promote.py"
+    cli_src = tmp_path / "aegis_cli" / "promote.py"
     candidates_cli = [p.as_posix() for p in _resolve_canonical_test_candidates(tmp_path, cli_src)]
     assert any("tests/cli/test_promote.py" in c for c in candidates_cli)
     assert any("tests/test_cli_promote.py" in c for c in candidates_cli)

@@ -55,9 +55,9 @@ def test_resolve_metrics_dir_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_compute_token_census(tmp_path: Path) -> None:
-    (tmp_path / "soma_core").mkdir()
-    (tmp_path / "soma_cli").mkdir()
-    (tmp_path / "pyproject.toml").write_text('name = "soma-governance"\n', encoding="utf-8")
+    (tmp_path / "aegis_core").mkdir()
+    (tmp_path / "aegis_cli").mkdir()
+    (tmp_path / "pyproject.toml").write_text('name = "aegis-governance"\n', encoding="utf-8")
     genome = tmp_path / "genome"
     genome.mkdir()
     (genome / "rule1.md").write_text("---\ntrigger: always_on\n---\nRule content here with several words.", encoding="utf-8")

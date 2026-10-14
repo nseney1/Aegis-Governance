@@ -4,7 +4,7 @@ Verifies the entire lifecycle loop:
 1. Source files modified.
 2. `soma verify` executed.
 3. Layer 1 + Layer 2 executed.
-4. `.soma/evidence/arbitration_cycle_{N}.json` atomically persisted to disk with target_files, commit_sha, and tree_hash.
+4. `.aegis/evidence/arbitration_cycle_{N}.json` atomically persisted to disk with target_files, commit_sha, and tree_hash.
 5. `soma checkpoint` verifies the newly persisted receipt.
 6. `verify_release_gate` (Gate 4.5) passes cleanly.
 7. Any subsequent file mutation without re-arbitration fails closed.
@@ -18,9 +18,9 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from soma_cli.checkpoint import run_checkpoint
-from soma_cli.verify import run_verify, verify_release_gate
-from soma_core.verification import Verdict
+from aegis_cli.checkpoint import run_checkpoint
+from aegis_cli.verify import run_verify, verify_release_gate
+from aegis_core.verification import Verdict
 
 
 def _setup_git_workspace(tmp_path: Path) -> Path:
@@ -40,10 +40,10 @@ def _setup_git_workspace(tmp_path: Path) -> Path:
     # Create tests/ directory and source directory
     (tmp_path / "src").mkdir()
     (tmp_path / "tests").mkdir()
-    (tmp_path / ".soma" / "cells" / "walls").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules" / "walls").mkdir(parents=True)
 
     # Add a valid wall cell
-    wall = tmp_path / ".soma" / "cells" / "walls" / "wall-test.md"
+    wall = tmp_path / ".aegis" / "rules" / "walls" / "wall-test.md"
     wall.write_text(
         "---\nid: wall-test\ntype: wall\nenforcement: gate\ndomain: testing\n---\n# Wall\n",
         encoding="utf-8",
@@ -81,7 +81,7 @@ class TestClosedLoopArbitrationCircuit:
             def generate(self, prompt: str) -> str:
                 return json.dumps([])
 
-        from soma_cli import verify as cli_verify
+        from aegis_cli import verify as cli_verify
         monkeypatch.setattr(cli_verify, "resolve_cli_provider", lambda args, root: MockProvider())
 
         # Run soma verify with plan
@@ -101,7 +101,7 @@ class TestClosedLoopArbitrationCircuit:
         assert exit_code == 0, "run_verify must succeed with SHIP verdict"
 
         # Assert evidence file was written to disk
-        ev_dir = repo_root / ".soma" / "evidence"
+        ev_dir = repo_root / ".aegis" / "evidence"
         ev_file = ev_dir / "arbitration_cycle_1.json"
         assert ev_file.is_file(), "Arbitration evidence file must be created on disk"
 
@@ -142,7 +142,7 @@ class TestClosedLoopArbitrationCircuit:
             def generate(self, prompt: str) -> str:
                 return json.dumps([])
 
-        from soma_cli import verify as cli_verify
+        from aegis_cli import verify as cli_verify
         monkeypatch.setattr(cli_verify, "resolve_cli_provider", lambda args, root: MockProvider())
 
         args = argparse.Namespace(

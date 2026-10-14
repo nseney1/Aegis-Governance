@@ -10,13 +10,13 @@ import os
 import sys
 import json
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.cells import parse_cell_file
+from aegis_sdk.rules import parse_rule_file
 
 
 def _make_cell(workspace, cell_id, target_paths, cell_type='vacuole', fitness=None):
@@ -24,7 +24,7 @@ def _make_cell(workspace, cell_id, target_paths, cell_type='vacuole', fitness=No
     type_dir = {
         'vacuole': 'vacuoles', 'wall': 'walls', 'membrane': 'membranes',
     }.get(cell_type, 'vacuoles')
-    cells_dir = os.path.join(workspace, '.soma', 'cells', type_dir)
+    cells_dir = os.path.join(workspace, '.aegis', "rules", type_dir)
     os.makedirs(cells_dir, exist_ok=True)
     fm = {
         'id': cell_id,
@@ -46,7 +46,7 @@ class TestMatchCellsToChanges:
     """Tests for matching cells to changed files."""
 
     def test_cell_with_matching_target_is_returned(self, tmp_path):
-        from soma_core.outcomes.engine import match_cells_to_changes
+        from aegis_core.outcomes.engine import match_cells_to_changes
         ws = str(tmp_path)
         _make_cell(ws, 'cell-src', ['src/*.py'])
         result = match_cells_to_changes(ws, ['src/foo.py'])
@@ -55,7 +55,7 @@ class TestMatchCellsToChanges:
         assert any('cell-src' in cid for cid in cell_ids)
 
     def test_cell_with_non_matching_target_excluded(self, tmp_path):
-        from soma_core.outcomes.engine import match_cells_to_changes
+        from aegis_core.outcomes.engine import match_cells_to_changes
         ws = str(tmp_path)
         _make_cell(ws, 'cell-tests', ['tests/*.py'])
         result = match_cells_to_changes(ws, ['src/foo.py'])
@@ -63,14 +63,14 @@ class TestMatchCellsToChanges:
         assert not any('cell-tests' in cid for cid in cell_ids)
 
     def test_empty_changed_files_returns_empty(self, tmp_path):
-        from soma_core.outcomes.engine import match_cells_to_changes
+        from aegis_core.outcomes.engine import match_cells_to_changes
         ws = str(tmp_path)
         _make_cell(ws, 'cell-any', ['src/*.py'])
         result = match_cells_to_changes(ws, [])
         assert result == []
 
     def test_multiple_cells_only_matching_returned(self, tmp_path):
-        from soma_core.outcomes.engine import match_cells_to_changes
+        from aegis_core.outcomes.engine import match_cells_to_changes
         ws = str(tmp_path)
         _make_cell(ws, 'cell-match', ['src/*.py'])
         _make_cell(ws, 'cell-nomatch', ['docs/*.md'])
@@ -80,7 +80,7 @@ class TestMatchCellsToChanges:
         assert not any('cell-nomatch' in cid for cid in cell_ids)
 
     def test_wildcard_glob_matching(self, tmp_path):
-        from soma_core.outcomes.engine import match_cells_to_changes
+        from aegis_core.outcomes.engine import match_cells_to_changes
         ws = str(tmp_path)
         _make_cell(ws, 'cell-deep', ['src/**/*.py'])
         result = match_cells_to_changes(ws, ['src/sub/deep.py'])
@@ -91,7 +91,7 @@ class TestComputeFitnessSignals:
     """Tests for computing fitness signals from outcomes."""
 
     def test_test_passed_produces_positive_signal(self):
-        from soma_core.telemetry import compute_fitness_signals
+        from aegis_core.telemetry import compute_fitness_signals
         cells = [{'id': 'c1', '_name': 'c1', '_path': '/tmp/c1.md',
                   'target_paths': ['src/*.py']}]
         outcomes = {'test': {'verified': True, 'passed': True, 'exit_code': 0}}
@@ -100,7 +100,7 @@ class TestComputeFitnessSignals:
         assert signals[0]['signal'] >= 0  # Non-negative for passed test
 
     def test_test_failed_produces_negative_signal(self):
-        from soma_core.telemetry import compute_fitness_signals
+        from aegis_core.telemetry import compute_fitness_signals
         cells = [{'id': 'c1', '_name': 'c1', '_path': '/tmp/c1.md',
                   'target_paths': ['src/*.py']}]
         outcomes = {'test': {'verified': True, 'passed': False, 'exit_code': 1}}
@@ -109,7 +109,7 @@ class TestComputeFitnessSignals:
         assert signals[0]['signal'] <= 0  # Non-positive for failed test
 
     def test_signal_clamped_to_range(self):
-        from soma_core.telemetry import compute_fitness_signals
+        from aegis_core.telemetry import compute_fitness_signals
         cells = [{'id': 'c1', '_name': 'c1', '_path': '/tmp/c1.md',
                   'target_paths': ['src/*.py']}]
         outcomes = {
@@ -123,7 +123,7 @@ class TestComputeFitnessSignals:
             assert -2.0 <= sig['signal'] <= 2.0
 
     def test_signal_has_required_keys(self):
-        from soma_core.telemetry import compute_fitness_signals
+        from aegis_core.telemetry import compute_fitness_signals
         cells = [{'id': 'c1', '_name': 'c1', '_path': '/tmp/c1.md',
                   'target_paths': ['src/*.py']}]
         outcomes = {'test': {'verified': True, 'passed': True, 'exit_code': 0}}
@@ -134,7 +134,7 @@ class TestComputeFitnessSignals:
         assert 'signal' in sig
 
     def test_empty_cells_returns_empty_signals(self):
-        from soma_core.telemetry import compute_fitness_signals
+        from aegis_core.telemetry import compute_fitness_signals
         signals = compute_fitness_signals([], {'test': {'passed': True}})
         assert signals == []
 
@@ -143,7 +143,7 @@ class TestUpdateCellFitness:
     """Tests for updating cell fitness in frontmatter."""
 
     def test_positive_signal_increments_true_positives(self, tmp_path):
-        from soma_core.telemetry import update_cell_fitness
+        from aegis_core.telemetry import update_cell_fitness
         ws = str(tmp_path)
         path = _make_cell(ws, 'cell-pos', ['src/*.py'],
                           fitness={'triggers': 5, 'true_positives': 3,
@@ -151,12 +151,12 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-pos', '_path': path, 'signal': 1.0,
                      'reasons': ['test passed'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         from fractions import Fraction
         assert Fraction(str(fm['fitness']['true_positives'])) >= 4
 
     def test_negative_signal_increments_false_positives(self, tmp_path):
-        from soma_core.telemetry import update_cell_fitness
+        from aegis_core.telemetry import update_cell_fitness
         ws = str(tmp_path)
         path = _make_cell(ws, 'cell-neg', ['src/*.py'],
                           fitness={'triggers': 5, 'true_positives': 3,
@@ -164,12 +164,12 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-neg', '_path': path, 'signal': -1.0,
                      'reasons': ['test failed'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         from fractions import Fraction
         assert Fraction(str(fm['fitness']['false_positives'])) >= 2
 
     def test_triggers_always_incremented(self, tmp_path):
-        from soma_core.telemetry import update_cell_fitness
+        from aegis_core.telemetry import update_cell_fitness
         ws = str(tmp_path)
         path = _make_cell(ws, 'cell-trg', ['src/*.py'],
                           fitness={'triggers': 5, 'true_positives': 3,
@@ -177,11 +177,11 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-trg', '_path': path, 'signal': 0.5,
                      'reasons': ['partial'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         assert int(fm['fitness']['triggers']) >= 6
 
     def test_frontmatter_survives_roundtrip(self, tmp_path):
-        from soma_core.telemetry import update_cell_fitness
+        from aegis_core.telemetry import update_cell_fitness
         ws = str(tmp_path)
         path = _make_cell(ws, 'cell-rt', ['src/*.py'],
                           fitness={'triggers': 5, 'true_positives': 3,
@@ -189,15 +189,15 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-rt', '_path': path, 'signal': 1.0,
                      'reasons': ['test'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, body = parse_cell_file(path)
+        fm, body = parse_rule_file(path)
         assert fm['id'] == 'cell-rt'
         assert fm['type'] == 'vacuole'
         assert 'Body text' in body
 
     def test_corrupt_cell_no_crash(self, tmp_path):
-        from soma_core.telemetry import update_cell_fitness
+        from aegis_core.telemetry import update_cell_fitness
         ws = str(tmp_path)
-        cells_dir = os.path.join(ws, '.soma', 'cells', 'vacuoles')
+        cells_dir = os.path.join(ws, '.aegis', "rules", 'vacuoles')
         os.makedirs(cells_dir, exist_ok=True)
         corrupt_path = os.path.join(cells_dir, 'corrupt.md')
         with open(corrupt_path, 'w', encoding='utf-8') as f:
@@ -208,18 +208,18 @@ class TestUpdateCellFitness:
         update_cell_fitness(ws, signals)
 
     def test_missing_fitness_field_initialized(self, tmp_path):
-        from soma_core.telemetry import update_cell_fitness
+        from aegis_core.telemetry import update_cell_fitness
         ws = str(tmp_path)
         path = _make_cell(ws, 'cell-nofitness', ['src/*.py'])
         signals = [{'cell': 'cell-nofitness', '_path': path, 'signal': 1.0,
                      'reasons': ['test'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         assert 'fitness' in fm
         assert int(fm['fitness'].get('triggers', 0)) >= 1
 
     def test_fractional_credit_deterministic(self, tmp_path):
-        from soma_core.telemetry import update_cell_fitness
+        from aegis_core.telemetry import update_cell_fitness
         ws = str(tmp_path)
         path = _make_cell(ws, 'cell-frac', ['src/*.py'],
                           fitness={'triggers': 1, 'true_positives': "1/3",
@@ -231,32 +231,32 @@ class TestUpdateCellFitness:
         # Another update
         update_cell_fitness(ws, signals)
         
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         assert fm['fitness']['true_positives'] in ["1.0", "1", "1/1"] or str(fm['fitness']['true_positives']) in ["1.0", "1", "1/1"]
 
 class TestAppendFitnessLogGenerationFence:
     def test_outcome_engine_appends_are_generation_fenced(self, tmp_path):
-        from soma_core.telemetry import append_fitness_log
+        from aegis_core.telemetry import append_fitness_log
         ws = str(tmp_path)
-        os.makedirs(os.path.join(ws, ".soma"), exist_ok=True)
-        with open(os.path.join(ws, ".soma", "epoch_generation"), "w", encoding="utf-8") as f:
+        os.makedirs(os.path.join(ws, ".aegis"), exist_ok=True)
+        with open(os.path.join(ws, ".aegis", "epoch_generation"), "w", encoding="utf-8") as f:
             f.write("2\n")
         sig = [{"cell": "c", "_path": "x", "signal": 0.5, "verified": True, "reasons": []}]
         assert append_fitness_log(ws, sig, {}, expected_generation=1) is False
-        assert not os.path.exists(os.path.join(ws, ".soma", "evidence", "signals.jsonl"))
+        assert not os.path.exists(os.path.join(ws, ".aegis", "evidence", "signals.jsonl"))
         assert append_fitness_log(ws, sig, {}, expected_generation=2) is True
 
 # ── Bug 1: Outcome Engine Path ──────────────────────────────────────────
 
 class TestBug1OutcomeEnginePath:
-    """Bug 1: capture_mcp_outcomes must read from .soma/evidence/outcomes.jsonl."""
+    """Bug 1: capture_mcp_outcomes must read from .aegis/evidence/outcomes.jsonl."""
 
     def test_reads_from_evidence_dir(self, tmp_path):
-        """outcome_engine reads from .soma/evidence/outcomes.jsonl, not .soma/outcomes.jsonl."""
-        from soma_core.telemetry import capture_mcp_outcomes
+        """outcome_engine reads from .aegis/evidence/outcomes.jsonl, not .aegis/outcomes.jsonl."""
+        from aegis_core.telemetry import capture_mcp_outcomes
 
         # Write to the CORRECT path
-        evidence_dir = tmp_path / '.soma' / 'evidence'
+        evidence_dir = tmp_path / '.aegis' / 'evidence'
         evidence_dir.mkdir(parents=True)
         signals_file = evidence_dir / 'signals.jsonl'
         record = {'cell_id': 'trap-example', 'outcome': 'success',
@@ -268,18 +268,18 @@ class TestBug1OutcomeEnginePath:
         assert results[0]['cell_id'] == 'trap-example'
 
     def test_ignores_old_path(self, tmp_path):
-        """outcome_engine does NOT read from the old .soma/outcomes.jsonl path."""
-        from soma_core.telemetry import capture_mcp_outcomes
+        """outcome_engine does NOT read from the old .aegis/outcomes.jsonl path."""
+        from aegis_core.telemetry import capture_mcp_outcomes
 
         # Write to the OLD (wrong) path
-        old_dir = tmp_path / '.soma'
+        old_dir = tmp_path / '.aegis'
         old_dir.mkdir(parents=True)
         old_file = old_dir / 'outcomes.jsonl'
         old_file.write_text(json.dumps({'cell_id': 'stale'}) + '\n', encoding='utf-8')
 
         # Correct path doesn't exist
         results = capture_mcp_outcomes(str(tmp_path))
-        assert len(results) == 0, 'Should not read from old .soma/outcomes.jsonl path'
+        assert len(results) == 0, 'Should not read from old .aegis/outcomes.jsonl path'
 
 
 class TestBug2OutcomeEngineSchema:
@@ -287,7 +287,7 @@ class TestBug2OutcomeEngineSchema:
 
     def test_cell_id_schema_matches(self, tmp_path):
         """MCP records with cell_id (string) are matched to cells."""
-        from soma_core.telemetry import compute_fitness_signals
+        from aegis_core.telemetry import compute_fitness_signals
 
         triggered_cells = [{
             '_name': 'trap-example',
@@ -309,7 +309,7 @@ class TestBug2OutcomeEngineSchema:
 
     def test_cells_used_schema_still_works(self, tmp_path):
         """Legacy records with cells_used (list) still match."""
-        from soma_core.telemetry import compute_fitness_signals
+        from aegis_core.telemetry import compute_fitness_signals
 
         triggered_cells = [{
             '_name': 'trap-example',
@@ -329,10 +329,10 @@ class TestBug2OutcomeEngineSchema:
 
 
 class TestOutcomeEngineExecution:
-    """Direct tests for soma_core.outcomes.engine functions."""
+    """Direct tests for aegis_core.outcomes.engine functions."""
 
     def test_get_changed_files(self, monkeypatch, tmp_path):
-        from soma_core.outcomes.engine import _get_changed_files
+        from aegis_core.outcomes.engine import _get_changed_files
         import subprocess
 
         # 1. git diff success
@@ -360,58 +360,58 @@ class TestOutcomeEngineExecution:
         assert _get_changed_files(str(tmp_path)) == []
 
     def test_run_outcome_engine_no_cells_dir(self, tmp_path):
-        from soma_core.outcomes.engine import run_outcome_engine
+        from aegis_core.outcomes.engine import run_outcome_engine
         assert run_outcome_engine(str(tmp_path)) == 0
 
     def test_run_outcome_engine_no_matches(self, tmp_path):
-        from soma_core.outcomes.engine import run_outcome_engine
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        from aegis_core.outcomes.engine import run_outcome_engine
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
         assert run_outcome_engine(str(tmp_path)) == 0
 
     def test_run_outcome_engine_full_flow(self, monkeypatch, tmp_path):
-        from soma_core.outcomes.engine import run_outcome_engine
+        from aegis_core.outcomes.engine import run_outcome_engine
         ws = str(tmp_path)
         _make_cell(ws, "cell-active", ["src/*.py"])
 
         # Mock dependencies in run_outcome_engine
-        monkeypatch.setattr("soma_core.outcomes.engine._get_changed_files", lambda w: ["src/code.py"])
-        monkeypatch.setattr("soma_core.outcomes.telemetry.capture_test_outcome", lambda w: {"verified": True, "passed": True, "framework": "pytest"})
-        monkeypatch.setattr("soma_core.outcomes.telemetry.capture_mcp_outcomes", lambda w: [{"cell_id": "cell-active", "outcome": "success"}])
-        monkeypatch.setattr("soma_core.outcomes.insights.read_human_insight_signals", lambda w: ([{"signal_type": "blind_spot"}, {"_path": "/path/boost.md", "cell": "boost", "signal": 1.0, "verified": True, "reasons": ["boost"]}], 100))
+        monkeypatch.setattr("aegis_core.outcomes.engine._get_changed_files", lambda w: ["src/code.py"])
+        monkeypatch.setattr("aegis_core.outcomes.telemetry.capture_test_outcome", lambda w: {"verified": True, "passed": True, "framework": "pytest"})
+        monkeypatch.setattr("aegis_core.outcomes.telemetry.capture_mcp_outcomes", lambda w: [{"cell_id": "cell-active", "outcome": "success"}])
+        monkeypatch.setattr("aegis_core.outcomes.insights.read_human_insight_signals", lambda w: ([{"signal_type": "blind_spot"}, {"_path": "/path/boost.md", "cell": "boost", "signal": 1.0, "verified": True, "reasons": ["boost"]}], 100))
 
         code = run_outcome_engine(ws)
         assert code == 0
 
     def test_run_outcome_engine_append_log_failure(self, monkeypatch, tmp_path):
-        from soma_core.outcomes.engine import run_outcome_engine
+        from aegis_core.outcomes.engine import run_outcome_engine
         ws = str(tmp_path)
         _make_cell(ws, "cell-active", ["src/*.py"])
 
-        monkeypatch.setattr("soma_core.outcomes.engine._get_changed_files", lambda w: ["src/code.py"])
-        monkeypatch.setattr("soma_core.outcomes.fitness.append_fitness_log", lambda *args, **kwargs: False)
+        monkeypatch.setattr("aegis_core.outcomes.engine._get_changed_files", lambda w: ["src/code.py"])
+        monkeypatch.setattr("aegis_core.outcomes.fitness.append_fitness_log", lambda *args, **kwargs: False)
 
         code = run_outcome_engine(ws)
         assert code == 0
 
     def test_run_outcome_engine_empty_signals(self, monkeypatch, tmp_path):
-        from soma_core.outcomes.engine import run_outcome_engine
+        from aegis_core.outcomes.engine import run_outcome_engine
         ws = str(tmp_path)
         _make_cell(ws, "cell-active", ["src/*.py"])
 
-        monkeypatch.setattr("soma_core.outcomes.engine._get_changed_files", lambda w: ["src/code.py"])
-        monkeypatch.setattr("soma_core.outcomes.fitness.compute_fitness_signals", lambda *args, **kwargs: [])
+        monkeypatch.setattr("aegis_core.outcomes.engine._get_changed_files", lambda w: ["src/code.py"])
+        monkeypatch.setattr("aegis_core.outcomes.fitness.compute_fitness_signals", lambda *args, **kwargs: [])
 
         code = run_outcome_engine(ws)
         assert code == 0
 
     def test_main_entrypoint(self, monkeypatch, tmp_path):
-        from soma_core.outcomes.engine import main
+        from aegis_core.outcomes.engine import main
         import sys
         ws = str(tmp_path)
         reconfigured = []
         monkeypatch.setattr(sys.stdout, "reconfigure", lambda **kwargs: reconfigured.append(kwargs))
-        monkeypatch.setattr("soma_core.outcomes.engine.run_outcome_engine", lambda w=None: 42 if w is not None else 24)
+        monkeypatch.setattr("aegis_core.outcomes.engine.run_outcome_engine", lambda w=None: 42 if w is not None else 24)
 
         assert main(workspace=ws) == 42
         assert len(reconfigured) == 1
@@ -420,7 +420,7 @@ class TestOutcomeEngineExecution:
         assert len(reconfigured) == 2
 
     def test_run_outcome_engine_mod_branches(self, tmp_path):
-        from soma_core.outcomes.engine import run_outcome_engine
+        from aegis_core.outcomes.engine import run_outcome_engine
         import types
         ws = str(tmp_path)
         custom_mod = types.ModuleType("custom_mod")

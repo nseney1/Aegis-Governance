@@ -171,7 +171,7 @@ class TestSafetyGate:
 
 
     def test_redacts_credentials_in_logs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("SOMA_LOGS_DIR", str(tmp_path))
+        monkeypatch.setenv("AEGIS_LOGS_DIR", str(tmp_path))
         fake_akia = "AKIA" + "IOSFODNN7EXAMPLE"
         fake_ghp = "ghp_" + ("a" * 36)
         fake_sk = "sk-" + ("b" * 30)
@@ -261,7 +261,7 @@ class TestPreInvocation:
         pending = gov_dir / "pending_critical.md"
         last = gov_dir / "last_critical.md"
         pending.write_text("CRITICAL: Disjoint lane violation in test module", encoding="utf-8")
-        monkeypatch.setenv("SOMA_LOGS_DIR", str(tmp_path))
+        monkeypatch.setenv("AEGIS_LOGS_DIR", str(tmp_path))
 
         rc, res = run_pre_invocation(
             payload={"invocationNum": 1, "workspacePaths": [str(tmp_path)]},
@@ -305,7 +305,7 @@ class TestPostSessionHook:
             called.append((transcript_path, repo_root))
             return 0
 
-        monkeypatch.setattr("soma_core.sync.run_post_session_hook", fake_hook)
+        monkeypatch.setattr("aegis_core.sync.run_post_session_hook", fake_hook)
         args = Namespace(phase="post-session", workspace=str(tmp_path), transcript=str(transcript_file))
         rc = run_hook(args)
         assert rc == 0

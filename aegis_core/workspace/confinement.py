@@ -73,11 +73,13 @@ def confine_path_internal(
 def validate_workspace_path(
     untrusted_workspace: str | Path | os.PathLike[str],
 ) -> Path:
-    """Validate that an untrusted workspace path exists and contains .soma/cells/.
+    """Validate that an untrusted workspace path exists and contains .aegis/rules/.
 
     Returns the resolved Path object.
     Raises WorkspaceError / WorkspaceNotFoundError on invalid or malicious input.
     """
+    from aegis_core.workspace.discovery import check_legacy_soma_sentinel
+
     if not untrusted_workspace or not str(untrusted_workspace).strip():
         raise WorkspaceError("workspace path must not be empty")
 
@@ -85,12 +87,11 @@ def validate_workspace_path(
     if not os.path.isdir(resolved):
         raise WorkspaceNotFoundError(f"workspace does not exist or is not a directory: {resolved}")
 
+    check_legacy_soma_sentinel(resolved)
+
     aegis_rules = os.path.join(resolved, ".aegis", "rules")
-    aegis_cells = os.path.join(resolved, ".aegis", "cells")
-    soma_cells = os.path.join(resolved, ".soma", "cells")
-    soma_rules = os.path.join(resolved, ".soma", "rules")
-    if not (os.path.isdir(aegis_rules) or os.path.isdir(aegis_cells) or os.path.isdir(soma_cells) or os.path.isdir(soma_rules)):
-        raise WorkspaceError(f"not a valid Aegis workspace (not a valid Soma workspace: missing .soma/cells or .aegis/rules): {resolved}")
+    if not os.path.isdir(aegis_rules):
+        raise WorkspaceError(f"not a valid Aegis workspace (missing .aegis/rules): {resolved}")
 
     return Path(resolved)
 

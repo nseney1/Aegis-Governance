@@ -5,7 +5,7 @@ import os
 import textwrap
 import pytest
 
-from soma_core.verification import call_graph
+from aegis_core.verification import call_graph
 
 
 class TestCallGraphAST:

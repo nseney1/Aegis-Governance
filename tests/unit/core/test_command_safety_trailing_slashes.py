@@ -4,7 +4,7 @@ evaluate_rm() must normalize paths and strip trailing slashes (e.g. ./, ../, ~/,
 so that targets cannot evade dangerous directory deletion detection.
 """
 import pytest
-from soma_core.command_safety import (
+from aegis_core.command_safety import (
     CommandAnalyzer,
     REASON_RM_RF,
 )

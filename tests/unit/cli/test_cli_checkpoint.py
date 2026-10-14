@@ -60,7 +60,7 @@ def _setup_clean_workspace(root):
     )
 
     # Healthy canonical signal evidence
-    evidence = root / ".soma" / "evidence"
+    evidence = root / ".aegis" / "evidence"
     evidence.mkdir(parents=True, exist_ok=True)
     signal_records = [
         {
@@ -357,7 +357,7 @@ class TestCheckpointDeterministicQualityChecks:
         from aegis_cli.checkpoint import run_checkpoint
 
         _setup_clean_workspace(tmp_path)
-        evidence = tmp_path / ".soma" / "evidence"
+        evidence = tmp_path / ".aegis" / "evidence"
         evidence.mkdir(parents=True, exist_ok=True)
         # Canonical signals mark the cell unhealthy.
         signal_records = [
@@ -507,9 +507,9 @@ class TestCheckpointEdgeCases:
             def sync_frontmatter(*args, **kwargs):
                 SyncMock.called = True
                 
-        # Actually it's probably better to check that no files in .soma/cells were modified
+        # Actually it's probably better to check that no files in .aegis/rules were modified
         import stat
-        cells_dir = tmp_path / ".soma" / "cells"
+        cells_dir = tmp_path / ".aegis" / "rules"
         cells_dir.mkdir(parents=True, exist_ok=True)
         cell_file = cells_dir / "test-cell.md"
         cell_file.write_text("---\nfitness: 0\n---\ncontent", encoding="utf-8")
@@ -554,7 +554,7 @@ class TestRequireArbitrationFlag:
 
     def test_require_arbitration_passes_with_ship_evidence(self, tmp_path):
         _setup_clean_workspace(tmp_path)
-        ev_dir = tmp_path / ".soma" / "evidence"
+        ev_dir = tmp_path / ".aegis" / "evidence"
         (ev_dir / "arbitration_cycle_1.json").write_text(
             json.dumps({"cycle": 1, "verdict": "ship", "divergence_count": 0}),
             encoding="utf-8",
@@ -571,7 +571,7 @@ class TestRequireArbitrationFlag:
 
     def test_require_arbitration_fails_with_block_evidence(self, tmp_path):
         _setup_clean_workspace(tmp_path)
-        ev_dir = tmp_path / ".soma" / "evidence"
+        ev_dir = tmp_path / ".aegis" / "evidence"
         (ev_dir / "arbitration_cycle_1.json").write_text(
             json.dumps({"cycle": 1, "verdict": "block", "divergence_count": 2}),
             encoding="utf-8",
@@ -588,7 +588,7 @@ class TestRequireArbitrationFlag:
 
     def test_paper_wall_with_advisory_enforcement_fails_gate(self, tmp_path):
         _setup_clean_workspace(tmp_path)
-        walls_dir = tmp_path / ".soma" / "cells" / "walls"
+        walls_dir = tmp_path / ".aegis" / "rules" / "walls"
         walls_dir.mkdir(parents=True, exist_ok=True)
         bad_wall = walls_dir / "wall-bad.md"
         bad_wall.write_text(
@@ -607,7 +607,7 @@ class TestRequireArbitrationFlag:
 
     def test_paper_wall_blocks_even_in_pre_commit_warn_mode(self, tmp_path):
         _setup_clean_workspace(tmp_path)
-        walls_dir = tmp_path / ".soma" / "cells" / "walls"
+        walls_dir = tmp_path / ".aegis" / "rules" / "walls"
         walls_dir.mkdir(parents=True, exist_ok=True)
         bad_wall = walls_dir / "wall-bad.md"
         bad_wall.write_text(

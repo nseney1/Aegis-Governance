@@ -3,9 +3,9 @@ import argparse
 from pathlib import Path
 import pytest
 
-from soma_cli.init import run_init
-from soma_core.skills.slots import SlotRegistry
-from soma_core.workspace import Workspace
+from aegis_cli.init import run_init
+from aegis_core.skills.slots import SlotRegistry
+from aegis_core.workspace import Workspace
 
 
 def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):
@@ -33,8 +33,8 @@ def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):
     exit_code = run_init(args)
     assert exit_code == 0
 
-    # Verify .soma/slots.yaml was auto-provisioned
-    slots_path = tmp_path / ".soma" / "slots.yaml"
+    # Verify .aegis/slots.yaml was auto-provisioned
+    slots_path = tmp_path / ".aegis" / "slots.yaml"
     assert slots_path.is_file()
 
     registry = SlotRegistry.load(tmp_path)
@@ -42,8 +42,8 @@ def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):
     assert rs_driver is not None
     assert "rust_ast.py" in rs_driver
 
-    # Verify driver file staged in .soma/drivers/
-    driver_staged = tmp_path / ".soma" / "drivers" / "rust_ast.py"
+    # Verify driver file staged in .aegis/drivers/
+    driver_staged = tmp_path / ".aegis" / "drivers" / "rust_ast.py"
     assert driver_staged.is_file()
 
 
@@ -73,5 +73,5 @@ def test_init_provisions_polyglot_ts_go_drivers(tmp_path: Path, monkeypatch):
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".ts") is not None
     assert registry.get_ast_driver(".go") is not None
-    assert (tmp_path / ".soma" / "drivers" / "ts_ast.js").is_file()
-    assert (tmp_path / ".soma" / "drivers" / "go_ast.go").is_file()
+    assert (tmp_path / ".aegis" / "drivers" / "ts_ast.js").is_file()
+    assert (tmp_path / ".aegis" / "drivers" / "go_ast.go").is_file()

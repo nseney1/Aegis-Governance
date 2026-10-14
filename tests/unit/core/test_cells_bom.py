@@ -1,11 +1,11 @@
-"""soma_sdk.cells.parse_cell_file must tolerate a UTF-8 BOM (PowerShell 5.1)."""
-from soma_sdk.cells import parse_cell_file
+"""aegis_sdk.rules.parse_rule_file must tolerate a UTF-8 BOM (PowerShell 5.1)."""
+from aegis_sdk.rules import parse_rule_file
 
 
 def test_bom_prefixed_cell_parses(tmp_path):
     f = tmp_path / "cell.md"
     f.write_bytes(b"\xef\xbb\xbf---\nid: bom-cell\ntype: trap\n---\n# Body\n")
-    fm, body = parse_cell_file(str(f))
+    fm, body = parse_rule_file(str(f))
     assert fm["id"] == "bom-cell"
     assert "# Body" in body
 
@@ -13,14 +13,14 @@ def test_bom_prefixed_cell_parses(tmp_path):
 def test_bomless_cell_unchanged(tmp_path):
     f = tmp_path / "cell.md"
     f.write_text("---\nid: plain\n---\n# Body\n", encoding="utf-8")
-    fm, body = parse_cell_file(str(f))
+    fm, body = parse_rule_file(str(f))
     assert fm["id"] == "plain"
     assert "# Body" in body
 
 
 def test_stdlib_parse_frontmatter_nested(monkeypatch):
     import pytest
-    import soma_sdk.cells as sdk_cells
+    import aegis_sdk.rules as sdk_cells
     monkeypatch.setattr(sdk_cells, "yaml", None)
     yaml_text = "id: test\ntags:\n  - a\n  - b\nfitness:\n  tp: 1\n"
     res = sdk_cells._stdlib_parse_frontmatter(yaml_text)
@@ -31,8 +31,8 @@ def test_stdlib_parse_frontmatter_nested(monkeypatch):
 
 def test_stdlib_parse_frontmatter_invalid(monkeypatch):
     import pytest
-    import soma_sdk.cells as sdk_cells
+    import aegis_sdk.rules as sdk_cells
     monkeypatch.setattr(sdk_cells, "yaml", None)
-    with pytest.raises(sdk_cells.CellParseError):
+    with pytest.raises(sdk_cells.RuleParseError):
         sdk_cells._stdlib_parse_frontmatter("\tkey: invalid tab")
 

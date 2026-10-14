@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from typing import Type
 
-from aegis_cli.platforms.base import PlatformAdapter, PlatformInstallResult
+from aegis_cli.platforms.base import (
+    PlatformAdapter,
+    PlatformInstallResult,
+    detect_platform,
+    get_rules_dir,
+)
 from aegis_cli.platforms.claude import ClaudeAdapter
 from aegis_cli.platforms.copilot import CopilotAdapter
 from aegis_cli.platforms.gemini import GeminiAdapter
@@ -43,4 +48,7 @@ __all__ = [
     "McpAdapter",
     "get_adapter",
     "register_adapter",
+    "detect_platform",
+    "get_rules_dir",
 ]
+

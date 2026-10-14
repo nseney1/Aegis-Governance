@@ -17,17 +17,13 @@ SKIP_DIRS = {
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", "egg-info",
 }
 DIR_TO_TYPE = {
-    "vacuoles": ("vacuole", "trap"),
-    "walls": ("wall", "invariant"),
-    "chloroplasts": ("chloroplast", "persona"),
-    "membranes": ("membrane", "boundary"),
-    "plasmodesmata": ("plasmodesmata", "contract"),
-    # Engineering canonical directories
-    "traps": ("trap", "vacuole"),
+    "traps": ("trap",),
     "invariants": ("invariant", "wall"),
-    "personas": ("persona", "chloroplast"),
+    "personas": ("persona",),
     "boundaries": ("boundary", "membrane"),
-    "contracts": ("contract", "plasmodesmata"),
+    "contracts": ("contract",),
+    "walls": ("wall", "invariant"),
+    "membranes": ("membrane", "boundary"),
 }
 
 
@@ -255,8 +251,18 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_core_lifecycle.py")
     if stem == "inference_provider":
         candidates.append(test_dir / "test_keyring_integration.py")
-    if stem == "verification_jobs":
+    if stem in ("verification_jobs", "jobs"):
         candidates.append(test_dir / "test_mcp_async_verify.py")
+        candidates.append(test_dir / "test_worker_lifecycle.py")
+    if stem in ("arbitration", "proposals"):
+        candidates.append(test_dir / "test_arbitration.py")
+        candidates.append(test_dir / "test_proposals.py")
+    if stem in ("cell_inventory", "rule_inventory"):
+        candidates.append(test_dir / "test_cell_inventory.py")
+        candidates.append(test_dir / "test_rule_inventory.py")
+    if stem in ("cell_cache", "rule_cache"):
+        candidates.append(test_dir / "test_cell_cache.py")
+        candidates.append(test_dir / "test_rule_cache.py")
     if stem == "integrity":
         candidates.append(test_dir / "test_evidence_integrity.py")
     if stem == "server":
@@ -457,8 +463,6 @@ def check_assertion_density(root: Path) -> list[dict]:
 def check_cell_fitness(root: Path) -> list[dict]:
     issues = []  # type: List[dict]
     evidence_dir = root / ".aegis" / "evidence"
-    if not evidence_dir.is_dir():
-        evidence_dir = root / ".soma" / "evidence"
     aggregation = aggregate_signals(evidence_dir)
 
     for error in aggregation.errors:
@@ -482,7 +486,7 @@ def check_cell_fitness(root: Path) -> list[dict]:
                 "check": "cell_fitness",
                 "cell_id": cell_id,
                 "message": (
-                    f"Cell '{cell_id}' has unhealthy fitness: "
+                    f"Rule '{cell_id}' has unhealthy fitness: "
                     f"{fp}/{total} false positives "
                     f"({rate:.0%} FP rate)"
                 ),
@@ -492,7 +496,7 @@ def check_cell_fitness(root: Path) -> list[dict]:
 
 def check_cell_conventions(root: Path) -> list[dict]:
     issues = []  # type: List[dict]
-    from aegis_core.cell_inventory import CellInventoryError, inventory_cells
+    from aegis_core.rule_inventory import CellInventoryError, inventory_cells
 
     try:
         inventory = inventory_cells(str(root))
@@ -503,13 +507,13 @@ def check_cell_conventions(root: Path) -> list[dict]:
         ))
         return issues
 
-    from aegis_core.cell_inventory import parse_frontmatter
+    from aegis_core.rule_inventory import parse_frontmatter
 
     for entry in inventory.entries:
         if os.path.basename(entry.relative_path) == "README.md":
             continue
         parts = entry.relative_path.split("/")
-        if len(parts) < 4 or (parts[:2] != [".soma", "cells"] and parts[:2] != [".aegis", "rules"]):
+        if len(parts) < 4 or parts[:2] != [".aegis", "rules"]:
             continue
         type_dir_name = parts[2]
         allowed_types = DIR_TO_TYPE.get(type_dir_name)
@@ -571,7 +575,7 @@ def check_cell_conventions(root: Path) -> list[dict]:
             continue
 
         required = ["id", "domain", "type"]
-        if any(t in ("wall", "vacuole", "invariant", "trap") for t in allowed_types):
+        if any(t in ("wall", "invariant", "trap") for t in allowed_types):
             required.append("enforcement")
         for field in required:
             if field not in meta:
@@ -615,8 +619,6 @@ def check_cell_conventions(root: Path) -> list[dict]:
 def check_arbitration_evidence(root: Path, strict: bool = False) -> list[dict]:
     issues = []  # type: List[dict]
     evidence_dir = root / ".aegis" / "evidence"
-    if not evidence_dir.is_dir():
-        evidence_dir = root / ".soma" / "evidence"
     try:
         info = os.stat(evidence_dir, follow_symlinks=False)
     except FileNotFoundError:
@@ -743,8 +745,6 @@ def check_paper_walls(root: Path, strict: bool = False) -> list[dict]:
     walls_dir = root / ".aegis" / "rules" / "invariants"
     if not walls_dir.is_dir():
         walls_dir = root / ".aegis" / "rules" / "walls"
-    if not walls_dir.is_dir():
-        walls_dir = root / ".soma" / "cells" / "walls"
     if not walls_dir.is_dir():
         return issues
 

@@ -180,7 +180,7 @@ def resolve_task_plan(args: argparse.Namespace, repo_root: str) -> str | None:
             return None
 
     # Check conventional plan files
-    for default_name in ("docs/plan.md", ".soma/plan.md", "PLAN.md"):
+    for default_name in ("docs/plan.md", ".aegis/plan.md", "PLAN.md"):
         cand = os.path.join(repo_root, default_name)
         if os.path.isfile(cand):
             try:
@@ -216,7 +216,7 @@ def resolve_cli_provider(args: argparse.Namespace, repo_root: str):
 
     explicit_provider = getattr(args, 'provider', None)
     if not explicit_provider:
-        explicit_provider = resolve_key(repo_root, ["SOMA_INFERENCE_PROVIDER"])
+        explicit_provider = resolve_key(repo_root, ["AEGIS_INFERENCE_PROVIDER"])
 
     # If no provider is explicitly requested, check if any API key exists
     if not explicit_provider:
@@ -265,20 +265,14 @@ def _is_dirty(line: str) -> bool:
     if len(parts) < 2:
         return False
     path = parts[1].strip()
-    # Ignore soma/aegis runtime evidence, metrics, and telemetry
+    # Ignore aegis runtime evidence, metrics, and telemetry
     if (
-        path.startswith(".soma/evidence") or "/.soma/evidence" in path
-        or path.startswith(".aegis/evidence") or "/.aegis/evidence" in path
-        or path.startswith(".soma/metrics") or "/.soma/metrics" in path
+        path.startswith(".aegis/evidence") or "/.aegis/evidence" in path
         or path.startswith(".aegis/metrics") or "/.aegis/metrics" in path
-        or path.startswith(".soma/telemetry") or "/.soma/telemetry" in path
         or path.startswith(".aegis/telemetry") or "/.aegis/telemetry" in path
-        or path.startswith(".soma/cells") or "/.soma/cells" in path
         or path.startswith(".aegis/rules") or "/.aegis/rules" in path
-        or path.startswith(".soma/governance") or "/.soma/governance" in path
         or path.startswith(".aegis/governance") or "/.aegis/governance" in path
-        or path in (".soma/human_insights.jsonl", ".aegis/human_insights.jsonl")
-        or path.endswith("/.soma/human_insights.jsonl")
+        or path == ".aegis/human_insights.jsonl"
         or path.endswith("/.aegis/human_insights.jsonl")
     ):
         return False
@@ -300,7 +294,7 @@ def verify_release_gate(repo_root: str) -> tuple[bool, str]:
 
     cycle_num, data = get_latest_arbitration_evidence(repo_root)
     if not data or cycle_num == 0:
-        return False, "Release Gate 4.5 FAIL: No arbitration evidence found in .aegis/evidence/ or .soma/evidence/. Run 'soma verify' or 'aegis verify' first."
+        return False, "Release Gate 4.5 FAIL: No arbitration evidence found in .aegis/evidence/. Run 'aegis verify' first."
 
     verdict = str(data.get("verdict", "")).lower()
     if verdict != "ship":
@@ -342,7 +336,7 @@ def verify_release_gate(repo_root: str) -> tuple[bool, str]:
             return False, f"Release Gate 4.5 FAIL: git rev-parse HEAD^{{tree}} failed: {tree_res.stderr.strip()}"
         current_tree = tree_res.stdout.strip()
         if current_tree != recorded_tree:
-            # Check if differences are strictly within evidence, cells, or rules (e.g. committing the receipt)
+            # Check if differences are strictly within evidence or rules (e.g. committing the receipt)
             diff_res = subprocess.run(
                 ["git", "diff-tree", "--name-only", "-r", recorded_tree, current_tree],
                 capture_output=True, text=True, cwd=repo_root, timeout=5,
@@ -352,11 +346,8 @@ def verify_release_gate(repo_root: str) -> tuple[bool, str]:
                 non_evidence = [
                     f for f in diff_files
                     if not (
-                        f.startswith(".soma/evidence") or "/.soma/evidence" in f
-                        or f.startswith(".aegis/evidence") or "/.aegis/evidence" in f
-                        or f.startswith(".soma/cells") or "/.soma/cells" in f
+                        f.startswith(".aegis/evidence") or "/.aegis/evidence" in f
                         or f.startswith(".aegis/rules") or "/.aegis/rules" in f
-                        or f.startswith(".soma/governance") or "/.soma/governance" in f
                         or f.startswith(".aegis/governance") or "/.aegis/governance" in f
                     )
                 ]
@@ -444,9 +435,15 @@ def run_verify(args: argparse.Namespace) -> int:
         print(f"Error: repo root does not exist: {repo_root}", file=sys.stderr)
         return 1
 
+    use_json = bool(getattr(args, "json", False) or getattr(args, "format", None) == "json")
+
     # ── Release Gate 4.5 Check ────────────────────────────────────────
     if getattr(args, 'release_gate', False):
         passed, msg = verify_release_gate(repo_root)
+        if use_json:
+            import json
+            print(json.dumps({"release_gate": True, "passed": passed, "message": msg}, indent=2))
+            return 0 if passed else 1
         if passed:
             print(f"✅ {msg}")
             return 0
@@ -477,6 +474,10 @@ def run_verify(args: argparse.Namespace) -> int:
     # ── Dry Run ───────────────────────────────────────────────────────
     if getattr(args, 'dry_run', False):
         layer_mode = "Layer 1 only" if getattr(args, 'layer1_only', False) else "Layer 1 + Layer 2"
+        if use_json:
+            import json
+            print(json.dumps({"dry_run": True, "mode": layer_mode, "repo_root": repo_root, "files": target_files}, indent=2))
+            return 0
         print(f"Dry run — {layer_mode}")
         print(f"Repo root: {repo_root}")
         print(f"Files to verify ({len(target_files)}):")
@@ -486,6 +487,10 @@ def run_verify(args: argparse.Namespace) -> int:
 
     # ── Clean Repository ──────────────────────────────────────────────
     if not target_files:
+        if use_json:
+            import json
+            print(json.dumps({"passed": True, "files": [], "layer1": [], "summary": "Layer 1: 0 files changed (clean repository)"}, indent=2))
+            return 0
         print("Layer 1: 0 files changed (clean repository)")
         return 0
 
@@ -499,12 +504,13 @@ def run_verify(args: argparse.Namespace) -> int:
     )
 
     layer1_pass = runner.gate_verdict(results)
-    if not layer1_pass:
-        for r in results:
-            if not r.verdict:
-                print(f"🔴 {r.tool}: {r.target} — {r.detail}")
     summary = runner.format_summary(results)
-    print(summary)
+    if not use_json:
+        if not layer1_pass:
+            for r in results:
+                if not r.verdict:
+                    print(f"🔴 {r.tool}: {r.target} — {r.detail}")
+        print(summary)
 
     def _record_telemetry(passed: bool, verdict: Any):
         try:
@@ -522,6 +528,23 @@ def run_verify(args: argparse.Namespace) -> int:
 
     if getattr(args, 'layer1_only', False):
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
+        if use_json:
+            import json
+            payload = {
+                "passed": layer1_pass,
+                "files": target_files,
+                "layer1": [
+                    {
+                        "tool": r.tool,
+                        "target": r.target,
+                        "verdict": bool(r.verdict),
+                        "detail": r.detail,
+                    }
+                    for r in results
+                ],
+                "summary": summary,
+            }
+            print(json.dumps(payload, indent=2))
         return 0 if layer1_pass else 1
 
     # ── In-Band Verification Mode ─────────────────────────────────────
@@ -536,7 +559,7 @@ def run_verify(args: argparse.Namespace) -> int:
             rebuttal=None,
         )
         if pipeline_res.charge_sheet:
-            print("\n📋 SOMA IN-BAND CHARGE SHEET (SOMA-V01)")
+            print("\n📋 AEGIS VERIFICATION REPORT — IN-BAND CHARGE SHEET (AEGIS-V01)")
             print(f"Target files ({len(pipeline_res.charge_sheet.target_files)}): {', '.join(pipeline_res.charge_sheet.target_files)}")
             print(f"Prosecution charges ({len(pipeline_res.charge_sheet.predictions)}):")
             for idx, p in enumerate(pipeline_res.charge_sheet.predictions, 1):
@@ -548,6 +571,7 @@ def run_verify(args: argparse.Namespace) -> int:
             print("  Submit defense claims citing evidence_file, evidence_line, and tests covering the fix.")
             _record_telemetry(False, "REVISE")
             return 1
+
 
     # ── Run Layer 2 (full verification) ───────────────────────────────
     provider = resolve_cli_provider(args, repo_root)

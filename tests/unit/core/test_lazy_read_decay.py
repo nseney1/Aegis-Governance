@@ -17,11 +17,11 @@ from unittest.mock import patch
 
 import pytest
 
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def _create_cell(workspace: Path, cell_id: str, last_trigger_date: str | None = None) -> Path:
-    cells_dir = workspace / ".soma" / "cells" / "vacuoles"
+    cells_dir = workspace / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_path = cells_dir / f"{cell_id}.md"
     fm = {
@@ -59,20 +59,20 @@ def _append_signal(evidence_dir: Path, cell_id: str, sig_type: str, timestamp: s
 def workspace(tmp_path: Path) -> Path:
     ws = tmp_path / "ws"
     ws.mkdir()
-    (ws / ".soma" / "cells").mkdir(parents=True)
-    (ws / ".soma" / "evidence").mkdir(parents=True)
+    (ws / ".aegis" / "rules").mkdir(parents=True)
+    (ws / ".aegis" / "evidence").mkdir(parents=True)
     return ws
 
 
 def test_recently_active_cell_is_healthy(workspace: Path):
     """A cell active 2 days ago should be healthy."""
-    from soma_core.arbitration import generate_checkpoint
+    from aegis_core.proposals import generate_checkpoint
 
     cell_id = "fresh-cell"
     recent_ts = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     _create_cell(workspace, cell_id, last_trigger_date=recent_ts)
-    _append_signal(workspace / ".soma" / "evidence", cell_id, "trigger", recent_ts)
-    _append_signal(workspace / ".soma" / "evidence", cell_id, "tp", recent_ts)
+    _append_signal(workspace / ".aegis" / "evidence", cell_id, "trigger", recent_ts)
+    _append_signal(workspace / ".aegis" / "evidence", cell_id, "tp", recent_ts)
 
     report = generate_checkpoint(str(workspace))
     assert cell_id in [c["cell_id"] for c in report["classifications"].get("healthy", [])]
@@ -80,13 +80,13 @@ def test_recently_active_cell_is_healthy(workspace: Path):
 
 def test_inactive_cell_transitions_to_decaying(workspace: Path):
     """A cell with no activity for 45 days should dynamically decay to decaying/dormant on read."""
-    from soma_core.arbitration import generate_checkpoint
+    from aegis_core.proposals import generate_checkpoint
 
     cell_id = "stale-cell"
     old_ts = (datetime.now(timezone.utc) - timedelta(days=45)).strftime("%Y-%m-%dT%H:%M:%SZ")
     _create_cell(workspace, cell_id, last_trigger_date=old_ts)
-    _append_signal(workspace / ".soma" / "evidence", cell_id, "trigger", old_ts)
-    _append_signal(workspace / ".soma" / "evidence", cell_id, "tp", old_ts)
+    _append_signal(workspace / ".aegis" / "evidence", cell_id, "trigger", old_ts)
+    _append_signal(workspace / ".aegis" / "evidence", cell_id, "tp", old_ts)
 
     report = generate_checkpoint(str(workspace))
     # Should not be in healthy; should be in decaying or dormant
@@ -100,15 +100,15 @@ def test_inactive_cell_transitions_to_decaying(workspace: Path):
 
 def test_read_time_decay_does_not_mutate_evidence(workspace: Path):
     """Generating checkpoint must not alter signals.jsonl."""
-    from soma_core.arbitration import generate_checkpoint
+    from aegis_core.proposals import generate_checkpoint
 
     cell_id = "immutable-check-cell"
     ts = (datetime.now(timezone.utc) - timedelta(days=50)).strftime("%Y-%m-%dT%H:%M:%SZ")
     _create_cell(workspace, cell_id, last_trigger_date=ts)
-    _append_signal(workspace / ".soma" / "evidence", cell_id, "trigger", ts)
-    _append_signal(workspace / ".soma" / "evidence", cell_id, "tp", ts)
+    _append_signal(workspace / ".aegis" / "evidence", cell_id, "trigger", ts)
+    _append_signal(workspace / ".aegis" / "evidence", cell_id, "tp", ts)
 
-    sig_file = workspace / ".soma" / "evidence" / "signals.jsonl"
+    sig_file = workspace / ".aegis" / "evidence" / "signals.jsonl"
     before_content = sig_file.read_bytes()
 
     generate_checkpoint(str(workspace))

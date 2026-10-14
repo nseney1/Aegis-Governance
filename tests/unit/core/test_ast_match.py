@@ -14,8 +14,8 @@ import tempfile
 from pathlib import Path
 import pytest
 
-from soma_core.ast_match import match_ast_triggers, prefilter_ast_tokens
-from soma_mcp.jit_engine import match_cells_for_diff
+from aegis_core.ast_match import match_ast_triggers, prefilter_ast_tokens
+from aegis_mcp.jit_engine import match_cells_for_diff
 
 
 class TestASTTriggers:

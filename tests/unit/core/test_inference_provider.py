@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-from soma_core.inference_provider import (
+from aegis_core.inference_provider import (
     AnthropicProvider,
     GeminiProvider,
     InferenceProvider,
@@ -114,6 +114,6 @@ class TestInferenceProviderModels(unittest.TestCase):
 
     def test_compute_token_census_default_model(self):
         """Ensure compute_token_census default parameter is gemini-3.8-flash."""
-        from soma_core.metrics import compute_token_census
+        from aegis_core.metrics import compute_token_census
         sig = inspect.signature(compute_token_census)
         self.assertEqual(sig.parameters["model"].default, "gemini-3.8-flash")

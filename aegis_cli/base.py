@@ -4,9 +4,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import argparse
 from enum import Enum
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
-__all__ = ["CommandCategory", "AegisCommand", "SomaCommand"]
+if TYPE_CHECKING:
+    from aegis_cli.ui.theme import OutputContext
+
+__all__ = ["CommandCategory", "AegisCommand"]
 
 
 class CommandCategory(str, Enum):
@@ -30,6 +33,14 @@ class AegisCommand(ABC):
         """Return the primary command name and all registered aliases."""
         return (self.name, *self.aliases)
 
+    def get_ui(self, args: Optional[argparse.Namespace] = None) -> "OutputContext":
+        """Resolve or create the OutputContext for this command invocation."""
+        from aegis_cli.ui.theme import OutputContext
+        existing = getattr(args, "ui", None) if args is not None else None
+        if isinstance(existing, OutputContext):
+            return existing
+        return OutputContext.from_env_and_args(args)
+
     @abstractmethod
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         """Register command-specific flags and arguments onto its subparser."""
@@ -39,6 +50,3 @@ class AegisCommand(ABC):
     def execute(self, args: argparse.Namespace) -> int:
         """Execute command logic. Common options are pre-handled by the dispatcher."""
         ...
-
-
-SomaCommand = AegisCommand

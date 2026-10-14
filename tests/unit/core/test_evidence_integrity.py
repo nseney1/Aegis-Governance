@@ -39,7 +39,7 @@ def _spawn(code, prelude=""):
 
 
 def _rows(ws):
-    path = os.path.join(ws, ".soma", "evidence", "signals.jsonl")
+    path = os.path.join(ws, ".aegis", "evidence", "signals.jsonl")
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 

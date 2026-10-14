@@ -1,5 +1,5 @@
 from pathlib import Path
-"""Tests for soma_mcp.cell_cache — mtime-based in-memory cell cache.
+"""Tests for aegis_mcp.rule_cache — mtime-based in-memory cell cache.
 
 v0.83 'Fast Path': eliminates redundant disk I/O in MCP hot path.
 """
@@ -9,13 +9,13 @@ import sys
 import time
 
 import pytest
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_mcp.cell_cache import CellCache
+from aegis_mcp.rule_cache import CellCache
 
 
 def _make_cell(cells_dir, subdir, name, target_paths=None):
@@ -38,7 +38,7 @@ class TestCellCacheBasic:
 
     def test_returns_cells_from_disk(self, tmp_path):
         """First call reads cells from disk."""
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         _make_cell(cells_dir, 'walls', 'trap-test')
         cache = CellCache()
         cells = cache.get_cells(str(tmp_path))
@@ -47,7 +47,7 @@ class TestCellCacheBasic:
 
     def test_second_call_returns_cached(self, tmp_path):
         """Second call with same mtime returns cached list (no re-parse)."""
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         _make_cell(cells_dir, 'walls', 'trap-test')
         cache = CellCache()
         cells1 = cache.get_cells(str(tmp_path))
@@ -57,7 +57,7 @@ class TestCellCacheBasic:
 
     def test_invalidates_on_new_file(self, tmp_path):
         """Adding a cell file triggers re-parse."""
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         _make_cell(cells_dir, 'walls', 'trap-a')
         cache = CellCache()
         cells1 = cache.get_cells(str(tmp_path))
@@ -73,7 +73,7 @@ class TestCellCacheBasic:
 
     def test_invalidates_on_modified_file(self, tmp_path):
         """Modifying a cell file triggers re-parse."""
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         cell_path = _make_cell(cells_dir, 'walls', 'trap-test')
         cache = CellCache()
         cells1 = cache.get_cells(str(tmp_path))
@@ -97,7 +97,7 @@ class TestCellCacheBasic:
 
     def test_deleted_cell_removed(self, tmp_path):
         """Removing a cell file updates cache."""
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         cell_path = _make_cell(cells_dir, 'walls', 'trap-a')
         _make_cell(cells_dir, 'walls', 'trap-b')
         cache = CellCache()
@@ -114,7 +114,7 @@ class TestCellCacheBasic:
 
     def test_skips_readme(self, tmp_path):
         """README.md files are not treated as cells."""
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         _make_cell(cells_dir, 'walls', 'trap-test')
         readme = os.path.join(cells_dir, 'README.md')
         with open(readme, 'w') as f:
@@ -125,7 +125,7 @@ class TestCellCacheBasic:
 
     def test_skips_expired_cells(self, tmp_path):
         """Cells with expired_at are excluded."""
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         path = os.path.join(cells_dir, 'walls', 'trap-expired.md')
         os.makedirs(os.path.dirname(path), exist_ok=True)
         fm = {'id': 'trap-expired', 'type': 'wall', 'expired_at': '2026-01-01'}
@@ -142,7 +142,7 @@ class TestCellCacheIntegration:
 
     def test_output_matches_load_all_cells_schema(self, tmp_path):
         """Cache output has same keys as load_all_cells."""
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         _make_cell(cells_dir, 'walls', 'trap-schema')
         cache = CellCache()
         cells = cache.get_cells(str(tmp_path))
@@ -159,7 +159,7 @@ class TestCellCacheContentFingerprint:
     """Cache invalidation and I/O failures are content-correct and fail closed."""
 
     def test_same_size_edit_with_restored_mtime_invalidates(self, tmp_path):
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         cell_path = _make_cell(cells_dir, 'walls', 'trap-one')
         cache = CellCache()
         cells1 = cache.get_cells(str(tmp_path))
@@ -176,10 +176,10 @@ class TestCellCacheContentFingerprint:
         assert cells2[0]['id'] == 'trap-two'
 
     def test_stat_failure_after_warm_cache_raises(self, tmp_path, monkeypatch):
-        import soma_core.cell_inventory as inventory
-        from soma_mcp.cell_cache import CellCacheError
+        import aegis_core.rule_inventory as inventory
+        from aegis_mcp.rule_cache import CellCacheError
 
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         cell_path = _make_cell(cells_dir, 'walls', 'trap-test')
         cache = CellCache()
         warmed = cache.get_cells(str(tmp_path))
@@ -196,10 +196,10 @@ class TestCellCacheContentFingerprint:
         assert warmed[0]['id'] == 'trap-test'
 
     def test_open_failure_after_warm_cache_raises(self, tmp_path, monkeypatch):
-        import soma_core.cell_inventory as inventory
-        from soma_mcp.cell_cache import CellCacheError
+        import aegis_core.rule_inventory as inventory
+        from aegis_mcp.rule_cache import CellCacheError
 
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         cell_path = _make_cell(cells_dir, 'walls', 'trap-test')
         cache = CellCache()
         cache.get_cells(str(tmp_path))
@@ -215,9 +215,9 @@ class TestCellCacheContentFingerprint:
             cache.get_cells(str(tmp_path))
 
     def test_load_uses_inventory_bytes_without_second_open(self, tmp_path, monkeypatch):
-        import soma_core.cell_inventory as inventory
+        import aegis_core.rule_inventory as inventory
 
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         _make_cell(cells_dir, 'walls', 'trap-test')
         inventory_result = inventory.inventory_cells(str(tmp_path))
         monkeypatch.setattr(
@@ -232,10 +232,10 @@ class TestCellCacheContentFingerprint:
         assert cells[0]['id'] == 'trap-test'
 
     def test_manifest_tampering_invalidates_cache_and_raises(self, tmp_path):
-        from soma_mcp.integrity import generate_key, generate_manifest, save_manifest
-        from soma_mcp.cell_cache import CellCacheError
+        from aegis_mcp.integrity import generate_key, generate_manifest, save_manifest
+        from aegis_mcp.rule_cache import CellCacheError
 
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         _make_cell(cells_dir, 'walls', 'trap-test')
 
         # Generate key and signed manifest

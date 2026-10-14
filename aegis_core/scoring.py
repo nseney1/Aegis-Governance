@@ -260,15 +260,15 @@ def compute_salience(
 
     # 1. Tier Weight W_tier(C)
     meta = cell.get("frontmatter", cell) if isinstance(cell, dict) else {}
-    cell_type = str(meta.get("type", cell.get("type", "vacuole"))).lower()
+    cell_type = str(meta.get("type", cell.get("type", "trap"))).lower()
     enforcement = str(meta.get("enforcement", cell.get("enforcement", ""))).lower()
 
     is_gate = cell_type == "gate" or enforcement == "gate"
     if is_gate:
         w_tier = SALIENT_GATE_WEIGHT
-    elif cell_type == "wall" or enforcement == "wall":
+    elif cell_type in ("wall", "invariant") or enforcement == "wall":
         w_tier = SALIENT_WALL_WEIGHT
-    elif cell_type == "vacuole":
+    elif cell_type == "trap":
         w_tier = SALIENT_VACUOLE_WEIGHT
     else:
         w_tier = 1.0

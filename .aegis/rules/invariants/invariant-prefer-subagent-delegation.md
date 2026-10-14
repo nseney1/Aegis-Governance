@@ -1,5 +1,5 @@
 ---
-id: wall-prefer-subagent-delegation
+id: invariant-prefer-subagent-delegation
 domain: architecture
 type: invariant
 enforcement: gate
@@ -29,10 +29,10 @@ tags:
 fitness:
   score: null
   impact_weight: 1.0
-  triggers: 25
-  true_positives: 6.0464
+  triggers: 29
+  true_positives: 7.0464
   false_positives: 6.7256
-  last_trigger_date: "2026-10-14T08:55:41Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 # Wall: Prefer Subagent Delegation Protocol

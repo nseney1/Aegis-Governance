@@ -1,5 +1,5 @@
 ---
-id: wall-test-canonical-colocality
+id: invariant-test-canonical-colocality
 type: invariant
 domain: testing
 enforcement: gate

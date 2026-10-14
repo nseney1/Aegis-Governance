@@ -4,17 +4,13 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from aegis_core.compat import install_compat_aliases
-
-install_compat_aliases()
-
-__version__ = "2.0.0"
+__version__ = "3.0.0"
 
 # Explicit mapping of exported symbol name -> (module_name, attribute_name)
 _EXPORTS: dict[str, tuple[str, str | None]] = {
     # Submodules
-    "arbitration": ("aegis_core.arbitration", None),
-    "cell_inventory": ("aegis_core.cell_inventory", None),
+    "proposals": ("aegis_core.proposals", None),
+    "rule_inventory": ("aegis_core.rule_inventory", None),
     "command_safety": ("aegis_core.command_safety", None),
     "defects": ("aegis_core.defects", None),
     "enforcement": ("aegis_core.enforcement", None),
@@ -33,7 +29,6 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "scoring": ("aegis_core.scoring", None),
     "sentinels": ("aegis_core.sentinels", None),
     "skills": ("aegis_core.skills", None),
-    "somayaml": ("aegis_core.yaml", None),
     "yaml": ("aegis_core.yaml", None),
     "storage": ("aegis_core.storage", None),
     "sweep_session": ("aegis_core.sweep_session", None),
@@ -44,10 +39,10 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     # Core types & functions
     "CommandAnalyzer": ("aegis_core.command_safety", "CommandAnalyzer"),
     "SafetyEvaluation": ("aegis_core.command_safety", "SafetyEvaluation"),
-    "CellInventory": ("aegis_core.cell_inventory", "CellInventory"),
-    "CellInventoryEntry": ("aegis_core.cell_inventory", "CellInventoryEntry"),
-    "CellInventoryError": ("aegis_core.cell_inventory", "CellInventoryError"),
-    "inventory_cells": ("aegis_core.cell_inventory", "inventory_cells"),
+    "RuleInventory": ("aegis_core.rule_inventory", "RuleInventory"),
+    "RuleInventoryEntry": ("aegis_core.rule_inventory", "RuleInventoryEntry"),
+    "RuleInventoryError": ("aegis_core.rule_inventory", "RuleInventoryError"),
+    "inventory_rules": ("aegis_core.rule_inventory", "inventory_rules"),
     "issue_receipt": ("aegis_core.receipts", "issue_receipt"),
     "verify_receipt": ("aegis_core.receipts", "verify_receipt"),
     "clear_receipts": ("aegis_core.receipts", "clear_receipts"),
@@ -67,13 +62,9 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "STATUS_APOPTOSIS": ("aegis_core.lifecycle", "STATUS_APOPTOSIS"),
     "STATUS_APOPTOSIS_WARNING": ("aegis_core.lifecycle", "STATUS_APOPTOSIS_WARNING"),
     "STATUS_DORMANT": ("aegis_core.lifecycle", "STATUS_DORMANT"),
-    "parse_cell_frontmatter": ("aegis_core.yaml", "parse_cell_frontmatter"),
     "parse_rule_frontmatter": ("aegis_core.yaml", "parse_rule_frontmatter"),
-    "SomaYAML": ("aegis_core.yaml", "SomaYAML"),
     "AegisYAML": ("aegis_core.yaml", "AegisYAML"),
-    "SomaDocument": ("aegis_core.yaml", "SomaDocument"),
     "AegisDocument": ("aegis_core.yaml", "AegisDocument"),
-    "SomaYAMLError": ("aegis_core.yaml", "SomaYAMLError"),
     "AegisYAMLError": ("aegis_core.yaml", "AegisYAMLError"),
     "append_signal": ("aegis_core.telemetry", "append_signal"),
     "Workspace": ("aegis_core.workspace", "Workspace"),
@@ -84,9 +75,6 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "AegisError": ("aegis_core.errors", "AegisError"),
     "AegisValidationError": ("aegis_core.errors", "AegisValidationError"),
     "RuleCorruptError": ("aegis_core.errors", "RuleCorruptError"),
-    "SomaError": ("aegis_core.errors", "SomaError"),
-    "SomaValidationError": ("aegis_core.errors", "SomaValidationError"),
-    "CellCorruptError": ("aegis_core.errors", "CellCorruptError"),
 }
 
 __all__ = list(_EXPORTS.keys())

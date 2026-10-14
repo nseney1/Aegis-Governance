@@ -56,18 +56,18 @@ def run_uninstall(args: argparse.Namespace) -> int:
         except Exception as e:
             res.errors.append(f"Failed to remove pre-commit hook: {e}")
 
-        # 2. Clean .soma directory if --purge requested
+        # 2. Clean .aegis directory if --purge requested
         if purge:
-            soma_dir = ws_path / ".soma"
-            if soma_dir.is_dir():
+            aegis_dir = ws_path / ".aegis"
+            if aegis_dir.is_dir():
                 if dry_run:
-                    res.messages.append(f"[dry-run] Would remove {soma_dir}")
+                    res.messages.append(f"[dry-run] Would remove {aegis_dir}")
                 else:
                     try:
-                        shutil.rmtree(soma_dir)
-                        res.messages.append(f"Purged {soma_dir}")
+                        shutil.rmtree(aegis_dir)
+                        res.messages.append(f"Purged {aegis_dir}")
                     except Exception as e:
-                        res.errors.append(f"Failed to purge {soma_dir}: {e}")
+                        res.errors.append(f"Failed to purge {aegis_dir}: {e}")
                         res.success = False
 
         for msg in res.messages:
@@ -138,7 +138,7 @@ class UninstallCommand(AegisCommand):
         parser.add_argument(
             "--purge",
             action="store_true",
-            help="Purge .soma directory and local governance state",
+            help="Purge .aegis directory and local governance state",
         )
 
     def execute(self, args: argparse.Namespace) -> int:

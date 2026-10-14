@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
-from aegis_core.errors import SomaValidationError
-from aegis_core.yaml import SomaDocument, SomaYAML
+from aegis_core.errors import AegisValidationError
+from aegis_core.yaml import AegisDocument, AegisYAML
 
 __all__ = ["SkillNode", "SkillGraph"]
 
@@ -27,7 +27,7 @@ class SkillNode:
     slot_constraints: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_doc(cls, doc: SomaDocument, file_path: Optional[str | Path] = None) -> SkillNode:
+    def from_doc(cls, doc: AegisDocument, file_path: Optional[str | Path] = None) -> SkillNode:
         return cls(
             id=str(doc.id or (Path(file_path).stem if file_path else "unknown")),
             tier=str(doc.tier or "method"),
@@ -49,7 +49,7 @@ class SkillNode:
         p = Path(self.instructions_file)
         if not p.exists():
             return ""
-        doc = SomaYAML.parse_text(p.read_text(encoding="utf-8"))
+        doc = AegisYAML.parse_text(p.read_text(encoding="utf-8"))
         return doc.body
 
     def to_dict(self) -> Dict[str, Any]:
@@ -106,7 +106,7 @@ class SkillGraph:
             for cand in candidates:
                 try:
                     text = cand.read_text(encoding="utf-8")
-                    doc = SomaYAML.parse_text(text)
+                    doc = AegisYAML.parse_text(text)
                     if doc.kind == "skill" or any(k in doc for k in ("tier", "consumes", "produces", "handoff_targets")):
                         node = SkillNode.from_doc(doc, file_path=str(cand.resolve()))
                         if node.id not in nodes:
@@ -135,19 +135,19 @@ class SkillGraph:
         to_node = self.get(to_skill)
 
         if from_node and from_node.produces and artifact_type not in from_node.produces:
-            raise SomaValidationError(
+            raise AegisValidationError(
                 f"Skill '{from_skill}' does not produce artifact type '{artifact_type}'. "
                 f"Declared produces: {from_node.produces}"
             )
 
         if from_node and from_node.handoff_targets and to_skill not in from_node.handoff_targets:
-            raise SomaValidationError(
+            raise AegisValidationError(
                 f"Skill '{from_skill}' cannot handoff to '{to_skill}'. "
                 f"Allowed targets: {from_node.handoff_targets}"
             )
 
         if to_node and to_node.consumes and artifact_type not in to_node.consumes:
-            raise SomaValidationError(
+            raise AegisValidationError(
                 f"Skill '{to_skill}' does not consume artifact type '{artifact_type}'. "
                 f"Declared consumes: {to_node.consumes}"
             )

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from soma_mcp.projection import DENYLIST, project_response
+from aegis_mcp.projection import DENYLIST, project_response
 
 
 class TestResponseProjection:
@@ -101,13 +101,13 @@ class TestResponseProjection:
         assert res == {"id": "audit-1"}
 
     def test_execute_tool_with_projection(self, tmp_path, monkeypatch):
-        from soma_mcp.tools import execute_tool
+        from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True, exist_ok=True)
         monkeypatch.chdir(tmp_path)
         # Test audit tool with fields projection
         res = execute_tool(
-            "soma_audit_security",
+            "aegis_audit_security",
             {
                 "proposed_content": "x = 1\n",
                 "file_path": "test.py",

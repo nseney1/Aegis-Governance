@@ -23,10 +23,10 @@ __all__ = ["run_sync", "SyncCommand"]
 
 
 def run_sync(args: argparse.Namespace) -> int:
-    """CLI entrypoint for soma sync."""
+    """CLI entrypoint for aegis sync."""
     root = resolve_root(args)
-    evidence_dir = str((root / ".aegis" / "evidence") if (root / ".aegis" / "evidence").is_dir() else (root / ".soma" / "evidence"))
-    cells_dir = str((root / ".aegis" / "rules") if (root / ".aegis" / "rules").is_dir() else ((root / ".soma" / "rules") if (root / ".soma" / "rules").is_dir() else (root / ".soma" / "cells")))
+    evidence_dir = str(root / ".aegis" / "evidence")
+    cells_dir = str(root / ".aegis" / "rules")
 
     dry_run = getattr(args, "dry_run", False)
     as_json = getattr(args, "json", False)

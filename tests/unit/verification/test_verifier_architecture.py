@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from soma_core.verification import (
+from aegis_core.verification import (
     AdversarialVerifier,
     AgentBackend,
     Arbiter,
@@ -33,7 +33,7 @@ from soma_core.verification import (
     Verdict,
     VerificationPipeline,
 )
-from soma_core.workspace import GitWorkspace, Workspace
+from aegis_core.workspace import GitWorkspace, Workspace
 
 
 class TestDeterministicVerifier:

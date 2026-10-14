@@ -53,27 +53,9 @@ def _get_starter_rule_path(name: str) -> Path | None:
     return None
 
 
-# ── Detection ───────────────────────────────────────────────────────────────
+# ── Detection & Platform Rules Directory (Delegated to aegis_cli.platforms) ──
 
-def detect_platform(project_root: Path) -> str:
-    """Detect the AI platform from directory markers.
-
-    Returns: 'gemini' | 'claude' | 'cursor' | 'copilot' | 'unknown'
-    """
-    project_root = Path(project_root)
-
-    if (project_root / ".gemini").is_dir():
-        return "gemini"
-    if (project_root / ".claude").is_dir():
-        return "claude"
-    if (project_root / ".cursor").is_dir() or (project_root / ".cursorrules").is_file():
-        return "cursor"
-    if (project_root / ".github" / "copilot").is_dir() or (project_root / ".github" / "copilot-instructions.md").is_file():
-        return "copilot"
-    if (project_root / ".kiro").is_dir():
-        return "kiro"
-
-    return "unknown"
+from aegis_cli.platforms import detect_platform, get_rules_dir
 
 
 def detect_project_type(project_root: Path) -> str:
@@ -95,64 +77,6 @@ def detect_project_type(project_root: Path) -> str:
     return "unknown"
 
 
-# ── Rules directory per platform ────────────────────────────────────────────
-
-def get_rules_dir(
-    platform: str,
-    home: Path | None = None,
-    project_root: Path | None = None,
-    local: bool = False,
-) -> Path:
-    """Return the target rules directory for the given platform.
-
-    Args:
-        platform: One of 'gemini', 'claude', 'cursor', 'copilot', 'kiro'.
-        home: Home directory override (for testing).
-        project_root: Project directory override (for copilot, which is project-relative).
-        local: If True, return project-local rules directory.
-
-    Returns:
-        Path to the platform's rules directory.
-
-    Raises:
-        ValueError: If platform is unsupported.
-    """
-    if home is None:
-        home = Path(os.environ.get("HOME") or Path.home())
-    home = Path(home)
-    if project_root is None:
-        project_root = Path.cwd()
-    project_root = Path(project_root)
-
-    if local:
-        local_dirs = {
-            "gemini": project_root / ".gemini" / "rules",
-            "claude": project_root / ".claude",
-            "cursor": project_root / ".cursor" / "rules",
-            "copilot": project_root / ".github" / "copilot",
-            "kiro": project_root / ".kiro" / "steering",
-        }
-        if platform not in local_dirs:
-            raise ValueError(
-                f"Unsupported platform: '{platform}'. "
-                f"Supported: {', '.join(sorted(local_dirs))}"
-            )
-        return local_dirs[platform]
-
-    dirs = {
-        "gemini": home / ".gemini" / "config" / "rules",
-        "claude": home / ".claude",
-        "cursor": home / ".cursor" / "rules",
-        "copilot": project_root / ".github" / "copilot",
-        "kiro": home / ".kiro" / "steering",
-    }
-    if platform not in dirs:
-        raise ValueError(
-            f"Unsupported platform: '{platform}'. "
-            f"Supported: {', '.join(sorted(dirs))}"
-        )
-    return dirs[platform]
-
 # ── Pre-commit Hook (Delegated to aegis_cli.hooks) ───────────────────────────
 
 from aegis_cli.hooks import (
@@ -172,8 +96,8 @@ _hook_block = generate_hook_block
 # ── Installation ────────────────────────────────────────────────────────────
 
 def check_existing_install(project_root: Path) -> bool:
-    """Check if Aegis or Soma is already installed in this project."""
-    return (Path(project_root) / ".aegis").is_dir() or (Path(project_root) / ".soma").is_dir()
+    """Check if Aegis is already installed in this project."""
+    return (Path(project_root) / ".aegis").is_dir()
 
 
 def _get_soma_root() -> Path:
@@ -341,7 +265,7 @@ def generate_mcp_config(project_root: Path, dry_run: bool = False) -> None:
         "command": "python3",
         "args": ["-m", "aegis_mcp"],
         "cwd": workspace,
-        "env": {"SOMA_WORKSPACE": workspace},
+        "env": {"AEGIS_WORKSPACE": workspace},
     }
 
     if dry_run:
@@ -403,7 +327,7 @@ def run_init(args: argparse.Namespace) -> int:
     forced_platform = args.platform
 
     print()
-    print("  🧬 Soma Governance — Setup")
+    print("  🛡️ Aegis Guardrails — Workspace Setup")
     print()
 
     # 1. Detect platform
@@ -434,7 +358,7 @@ def run_init(args: argparse.Namespace) -> int:
     # 3. Check existing install
     if check_existing_install(project_root):
         print()
-        print("  ℹ️  Existing Soma installation detected (.soma/ directory).")
+        print("  ℹ️  Existing Aegis installation detected.")
         print("     Starter rules will be added alongside existing rules.")
 
     print()
@@ -452,7 +376,7 @@ def run_init(args: argparse.Namespace) -> int:
     skip_confirm = getattr(args, "yes", False) or dry_run
     global_rules_exist = rules_dir.is_dir() and any(rules_dir.glob("*.md"))
     if global_rules_exist and not getattr(args, "force", False):
-        print(f"  ℹ️  Global platform rules detected in {rules_dir}. Attaching Soma to local repository.")
+        print(f"  ℹ️  Global platform rules detected in {rules_dir}. Attaching Aegis to local repository.")
         skip_confirm = True
 
     if not skip_confirm:
@@ -476,11 +400,17 @@ def run_init(args: argparse.Namespace) -> int:
     else:
         print(f"  Installing rules (preset={preset})...")
 
+    pre_existing = {p.stem for p in rules_dir.glob("*.md")} if rules_dir.is_dir() else set()
     ws.scaffold(minimal=(preset == "minimal"), dry_run=dry_run)
     installed = install_rules(rules_dir, preset=preset, dry_run=dry_run, force=force)
 
     for name in installed:
-        print(f"    ✅ {name}")
+        if dry_run:
+            print(f"    [DRY-RUN] {name}")
+        elif name in pre_existing and not force:
+            print(f"    [SKIP] {name}")
+        else:
+            print(f"    ✅ {name}")
 
     # 6.5. Zero-touch AST driver provisioning
     slots, created_drivers = provision_ast_driver_slots(
@@ -517,15 +447,16 @@ def run_init(args: argparse.Namespace) -> int:
         print("  Dry run complete. No files were created.")
         print(f"  Target: {rules_dir}")
     elif not installed:
-        print("  ❌ No rules were installed. Check that Soma source files exist.")
+        print("  ❌ No rules were installed. Check that Aegis source files exist.")
         return 1
     else:
         print("  Done! Your next agent session will be governed.")
         print(f"  Rules installed to: {rules_dir}")
 
     print()
-    print("  After a session, run: soma report")
+    print("  After a session, run: aegis report")
     print()
+
 
     # Proactive PATH guidance (Phase 15 / BUG-041)
     if not dry_run:

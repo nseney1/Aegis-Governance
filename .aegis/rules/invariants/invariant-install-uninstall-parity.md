@@ -1,5 +1,5 @@
 ---
-id: wall-install-uninstall-parity
+id: invariant-install-uninstall-parity
 domain: correctness
 type: invariant
 enforcement: gate
@@ -22,10 +22,10 @@ tags:
 fitness:
   score: null
   impact_weight: 1.0
-  triggers: 57
-  true_positives: 2.1561
+  triggers: 58
+  true_positives: 2.1996
   false_positives: 1.8187
-  last_trigger_date: "2026-10-14T08:55:41Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 The install and uninstall scripts must support the same set of platforms. When adding

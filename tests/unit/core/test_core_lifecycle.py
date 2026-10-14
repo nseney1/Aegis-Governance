@@ -1,4 +1,4 @@
-"""Tests for soma_core.lifecycle — canonical cell state transitions, scoring, and operations."""
+"""Tests for aegis_core.lifecycle — canonical cell state transitions, scoring, and operations."""
 from __future__ import annotations
 
 import os
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_core.lifecycle import (
+from aegis_core.lifecycle import (
     PROTECTED_RULES,
     STATUS_ADAPT,
     STATUS_APOPTOSIS,
@@ -29,13 +29,14 @@ from soma_core.lifecycle import (
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
-    """Create a minimal workspace with .soma/cells directories."""
-    (tmp_path / ".soma" / "cells" / "vacuoles").mkdir(parents=True)
-    (tmp_path / ".soma" / "cells" / "walls").mkdir(parents=True)
+    """Create a minimal workspace with .aegis/rules directories."""
+    (tmp_path / ".aegis" / "rules" / "traps").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules" / "invariants").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules" / "walls").mkdir(parents=True)
     (tmp_path / "genome").mkdir(parents=True)
-    (tmp_path / "soma_core").mkdir(parents=True)
-    (tmp_path / "soma_cli").mkdir(parents=True)
-    (tmp_path / "pyproject.toml").write_text('name = "soma-governance"\n', encoding="utf-8")
+    (tmp_path / "aegis_core").mkdir(parents=True)
+    (tmp_path / "aegis_cli").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text('name = "aegis-governance"\n', encoding="utf-8")
     return tmp_path
 
 
@@ -63,7 +64,7 @@ class TestFitnessStatusEvaluation:
 
     def test_apoptosis_for_vacuole_when_false_positives_dominate(self):
         status = calculate_fitness_status(
-            cell_type="vacuole", tp=5, fp=15, triggers=20, dec_score=0.25
+            cell_type="trap", tp=5, fp=15, triggers=20, dec_score=0.25
         )
         assert status == STATUS_APOPTOSIS
 
@@ -75,33 +76,33 @@ class TestFitnessStatusEvaluation:
 
     def test_survive_status_high_score(self):
         status = calculate_fitness_status(
-            cell_type="vacuole", tp=18, fp=2, triggers=20, dec_score=0.85
+            cell_type="trap", tp=18, fp=2, triggers=20, dec_score=0.85
         )
         assert status == STATUS_SURVIVE
 
     def test_adapt_status_medium_score(self):
         status = calculate_fitness_status(
-            cell_type="vacuole", tp=10, fp=10, triggers=20, dec_score=0.5
+            cell_type="trap", tp=10, fp=10, triggers=20, dec_score=0.5
         )
         assert status == STATUS_ADAPT
 
     def test_extinct_status_below_threshold(self):
         status = calculate_fitness_status(
-            cell_type="vacuole", tp=1, fp=1, triggers=20, dec_score=0.10
+            cell_type="trap", tp=1, fp=1, triggers=20, dec_score=0.10
         )
         assert status == STATUS_EXTINCT
 
     def test_dormant_vs_new_unobserved(self):
         # Unobserved older than expiry -> DORMANT
         status_old = calculate_fitness_status(
-            cell_type="vacuole", tp=0, fp=0, triggers=0, is_unobserved=True,
+            cell_type="trap", tp=0, fp=0, triggers=0, is_unobserved=True,
             created_str="2020-01-01T00:00:00Z", expiry_days=30
         )
         assert status_old == STATUS_DORMANT
 
         # Unobserved recent -> NEW
         status_new = calculate_fitness_status(
-            cell_type="vacuole", tp=0, fp=0, triggers=0, is_unobserved=True,
+            cell_type="trap", tp=0, fp=0, triggers=0, is_unobserved=True,
             created_str="2099-01-01T00:00:00Z", expiry_days=30
         )
         assert status_new == STATUS_NEW
@@ -161,36 +162,36 @@ class TestCellPromoteAndDemote:
     """Verifies file movements and frontmatter updates for promotions and demotions."""
 
     def test_find_cell_file(self, workspace: Path):
-        vacuole = _create_cell_file(workspace / ".soma" / "cells" / "vacuoles" / "test-v.md", "test-v", "vacuole")
+        trap = _create_cell_file(workspace / ".aegis" / "rules" / "traps" / "test-v.md", "test-v", "trap")
         found_path, found_type = find_cell_file(workspace, "test-v")
-        assert found_path == vacuole
-        assert found_type == "vacuole"
+        assert found_path == trap
+        assert found_type == "trap"
 
         # Traversal attempt returns None
         assert find_cell_file(workspace, "../etc/passwd") == (None, None)
 
     def test_promote_vacuole_to_wall(self, workspace: Path):
-        vacuole = _create_cell_file(
-            workspace / ".soma" / "cells" / "vacuoles" / "promote-me.md",
-            "promote-me", "vacuole", triggers=25, tp=24, fp=1
+        trap = _create_cell_file(
+            workspace / ".aegis" / "rules" / "traps" / "promote-me.md",
+            "promote-me", "trap", triggers=25, tp=24, fp=1
         )
         res = promote_cell(workspace, "promote-me", force=False)
         assert res["status"] == "promoted"
-        assert res["from_type"] == "vacuole"
-        assert res["to_type"] == "wall"
+        assert res["from_type"] == "trap"
+        assert res["to_type"] == "invariant"
 
-        # Original vacuole path no longer exists
-        assert not vacuole.exists()
+        # Original trap path no longer exists
+        assert not trap.exists()
 
-        # Wall path exists with updated frontmatter
-        wall_path = workspace / ".soma" / "cells" / "walls" / "promote-me.md"
-        assert wall_path.exists()
-        content = wall_path.read_text(encoding="utf-8")
-        assert "type: wall" in content
+        # Invariant path exists with updated frontmatter
+        inv_path = workspace / ".aegis" / "rules" / "invariants" / "promote-me.md"
+        assert inv_path.exists()
+        content = inv_path.read_text(encoding="utf-8")
+        assert "type: invariant" in content
 
     def test_promote_wall_to_genome(self, workspace: Path):
         wall = _create_cell_file(
-            workspace / ".soma" / "cells" / "walls" / "wall-cell.md",
+            workspace / ".aegis" / "rules" / "walls" / "wall-cell.md",
             "wall-cell", "wall", triggers=30, tp=29, fp=1
         )
         res = promote_cell(workspace, "wall-cell", force=True)
@@ -205,15 +206,15 @@ class TestCellPromoteAndDemote:
         assert res["status"] == "already_terminal"
 
     def test_demote_wall_to_vacuole(self, workspace: Path):
-        wall = _create_cell_file(workspace / ".soma" / "cells" / "walls" / "demote-wall.md", "demote-wall", "wall")
+        wall = _create_cell_file(workspace / ".aegis" / "rules" / "walls" / "demote-wall.md", "demote-wall", "wall")
         res = demote_cell(workspace, "demote-wall")
         assert res["status"] == "demoted"
         assert res["from_type"] == "wall"
-        assert res["to_type"] == "vacuole"
+        assert res["to_type"] == "trap"
         assert not wall.exists()
-        vacuole_path = workspace / ".soma" / "cells" / "vacuoles" / "demote-wall.md"
-        assert vacuole_path.exists()
-        assert "type: vacuole" in vacuole_path.read_text(encoding="utf-8")
+        trap_path = workspace / ".aegis" / "rules" / "traps" / "demote-wall.md"
+        assert trap_path.exists()
+        assert "type: trap" in trap_path.read_text(encoding="utf-8")
 
     def test_demote_protected_rules_blocked(self, workspace: Path):
         for rule in ("providence", "cost-optimization", "git-workflow"):
@@ -223,7 +224,7 @@ class TestCellPromoteAndDemote:
 
     def test_promote_protected_rule_blocked(self, workspace: Path):
         _create_cell_file(
-            workspace / ".soma" / "cells" / "walls" / "providence.md",
+            workspace / ".aegis" / "rules" / "walls" / "providence.md",
             "providence", "wall", triggers=30, tp=29, fp=1
         )
         res = promote_cell(workspace, "providence", force=True)
@@ -244,11 +245,11 @@ class TestCellPromoteAndDemote:
 
     def test_demote_wall_cleans_enforcement_artifacts(self, workspace: Path):
         wall = _create_cell_file(
-            workspace / ".soma" / "cells" / "walls" / "guarded-cell.md",
+            workspace / ".aegis" / "rules" / "walls" / "guarded-cell.md",
             "guarded-cell", "wall"
         )
         # Create gate enforcement artifact
-        enf_dir = workspace / ".soma" / "enforcement"
+        enf_dir = workspace / ".aegis" / "enforcement"
         enf_dir.mkdir(parents=True)
         gate_script = enf_dir / "gate-guarded-cell.sh"
         gate_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -256,3 +257,17 @@ class TestCellPromoteAndDemote:
         res = demote_cell(workspace, "guarded-cell")
         assert res["status"] == "demoted"
         assert not gate_script.exists()
+
+    def test_lifecycle_frontmatter_and_storage_consolidation(self):
+        """Ensure lifecycle, sync, and telemetry delegate frontmatter and fsync/atomic storage to yaml.py and storage.py."""
+        import inspect
+        from aegis_core import storage, sync, telemetry
+        from aegis_core.lifecycle import creation, parsers, promotion, selection
+
+        assert hasattr(storage, "atomic_write_and_unlink")
+        for mod in (creation, parsers, promotion, selection, sync, telemetry):
+            src = inspect.getsource(mod)
+            assert 'find("---", 3)' not in src, f"{mod.__name__} still uses naive find('---', 3)"
+            assert "def _fsync_dir" not in src, f"{mod.__name__} still defines duplicate _fsync_dir"
+            assert "def _atomic_write_and_unlink" not in src, f"{mod.__name__} still defines duplicate _atomic_write_and_unlink"
+

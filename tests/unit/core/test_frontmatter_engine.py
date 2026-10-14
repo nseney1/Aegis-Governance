@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import pytest
-from soma_core.somayaml import (
+from aegis_core.yaml import (
     FrontmatterError,
     dump_frontmatter,
-    parse_cell_frontmatter,
+    parse_rule_frontmatter,
     parse_frontmatter,
     parse_yaml_subset,
 )
@@ -194,7 +194,7 @@ This is markdown content.
             "---\nid: cell-file\ntype: wall\n---\n\n# Body Heading\nBody content\n",
             encoding="utf-8",
         )
-        meta, body = parse_cell_frontmatter(str(cell_file))
+        meta, body = parse_rule_frontmatter(str(cell_file))
         assert meta == {"id": "cell-file", "type": "wall"}
         assert body == "# Body Heading\nBody content\n"
 
@@ -266,7 +266,7 @@ sibling_key: 123
 
     def test_crlf_delimiter_parsing(self):
         content = "---\r\nid: test-crlf\r\ncount: 5\r\n---\r\n# Body Content\r\n"
-        meta, body = parse_cell_frontmatter(content)
+        meta, body = parse_rule_frontmatter(content)
         assert meta == {"id": "test-crlf", "count": 5}
         assert body == "# Body Content\r\n"
 

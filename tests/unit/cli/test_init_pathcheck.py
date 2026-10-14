@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_cli.init import run_init
+from aegis_cli.init import run_init
 
 
 class TestInitPathGuidance:
@@ -16,9 +16,9 @@ class TestInitPathGuidance:
         target = tmp_path / "project"
         target.mkdir()
 
-        # Monkeypatch build_hint in soma_cli.pathcheck to return a simulated diagnostic
+        # Monkeypatch build_hint in aegis_cli.pathcheck to return a simulated diagnostic
         monkeypatch.setattr(
-            "soma_cli.pathcheck.build_hint",
+            "aegis_cli.pathcheck.build_hint",
             lambda **kwargs: "ℹ️  'soma' was installed to ~/.local/bin, which is not on your zsh PATH.\n      export PATH=\"$HOME/.local/bin:$PATH\"",
         )
 
@@ -47,7 +47,7 @@ class TestInitPathGuidance:
         target.mkdir()
 
         # Monkeypatch build_hint to return None (meaning soma is already on PATH)
-        monkeypatch.setattr("soma_cli.pathcheck.build_hint", lambda **kwargs: None)
+        monkeypatch.setattr("aegis_cli.pathcheck.build_hint", lambda **kwargs: None)
 
         args = argparse.Namespace(
             project=str(target),

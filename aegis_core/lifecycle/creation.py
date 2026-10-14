@@ -52,7 +52,7 @@ def create_cell(
     type_lower = cell_type.lower()
     if type_lower not in VALID_TYPES:
         raise ValueError(
-            f"Invalid type '{cell_type}'. Must be one of: vacuole, chloroplast, wall, membrane, plasmodesmata."
+            f"Invalid type '{cell_type}'. Must be one of: trap, persona, invariant, boundary, contract."
         )
 
     if enforcement is None:
@@ -83,7 +83,7 @@ def create_cell(
         minimum_mode = "tempest"
         decay_to_yaml = (
             "decay_to:\n"
-            "  type: membrane\n"
+            "  type: boundary\n"
             "  impact_weight: 1.0\n"
             "  minimum_mode: trident\n"
             "  response_type: memory\n"
@@ -106,7 +106,7 @@ def create_cell(
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
     type_plural = VALID_TYPES[type_lower]
-    target_dir = ws.cells_dir / type_plural
+    target_dir = ws.rules_dir / type_plural
     target_dir.mkdir(parents=True, exist_ok=True)
 
     slug = generate_slug(hypothesis, id_override)
@@ -202,7 +202,7 @@ def create_cell_from_description(
     provider = resolve_provider(str(ws.root), provider_name)
 
     examples = []
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     if cells_dir.is_dir():
         for cell_file in cells_dir.rglob("*.md"):
             if cell_file.name == "README.md":
@@ -218,22 +218,22 @@ def create_cell_from_description(
     domain_context = f"\nDomain hint: {domain_hint}" if domain_hint else ""
     type_hint = f"\nPreferred cell type: {cell_type}" if cell_type else ""
 
-    prompt = f"""You are a governance cell generator for Soma.
+    prompt = f"""You are a governance rule generator for Aegis.
 
-Given a natural language description of a concern, generate a governance cell in markdown with YAML frontmatter.
+Given a natural language description of a concern, generate a governance rule in markdown with YAML frontmatter.
 
-Cell types:
-- wall: Non-negotiable invariant (hard safety gate). Use for things that must ALWAYS hold.
-- vacuole: Learned anti-pattern trap. Use for known failure modes to watch for.
-- membrane: Escalation gate. Use when sensitive areas need elevated review.
-- chloroplast: Domain persona/accelerator. Use for idiomatic patterns to follow.
-- plasmodesmata: Cross-service contract. Use for API/data shape agreements.
+Rule types:
+- invariant: Non-negotiable invariant (hard safety gate). Use for things that must ALWAYS hold.
+- trap: Learned anti-pattern trap. Use for known failure modes to watch for.
+- boundary: Escalation gate. Use when sensitive areas need elevated review.
+- persona: Domain persona/accelerator. Use for idiomatic patterns to follow.
+- contract: Cross-service contract. Use for API/data shape agreements.
 
 YAML fields required:
 - id: (filename stem, e.g. 'trap-missing-tests' for trap-missing-tests.md)
 - type: (one of above)
 - domain: (one of: efficiency, correctness, security, style, governance)
-- enforcement: (gate for walls, advisory for vacuoles)
+- enforcement: (gate for invariants, advisory for traps)
 - hypothesis: (clear, testable statement)
 - prediction: (what will happen if the hypothesis is violated)
 - falsification: (how to prove this cell is no longer needed)
@@ -253,7 +253,7 @@ Generate ONLY the complete markdown cell file content. Start with --- for the YA
 
 
 def cli_cell_create(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Programmatic Cell Creation for Soma", add_help=False)
+    parser = argparse.ArgumentParser(description="Programmatic Cell Creation for Aegis", add_help=False)
     parser.add_argument("--help", action="store_true", default=False)
     parser.add_argument("-t", "--type", dest="cell_type", default="")
     parser.add_argument("-h", "--hypothesis", dest="hypothesis", default="")
@@ -288,7 +288,7 @@ def cli_cell_create(argv: list[str] | None = None) -> int:
     if args.description:
         try:
             created = create_cell(
-                cell_type=args.cell_type or "vacuole",
+                cell_type=args.cell_type or "trap",
                 hypothesis=args.description,
                 id_override=args.cell_id or None,
                 domain=args.domain,
@@ -345,18 +345,18 @@ def transfer_cell(
     src_ws = source_workspace if isinstance(source_workspace, Workspace) else (
         Workspace(root=Path(source_workspace).resolve()) if source_workspace else Workspace.resolve()
     )
-    if not src_ws.cells_dir.is_dir():
-        print(f"Error: No Soma project found: no .soma/cells/ in {src_ws.root or os.getcwd()} or any parent directory.", file=sys.stderr)
-        print("Run from inside the source project, or set SOMA_ROOT to its root.", file=sys.stderr)
+    if not src_ws.rules_dir.is_dir():
+        print(f"Error: No Aegis project found: no .aegis/rules/ in {src_ws.root or os.getcwd()} or any parent directory.", file=sys.stderr)
+        print("Run from inside the source project, or set AEGIS_WORKSPACE to its root.", file=sys.stderr)
         return 1
 
     target_dir = Path(target_dir_str).resolve()
-    if not (target_dir / ".soma").is_dir():
-        print(f"Error: Target directory does not have a .soma/ directory: {target_dir}", file=sys.stderr)
+    if not (target_dir / ".aegis").is_dir():
+        print(f"Error: Target directory does not have a .aegis/ directory: {target_dir}", file=sys.stderr)
         return 1
 
     source_path = None
-    cells_dir = src_ws.cells_dir
+    cells_dir = src_ws.rules_dir
     for cand in cells_dir.rglob("*.md"):
         if cand.name == "README.md":
             continue
@@ -389,12 +389,12 @@ def transfer_cell(
         meta["lineage"] = lineage
 
     target_sub = source_path.parent.name
-    dest_dir = target_dir / ".soma" / "cells" / target_sub
+    dest_dir = target_dir / ".aegis" / "rules" / target_sub
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / source_path.name
+    from aegis_core.yaml import _get_body
     new_fm = dump_frontmatter(meta)
-    end_idx = content.find("---", 3)
-    body = content[end_idx + 3:].lstrip() if end_idx != -1 else ""
+    body = _get_body(content).lstrip()
     new_content = f"---\n{new_fm.strip()}\n---\n\n{body}\n" if body else f"---\n{new_fm.strip()}\n---\n"
     dest_path.write_text(new_content, encoding="utf-8")
 

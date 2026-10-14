@@ -1,5 +1,5 @@
 import pytest
-from soma_core.receipts import issue_receipt, verify_receipt, clear_receipts
+from aegis_core.receipts import issue_receipt, verify_receipt, clear_receipts
 
 def test_issue_and_verify_receipt():
     # Failing test to drive receipt implementation
@@ -27,7 +27,7 @@ def test_receipt_ttl_expiration():
     assert verify_receipt(receipt_id, "s1", "w1", "o1", {}, "fd", "cd") == False
 
 def test_receipt_capacity_cap(monkeypatch):
-    import soma_core.receipts as r_mod
+    import aegis_core.receipts as r_mod
     clear_receipts()
     monkeypatch.setattr(r_mod, "MAX_RECEIPTS", 5)
 
@@ -77,7 +77,7 @@ def test_verify_receipt_unconditional_burn_on_consume():
 
 
 def test_compute_file_digest_path_normalization(tmp_path):
-    from soma_core.receipts import compute_file_digest
+    from aegis_core.receipts import compute_file_digest
 
     sub = tmp_path / "sub"
     sub.mkdir()
@@ -112,7 +112,7 @@ def test_verify_receipt_unicode_workspace_and_args():
 
 def test_confined_path_rejects_devices_and_streams(tmp_path):
     """C-04: _confined must delegate to confine_path and reject Windows devices and ADS."""
-    from soma_core.receipts import _confined
+    from aegis_core.receipts import _confined
 
     ws = str(tmp_path)
     (tmp_path / "valid.txt").write_text("hello", encoding="utf-8")
@@ -140,7 +140,7 @@ def test_confined_path_rejects_devices_and_streams(tmp_path):
 def test_receipt_store_class_isolation():
     """Verify ReceiptStore provides encapsulated state isolation, capacity eviction, and thread safety."""
     import concurrent.futures
-    from soma_core.receipts import ReceiptStore
+    from aegis_core.receipts import ReceiptStore
 
     store = ReceiptStore(max_receipts=10, default_ttl=60.0)
     assert len(store) == 0
@@ -178,7 +178,7 @@ def test_receipt_store_class_isolation():
 def test_receipt_dataclass_model():
     """Verify Receipt frozen dataclass model contract."""
     from dataclasses import FrozenInstanceError
-    from soma_core.schemas import Receipt
+    from aegis_core.schemas import Receipt
 
     r = Receipt(
         receipt_id="r-123",

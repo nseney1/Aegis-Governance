@@ -17,10 +17,7 @@ class GeminiAdapter(PlatformAdapter):
     def get_target_dirs(self, local: bool = False) -> tuple[Path, Path, Path]:
         """Return (rules_dir, skills_dir, hooks_dir)."""
         if local:
-            if (self.workspace / ".soma").exists() and not (self.workspace / ".aegis").exists():
-                base = self.workspace / ".soma"
-            else:
-                base = self.workspace / ".aegis"
+            base = self.workspace / ".aegis"
             return base / "rules", base / "skills", base / "plugins" / "governance"
         base = self.home / ".gemini" / "config"
         return base / "rules", base / "skills", base / "plugins" / "governance"

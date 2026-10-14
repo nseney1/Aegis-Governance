@@ -1,8 +1,8 @@
-"""Unit tests for immutable typed schemas (soma_core.schemas)."""
+"""Unit tests for immutable typed schemas (aegis_core.schemas)."""
 from dataclasses import FrozenInstanceError
 import pytest
 
-from soma_core.schemas import CellMetadata, TransitionResult, SignalEvent
+from aegis_core.schemas import CellMetadata, TransitionResult, SignalEvent
 
 
 def test_cell_metadata_immutability():

@@ -14,9 +14,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from soma_mcp.tools import _handle_verify_changes
-from soma_cli.verify import run_verify
-from soma_core.workspace import Workspace
+from aegis_mcp.tools import _handle_verify_changes
+from aegis_cli.verify import run_verify
+from aegis_core.workspace import Workspace
 
 
 class TestMCPDualModeVerify:
@@ -137,7 +137,7 @@ class TestMCPDualModeVerify:
         resp = _handle_verify_changes(args, gov=None)
         assert resp["status"] == "SHIP"
 
-        evidence_files = list((tmp_path / ".soma" / "evidence").glob("arbitration_cycle_*.json"))
+        evidence_files = list((tmp_path / ".aegis" / "evidence").glob("arbitration_cycle_*.json"))
         # Must write exactly 1 file (cycle 1), NOT duplicate with cycle 2
         assert len(evidence_files) == 1
         assert evidence_files[0].name == "arbitration_cycle_1.json"
@@ -171,6 +171,8 @@ class TestCLIDualModeVerify:
         assert exit_code == 1
 
         out, _err = capsys.readouterr()
-        assert "SOMA IN-BAND CHARGE SHEET (SOMA-V01)" in out
+        assert "AEGIS VERIFICATION REPORT" in out
+        assert "SOMA IN-BAND CHARGE SHEET" not in out
         assert "run_feature" in out
         assert "Rebuttal instructions" in out
+

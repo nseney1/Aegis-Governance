@@ -7,15 +7,15 @@ import pytest
 import shutil
 import sys
 
-from soma_core.ast.runner import (
+from aegis_core.ast.runner import (
     ASTDriverError,
     ASTDriverRegistry,
     ASTDriverRunner,
     ASTDriverTimeoutError,
     NoDriverConfiguredError,
 )
-from soma_core.ast.schema import NormalizedAST
-from soma_core.skills.slots import SlotRegistry
+from aegis_core.ast.schema import NormalizedAST
+from aegis_core.skills.slots import SlotRegistry
 
 
 def test_native_python_fast_path(tmp_path):
@@ -104,7 +104,7 @@ def test_no_driver_configured_raises_expected_error(tmp_path):
 
 
 def test_slot_registry_driver_resolution(tmp_path):
-    slots_file = tmp_path / ".soma" / "slots.yaml"
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
     slots_file.parent.mkdir(parents=True)
     slots_file.write_text("""
 slots:
@@ -119,9 +119,9 @@ slots:
 
 
 def test_split_command_windows(monkeypatch):
-    from soma_core.ast.runner import _split_command
+    from aegis_core.ast.runner import _split_command
     with monkeypatch.context() as m:
-        m.setattr("soma_core.ast.runner.os.name", "nt")
+        m.setattr("aegis_core.ast.runner.os.name", "nt")
         cmd = r'"C:\Program Files\nodejs\node.exe" "D:\my project\driver.js"'
         parts = _split_command(cmd)
         assert parts == [r"C:\Program Files\nodejs\node.exe", r"D:\my project\driver.js"]
@@ -152,7 +152,7 @@ def test_python_driver_runs_when_interpreter_name_is_not_on_path(tmp_path, monke
 
 
 def test_resolve_driver_executable_deterministic_tokens(tmp_path, monkeypatch):
-    from soma_core.ast.runner import resolve_driver_executable
+    from aegis_core.ast.runner import resolve_driver_executable
     empty_bin = tmp_path / "empty-bin"
     empty_bin.mkdir()
     monkeypatch.setenv("PATH", str(empty_bin))
@@ -176,7 +176,7 @@ def test_in_process_rust_driver_execution(tmp_path):
     source = tmp_path / "lib.rs"
     source.write_text("pub fn calculate(x: i32) -> i32 { x * 2 }\n", encoding="utf-8")
 
-    registry = ASTDriverRegistry({".rs": "{python} .soma/drivers/rust_ast.py"})
+    registry = ASTDriverRegistry({".rs": "{python} .aegis/drivers/rust_ast.py"})
     runner = ASTDriverRunner(registry=registry)
     result = runner.parse_file(source, workspace_root=tmp_path)
 

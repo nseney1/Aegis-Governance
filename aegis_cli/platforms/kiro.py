@@ -16,7 +16,7 @@ class KiroAdapter(PlatformAdapter):
     def get_target_dirs(self, local: bool = False) -> tuple[Path, Path]:
         """Return (steering_dir, skills_dir)."""
         if local:
-            base = self.workspace / ".soma"
+            base = self.workspace / ".aegis"
             return base / "steering", base / "skills"
         base = self.home / ".kiro"
         return base / "steering", base / "skills"

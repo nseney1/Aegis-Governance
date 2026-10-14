@@ -175,3 +175,57 @@ def test_rule_clean(tmp_path):
         rc = run_rule(args)
         assert rc == 0
         mock_clean.assert_called_once_with(dry_run=True, force=False, quarantine_dir=None)
+
+
+def test_rule_list_long_id_not_truncated_and_colored(tmp_path, capsys):
+    """v3.0.0: long rule IDs (>36 chars) are never truncated and Table uses OutputContext."""
+    from aegis_cli.ui.theme import OutputContext
+
+    rules_dir = tmp_path / ".aegis" / "rules" / "invariants"
+    rules_dir.mkdir(parents=True)
+    long_id = "invariant-very-long-identifier-exceeding-thirty-six-characters-limit"
+    (rules_dir / f"{long_id}.md").write_text(
+        f"---\nid: {long_id}\ntype: invariant\nenforcement: gate\nfitness:\n  score: 0.91\n---\nBody\n",
+        encoding="utf-8",
+    )
+
+    tty_ui = OutputContext(color_enabled=True, emoji_enabled=True, plain=False)
+    args_tty = argparse.Namespace(
+        rule_action="list",
+        workspace=str(tmp_path),
+        json=False,
+        type=None,
+        min_fitness=None,
+        ui=tty_ui,
+    )
+    assert run_rule(args_tty) == 0
+    out_tty = capsys.readouterr().out
+    assert long_id in out_tty
+    assert "\x1b[" in out_tty
+
+    plain_ui = OutputContext(color_enabled=False, emoji_enabled=False, plain=True)
+    args_plain = argparse.Namespace(
+        rule_action="list",
+        workspace=str(tmp_path),
+        json=False,
+        type=None,
+        min_fitness=None,
+        plain=True,
+        ui=plain_ui,
+    )
+    assert run_rule(args_plain) == 0
+    out_plain = capsys.readouterr().out
+    assert long_id in out_plain
+    assert "\x1b[" not in out_plain
+
+
+def test_rule_parser_rejects_legacy_cell_flag():
+    """v3.0.0: --cell flag is removed from aegis rule subcommands."""
+    cmd = RuleCommand()
+    parser = argparse.ArgumentParser()
+    cmd.configure_parser(parser)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["promote", "--cell", "old-id"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["demote", "--cell", "old-id"])
+

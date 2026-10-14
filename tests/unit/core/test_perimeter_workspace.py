@@ -1,8 +1,8 @@
 """Tests for Phase 16: Perimeter & Edge Workspace Adoption.
 
 Verifies that:
-1. soma_sdk.Governance initializes with and exposes Workspace instances.
-2. soma_core.receipts functions accept Workspace instances and behave identically.
+1. aegis_sdk.Governance initializes with and exposes Workspace instances.
+2. aegis_core.receipts functions accept Workspace instances and behave identically.
 3. soma_mcp server and tools operate with strongly-typed Workspace instances.
 """
 from __future__ import annotations
@@ -12,30 +12,30 @@ from pathlib import Path
 
 import pytest
 
-import soma_mcp.security as mcp_security
-from soma_core.receipts import (
+import aegis_mcp.security as mcp_security
+from aegis_core.receipts import (
     ReceiptStore,
     compute_cell_digest,
     compute_file_digest,
     issue_receipt,
     verify_receipt,
 )
-from soma_core.workspace import Workspace
-from soma_mcp.tools import execute_tool
-from soma_sdk import Governance
+from aegis_core.workspace import Workspace
+from aegis_mcp.tools import execute_tool
+from aegis_sdk import Governance
 
 
 @pytest.fixture
 def mock_soma_workspace(tmp_path: Path) -> Path:
     """Create a minimal valid Soma workspace directory structure."""
-    cells_dir = tmp_path / ".soma" / "cells" / "walls"
+    cells_dir = tmp_path / ".aegis" / "rules" / "walls"
     cells_dir.mkdir(parents=True)
     sample_cell = cells_dir / "sample_rule.md"
     sample_cell.write_text(
         "---\nname: sample-rule\ntype: wall\nenforcement: gate\n---\nRule content\n",
         encoding="utf-8",
     )
-    metrics_dir = tmp_path / ".soma" / "metrics"
+    metrics_dir = tmp_path / ".aegis" / "metrics"
     metrics_dir.mkdir(parents=True)
     tracked_file = tmp_path / "hello.py"
     tracked_file.write_text("print('hello')\n", encoding="utf-8")
@@ -43,7 +43,7 @@ def mock_soma_workspace(tmp_path: Path) -> Path:
 
 
 class TestGovernanceWorkspacePorcelain:
-    """Verifies soma_sdk.Governance integration with Workspace."""
+    """Verifies aegis_sdk.Governance integration with Workspace."""
 
     def test_governance_init_with_path_creates_workspace(self, mock_soma_workspace: Path):
         gov = Governance(project_root=mock_soma_workspace)
@@ -51,15 +51,15 @@ class TestGovernanceWorkspacePorcelain:
         assert isinstance(gov.workspace, Workspace)
         assert gov.workspace.root == mock_soma_workspace.resolve()
         assert gov.root == mock_soma_workspace.resolve()
-        assert gov.cells_dir == mock_soma_workspace.resolve() / ".soma" / "cells"
-        assert gov.metrics_dir == mock_soma_workspace.resolve() / ".soma" / "metrics"
+        assert gov.rules_dir == mock_soma_workspace.resolve() / ".aegis" / "rules"
+        assert gov.metrics_dir == mock_soma_workspace.resolve() / ".aegis" / "metrics"
 
     def test_governance_init_with_workspace_object(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
         gov = Governance(project_root=ws)
         assert gov.workspace is ws
         assert gov.root == ws.root
-        assert gov.cells_dir == ws.cells_dir
+        assert gov.rules_dir == ws.rules_dir
         assert gov.metrics_dir == ws.metrics_dir
 
     def test_governance_list_cells_with_workspace(self, mock_soma_workspace: Path):
@@ -71,7 +71,7 @@ class TestGovernanceWorkspacePorcelain:
 
 
 class TestReceiptsWorkspaceInteroperability:
-    """Verifies soma_core.receipts handles Workspace value objects."""
+    """Verifies aegis_core.receipts handles Workspace value objects."""
 
     def test_compute_file_digest_with_workspace(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
@@ -95,7 +95,7 @@ class TestReceiptsWorkspaceInteroperability:
         rid = issue_receipt(
             session_id="test_session",
             workspace=ws,
-            operation="soma_propose_change",
+            operation="aegis_propose_change",
             args={"file_path": "hello.py"},
             file_digest=file_digest,
             cell_digest=cell_digest,
@@ -108,7 +108,7 @@ class TestReceiptsWorkspaceInteroperability:
             receipt_id=rid,
             session_id="test_session",
             workspace=ws,
-            operation="soma_propose_change",
+            operation="aegis_propose_change",
             args={"file_path": "hello.py"},
             file_digest=file_digest,
             cell_digest=cell_digest,
@@ -149,13 +149,13 @@ class TestMCPSecurityAndToolsWorkspace:
 
     def test_mcp_execute_tool_with_workspace_object(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
-        result = execute_tool("soma_list_cells", {"workspace": ws})
+        result = execute_tool("aegis_list_cells", {"workspace": ws})
         data = json.loads(result) if isinstance(result, str) else result
         assert isinstance(data, list)
         assert any(c.get("name") == "sample-rule" or c.get("_name") == "sample_rule" for c in data)
 
     def test_mcp_server_canonical_workspace_type(self, monkeypatch, mock_soma_workspace: Path):
-        from soma_mcp import server
+        from aegis_mcp import server
         ws = Workspace.confine(mock_soma_workspace)
         monkeypatch.setattr(server, "_canonical_workspace", ws)
         # Verify _state_digests uses Workspace cleanly

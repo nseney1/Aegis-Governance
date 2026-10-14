@@ -11,7 +11,7 @@ from pathlib import Path
 
 from conftest import REPO_ROOT, require_bash, run
 
-from soma_core.enforcement import generate_precommit_check
+from aegis_core.enforcement import generate_precommit_check
 
 
 def test_cell_enforce_empty_target_patterns_bash_syntax(tmp_path):
@@ -37,7 +37,7 @@ def test_cell_enforce_empty_target_patterns_bash_syntax(tmp_path):
 
 def test_cell_enforce_handles_null_target_paths():
     """generate_precommit_check must handle target_paths=None without crashing."""
-    from soma_core.enforcement import generate_precommit_check
+    from aegis_core.enforcement import generate_precommit_check
     cell = {
         "_name": "test-null-targets",
         "type": "wall",

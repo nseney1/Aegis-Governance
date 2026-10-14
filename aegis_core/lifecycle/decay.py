@@ -165,7 +165,7 @@ def compute_cells_fitness(
     )
 
     total_sessions = 30
-    conf_path = ws.root / "soma.conf"
+    conf_path = ws.root / "aegis.conf"
     if conf_path.is_file():
         try:
             with open(conf_path, encoding="utf-8") as f:
@@ -175,7 +175,7 @@ def compute_cells_fitness(
         except Exception:
             pass
 
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     cell_files = glob.glob(os.path.join(str(cells_dir), "**", "*.md"), recursive=True)
     results = []
 

@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Mapping, Optional, Union
 
 from aegis_core.ast.drivers.python import parse_python_ast
 from aegis_core.ast.schema import NormalizedAST
-from aegis_core.errors import SomaError, SomaValidationError
+from aegis_core.errors import AegisError, AegisValidationError
 from aegis_core.workspace import Workspace, as_workspace
 
 __all__ = [
@@ -32,7 +32,7 @@ def _is_python_name(name: str) -> bool:
     return clean in _PYTHON_NAMES
 
 
-class ASTDriverError(SomaError):
+class ASTDriverError(AegisError):
     """Raised when an external AST driver execution fails."""
 
 

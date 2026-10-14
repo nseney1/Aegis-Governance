@@ -1,5 +1,5 @@
 ---
-id: wall-core-installers
+id: invariant-core-installers
 domain: correctness
 type: invariant
 enforcement: gate
@@ -26,10 +26,10 @@ tags:
 fitness:
   score: null
   impact_weight: 1.0
-  triggers: 57
-  true_positives: 5.3554
+  triggers: 58
+  true_positives: 5.3989
   false_positives: 7.0844
-  last_trigger_date: "2026-10-14T08:55:41Z"
+  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 The install flow is the first thing every user touches. Breakage here means

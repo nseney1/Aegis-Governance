@@ -1094,7 +1094,7 @@
       "affected_files": [
         "soma_mcp/cell_cache.py"
       ],
-      "regression_test": "tests/unit/mcp/test_cell_cache.py",
+      "regression_test": "tests/unit/mcp/test_rule_cache.py",
       "pattern": "Cryptographic integrity verification error caught and downgraded to empty or partial state",
       "changelog_ref": "v0.92.3"
     },

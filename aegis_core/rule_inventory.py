@@ -151,28 +151,15 @@ def _empty_inventory() -> CellInventory:
 
 
 def inventory_cells(workspace: str) -> CellInventory:
-    """Capture every ``.md`` below ``.aegis/rules`` or ``.soma/cells`` without following links.
+    """Capture every ``.md`` below ``.aegis/rules`` without following links.
 
     The returned content bytes are the same bytes used to calculate each entry
     digest and the aggregate fingerprint. Directory and file metadata are
     checked before and after capture so concurrent changes fail closed.
     """
     workspace_abs = os.path.abspath(os.fspath(workspace))
-    aegis_dir = os.path.join(workspace_abs, ".aegis")
-    aegis_rules_dir = os.path.join(aegis_dir, "rules")
-    soma_dir = os.path.join(workspace_abs, ".soma")
-    soma_rules_dir = os.path.join(soma_dir, "rules")
-    soma_cells_dir = os.path.join(soma_dir, "cells")
-
-    if os.path.isdir(aegis_rules_dir):
-        parent_dir = aegis_dir
-        cells_dir = aegis_rules_dir
-    elif os.path.isdir(soma_rules_dir):
-        parent_dir = soma_dir
-        cells_dir = soma_rules_dir
-    else:
-        parent_dir = soma_dir
-        cells_dir = soma_cells_dir
+    parent_dir = os.path.join(workspace_abs, ".aegis")
+    cells_dir = os.path.join(parent_dir, "rules")
 
     workspace_info = _optional_stat(workspace_abs)
     if workspace_info is None:

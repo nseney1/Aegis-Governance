@@ -9,8 +9,8 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from soma_sdk.hot_zones import BoostConfig, HotZoneReport
-from soma_core.defects import (
+from aegis_sdk.hot_zones import BoostConfig, HotZoneReport
+from aegis_core.defects import (
     proximity_alerts,
     threshold_sanity,
     run_diagnostic,

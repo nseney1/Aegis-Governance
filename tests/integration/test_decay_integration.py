@@ -10,8 +10,8 @@ import sys
 import subprocess
 import pytest
 
-from aegis_core.somayaml import parse_frontmatter
-from tests.helpers_cell import soma_workspace, write_cell_with_fitness
+from aegis_core.yaml import parse_frontmatter
+from tests.helpers_rule import soma_workspace, write_cell_with_fitness
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
@@ -28,7 +28,7 @@ class TestDecayIntegration:
 
     def test_tier_check_decays_counts_on_disk(self, soma_workspace):
         """After --tier-check --execute, the cell file should have decayed counts."""
-        cells_dir = soma_workspace / ".soma" / "cells"
+        cells_dir = soma_workspace / ".aegis" / "rules"
         write_cell_with_fitness(cells_dir, "high-count", "advisory", 100, 90, 10)
 
         result = subprocess.run(
@@ -50,13 +50,13 @@ class TestDecayIntegration:
     def test_frozen_champion_eventually_demotes(self, soma_workspace):
         """A gate-tier cell that stops being useful should eventually demote
         after enough tier-check cycles apply decay + see no new TPs."""
-        cells_dir = soma_workspace / ".soma" / "cells"
+        cells_dir = soma_workspace / ".aegis" / "rules"
 
         # Start with a cell that has a massive history but is now getting FPs
         # After decay, the FP rate will dominate
         write_cell_with_fitness(cells_dir, "stale-gate", "gate", 100, 95, 5)
 
-        escaped_log = soma_workspace / ".soma" / "metrics" / "escaped_defects.jsonl"
+        escaped_log = soma_workspace / ".aegis" / "metrics" / "escaped_defects.jsonl"
         import json
         escaped_log.write_text(
             json.dumps({"cell": "stale-gate", "defect": "test"}) + "\n"
@@ -79,7 +79,7 @@ class TestDecayIntegration:
 
     def test_tier_check_dry_run_does_not_decay(self, soma_workspace):
         """Dry run (no --execute) should NOT write decayed values to disk."""
-        cells_dir = soma_workspace / ".soma" / "cells"
+        cells_dir = soma_workspace / ".aegis" / "rules"
         write_cell_with_fitness(cells_dir, "dry-run-cell", "advisory", 100, 90, 10)
 
         result = subprocess.run(
@@ -98,7 +98,7 @@ class TestDecayIntegration:
     def test_tier_check_execute_idempotent_consecutive_runs(self, soma_workspace):
         """Running --tier-check --execute twice in a row should only decay once.
         The second run must read last_decay_epoch from disk and skip decay."""
-        cells_dir = soma_workspace / ".soma" / "cells"
+        cells_dir = soma_workspace / ".aegis" / "rules"
         write_cell_with_fitness(cells_dir, "idempotent-cell", "advisory", 100, 90, 10)
 
         cmd = [sys.executable, "-c",

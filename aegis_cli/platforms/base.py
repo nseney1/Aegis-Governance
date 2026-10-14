@@ -10,7 +10,72 @@ import shutil
 from typing import Any, Optional
 
 
-__all__ = ["PlatformAdapter", "PlatformInstallResult"]
+__all__ = ["PlatformAdapter", "PlatformInstallResult", "detect_platform", "get_rules_dir"]
+
+
+def detect_platform(project_root: Path | str) -> str:
+    """Detect the AI platform from directory markers.
+
+    Returns: 'gemini' | 'claude' | 'cursor' | 'copilot' | 'kiro' | 'unknown'
+    """
+    project_root = Path(project_root)
+
+    if (project_root / ".gemini").is_dir():
+        return "gemini"
+    if (project_root / ".claude").is_dir():
+        return "claude"
+    if (project_root / ".cursor").is_dir() or (project_root / ".cursorrules").is_file():
+        return "cursor"
+    if (project_root / ".github" / "copilot").is_dir() or (project_root / ".github" / "copilot-instructions.md").is_file():
+        return "copilot"
+    if (project_root / ".kiro").is_dir():
+        return "kiro"
+
+    return "unknown"
+
+
+def get_rules_dir(
+    platform: str,
+    home: Path | None = None,
+    project_root: Path | None = None,
+    local: bool = False,
+) -> Path:
+    """Return the target rules directory for the given platform."""
+    if home is None:
+        home = Path(os.environ.get("HOME") or Path.home())
+    home = Path(home)
+    if project_root is None:
+        project_root = Path.cwd()
+    project_root = Path(project_root)
+
+    if local:
+        local_dirs = {
+            "gemini": project_root / ".gemini" / "rules",
+            "claude": project_root / ".claude",
+            "cursor": project_root / ".cursor" / "rules",
+            "copilot": project_root / ".github" / "copilot",
+            "kiro": project_root / ".kiro" / "steering",
+        }
+        if platform not in local_dirs:
+            raise ValueError(
+                f"Unsupported platform: '{platform}'. "
+                f"Supported: {', '.join(sorted(local_dirs))}"
+            )
+        return local_dirs[platform]
+
+    dirs = {
+        "gemini": home / ".gemini" / "config" / "rules",
+        "claude": home / ".claude",
+        "cursor": home / ".cursor" / "rules",
+        "copilot": project_root / ".github" / "copilot",
+        "kiro": home / ".kiro" / "steering",
+    }
+    if platform not in dirs:
+        raise ValueError(
+            f"Unsupported platform: '{platform}'. "
+            f"Supported: {', '.join(sorted(dirs))}"
+        )
+    return dirs[platform]
 
 
 @dataclass
@@ -24,6 +89,7 @@ class PlatformInstallResult:
     skipped_files: list[Path] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
+
 
 
 class PlatformAdapter(ABC):

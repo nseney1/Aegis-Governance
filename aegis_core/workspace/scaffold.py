@@ -1,6 +1,6 @@
-"""Workspace scaffolding and initialization for Soma (Layer 0 Core).
+"""Workspace scaffolding and initialization for Aegis (Layer 0 Core).
 
-Creates canonical directory structure (.soma/cells/{walls,vacuoles,gates}, .soma/evidence, .soma/metrics).
+Creates canonical directory structure (.aegis/rules/{invariants,traps,gates}, .aegis/evidence, .aegis/metrics).
 Guards against bare git repositories.
 Strictly zero-dependency: uses only Python standard library.
 """
@@ -19,9 +19,9 @@ def scaffold_workspace(
     minimal: bool = False,
     dry_run: bool = False,
 ) -> list[Path]:
-    """Scaffold standard directory structure for Soma governance.
+    """Scaffold standard directory structure for Aegis governance.
 
-    Creates .soma/cells/ and .soma/evidence/ (and .soma/metrics/).
+    Creates .aegis/rules/ and .aegis/evidence/ (and .aegis/metrics/).
     Guards against bare git repositories.
     """
     if (
@@ -31,16 +31,16 @@ def scaffold_workspace(
         and not (root / ".git").exists()
     ):
         raise WorkspaceBareRepoError(
-            f"Cannot scaffold soma in a bare git repository: {root}"
+            f"Cannot scaffold aegis in a bare git repository: {root}"
         )
 
     dirs_to_create: list[Path] = [
-        cells_dir / "walls",
+        cells_dir / "invariants",
         evidence_dir,
     ]
     if not minimal:
         dirs_to_create.extend([
-            cells_dir / "vacuoles",
+            cells_dir / "traps",
             cells_dir / "gates",
             metrics_dir,
         ])

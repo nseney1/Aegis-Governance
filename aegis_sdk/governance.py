@@ -10,22 +10,24 @@ import warnings
 from pathlib import Path
 from typing import Any, Optional
 
-from aegis_core.cell_inventory import CellInventoryError, inventory_cells
+from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
 from aegis_core.yaml import parse_frontmatter
 from aegis_core.telemetry import EventConflictError, StaleGenerationError
 from aegis_core.workspace import Workspace
 
 TYPE_TRANSLATION_MAP: dict[str, str] = {
-    "safety-guard": "wall",
-    "learned-trap": "vacuole",
-    "agent-persona": "chloroplast",
-    "escalation-boundary": "membrane",
-    "contract-bridge": "plasmodesmata",
-    "wall": "wall",
-    "vacuole": "vacuole",
-    "chloroplast": "chloroplast",
-    "membrane": "membrane",
-    "plasmodesmata": "plasmodesmata",
+    "safety-guard": "invariant",
+    "learned-trap": "trap",
+    "agent-persona": "persona",
+    "escalation-boundary": "boundary",
+    "contract-bridge": "contract",
+    "invariant": "invariant",
+    "trap": "trap",
+    "persona": "persona",
+    "boundary": "boundary",
+    "contract": "contract",
+    "wall": "invariant",
+    "membrane": "boundary",
 }
 
 __all__ = ["Governance", "TYPE_TRANSLATION_MAP"]
@@ -34,7 +36,7 @@ VALID_SOURCES = ('ci', 'manual', 'mcp', 'session')
 
 
 class Governance:
-    """Soma governance interface.
+    """Aegis governance interface.
     
     Usage:
         from aegis_sdk import Governance
@@ -50,10 +52,11 @@ class Governance:
             project_root if isinstance(project_root, Workspace) else Workspace.resolve(project_root)
         )
         self.root: Path = self.workspace.root
-        self.cells_dir: Path = self.workspace.cells_dir
+        self.rules_dir: Path = self.workspace.rules_dir
+        self.cells_dir: Path = self.workspace.rules_dir
         self.metrics_dir: Path = self.workspace.metrics_dir
     
-    # === Cell & Rule Management ===
+    # === Rule & Rule Management ===
     
     def list_cells(self, cell_type: Optional[str] = None) -> list[dict[str, Any]]:
         """List immune cells, optionally filtered by cell_type or porcelain alias.
@@ -63,8 +66,8 @@ class Governance:
         distinguish an empty tree from an incomplete one.
         """
         try:
-            inventory = inventory_cells(str(self.root))
-        except CellInventoryError as exc:
+            inventory = inventory_rules(str(self.root))
+        except RuleInventoryError as exc:
             raise RuntimeError(str(exc)) from exc
 
         canonical_filter = TYPE_TRANSLATION_MAP.get(cell_type, cell_type) if cell_type else None
@@ -146,14 +149,14 @@ class Governance:
         """
         # I-03: Validate rule_id against active inventory (advisory warning)
         try:
-            inventory = inventory_cells(str(self.root))
+            inventory = inventory_rules(str(self.root))
             known_cells = {
                 Path(entry.relative_path).stem
                 for entry in inventory.entries
                 if Path(entry.relative_path).name != 'README.md'
             }
             if known_cells and rule_id not in known_cells:
-                warnings.warn(f"Cell '{rule_id}' not found in active inventory", UserWarning, stacklevel=2)
+                warnings.warn(f"Rule '{rule_id}' not found in active inventory", UserWarning, stacklevel=2)
         except Exception:
             pass
 
@@ -213,7 +216,7 @@ class Governance:
     def create_cell(
         self,
         hypothesis: str,
-        type: str = 'vacuole',
+        type: str = 'trap',
         target_paths: Optional[list[str]] = None,
         minimum_mode: str = 'breeze',
         tags: Optional[list[str]] = None,
@@ -238,7 +241,7 @@ class Governance:
     def create_rule(
         self,
         hypothesis: str,
-        type: str = 'vacuole',
+        type: str = 'trap',
         target_paths: Optional[list[str]] = None,
         minimum_mode: str = 'breeze',
         tags: Optional[list[str]] = None,
@@ -255,10 +258,12 @@ class Governance:
             cell_id=rule_id or cell_id,
         )
 
-    def parse_cell_file(self, filepath: str) -> tuple[dict, str]:
+    def parse_rule_file(self, filepath: str) -> tuple[dict, str]:
         """Parse a cell markdown file into (frontmatter_dict, body_text)."""
-        from aegis_sdk.cells import parse_cell_file
-        return parse_cell_file(filepath)
+        from aegis_sdk.rules import parse_rule_file
+        return parse_rule_file(filepath)
+
+    parse_rule_file = parse_rule_file
     
     def create_cell_from_description(
         self, description: str, domain: Optional[str] = None, cell_type: Optional[str] = None,
