@@ -66,7 +66,8 @@ def capture_insight(
         raise ValueError("insight must not be empty")
 
     ws_path = getattr(workspace, "root", workspace)
-    cells_dir = os.path.join(ws_path, ".aegis", "rules")
+    layout = WorkspaceLayout(ws_path)
+    cells_dir = str(layout.rules_dir)
     if os.path.isdir(cells_dir):
         cells = load_cells(cells_dir)
     else:
@@ -90,7 +91,7 @@ def capture_insight(
     }
 
     if scaffold_wall or wall_id:
-        wall_dir = os.path.join(ws_path, ".aegis", "rules", "walls")
+        wall_dir = str(layout.rules_dir / "walls")
         os.makedirs(wall_dir, exist_ok=True)
         if wall_id:
             clean_stem = wall_id.strip().lower()
@@ -115,7 +116,7 @@ def capture_insight(
         record["wall_file"] = wall_path
         record["wall_id"] = stem
 
-    jsonl_path = os.path.join(ws_path, ".aegis", "human_insights.jsonl")
+    jsonl_path = str(layout.human_insights_file)
     os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
     with open(jsonl_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
@@ -129,7 +130,7 @@ def cluster_insights(
     window_days: int = 30,
 ) -> list[dict]:
     """Read human insights and cluster by category within rolling window."""
-    jsonl_path = os.path.join(workspace, ".aegis", "human_insights.jsonl")
+    jsonl_path = str(WorkspaceLayout(getattr(workspace, "root", workspace)).human_insights_file)
     if not os.path.isfile(jsonl_path):
         return []
 
