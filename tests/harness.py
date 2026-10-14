@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
-from aegis_core.somayaml import dump_frontmatter, parse_cell_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_cell_frontmatter
 
 
 CELL_TYPE_DIRS = {
@@ -23,8 +23,8 @@ CELL_TYPE_DIRS = {
 }
 
 
-class SomaTestHarness:
-    """Isolated sandbox fixture for testing Soma Governance lifecycle, telemetry, and CLI."""
+class AegisTestHarness:
+    """Isolated sandbox fixture for testing Aegis Governance lifecycle, telemetry, and CLI."""
 
     def __init__(self, workspace: Path) -> None:
         self.workspace = Path(workspace).resolve()
@@ -123,7 +123,11 @@ class SomaTestHarness:
         )
 
 
+SomaTestHarness = AegisTestHarness
+
+
 __all__ = [
+    "AegisTestHarness",
     "CELL_TYPE_DIRS",
     "SomaTestHarness",
 ]

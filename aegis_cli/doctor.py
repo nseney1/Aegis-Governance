@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, TextIO
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_doctor", "DoctorCommand"]
 
@@ -39,7 +39,7 @@ def _check_python_version() -> bool:
 
 def _check_zero_dependencies() -> bool:
     """Verify that the frontmatter engine is operational with zero dependencies."""
-    from aegis_core.somayaml import parse_frontmatter
+    from aegis_core.yaml import parse_frontmatter
 
     test_fm = "---\nid: test\ntype: wall\n---\n"
     ok = parse_frontmatter(test_fm) == {"id": "test", "type": "wall"}
@@ -203,7 +203,7 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
     from aegis_core.ast.runner import resolve_driver_executable
 
     ws_root = Path(project_root or Path.cwd())
-    slots_path = ws_root / ".soma" / "slots.yaml"
+    slots_path = (ws_root / ".aegis" / "slots.yaml") if (ws_root / ".aegis" / "slots.yaml").exists() else (ws_root / ".soma" / "slots.yaml")
 
     detected_langs = detect_project_languages(ws_root)
     non_py_langs = {k: v for k, v in detected_langs.items() if k != "python"}
@@ -570,7 +570,7 @@ def run_doctor(args: argparse.Namespace) -> int:
     return 0 if all(results) else 1
 
 
-class DoctorCommand(SomaCommand):
+class DoctorCommand(AegisCommand):
     """Command for system health and governance audit."""
 
     name = "doctor"

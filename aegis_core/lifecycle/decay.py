@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 from typing import Any, Dict, Optional
 
-from aegis_core.somayaml import parse_frontmatter
+from aegis_core.yaml import parse_frontmatter
 from aegis_core.scoring import bayesian_posterior, bayesian_score, calculate_snr, laplace_score
 from aegis_core.workspace import Workspace, resolve_workspace
 from .constants import (

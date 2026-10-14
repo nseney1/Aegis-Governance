@@ -9,7 +9,7 @@ import re
 import shutil
 from typing import Any, Optional, Tuple
 
-from aegis_core.somayaml import parse_frontmatter
+from aegis_core.yaml import parse_frontmatter
 from aegis_core.workspace import Workspace
 from .constants import (
     TYPE_TO_DIR,

@@ -11,7 +11,7 @@ import shutil
 import sys
 from typing import Optional
 
-from aegis_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 from aegis_core.workspace import Workspace, resolve_workspace
 from .constants import (
     EXTINCTION_THRESHOLD,

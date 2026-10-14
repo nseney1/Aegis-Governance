@@ -21,7 +21,7 @@ import sys
 from typing import List, Optional, Union
 
 from aegis_core.workspace import Workspace, resolve_workspace
-from aegis_core.somayaml import parse_frontmatter
+from aegis_core.yaml import parse_frontmatter
 
 
 def resolve_metrics_dir(workspace: Path | str) -> Path:

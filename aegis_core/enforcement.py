@@ -294,7 +294,7 @@ def cli_verify_readme_claims(argv: Optional[List[str]] = None) -> int:
 def load_cells_for_enforcement(cells_dir: str | Path | Workspace) -> List[Dict[str, Any]]:
     """Load all cells for enforcement artifact generation."""
     cells = []
-    from aegis_core.somayaml import parse_frontmatter, _get_body
+    from aegis_core.yaml import parse_frontmatter, _get_body
 
     if isinstance(cells_dir, Workspace):
         c_dir = str(cells_dir.cells_dir)
@@ -562,7 +562,7 @@ def _parse_cell_frontmatter(filepath: str) -> Dict[str, Any]:
     except Exception:
         return {}
 
-    from aegis_core.somayaml import parse_frontmatter
+    from aegis_core.yaml import parse_frontmatter
     try:
         return parse_frontmatter(content) or {}
     except Exception:

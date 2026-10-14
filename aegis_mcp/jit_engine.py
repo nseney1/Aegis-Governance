@@ -48,7 +48,7 @@ def warn(message: str) -> None:
         pass
 
 
-from aegis_core.somayaml import (
+from aegis_core.yaml import (
     FrontmatterError,
     parse_yaml_subset,
     parse_frontmatter,

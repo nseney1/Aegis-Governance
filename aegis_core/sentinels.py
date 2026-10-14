@@ -17,7 +17,7 @@ import subprocess
 import sys
 from typing import Any
 
-from aegis_core.somayaml import parse_frontmatter, _get_body, dump_frontmatter
+from aegis_core.yaml import parse_frontmatter, _get_body, dump_frontmatter
 
 
 # ── Liveness Sentinel ──────────────────────────────────────────────────────

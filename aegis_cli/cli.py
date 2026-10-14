@@ -12,10 +12,10 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_cli.registry import get_default_registry
 
-__all__ = ["main", "SomaParser", "COMMANDS"]
+__all__ = ["main", "AegisParser", "SomaParser", "COMMANDS"]
 
 
 def _version() -> str:
@@ -41,7 +41,7 @@ def _version() -> str:
     return "unknown"
 
 
-class SomaParser(argparse.ArgumentParser):
+class AegisParser(argparse.ArgumentParser):
     """ArgumentParser ensuring global flags like plumbing default properly."""
 
     def format_help(self) -> str:
@@ -68,6 +68,9 @@ class SomaParser(argparse.ArgumentParser):
         if not hasattr(ns, "workspace"):
             ns.workspace = None
         return ns
+
+
+SomaParser = AegisParser
 
 
 def _build_parser(prog: str = "aegis") -> argparse.ArgumentParser:
@@ -98,7 +101,7 @@ def _build_parser(prog: str = "aegis") -> argparse.ArgumentParser:
                                help="Target workspace root")
 
     prog_title = "Aegis" if prog == "aegis" else "Soma"
-    parser = SomaParser(
+    parser = AegisParser(
         prog=prog,
         description=f"{prog_title} Governance — make AI coding agents trustworthy",
         parents=[common_parser],
@@ -106,7 +109,7 @@ def _build_parser(prog: str = "aegis") -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version",
                         version=f"{prog} {_version()}")
 
-    sub = parser.add_subparsers(dest="command", parser_class=SomaParser)
+    sub = parser.add_subparsers(dest="command", parser_class=AegisParser)
     get_default_registry().populate_subparsers(sub, common_parser=common_parser)
     return parser
 
@@ -147,9 +150,14 @@ def cmd_completion(args: argparse.Namespace) -> int:
     from aegis_cli.completion import run_completion
     return run_completion(args)
 
+def cmd_migrate(args: argparse.Namespace) -> int:
+    from aegis_cli.migrate import run_migrate
+    return run_migrate(args)
+
 
 COMMANDS = {
     "init": cmd_init,
+    "migrate": cmd_migrate,
     "status": cmd_status,
     "rules": cmd_status,
     "check": cmd_check,

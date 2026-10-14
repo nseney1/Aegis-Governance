@@ -13,7 +13,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_init", "InitCommand"]
 
@@ -614,7 +614,7 @@ def _install_claude_md(
     print(f"  📝 Updated {claude_md}")
 
 
-class InitCommand(SomaCommand):
+class InitCommand(AegisCommand):
     """Command to initialize governance for a project."""
 
     name = "init"

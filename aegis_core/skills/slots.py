@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, Mapping, Optional
 
 from aegis_core.errors import SomaValidationError
-from aegis_core.somayaml import SomaYAML
+from aegis_core.yaml import SomaYAML
 
 __all__ = ["SlotResolutionError", "SlotRegistry", "SLOT_REF_PATTERN"]
 

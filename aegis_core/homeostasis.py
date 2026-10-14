@@ -20,7 +20,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from aegis_core.workspace import resolve_workspace
-from aegis_core.somayaml import parse_frontmatter, _get_body
+from aegis_core.yaml import parse_frontmatter, _get_body
 
 # ── Signal Coherence & State Monitoring ───────────────────────────────────
 

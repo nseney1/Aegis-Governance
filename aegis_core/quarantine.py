@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
-from aegis_core.somayaml import parse_frontmatter
+from aegis_core.yaml import parse_frontmatter
 from aegis_core.storage import atomic_write_text
 
 QUARANTINE_DIR = "quarantine"

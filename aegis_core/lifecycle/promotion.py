@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, Optional
 
-from aegis_core.somayaml import dump_frontmatter, parse_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 from aegis_core.locking import workspace_lock
 from aegis_core.workspace import Workspace, resolve_workspace
 from .constants import (

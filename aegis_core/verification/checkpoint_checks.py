@@ -246,8 +246,9 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_outcomes.py")
     if parent_name == "hooks":
         candidates.append(test_dir / "test_hooks_lifecycle.py")
-    if stem == "somayaml":
+    if stem in ("somayaml", "yaml"):
         candidates.append(test_dir / "test_somayaml.py")
+        candidates.append(test_dir / "test_yaml.py")
 
     # 4. Flat root candidates
     candidates.append(test_dir / f"test_{stem}.py")
@@ -716,7 +717,7 @@ def check_paper_walls(root: Path, strict: bool = False) -> list[dict]:
     for wall_file in sorted(walls_dir.glob("*.md")):
         try:
             content = wall_file.read_text(encoding="utf-8")
-            from aegis_core.somayaml import parse_frontmatter
+            from aegis_core.yaml import parse_frontmatter
             meta = parse_frontmatter(content)
             if not isinstance(meta, dict):
                 issues.append({

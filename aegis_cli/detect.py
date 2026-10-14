@@ -15,7 +15,7 @@ from aegis_core.ast.detect import (
 )
 from aegis_core.skills.slots import SlotRegistry
 from aegis_core.workspace import Workspace
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_detect", "DetectCommand"]
 
@@ -112,7 +112,7 @@ def run_detect(args: argparse.Namespace) -> int:
     return 0
 
 
-class DetectCommand(SomaCommand):
+class DetectCommand(AegisCommand):
     """Command to inspect project languages and AST driver configuration."""
 
     name = "detect"

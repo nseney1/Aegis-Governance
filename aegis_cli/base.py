@@ -6,19 +6,19 @@ import argparse
 from enum import Enum
 from typing import Optional, Tuple
 
-__all__ = ["CommandCategory", "SomaCommand"]
+__all__ = ["CommandCategory", "AegisCommand", "SomaCommand"]
 
 
 class CommandCategory(str, Enum):
-    """Categorical grouping for Soma commands in help screens and documentation."""
+    """Categorical grouping for Aegis commands in help screens and documentation."""
     SETUP = "Setup & Environment"
     WORKFLOW = "Daily Workflow & Verification"
     LIFECYCLE = "Rule Evolution & Intelligence"
     PLUMBING = "Plumbing & Swarm Protocol"
 
 
-class SomaCommand(ABC):
-    """Abstract Base Class defining the lifecycle contract for all Soma CLI subcommands."""
+class AegisCommand(ABC):
+    """Abstract Base Class defining the lifecycle contract for all Aegis CLI subcommands."""
 
     name: str
     aliases: Tuple[str, ...] = ()
@@ -39,3 +39,6 @@ class SomaCommand(ABC):
     def execute(self, args: argparse.Namespace) -> int:
         """Execute command logic. Common options are pre-handled by the dispatcher."""
         ...
+
+
+SomaCommand = AegisCommand

@@ -90,7 +90,7 @@ def validate_workspace_path(
     soma_cells = os.path.join(resolved, ".soma", "cells")
     soma_rules = os.path.join(resolved, ".soma", "rules")
     if not (os.path.isdir(aegis_rules) or os.path.isdir(aegis_cells) or os.path.isdir(soma_cells) or os.path.isdir(soma_rules)):
-        raise WorkspaceError(f"not a valid Aegis workspace (missing .soma/cells or .aegis/rules): {resolved}")
+        raise WorkspaceError(f"not a valid Aegis workspace (not a valid Soma workspace: missing .soma/cells or .aegis/rules): {resolved}")
 
     return Path(resolved)
 

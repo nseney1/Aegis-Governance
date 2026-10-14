@@ -14,7 +14,7 @@ from aegis_cli.hooks.management import (
     run_hook_uninstall,
 )
 from aegis_cli.hooks.safety import _find_gate_log_dir, run_safety_gate
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_hook", "HookCommand", "run_pre_commit", "run_pre_invocation", "run_session_close"]
 
@@ -402,7 +402,7 @@ def run_hook(args: Any) -> int:
         return 1
 
 
-class HookCommand(SomaCommand):
+class HookCommand(AegisCommand):
     """Command to manage and run cross-platform lifecycle hooks."""
 
     name = "hook"

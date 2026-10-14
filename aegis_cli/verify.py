@@ -11,7 +11,7 @@ import subprocess
 import sys
 from typing import Any
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_verify", "VerifyCommand"]
 
@@ -615,7 +615,7 @@ def run_verify(args: argparse.Namespace) -> int:
     return 0
 
 
-class VerifyCommand(SomaCommand):
+class VerifyCommand(AegisCommand):
     """Command to run verification on changed files."""
 
     name = "verify"
