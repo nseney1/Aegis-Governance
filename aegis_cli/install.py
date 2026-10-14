@@ -5,7 +5,7 @@ import argparse
 import sys
 from typing import Optional
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_install", "run_uninstall", "InstallCommand", "UninstallCommand"]
 
@@ -80,7 +80,7 @@ def run_uninstall(args: argparse.Namespace) -> int:
         return 1
 
 
-class InstallCommand(SomaCommand):
+class InstallCommand(AegisCommand):
     """Command to install Soma governance rules and configuration."""
 
     name = "install"
@@ -110,7 +110,7 @@ class InstallCommand(SomaCommand):
         return run_install(args)
 
 
-class UninstallCommand(SomaCommand):
+class UninstallCommand(AegisCommand):
     """Command to uninstall Soma governance rules and configuration."""
 
     name = "uninstall"

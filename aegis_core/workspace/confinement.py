@@ -86,10 +86,11 @@ def validate_workspace_path(
         raise WorkspaceNotFoundError(f"workspace does not exist or is not a directory: {resolved}")
 
     aegis_rules = os.path.join(resolved, ".aegis", "rules")
+    aegis_cells = os.path.join(resolved, ".aegis", "cells")
     soma_cells = os.path.join(resolved, ".soma", "cells")
     soma_rules = os.path.join(resolved, ".soma", "rules")
-    if not (os.path.isdir(aegis_rules) or os.path.isdir(soma_cells) or os.path.isdir(soma_rules)):
-        raise WorkspaceError(f"not a valid Soma workspace (missing .soma/cells/ or .aegis/rules/): {resolved}")
+    if not (os.path.isdir(aegis_rules) or os.path.isdir(aegis_cells) or os.path.isdir(soma_cells) or os.path.isdir(soma_rules)):
+        raise WorkspaceError(f"not a valid Aegis workspace (not a valid Soma workspace: missing .soma/cells or .aegis/rules): {resolved}")
 
     return Path(resolved)
 

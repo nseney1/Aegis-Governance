@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 
@@ -316,9 +317,8 @@ def persist_jobs_state(workspace: str) -> str:
     from aegis_core.storage import atomic_write_text
 
     ws = Path(workspace).resolve()
-    soma_dir = ws / ".soma"
-    soma_dir.mkdir(parents=True, exist_ok=True)
-    state_file = soma_dir / "jobs_state.json"
+    state_file = _resolve_jobs_state_file(ws)
+    state_file.parent.mkdir(parents=True, exist_ok=True)
 
     with _JOBS_LOCK:
         data = {jid: j.to_dict() for jid, j in _JOBS.items()}
@@ -327,13 +327,23 @@ def persist_jobs_state(workspace: str) -> str:
     return str(state_file)
 
 
+def _resolve_jobs_state_file(ws: Path) -> Path:
+    if (ws / ".aegis" / "jobs_state.json").is_file():
+        return ws / ".aegis" / "jobs_state.json"
+    if (ws / ".soma" / "jobs_state.json").is_file():
+        return ws / ".soma" / "jobs_state.json"
+    if (ws / ".aegis").is_dir() or not (ws / ".soma").is_dir():
+        return ws / ".aegis" / "jobs_state.json"
+    return ws / ".soma" / "jobs_state.json"
+
+
 def restore_jobs_state(workspace: str) -> list[VerificationJob]:
-    """Load previously persisted jobs from .soma/jobs_state.json into memory."""
+    """Load previously persisted jobs from .aegis/jobs_state.json or .soma/jobs_state.json into memory."""
     import json
     from pathlib import Path
     from aegis_core.storage import read_text_utf8
 
-    state_file = Path(workspace).resolve() / ".soma" / "jobs_state.json"
+    state_file = _resolve_jobs_state_file(Path(workspace).resolve())
     if not state_file.exists():
         return []
 

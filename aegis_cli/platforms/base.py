@@ -43,10 +43,10 @@ class PlatformAdapter(ABC):
         """Locate genome rules in repository workspace or bundled starter_rules."""
         rules_dir = (self.workspace / "rules") if (self.workspace / "rules").is_dir() else (self.workspace / "genome")
         if rules_dir.is_dir():
-            rules = [p for p in rules_dir.glob("*.md") if p.name not in {"META.md", "README.md"}]
+            rules = [p for p in rules_dir.glob("*.md") if p.name not in {"README.md"}]
             oracles_dir = rules_dir / ".oracles"
             if oracles_dir.is_dir():
-                rules.extend([p for p in oracles_dir.glob("*.md") if p.name not in {"META.md", "README.md"}])
+                rules.extend([p for p in oracles_dir.glob("*.md") if p.name not in {"README.md"}])
             if rules:
                 return sorted(rules)
         try:
@@ -54,12 +54,12 @@ class PlatformAdapter(ABC):
             pkg = importlib.resources.files("aegis_cli") / "starter_rules"
             pkg_path = Path(str(pkg))
             if pkg_path.is_dir():
-                return sorted([p for p in pkg_path.glob("*.md") if p.name not in {"META.md", "README.md"}])
+                return sorted([p for p in pkg_path.glob("*.md") if p.name not in {"README.md"}])
         except Exception:
             pass
         fallback = Path(__file__).resolve().parent.parent / "starter_rules"
         if fallback.is_dir():
-            return sorted([p for p in fallback.glob("*.md") if p.name not in {"META.md", "README.md"}])
+            return sorted([p for p in fallback.glob("*.md") if p.name not in {"README.md"}])
         return []
 
     def get_source_skills(self) -> list[Path]:

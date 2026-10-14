@@ -225,9 +225,10 @@ class TestOutcomesAndSyncWorkspaceInteroperability:
             test_passed=True,
             commit_sha="abcdef123456",
         )
-        assert "matched_cells" in report
+        assert "matched_rules" in report
         assert "summary" in report
-        assert "Soma CI Outcome Report" in report["summary"]
+        assert "Aegis CI Outcome Report" in report["summary"]
+
 
     def test_verify_registry_and_claims_with_workspace_instance(self, mock_soma_workspace: Workspace):
         # Regression tests on empty registry

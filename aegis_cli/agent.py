@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.workspace import Workspace
 
 __all__ = ["run_agent", "AgentCommand"]
@@ -113,7 +113,7 @@ def _run_agent_record(args: argparse.Namespace, ws: Workspace) -> int:
     return 0
 
 
-class AgentCommand(SomaCommand):
+class AgentCommand(AegisCommand):
     """Headless machine-to-machine subcommands for agents and MCP."""
 
     name = "agent"

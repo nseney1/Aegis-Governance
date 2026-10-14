@@ -42,8 +42,9 @@ class CellCache:
     def _compute_manifest_state_digest(workspace: str) -> str:
         """Compute SHA-256 of manifest.json and manifest.key if they exist."""
         import hashlib
+        from aegis_mcp.integrity import _manifest_path, _key_path
         h = hashlib.sha256()
-        manifest_path = os.path.join(workspace, ".soma", "cells", "manifest.json")
+        manifest_path = _manifest_path(workspace)
         if os.path.isfile(manifest_path):
             try:
                 with open(manifest_path, "rb") as f:
@@ -53,7 +54,7 @@ class CellCache:
         else:
             h.update(b"no-manifest")
 
-        key_path = os.path.join(workspace, ".soma", "keys", "manifest.key")
+        key_path = _key_path(workspace)
         if os.path.isfile(key_path):
             try:
                 with open(key_path, "rb") as f:
@@ -146,15 +147,16 @@ class CellCache:
         """Preserve optional manifest diagnostics without affecting cell bytes."""
         from aegis_mcp.jit_engine import warn
 
-        cells_dir = os.path.join(workspace, ".soma", "cells")
-        manifest_path = os.path.join(cells_dir, "manifest.json")
         try:
             from aegis_mcp.integrity import (
+                _manifest_path,
                 load_manifest,
                 verify_manifest,
                 load_key,
                 verify_signature,
             )
+            manifest_path = _manifest_path(workspace)
+            cells_dir = os.path.dirname(manifest_path)
             key = load_key(workspace)
             manifest = load_manifest(workspace)
             if key is None and manifest is None:

@@ -6,19 +6,20 @@ Only the current minor release line receives security fixes. Fixes land on `deve
 
 | Version | Supported |
 |:--------|:---------:|
-| 2.0.x | ✅ |
-| < 2.0 | ❌ |
+| 2.1.x | ✅ |
+| < 2.1 | ❌ |
 
 ## Reporting a Vulnerability
 
 Please **do not open a public issue** for a suspected vulnerability.
 
-Report it privately through GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability** (<https://github.com/nseney1/Soma-Governance/security/advisories/new>). The report stays visible only to you and the maintainers.
+Report it privately through GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability** (<https://github.com/nseney1/Aegis-Guardrails/security/advisories/new>). The report stays visible only to you and the maintainers.
+
 
 > [!NOTE]
 > This channel works only after the maintainer enables *Private vulnerability reporting* under **Settings → Code security** for the repository. If the button is missing, open a public issue that asks for a private contact channel, without any vulnerability details.
 
-Include, where you can: the affected version (`VERSION` or `pip show aegis-governance`), OS and shell, the component (installer, MCP server, CLI), reproduction steps or a proof of concept, and the impact you observed.
+Include, where you can: the affected version (`VERSION` or `pip show aegis-guardrails`), OS and shell, the component (installer, MCP server, CLI), reproduction steps or a proof of concept, and the impact you observed.
 
 **What to expect.** Aegis is maintained by Nicholas Seney, so these are goals, not guarantees:
 

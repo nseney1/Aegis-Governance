@@ -10,7 +10,7 @@ import sys
 import tempfile
 from typing import Optional
 
-from aegis_core.somayaml import parse_frontmatter, parse_yaml_subset
+from aegis_core.yaml import parse_frontmatter, parse_yaml_subset
 from aegis_core.workspace import Workspace, as_workspace
 
 __all__ = ["commit_insight_cursor", "capture_human_insight_signals", "read_human_insight_signals"]

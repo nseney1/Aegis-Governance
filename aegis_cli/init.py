@@ -13,7 +13,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_init", "InitCommand"]
 
@@ -172,8 +172,8 @@ _hook_block = generate_hook_block
 # ── Installation ────────────────────────────────────────────────────────────
 
 def check_existing_install(project_root: Path) -> bool:
-    """Check if Soma is already installed in this project."""
-    return (Path(project_root) / ".soma").is_dir()
+    """Check if Aegis or Soma is already installed in this project."""
+    return (Path(project_root) / ".aegis").is_dir() or (Path(project_root) / ".soma").is_dir()
 
 
 def _get_soma_root() -> Path:
@@ -614,7 +614,7 @@ def _install_claude_md(
     print(f"  📝 Updated {claude_md}")
 
 
-class InitCommand(SomaCommand):
+class InitCommand(AegisCommand):
     """Command to initialize governance for a project."""
 
     name = "init"

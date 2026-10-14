@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from aegis_core.skills.graph import SkillGraph
 from aegis_core.skills.handoff import soma_handoff
 from aegis_core.skills.slots import SlotRegistry
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_skill", "run_handoff", "SkillCommand", "HandoffCommand"]
 
@@ -122,7 +122,7 @@ def run_handoff(args: argparse.Namespace) -> int:
         return 1
 
 
-class SkillCommand(SomaCommand):
+class SkillCommand(AegisCommand):
     """Command to manage and inspect horizontal skills and slots."""
 
     name = "skill"
@@ -144,7 +144,7 @@ class SkillCommand(SomaCommand):
         return run_skill(args)
 
 
-class HandoffCommand(SomaCommand):
+class HandoffCommand(AegisCommand):
     """Command to execute file-buffered swarm handoff between skills."""
 
     name = "handoff"

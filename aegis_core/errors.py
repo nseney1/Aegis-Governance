@@ -1,13 +1,13 @@
-"""Standardized typed exception hierarchy for Soma-Governance."""
+"""Standardized typed exception hierarchy for Aegis-Governance."""
 from __future__ import annotations
 
 from typing import Any
 
 
-class SomaError(Exception):
-    """Root domain exception for all soma operations."""
+class AegisError(Exception):
+    """Root domain exception for all Aegis operations."""
 
-    def __init__(self, message: str = "", code: str = "ERR_SOMA", **kwargs: Any) -> None:
+    def __init__(self, message: str = "", code: str = "ERR_AEGIS", **kwargs: Any) -> None:
         super().__init__(message)
         self.message = message
         self.code = code
@@ -18,28 +18,40 @@ class SomaError(Exception):
         return self.message if self.message else super().__str__()
 
 
-class SomaValidationError(SomaError, ValueError):
-    """Raised when data validation fails against Soma contracts or schemas."""
+SomaError = AegisError
+
+
+class AegisValidationError(AegisError, ValueError):
+    """Raised when data validation fails against Aegis contracts or schemas."""
 
     def __init__(self, message: str = "", code: str = "VALIDATION_ERROR", **kwargs: Any) -> None:
         super().__init__(message, code=code, **kwargs)
 
 
-class CellCorruptError(SomaError):
-    """Raised when a cell frontmatter or body is malformed or unparseable."""
+SomaValidationError = AegisValidationError
+
+
+class RuleCorruptError(AegisError):
+    """Raised when a rule frontmatter or body is malformed or unparseable."""
 
     def __init__(
         self,
         message: str = "",
         cell_id: str | None = None,
-        code: str = "CELL_CORRUPT",
+        rule_id: str | None = None,
+        code: str = "RULE_CORRUPT",
         **kwargs: Any,
     ) -> None:
-        super().__init__(message, code=code, cell_id=cell_id, **kwargs)
-        self.cell_id = cell_id
+        actual_id = rule_id or cell_id
+        super().__init__(message, code=code, cell_id=actual_id, rule_id=actual_id, **kwargs)
+        self.cell_id = actual_id
+        self.rule_id = actual_id
 
 
-class ReceiptExpiredError(SomaError, KeyError):
+CellCorruptError = RuleCorruptError
+
+
+class ReceiptExpiredError(AegisError, KeyError):
     """Raised when a receipt is expired or not found."""
 
     def __init__(
@@ -53,7 +65,7 @@ class ReceiptExpiredError(SomaError, KeyError):
         self.receipt_id = receipt_id
 
 
-class LockTimeoutError(SomaError, TimeoutError):
+class LockTimeoutError(AegisError, TimeoutError):
     """Raised when a workspace lock cannot be acquired within the timeout period."""
 
     def __init__(
@@ -67,7 +79,7 @@ class LockTimeoutError(SomaError, TimeoutError):
         self.resource = resource
 
 
-class WorkspaceError(SomaValidationError):
+class WorkspaceError(AegisValidationError):
     """Raised when workspace resolution, confinement, or structure fails."""
 
     def __init__(self, message: str = "", code: str = "ERR_WORKSPACE", **kwargs: Any) -> None:
@@ -110,7 +122,7 @@ class WorkspaceBareRepoError(WorkspaceError):
         super().__init__(message, code=code, **kwargs)
 
 
-class NoTestRunnerFoundError(SomaError, RuntimeError):
+class NoTestRunnerFoundError(AegisError, RuntimeError):
     """Raised when tests are required but no pytest test runner can be discovered."""
 
     def __init__(
@@ -122,7 +134,7 @@ class NoTestRunnerFoundError(SomaError, RuntimeError):
         super().__init__(message, code=code, **kwargs)
 
 
-class InvalidHandoffPayloadError(SomaValidationError):
+class InvalidHandoffPayloadError(AegisValidationError):
     """Raised when an artifact payload violates its typed schema."""
 
     def __init__(
@@ -134,7 +146,7 @@ class InvalidHandoffPayloadError(SomaValidationError):
         super().__init__(message, code=code, **kwargs)
 
 
-class HandoffAuthorizationError(SomaError):
+class HandoffAuthorizationError(AegisError):
     """Raised when a producer skill/tier lacks authorization to emit an artifact."""
 
     def __init__(
@@ -147,6 +159,8 @@ class HandoffAuthorizationError(SomaError):
 
 
 __all__ = [
+    "AegisError",
+    "AegisValidationError",
     "CellCorruptError",
     "HandoffAuthorizationError",
     "InvalidHandoffPayloadError",
@@ -154,6 +168,7 @@ __all__ = [
     "NoTestRunnerFoundError",
     "PathTraversalError",
     "ReceiptExpiredError",
+    "RuleCorruptError",
     "SomaError",
     "SomaValidationError",
     "WorkspaceBareRepoError",

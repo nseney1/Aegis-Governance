@@ -3,9 +3,10 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aegis-governance"
-version = "2.0.0"
+name = "aegis-guardrails"
+version = "2.1.0"
 description = "Governance framework that makes AI coding agents trustworthy"
+
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
@@ -42,9 +43,11 @@ keyring = ["keyring>=23.0.0"]
 dev = ["pytest", "pytest-xdist>=3.5.0", "ruff", "hypothesis>=6.100.0", "coverage", "pyyaml", "anyio"]
 
 [project.urls]
-Homepage = "https://github.com/nseney1/Soma-Governance"
-Documentation = "https://github.com/nseney1/Soma-Governance/tree/main/docs"
-Changelog = "https://github.com/nseney1/Soma-Governance/blob/main/docs/project/CHANGELOG.md"
+Homepage = "https://github.com/nseney1/Aegis-Guardrails"
+Documentation = "https://github.com/nseney1/Aegis-Guardrails/tree/main/docs"
+Changelog = "https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/project/CHANGELOG.md"
+
+
 
 [tool.setuptools.packages.find]
 include = [

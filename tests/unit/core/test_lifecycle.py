@@ -441,3 +441,37 @@ class TestLifecycleBoundaries:
         assert len(candidates) == 1
         assert candidates[0]["cell_id"] == "dormant-90"
         assert candidates[0]["reason"] == "dormant"
+
+
+class TestModernRuleLifecycle:
+    """Lifecycle promotion and demotion for modern .aegis/rules/ types (trap <-> invariant)."""
+
+    def test_promote_trap_to_invariant_and_demote_invariant_to_trap(self, tmp_path):
+        from aegis_core.lifecycle import evaluate_promotions, evaluate_demotions
+
+        traps_dir = tmp_path / ".aegis" / "rules" / "traps"
+        inv_dir = tmp_path / ".aegis" / "rules" / "invariants"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
+        traps_dir.mkdir(parents=True)
+        inv_dir.mkdir(parents=True)
+        evidence_dir.mkdir(parents=True)
+
+        make_cell(str(traps_dir), "proven-trap", cell_type="trap", created_days_ago=45)
+        write_evidence(str(evidence_dir), "proven-trap", triggers=25, tp=23, fp=2)
+
+        make_cell(str(inv_dir), "noisy-invariant", cell_type="invariant", created_days_ago=45)
+        write_evidence(str(evidence_dir), "noisy-invariant", triggers=20, tp=4, fp=16)
+
+        promotions = evaluate_promotions(str(tmp_path))
+        assert len(promotions) == 1
+        assert promotions[0]["rule_id"] == "proven-trap"
+        assert promotions[0]["from_type"] == "trap"
+        assert promotions[0]["to_type"] == "invariant"
+
+        demotions = evaluate_demotions(str(tmp_path))
+        assert len(demotions) == 1
+        assert demotions[0]["rule_id"] == "noisy-invariant"
+        assert demotions[0]["from_type"] == "invariant"
+        assert demotions[0]["to_type"] == "trap"
+
+

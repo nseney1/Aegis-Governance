@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["CommandRegistry", "create_default_registry", "get_default_registry"]
 
@@ -13,10 +13,10 @@ class CommandRegistry:
     """Registry maintaining active Soma commands, aliases, and categorized discovery."""
 
     def __init__(self) -> None:
-        self._commands: Dict[str, SomaCommand] = {}
-        self._alias_map: Dict[str, SomaCommand] = {}
+        self._commands: Dict[str, AegisCommand] = {}
+        self._alias_map: Dict[str, AegisCommand] = {}
 
-    def register(self, command: Union[SomaCommand, type[SomaCommand]]) -> None:
+    def register(self, command: Union[AegisCommand, type[AegisCommand]]) -> None:
         """Register a command instance or class into the registry."""
         inst = command() if isinstance(command, type) else command
         self._commands[inst.name] = inst
@@ -24,15 +24,15 @@ class CommandRegistry:
         for alias in inst.aliases:
             self._alias_map[alias] = inst
 
-    def get(self, name_or_alias: str) -> Optional[SomaCommand]:
+    def get(self, name_or_alias: str) -> Optional[AegisCommand]:
         """Resolve a command by its primary name or alias."""
         return self._alias_map.get(name_or_alias)
 
-    def list_commands(self) -> List[SomaCommand]:
+    def list_commands(self) -> List[AegisCommand]:
         """Return all unique registered primary commands."""
         return list(self._commands.values())
 
-    def get_by_category(self, category: CommandCategory) -> List[SomaCommand]:
+    def get_by_category(self, category: CommandCategory) -> List[AegisCommand]:
         """Return all registered commands belonging to a specific category."""
         return [c for c in self._commands.values() if c.category == category]
 
@@ -119,6 +119,7 @@ def create_default_registry() -> CommandRegistry:
 
     # Category 1: Setup & Environment
     from aegis_cli.init import InitCommand
+    from aegis_cli.migrate import MigrateCommand
     from aegis_cli.system import SystemCommand
 
     # Category 2: Daily Workflow & Verification
@@ -135,6 +136,7 @@ def create_default_registry() -> CommandRegistry:
 
     for cmd_cls in (
         InitCommand,
+        MigrateCommand,
         SystemCommand,
         CheckCommand,
         StatusCommand,

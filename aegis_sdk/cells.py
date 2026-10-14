@@ -15,7 +15,7 @@ yaml = None  # Backward-compatible sentinel: zero-dependency runtime
 
 
 def _stdlib_parse_frontmatter(yaml_text: str) -> dict:
-    from aegis_core.somayaml import parse_yaml_subset, FrontmatterError
+    from aegis_core.yaml import parse_yaml_subset, FrontmatterError
     try:
         res = parse_yaml_subset(yaml_text)
         if not isinstance(res, dict):
@@ -194,7 +194,7 @@ def parse_cell_file(filepath: str) -> Tuple[dict, str]:
     if not os.path.isfile(filepath):
         raise CellNotFoundError(f"Cell file not found: {filepath}")
 
-    from aegis_core.somayaml import parse_cell_frontmatter
+    from aegis_core.yaml import parse_cell_frontmatter
     try:
         return parse_cell_frontmatter(filepath)
     except ValueError as exc:
@@ -213,7 +213,7 @@ def write_cell_frontmatter(
         frontmatter: Dict to serialize as YAML frontmatter.
         body: Markdown body text.
     """
-    from aegis_core.somayaml import dump_frontmatter
+    from aegis_core.yaml import dump_frontmatter
     yaml_text = dump_frontmatter(frontmatter)
 
     content = f"---\n{yaml_text.strip()}\n---\n"
@@ -348,7 +348,7 @@ parse_rule_file = parse_cell_file
 
 def dump_cell(frontmatter: dict, body: str = "") -> str:
     """Dump cell/rule dictionary and body to markdown with frontmatter."""
-    from aegis_core.somayaml import dump_frontmatter
+    from aegis_core.yaml import dump_frontmatter
     yaml_text = dump_frontmatter(frontmatter)
     content = f"---\n{yaml_text.strip()}\n---\n"
     if body:

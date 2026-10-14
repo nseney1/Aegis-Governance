@@ -11,44 +11,43 @@ from typing import Generic, Optional, TypeVar
 T = TypeVar('T')
 
 
-from aegis_core.errors import SomaError
+from aegis_core.errors import AegisError, SomaError
 
 
 __all__ = [
-    "SomaError",
     "AegisError",
-    "CellParseError",
+    "SomaError",
     "RuleParseError",
-    "CellNotFoundError",
+    "CellParseError",
     "RuleNotFoundError",
-    "CellPathTraversalError",
+    "CellNotFoundError",
     "RulePathTraversalError",
+    "CellPathTraversalError",
     "FitnessError",
     "ScoringError",
     "Result",
 ]
 
 
-class CellParseError(SomaError):
-    """Raised when a cell file cannot be parsed (missing/malformed frontmatter)."""
+class RuleParseError(AegisError):
+    """Raised when a rule file cannot be parsed (missing/malformed frontmatter)."""
 
 
-RuleParseError = CellParseError
+CellParseError = RuleParseError
 
 
-class CellNotFoundError(SomaError):
-    """Raised when a cell file does not exist."""
+class RuleNotFoundError(AegisError):
+    """Raised when a rule file does not exist."""
 
 
-RuleNotFoundError = CellNotFoundError
+CellNotFoundError = RuleNotFoundError
 
 
-class CellPathTraversalError(SomaError):
-    """Raised when a cell_id or path attempts directory traversal."""
+class RulePathTraversalError(AegisError):
+    """Raised when a rule_id or path attempts directory traversal."""
 
 
-RulePathTraversalError = CellPathTraversalError
-AegisError = SomaError
+CellPathTraversalError = RulePathTraversalError
 
 
 class FitnessError(SomaError):

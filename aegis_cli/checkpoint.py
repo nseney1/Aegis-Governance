@@ -25,7 +25,7 @@ from aegis_core.verification.checkpoint_checks import (
     CHECK_NAMES,
     run_all_checks,
 )
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_checkpoint", "CheckpointCommand"]
 
@@ -114,7 +114,7 @@ def run_checkpoint(args: argparse.Namespace) -> int:
     return exit_code
 
 
-class CheckpointCommand(SomaCommand):
+class CheckpointCommand(AegisCommand):
     """Command to run deterministic quality checks."""
 
     name = "checkpoint"

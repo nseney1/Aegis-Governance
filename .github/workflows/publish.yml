@@ -26,8 +26,9 @@ jobs:
     # so no long-lived API token exists. id-token is only for the upload step.
     environment:
       name: pypi
-      url: https://pypi.org/p/aegis-governance
+      url: https://pypi.org/p/aegis-guardrails
     permissions:
+
       contents: read
       id-token: write
     steps:

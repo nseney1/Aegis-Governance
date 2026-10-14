@@ -1,9 +1,37 @@
 # Changelog
 
-All notable changes to Soma are documented here.
+All notable changes to Aegis Guardrails are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [2.1.0] — 2026-10-14 — "Pure Aegis Unification, Migration Bridge & aegis-guardrails Cutover"
+
+### Package & Repository Cutover
+- **PyPI Package (`aegis-guardrails`) & Repository (`Aegis-Guardrails`)**:
+  - Updated `pyproject.toml` distribution package name to `aegis-guardrails` (`pip install aegis-guardrails`) and repository links to `https://github.com/nseney1/Aegis-Guardrails`.
+  - Updated `.github/workflows/publish.yml` OIDC Trusted Publisher target to `https://pypi.org/p/aegis-guardrails`.
+  - Updated `aegis_core/workspace/discovery.py`, `aegis_cli/cli.py`, and `aegis_mcp/server.py` to resolve `aegis-guardrails` metadata.
+
+### Workspace Migration Bridge (`aegis migrate`) & Modern Rule Taxonomy
+- **Interactive & Automated `.soma` $\rightarrow$ `.aegis` Migration (`aegis_cli/migrate.py`)**:
+  - Added `aegis migrate` (`--dry-run`, `--json`) to atomically migrate legacy `.soma/cells/` workspaces to `.aegis/rules/` (`invariants/`, `traps/`, `boundaries/`, `personas/`, `contracts/`).
+  - Rewrites legacy biological `type:` frontmatter (`vacuole` $\rightarrow$ `trap`, `wall` $\rightarrow$ `invariant`, `membrane` $\rightarrow$ `boundary`, `chloroplast` $\rightarrow$ `persona`, `plasmodesmata` $\rightarrow$ `contract`) during migration (`BUG-099`).
+- **Native Aegis Primitives (`AegisYAML`, `Rule`, `AegisError`, `AegisCommand`)**:
+  - Promoted `aegis_core/yaml.py` (`AegisYAML`, `AegisDocument`, `parse_rule_frontmatter`), `aegis_sdk/rules.py` (`Rule`, `RuleFitness`), `aegis_core/errors.py` (`AegisError`, `AegisValidationError`, `RuleCorruptError`), and `aegis_cli/base.py` (`AegisCommand`) to primary implementations while retaining v2.x compatibility aliases.
+
+### Runtime Engine & Governance Rule Wiring (`BUG-096`–`BUG-100`)
+- **Governance Rule Frontmatter & Platform Adapter Parity (`BUG-096`, `BUG-097`)**:
+  - Added required `trigger:` and `description:` frontmatter to `rules/META.md`, `rules/gitflow-review-gate.md`, `rules/core-change-protocol.md`, `rules/ci-green-before-release.md`, and `rules/no-pre-existing-excuse.md`.
+  - Removed the `META.md` exclusion filter in `aegis_cli/platforms/base.py:discover_rules()`.
+- **`.aegis/rules/` Engine Discovery (`BUG-098`, `BUG-100`)**:
+  - Updated `aegis_mcp/jit_engine.py`, `aegis_core/sentinels.py`, `aegis_core/metrics.py`, `aegis_core/lifecycle/`, `aegis_cli/hooks/runtime.py`, `aegis_cli/init.py`, and `aegis_core/enforcement.py` to discover `.aegis/rules/` and emit modern Aegis response keys (`relevant_rules`, `invariant_warnings`, `triggered_rules`, `matched_rules`, `rules_triggered`, `total_rules`, `invariant_strength`).
+
+## [2.0.0] — 2026-10-14 — "Soma-to-Aegis Unification & Architecture Rebrand"
+
+### Architectural Rebrand
+- Renamed core packages to `aegis_core`, `aegis_cli`, `aegis_mcp`, and `aegis_sdk` with `aegis_core/compat.py` import hooks preserving `soma_*` backwards compatibility across the v2.x line.
+- Consolidated `genome/` into `rules/` and `.soma/cells/` into `.aegis/rules/`.
 
 ## [1.5.1] — 2026-10-14 — "Subagent Delegation Governance & CI Supply Chain Hardening"
 

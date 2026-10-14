@@ -320,6 +320,36 @@ class TestPreCommitHook:
         rc = run_pre_commit(workspace=tmp_path, strict=False)
         assert rc == 0
 
+    def test_run_pre_commit_triggers_rules_in_aegis_rules_directory(self, tmp_path: Path, capsys):
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True)
+
+        inv_dir = tmp_path / ".aegis" / "rules" / "invariants"
+        inv_dir.mkdir(parents=True)
+        (inv_dir / "inv-src-guard.md").write_text(
+            "---\n"
+            "id: inv-src-guard\n"
+            "type: invariant\n"
+            "enforcement: gate\n"
+            "target_paths:\n"
+            "  - src/**/*.py\n"
+            "---\n"
+            "# Invariant Src Guard\n",
+            encoding="utf-8",
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        app_file = src_dir / "app.py"
+        app_file.write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "src/app.py"], cwd=tmp_path, check=True)
+
+        rc = run_pre_commit(workspace=tmp_path, strict=False, use_json=True)
+        assert rc == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+        assert "inv-src-guard" in data["triggered_rules"]
+
 
 class TestCliDispatch:
     """Test CLI and module dispatch for aegis hook."""
@@ -335,7 +365,7 @@ class TestCliDispatch:
         data = json.loads(proc.stdout.strip())
         assert data["decision"] == "force_ask"
 
-    def test_soma_cli_hook_subcommand(self):
+    def test_aegis_cli_hook_subcommand(self):
         proc = subprocess.run(
             [sys.executable, "-m", "aegis_cli", "hook", "safety-gate", "--cmd", "git status"],
             capture_output=True,
@@ -357,7 +387,8 @@ class TestCliDispatch:
         # stdout must be exclusively valid JSON with no banners or logs
         data = json.loads(proc.stdout.strip())
         assert data["status"] == "ok"
-        assert "triggered_cells" in data
+        assert "triggered_rules" in data
+
 
     def test_post_session_json_stdout_purity(self, tmp_path):
         transcript_file = tmp_path / "transcript.jsonl"

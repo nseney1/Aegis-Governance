@@ -146,13 +146,16 @@ def _server_version() -> str:
             pass
     try:
         from importlib.metadata import PackageNotFoundError, version
-        try:
-            return version("soma-governance")
-        except PackageNotFoundError:
-            pass
+        for pkg_name in ("aegis-guardrails", "aegis-governance", "soma-governance"):
+            try:
+                return version(pkg_name)
+            except PackageNotFoundError:
+                continue
     except ImportError:
         pass
     return "unknown"
+
+
 
 
 def send_response(response: Dict[str, Any]):

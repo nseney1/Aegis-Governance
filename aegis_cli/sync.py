@@ -15,7 +15,7 @@ import tempfile
 from typing import Optional
 
 from aegis_cli import resolve_root
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.evidence import aggregate_signals
 from aegis_core.sync import aggregate_evidence, sync_frontmatter
 
@@ -102,7 +102,7 @@ def run_sync(args: argparse.Namespace) -> int:
     return 0
 
 
-class SyncCommand(SomaCommand):
+class SyncCommand(AegisCommand):
     """Command to reconcile canonical JSONL evidence with cell frontmatter."""
 
     name = "sync"
