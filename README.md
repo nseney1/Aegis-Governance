@@ -6,6 +6,8 @@
 [![Architecture](https://img.shields.io/badge/Architecture-Pure_Python-blue?style=flat-square)](#-core-architecture)
 [![Version](https://img.shields.io/badge/Version-2.0.0-informational?style=flat-square)](docs/project/CHANGELOG.md)
 [![Zero Runtime Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen?style=flat-square)](#)
+[![Blog Post](https://img.shields.io/badge/Blog-dev.to-black?style=flat-square&logo=devdotto)](https://dev.to/nseney1/your-ai-agents-rules-file-is-a-gentlemans-agreement-heres-what-happens-when-you-build-2dml)
+[![M8ven Score](https://m8ven.ai/badge/mcp/nseney1-soma-governance-yv4xbk)](https://m8ven.ai/mcp/nseney1/soma-governance?s=readme)
 
 **Production-grade governance framework making AI coding agents trustworthy through observable, self-evolving constraints.**
 

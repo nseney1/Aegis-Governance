@@ -58,7 +58,7 @@ docs/postmortem-work-sessions.md
 .soma/enforcement/
 .soma/governance/
 .soma/metrics/
-.soma/evidence/
+.soma/keys/
 .soma/locks/
 .soma/human_insights.jsonl
 .aegis/rules/fitness.jsonl
@@ -69,7 +69,6 @@ docs/postmortem-work-sessions.md
 .aegis/governance/
 .aegis/metrics/
 .aegis/keys/
-.aegis/evidence/
 .aegis/locks/
 .aegis/human_insights.jsonl
 docs/internal/

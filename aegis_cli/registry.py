@@ -120,6 +120,7 @@ def create_default_registry() -> CommandRegistry:
     # Category 1: Setup & Environment
     from aegis_cli.init import InitCommand
     from aegis_cli.system import SystemCommand
+    from aegis_cli.install import InstallCommand, UninstallCommand
 
     # Category 2: Daily Workflow & Verification
     from aegis_cli.check import CheckCommand
@@ -136,6 +137,8 @@ def create_default_registry() -> CommandRegistry:
     for cmd_cls in (
         InitCommand,
         SystemCommand,
+        InstallCommand,
+        UninstallCommand,
         CheckCommand,
         StatusCommand,
         RuleCommand,
