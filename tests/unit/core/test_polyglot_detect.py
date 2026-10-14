@@ -89,14 +89,14 @@ def test_provision_ast_driver_slots(tmp_path: Path):
     assert "ast_driver_ts" in slots
 
     # Verify slots.yaml was created and readable by SlotRegistry
-    slots_file = tmp_path / ".soma" / "slots.yaml"
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
     assert slots_file.exists()
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".rs") is not None
     assert registry.get_ast_driver(".ts") is not None
 
-    # Verify driver files were staged in .soma/drivers/
-    drivers_dir = tmp_path / ".soma" / "drivers"
+    # Verify driver files were staged in .aegis/drivers/
+    drivers_dir = tmp_path / ".aegis" / "drivers"
     assert drivers_dir.is_dir()
     assert (drivers_dir / "ts_ast.js").exists()
     assert (drivers_dir / "rust_ast.py").exists()

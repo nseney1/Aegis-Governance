@@ -43,9 +43,9 @@ Test cell for sync tests.
 
 def _setup_workspace(tmp_path, cells, fitness_records, outcome_records=None):
     """Create a minimal .soma workspace with cells and evidence."""
-    cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True)
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True)
 
     for cell_id in cells:
@@ -133,7 +133,7 @@ class TestAggregateEvidence:
 
     def test_malformed_lines_skipped(self, tmp_path):
         """Malformed JSONL lines are skipped without crashing."""
-        evidence_dir = str(tmp_path / ".soma" / "evidence")
+        evidence_dir = str(tmp_path / ".aegis" / "evidence")
         os.makedirs(evidence_dir, exist_ok=True)
         with open(os.path.join(evidence_dir, "signals.jsonl"), "w") as f:
             f.write("not valid json\n")
@@ -164,7 +164,7 @@ class TestSyncFrontmatter:
         assert changes[0]["cell_id"] == "cell-a"
 
         # Verify file was updated
-        content = (tmp_path / ".soma" / "cells" / "vacuoles" / "cell-a.md").read_text()
+        content = (tmp_path / ".aegis" / "rules" / "vacuoles" / "cell-a.md").read_text()
         fm = parse_frontmatter(content)
         assert fm["fitness"]["triggers"] == 1
         assert fm["fitness"]["true_positives"] == 1
@@ -202,7 +202,7 @@ class TestSyncFrontmatter:
         assert len(changes) == 1  # reports the change
 
         # File should NOT be modified
-        content = (tmp_path / ".soma" / "cells" / "vacuoles" / "cell-a.md").read_text()
+        content = (tmp_path / ".aegis" / "rules" / "vacuoles" / "cell-a.md").read_text()
         fm = parse_frontmatter(content)
         assert fm["fitness"]["triggers"] == 0  # unchanged
 
@@ -241,7 +241,7 @@ class TestSyncFrontmatter:
     def test_sync_preserves_both_when_has_outcomes_is_false(self, tmp_path):
         """When ledger has only triggers (has_outcomes=False), tp and fp are preserved."""
         from aegis_sdk.cells import parse_cell_file
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
         cell_file = cells_dir / "cell-a.md"
         cell_file.write_text(
@@ -306,9 +306,9 @@ class TestRunSync:
 
     def test_no_evidence(self, tmp_path, capsys):
         """No evidence prints friendly message."""
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
 
         args = argparse.Namespace(dry_run=False, json=False)
         import aegis_cli.sync as sync_mod

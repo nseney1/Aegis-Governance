@@ -113,11 +113,3 @@ class TestWorkspaceLock:
             assert lock_file.exists()
             assert not (tmp_path / ".soma" / LOCK_DIRNAME / "rules.lock").exists()
 
-    def test_soma_workspace_lock_fallback(self, tmp_path: Path):
-        """Lock in a .soma workspace creates locks under .soma/locks."""
-        (tmp_path / ".soma").mkdir()
-        with workspace_lock(tmp_path, "cells", timeout_sec=1.0):
-            lock_file = tmp_path / ".soma" / LOCK_DIRNAME / "cells.lock"
-            assert lock_file.exists()
-            assert not (tmp_path / ".aegis" / LOCK_DIRNAME / "cells.lock").exists()
-

@@ -106,7 +106,7 @@ def create_cell(
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
     type_plural = VALID_TYPES[type_lower]
-    target_dir = ws.cells_dir / type_plural
+    target_dir = ws.rules_dir / type_plural
     target_dir.mkdir(parents=True, exist_ok=True)
 
     slug = generate_slug(hypothesis, id_override)
@@ -202,7 +202,7 @@ def create_cell_from_description(
     provider = resolve_provider(str(ws.root), provider_name)
 
     examples = []
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     if cells_dir.is_dir():
         for cell_file in cells_dir.rglob("*.md"):
             if cell_file.name == "README.md":
@@ -345,18 +345,18 @@ def transfer_cell(
     src_ws = source_workspace if isinstance(source_workspace, Workspace) else (
         Workspace(root=Path(source_workspace).resolve()) if source_workspace else Workspace.resolve()
     )
-    if not src_ws.cells_dir.is_dir():
-        print(f"Error: No Soma project found: no .soma/cells/ in {src_ws.root or os.getcwd()} or any parent directory.", file=sys.stderr)
-        print("Run from inside the source project, or set SOMA_ROOT to its root.", file=sys.stderr)
+    if not src_ws.rules_dir.is_dir():
+        print(f"Error: No Aegis project found: no .aegis/rules/ in {src_ws.root or os.getcwd()} or any parent directory.", file=sys.stderr)
+        print("Run from inside the source project, or set AEGIS_WORKSPACE to its root.", file=sys.stderr)
         return 1
 
     target_dir = Path(target_dir_str).resolve()
-    if not (target_dir / ".soma").is_dir():
-        print(f"Error: Target directory does not have a .soma/ directory: {target_dir}", file=sys.stderr)
+    if not (target_dir / ".aegis").is_dir():
+        print(f"Error: Target directory does not have a .aegis/ directory: {target_dir}", file=sys.stderr)
         return 1
 
     source_path = None
-    cells_dir = src_ws.cells_dir
+    cells_dir = src_ws.rules_dir
     for cand in cells_dir.rglob("*.md"):
         if cand.name == "README.md":
             continue
@@ -389,7 +389,7 @@ def transfer_cell(
         meta["lineage"] = lineage
 
     target_sub = source_path.parent.name
-    dest_dir = target_dir / ".soma" / "cells" / target_sub
+    dest_dir = target_dir / ".aegis" / "rules" / target_sub
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / source_path.name
     from aegis_core.yaml import _get_body

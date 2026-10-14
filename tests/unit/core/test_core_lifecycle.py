@@ -29,13 +29,13 @@ from aegis_core.lifecycle import (
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
-    """Create a minimal workspace with .soma/cells directories."""
-    (tmp_path / ".soma" / "cells" / "vacuoles").mkdir(parents=True)
-    (tmp_path / ".soma" / "cells" / "walls").mkdir(parents=True)
+    """Create a minimal workspace with .aegis/rules directories."""
+    (tmp_path / ".aegis" / "rules" / "vacuoles").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules" / "walls").mkdir(parents=True)
     (tmp_path / "genome").mkdir(parents=True)
-    (tmp_path / "soma_core").mkdir(parents=True)
-    (tmp_path / "soma_cli").mkdir(parents=True)
-    (tmp_path / "pyproject.toml").write_text('name = "soma-governance"\n', encoding="utf-8")
+    (tmp_path / "aegis_core").mkdir(parents=True)
+    (tmp_path / "aegis_cli").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text('name = "aegis-governance"\n', encoding="utf-8")
     return tmp_path
 
 
@@ -161,7 +161,7 @@ class TestCellPromoteAndDemote:
     """Verifies file movements and frontmatter updates for promotions and demotions."""
 
     def test_find_cell_file(self, workspace: Path):
-        vacuole = _create_cell_file(workspace / ".soma" / "cells" / "vacuoles" / "test-v.md", "test-v", "vacuole")
+        vacuole = _create_cell_file(workspace / ".aegis" / "rules" / "vacuoles" / "test-v.md", "test-v", "vacuole")
         found_path, found_type = find_cell_file(workspace, "test-v")
         assert found_path == vacuole
         assert found_type == "vacuole"
@@ -171,7 +171,7 @@ class TestCellPromoteAndDemote:
 
     def test_promote_vacuole_to_wall(self, workspace: Path):
         vacuole = _create_cell_file(
-            workspace / ".soma" / "cells" / "vacuoles" / "promote-me.md",
+            workspace / ".aegis" / "rules" / "vacuoles" / "promote-me.md",
             "promote-me", "vacuole", triggers=25, tp=24, fp=1
         )
         res = promote_cell(workspace, "promote-me", force=False)
@@ -183,14 +183,14 @@ class TestCellPromoteAndDemote:
         assert not vacuole.exists()
 
         # Wall path exists with updated frontmatter
-        wall_path = workspace / ".soma" / "cells" / "walls" / "promote-me.md"
+        wall_path = workspace / ".aegis" / "rules" / "walls" / "promote-me.md"
         assert wall_path.exists()
         content = wall_path.read_text(encoding="utf-8")
         assert "type: wall" in content
 
     def test_promote_wall_to_genome(self, workspace: Path):
         wall = _create_cell_file(
-            workspace / ".soma" / "cells" / "walls" / "wall-cell.md",
+            workspace / ".aegis" / "rules" / "walls" / "wall-cell.md",
             "wall-cell", "wall", triggers=30, tp=29, fp=1
         )
         res = promote_cell(workspace, "wall-cell", force=True)
@@ -205,13 +205,13 @@ class TestCellPromoteAndDemote:
         assert res["status"] == "already_terminal"
 
     def test_demote_wall_to_vacuole(self, workspace: Path):
-        wall = _create_cell_file(workspace / ".soma" / "cells" / "walls" / "demote-wall.md", "demote-wall", "wall")
+        wall = _create_cell_file(workspace / ".aegis" / "rules" / "walls" / "demote-wall.md", "demote-wall", "wall")
         res = demote_cell(workspace, "demote-wall")
         assert res["status"] == "demoted"
         assert res["from_type"] == "wall"
         assert res["to_type"] == "vacuole"
         assert not wall.exists()
-        vacuole_path = workspace / ".soma" / "cells" / "vacuoles" / "demote-wall.md"
+        vacuole_path = workspace / ".aegis" / "rules" / "vacuoles" / "demote-wall.md"
         assert vacuole_path.exists()
         assert "type: vacuole" in vacuole_path.read_text(encoding="utf-8")
 
@@ -223,7 +223,7 @@ class TestCellPromoteAndDemote:
 
     def test_promote_protected_rule_blocked(self, workspace: Path):
         _create_cell_file(
-            workspace / ".soma" / "cells" / "walls" / "providence.md",
+            workspace / ".aegis" / "rules" / "walls" / "providence.md",
             "providence", "wall", triggers=30, tp=29, fp=1
         )
         res = promote_cell(workspace, "providence", force=True)
@@ -244,11 +244,11 @@ class TestCellPromoteAndDemote:
 
     def test_demote_wall_cleans_enforcement_artifacts(self, workspace: Path):
         wall = _create_cell_file(
-            workspace / ".soma" / "cells" / "walls" / "guarded-cell.md",
+            workspace / ".aegis" / "rules" / "walls" / "guarded-cell.md",
             "guarded-cell", "wall"
         )
         # Create gate enforcement artifact
-        enf_dir = workspace / ".soma" / "enforcement"
+        enf_dir = workspace / ".aegis" / "enforcement"
         enf_dir.mkdir(parents=True)
         gate_script = enf_dir / "gate-guarded-cell.sh"
         gate_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")

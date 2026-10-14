@@ -27,9 +27,9 @@ class TestPromotionZeroTriggerGuard:
         from aegis_core.lifecycle import evaluate_promotions
         from tests.helpers_rule import make_cell
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "zero-cell", cell_type="vacuole", created_days_ago=60)
@@ -43,9 +43,9 @@ class TestPromotionZeroTriggerGuard:
         from aegis_core.lifecycle import evaluate_promotions
         from tests.helpers_rule import make_cell, write_evidence
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "high-cell", cell_type="vacuole", created_days_ago=60)

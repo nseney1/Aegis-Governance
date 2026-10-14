@@ -19,7 +19,7 @@ from aegis_mcp.tools import execute_tool
 def _setup_workspace(tmp_path):
     """Create a minimal workspace with cells for MCP tools."""
     ws = str(tmp_path)
-    cells_dir = os.path.join(ws, '.soma', 'cells', 'vacuoles')
+    cells_dir = os.path.join(ws, '.aegis', "rules", 'vacuoles')
     os.makedirs(cells_dir, exist_ok=True)
     # Create one cell
     fm = {
@@ -36,7 +36,7 @@ def _setup_workspace(tmp_path):
     genome_dir = os.path.join(ws, 'genome')
     os.makedirs(genome_dir, exist_ok=True)
     # Create insight log dir
-    os.makedirs(os.path.join(ws, '.soma', 'insights'), exist_ok=True)
+    os.makedirs(os.path.join(ws, '.aegis', 'insights'), exist_ok=True)
     return ws
 
 

@@ -25,7 +25,7 @@ class TestAppendSignal:
             metadata={'commit_sha': 'abc123'},
         )
 
-        log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+        log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
         assert log_path.exists(), f'Expected {log_path} to exist'
 
         lines = log_path.read_text(encoding='utf-8').strip().splitlines()
@@ -46,7 +46,7 @@ class TestAppendSignal:
         append_signal(workspace=workspace, cell_name='cell-a', signal_type='tp', source='ci')
         append_signal(workspace=workspace, cell_name='cell-b', signal_type='fp', source='session')
 
-        log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+        log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
         lines = log_path.read_text(encoding='utf-8').strip().splitlines()
         assert len(lines) == 2
 
@@ -55,14 +55,14 @@ class TestAppendSignal:
         assert records[1]['cell'] == 'cell-b'
 
     def test_creates_directories_if_missing(self, tmp_path):
-        """Parent directories (.soma/evidence/) are created automatically."""
+        """Parent directories (.aegis/evidence/) are created automatically."""
         from aegis_sdk.telemetry import append_signal
 
         workspace = str(tmp_path)
-        # No .soma/evidence/ exists yet
+        # No .aegis/evidence/ exists yet
         append_signal(workspace=workspace, cell_name='cell-x', signal_type='trigger', source='ci')
 
-        log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+        log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
         assert log_path.exists()
 
 
@@ -76,7 +76,7 @@ class TestSignalSchema:
         workspace = str(tmp_path)
         append_signal(workspace=workspace, cell_name='rule-1', signal_type='trigger', source='ci')
 
-        log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+        log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
         record = json.loads(log_path.read_text(encoding='utf-8').strip())
 
         required = {'timestamp', 'cell', 'signal', 'source'}
@@ -105,7 +105,7 @@ class TestSignalSchema:
         workspace = str(tmp_path)
         append_signal(workspace=workspace, cell_name='rule-1', signal_type='tp', source='session')
 
-        log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+        log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
         record = json.loads(log_path.read_text(encoding='utf-8').strip())
         # metadata should be empty dict or absent, not an error
         assert record.get('metadata') is None or isinstance(record.get('metadata'), dict)
@@ -137,7 +137,7 @@ class TestConcurrentAppend:
         for t in threads:
             t.join()
 
-        log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+        log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
         lines = log_path.read_text(encoding='utf-8').strip().splitlines()
         assert len(lines) == n_threads * n_per_thread, (
             f'Expected {n_threads * n_per_thread} records, got {len(lines)}'
@@ -154,7 +154,7 @@ class TestConcurrentAppend:
 # ── Idempotent event identity, evidence lock, generation fence ─────────
 
 def _signals(tmp_path):
-    log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+    log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
     if not log_path.exists():
         return []
     return [json.loads(l) for l in log_path.read_text(encoding='utf-8').splitlines() if l.strip()]
@@ -199,7 +199,7 @@ class TestIdempotentEventIdentity:
         from aegis_sdk.telemetry import append_signal
         first = append_signal(str(tmp_path), 'cell-a', 'tp', 'ci', metadata={'a': 1},
                               idempotency_scope='run-1', idempotency_key='op-1')
-        log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+        log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
         before = log_path.read_bytes()
         again = append_signal(str(tmp_path), 'cell-a', 'tp', 'ci', metadata={'a': 1},
                               idempotency_scope='run-1', idempotency_key='op-1')
@@ -209,7 +209,7 @@ class TestIdempotentEventIdentity:
     def test_same_key_different_signal_conflicts(self, tmp_path):
         from aegis_sdk.telemetry import append_signal, EventConflictError
         append_signal(str(tmp_path), 'cell-a', 'tp', 'ci', idempotency_key='op-1')
-        log_path = tmp_path / '.soma' / 'evidence' / 'signals.jsonl'
+        log_path = tmp_path / '.aegis' / 'evidence' / 'signals.jsonl'
         before = log_path.read_bytes()
         with pytest.raises(EventConflictError):
             append_signal(str(tmp_path), 'cell-a', 'fp', 'ci', idempotency_key='op-1')
@@ -254,7 +254,7 @@ class TestEvidenceLock:
     def test_lock_file_location(self, tmp_path):
         from aegis_sdk.telemetry import evidence_lock
         with evidence_lock(str(tmp_path)):
-            assert (tmp_path / '.soma' / 'evidence' / '.signals.lock').exists()
+            assert (tmp_path / '.aegis' / 'evidence' / '.signals.lock').exists()
 
     def test_append_waits_for_lock_holder(self, tmp_path):
         import time
@@ -301,10 +301,10 @@ class TestEvidenceLockIgnoredByGit:
         assert _repo_ignores(rel), f'{rel} is not git-ignored'
 
     @pytest.mark.parametrize('rel', [
-        '.soma/evidence/outcomes.jsonl',
-        '.soma/evidence/README.md',
-        '.soma/evidence/arbitration_cycle_2.json',
-        '.soma/evidence/.fitness.lock',
+        '.aegis/evidence/outcomes.jsonl',
+        '.aegis/evidence/README.md',
+        '.aegis/evidence/arbitration_cycle_2.json',
+        '.aegis/evidence/.fitness.lock',
     ])
     def test_tracked_evidence_is_not_ignored(self, rel):
         assert not _repo_ignores(rel), f'{rel} must stay committable'
@@ -319,21 +319,21 @@ class TestGenerationFence:
 
     def test_invalid_generation_file_defaults_to_one(self, tmp_path):
         from aegis_sdk.telemetry import append_signal
-        (tmp_path / '.soma').mkdir()
-        (tmp_path / '.soma' / 'epoch_generation').write_text('garbage')
+        (tmp_path / '.aegis').mkdir()
+        (tmp_path / '.aegis' / 'epoch_generation').write_text('garbage')
         assert append_signal(str(tmp_path), 'cell-a', 'tp', 'ci')['generation'] == 1
 
     def test_generation_read_from_file(self, tmp_path):
         from aegis_sdk.telemetry import append_signal
-        (tmp_path / '.soma').mkdir()
-        (tmp_path / '.soma' / 'epoch_generation').write_text('3\n')
+        (tmp_path / '.aegis').mkdir()
+        (tmp_path / '.aegis' / 'epoch_generation').write_text('3\n')
         rec = append_signal(str(tmp_path), 'cell-a', 'tp', 'ci', expected_generation=3)
         assert rec['generation'] == 3
 
     def test_stale_generation_rejected_without_write(self, tmp_path):
         from aegis_sdk.telemetry import append_signal, StaleGenerationError
-        (tmp_path / '.soma').mkdir()
-        (tmp_path / '.soma' / 'epoch_generation').write_text('2')
+        (tmp_path / '.aegis').mkdir()
+        (tmp_path / '.aegis' / 'epoch_generation').write_text('2')
         with pytest.raises(StaleGenerationError):
             append_signal(str(tmp_path), 'cell-a', 'tp', 'ci', expected_generation=1)
         assert _signals(tmp_path) == []
@@ -341,8 +341,8 @@ class TestGenerationFence:
 
     def test_migration_lock_still_blocks(self, tmp_path):
         from aegis_sdk.telemetry import append_signal
-        (tmp_path / '.soma').mkdir()
-        (tmp_path / '.soma' / 'migration.lock').touch()
+        (tmp_path / '.aegis').mkdir()
+        (tmp_path / '.aegis' / 'migration.lock').touch()
         with pytest.raises(RuntimeError, match='migration in progress'):
             append_signal(str(tmp_path), 'cell-a', 'tp', 'ci')
         assert _signals(tmp_path) == []

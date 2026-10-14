@@ -137,7 +137,7 @@ class TestMCPDualModeVerify:
         resp = _handle_verify_changes(args, gov=None)
         assert resp["status"] == "SHIP"
 
-        evidence_files = list((tmp_path / ".soma" / "evidence").glob("arbitration_cycle_*.json"))
+        evidence_files = list((tmp_path / ".aegis" / "evidence").glob("arbitration_cycle_*.json"))
         # Must write exactly 1 file (cycle 1), NOT duplicate with cycle 2
         assert len(evidence_files) == 1
         assert evidence_files[0].name == "arbitration_cycle_1.json"

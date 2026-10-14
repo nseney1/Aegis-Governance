@@ -22,7 +22,7 @@ __all__ = [
     "record_verification_telemetry",
 ]
 
-VERIFY_TIMEOUT = int(os.environ.get("SOMA_VERIFY_TIMEOUT", "60"))
+VERIFY_TIMEOUT = int(os.environ.get("AEGIS_VERIFY_TIMEOUT", "60"))
 
 
 def _run_verify(cmd: str, cwd: str, timeout: Optional[int] = None) -> Optional[dict]:
@@ -130,7 +130,7 @@ def capture_build_outcome(workspace: str) -> dict:
 
 
 def capture_mcp_outcomes(workspace: Workspace | Path | str) -> list[dict]:
-    """Read any soma_report_outcome calls from this session from .soma/evidence/signals.jsonl."""
+    """Read any aegis_report_outcome calls from this session from .aegis/evidence/signals.jsonl."""
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
@@ -193,7 +193,7 @@ def record_verification_telemetry(
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     if not cells_dir.is_dir():
         return False
 

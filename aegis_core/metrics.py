@@ -31,7 +31,7 @@ def resolve_metrics_dir(workspace: Path | str) -> Path:
     metrics_repo = os.environ.get("METRICS_REPO")
 
     ws = Path(workspace).resolve()
-    conf_path = ws / "soma.conf"
+    conf_path = ws / "aegis.conf"
     if (not team_repo or not metrics_repo) and conf_path.is_file():
         with open(conf_path, encoding="utf-8") as f:
             for line in f:
@@ -74,7 +74,7 @@ def compute_token_census(workspace: Workspace | Path | str | None = None, model:
     def _wc(text: str) -> int:
         return len(text.split())
 
-    if ws.is_soma_repo and rules_dir.is_dir():
+    if ws.is_aegis_repo and rules_dir.is_dir():
         for fpath in sorted(rules_dir.glob("*.md")):
             try:
                 content = fpath.read_text(encoding="utf-8")
@@ -200,7 +200,7 @@ def take_snapshot(
     waste_rate_avg = "18.8%"
 
     cells_count = 0
-    cells_dir = (ws / ".aegis" / "rules") if (ws / ".aegis" / "rules").is_dir() else (ws / ".soma" / "cells")
+    cells_dir = ws / ".aegis" / "rules"
     if cells_dir.is_dir():
         for f in cells_dir.rglob("*.md"):
             cells_count += 1
@@ -282,10 +282,7 @@ _QUORUM_MODES = {'breeze': 0, 'gale': 1, 'trident': 2, 'maelstrom': 3, 'tempest'
 
 def _resolve_rules_dir(workspace: str | Path) -> str:
     ws = Path(workspace)
-    aegis_rules = ws / ".aegis" / "rules"
-    if aegis_rules.is_dir():
-        return str(aegis_rules)
-    return str(ws / ".soma" / "cells")
+    return str(ws / ".aegis" / "rules")
 
 
 def _list_workspace_files(workspace: str) -> list[str]:
@@ -310,17 +307,12 @@ def evaluate_quorum(cells_dir: Path | str, changed_files: list[str], threshold: 
     cells_path = Path(cells_dir)
     if not cells_path.is_dir():
         aegis_cand = cells_path / ".aegis" / "rules"
-        soma_cand = cells_path / ".soma" / "cells"
         if aegis_cand.is_dir():
             cells_path = aegis_cand
-        elif soma_cand.is_dir():
-            cells_path = soma_cand
         else:
             return {'quorum': False, 'cells_triggered': 0, 'rules_triggered': 0}
     elif (cells_path / ".aegis" / "rules").is_dir():
         cells_path = cells_path / ".aegis" / "rules"
-    elif (cells_path / ".soma" / "cells").is_dir():
-        cells_path = cells_path / ".soma" / "cells"
 
     triggered = []
     for cell_file in cells_path.rglob("*.md"):

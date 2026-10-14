@@ -38,7 +38,7 @@ class TestInvariant1_LayerDecoupling:
     """Invariant 1: aegis_core must be strictly layered and never import upward."""
 
     def test_core_has_zero_upward_imports(self):
-        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "soma_core"
+        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "aegis_core"
         python_files = list(core_dir.glob("*.py"))
         assert len(python_files) > 0, "core files not found"
 
@@ -70,7 +70,7 @@ class TestInvariant2_SymbolAuthority:
     """Invariant 2: All symbols declared in __all__ across core modules must be resolvable."""
 
     def test_all_symbols_resolvable(self):
-        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "soma_core"
+        core_dir = REPO_ROOT / "aegis_core" if (REPO_ROOT / "aegis_core").exists() else REPO_ROOT / "aegis_core"
         pkg = "aegis_core" if (REPO_ROOT / "aegis_core").exists() else "soma_core"
         python_files = [f for f in core_dir.glob("*.py") if f.name != "__init__.py"]
 

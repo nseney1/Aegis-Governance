@@ -38,7 +38,7 @@ def test_doctor_returns_zero_in_valid_env(tmp_path, monkeypatch):
     """run_doctor returns 0 when every check is mocked to pass."""
     # Set up a fake project with a recognized platform and evidence dir
     (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".soma" / "evidence"
+    evidence = tmp_path / ".aegis" / "evidence"
     evidence.mkdir(parents=True)
 
     # Fake rules directory with at least one .md file
@@ -65,7 +65,7 @@ def test_doctor_returns_one_on_failure(tmp_path, monkeypatch):
     """Monkeypatch sys.version_info to (3, 8) and verify exit code 1."""
     # Even with a valid environment, a failing Python version check → exit 1
     (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".soma" / "evidence"
+    evidence = tmp_path / ".aegis" / "evidence"
     evidence.mkdir(parents=True)
 
     rules_dir = tmp_path / "rules"
@@ -105,13 +105,13 @@ def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, ca
          patch("aegis_cli.pathcheck.shutil.which", return_value=None):
         assert _check_cli_resolvable() is False
     out = capsys.readouterr().out
-    assert "soma CLI not found on PATH" in out
+    assert "aegis CLI not found on PATH" in out
     assert "~/.zshrc" in out
     assert "python3 -m soma_cli" in out
 
 
 def test_cli_check_silent_remedy_when_resolvable(capsys):
-    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"):
+    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/aegis"):
         assert _check_cli_resolvable() is True
     out = capsys.readouterr().out
     assert "export PATH" not in out
@@ -124,7 +124,7 @@ def test_check_ast_drivers_native_when_no_slots(tmp_path, capsys):
     assert "native Python stdlib" in out
 
     # slots.yaml exists, but no ast_driver slots
-    slots_file = tmp_path / ".soma" / "slots.yaml"
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
     slots_file.parent.mkdir(parents=True, exist_ok=True)
     slots_file.write_text("slots:\n  other_slot: foo\n")
     assert _check_ast_drivers(tmp_path) is True
@@ -134,7 +134,7 @@ def test_check_ast_drivers_native_when_no_slots(tmp_path, capsys):
 
 def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys):
     from aegis_cli.doctor import _check_ast_drivers
-    slots_file = tmp_path / ".soma" / "slots.yaml"
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
     slots_file.parent.mkdir(parents=True)
     slots_file.write_text("slots:\n  ast_driver_ts: node runner.js\n  ast_driver: default_bin\n")
 
@@ -157,17 +157,17 @@ def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys):
 
 def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsys):
     (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".soma" / "evidence"
+    evidence = tmp_path / ".aegis" / "evidence"
     evidence.mkdir(parents=True)
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
     (rules_dir / "example.md").write_text("# rule")
 
-    slots_file = tmp_path / ".soma" / "slots.yaml"
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
     slots_file.write_text("slots:\n  ast_driver_xyz: nonexistent_ast_binary_12345\n")
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else None), \
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/aegis" if cmd in ("aegis", "soma") else None), \
          patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace()
         result = run_doctor(args)
@@ -191,7 +191,7 @@ def test_check_ast_drivers_missing_driver_warns_and_fixes(tmp_path, capsys):
     assert _check_ast_drivers(tmp_path, fix=True) is True
     out = capsys.readouterr().out
     assert "Fixed: Auto-provisioned AST drivers" in out
-    assert (tmp_path / ".soma" / "slots.yaml").is_file()
+    assert (tmp_path / ".aegis" / "slots.yaml").is_file()
 
 
 def test_check_ast_drivers_missing_extension_slot_warns_and_fixes(tmp_path, capsys):
@@ -200,7 +200,7 @@ def test_check_ast_drivers_missing_extension_slot_warns_and_fixes(tmp_path, caps
     (tmp_path / "src" / "main.rs").write_text("fn main() {}")
 
     # Write existing slots without rs slot
-    slots_file = tmp_path / ".soma" / "slots.yaml"
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
     slots_file.parent.mkdir(parents=True)
     slots_file.write_text("slots:\n  ast_driver_ts: node runner.js\n")
 
@@ -218,7 +218,7 @@ def test_check_ast_drivers_missing_extension_slot_warns_and_fixes(tmp_path, caps
 
 def test_run_doctor_with_fix_flag(tmp_path, monkeypatch, capsys):
     (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".soma" / "evidence"
+    evidence = tmp_path / ".aegis" / "evidence"
     evidence.mkdir(parents=True)
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
@@ -234,12 +234,12 @@ def test_run_doctor_with_fix_flag(tmp_path, monkeypatch, capsys):
     assert res == 0
     captured = capsys.readouterr().out
     assert "Fixed: Auto-provisioned AST drivers" in captured
-    assert (tmp_path / ".soma" / "slots.yaml").is_file()
+    assert (tmp_path / ".aegis" / "slots.yaml").is_file()
 
 
 def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, capsys):
     (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".soma" / "evidence"
+    evidence = tmp_path / ".aegis" / "evidence"
     evidence.mkdir(parents=True)
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
@@ -252,7 +252,7 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
          patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace()
         res = run_doctor(args)
-    assert not (tmp_path / ".soma" / "slots.yaml").exists()
+    assert not (tmp_path / ".aegis" / "slots.yaml").exists()
     out = capsys.readouterr().out
     assert "Run 'aegis doctor --fix' to provision" in out
 
@@ -290,9 +290,9 @@ def test_doctor_command_contract():
 def _rust_project_with_python3_slot(tmp_path, monkeypatch):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.rs").write_text("fn main() {}")
-    slots_file = tmp_path / ".soma" / "slots.yaml"
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
     slots_file.parent.mkdir(parents=True)
-    slots_file.write_text('slots:\n  ast_driver_rs: "python3 .soma/drivers/rust_ast.py"\n')
+    slots_file.write_text('slots:\n  ast_driver_rs: "python3 .aegis/drivers/rust_ast.py"\n')
     empty_bin = tmp_path / "empty-bin"
     empty_bin.mkdir()
     monkeypatch.setenv("PATH", str(empty_bin))

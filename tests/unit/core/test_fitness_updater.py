@@ -61,7 +61,7 @@ def _make_cell(cells_dir, name, target_paths, subdir="vacuoles"):
 
 def _make_evidence_dir(tmp_path):
     """Create the evidence directory structure."""
-    evidence = tmp_path / ".soma" / "evidence"
+    evidence = tmp_path / ".aegis" / "evidence"
     evidence.mkdir(parents=True, exist_ok=True)
     return evidence
 

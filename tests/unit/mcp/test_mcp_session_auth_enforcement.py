@@ -1,6 +1,6 @@
 """Behavioral tests for BUG-076: Authentication Bypass in MCP Server tools/call.
 
-1. When SOMA_REQUIRE_SESSION_TOKEN=1 is enabled, any tools/call request that omits
+1. When AEGIS_REQUIRE_SESSION_TOKEN=1 is enabled, any tools/call request that omits
    _sessionToken must be rejected with -32002.
 2. In default mode, an unauthenticated caller must NOT inherit the server's internal
    _session_token as their session ID (which previously allowed unauthenticated callers
@@ -18,8 +18,8 @@ def reset_server_session(monkeypatch):
 
 
 def test_tools_call_rejects_missing_session_token_when_required(monkeypatch):
-    """When SOMA_REQUIRE_SESSION_TOKEN=1, tools/call without token must return -32002."""
-    monkeypatch.setenv("SOMA_REQUIRE_SESSION_TOKEN", "1")
+    """When AEGIS_REQUIRE_SESSION_TOKEN=1, tools/call without token must return -32002."""
+    monkeypatch.setenv("AEGIS_REQUIRE_SESSION_TOKEN", "1")
 
     # 1. Initialize server
     init_req = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
@@ -38,14 +38,14 @@ def test_tools_call_rejects_missing_session_token_when_required(monkeypatch):
     }
     call_resp = server.handle_request(call_req)
 
-    assert "error" in call_resp, "Server permitted tool call without session token under SOMA_REQUIRE_SESSION_TOKEN=1!"
+    assert "error" in call_resp, "Server permitted tool call without session token under AEGIS_REQUIRE_SESSION_TOKEN=1!"
     assert call_resp["error"]["code"] == -32002
     assert "session token required" in call_resp["error"]["message"].lower()
 
 
 def test_tools_call_accepts_valid_session_token(monkeypatch):
-    """tools/call with correct _sessionToken is accepted under SOMA_REQUIRE_SESSION_TOKEN=1."""
-    monkeypatch.setenv("SOMA_REQUIRE_SESSION_TOKEN", "1")
+    """tools/call with correct _sessionToken is accepted under AEGIS_REQUIRE_SESSION_TOKEN=1."""
+    monkeypatch.setenv("AEGIS_REQUIRE_SESSION_TOKEN", "1")
     init_req = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
     init_resp = server.handle_request(init_req)
     token = init_resp["result"]["serverInfo"]["_sessionToken"]

@@ -5,7 +5,7 @@ Verifies:
 2. Whitelist retention: universal tenets and custom user rules are strictly preserved.
 3. Purge targeting: leaked HGT rules (hgt-*.md) and internal Soma rules are quarantined and removed.
 4. Delimiter-targeted cleanup of ~/.claude/CLAUDE.md preserving user content.
-5. Mandatory backup creation in ~/.soma/quarantine/global_rules_backup_{TIMESTAMP}/.
+5. Mandatory backup creation in ~/.aegis/quarantine/global_rules_backup_{TIMESTAMP}/.
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def test_dry_run_does_not_modify_files(fake_home: Path):
 
 def test_force_cleans_rules_with_quarantine_backup(fake_home: Path):
     """When force=True and dry_run=False, leaked files are moved to quarantine and removed from config."""
-    q_dir = fake_home / ".soma" / "quarantine"
+    q_dir = fake_home / ".aegis" / "quarantine"
     res = clean_global_rules(home_dir=fake_home, dry_run=False, force=True, quarantine_dir=q_dir)
     assert res["dry_run"] is False
 

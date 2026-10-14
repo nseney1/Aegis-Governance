@@ -21,9 +21,9 @@ from aegis_core.evidence import aggregate_signals
 
 
 def _load_signal_weight(workspace: str) -> float:
-    """Load insight_signal_weight from .soma/config.yaml, defaulting to 0.5."""
+    """Load insight_signal_weight from .aegis/config.yaml, defaulting to 0.5."""
     default = 0.5
-    config_path = os.path.join(workspace, ".soma", "config.yaml")
+    config_path = os.path.join(workspace, ".aegis", "config.yaml")
     if not os.path.exists(config_path):
         return default
     try:
@@ -64,7 +64,7 @@ def capture_insight(
         raise ValueError("insight must not be empty")
 
     ws_path = getattr(workspace, "root", workspace)
-    cells_dir = os.path.join(ws_path, ".soma", "cells")
+    cells_dir = os.path.join(ws_path, ".aegis", "rules")
     if os.path.isdir(cells_dir):
         cells = load_cells(cells_dir)
     else:
@@ -88,7 +88,7 @@ def capture_insight(
     }
 
     if scaffold_wall or wall_id:
-        wall_dir = os.path.join(ws_path, ".soma", "cells", "walls")
+        wall_dir = os.path.join(ws_path, ".aegis", "rules", "walls")
         os.makedirs(wall_dir, exist_ok=True)
         if wall_id:
             clean_stem = wall_id.strip().lower()
@@ -113,7 +113,7 @@ def capture_insight(
         record["wall_file"] = wall_path
         record["wall_id"] = stem
 
-    jsonl_path = os.path.join(ws_path, ".soma", "human_insights.jsonl")
+    jsonl_path = os.path.join(ws_path, ".aegis", "human_insights.jsonl")
     os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
     with open(jsonl_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
@@ -127,7 +127,7 @@ def cluster_insights(
     window_days: int = 30,
 ) -> list[dict]:
     """Read human insights and cluster by category within rolling window."""
-    jsonl_path = os.path.join(workspace, ".soma", "human_insights.jsonl")
+    jsonl_path = os.path.join(workspace, ".aegis", "human_insights.jsonl")
     if not os.path.isfile(jsonl_path):
         return []
 
@@ -264,13 +264,12 @@ def create_cell_from_insight_cluster(cluster: dict, workspace: str) -> str:
     cell_content = f"---\n{fm_text}---\n\n{body}"
  
     filename = f"vacuole-{slug}.md"
-    target_dir = os.path.join(workspace, ".soma", "cells", "vacuoles")
+    target_dir = os.path.join(workspace, ".aegis", "rules", "vacuoles")
     os.makedirs(target_dir, exist_ok=True)
  
     filepath = os.path.join(target_dir, filename)
     if os.path.isfile(filepath):
-        aegis_ev = os.path.join(workspace, ".aegis", "evidence")
-        evidence_dir = aegis_ev if os.path.isdir(aegis_ev) else os.path.join(workspace, ".soma", "evidence")
+        evidence_dir = os.path.join(workspace, ".aegis", "evidence")
         signal_counts = aggregate_signals(evidence_dir).counts
         c_id = frontmatter.get("id", "")
         if signal_counts.get(c_id, {}).get("has_triggers", False):

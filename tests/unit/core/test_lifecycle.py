@@ -64,9 +64,9 @@ class TestPromotionCriteria:
         """Vacuole with 25 triggers, 90% tp_rate, 45 days old → promote to wall."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "proven-cell", cell_type="vacuole",
@@ -83,9 +83,9 @@ class TestPromotionCriteria:
         """Only 10 triggers → not enough for promotion."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "young-cell", cell_type="vacuole",
@@ -99,9 +99,9 @@ class TestPromotionCriteria:
         """tp_rate = 0.60 → below 0.85 threshold."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "noisy-cell", cell_type="vacuole",
@@ -115,9 +115,9 @@ class TestPromotionCriteria:
         """Cell only 15 days old → must be > 30 days."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "new-cell", cell_type="vacuole",
@@ -131,13 +131,13 @@ class TestPromotionCriteria:
         """Wall with strong evidence → promote to genome."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
-        (tmp_path / "soma_core").mkdir(parents=True)
-        (tmp_path / "soma_cli").mkdir(parents=True)
-        (tmp_path / "pyproject.toml").write_text('name = "soma-governance"\n', encoding="utf-8")
+        (tmp_path / "aegis_core").mkdir(parents=True)
+        (tmp_path / "aegis_cli").mkdir(parents=True)
+        (tmp_path / "pyproject.toml").write_text('name = "aegis-governance"\n', encoding="utf-8")
 
         make_cell(str(cells_dir), "proven-wall", cell_type="wall",
                   created_days_ago=60)
@@ -151,8 +151,8 @@ class TestPromotionCriteria:
         """No cells → no promotion candidates."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
-        (tmp_path / ".soma" / "evidence").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+        (tmp_path / ".aegis" / "evidence").mkdir(parents=True)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert candidates == []
@@ -165,9 +165,9 @@ class TestDemotionCriteria:
         """fp_rate = 0.7 → demote."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "noisy-wall", cell_type="wall",
@@ -183,9 +183,9 @@ class TestDemotionCriteria:
         """Zero triggers for 90+ days → demote."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "dormant-wall", cell_type="wall",
@@ -201,9 +201,9 @@ class TestDemotionCriteria:
         """Cell with good metrics → no demotion."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "good-wall", cell_type="wall",
@@ -217,9 +217,9 @@ class TestDemotionCriteria:
         """Demoted wall should become a vacuole."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "bad-wall", cell_type="wall",
@@ -235,8 +235,8 @@ class TestDemotionCriteria:
         """No cells → no demotion candidates."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
-        (tmp_path / ".soma" / "evidence").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+        (tmp_path / ".aegis" / "evidence").mkdir(parents=True)
 
         candidates = evaluate_demotions(str(tmp_path))
         assert candidates == []
@@ -249,9 +249,9 @@ class TestLifecycleBoundaries:
         """19 triggers should NOT promote (need >=20)."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "edge-cell-19", cell_type="vacuole",
@@ -266,9 +266,9 @@ class TestLifecycleBoundaries:
         """Exactly 20 triggers should promote."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "edge-cell-20", cell_type="vacuole",
@@ -284,9 +284,9 @@ class TestLifecycleBoundaries:
         """0.84 tp_rate should NOT promote (need >=0.85)."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "low-tp-cell", cell_type="vacuole",
@@ -301,9 +301,9 @@ class TestLifecycleBoundaries:
         """4 triggers too few for fp_rate demotion (need >=5)."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "few-triggers", cell_type="wall",
@@ -320,9 +320,9 @@ class TestLifecycleBoundaries:
         """5 triggers with >50% FP should demote."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "noisy-5", cell_type="wall",
@@ -339,9 +339,9 @@ class TestLifecycleBoundaries:
         """Exactly 0.85 tp_rate should promote (inclusive >=)."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "tp-085-cell", cell_type="vacuole",
@@ -358,9 +358,9 @@ class TestLifecycleBoundaries:
         """29 days old should NOT promote (need >=30)."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         # created_days_ago=28 → actual age_days=29 (date truncation adds ~1 day)
@@ -376,9 +376,9 @@ class TestLifecycleBoundaries:
         """Exactly 30 days old should promote."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "age-30-cell", cell_type="vacuole",
@@ -394,9 +394,9 @@ class TestLifecycleBoundaries:
         """fp_rate exactly 0.50 should NOT demote (need >0.50)."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "fp-050-wall", cell_type="wall",
@@ -411,9 +411,9 @@ class TestLifecycleBoundaries:
         """89 days old with 0 triggers should NOT be demoted for dormancy (need >=90)."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         # created_days_ago=88 → actual age_days=89 (date truncation adds ~1 day)
@@ -428,9 +428,9 @@ class TestLifecycleBoundaries:
         """90 days old with 0 triggers should be demoted for dormancy."""
         from aegis_core.lifecycle import evaluate_demotions
 
-        cells_dir = tmp_path / ".soma" / "cells" / "walls"
+        cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        evidence_dir = tmp_path / ".soma" / "evidence"
+        evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "dormant-90", cell_type="wall",

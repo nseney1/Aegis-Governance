@@ -36,7 +36,7 @@ from aegis_core.yaml import dump_frontmatter
 
 @pytest.fixture
 def mcp_workspace(tmp_path: Path) -> Path:
-    cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_file = cells_dir / "sample-cell.md"
     fm = {
@@ -47,7 +47,7 @@ def mcp_workspace(tmp_path: Path) -> Path:
         "fitness": {"score": 0.5, "triggers": 1, "true_positives": 1, "false_positives": 0},
     }
     cell_file.write_text(f"---\n{dump_frontmatter(fm)}---\n\n# Body\n", encoding="utf-8")
-    (tmp_path / ".soma" / "evidence").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".aegis" / "evidence").mkdir(parents=True, exist_ok=True)
     (tmp_path / "genome").mkdir(parents=True, exist_ok=True)
     return tmp_path
 
@@ -241,7 +241,7 @@ def test_governance_soma_handoff(mcp_workspace: Path):
     assert res_bad_ws["status"] == "FAIL"
 
     # Valid skills for handoff
-    skills_dir = mcp_workspace / ".soma" / "skills"
+    skills_dir = mcp_workspace / ".aegis" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "scout.md").write_text("---\nid: scout\ntier: method\nproduces: [DiffProposal]\nhandoff_targets: [builder]\n---\n", encoding="utf-8")
     (skills_dir / "builder.md").write_text("---\nid: builder\nconsumes: [DiffProposal]\n---\n", encoding="utf-8")

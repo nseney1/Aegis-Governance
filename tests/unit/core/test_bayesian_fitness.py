@@ -138,7 +138,7 @@ class TestMandatoryInvariantSlots:
     @pytest.fixture
     def populated_workspace(self, soma_workspace):
         """Workspace with wall, gate, and advisory cells for slot tests."""
-        cells_dir = soma_workspace / ".soma" / "cells"
+        cells_dir = soma_workspace / ".aegis" / "rules"
         write_cell_with_fitness(
             cells_dir, "wall-no-secrets", cell_type="wall",
             triggers=10, tp=9, fp=0,

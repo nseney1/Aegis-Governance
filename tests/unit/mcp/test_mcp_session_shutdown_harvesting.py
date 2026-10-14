@@ -47,8 +47,8 @@ def test_stdio_server_triggers_shutdown_harvesting_on_eof(tmp_path: Path, monkey
 
     ws = tmp_path / "ws"
     ws.mkdir()
-    (ws / ".soma" / "cells").mkdir(parents=True)
-    monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
+    (ws / ".aegis" / "rules").mkdir(parents=True)
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(ws))
 
     # Empty stdin (immediate EOF)
     monkeypatch.setattr("sys.stdin", io.StringIO(""))

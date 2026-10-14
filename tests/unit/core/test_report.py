@@ -23,8 +23,8 @@ def _create_event(cell: str, triggered_at: datetime) -> dict:
 
 
 def _write_ledger(tmp_path, events: list[dict]) -> None:
-    """Helper to write events into <tmp_path>/.soma/evidence/signals.jsonl."""
-    ledger = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+    """Helper to write events into <tmp_path>/.aegis/evidence/signals.jsonl."""
+    ledger = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     ledger.parent.mkdir(parents=True, exist_ok=True)
     with open(ledger, "w", encoding="utf-8") as f:
         f.writelines(json.dumps(ev) + "\n" for ev in events)
@@ -43,7 +43,7 @@ class TestReportEmpty:
 
     def test_report_empty_file(self, tmp_path, capsys):
         """Empty file → prints 'No session data', returns 0."""
-        ledger = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+        ledger = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
         ledger.parent.mkdir(parents=True, exist_ok=True)
         ledger.write_text("")
 
@@ -216,7 +216,7 @@ class TestReportEdgeCases:
 
     def test_report_corrupted_lines_skipped(self, tmp_path, capsys):
         """Corrupted or malformed lines are safely skipped."""
-        ledger = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+        ledger = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
         ledger.parent.mkdir(parents=True, exist_ok=True)
         ledger.write_text(
             "\n"

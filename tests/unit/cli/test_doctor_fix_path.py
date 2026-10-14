@@ -5,7 +5,7 @@ PATH line by hand. Contract:
 - dry run by default; applies only with --yes or an interactive "y";
 - appends exactly the pathcheck line plus a marker, once (idempotent);
 - refuses rc files that resolve outside HOME; never edits a PowerShell $PROFILE;
-- records the file and line in ~/.soma/manifest.json (keys preserved), so
+- records the file and line in ~/.aegis/manifest.json (keys preserved), so
   install/uninstall.sh can remove exactly that line again.
 
 Every test uses an isolated HOME under tmp_path; env is passed explicitly, so
@@ -63,7 +63,7 @@ def do_fix(lay, shell="zsh", yes=True, extra_env=None, stdin=None, platform="lin
 
 
 def manifest_of(lay):
-    p = lay["home"] / ".soma" / "manifest.json"
+    p = lay["home"] / ".aegis" / "manifest.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
@@ -100,7 +100,7 @@ def test_yes_appends_marked_line_and_records_it(env_layout, capsys):
     assert entry == [{"file": str(zshrc), "line": EXPECTED_ZSH,
                       "created": False, "prefix_newline": False}]
     # No temp files left behind.
-    assert sorted(p.name for p in env_layout["home"].iterdir()) == [".local", ".soma", ".zshrc"]
+    assert sorted(p.name for p in env_layout["home"].iterdir()) == [".aegis", ".local", ".zshrc"]
 
 
 def test_missing_trailing_newline_is_handled(env_layout):
@@ -237,7 +237,7 @@ def test_symlinked_rc_inside_home_is_written_through(env_layout):
 
 
 def test_existing_manifest_keys_are_preserved(env_layout):
-    mpath = env_layout["home"] / ".soma" / "manifest.json"
+    mpath = env_layout["home"] / ".aegis" / "manifest.json"
     mpath.parent.mkdir()
     original = {"version": "0.89.0", "platform": "kiro", "files": ["/x"], "hooks": []}
     mpath.write_text(json.dumps(original, indent=2), encoding="utf-8")
@@ -250,7 +250,7 @@ def test_existing_manifest_keys_are_preserved(env_layout):
 
 
 def test_corrupt_manifest_aborts_before_editing_rc(env_layout):
-    mpath = env_layout["home"] / ".soma" / "manifest.json"
+    mpath = env_layout["home"] / ".aegis" / "manifest.json"
     mpath.parent.mkdir()
     mpath.write_text("{not json", encoding="utf-8")
     assert do_fix(env_layout) != 0

@@ -8,8 +8,8 @@ import pytest
 
 
 def _write_insights(workspace, insights):
-    """Helper: write a list of insight dicts to .soma/human_insights.jsonl."""
-    jsonl_path = os.path.join(workspace, ".soma", "human_insights.jsonl")
+    """Helper: write a list of insight dicts to .aegis/human_insights.jsonl."""
+    jsonl_path = os.path.join(workspace, ".aegis", "human_insights.jsonl")
     os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
     with open(jsonl_path, "w") as f:
         for record in insights:
@@ -112,7 +112,7 @@ class TestClusterInsights:
         from aegis_core.insights import cluster_insights
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         clusters = cluster_insights(workspace)
         assert clusters == []

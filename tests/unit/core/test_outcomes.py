@@ -149,7 +149,7 @@ def test_insight_cursor_roundtrip(tmp_path: Path) -> None:
 
 def test_capture_mcp_outcomes(tmp_path: Path) -> None:
     ws = str(tmp_path)
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True)
     signals_file = evidence_dir / "signals.jsonl"
     signals_file.write_text(
@@ -167,7 +167,7 @@ def test_capture_mcp_outcomes(tmp_path: Path) -> None:
 
 def test_read_human_insight_signals(tmp_path: Path) -> None:
     ws = str(tmp_path)
-    soma_dir = tmp_path / ".soma"
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir()
     insights_file = soma_dir / "human_insights.jsonl"
     insights_file.write_text(
@@ -181,7 +181,7 @@ def test_read_human_insight_signals(tmp_path: Path) -> None:
 
 
 def test_update_fitness_transcript(tmp_path: Path) -> None:
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True)
     triggered = [{"cell_id": "cell-transcript", "matched_files": ["foo.py"]}]
     events = update_fitness(triggered, "trans-1", evidence_dir)

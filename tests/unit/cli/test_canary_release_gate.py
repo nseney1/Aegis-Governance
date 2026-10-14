@@ -15,7 +15,7 @@ def test_is_dirty_ignores_aegis_evidence():
 
 
 def test_get_latest_arbitration_evidence_dual_brand(tmp_path: Path):
-    """Verify evidence discovery looks in .aegis/evidence before .soma/evidence."""
+    """Verify evidence discovery looks in .aegis/evidence before .aegis/evidence."""
     aegis_ev = tmp_path / ".aegis" / "evidence"
     aegis_ev.mkdir(parents=True)
     ev_file = aegis_ev / "arbitration_cycle_1.json"

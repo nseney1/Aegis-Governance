@@ -85,7 +85,7 @@ class TestWorkerLifecycleAndPersistence:
     def test_restore_in_flight_jobs_transitions_to_failed(self, tmp_path: Path):
         """Restoring persisted jobs that were queued or running must mark them failed to prevent infinite hangs."""
         from aegis_core.verification.jobs import _JOBS, _JOBS_LOCK
-        soma_dir = tmp_path / ".soma"
+        soma_dir = tmp_path / ".aegis"
         soma_dir.mkdir(parents=True, exist_ok=True)
         state_file = soma_dir / "jobs_state.json"
 

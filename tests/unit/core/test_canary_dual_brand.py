@@ -10,7 +10,7 @@ def test_prefix_stripping_dual_brand():
     """Verify that both soma_ and aegis_ prefixes are cleanly stripped."""
     root = Path("/dummy/repo")
     soma_candidates = [
-        str(c) for c in _resolve_canonical_test_candidates(root, root / "soma_core" / "scoring.py")
+        str(c) for c in _resolve_canonical_test_candidates(root, root / "aegis_core" / "scoring.py")
     ]
     aegis_candidates = [
         str(c) for c in _resolve_canonical_test_candidates(root, root / "aegis_core" / "scoring.py")
@@ -20,7 +20,7 @@ def test_prefix_stripping_dual_brand():
     assert str(root / "tests" / "core" / "test_scoring.py") in aegis_candidates
 
     soma_cli = [
-        str(c) for c in _resolve_canonical_test_candidates(root, root / "soma_cli" / "verify.py")
+        str(c) for c in _resolve_canonical_test_candidates(root, root / "aegis_cli" / "verify.py")
     ]
     aegis_cli = [
         str(c) for c in _resolve_canonical_test_candidates(root, root / "aegis_cli" / "verify.py")

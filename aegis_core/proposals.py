@@ -32,7 +32,7 @@ ESCALATION_PROTOCOLS = ("breeze", "gale", "trident", "maelstrom", "tempest")
 ESCALATING_PROTOCOLS = ("trident", "maelstrom", "tempest")
 PROTOCOL_UNKNOWN = "unknown"
 
-SENTINEL_TIMEOUT = int(os.environ.get("SOMA_SENTINEL_TIMEOUT", "30"))
+SENTINEL_TIMEOUT = int(os.environ.get("AEGIS_SENTINEL_TIMEOUT", "30"))
 
 ORACLE_FAIL_OPEN_MARKERS = (
     "oracle evaluation failed",
@@ -401,7 +401,7 @@ def soma_propose_change(
             ],
         )
 
-    if os.environ.get("SOMA_ENABLE_CLOUD_ORACLE", "0").lower() in ("1", "true"):
+    if os.environ.get("AEGIS_ENABLE_CLOUD_ORACLE", "0").lower() in ("1", "true"):
         oracle_verdict, oracle_detail = _consult_oracle(ws, relative_path, proposed_content)
     else:
         oracle_verdict, oracle_detail = VERDICT_APPROVED, "Oracle skipped (local-only mode)"
@@ -467,11 +467,11 @@ def _load_fitness_evidence(workspace: Workspace | Path | str) -> Dict[str, Any]:
 
 
 def _load_cells(workspace: Workspace | Path | str) -> List[Dict[str, Any]]:
-    """Load all cell metadata from .soma/cells/."""
+    """Load all rule metadata from .aegis/rules/."""
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     cells = []
     if not cells_dir.is_dir():
         return cells

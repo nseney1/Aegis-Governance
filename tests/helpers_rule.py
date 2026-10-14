@@ -104,13 +104,13 @@ def aegis_workspace(tmp_path):
 
 @pytest.fixture
 def soma_workspace(tmp_path):
-    """Create a minimal workspace with rules/cells and metrics directories."""
+    """Create a minimal workspace with rules and metrics directories."""
     workspace = tmp_path / "project"
-    cells_dir = workspace / ".soma" / "cells"
-    cells_dir.mkdir(parents=True)
-    metrics_dir = workspace / ".soma" / "metrics"
+    rules_dir = workspace / ".aegis" / "rules"
+    rules_dir.mkdir(parents=True)
+    metrics_dir = workspace / ".aegis" / "metrics"
     metrics_dir.mkdir(parents=True)
-    (workspace / "soma.conf").write_text("TOTAL_SESSIONS=100\n")
+    (workspace / "aegis.conf").write_text("TOTAL_SESSIONS=100\n")
     return workspace
 
 

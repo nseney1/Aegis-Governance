@@ -155,7 +155,7 @@ def run_pre_commit(
     except Exception:
         pass
 
-    cells_dirs = [repo_root / ".aegis" / "rules", repo_root / ".soma" / "cells"]
+    cells_dirs = [repo_root / ".aegis" / "rules"]
     all_target_patterns: list[str] = []
     triggered_cells: list[str] = []
 
@@ -198,7 +198,7 @@ def run_pre_commit(
 
     # 3. Mechanical enforcement scripts
     mechanical_failed = False
-    for enforcement_dir in [repo_root / ".aegis" / "enforcement", repo_root / ".soma" / "enforcement"]:
+    for enforcement_dir in [repo_root / ".aegis" / "enforcement"]:
         if enforcement_dir.is_dir():
             for check in sorted(enforcement_dir.glob("check-*")):
                 if check.is_file():

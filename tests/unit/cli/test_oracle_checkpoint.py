@@ -55,9 +55,9 @@ def append_signal_records(evidence_dir, records):
 
 @pytest.fixture
 def workspace(tmp_path):
-    cells_dir = tmp_path / ".soma" / "cells"
+    cells_dir = tmp_path / ".aegis" / "rules"
     cells_dir.mkdir(parents=True)
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True)
     return tmp_path
 
@@ -74,7 +74,7 @@ class TestOracleCheckpointBasics:
 
     def test_cell_with_no_evidence_is_unobserved(self, workspace):
         from aegis_core.proposals import generate_checkpoint
-        cells_dir = str(workspace / ".soma" / "cells")
+        cells_dir = str(workspace / ".aegis" / "rules")
         make_cell(cells_dir, "new-cell")
         report = generate_checkpoint(str(workspace))
         assert report['total_cells'] == 1
@@ -83,9 +83,9 @@ class TestOracleCheckpointBasics:
 
     def test_cell_with_triggers_is_healthy(self, workspace):
         from aegis_core.proposals import generate_checkpoint
-        cells_dir = str(workspace / ".soma" / "cells")
+        cells_dir = str(workspace / ".aegis" / "rules")
         make_cell(cells_dir, "good-cell")
-        evidence_dir = str(workspace / ".soma" / "evidence")
+        evidence_dir = str(workspace / ".aegis" / "evidence")
         append_signal_records(evidence_dir, [
             {'cell': 'good-cell', 'signal': 'trigger', 'timestamp': '2026-09-30T10:00:00Z'},
             {'cell': 'good-cell', 'signal': 'trigger', 'timestamp': '2026-09-30T10:01:00Z'},
@@ -101,9 +101,9 @@ class TestOracleCheckpointClassifications:
 
     def test_noisy_cell_flagged(self, workspace):
         from aegis_core.proposals import generate_checkpoint
-        cells_dir = str(workspace / ".soma" / "cells")
+        cells_dir = str(workspace / ".aegis" / "rules")
         make_cell(cells_dir, "noisy-cell")
-        evidence_dir = str(workspace / ".soma" / "evidence")
+        evidence_dir = str(workspace / ".aegis" / "evidence")
         append_signal_records(evidence_dir, [
             {'cell': 'noisy-cell', 'signal': 'trigger', 'timestamp': '2026-09-30T10:00:00Z'},
             {'cell': 'noisy-cell', 'signal': 'trigger', 'timestamp': '2026-09-30T10:01:00Z'},
@@ -127,7 +127,7 @@ class TestOracleCheckpointClassifications:
 
     def test_expired_cell_flagged(self, workspace):
         from aegis_core.proposals import generate_checkpoint
-        cells_dir = str(workspace / ".soma" / "cells")
+        cells_dir = str(workspace / ".aegis" / "rules")
         make_cell(cells_dir, "old-cell", created_days_ago=100, expiry_days=30)
         report = generate_checkpoint(str(workspace))
         assert 'expired' in report['classifications']
@@ -139,7 +139,7 @@ class TestOracleCheckpointRecommendations:
 
     def test_report_includes_recommendations(self, workspace):
         from aegis_core.proposals import generate_checkpoint
-        cells_dir = str(workspace / ".soma" / "cells")
+        cells_dir = str(workspace / ".aegis" / "rules")
         make_cell(cells_dir, "stale-cell", created_days_ago=100, expiry_days=30)
         make_cell(cells_dir, "fresh-cell", created_days_ago=1, expiry_days=60)
         report = generate_checkpoint(str(workspace))
@@ -148,9 +148,9 @@ class TestOracleCheckpointRecommendations:
 
     def test_healthy_workspace_has_no_critical_recommendations(self, workspace):
         from aegis_core.proposals import generate_checkpoint
-        cells_dir = str(workspace / ".soma" / "cells")
+        cells_dir = str(workspace / ".aegis" / "rules")
         make_cell(cells_dir, "good-cell", created_days_ago=1, expiry_days=60)
-        evidence_dir = str(workspace / ".soma" / "evidence")
+        evidence_dir = str(workspace / ".aegis" / "evidence")
         append_signal_records(evidence_dir, [
             {'cell': 'good-cell', 'signal': 'trigger', 'timestamp': '2026-09-30T10:00:00Z'},
         ])

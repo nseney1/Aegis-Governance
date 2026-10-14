@@ -41,7 +41,7 @@ def run_report(args: argparse.Namespace) -> int:
     """Session report card."""
     root = resolve_root(args)
 
-    evidence_dir = (root / ".aegis" / "evidence") if (root / ".aegis" / "evidence").is_dir() else (root / ".soma" / "evidence")
+    evidence_dir = root / ".aegis" / "evidence"
     aggregation = aggregate_signals(str(evidence_dir))
     events: list[dict] = []
     for event in aggregation.trigger_events:

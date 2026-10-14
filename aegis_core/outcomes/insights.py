@@ -18,7 +18,7 @@ __all__ = ["commit_insight_cursor", "capture_human_insight_signals", "read_human
 
 def _insight_cursor_path(workspace: Workspace | Path | str) -> str:
     ws = as_workspace(workspace)
-    return str(ws.soma_dir / "insight_cursor")
+    return str(ws.aegis_dir / "insight_cursor")
 
 
 def _read_insight_cursor(workspace: Workspace | Path | str) -> int:
@@ -69,7 +69,7 @@ def capture_human_insight_signals(workspace: Workspace | Path | str) -> list[dic
 def read_human_insight_signals(workspace: Workspace | Path | str) -> tuple[list[dict], int]:
     """Read NEW human insight annotations and produce fitness signals."""
     ws = as_workspace(workspace)
-    insights_file = str(ws.soma_dir / "human_insights.jsonl")
+    insights_file = str(ws.aegis_dir / "human_insights.jsonl")
     cursor_offset = _read_insight_cursor(ws)
     if not os.path.isfile(insights_file):
         return [], cursor_offset
@@ -79,7 +79,7 @@ def read_human_insight_signals(workspace: Workspace | Path | str) -> tuple[list[
         cursor_offset = 0
 
     weight = 0.5
-    config_path = str(ws.soma_dir / "config.yaml")
+    config_path = str(ws.aegis_dir / "config.yaml")
     if os.path.isfile(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -91,7 +91,7 @@ def read_human_insight_signals(workspace: Workspace | Path | str) -> tuple[list[
             pass
 
     cell_paths = {}
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     if cells_dir.is_dir():
         for cell_file in glob.glob(os.path.join(str(cells_dir), "**", "*.md"), recursive=True):
             name = os.path.splitext(os.path.basename(cell_file))[0]

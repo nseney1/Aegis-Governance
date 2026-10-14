@@ -2,8 +2,8 @@
 
 Verifies that:
 1. `record_verification_telemetry` generates canonical trigger and tp/fp signals.
-2. CLI `soma verify` automatically emits telemetry to .soma/evidence/signals.jsonl.
-3. MCP `soma_verify_changes` automatically emits telemetry to .soma/evidence/signals.jsonl.
+2. CLI `soma verify` automatically emits telemetry to .aegis/evidence/signals.jsonl.
+3. MCP `soma_verify_changes` automatically emits telemetry to .aegis/evidence/signals.jsonl.
 4. Scale-to-zero / sub-20ms overhead: evidence writes are atomic and local.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from aegis_core.yaml import dump_frontmatter
 
 
 def _create_cell(workspace: Path, cell_id: str, target_paths: list[str]) -> Path:
-    cells_dir = workspace / ".soma" / "cells" / "vacuoles"
+    cells_dir = workspace / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_path = cells_dir / f"{cell_id}.md"
     fm = {
@@ -38,7 +38,7 @@ def _create_cell(workspace: Path, cell_id: str, target_paths: list[str]) -> Path
 def test_workspace(tmp_path: Path) -> Path:
     ws = tmp_path / "ws"
     ws.mkdir()
-    (ws / ".soma" / "evidence").mkdir(parents=True)
+    (ws / ".aegis" / "evidence").mkdir(parents=True)
     return ws
 
 
@@ -60,7 +60,7 @@ def test_record_verification_telemetry_appends_signals(test_workspace: Path):
     )
 
     assert recorded is True
-    signals_file = test_workspace / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = test_workspace / ".aegis" / "evidence" / "signals.jsonl"
     assert signals_file.is_file()
 
     lines = [json.loads(line) for line in signals_file.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -74,7 +74,7 @@ def test_record_verification_telemetry_appends_signals(test_workspace: Path):
     assert "trigger" in sig_types
     assert "tp" in sig_types
 
-    agg = aggregate_signals(str(test_workspace / ".soma" / "evidence"))
+    agg = aggregate_signals(str(test_workspace / ".aegis" / "evidence"))
     assert "cell-math" in agg.counts
     assert agg.counts["cell-math"]["triggers"] == 1
     assert agg.counts["cell-math"]["tp"] >= 1
@@ -96,7 +96,7 @@ def test_record_verification_telemetry_handles_failure(test_workspace: Path):
     )
 
     assert recorded is True
-    agg = aggregate_signals(str(test_workspace / ".soma" / "evidence"))
+    agg = aggregate_signals(str(test_workspace / ".aegis" / "evidence"))
     assert "cell-auth" in agg.counts
     assert agg.counts["cell-auth"]["triggers"] == 1
     assert agg.counts["cell-auth"]["fp"] >= 1
@@ -124,7 +124,7 @@ def test_cli_verify_emits_telemetry_ambiently(test_workspace: Path, monkeypatch)
     exit_code = run_verify(args)
     assert exit_code == 0
 
-    signals_file = test_workspace / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = test_workspace / ".aegis" / "evidence" / "signals.jsonl"
     assert signals_file.is_file()
     records = [json.loads(l) for l in signals_file.read_text(encoding="utf-8").splitlines() if l.strip()]
     assert any(r["cell"] == "cell-core" and r["signal"] == "trigger" for r in records)
@@ -143,7 +143,7 @@ def test_mcp_verify_changes_emits_telemetry_ambiently(test_workspace: Path):
     )
     assert result.get("status") == "PASS"
 
-    signals_file = test_workspace / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = test_workspace / ".aegis" / "evidence" / "signals.jsonl"
     assert signals_file.is_file()
     records = [json.loads(l) for l in signals_file.read_text(encoding="utf-8").splitlines() if l.strip()]
     assert any(r["cell"] == "cell-api" for r in records)

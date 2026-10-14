@@ -50,7 +50,8 @@ class Governance:
             project_root if isinstance(project_root, Workspace) else Workspace.resolve(project_root)
         )
         self.root: Path = self.workspace.root
-        self.cells_dir: Path = self.workspace.cells_dir
+        self.rules_dir: Path = self.workspace.rules_dir
+        self.cells_dir: Path = self.workspace.rules_dir
         self.metrics_dir: Path = self.workspace.metrics_dir
     
     # === Cell & Rule Management ===

@@ -12,11 +12,11 @@ class TestCaptureInsight:
     """Tests for the capture_insight() function."""
 
     def test_creates_jsonl_file(self, tmp_path):
-        """Capturing an insight creates .soma/human_insights.jsonl if missing."""
+        """Capturing an insight creates .aegis/human_insights.jsonl if missing."""
         from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         capture_insight(
             workspace=workspace,
@@ -24,7 +24,7 @@ class TestCaptureInsight:
             context_files=["tools/slice_sprite_sheet.py"],
         )
 
-        jsonl_path = os.path.join(workspace, ".soma", "human_insights.jsonl")
+        jsonl_path = os.path.join(workspace, ".aegis", "human_insights.jsonl")
         assert os.path.exists(jsonl_path)
 
     def test_record_has_required_fields(self, tmp_path):
@@ -32,7 +32,7 @@ class TestCaptureInsight:
         from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         result = capture_insight(
             workspace=workspace,
@@ -51,12 +51,12 @@ class TestCaptureInsight:
         from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         capture_insight(workspace=workspace, insight="First", context_files=["a.py"])
         capture_insight(workspace=workspace, insight="Second", context_files=["b.py"])
 
-        jsonl_path = os.path.join(workspace, ".soma", "human_insights.jsonl")
+        jsonl_path = os.path.join(workspace, ".aegis", "human_insights.jsonl")
         with open(jsonl_path) as f:
             lines = [json.loads(line) for line in f if line.strip()]
         assert len(lines) == 2
@@ -68,7 +68,7 @@ class TestCaptureInsight:
         from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         result = capture_insight(
             workspace=workspace,
@@ -83,7 +83,7 @@ class TestCaptureInsight:
         from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         result = capture_insight(
             workspace=workspace,
@@ -98,7 +98,7 @@ class TestCaptureInsight:
         from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
-        cells_dir = os.path.join(workspace, ".soma", "cells", "vacuoles")
+        cells_dir = os.path.join(workspace, ".aegis", "rules", "vacuoles")
         os.makedirs(cells_dir, exist_ok=True)
 
         # Create a cell that covers "api/*.py"
@@ -131,7 +131,7 @@ Check API input validation.
         from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         result = capture_insight(
             workspace=workspace,
@@ -146,7 +146,7 @@ Check API input validation.
         from aegis_core.insights import capture_insight
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         with pytest.raises(ValueError, match="context_files"):
             capture_insight(

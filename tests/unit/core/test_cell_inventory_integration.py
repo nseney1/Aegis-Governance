@@ -18,7 +18,7 @@ CELL_TEMPLATE = (
 
 
 def _write_cell(workspace, cell_id="alpha", hypothesis="first"):
-    path = workspace / ".soma" / "cells" / "walls" / f"{cell_id}.md"
+    path = workspace / ".aegis" / "rules" / "walls" / f"{cell_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         CELL_TEMPLATE.format(cell_id=cell_id, hypothesis=hypothesis),
@@ -29,13 +29,13 @@ def _write_cell(workspace, cell_id="alpha", hypothesis="first"):
 
 def _symlinked_cell_directory(tmp_path):
     workspace = tmp_path / "workspace"
-    cells_dir = workspace / ".soma" / "cells"
+    cells_dir = workspace / ".aegis" / "rules"
     cells_dir.mkdir(parents=True)
     outside = tmp_path / "outside"
     _write_cell(outside, "outside", "must not escape")
     link = cells_dir / "outside-rules"
     try:
-        link.symlink_to(outside / ".soma" / "cells" / "walls", target_is_directory=True)
+        link.symlink_to(outside / ".aegis" / "rules" / "walls", target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are unavailable")
     return workspace
@@ -106,14 +106,14 @@ def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypa
     from aegis_sdk.governance import Governance
     import aegis_mcp.tools as tools
 
-    bad_path = tmp_path / ".soma" / "cells" / "walls" / "bad.md"
+    bad_path = tmp_path / ".aegis" / "rules" / "walls" / "bad.md"
     bad_path.parent.mkdir(parents=True)
     bad_path.write_bytes(b"---\nid: bad\n---\n\xff\n")
 
     sdk_records = Governance(project_root=tmp_path).list_cells()
     assert len(sdk_records) == 1
     assert sdk_records[0]["_name"] == "bad"
-    assert sdk_records[0]["_path"] == ".soma/cells/walls/bad.md"
+    assert sdk_records[0]["_path"] == ".aegis/rules/walls/bad.md"
     assert "UTF-8" in sdk_records[0]["_error"]
 
     monkeypatch.setattr(tools, "_HAS_SDK", False)
@@ -121,7 +121,7 @@ def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypa
     mcp_records = tools.execute_tool("soma_list_cells", {})
     assert len(mcp_records) == 1
     assert mcp_records[0]["_name"] == "bad"
-    assert mcp_records[0]["_path"] == ".soma/cells/walls/bad.md"
+    assert mcp_records[0]["_path"] == ".aegis/rules/walls/bad.md"
     assert "UTF-8" in mcp_records[0]["_error"]
 
 
@@ -167,4 +167,4 @@ def test_mcp_fallback_parses_inventory_when_yaml_is_absent(tmp_path, monkeypatch
     cells = tools.execute_tool("soma_list_cells", {})
     assert cells[0]["id"] == "fallback"
     assert cells[0]["target_paths"] == ["src/*.py"]
-    assert cells[0]["_path"] == ".soma/cells/walls/fallback.md"
+    assert cells[0]["_path"] == ".aegis/rules/walls/fallback.md"

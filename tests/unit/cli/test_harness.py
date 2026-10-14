@@ -57,7 +57,7 @@ def test_harness_record_signal(harness: AegisTestHarness):
         session_id="session-xyz",
         details={"status": "ok"},
     )
-    signals_file = harness.soma_dir / "signals.jsonl"
+    signals_file = harness.aegis_dir / "signals.jsonl"
     assert signals_file.exists()
 
     lines = [json.loads(line) for line in signals_file.read_text(encoding="utf-8").splitlines() if line]
@@ -79,7 +79,7 @@ def test_governance_wall_parseable():
     candidates = [
         Path(".aegis/rules/invariants/invariant-test-canonical-colocality.md"),
         Path(".aegis/rules/invariants/wall-test-canonical-colocality.md"),
-        Path(".soma/cells/walls/wall-test-canonical-colocality.md"),
+        Path(".aegis/rules/walls/wall-test-canonical-colocality.md"),
     ]
     wall_file = next((p for p in candidates if p.exists()), candidates[0])
     assert wall_file.exists()

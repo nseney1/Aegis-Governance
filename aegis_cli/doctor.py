@@ -91,9 +91,9 @@ def _check_rules(platform: str | None, project_root: Path | None = None) -> bool
 
 
 def _check_evidence_dir(project_root: Path | None = None) -> bool:
-    """Check .aegis/evidence/ or .soma/evidence/ exists and is writable (read-only check)."""
+    """Check .aegis/evidence/ exists and is writable (read-only check)."""
     base = project_root or Path.cwd()
-    evidence = (base / ".aegis" / "evidence") if (base / ".aegis").is_dir() or not (base / ".soma" / "evidence").is_dir() else (base / ".soma" / "evidence")
+    evidence = base / ".aegis" / "evidence"
     if evidence.is_dir():
         if os.access(str(evidence), os.W_OK):
             print(f"  ✅ Evidence directory writable ({evidence})")
@@ -113,12 +113,12 @@ def _check_evidence_dir(project_root: Path | None = None) -> bool:
 
 
 def _check_cli_resolvable() -> bool:
-    """Check that 'aegis' or 'soma' CLI is on PATH."""
-    path = shutil.which("aegis") or shutil.which("soma")
+    """Check that 'aegis' CLI is on PATH."""
+    path = shutil.which("aegis")
     if path:
-        print(f"  ✅ soma CLI resolvable ({path})")
+        print(f"  ✅ aegis CLI resolvable ({path})")
         return True
-    print("  ❌ soma CLI not found on PATH")
+    print("  ❌ aegis CLI not found on PATH")
     from aegis_cli.pathcheck import build_hint
     hint = build_hint()
     if hint:
@@ -131,7 +131,7 @@ def _check_cli_resolvable() -> bool:
 # MCP configs start the server as `python3 -m aegis_mcp`. The import probe runs
 # without -I so user site-packages count, but drops the implicit CWD entry so
 # doctor never imports (executes) a aegis_mcp that happens to sit in the cwd.
-_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __import__('aegis_mcp' if __import__('importlib.util').util.find_spec('aegis_mcp') else 'soma_mcp')"
+_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __import__('aegis_mcp')"
 
 
 def probe_mcp_launcher(path_env: str | None = None,
@@ -195,21 +195,21 @@ def _check_mcp_launcher(path_env: str | None = None) -> bool:
               "      (or make sure the real python3 comes first on PATH).")
     elif status == "no_soma_mcp":
         print(f"  ⚠️  MCP launcher: {detail} runs but cannot import aegis_mcp.\n"
-              f"      Install it for that interpreter: {detail} -m pip install --user soma-governance")
+              f"      Install it for that interpreter: {detail} -m pip install --user aegis-guardrails")
     else:
         print(f"  ⚠️  MCP launcher: {detail}")
     return False
 
 
 def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> bool:
-    """Check configured AST drivers in .soma/slots.yaml and verify their binaries."""
+    """Check configured AST drivers in .aegis/slots.yaml and verify their binaries."""
     import shlex
     from aegis_core.skills.slots import SlotRegistry
     from aegis_core.ast.detect import detect_project_languages, provision_ast_driver_slots
     from aegis_core.ast.runner import resolve_driver_executable
 
     ws_root = Path(project_root or Path.cwd())
-    slots_path = (ws_root / ".aegis" / "slots.yaml") if (ws_root / ".aegis" / "slots.yaml").exists() else (ws_root / ".soma" / "slots.yaml")
+    slots_path = ws_root / ".aegis" / "slots.yaml"
 
     detected_langs = detect_project_languages(ws_root)
     non_py_langs = {k: v for k, v in detected_langs.items() if k != "python"}
@@ -219,7 +219,7 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
             if fix:
                 new_slots, created = provision_ast_driver_slots(ws_root, detected_langs, copy_drivers=True)
                 if created:
-                    print(f"  ✅ Fixed: Auto-provisioned AST drivers in .soma/slots.yaml for {', '.join(k.title() for k in sorted(non_py_langs))}")
+                    print(f"  ✅ Fixed: Auto-provisioned AST drivers in .aegis/slots.yaml for {', '.join(k.title() for k in sorted(non_py_langs))}")
             else:
                 missing_exts = sorted(set().union(*(d.get("extensions", []) for d in non_py_langs.values())))
                 ext_str = ", ".join(missing_exts) if missing_exts else ", ".join(non_py_langs.keys())
@@ -253,7 +253,7 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
         if fix:
             new_slots, created = provision_ast_driver_slots(ws_root, detected_langs, copy_drivers=True)
             if created:
-                print(f"  ✅ Fixed: Auto-provisioned missing AST driver slots in .soma/slots.yaml: {', '.join(missing)}")
+                print(f"  ✅ Fixed: Auto-provisioned missing AST driver slots in .aegis/slots.yaml: {', '.join(missing)}")
                 registry = SlotRegistry.load(ws_root)
                 for slot_name, slot_val in registry.to_dict().items():
                     if slot_name.startswith("ast_driver_"):
@@ -485,7 +485,7 @@ def fix_path(yes: bool = False, *,
             print("Not changed.")
             return 0
 
-    manifest_path = os.path.join(home, ".soma", "manifest.json")
+    manifest_path = os.path.join(home, ".aegis", "manifest.json")
     try:
         old_manifest = None
         if os.path.exists(manifest_path):

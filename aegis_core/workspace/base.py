@@ -107,11 +107,6 @@ class Workspace(os.PathLike[str]):
         """True if this workspace is the core Aegis Governance repository."""
         return is_aegis_repo(self.root)
 
-    @property
-    def is_soma_repo(self) -> bool:
-        """Alias for is_aegis_repo."""
-        return self.is_aegis_repo
-
     def __fspath__(self) -> str:
         return str(self.root)
 
@@ -240,8 +235,6 @@ class Workspace(os.PathLike[str]):
                     known.add(os.path.splitext(fn)[0])
 
         return [name for name in rule_names if name not in known]
-
-    validate_cell_names = validate_rule_names
 
 
 __all__ = ["Workspace"]

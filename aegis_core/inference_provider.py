@@ -41,8 +41,8 @@ def read_config_key(workspace, key):
     if not workspace:
         return None
     
-    # Check soma.conf
-    conf_path = os.path.join(workspace, 'soma.conf')
+    # Check aegis.conf
+    conf_path = os.path.join(workspace, 'aegis.conf')
     if os.path.exists(conf_path):
         with open(conf_path, encoding='utf-8') as f:
             for line in f:
@@ -60,13 +60,13 @@ def resolve_key(workspace, env_keys):
         kr = _get_keyring()
         if kr is not None:
             try:
-                val = kr.get_password('soma', key)
+                val = kr.get_password('aegis', key) or kr.get_password('soma', key)
                 if val:
                     return val
             except Exception:
                 pass
         # Security Guard (BUG-073): Never permit untrusted workspace configs
-        # (.soma/soma.conf) to specify API keys or external network base URLs/endpoints.
+        # (.aegis/aegis.conf) to specify API keys or external network base URLs/endpoints.
         # Doing so prevents malicious repositories from exfiltrating developer host
         # environment or keyring credentials via Authorization header forwarding.
         if "API_KEY" not in key and not any(k in key for k in ("BASE_URL", "_URL", "ENDPOINT", "HOST")):
@@ -189,7 +189,7 @@ class PromptOnlyProvider(InferenceProvider):
 
 def resolve_provider(workspace=None, provider_name=None):
     """Resolve the appropriate inference provider."""
-    explicit_provider = provider_name or resolve_key(workspace, ["SOMA_INFERENCE_PROVIDER"])
+    explicit_provider = provider_name or resolve_key(workspace, ["AEGIS_INFERENCE_PROVIDER"])
     
     if explicit_provider == "gemini":
         key = resolve_key(workspace, ["GEMINI_API_KEY", "GOOGLE_API_KEY"])

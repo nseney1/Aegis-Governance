@@ -32,7 +32,7 @@ class TestMCPVerifyChanges:
         """Clean Python file returns status=PASS."""
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         code_file = tmp_path / "clean.py"
         code_file.write_text(textwrap.dedent("""\
             def compute(a: int, b: int) -> int:
@@ -56,7 +56,7 @@ class TestMCPVerifyChanges:
         """File with forbidden unguarded import returns status=FAIL."""
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         bad_file = tmp_path / "broken.py"
         bad_file.write_text("import nonexistent_forbidden_package_xyz\n")
 
@@ -72,7 +72,7 @@ class TestMCPVerifyChanges:
         """Result must contain a 'summary' string describing Layer 1 outcome."""
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         code_file = tmp_path / "simple.py"
         code_file.write_text("def hello(): return 'world'\n")
 
@@ -90,7 +90,7 @@ class TestMCPVerifyChanges:
         """Empty file list returns FAIL (empty list cannot pass verification)."""
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
         result = execute_tool("soma_verify_changes", {
             "files": [],
@@ -103,7 +103,7 @@ class TestMCPVerifyChanges:
         """Result must include layer1_only field reflecting the request."""
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
         result = execute_tool("soma_verify_changes", {
             "files": [],
@@ -132,7 +132,7 @@ class TestMCPCheckpoint:
         """Empty workspace (no violations) returns status=PASS."""
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
         result = execute_tool("soma_checkpoint", {"workspace": str(tmp_path)})
 
@@ -143,7 +143,7 @@ class TestMCPCheckpoint:
         """Result must contain an 'issues' list."""
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: str(tmp_path))
         result = execute_tool("soma_checkpoint", {"workspace": str(tmp_path)})
 
@@ -165,7 +165,7 @@ class TestMCPCheckpoint:
         """Workspace with hardcoded paths in src/ returns FAIL with issues."""
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         src = tmp_path / "src"
         src.mkdir()
         bad_file = src / "config.py"

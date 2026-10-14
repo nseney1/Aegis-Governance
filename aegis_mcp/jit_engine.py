@@ -82,32 +82,31 @@ def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -
         except (ValueError, TypeError):
             pass
 
-    # 2. Environment variable AEGIS_MAX_JIT_TOKENS (with SOMA_MAX_JIT_TOKENS fallback)
-    env_val = os.environ.get("AEGIS_MAX_JIT_TOKENS") or os.environ.get("SOMA_MAX_JIT_TOKENS")
+    # 2. Environment variable AEGIS_MAX_JIT_TOKENS
+    env_val = os.environ.get("AEGIS_MAX_JIT_TOKENS")
     if env_val:
         try:
             return int(env_val.strip())
         except (ValueError, TypeError):
             pass
 
-    # 3. Workspace aegis.conf or soma.conf configuration
+    # 3. Workspace aegis.conf configuration
     if workspace:
-        for conf_name in ("aegis.conf", "soma.conf"):
-            conf_path = os.path.join(workspace, conf_name)
-            if os.path.isfile(conf_path):
-                try:
-                    with open(conf_path, encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith("#"):
-                                continue
-                            lowered = line.lower()
-                            if lowered.startswith("max_jit_tokens=") or lowered.startswith("max_jit_tokens:"):
-                                sep = "=" if "=" in line else ":"
-                                val = line.split(sep, 1)[1].strip().strip('"').strip("'")
-                                return int(val)
-                except Exception:
-                    pass
+        conf_path = os.path.join(workspace, "aegis.conf")
+        if os.path.isfile(conf_path):
+            try:
+                with open(conf_path, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("#"):
+                            continue
+                        lowered = line.lower()
+                        if lowered.startswith("max_jit_tokens=") or lowered.startswith("max_jit_tokens:"):
+                            sep = "=" if "=" in line else ":"
+                            val = line.split(sep, 1)[1].strip().strip('"').strip("'")
+                            return int(val)
+            except Exception:
+                pass
 
     # 4. Default fallback: 2000 tokens
     return 2000
@@ -131,11 +130,9 @@ def get_git_diff_files(workspace: str) -> list[str]:
 
 
 def load_all_cells(workspace: str) -> list[dict[str, object]]:
-    """Load all cells from .aegis/rules/ or .soma/cells/ using stdlib parser."""
+    """Load all rules from .aegis/rules/ using stdlib parser."""
     cells = []
     cells_dir = os.path.join(workspace, '.aegis', 'rules')
-    if not os.path.isdir(cells_dir):
-        cells_dir = os.path.join(workspace, '.soma', 'cells')
     if not os.path.isdir(cells_dir):
         return cells
 
@@ -523,7 +520,7 @@ def load_genome_rules(workspace: str, changed_files: list[str]) -> list[dict[str
     try:
         from aegis_core.workspace import Workspace
         ws = Workspace.resolve(workspace)
-        if not ws.is_soma_repo:
+        if not ws.is_aegis_repo:
             return []
     except Exception:
         return []
@@ -594,7 +591,7 @@ def express(
     token_budget = resolve_token_budget(workspace, max_tokens)
 
     if budget is None:
-        budget = int(os.environ.get('SOMA_CONTEXT_BUDGET', '3'))
+        budget = int(os.environ.get('AEGIS_CONTEXT_BUDGET', '3'))
 
     if not changed_files:
         changed_files = get_git_diff_files(workspace)

@@ -12,7 +12,7 @@ from aegis_core.insights import (
 
 def test_capture_and_cluster_insights(tmp_path):
     ws = str(tmp_path)
-    os.makedirs(os.path.join(ws, ".soma", "cells"), exist_ok=True)
+    os.makedirs(os.path.join(ws, ".aegis", "rules"), exist_ok=True)
 
     rec = capture_insight(
         workspace=ws,
@@ -42,7 +42,7 @@ def test_load_signal_weight_without_frontmatter(tmp_path):
     from aegis_core.insights import _load_signal_weight
 
     ws = str(tmp_path)
-    soma_dir = os.path.join(ws, ".soma")
+    soma_dir = os.path.join(ws, ".aegis")
     os.makedirs(soma_dir, exist_ok=True)
     with open(os.path.join(soma_dir, "config.yaml"), "w", encoding="utf-8") as f:
         f.write("insight_signal_weight: 0.85\n")
@@ -53,7 +53,7 @@ def test_load_signal_weight_with_bom(tmp_path):
     from aegis_core.insights import _load_signal_weight
 
     ws = str(tmp_path)
-    soma_dir = os.path.join(ws, ".soma")
+    soma_dir = os.path.join(ws, ".aegis")
     os.makedirs(soma_dir, exist_ok=True)
     with open(os.path.join(soma_dir, "config.yaml"), "w", encoding="utf-8") as f:
         f.write("\ufeffinsight_signal_weight: 0.95\n")

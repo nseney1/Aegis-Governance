@@ -51,7 +51,7 @@ def test_defects_match_glob():
 
 def test_insights_capture_and_clustering(tmp_path):
     ws = str(tmp_path)
-    os.makedirs(os.path.join(ws, ".soma", "cells"), exist_ok=True)
+    os.makedirs(os.path.join(ws, ".aegis", "rules"), exist_ok=True)
 
     rec = capture_insight(
         workspace=ws,

@@ -37,11 +37,11 @@ from aegis_core.workspace import Workspace
 @pytest.fixture
 def mock_soma_workspace(tmp_path: Path) -> Workspace:
     """Create a temporary initialized Soma workspace structure."""
-    cells_dir = tmp_path / ".soma" / "cells"
+    cells_dir = tmp_path / ".aegis" / "rules"
     vacuoles_dir = cells_dir / "vacuoles"
     walls_dir = cells_dir / "walls"
-    metrics_dir = tmp_path / ".soma" / "metrics"
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    metrics_dir = tmp_path / ".aegis" / "metrics"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     for d in (vacuoles_dir, walls_dir, metrics_dir, evidence_dir):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -107,11 +107,11 @@ class TestLifecycleWorkspaceInteroperability:
         )
         assert isinstance(created, Path)
         assert created.is_file()
-        assert str(mock_soma_workspace.cells_dir) in str(created)
+        assert str(mock_soma_workspace.rules_dir) in str(created)
 
     def test_transfer_cell_with_workspace_instance(self, mock_soma_workspace: Workspace, tmp_path: Path):
         dest_dir = tmp_path / "dest_repo"
-        (dest_dir / ".soma" / "cells").mkdir(parents=True)
+        (dest_dir / ".aegis" / "rules").mkdir(parents=True)
 
         res = transfer_cell(
             cell_id="test-rule",
@@ -119,7 +119,7 @@ class TestLifecycleWorkspaceInteroperability:
             source_workspace=mock_soma_workspace,
         )
         assert res == 0
-        dest_cell = dest_dir / ".soma" / "cells" / "vacuoles" / "test-rule.md"
+        dest_cell = dest_dir / ".aegis" / "rules" / "vacuoles" / "test-rule.md"
         assert dest_cell.is_file()
 
     def test_compute_cells_fitness_with_workspace_instance(self, mock_soma_workspace: Workspace):
@@ -204,8 +204,8 @@ class TestOutcomesAndSyncWorkspaceInteroperability:
         assert isinstance(matched, list)
 
     def test_sync_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        # Create a dummy soma.conf
-        conf_file = mock_soma_workspace.root / "soma.conf"
+        # Create a dummy aegis.conf
+        conf_file = mock_soma_workspace.root / "aegis.conf"
         conf_file.write_text("TEAM_REPO=/tmp/team\n", encoding="utf-8")
         cfg = load_soma_config(repo_dir=mock_soma_workspace)
         assert cfg.get("TEAM_REPO") == "/tmp/team"

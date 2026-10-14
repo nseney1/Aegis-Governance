@@ -174,8 +174,8 @@ def log_finding(
     resolved_home = Path.home()
     if logs_dir:
         base_logs = Path(logs_dir)
-    elif os.environ.get("SOMA_LOGS_DIR"):
-        base_logs = Path(os.environ["SOMA_LOGS_DIR"])
+    elif os.environ.get("AEGIS_LOGS_DIR"):
+        base_logs = Path(os.environ["AEGIS_LOGS_DIR"])
     else:
         base_logs = resolved_home / ".gemini" / "antigravity" / "scratch" / "ai-conversation-logs"
 

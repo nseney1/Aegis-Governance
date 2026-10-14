@@ -178,7 +178,7 @@ def test_no_infinity_emitted_in_json_payloads():
 
 def test_soma_mcp_has_no_unguarded_third_party_imports():
     """SOMA-C01: a bare `import yaml` in soma_mcp/ stopped the server from
-    starting at all, violating .soma/cells/walls/wall-mcp-zero-deps.md."""
+    starting at all, violating .aegis/rules/walls/wall-mcp-zero-deps.md."""
     offenders = []
     for path in iter_source_files(os.path.join(REPO_ROOT, "soma_mcp"), (".py",)):
         lines = read(path).splitlines()
@@ -198,7 +198,7 @@ def test_soma_mcp_has_no_unguarded_third_party_imports():
 def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
     """SOMA-C01 end to end: initialize + tools/list must return valid JSON on a
     bare interpreter. Regression: ModuleNotFoundError, exit 1, 0 bytes stdout."""
-    (tmp_path / ".soma" / "cells").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     requests = (
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n"
         + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}) + "\n"

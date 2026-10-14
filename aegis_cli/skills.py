@@ -33,8 +33,8 @@ def run_skill(args: argparse.Namespace) -> int:
         return 0
 
     # Discover skills
-    project_skills = ws_root / ".soma" / "skills"
-    global_skills = Path.home() / ".soma" / "skills"
+    project_skills = ws_root / ".aegis" / "skills"
+    global_skills = Path.home() / ".aegis" / "skills"
     graph = SkillGraph.discover([project_skills, global_skills])
 
     if action == "list":

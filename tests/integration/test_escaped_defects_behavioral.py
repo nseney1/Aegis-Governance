@@ -63,8 +63,8 @@ class TestEscapedDefectRecording:
     def _create_workspace_with_cell(self):
         """Create a temp workspace with a minimal cell and metrics dir."""
         workspace = tempfile.mkdtemp()
-        cells_dir = os.path.join(workspace, '.soma', 'cells', 'vacuoles')
-        metrics_dir = os.path.join(workspace, '.soma', 'metrics')
+        cells_dir = os.path.join(workspace, '.aegis', "rules", 'vacuoles')
+        metrics_dir = os.path.join(workspace, '.aegis', 'metrics')
         os.makedirs(cells_dir)
         os.makedirs(metrics_dir)
 
@@ -106,7 +106,7 @@ class TestEscapedDefectRecording:
                 workspace=workspace
             )
 
-            jsonl_path = os.path.join(workspace, '.soma', 'metrics', 'escaped_defects.jsonl')
+            jsonl_path = os.path.join(workspace, '.aegis', 'metrics', 'escaped_defects.jsonl')
             assert os.path.exists(jsonl_path), "JSONL file should be created"
 
             with open(jsonl_path, encoding='utf-8') as f:

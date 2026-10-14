@@ -435,7 +435,7 @@ def scan_git_for_defects(workspace: str, since: str) -> list[dict]:
 
 def generate_report(cells: list[dict], workspace: str) -> tuple[list[dict], int]:
     """Generate escaped defects report."""
-    metrics_dir = os.path.join(workspace, ".soma", "metrics")
+    metrics_dir = os.path.join(workspace, ".aegis", "metrics")
     log_path = os.path.join(metrics_dir, "escaped_defects.jsonl")
 
     cell_escapes: dict[str, int] = {}
@@ -488,7 +488,7 @@ def audit_expiry(workspace: Workspace | Path | str, session_count: Optional[int]
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     if not cells_dir.is_dir():
         return []
 

@@ -19,14 +19,14 @@ from aegis_cli.cli import main as cli_main
 def workspace_with_quarantine(tmp_path: Path) -> Path:
     ws = tmp_path / "test_ws"
     ws.mkdir(parents=True)
-    (ws / ".soma" / "cells").mkdir(parents=True)
-    q_dir = ws / ".soma" / "quarantine"
+    (ws / ".aegis" / "rules").mkdir(parents=True)
+    q_dir = ws / ".aegis" / "quarantine"
     q_dir.mkdir(parents=True)
     return ws
 
 
 def test_safe_parse_cell_with_bom(workspace_with_quarantine: Path):
-    cell_file = workspace_with_quarantine / ".soma" / "cells" / "test_cell.md"
+    cell_file = workspace_with_quarantine / ".aegis" / "rules" / "test_cell.md"
     # Write UTF-8 BOM + valid frontmatter
     cell_file.write_bytes(b"\xef\xbb\xbf---\nid: test_cell\ntype: membrane\n---\nBody here\n")
 
@@ -35,7 +35,7 @@ def test_safe_parse_cell_with_bom(workspace_with_quarantine: Path):
     assert metadata.get("id") == "test_cell"
     assert "Body here" in body
     # Ensure it was NOT quarantined
-    q_dir = workspace_with_quarantine / ".soma" / "quarantine"
+    q_dir = workspace_with_quarantine / ".aegis" / "quarantine"
     assert list(q_dir.glob("*.corrupt")) == []
 
 
@@ -65,7 +65,7 @@ def test_inspect_quarantined_file(workspace_with_quarantine: Path):
 
 
 def test_prune_quarantine(workspace_with_quarantine: Path):
-    q_dir = workspace_with_quarantine / ".soma" / "quarantine"
+    q_dir = workspace_with_quarantine / ".aegis" / "quarantine"
 
     # Create an old corrupt file (simulating 40 days ago)
     old_ts = int(time.time()) - (40 * 86400)

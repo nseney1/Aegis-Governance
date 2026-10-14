@@ -59,7 +59,7 @@ def generate_slug(hypothesis: str, id_override: str | None = None) -> str:
 
 
 def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Optional[Path], Optional[str]]:
-    """Locate a cell across .aegis/rules/, .soma/cells/, and rules/ or genome/ directories."""
+    """Locate a cell across .aegis/rules/ and rules/ or genome/ directories."""
     clean_id = sanitize_cell_id(cell_id)
     if not clean_id:
         return None, None
@@ -68,9 +68,7 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
     candidate_dirs = [
-        ws.root / ".aegis" / "rules",
-        ws.cells_dir,
-        ws.root / ".soma" / "cells",
+        ws.rules_dir,
     ]
     rules_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
 
@@ -84,7 +82,7 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
             if candidate.is_file():
                 return candidate, type_name
 
-    if ws.is_soma_repo:
+    if ws.is_aegis_repo:
         candidate = rules_dir / f"{clean_id}.md"
         if candidate.is_file():
             return candidate, "genome"
@@ -96,7 +94,7 @@ def find_cell(workspace: Workspace | Path | str, cell_id: str) -> Optional[str]:
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    for cand_dir in (ws.root / ".aegis" / "rules", ws.cells_dir, ws.root / ".soma" / "cells"):
+    for cand_dir in (ws.rules_dir,):
         if not cand_dir.is_dir():
             continue
         matches = glob.glob(os.path.join(str(cand_dir), "**", f"*{cell_id}*"), recursive=True)
@@ -141,8 +139,7 @@ def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    aegis_ev = ws.root / ".aegis" / "evidence"
-    evidence_dir = str(aegis_ev if aegis_ev.is_dir() else ws.evidence_dir)
+    evidence_dir = str(ws.evidence_dir)
     aggregation = aggregate_signals(evidence_dir)
     return {
         cell_id: {
@@ -157,7 +154,7 @@ def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any
 
 
 def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
-    """Load cell metadata from .aegis/rules/**/*.md, .soma/cells/**/*.md, and genome/**/*.md files.
+    """Load cell metadata from .aegis/rules/**/*.md and rules/**/*.md files.
 
     Returns:
         List of cell metadata dicts with at minimum: id, type, created, source_path.
@@ -166,12 +163,8 @@ def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
     cells = []
-    scan_roots = []
-    for cand in (ws.root / ".aegis" / "rules", ws.cells_dir, ws.root / ".soma" / "cells"):
-        cand_str = str(cand)
-        if cand_str not in scan_roots:
-            scan_roots.append(cand_str)
-    if ws.is_soma_repo:
+    scan_roots = [str(ws.rules_dir)]
+    if ws.is_aegis_repo:
         rules_root = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
         if str(rules_root) not in scan_roots:
             scan_roots.append(str(rules_root))

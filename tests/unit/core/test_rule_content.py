@@ -104,7 +104,7 @@ def _collect_target_paths_from_rules():
     """Collect target_paths values from all cell frontmatter."""
     from aegis_core.yaml import parse_frontmatter
     results = []
-    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".soma" / "cells")
+    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".aegis" / "rules")
     if not cells_dir.exists():
         return results
     for md_file in cells_dir.rglob("*.md"):
@@ -160,7 +160,7 @@ def test_parsers_agree_on_id_and_domain():
         REPO_ROOT / "genome",
         REPO_ROOT / "genome" / ".oracles",
         REPO_ROOT / ".aegis" / "rules",
-        REPO_ROOT / ".soma" / "cells",
+        REPO_ROOT / ".aegis" / "rules",
     ]
     checked = 0
     for rule_dir in rule_dirs:
@@ -209,7 +209,7 @@ def _collect_glob_paths_from_cells():
     """Collect glob target_paths from all cell frontmatter."""
     from aegis_core.yaml import parse_frontmatter
     results = []
-    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".soma" / "cells")
+    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".aegis" / "rules")
     if not cells_dir.exists():
         return results
     for md_file in cells_dir.rglob("*.md"):
@@ -264,9 +264,9 @@ def test_cell_subdirs_have_test_coverage():
     """
     import ast
 
-    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".soma" / "cells")
+    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".aegis" / "rules")
     if not cells_dir.exists():
-        pytest.skip("No .aegis/rules/ or .soma/cells/ directory")
+        pytest.skip("No .aegis/rules/ or .aegis/rules/ directory")
 
     # Find all cell subdirectories that contain .md files
     cell_subdirs = set()

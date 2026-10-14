@@ -50,35 +50,20 @@ _lock_tls = threading.local()
 
 
 def _resolve_evidence_dir(workspace: str) -> str:
-    """Resolve canonical evidence directory (.aegis/evidence or fallback .soma/evidence)."""
+    """Resolve canonical evidence directory (.aegis/evidence)."""
     ws = str(workspace)
-    aegis_evidence = os.path.join(ws, '.aegis', 'evidence')
-    soma_evidence = os.path.join(ws, '.soma', 'evidence')
-    if os.path.isdir(aegis_evidence):
-        return aegis_evidence
-    if os.path.isdir(soma_evidence):
-        return soma_evidence
-    if os.path.isdir(os.path.join(ws, '.aegis')):
-        return aegis_evidence
-    if os.path.isdir(os.path.join(ws, '.soma')):
-        return soma_evidence
-    if os.environ.get("AEGIS_WORKSPACE"):
-        return aegis_evidence
-    return soma_evidence
+    from aegis_core.workspace.discovery import check_legacy_soma_sentinel
+    check_legacy_soma_sentinel(ws)
+    return os.path.join(ws, '.aegis', 'evidence')
 
 
 def _resolve_governance_dir(workspace: str) -> str:
-    """Resolve canonical governance directory (.aegis or fallback .soma)."""
+    """Resolve canonical governance directory (.aegis)."""
     ws = str(workspace)
-    aegis_dir = os.path.join(ws, '.aegis')
-    soma_dir = os.path.join(ws, '.soma')
-    if os.path.isdir(aegis_dir):
-        return aegis_dir
-    if os.path.isdir(soma_dir):
-        return soma_dir
-    if os.environ.get("AEGIS_WORKSPACE"):
-        return aegis_dir
-    return soma_dir
+    from aegis_core.workspace.discovery import check_legacy_soma_sentinel
+    check_legacy_soma_sentinel(ws)
+    return os.path.join(ws, '.aegis')
+
 
 
 @contextmanager
@@ -120,17 +105,11 @@ def evidence_lock(workspace: str):
 
 
 def read_generation(workspace: str) -> int:
-    """Read the current epoch generation integer from .aegis/epoch_generation (or .soma/epoch_generation)."""
+    """Read the current epoch generation integer from .aegis/epoch_generation."""
     ws = str(workspace)
-    aegis_gen = os.path.join(ws, '.aegis', EPOCH_FILENAME)
-    if os.path.isfile(aegis_gen):
-        gen_path = aegis_gen
-    else:
-        soma_gen = os.path.join(ws, '.soma', EPOCH_FILENAME)
-        if os.path.isfile(soma_gen):
-            gen_path = soma_gen
-        else:
-            return DEFAULT_GENERATION
+    gen_path = os.path.join(ws, '.aegis', EPOCH_FILENAME)
+    if not os.path.isfile(gen_path):
+        return DEFAULT_GENERATION
     try:
         with open(gen_path, 'r', encoding='utf-8') as f:
             content = f.read().strip()
@@ -149,10 +128,7 @@ def increment_generation(workspace: str) -> int:
     ws = str(workspace)
     with evidence_lock(ws):
         gen = read_generation(ws) + 1
-        if os.path.isfile(os.path.join(ws, '.soma', EPOCH_FILENAME)) and not os.path.isfile(os.path.join(ws, '.aegis', EPOCH_FILENAME)):
-            epoch_file = os.path.join(ws, '.soma', EPOCH_FILENAME)
-        else:
-            epoch_file = os.path.join(ws, '.aegis', EPOCH_FILENAME)
+        epoch_file = os.path.join(ws, '.aegis', EPOCH_FILENAME)
         os.makedirs(os.path.dirname(epoch_file), exist_ok=True)
         _atomic_replace_bytes(epoch_file, f"{gen}\n".encode("utf-8"))
         return gen
@@ -243,9 +219,7 @@ def _atomic_replace_bytes(path: str, data: bytes) -> None:
 
 def _migration_in_progress(workspace: str) -> bool:
     return (
-        os.path.exists(os.path.join(workspace, '.soma', 'migration.lock'))
-        or os.path.exists(os.path.join(workspace, '.soma', 'evidence', '.migration.lock'))
-        or os.path.exists(os.path.join(workspace, '.aegis', 'migration.lock'))
+        os.path.exists(os.path.join(workspace, '.aegis', 'migration.lock'))
         or os.path.exists(os.path.join(workspace, '.aegis', 'evidence', '.migration.lock'))
     )
 

@@ -28,14 +28,14 @@ from aegis_sdk import Governance
 @pytest.fixture
 def mock_soma_workspace(tmp_path: Path) -> Path:
     """Create a minimal valid Soma workspace directory structure."""
-    cells_dir = tmp_path / ".soma" / "cells" / "walls"
+    cells_dir = tmp_path / ".aegis" / "rules" / "walls"
     cells_dir.mkdir(parents=True)
     sample_cell = cells_dir / "sample_rule.md"
     sample_cell.write_text(
         "---\nname: sample-rule\ntype: wall\nenforcement: gate\n---\nRule content\n",
         encoding="utf-8",
     )
-    metrics_dir = tmp_path / ".soma" / "metrics"
+    metrics_dir = tmp_path / ".aegis" / "metrics"
     metrics_dir.mkdir(parents=True)
     tracked_file = tmp_path / "hello.py"
     tracked_file.write_text("print('hello')\n", encoding="utf-8")
@@ -51,15 +51,15 @@ class TestGovernanceWorkspacePorcelain:
         assert isinstance(gov.workspace, Workspace)
         assert gov.workspace.root == mock_soma_workspace.resolve()
         assert gov.root == mock_soma_workspace.resolve()
-        assert gov.cells_dir == mock_soma_workspace.resolve() / ".soma" / "cells"
-        assert gov.metrics_dir == mock_soma_workspace.resolve() / ".soma" / "metrics"
+        assert gov.rules_dir == mock_soma_workspace.resolve() / ".aegis" / "rules"
+        assert gov.metrics_dir == mock_soma_workspace.resolve() / ".aegis" / "metrics"
 
     def test_governance_init_with_workspace_object(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
         gov = Governance(project_root=ws)
         assert gov.workspace is ws
         assert gov.root == ws.root
-        assert gov.cells_dir == ws.cells_dir
+        assert gov.rules_dir == ws.rules_dir
         assert gov.metrics_dir == ws.metrics_dir
 
     def test_governance_list_cells_with_workspace(self, mock_soma_workspace: Path):

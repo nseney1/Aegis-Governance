@@ -103,7 +103,7 @@ class TestResponseProjection:
     def test_execute_tool_with_projection(self, tmp_path, monkeypatch):
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".soma" / "cells").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True, exist_ok=True)
         monkeypatch.chdir(tmp_path)
         # Test audit tool with fields projection
         res = execute_tool(

@@ -31,7 +31,7 @@ def _make_cell(workspace, cell_id, cell_type='vacuole', target_paths=None,
                expired=False):
     """Create a minimal cell file in workspace."""
     type_map = {'vacuole': 'vacuoles', 'wall': 'walls', 'membrane': 'membranes'}
-    cells_dir = os.path.join(workspace, '.soma', 'cells',
+    cells_dir = os.path.join(workspace, '.aegis', "rules",
                              type_map.get(cell_type, 'vacuoles'))
     os.makedirs(cells_dir, exist_ok=True)
     fm = {
@@ -182,7 +182,7 @@ class TestExpress:
 
     def test_empty_workspace_no_crash(self, tmp_path):
         ws = str(tmp_path)
-        os.makedirs(os.path.join(ws, '.soma', 'cells'), exist_ok=True)
+        os.makedirs(os.path.join(ws, '.aegis', "rules"), exist_ok=True)
         result = express(ws)
         assert 'relevant_cells' in result
         assert 'stats' in result
@@ -223,7 +223,7 @@ class TestExpress:
 
     def test_stats_has_required_keys(self, tmp_path):
         ws = str(tmp_path)
-        os.makedirs(os.path.join(ws, '.soma', 'cells'), exist_ok=True)
+        os.makedirs(os.path.join(ws, '.aegis', "rules"), exist_ok=True)
         result = express(ws)
         stats = result['stats']
         assert 'total_cells' in stats
@@ -247,7 +247,7 @@ class TestExpress:
         ws = str(tmp_path)
         for i in range(10):
             _make_cell(ws, f'budget-cell-{i}', target_paths=['src/*.py'])
-        monkeypatch.setenv('SOMA_CONTEXT_BUDGET', '2')
+        monkeypatch.setenv('AEGIS_CONTEXT_BUDGET', '2')
         result = express(ws, changed_files=['src/foo.py'])
         # Mandatory cells can exceed budget, but non-mandatory should respect it
         assert result['stats']['budget'] == 2
@@ -262,7 +262,7 @@ class TestMandatoryCellsFitnessScore:
     @pytest.fixture
     def populated_workspace(self, soma_workspace):
         """Workspace with a wall cell and an advisory cell for fitness tests."""
-        cells_dir = soma_workspace / ".soma" / "cells"
+        cells_dir = soma_workspace / ".aegis" / "rules"
         write_cell_with_fitness(cells_dir, "wall-auth", cell_type="wall",
                                triggers=50, tp=48, fp=1,
                                hypothesis="Auth check")

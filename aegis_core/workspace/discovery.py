@@ -79,9 +79,6 @@ def is_aegis_repo(root: Path) -> bool:
     return has_core and has_cli
 
 
-is_soma_repo = is_aegis_repo
-
-
 def resolve_workspace_root(
     start: str | Path | os.PathLike[str] | None = None,
     caller_file: str | Path | os.PathLike[str] | None = None,
@@ -163,6 +160,5 @@ __all__ = [
     "_is_workspace_dir",
     "check_legacy_soma_sentinel",
     "is_aegis_repo",
-    "is_soma_repo",
     "resolve_workspace_root",
 ]

@@ -297,20 +297,11 @@ def load_cells_for_enforcement(cells_dir: str | Path | Workspace) -> List[Dict[s
     from aegis_core.yaml import parse_frontmatter, _get_body
 
     if isinstance(cells_dir, Workspace):
-        aegis_rules = cells_dir.root / ".aegis" / "rules"
-        soma_cells = cells_dir.root / ".soma" / "cells"
-        if aegis_rules.is_dir():
-            c_dir = str(aegis_rules)
-        elif soma_cells.is_dir():
-            c_dir = str(soma_cells)
-        else:
-            c_dir = str(cells_dir.cells_dir)
+        c_dir = str(cells_dir.rules_dir)
     else:
         p = Path(cells_dir)
         if (p / ".aegis" / "rules").is_dir():
             c_dir = str(p / ".aegis" / "rules")
-        elif (p / ".soma" / "cells").is_dir():
-            c_dir = str(p / ".soma" / "cells")
         else:
             c_dir = str(cells_dir)
 
@@ -597,14 +588,7 @@ def _match_cells(workspace: str | Path | Workspace, changed_files: List[str]) ->
     from aegis_core.cell_inventory import find_matching_cells
 
     ws = as_workspace(workspace)
-    aegis_rules = ws.root / ".aegis" / "rules"
-    soma_cells = ws.root / ".soma" / "cells"
-    if aegis_rules.is_dir():
-        cells_dir = str(aegis_rules)
-    elif soma_cells.is_dir():
-        cells_dir = str(soma_cells)
-    else:
-        cells_dir = str(ws.cells_dir)
+    cells_dir = str(ws.rules_dir)
     matches = find_matching_cells(cells_dir, changed_files, allow_basename_match=True)
     matched = []
     for m in matches:

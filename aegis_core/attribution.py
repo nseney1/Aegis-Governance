@@ -167,13 +167,13 @@ def attribute_verification_outcome(
     """Attribute Layer 1 and Layer 2 verification outcomes to matching workspace cells.
 
     Updates cell frontmatter (incrementing true_positives / false_positives and triggers)
-    and appends structured signals to .soma/evidence/signals.jsonl.
+    and appends structured signals to .aegis/evidence/signals.jsonl.
 
     Returns:
         List of generated signal events.
     """
     ws = as_workspace(workspace)
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     cells = _load_workspace_cells(cells_dir)
     if not cells:
         return []

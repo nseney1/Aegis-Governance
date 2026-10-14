@@ -28,7 +28,6 @@ from aegis_core.workspace.discovery import (
     _is_workspace_dir,
     check_legacy_soma_sentinel,
     is_aegis_repo,
-    is_soma_repo,
     resolve_workspace_root,
 )
 from aegis_core.workspace.git import GitWorkspace, _parse_worktree_porcelain
@@ -90,9 +89,6 @@ def validate_rule_names(
     return ws.validate_rule_names(rule_names)
 
 
-validate_cell_names = validate_rule_names
-
-
 __all__ = [
     "GitWorkspace",
     "LEGACY_SOMA_UPGRADE_MSG",
@@ -102,14 +98,13 @@ __all__ = [
     "confine_path",
     "confine_workspace",
     "is_aegis_repo",
-    "is_soma_repo",
     "resolve_git_hooks_dir",
     "resolve_workspace",
     "resolve_workspace_path",
-    "validate_cell_names",
     "validate_rule_names",
     "_WINDOWS_DEVICE_NAMES",
     "_find_git_dirs",
     "_is_workspace_dir",
     "_parse_worktree_porcelain",
 ]
+

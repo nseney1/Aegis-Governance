@@ -43,7 +43,7 @@ def _handle_create_cell(args: dict, gov) -> dict:
         }
     return {
         "prompt": prompt,
-        "instruction": "Process this prompt and return the cell YAML. Then use a file-writing tool to save it to the appropriate .soma/cells/ directory.",
+        "instruction": "Process this prompt and return the cell YAML. Then use a file-writing tool to save it to the appropriate .aegis/rules/ directory.",
     }
 
 
@@ -95,7 +95,7 @@ def _handle_generate_manifest(args: dict, gov) -> dict:
         workspace = _get_workspace(args)
     except ValueError as exc:
         return {"error": str(exc), "status": "FAIL"}
-    cells_dir = str(workspace.cells_dir)
+    cells_dir = str(workspace.rules_dir)
 
     key_created = False
     if args.get("generate_key") and load_key(workspace) is None:

@@ -32,7 +32,7 @@ def test_doctor_fix_provisions_missing_drivers(tmp_path: Path):
     # Verify slots.yaml now has ast_driver_rs
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".rs") is not None
-    assert (tmp_path / ".soma" / "drivers" / "rust_ast.py").is_file()
+    assert (tmp_path / ".aegis" / "drivers" / "rust_ast.py").is_file()
 
 
 from unittest.mock import patch
@@ -41,7 +41,7 @@ from unittest.mock import patch
 def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch):
     (tmp_path / "go.mod").write_text("module example.com/app\n", encoding="utf-8")
     (tmp_path / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
-    (tmp_path / ".soma" / "evidence").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".aegis" / "evidence").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".gemini").mkdir(exist_ok=True)
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()

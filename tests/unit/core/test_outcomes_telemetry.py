@@ -145,7 +145,7 @@ def test_capture_mcp_outcomes(tmp_path: Path):
     # File missing
     assert capture_mcp_outcomes(ws) == []
 
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     signals_file = evidence_dir / "signals.jsonl"
 
@@ -178,7 +178,7 @@ def test_record_verification_telemetry(tmp_path: Path):
     # Missing cells_dir
     assert record_verification_telemetry(ws, ["src/foo.py"], passed=True) is False
 
-    cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_file = cells_dir / "test-cell.md"
     fm = {
@@ -284,14 +284,14 @@ def test_telemetry_edge_cases_and_error_branches(tmp_path: Path, monkeypatch):
     assert cmd is None and name is None
 
     # 3. lines 166-167: capture_mcp_outcomes exception handled
-    signals_file = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     signals_file.parent.mkdir(parents=True, exist_ok=True)
     signals_file.write_text("dummy\n", encoding="utf-8")
     assert capture_mcp_outcomes(ws) == []
     monkeypatch.undo()
 
     # 4. lines 259-261: record_verification_telemetry exception handled
-    cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_file = cells_dir / "test-cell.md"
     fm = {

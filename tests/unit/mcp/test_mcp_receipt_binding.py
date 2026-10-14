@@ -25,7 +25,7 @@ STALE_RECEIPT = "Invalid, expired, or mismatched receipt."
 
 
 def _make_workspace(root, cell_name):
-    cells = root / ".soma" / "cells" / "vacuoles"
+    cells = root / ".aegis" / "rules" / "vacuoles"
     cells.mkdir(parents=True)
     (cells / f"{cell_name}.md").write_text(
         "---\n"
@@ -47,8 +47,8 @@ def workspaces(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_session_token", "session-test")
     monkeypatch.setattr(server, "_canonical_workspace", os.path.realpath(str(canonical)))
     monkeypatch.setattr(server, "_execution_enabled", True)
-    monkeypatch.setenv("SOMA_WORKSPACE", str(canonical))
-    monkeypatch.delenv("SOMA_ROOT", raising=False)
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(canonical))
+    monkeypatch.delenv("AEGIS_ROOT", raising=False)
     server._tool_call_times.clear()
     receipts.clear_receipts()
     yield canonical, other
@@ -85,8 +85,8 @@ def test_write_tool_cannot_be_redirected_to_another_workspace(workspaces):
     receipt = _request_receipt("soma_report_outcome", args)
     resp = _call("soma_report_outcome", dict(args, receipt=receipt))
     assert "result" in resp and not resp["result"]["isError"], resp
-    assert (canonical / ".soma" / "evidence" / "signals.jsonl").exists()
-    assert not (other / ".soma" / "evidence").exists(), (
+    assert (canonical / ".aegis" / "evidence" / "signals.jsonl").exists()
+    assert not (other / ".aegis" / "evidence").exists(), (
         "write tool mutated a caller-selected workspace"
     )
 
@@ -142,18 +142,18 @@ def test_receipt_is_stale_after_cells_change(workspaces):
     canonical, _ = workspaces
     args = {"outcome": "success", "cells_used": []}
     receipt = _request_receipt("soma_report_outcome", args)
-    cell = canonical / ".soma" / "cells" / "vacuoles" / "cell-canonical.md"
+    cell = canonical / ".aegis" / "rules" / "vacuoles" / "cell-canonical.md"
     cell.write_text(cell.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
     resp = _call("soma_report_outcome", dict(args, receipt=receipt))
     assert resp.get("error", {}).get("message") == STALE_RECEIPT, resp
-    assert not (canonical / ".soma" / "evidence" / "outcomes.jsonl").exists()
+    assert not (canonical / ".aegis" / "evidence" / "outcomes.jsonl").exists()
 
 
 def test_receipt_flow_works_after_cell_edited_since_creation(workspaces):
     """BUG-035: a cell edited after creation made every receipt request fail
     on Windows with an internal error, so no write tool could run."""
     canonical, _ = workspaces
-    cell = canonical / ".soma" / "cells" / "vacuoles" / "cell-canonical.md"
+    cell = canonical / ".aegis" / "rules" / "vacuoles" / "cell-canonical.md"
     time.sleep(0.05)
     cell.write_text(cell.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
     args = {"outcome": "success", "cells_used": [], "idempotency_key": "bug-035"}
@@ -187,8 +187,8 @@ def test_receipt_digest_rejects_symlinked_cell(workspaces):
     from aegis_core.cell_inventory import CellInventoryError
 
     canonical, _ = workspaces
-    target = canonical / '.soma' / 'cells' / 'vacuoles' / 'cell-canonical.md'
-    link = canonical / '.soma' / 'cells' / 'vacuoles' / 'linked.md'
+    target = canonical / '.aegis' / 'rules' / 'vacuoles' / 'cell-canonical.md'
+    link = canonical / '.aegis' / 'rules' / 'vacuoles' / 'linked.md'
     try:
         link.symlink_to(target)
     except (OSError, NotImplementedError):

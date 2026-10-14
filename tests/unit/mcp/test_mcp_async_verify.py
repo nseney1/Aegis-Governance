@@ -102,9 +102,9 @@ class TestMcpAsyncExecutionAndPolling:
     """Verify end-to-end execution of async verification and polling tools."""
 
     def test_async_verify_and_poll_flow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("SOMA_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("AEGIS_WORKSPACE", str(tmp_path))
         # Create minimal cell structure so workspace passes
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
 
         # 1. Enqueue job via soma_verify_changes
         res_queue = execute_tool(
@@ -154,8 +154,8 @@ class TestMcpAsyncExecutionAndPolling:
         assert "missing required argument" in res.get("error", "").lower()
 
     def test_sync_mode_still_works_as_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("SOMA_WORKSPACE", str(tmp_path))
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        monkeypatch.setenv("AEGIS_WORKSPACE", str(tmp_path))
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
 
         res = execute_tool(
             "soma_verify_changes",

@@ -166,7 +166,7 @@ class TestCycleHelpers:
 
     def test_get_next_cycle_number_increments(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = os.path.join(tmpdir, ".soma", "evidence")
+            ev_dir = os.path.join(tmpdir, ".aegis", "evidence")
             os.makedirs(ev_dir, exist_ok=True)
             with open(os.path.join(ev_dir, "arbitration_cycle_1.json"), "w") as f:
                 f.write("{}")
@@ -178,7 +178,7 @@ class TestCycleHelpers:
 
     def test_get_next_cycle_number_sparse(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = os.path.join(tmpdir, ".soma", "evidence")
+            ev_dir = os.path.join(tmpdir, ".aegis", "evidence")
             os.makedirs(ev_dir, exist_ok=True)
             with open(os.path.join(ev_dir, "arbitration_cycle_4.json"), "w") as f:
                 f.write("{}")
@@ -187,7 +187,7 @@ class TestCycleHelpers:
     def test_cycle_counter_file_created_and_atomic(self):
         """Verify .cycle_counter persists monotonic increments under lock."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            counter_file = os.path.join(tmpdir, ".soma", "evidence", ".cycle_counter")
+            counter_file = os.path.join(tmpdir, ".aegis", "evidence", ".cycle_counter")
             c1 = get_next_cycle_number(tmpdir)
             assert c1 == 1
             assert os.path.isfile(counter_file)
@@ -202,7 +202,7 @@ class TestCycleHelpers:
     def test_cycle_counter_fallback_recovery(self):
         """Verify fallback recovery scans directory if counter file is missing or corrupted."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = os.path.join(tmpdir, ".soma", "evidence")
+            ev_dir = os.path.join(tmpdir, ".aegis", "evidence")
             os.makedirs(ev_dir, exist_ok=True)
             with open(os.path.join(ev_dir, "arbitration_cycle_7.json"), "w") as f:
                 f.write("{}")
@@ -235,7 +235,7 @@ class TestCycleHelpers:
 
     def test_get_latest_arbitration_evidence_finds_latest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = os.path.join(tmpdir, ".soma", "evidence")
+            ev_dir = os.path.join(tmpdir, ".aegis", "evidence")
             os.makedirs(ev_dir, exist_ok=True)
             with open(os.path.join(ev_dir, "arbitration_cycle_1.json"), "w") as f:
                 json.dump({"cycle": 1, "verdict": "block"}, f)
@@ -249,7 +249,7 @@ class TestCycleHelpers:
     def test_get_next_cycle_number_oserror(self, monkeypatch):
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = Path(tmpdir) / ".soma" / "evidence"
+            ev_dir = Path(tmpdir) / ".aegis" / "evidence"
             ev_dir.mkdir(parents=True)
             def mock_iterdir(self):
                 raise OSError("Permission denied")
@@ -259,7 +259,7 @@ class TestCycleHelpers:
     def test_get_latest_arbitration_evidence_oserror(self, monkeypatch):
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = Path(tmpdir) / ".soma" / "evidence"
+            ev_dir = Path(tmpdir) / ".aegis" / "evidence"
             ev_dir.mkdir(parents=True)
             def mock_iterdir(self):
                 raise OSError("Permission denied")
@@ -270,7 +270,7 @@ class TestCycleHelpers:
 
     def test_get_latest_arbitration_evidence_no_matching_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = os.path.join(tmpdir, ".soma", "evidence")
+            ev_dir = os.path.join(tmpdir, ".aegis", "evidence")
             os.makedirs(ev_dir, exist_ok=True)
             with open(os.path.join(ev_dir, "signals.jsonl"), "w") as f:
                 f.write("")
@@ -280,7 +280,7 @@ class TestCycleHelpers:
 
     def test_get_latest_arbitration_evidence_corrupted_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = os.path.join(tmpdir, ".soma", "evidence")
+            ev_dir = os.path.join(tmpdir, ".aegis", "evidence")
             os.makedirs(ev_dir, exist_ok=True)
             with open(os.path.join(ev_dir, "arbitration_cycle_1.json"), "w") as f:
                 f.write("not valid json{{{")
@@ -290,7 +290,7 @@ class TestCycleHelpers:
 
     def test_cycle_helpers_ignore_subdirectories(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = os.path.join(tmpdir, ".soma", "evidence")
+            ev_dir = os.path.join(tmpdir, ".aegis", "evidence")
             os.makedirs(os.path.join(ev_dir, "subdir_should_be_skipped"), exist_ok=True)
             with open(os.path.join(ev_dir, "arbitration_cycle_1.json"), "w") as f:
                 json.dump({"cycle": 1, "verdict": "ship"}, f)
@@ -347,7 +347,7 @@ class TestCycleHelpers:
             claims=[],
         )
         with tempfile.TemporaryDirectory() as tmpdir:
-            ev_dir = os.path.join(tmpdir, ".soma", "evidence")
+            ev_dir = os.path.join(tmpdir, ".aegis", "evidence")
             def broken_dump(*args, **kwargs):
                 raise RuntimeError("disk write failure")
             monkeypatch.setattr(json, "dump", broken_dump)
@@ -378,7 +378,7 @@ class TestCycleHelpers:
             with open(p2) as f:
                 assert json.load(f)["cycle"] == 2
 
-            counter_file = os.path.join(tmpdir, ".soma", "evidence", ".cycle_counter")
+            counter_file = os.path.join(tmpdir, ".aegis", "evidence", ".cycle_counter")
             assert os.path.isfile(counter_file)
             with open(counter_file) as f:
                 assert f.read().strip() == "2"
@@ -396,7 +396,7 @@ class TestCycleHelpers:
         with tempfile.TemporaryDirectory() as fresh_dir:
             # Explicit cycle=1 in fresh dir without pre-existing counter
             save_arbitration_evidence(res, fresh_dir, cycle=1)
-            fresh_cf = os.path.join(fresh_dir, ".soma", "evidence", ".cycle_counter")
+            fresh_cf = os.path.join(fresh_dir, ".aegis", "evidence", ".cycle_counter")
             assert os.path.isfile(fresh_cf)
             with open(fresh_cf) as f:
                 assert f.read().strip() == "1"

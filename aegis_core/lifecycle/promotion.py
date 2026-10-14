@@ -58,7 +58,7 @@ __all__ = [
 
 
 def _effective_promotion_path(ws: Workspace) -> dict[str, str]:
-    modern = MODERN_GLOBAL_PROMOTION_PATH if getattr(ws, "is_soma_repo", False) else MODERN_LOCAL_PROMOTION_PATH
+    modern = MODERN_GLOBAL_PROMOTION_PATH if getattr(ws, "is_aegis_repo", False) else MODERN_LOCAL_PROMOTION_PATH
     return {**modern, **get_promotion_path(ws)}
 
 
@@ -248,14 +248,14 @@ def promote_cell(
         }
 
     if next_type == "genome":
-        if not ws.is_soma_repo:
+        if not ws.is_aegis_repo:
             return {
                 "status": "error",
                 "message": "Cannot promote to genome in non-soma repository",
             }
         target_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
     else:
-        target_dir = ws.cells_dir / TYPE_TO_DIR[next_type]
+        target_dir = ws.rules_dir / TYPE_TO_DIR[next_type]
 
     target_path = target_dir / f"{clean_id}.md"
     if target_path.exists():
@@ -324,7 +324,7 @@ def demote_cell(
             "message": f"Cell '{clean_id}' is at base level ('{current_type}') and cannot be demoted further",
         }
 
-    target_dir = ws.cells_dir / TYPE_TO_DIR[next_type]
+    target_dir = ws.rules_dir / TYPE_TO_DIR[next_type]
     target_path = target_dir / f"{clean_id}.md"
     if target_path.exists():
         return {
@@ -350,7 +350,7 @@ def demote_cell(
         if current_type in ("wall", "invariant") and next_type in ("vacuole", "trap"):
             for pfx in ("check-", "gate-"):
                 for sfx in (".sh", ".py"):
-                    art = ws.soma_dir / "enforcement" / f"{pfx}{clean_id}{sfx}"
+                    art = ws.aegis_dir / "enforcement" / f"{pfx}{clean_id}{sfx}"
                     if art.exists():
                         try:
                             art.unlink()
@@ -371,7 +371,7 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     cell_files = glob.glob(os.path.join(str(cells_dir), "**", "*.md"), recursive=True)
     escaped_defects_log = str(ws.metrics_dir / "escaped_defects.jsonl")
 
@@ -466,7 +466,7 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
                         generate_precommit_check,
                         update_cell_enforcement_artifact,
                     )
-                    artifacts_dir = str(ws.soma_dir / "enforcement")
+                    artifacts_dir = str(ws.aegis_dir / "enforcement")
                     os.makedirs(artifacts_dir, exist_ok=True)
                     if new_tier == "mechanical":
                         artifact_content = generate_precommit_check(metadata, str(ws.root))
@@ -509,7 +509,7 @@ def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) ->
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     clean_id = cell_id.stem if isinstance(cell_id, Path) else str(cell_id)
     if clean_id.endswith(".md"):
         clean_id = clean_id[:-3]
@@ -544,7 +544,7 @@ def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) ->
     meta["metamorphosis_date"] = datetime.now(timezone.utc).isoformat() + "Z"
 
     if new_type == "rule":
-        if ws.is_soma_repo:
+        if ws.is_aegis_repo:
             target_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
             target_path = target_dir / f"rule-{cell_path.name}"
         else:
@@ -578,7 +578,7 @@ def adapt_cell(workspace: Workspace | Path | str, generate: bool = False) -> lis
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     results = []
 
     for fpath in cells_dir.rglob("*.md"):

@@ -16,8 +16,8 @@ class TestJitPreseedConstraints(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.workspace = self.temp_dir.name
-        self.cells_dir = os.path.join(self.workspace, ".soma", "cells")
-        os.makedirs(self.cells_dir, exist_ok=True)
+        self.rules_dir = os.path.join(self.workspace, ".aegis", "rules")
+        os.makedirs(self.rules_dir, exist_ok=True)
 
         # Create a sample wall cell (security invariant)
         wall_cell = (
@@ -34,7 +34,7 @@ class TestJitPreseedConstraints(unittest.TestCase):
             "# Auth Token Invariants\n"
             "All authentication handlers must validate tokens before processing requests.\n"
         )
-        with open(os.path.join(self.cells_dir, "auth-token-invariants.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(self.rules_dir, "auth-token-invariants.md"), "w", encoding="utf-8") as f:
             f.write(wall_cell)
 
         # Create a sample vacuole cell (anti-pattern trap)
@@ -52,7 +52,7 @@ class TestJitPreseedConstraints(unittest.TestCase):
             "# No Broad Exceptions\n"
             "Catch specific exceptions rather than broad Exception.\n"
         )
-        with open(os.path.join(self.cells_dir, "no-broad-exceptions.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(self.rules_dir, "no-broad-exceptions.md"), "w", encoding="utf-8") as f:
             f.write(trap_cell)
 
     def tearDown(self):

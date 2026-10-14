@@ -25,7 +25,7 @@ def test_slot_registry_load_nonexistent(tmp_path):
 
 
 def test_slot_registry_load_valid(tmp_path):
-    soma_dir = tmp_path / ".soma"
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir()
     (soma_dir / "slots.yaml").write_text("slots:\n  tool: /usr/bin/tool\n", encoding="utf-8")
 
@@ -34,7 +34,7 @@ def test_slot_registry_load_valid(tmp_path):
 
 
 def test_slot_registry_load_invalid_yaml(tmp_path):
-    soma_dir = tmp_path / ".soma"
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir()
     # Bad yaml syntax
     (soma_dir / "slots.yaml").write_text(": : invalid", encoding="utf-8")
@@ -44,7 +44,7 @@ def test_slot_registry_load_invalid_yaml(tmp_path):
 
 
 def test_slot_registry_load_non_mapping_slots(tmp_path):
-    soma_dir = tmp_path / ".soma"
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir()
     (soma_dir / "slots.yaml").write_text("slots: 'not a dict'\n", encoding="utf-8")
 

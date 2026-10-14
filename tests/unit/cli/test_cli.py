@@ -221,7 +221,7 @@ class TestMCPConfig:
         mcp_file = tmp_path / ".mcp.json"
         data = json.loads(mcp_file.read_text())
         soma_cfg = data["mcpServers"].get("aegis") or data["mcpServers"].get("soma")
-        # Check cwd and SOMA_ROOT are relative (not absolute)
+        # Check cwd and AEGIS_ROOT are relative (not absolute)
         cfg_str = json.dumps(soma_cfg)
         assert "/home/" not in cfg_str, f"Absolute path detected in MCP config: {cfg_str}"
 

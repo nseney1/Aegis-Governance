@@ -8,7 +8,7 @@ import aegis_mcp.server as server_module
 @pytest.fixture(autouse=True)
 def setup_server_globals(monkeypatch, tmp_path):
     workspace = str(tmp_path)
-    os.makedirs(os.path.join(workspace, ".soma", "cells"), exist_ok=True)
+    os.makedirs(os.path.join(workspace, ".aegis", "rules"), exist_ok=True)
     monkeypatch.setattr(server_module, "_session_token", "test-session-123")
     monkeypatch.setattr(server_module, "_canonical_workspace", workspace)
     monkeypatch.setattr(server_module, "_execution_enabled", True)
@@ -18,7 +18,7 @@ def setup_server_globals(monkeypatch, tmp_path):
     monkeypatch.setenv("PYTHONPATH", repo_root)
     
     # Create a dummy cell so grade/coverage don't fail due to an empty workspace
-    vacuoles_dir = os.path.join(workspace, ".soma", "cells", "vacuoles")
+    vacuoles_dir = os.path.join(workspace, ".aegis", "rules", "vacuoles")
     os.makedirs(vacuoles_dir, exist_ok=True)
     with open(os.path.join(vacuoles_dir, "dummy-test-cell.md"), "w", encoding="utf-8") as f:
         f.write("---\nid: dummy-test-cell\ndomain: vacuoles\n---\n# Dummy cell\n")

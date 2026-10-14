@@ -15,8 +15,8 @@ if REPO_ROOT not in sys.path:
 
 
 def _write_insights(workspace, insights):
-    """Helper: write insight records to .soma/human_insights.jsonl."""
-    jsonl_path = os.path.join(workspace, ".soma", "human_insights.jsonl")
+    """Helper: write insight records to .aegis/human_insights.jsonl."""
+    jsonl_path = os.path.join(workspace, ".aegis", "human_insights.jsonl")
     os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
     with open(jsonl_path, "w") as f:
         for record in insights:
@@ -25,7 +25,7 @@ def _write_insights(workspace, insights):
 
 def _write_cell(workspace, name, target_paths):
     """Helper: create a minimal cell file."""
-    cells_dir = os.path.join(workspace, ".soma", "cells", "vacuoles")
+    cells_dir = os.path.join(workspace, ".aegis", "rules", "vacuoles")
     os.makedirs(cells_dir, exist_ok=True)
     content = f"""---
 type: vacuole
@@ -69,7 +69,7 @@ class TestCaptureHumanInsightSignals:
         assert matching[0]["verified"] is True
 
     def test_signal_weight_is_configurable(self, tmp_path):
-        """Human insight signal weight reads from .soma/config if present."""
+        """Human insight signal weight reads from .aegis/config if present."""
         from aegis_core.telemetry import capture_human_insight_signals
 
         workspace = str(tmp_path)
@@ -87,12 +87,12 @@ class TestCaptureHumanInsightSignals:
         assert matching[0]["weight"] == pytest.approx(0.5, abs=0.01)
 
         # With config file: weight should be overridden (zero-dependency frontmatter engine)
-        config_path = os.path.join(workspace, ".soma", "config.yaml")
+        config_path = os.path.join(workspace, ".aegis", "config.yaml")
         with open(config_path, "w") as f:
             f.write("insight_signal_weight: 0.8\n")
 
         # Reset cursor so insights are re-read with new config
-        cursor_path = os.path.join(workspace, ".soma", "insight_cursor")
+        cursor_path = os.path.join(workspace, ".aegis", "insight_cursor")
         if os.path.isfile(cursor_path):
             os.remove(cursor_path)
 
@@ -102,11 +102,11 @@ class TestCaptureHumanInsightSignals:
         assert matching[0]["weight"] == pytest.approx(0.8, abs=0.01)
 
     def test_no_insights_no_signals(self, tmp_path):
-        """When .soma/human_insights.jsonl doesn't exist, return empty list."""
+        """When .aegis/human_insights.jsonl doesn't exist, return empty list."""
         from aegis_core.telemetry import capture_human_insight_signals
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
 
         signals = capture_human_insight_signals(workspace)
         assert signals == []
@@ -116,7 +116,7 @@ class TestCaptureHumanInsightSignals:
         from aegis_core.telemetry import capture_human_insight_signals
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis"), exist_ok=True)
         _write_insights(workspace, [
             {"insight": "Nobody watches this", "context_files": ["orphan/file.py"],
              "category": "attention", "timestamp": "2026-09-29T10:00:00Z",
@@ -137,11 +137,11 @@ def _covered(cell, text="Needs attention"):
 
 
 def _cursor_path(workspace):
-    return os.path.join(workspace, ".soma", "insight_cursor")
+    return os.path.join(workspace, ".aegis", "insight_cursor")
 
 
 def _signals_log(workspace):
-    path = os.path.join(workspace, ".soma", "evidence", "signals.jsonl")
+    path = os.path.join(workspace, ".aegis", "evidence", "signals.jsonl")
     if not os.path.isfile(path):
         return []
     with open(path, encoding="utf-8") as f:
@@ -158,7 +158,7 @@ class TestInsightCursorDurability:
 
         signals, offset = read_human_insight_signals(ws)
         assert len(signals) == 1
-        assert offset == os.path.getsize(os.path.join(ws, ".soma", "human_insights.jsonl"))
+        assert offset == os.path.getsize(os.path.join(ws, ".aegis", "human_insights.jsonl"))
         assert not os.path.exists(_cursor_path(ws))
         # Re-reading without commit yields the same insight again
         again, _ = read_human_insight_signals(ws)
@@ -183,7 +183,7 @@ class TestInsightCursorDurability:
         assert replaced and replaced[-1][1] == _cursor_path(ws)
         with open(_cursor_path(ws)) as f:
             assert int(f.read().strip()) == offset
-        leftovers = [n for n in os.listdir(os.path.join(ws, ".soma")) if n.endswith(".tmp")]
+        leftovers = [n for n in os.listdir(os.path.join(ws, ".aegis")) if n.endswith(".tmp")]
         assert leftovers == []
         assert oe.read_human_insight_signals(ws)[0] == []
 
@@ -192,7 +192,7 @@ class TestInsightCursorDurability:
         ws = str(tmp_path)
         _write_cell(ws, "vacuole-a", ["api/*.py"])
         _write_cell(ws, "vacuole-b", ["api/*.py"])
-        path = os.path.join(ws, ".soma", "human_insights.jsonl")
+        path = os.path.join(ws, ".aegis", "human_insights.jsonl")
         first = json.dumps(_covered("vacuole-a")) + "\n"
         second = json.dumps(_covered("vacuole-b"))
         # newline="\n": the offset is in bytes, and Windows text mode writes CRLF.
@@ -283,7 +283,7 @@ class TestMainCursorCommitOrdering:
         rows = _signals_log(ws)
         assert [r["cell"] for r in rows] == ["vacuole-api-check"]
         with open(_cursor_path(ws)) as f:
-            assert int(f.read()) == os.path.getsize(os.path.join(ws, ".soma", "human_insights.jsonl"))
+            assert int(f.read()) == os.path.getsize(os.path.join(ws, ".aegis", "human_insights.jsonl"))
 
     def test_failed_append_does_not_commit_cursor(self, tmp_path, monkeypatch):
         import aegis_sdk.telemetry as telemetry
@@ -301,18 +301,18 @@ class TestMainCursorCommitOrdering:
 
     def test_blind_spots_only_commit_cursor(self, tmp_path, monkeypatch):
         ws = str(tmp_path)
-        os.makedirs(os.path.join(ws, ".soma", "cells"), exist_ok=True)
+        os.makedirs(os.path.join(ws, ".aegis", "rules"), exist_ok=True)
         _write_insights(ws, [{"insight": "Nobody watches this", "context_files": ["orphan.py"],
                               "category": "attention", "timestamp": "2026-09-29T10:00:00Z",
                               "was_covered": False, "covering_cells": []}])
         oe = _stub_main(monkeypatch, ws)
         oe.main()
         with open(_cursor_path(ws)) as f:
-            assert int(f.read()) == os.path.getsize(os.path.join(ws, ".soma", "human_insights.jsonl"))
+            assert int(f.read()) == os.path.getsize(os.path.join(ws, ".aegis", "human_insights.jsonl"))
 
 def _fitness(ws, name):
     from aegis_sdk.cells import parse_cell_file
-    fm, _ = parse_cell_file(os.path.join(ws, ".soma", "cells", "vacuoles", f"{name}.md"))
+    fm, _ = parse_cell_file(os.path.join(ws, ".aegis", "rules", "vacuoles", f"{name}.md"))
     return fm["fitness"]
 
 def test_retry_after_partial_append_neither_duplicates_nor_reinflates(tmp_path, monkeypatch):

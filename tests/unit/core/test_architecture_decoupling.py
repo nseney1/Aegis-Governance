@@ -13,7 +13,7 @@ import pytest
 def test_soma_core_has_zero_upward_imports():
     """All files in soma_core/ must have zero imports of soma_mcp, soma_cli, or aegis_sdk."""
     repo_root = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
-    core_dir = repo_root / "soma_core"
+    core_dir = repo_root / "aegis_core"
 
     violations = []
     forbidden_modules = ("soma_mcp", "soma_cli", "soma_sdk")
@@ -71,7 +71,7 @@ def test_zero_internal_calls_to_deprecated_workspace_getters():
             continue
         for py_file in pkg_dir.rglob("*.py"):
             # Exclude soma_core/workspace.py where the deprecated functions are defined
-            if py_file.resolve() == (repo_root / "soma_core" / "workspace.py").resolve():
+            if py_file.resolve() == (repo_root / "aegis_core" / "workspace.py").resolve():
                 continue
             try:
                 tree = ast.parse(py_file.read_text(encoding="utf-8"))

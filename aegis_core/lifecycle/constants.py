@@ -80,15 +80,15 @@ VALID_TYPES = {
 
 
 def get_promotion_path(ws: object) -> dict[str, str]:
-    """Return promotion path based on whether workspace is a Soma repository."""
-    is_soma = getattr(ws, "is_soma_repo", False)
-    return GLOBAL_PROMOTION_PATH if is_soma else LOCAL_PROMOTION_PATH
+    """Return promotion path based on whether workspace is an Aegis repository."""
+    is_aegis = getattr(ws, "is_aegis_repo", False)
+    return GLOBAL_PROMOTION_PATH if is_aegis else LOCAL_PROMOTION_PATH
 
 
 def get_demotion_path(ws: object) -> dict[str, str]:
-    """Return demotion path based on whether workspace is a Soma repository."""
-    is_soma = getattr(ws, "is_soma_repo", False)
-    return GLOBAL_DEMOTION_PATH if is_soma else LOCAL_DEMOTION_PATH
+    """Return demotion path based on whether workspace is an Aegis repository."""
+    is_aegis = getattr(ws, "is_aegis_repo", False)
+    return GLOBAL_DEMOTION_PATH if is_aegis else LOCAL_DEMOTION_PATH
 
 
 VALID_ENFORCEMENT = ("advisory", "mechanical", "gate")

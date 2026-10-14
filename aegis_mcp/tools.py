@@ -49,7 +49,7 @@ from aegis_mcp.security import (
     Workspace,
     confine_path,
     confine_workspace,
-    validate_cell_names,
+    validate_rule_names,
 )
 
 yaml = None  # Backward-compatible sentinel: zero-dependency runtime

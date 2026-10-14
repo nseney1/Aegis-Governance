@@ -163,7 +163,7 @@ class TestInstallStarterRules:
 
 
 class TestExistingWorkspaceDir:
-    """Verify behavior when .aegis/ or .soma/ already exists."""
+    """Verify behavior when .aegis/ or .aegis/ already exists."""
 
     def test_existing_aegis_dir_detected(self, tmp_path):
         (tmp_path / ".aegis" / "rules").mkdir(parents=True)
@@ -171,7 +171,7 @@ class TestExistingWorkspaceDir:
         assert check_existing_install(tmp_path) is True
 
     def test_existing_soma_dir_detected(self, tmp_path):
-        (tmp_path / ".soma").mkdir()
+        (tmp_path / ".aegis").mkdir()
         from aegis_cli.init import check_existing_install
         assert check_existing_install(tmp_path) is True
 
@@ -384,7 +384,7 @@ class TestPolyglotInit:
 
         registry = SlotRegistry.load(tmp_path)
         assert registry.get_ast_driver(".rs") is not None
-        assert (tmp_path / ".soma" / "drivers" / "rust_ast.py").is_file()
+        assert (tmp_path / ".aegis" / "drivers" / "rust_ast.py").is_file()
 
     def test_init_polyglot_dry_run(self, tmp_path, capsys):
         from aegis_cli.init import run_init
@@ -403,7 +403,7 @@ class TestPolyglotInit:
         assert result == 0
         out = capsys.readouterr().out
         assert "Would configure AST driver (.rs):" in out
-        assert not (tmp_path / ".soma" / "slots.yaml").exists()
+        assert not (tmp_path / ".aegis" / "slots.yaml").exists()
 
     def test_init_detected_project_type_fallback(self, tmp_path, capsys):
         from aegis_cli.init import run_init

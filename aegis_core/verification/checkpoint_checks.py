@@ -467,8 +467,6 @@ def check_assertion_density(root: Path) -> list[dict]:
 def check_cell_fitness(root: Path) -> list[dict]:
     issues = []  # type: List[dict]
     evidence_dir = root / ".aegis" / "evidence"
-    if not evidence_dir.is_dir():
-        evidence_dir = root / ".soma" / "evidence"
     aggregation = aggregate_signals(evidence_dir)
 
     for error in aggregation.errors:
@@ -519,7 +517,7 @@ def check_cell_conventions(root: Path) -> list[dict]:
         if os.path.basename(entry.relative_path) == "README.md":
             continue
         parts = entry.relative_path.split("/")
-        if len(parts) < 4 or (parts[:2] != [".soma", "cells"] and parts[:2] != [".aegis", "rules"]):
+        if len(parts) < 4 or parts[:2] != [".aegis", "rules"]:
             continue
         type_dir_name = parts[2]
         allowed_types = DIR_TO_TYPE.get(type_dir_name)
@@ -625,8 +623,6 @@ def check_cell_conventions(root: Path) -> list[dict]:
 def check_arbitration_evidence(root: Path, strict: bool = False) -> list[dict]:
     issues = []  # type: List[dict]
     evidence_dir = root / ".aegis" / "evidence"
-    if not evidence_dir.is_dir():
-        evidence_dir = root / ".soma" / "evidence"
     try:
         info = os.stat(evidence_dir, follow_symlinks=False)
     except FileNotFoundError:
@@ -753,8 +749,6 @@ def check_paper_walls(root: Path, strict: bool = False) -> list[dict]:
     walls_dir = root / ".aegis" / "rules" / "invariants"
     if not walls_dir.is_dir():
         walls_dir = root / ".aegis" / "rules" / "walls"
-    if not walls_dir.is_dir():
-        walls_dir = root / ".soma" / "cells" / "walls"
     if not walls_dir.is_dir():
         return issues
 

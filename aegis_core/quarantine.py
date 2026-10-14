@@ -31,9 +31,7 @@ def _resolve_workspace(file_path: Path, workspace: Optional[Path | str] = None) 
 
 
 def _resolve_quarantine_dir(ws: Path) -> Path:
-    if (ws / ".aegis").is_dir() or not (ws / ".soma").is_dir():
-        return ws / ".aegis" / QUARANTINE_DIR
-    return ws / ".soma" / QUARANTINE_DIR
+    return ws / ".aegis" / QUARANTINE_DIR
 
 
 def quarantine_file(

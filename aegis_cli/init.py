@@ -96,8 +96,8 @@ _hook_block = generate_hook_block
 # ── Installation ────────────────────────────────────────────────────────────
 
 def check_existing_install(project_root: Path) -> bool:
-    """Check if Aegis or Soma is already installed in this project."""
-    return (Path(project_root) / ".aegis").is_dir() or (Path(project_root) / ".soma").is_dir()
+    """Check if Aegis is already installed in this project."""
+    return (Path(project_root) / ".aegis").is_dir()
 
 
 def _get_soma_root() -> Path:
@@ -265,7 +265,7 @@ def generate_mcp_config(project_root: Path, dry_run: bool = False) -> None:
         "command": "python3",
         "args": ["-m", "aegis_mcp"],
         "cwd": workspace,
-        "env": {"SOMA_WORKSPACE": workspace},
+        "env": {"AEGIS_WORKSPACE": workspace},
     }
 
     if dry_run:

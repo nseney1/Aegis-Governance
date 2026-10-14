@@ -21,7 +21,7 @@ class TestMCPCaptureInsight:
         from aegis_mcp.tools import execute_tool
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma", "cells"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis", "rules"), exist_ok=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
         result = execute_tool("soma_capture_insight", {
@@ -39,7 +39,7 @@ class TestMCPCaptureInsight:
         from aegis_mcp.tools import execute_tool
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma", "cells"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis", "rules"), exist_ok=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
         result = execute_tool("soma_capture_insight", {
@@ -50,11 +50,11 @@ class TestMCPCaptureInsight:
         assert "error" in result
 
     def test_persists_to_jsonl(self, tmp_path, monkeypatch):
-        """Insight is persisted to .soma/human_insights.jsonl."""
+        """Insight is persisted to .aegis/human_insights.jsonl."""
         from aegis_mcp.tools import execute_tool
 
         workspace = str(tmp_path)
-        os.makedirs(os.path.join(workspace, ".soma", "cells"), exist_ok=True)
+        os.makedirs(os.path.join(workspace, ".aegis", "rules"), exist_ok=True)
         monkeypatch.setattr("aegis_mcp.tools.resolve_workspace", lambda args=None: workspace)
 
         execute_tool("soma_capture_insight", {
@@ -62,7 +62,7 @@ class TestMCPCaptureInsight:
             "context_files": ["a.py"],
         })
 
-        jsonl_path = os.path.join(workspace, ".soma", "human_insights.jsonl")
+        jsonl_path = os.path.join(workspace, ".aegis", "human_insights.jsonl")
         assert os.path.exists(jsonl_path)
         with open(jsonl_path) as f:
             record = json.loads(f.readline())

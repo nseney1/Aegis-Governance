@@ -9,7 +9,7 @@ from aegis_core.verification import checkpoint_checks
 
 
 def _write_wall(root, content=None):
-    path = root / '.soma' / 'cells' / 'walls' / 'wall-test.md'
+    path = root / '.aegis' / 'rules' / 'walls' / 'wall-test.md'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content or (
         '---\n'
@@ -80,7 +80,7 @@ def test_cell_stat_failure_is_an_issue(tmp_path, monkeypatch):
     issues = checkpoint_checks.check_cell_conventions(tmp_path)
     assert any(
         issue['check'] == 'cell_conventions'
-        and issue.get('file') == '.soma/cells/walls/wall-test.md'
+        and issue.get('file') == '.aegis/rules/walls/wall-test.md'
         and 'stat' in issue['message'].lower()
         for issue in issues
     )
@@ -123,7 +123,7 @@ def test_checkpoint_is_recursively_read_only_on_pass_and_fail(
 ):
     content = '---\nid: [unterminated\n---\nbody\n' if malformed else None
     _write_wall(tmp_path, content)
-    evidence_dir = tmp_path / '.soma' / 'evidence'
+    evidence_dir = tmp_path / '.aegis' / 'evidence'
     evidence_dir.mkdir(parents=True, exist_ok=True)
     (evidence_dir / 'arbitration_cycle_1.json').write_text(
         '{"verdict": "ship", "cycle": 1}', encoding='utf-8'
@@ -154,7 +154,7 @@ def test_resolve_canonical_test_candidates(tmp_path: Path):
     from aegis_core.verification.checkpoint_checks import _resolve_canonical_test_candidates
 
     # Subpackage file
-    sub_src = tmp_path / "soma_core" / "schemas" / "cells.py"
+    sub_src = tmp_path / "aegis_core" / "schemas" / "cells.py"
     candidates = [p.as_posix() for p in _resolve_canonical_test_candidates(tmp_path, sub_src)]
 
     # Must include canonical mirrored path and subpackage grouped test
@@ -162,7 +162,7 @@ def test_resolve_canonical_test_candidates(tmp_path: Path):
     assert any("tests/test_schemas.py" in c for c in candidates)
 
     # Standard module
-    cli_src = tmp_path / "soma_cli" / "promote.py"
+    cli_src = tmp_path / "aegis_cli" / "promote.py"
     candidates_cli = [p.as_posix() for p in _resolve_canonical_test_candidates(tmp_path, cli_src)]
     assert any("tests/cli/test_promote.py" in c for c in candidates_cli)
     assert any("tests/test_cli_promote.py" in c for c in candidates_cli)

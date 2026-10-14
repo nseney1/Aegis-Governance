@@ -36,8 +36,8 @@ def _readme_mcp_row(readme, label):
 
 
 def _script_groups():
-    core_dir = (ROOT / "aegis_core") if (ROOT / "aegis_core").is_dir() else (ROOT / "soma_core")
-    cli_dir = (ROOT / "aegis_cli") if (ROOT / "aegis_cli").is_dir() else (ROOT / "soma_cli")
+    core_dir = (ROOT / "aegis_core") if (ROOT / "aegis_core").is_dir() else (ROOT / "aegis_core")
+    cli_dir = (ROOT / "aegis_cli") if (ROOT / "aegis_cli").is_dir() else (ROOT / "aegis_cli")
     sdk_dir = (ROOT / "aegis_sdk") if (ROOT / "aegis_sdk").is_dir() else (ROOT / "soma_sdk")
     mcp_dir = (ROOT / "aegis_mcp") if (ROOT / "aegis_mcp").is_dir() else (ROOT / "soma_mcp")
     launcher = (ROOT / "aegis") if (ROOT / "aegis").exists() else (ROOT / "soma")

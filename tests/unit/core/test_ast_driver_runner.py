@@ -104,7 +104,7 @@ def test_no_driver_configured_raises_expected_error(tmp_path):
 
 
 def test_slot_registry_driver_resolution(tmp_path):
-    slots_file = tmp_path / ".soma" / "slots.yaml"
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
     slots_file.parent.mkdir(parents=True)
     slots_file.write_text("""
 slots:
@@ -176,7 +176,7 @@ def test_in_process_rust_driver_execution(tmp_path):
     source = tmp_path / "lib.rs"
     source.write_text("pub fn calculate(x: i32) -> i32 { x * 2 }\n", encoding="utf-8")
 
-    registry = ASTDriverRegistry({".rs": "{python} .soma/drivers/rust_ast.py"})
+    registry = ASTDriverRegistry({".rs": "{python} .aegis/drivers/rust_ast.py"})
     runner = ASTDriverRunner(registry=registry)
     result = runner.parse_file(source, workspace_root=tmp_path)
 

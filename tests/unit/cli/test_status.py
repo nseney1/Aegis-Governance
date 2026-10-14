@@ -17,7 +17,7 @@ class TestStatus:
     def test_status_no_rules(self, tmp_path, capsys):
         """Empty dirs → '0 active' and helpful message."""
         (tmp_path / "genome").mkdir()
-        (tmp_path / ".soma" / "cells").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         args = argparse.Namespace(_root=tmp_path)
         ret = run_status(args)
         assert ret == 0
@@ -42,8 +42,8 @@ class TestStatus:
         assert "3 active" in captured.out
 
     def test_status_counts_adaptive_rules(self, tmp_path, capsys):
-        """Create 2 .md files in mock .soma/cells/ → counts them."""
-        cells = tmp_path / ".soma" / "cells"
+        """Create 2 .md files in mock .aegis/rules/ → counts them."""
+        cells = tmp_path / ".aegis" / "rules"
         cells.mkdir(parents=True)
         (cells / "rule1.md").write_text("# Rule 1\n")
         sub = cells / "patterns"
@@ -65,7 +65,7 @@ class TestStatus:
         (genome / "rule-a.md").write_text("# Rule A\n")
         (genome / "rule-b.md").write_text("# Rule B\n")
 
-        evidence = tmp_path / ".soma" / "evidence"
+        evidence = tmp_path / ".aegis" / "evidence"
         evidence.mkdir(parents=True)
         records = [
             {"cell": "rule-a", "signal": "trigger", "timestamp": "2026-09-30T12:00:00Z"},
@@ -111,13 +111,13 @@ class TestStatus:
         genome.mkdir()
         (genome / "rule-a.md").write_text("# Rule A\n")
 
-        cells = tmp_path / ".soma" / "cells"
+        cells = tmp_path / ".aegis" / "rules"
         cells.mkdir(parents=True)
         (cells / "rule-b.md").write_text(
             "---\ncreated: 2026-09-01\nexpiry_days: 30\n---\n# Rule B\n"
         )
 
-        evidence = tmp_path / ".soma" / "evidence"
+        evidence = tmp_path / ".aegis" / "evidence"
         evidence.mkdir(parents=True)
         (evidence / "signals.jsonl").write_text(
             json.dumps(
@@ -177,7 +177,7 @@ class TestStatus:
 
     def test_status_adaptive_rule_expiry_active(self, tmp_path, capsys):
         """Active adaptive rules show remaining days."""
-        cells = tmp_path / ".soma" / "cells"
+        cells = tmp_path / ".aegis" / "rules"
         cells.mkdir(parents=True)
         created = (date.today() - timedelta(days=10)).isoformat()
         (cells / "pattern.md").write_text(
@@ -193,7 +193,7 @@ class TestStatus:
 
     def test_status_adaptive_rule_expiry_expired(self, tmp_path, capsys):
         """Expired adaptive rules show 'expired'."""
-        cells = tmp_path / ".soma" / "cells"
+        cells = tmp_path / ".aegis" / "rules"
         cells.mkdir(parents=True)
         created = (date.today() - timedelta(days=40)).isoformat()
         (cells / "stale.md").write_text(

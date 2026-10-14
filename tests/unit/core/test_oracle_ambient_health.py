@@ -34,7 +34,7 @@ def _commit_file(ws: Path, filename: str, content: str, msg: str) -> None:
 
 
 def _create_cell(ws: Path, cell_id: str, target_paths: list[str]) -> Path:
-    cells_dir = ws / ".soma" / "cells" / "vacuoles"
+    cells_dir = ws / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_path = cells_dir / f"{cell_id}.md"
     fm = {
@@ -53,7 +53,7 @@ def clean_project(tmp_path: Path) -> Path:
     ws = tmp_path / "project"
     ws.mkdir()
     _init_git_repo(ws)
-    (ws / ".soma" / "evidence").mkdir(parents=True)
+    (ws / ".aegis" / "evidence").mkdir(parents=True)
     return ws
 
 

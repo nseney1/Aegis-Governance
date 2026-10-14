@@ -14,7 +14,7 @@ def test_governance_fitness_landscape_in_process(tmp_path):
 
 
 def _populate_governed_workspace(root: Path):
-    cells_dir = root / ".soma" / "cells"
+    cells_dir = root / ".aegis" / "rules"
     for d in ["vacuoles", "walls", "chloroplasts", "membranes", "plasmodesmata"]:
         (cells_dir / d).mkdir(parents=True, exist_ok=True)
     (cells_dir / "vacuoles" / "vacuole-test-trap.md").write_text(
@@ -90,7 +90,7 @@ def test_record_outcome_in_process(tmp_path):
     assert isinstance(res, dict)
     assert res.get("signal") == "tp" or res.get("signal_type") == "tp"
 
-    signals_file = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     assert signals_file.exists()
     lines = [json.loads(line) for line in signals_file.read_text(encoding="utf-8").strip().splitlines()]
     assert len(lines) >= 1
@@ -130,7 +130,7 @@ def test_list_cells_corrupted_isolation(tmp_path):
     gov = Governance(project_root=tmp_path)
 
     # Add corrupted vacuole cell
-    corrupted_file = tmp_path / ".soma" / "cells" / "vacuoles" / "corrupted_trap.md"
+    corrupted_file = tmp_path / ".aegis" / "rules" / "vacuoles" / "corrupted_trap.md"
     corrupted_file.write_bytes(b"\xff\xfe\x00\x00")
 
     # Full list returns diagnostic error record
@@ -160,7 +160,7 @@ def test_record_outcome_idempotency_forwarding(tmp_path):
     assert res.get("event_id") is not None
     assert res.get("payload_digest") is not None
 
-    signals_file = tmp_path / ".soma" / "evidence" / "signals.jsonl"
+    signals_file = tmp_path / ".aegis" / "evidence" / "signals.jsonl"
     lines = [json.loads(line) for line in signals_file.read_text(encoding="utf-8").strip().splitlines()]
     last = lines[-1]
     assert last["cell"] == "vacuole-test-trap"

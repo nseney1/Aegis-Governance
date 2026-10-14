@@ -125,7 +125,7 @@ class TestSignalProvenance:
 
         append_fitness_log(workspace, signals, outcomes)
 
-        log_path = os.path.join(workspace, '.soma', 'evidence', 'signals.jsonl')
+        log_path = os.path.join(workspace, '.aegis', 'evidence', 'signals.jsonl')
         assert os.path.isfile(log_path)
         with open(log_path, 'r', encoding='utf-8') as f:
             lines = [json.loads(line) for line in f if line.strip()]
@@ -136,4 +136,4 @@ class TestSignalProvenance:
         assert 'metadata' in record
         assert record['metadata']['credit_weight'] == 0.5
         assert record['metadata']['signal_method'] == 'scope_narrowed'
-        assert not os.path.exists(os.path.join(workspace, '.soma', 'cells', 'fitness.jsonl'))
+        assert not os.path.exists(os.path.join(workspace, '.aegis', "rules", 'fitness.jsonl'))

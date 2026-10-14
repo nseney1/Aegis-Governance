@@ -52,7 +52,7 @@ from aegis_core.sentinels import (
 
 def load_soma_config(repo_dir: Path | str | Workspace) -> dict[str, str]:
     ws = as_workspace(repo_dir)
-    conf_path = ws.root / "soma.conf"
+    conf_path = ws.root / "aegis.conf"
     cfg = {}
     if conf_path.is_file():
         with open(conf_path, encoding="utf-8") as f:
@@ -81,7 +81,7 @@ def run_push(repo_dir: Path | str | Workspace, team_repo: Path | str, org_repo: 
     snap_dir = team_repo / "snapshots" / clean_id
     snap_dir.mkdir(parents=True, exist_ok=True)
 
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
 
     try:
         from aegis_core.lifecycle import compute_cells_fitness
@@ -152,7 +152,7 @@ def run_pull(repo_dir: Path | str | Workspace, team_repo: Path | str, org_repo: 
         print(f"Pulling from org repo ({org_repo})...")
         subprocess.run(["git", "pull", "--rebase"], cwd=str(org_repo), capture_output=True)
 
-    local_cells = ws.cells_dir
+    local_cells = ws.rules_dir
     ribosomes_dir = local_cells / "ribosomes"
     ribosomes_dir.mkdir(parents=True, exist_ok=True)
 
@@ -239,7 +239,7 @@ def run_sweep(active_only: bool = False, soma_data_dir: Path | None = None) -> i
     resolved_home = resolve_home()
 
     if soma_data_dir is None:
-        env_data = os.environ.get("SOMA_DATA_DIR")
+        env_data = os.environ.get("AEGIS_DATA_DIR")
         soma_data_dir = Path(env_data) if env_data else resolved_home / ".gemini" / "antigravity"
 
     governance_dir = soma_data_dir / "scratch" / "ai-conversation-logs" / "governance"
@@ -643,7 +643,7 @@ def run_post_session_hook(
 
     ws = as_workspace(repo_root)
     root = ws.root
-    cells_dir = cells_dir or ws.cells_dir
+    cells_dir = cells_dir or ws.rules_dir
     evidence_dir = evidence_dir or ws.evidence_dir
 
     from aegis_core.telemetry import (

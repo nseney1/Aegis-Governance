@@ -14,7 +14,7 @@ class TestCreateCellFromInsightCluster:
     """Tests for create_cell_from_insight_cluster()."""
 
     def test_creates_cell_file(self, tmp_path):
-        """A cluster produces a cell file in .soma/cells/vacuoles/."""
+        """A cluster produces a cell file in .aegis/rules/vacuoles/."""
 
         workspace = str(tmp_path)
         cluster = {

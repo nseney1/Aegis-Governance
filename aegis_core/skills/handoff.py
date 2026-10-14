@@ -49,7 +49,7 @@ class HandoffTicket:
     def format_prompt_block(self) -> str:
         """Format minimal token reference block for recipient subagent."""
         return (
-            f"<!-- SOMA_HANDOFF_TICKET -->\n"
+            f"<!-- AEGIS_HANDOFF_TICKET -->\n"
             f"[TICKET]: {self.ticket_id} | [TYPE]: {self.artifact_type}\n"
             f"[FROM]: {self.producer_skill} -> [TO]: {self.target_skill}\n"
             f"[PAYLOAD]: file://{self.file_path}\n"
@@ -96,8 +96,8 @@ class HandoffRouter:
         root = Path(ws.root)
 
         # 1. Discover SkillGraph
-        gov_dir = (root / ".aegis") if (root / ".aegis").is_dir() or not (root / ".soma").is_dir() else (root / ".soma")
-        home_gov = (Path.home() / ".aegis") if (Path.home() / ".aegis").is_dir() or not (Path.home() / ".soma").is_dir() else (Path.home() / ".soma")
+        gov_dir = root / ".aegis"
+        home_gov = Path.home() / ".aegis"
         project_skills = gov_dir / "skills"
         global_skills = home_gov / "skills"
         graph = SkillGraph.discover([project_skills, global_skills])
@@ -119,7 +119,7 @@ class HandoffRouter:
 
         # 4. Resolve tree hash and secret
         tree_hash = _get_tree_hash(root)
-        secret = session_secret or os.environ.get("AEGIS_SESSION_SECRET") or os.environ.get("SOMA_SESSION_SECRET", "aegis_default_session_secret")
+        secret = session_secret or os.environ.get("AEGIS_SESSION_SECRET", "aegis_default_session_secret")
 
         # 5. Create signed ArtifactEnvelope
         envelope = ArtifactEnvelope.create(
@@ -131,7 +131,7 @@ class HandoffRouter:
             payload=payload_dict,
         )
 
-        # 6. File buffer: write to .aegis/swarm/handoffs/ (or .soma/swarm/handoffs/)
+        # 6. File buffer: write to .aegis/swarm/handoffs/
         handoffs_dir = gov_dir / "swarm" / "handoffs"
         handoffs_dir.mkdir(parents=True, exist_ok=True)
 

@@ -17,7 +17,7 @@ from textwrap import dedent
 def _make_cell_with_invariant(ws, name, enforcement, invariant_type,
                                invariant_kwargs, target_paths=None):
     """Create a cell with an invariant spec in frontmatter."""
-    cells_dir = os.path.join(ws, '.soma', 'cells', 'walls')
+    cells_dir = os.path.join(ws, '.aegis', "rules", 'walls')
     os.makedirs(cells_dir, exist_ok=True)
     tp_yaml = ''
     if target_paths:

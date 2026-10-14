@@ -53,8 +53,8 @@ def test_uninstall_removes_pre_commit_hook(tmp_path, capsys):
 
 
 def test_uninstall_purge_removes_soma_dir(tmp_path, capsys):
-    """soma uninstall --purge removes .soma/ while non-purge preserves it."""
-    soma_dir = tmp_path / ".soma"
+    """soma uninstall --purge removes .aegis/ while non-purge preserves it."""
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir()
     (soma_dir / "slots.yaml").write_text("dummy: 1\n", encoding="utf-8")
 
@@ -79,7 +79,7 @@ def test_uninstall_purge_removes_soma_dir(tmp_path, capsys):
 
 def test_uninstall_dry_run_leaves_files(tmp_path, capsys):
     """soma uninstall --dry-run prints would remove and leaves files untouched."""
-    soma_dir = tmp_path / ".soma"
+    soma_dir = tmp_path / ".aegis"
     soma_dir.mkdir()
     claude_md = tmp_path / "CLAUDE.md"
     claude_md.write_text("<!-- SOMA:START -->\n# Soma\n<!-- SOMA:END -->\n", encoding="utf-8")

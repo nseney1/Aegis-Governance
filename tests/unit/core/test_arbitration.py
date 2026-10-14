@@ -45,7 +45,7 @@ class TestArbitrationCore:
 
     def test_soma_propose_change_containment(self, tmp_path: Path):
         ws = tmp_path / "workspace"
-        (ws / ".soma" / "cells").mkdir(parents=True)
+        (ws / ".aegis" / "rules").mkdir(parents=True)
 
         res = soma_propose_change("../escaped.py", "content", [], workspace=str(ws))
         assert "VERDICT: REJECTED" in res
@@ -53,8 +53,8 @@ class TestArbitrationCore:
 
     def test_checkpoint_generation_on_empty_workspace(self, tmp_path: Path):
         ws = tmp_path / "empty_ws"
-        (ws / ".soma" / "cells").mkdir(parents=True)
-        (ws / ".soma" / "evidence").mkdir(parents=True)
+        (ws / ".aegis" / "rules").mkdir(parents=True)
+        (ws / ".aegis" / "evidence").mkdir(parents=True)
 
         report = generate_checkpoint(str(ws))
         assert report["total_cells"] == 0
@@ -63,9 +63,9 @@ class TestArbitrationCore:
 
     def test_checkpoint_generation_with_cell(self, tmp_path: Path):
         ws = tmp_path / "ws_with_cell"
-        cells_dir = ws / ".soma" / "cells" / "walls"
+        cells_dir = ws / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
-        (ws / ".soma" / "evidence").mkdir(parents=True)
+        (ws / ".aegis" / "evidence").mkdir(parents=True)
         (cells_dir / "wall1.md").write_text(
             "---\nid: wall1\ntype: wall\nenforcement: gate\n---\n# Wall 1\n",
             encoding="utf-8",

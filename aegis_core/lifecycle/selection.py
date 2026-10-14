@@ -34,7 +34,7 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     archive_dir = cells_dir / ".archive"
     evidence_dir = ws.evidence_dir
     evidence_dir.mkdir(parents=True, exist_ok=True)

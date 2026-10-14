@@ -4,7 +4,7 @@ Validates:
 1. aegis_core.workspace is a proper package with __init__.py.
 2. Direct submodule imports: base, git, discovery, confinement, scaffold, hooks.
 3. Canonical symbols re-exported at package root.
-4. Workspace.is_soma_repo compound property.
+4. Workspace.is_aegis_repo compound property.
 5. Zero circular imports across submodules.
 """
 from __future__ import annotations

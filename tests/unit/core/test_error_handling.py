@@ -71,7 +71,7 @@ class TestPathTraversal:
     """Verify path traversal attacks are caught."""
 
     def test_load_cell_traversal_raises(self, tmp_path):
-        cells_dir = str(tmp_path / '.soma' / 'cells')
+        cells_dir = str(tmp_path / '.aegis' / 'rules')
         with pytest.raises(CellPathTraversalError):
             load_cell('../../etc/passwd', cells_dir=cells_dir)
 

@@ -3,7 +3,7 @@ import os
 import pytest
 
 def _workspace_with_cell(tmp_path, cell="trap-x"):
-    cells = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells.mkdir(parents=True)
     (cells / f"{cell}.md").write_text(
         f"---\nid: {cell}\ntype: vacuole\nhypothesis: h\nprediction: p\n---\n# x\n",
@@ -17,14 +17,14 @@ def _jsonl(path):
 def test_report_outcome_writes_only_canonical_signal(tmp_path, monkeypatch):
     from aegis_mcp.tools import execute_tool
     ws = _workspace_with_cell(tmp_path)
-    monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(ws))
     result = execute_tool(
         "soma_report_outcome",
         {"outcome": "success", "cells_used": ["trap-x"],
          "workspace": str(ws), "idempotency_key": "report-1"},
     )
     assert result["status"] == "recorded"
-    ev = ws / ".soma" / "evidence"
+    ev = ws / ".aegis" / "evidence"
     signal, = _jsonl(ev / "signals.jsonl")
     assert signal["cell"] == "trap-x"
     assert signal["signal"] == "tp"
@@ -35,7 +35,7 @@ def test_report_outcome_writes_only_canonical_signal(tmp_path, monkeypatch):
 def test_report_outcome_accepts_tp_and_fp(tmp_path, monkeypatch):
     from aegis_mcp.tools import execute_tool, TOOL_DEFINITIONS
     ws = _workspace_with_cell(tmp_path, cell="trap-tp")
-    monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(ws))
 
     # Verify tool definition enum
     tool_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "soma_report_outcome")
@@ -67,7 +67,7 @@ def test_soma_create_cell_description_clarifies_advisory():
 def test_report_outcome_accepts_pass_and_fail(tmp_path, monkeypatch):
     from aegis_mcp.tools import execute_tool, TOOL_DEFINITIONS
     ws = _workspace_with_cell(tmp_path, cell="trap-pass-fail")
-    monkeypatch.setenv("SOMA_WORKSPACE", str(ws))
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(ws))
 
     tool_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "soma_report_outcome")
     enum_vals = tool_def["inputSchema"]["properties"]["outcome"]["enum"]
@@ -86,7 +86,7 @@ def test_report_outcome_accepts_pass_and_fail(tmp_path, monkeypatch):
     )
     assert res_fail["status"] == "recorded"
 
-    signals = _jsonl(ws / ".soma" / "evidence" / "signals.jsonl")
+    signals = _jsonl(ws / ".aegis" / "evidence" / "signals.jsonl")
     types = [s["signal"] for s in signals if s["cell"] == "trap-pass-fail"]
     assert "tp" in types
     assert "fp" in types

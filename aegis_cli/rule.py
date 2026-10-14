@@ -77,7 +77,7 @@ def _run_list(args: argparse.Namespace) -> int:
     """List active rules and fitness metrics."""
     from aegis_core.yaml import parse_frontmatter
     root = _resolve_workspace_root(args)
-    rules_dir = (root / ".aegis" / "rules") if (root / ".aegis" / "rules").is_dir() else (root / ".soma" / "cells")
+    rules_dir = root / ".aegis" / "rules"
     if not rules_dir.is_dir():
         if getattr(args, "json", False):
             print(json.dumps([]))
@@ -434,7 +434,7 @@ def clean_global_rules(
     execute = bool(force and not dry_run)
     home = Path(home_dir).resolve() if home_dir else Path(os.environ.get("HOME") or Path.home()).resolve()
 
-    q_base = Path(quarantine_dir).resolve() if quarantine_dir else (home / ".aegis" / "quarantine" if (home / ".aegis").is_dir() else home / ".soma" / "quarantine")
+    q_base = Path(quarantine_dir).resolve() if quarantine_dir else (home / ".aegis" / "quarantine")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     q_backup = q_base / f"global_rules_backup_{timestamp}"
 

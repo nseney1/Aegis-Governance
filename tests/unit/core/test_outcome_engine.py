@@ -24,7 +24,7 @@ def _make_cell(workspace, cell_id, target_paths, cell_type='vacuole', fitness=No
     type_dir = {
         'vacuole': 'vacuoles', 'wall': 'walls', 'membrane': 'membranes',
     }.get(cell_type, 'vacuoles')
-    cells_dir = os.path.join(workspace, '.soma', 'cells', type_dir)
+    cells_dir = os.path.join(workspace, '.aegis', "rules", type_dir)
     os.makedirs(cells_dir, exist_ok=True)
     fm = {
         'id': cell_id,
@@ -197,7 +197,7 @@ class TestUpdateCellFitness:
     def test_corrupt_cell_no_crash(self, tmp_path):
         from aegis_core.telemetry import update_cell_fitness
         ws = str(tmp_path)
-        cells_dir = os.path.join(ws, '.soma', 'cells', 'vacuoles')
+        cells_dir = os.path.join(ws, '.aegis', "rules", 'vacuoles')
         os.makedirs(cells_dir, exist_ok=True)
         corrupt_path = os.path.join(cells_dir, 'corrupt.md')
         with open(corrupt_path, 'w', encoding='utf-8') as f:
@@ -238,25 +238,25 @@ class TestAppendFitnessLogGenerationFence:
     def test_outcome_engine_appends_are_generation_fenced(self, tmp_path):
         from aegis_core.telemetry import append_fitness_log
         ws = str(tmp_path)
-        os.makedirs(os.path.join(ws, ".soma"), exist_ok=True)
-        with open(os.path.join(ws, ".soma", "epoch_generation"), "w", encoding="utf-8") as f:
+        os.makedirs(os.path.join(ws, ".aegis"), exist_ok=True)
+        with open(os.path.join(ws, ".aegis", "epoch_generation"), "w", encoding="utf-8") as f:
             f.write("2\n")
         sig = [{"cell": "c", "_path": "x", "signal": 0.5, "verified": True, "reasons": []}]
         assert append_fitness_log(ws, sig, {}, expected_generation=1) is False
-        assert not os.path.exists(os.path.join(ws, ".soma", "evidence", "signals.jsonl"))
+        assert not os.path.exists(os.path.join(ws, ".aegis", "evidence", "signals.jsonl"))
         assert append_fitness_log(ws, sig, {}, expected_generation=2) is True
 
 # ── Bug 1: Outcome Engine Path ──────────────────────────────────────────
 
 class TestBug1OutcomeEnginePath:
-    """Bug 1: capture_mcp_outcomes must read from .soma/evidence/outcomes.jsonl."""
+    """Bug 1: capture_mcp_outcomes must read from .aegis/evidence/outcomes.jsonl."""
 
     def test_reads_from_evidence_dir(self, tmp_path):
-        """outcome_engine reads from .soma/evidence/outcomes.jsonl, not .soma/outcomes.jsonl."""
+        """outcome_engine reads from .aegis/evidence/outcomes.jsonl, not .aegis/outcomes.jsonl."""
         from aegis_core.telemetry import capture_mcp_outcomes
 
         # Write to the CORRECT path
-        evidence_dir = tmp_path / '.soma' / 'evidence'
+        evidence_dir = tmp_path / '.aegis' / 'evidence'
         evidence_dir.mkdir(parents=True)
         signals_file = evidence_dir / 'signals.jsonl'
         record = {'cell_id': 'trap-example', 'outcome': 'success',
@@ -268,18 +268,18 @@ class TestBug1OutcomeEnginePath:
         assert results[0]['cell_id'] == 'trap-example'
 
     def test_ignores_old_path(self, tmp_path):
-        """outcome_engine does NOT read from the old .soma/outcomes.jsonl path."""
+        """outcome_engine does NOT read from the old .aegis/outcomes.jsonl path."""
         from aegis_core.telemetry import capture_mcp_outcomes
 
         # Write to the OLD (wrong) path
-        old_dir = tmp_path / '.soma'
+        old_dir = tmp_path / '.aegis'
         old_dir.mkdir(parents=True)
         old_file = old_dir / 'outcomes.jsonl'
         old_file.write_text(json.dumps({'cell_id': 'stale'}) + '\n', encoding='utf-8')
 
         # Correct path doesn't exist
         results = capture_mcp_outcomes(str(tmp_path))
-        assert len(results) == 0, 'Should not read from old .soma/outcomes.jsonl path'
+        assert len(results) == 0, 'Should not read from old .aegis/outcomes.jsonl path'
 
 
 class TestBug2OutcomeEngineSchema:
@@ -365,7 +365,7 @@ class TestOutcomeEngineExecution:
 
     def test_run_outcome_engine_no_matches(self, tmp_path):
         from aegis_core.outcomes.engine import run_outcome_engine
-        cells_dir = tmp_path / ".soma" / "cells" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
         assert run_outcome_engine(str(tmp_path)) == 0
 

@@ -38,7 +38,7 @@ class TestSlotRegistry:
             reg.resolve("Run: ${SLOT.missing_slot}", strict=True)
 
     def test_slot_loading_from_workspace(self, tmp_path: Path):
-        soma_dir = tmp_path / ".soma"
+        soma_dir = tmp_path / ".aegis"
         soma_dir.mkdir(parents=True)
         (soma_dir / "slots.yaml").write_text(
             "---\nslots:\n  test_command: 'cargo test'\n  build_command: 'cargo build'\n---\n",
@@ -104,7 +104,7 @@ class TestSkillGraphAndHandoffRouter:
     """Test skill graph discovery, validation, and file-buffered handoff tickets."""
 
     def test_skill_discovery_and_routing(self, tmp_path: Path):
-        skills_dir = tmp_path / ".soma" / "skills"
+        skills_dir = tmp_path / ".aegis" / "skills"
         skills_dir.mkdir(parents=True)
 
         spec_skill = skills_dir / "spec_scout.md"
@@ -139,7 +139,7 @@ class TestSkillGraphAndHandoffRouter:
         ws = Workspace(tmp_path)
         ws.scaffold()
 
-        skills_dir = tmp_path / ".soma" / "skills"
+        skills_dir = tmp_path / ".aegis" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "guardian.md").write_text(
             "---\nid: guardian\ntier: guardrail\nproduces: [ChargeSheet]\nhandoff_targets: [worker]\n---\n",
@@ -174,7 +174,7 @@ class TestSkillGraphAndHandoffRouter:
         assert stored["payload"]["risk"] == "Buffer overflow risk"
 
         # Verify disk telemetry
-        telemetry_file = tmp_path / ".soma" / "telemetry" / "skills.jsonl"
+        telemetry_file = tmp_path / ".aegis" / "telemetry" / "skills.jsonl"
         assert telemetry_file.exists()
         telemetry_lines = telemetry_file.read_text(encoding="utf-8").strip().splitlines()
         assert len(telemetry_lines) == 1
@@ -184,7 +184,7 @@ class TestSkillGraphAndHandoffRouter:
 
         # Verify minimal prompt block
         block = ticket.format_prompt_block()
-        assert "<!-- SOMA_HANDOFF_TICKET -->" in block
+        assert "<!-- AEGIS_HANDOFF_TICKET -->" in block
         assert len(block.split()) < 50  # Well under 150 tokens!
 
     def test_cli_skill_and_handoff_commands(self, tmp_path: Path, monkeypatch, capsys):
@@ -193,7 +193,7 @@ class TestSkillGraphAndHandoffRouter:
         monkeypatch.chdir(tmp_path)
         ws = Workspace(tmp_path)
         ws.scaffold()
-        skills_dir = tmp_path / ".soma" / "skills"
+        skills_dir = tmp_path / ".aegis" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "scout.md").write_text(
             "---\nid: scout\ntier: guardrail\nproduces: [Finding]\nhandoff_targets: [fixer]\n---\n",
@@ -224,7 +224,7 @@ class TestSkillGraphAndHandoffRouter:
         rc = run_handoff(args_handoff)
         assert rc == 0
         out = capsys.readouterr().out
-        assert "SOMA_HANDOFF_TICKET" in out
+        assert "AEGIS_HANDOFF_TICKET" in out
 
 
 class TestArtifactsAndSkillsBranchHardening:
@@ -479,7 +479,7 @@ class TestArtifactsAndSkillsBranchHardening:
             ArtifactRegistry.validate("CustomRawItem", "invalid_type")
 
         # HandoffRouter payload string parsing (json and plain string) and summary truncation
-        skills_dir = tmp_path / ".soma" / "skills"
+        skills_dir = tmp_path / ".aegis" / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
         (skills_dir / "a.md").write_text("---\nid: a\ntier: sentinel\nproduces: [ChargeSheet]\nhandoff_targets: [b]\n---\n", encoding="utf-8")
         (skills_dir / "b.md").write_text("---\nid: b\nconsumes: [ChargeSheet, DiffProposal]\n---\n", encoding="utf-8")
@@ -517,7 +517,7 @@ class TestArtifactsAndSkillsBranchHardening:
         assert reg.to_dict() == {}
 
         # Invalid yaml syntax raises SlotResolutionError
-        soma_dir = tmp_path / ".soma"
+        soma_dir = tmp_path / ".aegis"
         soma_dir.mkdir(parents=True, exist_ok=True)
         (soma_dir / "slots.yaml").write_text("a: [unclosed", encoding="utf-8")
         with pytest.raises(SlotResolutionError, match="Failed to parse"):

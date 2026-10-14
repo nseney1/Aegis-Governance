@@ -241,7 +241,6 @@ def check_membrane_overrides(
 
     candidate_roots = [
         ws_path / ".aegis" / "rules",
-        ws_path / ".soma" / "cells",
     ]
     for cells_dir in candidate_roots:
         if not cells_dir.is_dir():
@@ -415,7 +414,7 @@ def write_frontmatter(filepath: str, metadata: dict[str, Any], body: str) -> Non
 
 def run_last_gasp(workspace: Path | None = None) -> int:
     ws = str(workspace or Path.cwd())
-    cells_dir = os.path.join(ws, ".soma", "cells")
+    cells_dir = os.path.join(ws, ".aegis", "rules")
     if not os.path.exists(cells_dir):
         return 0
 

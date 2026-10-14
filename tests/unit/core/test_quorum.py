@@ -16,7 +16,7 @@ from textwrap import dedent
 def _make_cell(ws, subdir, name, *, target_paths=None, minimum_mode='breeze',
                hypothesis='', fitness_score=None, cell_type='vacuole'):
     """Create a minimal cell file in the workspace."""
-    cells_dir = os.path.join(ws, '.soma', 'cells', subdir)
+    cells_dir = os.path.join(ws, '.aegis', "rules", subdir)
     os.makedirs(cells_dir, exist_ok=True)
     lines = [
         '---',
@@ -58,7 +58,7 @@ class TestQuorumThreshold:
         _make_cell(ws, 'vacuoles', 'cell-c', target_paths=['src/*.py'])
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['src/main.py'],
             threshold=3
         )
@@ -71,7 +71,7 @@ class TestQuorumThreshold:
         _make_cell(ws, 'vacuoles', 'cell-b', target_paths=['src/*.py'])
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['src/main.py'],
             threshold=3
         )
@@ -83,7 +83,7 @@ class TestQuorumThreshold:
         _make_cell(ws, 'vacuoles', 'cell-a', target_paths=['*.py'])
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['foo.py'],
             threshold=1
         )
@@ -105,7 +105,7 @@ class TestQuorumDisagree:
         _make_cell(ws, 'vacuoles', 'cell-b', target_paths=['tests/*.py'])
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['src/main.py'],
             threshold=2
         )
@@ -119,7 +119,7 @@ class TestQuorumDisagree:
         _make_cell(ws, 'vacuoles', 'cell-b', target_paths=['tests/*.py'])
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['src/main.py', 'tests/test_foo.py'],
             threshold=2
         )
@@ -144,7 +144,7 @@ class TestQuorumEscalation:
                    minimum_mode='gale')
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['src/main.py'],
             threshold=2
         )
@@ -159,7 +159,7 @@ class TestQuorumEscalation:
                    minimum_mode='gale')
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['foo.py'],
             threshold=2
         )
@@ -179,7 +179,7 @@ class TestQuorumOutput:
         _make_cell(ws, 'vacuoles', 'cell-b', target_paths=['*.py'])
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['foo.py'],
             threshold=2
         )
@@ -193,7 +193,7 @@ class TestQuorumOutput:
         _make_cell(ws, 'vacuoles', 'cell-b', target_paths=['*.py'])
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=['foo.py'],
             threshold=2
         )
@@ -214,7 +214,7 @@ class TestQuorumEdgeCases:
 
     def test_empty_cells_dir(self, tmp_path):
         ws = str(tmp_path)
-        cells_dir = os.path.join(ws, '.soma', 'cells')
+        cells_dir = os.path.join(ws, '.aegis', "rules")
         os.makedirs(cells_dir, exist_ok=True)
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
@@ -230,7 +230,7 @@ class TestQuorumEdgeCases:
         _make_cell(ws, 'vacuoles', 'cell-a', target_paths=['*.py'])
         from aegis_core.telemetry import evaluate_quorum
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=[],
             threshold=1
         )
@@ -243,7 +243,7 @@ class TestQuorumEdgeCases:
         from aegis_core.telemetry import evaluate_quorum
         win_changed = [r'src\main.py']
         result = evaluate_quorum(
-            cells_dir=os.path.join(ws, '.soma', 'cells'),
+            cells_dir=os.path.join(ws, '.aegis', "rules"),
             changed_files=win_changed,
             threshold=1
         )

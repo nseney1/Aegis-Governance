@@ -256,20 +256,13 @@ def load_cell(
     cell_id = _sanitize_cell_id(cell_id)
 
     if cells_dir is None:
-        # Walk up from CWD to find .aegis/rules/ or .soma/cells/
         cwd = os.getcwd()
         cand_aegis = os.path.join(cwd, '.aegis', 'rules')
-        cand_soma_rules = os.path.join(cwd, '.soma', 'rules')
-        cand_soma = os.path.join(cwd, '.soma', 'cells')
         if os.path.isdir(cand_aegis):
             cells_dir = cand_aegis
-        elif os.path.isdir(cand_soma_rules):
-            cells_dir = cand_soma_rules
-        elif os.path.isdir(cand_soma):
-            cells_dir = cand_soma
         else:
             raise CellNotFoundError(
-                f"Cannot find .aegis/rules/ or .soma/cells/ from {cwd}"
+                f"Cannot find .aegis/rules/ from {cwd}"
             )
 
     # Fast-path: check standard cell and rule subdirectories directly before recursive walk

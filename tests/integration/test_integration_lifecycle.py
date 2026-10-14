@@ -29,7 +29,7 @@ class TestCellLifecycle:
         """Create a temp workspace with a single cell."""
         workspace = tempfile.mkdtemp()
         subdir = 'walls' if cell_type == 'wall' else 'vacuoles'
-        cells_dir = os.path.join(workspace, '.soma', 'cells', subdir)
+        cells_dir = os.path.join(workspace, '.aegis', "rules", subdir)
         os.makedirs(cells_dir)
 
         frontmatter = {
@@ -67,7 +67,7 @@ class TestCellLifecycle:
             fitness_data={'triggers': 10, 'true_positives': 8, 'false_positives': 2}
         )
         try:
-            cells_dir = os.path.join(workspace, '.soma', 'cells')
+            cells_dir = os.path.join(workspace, '.aegis', "rules")
             cell = load_cell('loadable-cell', cells_dir=cells_dir)
             assert cell.name == 'loadable-cell'
             assert cell.type == 'wall'
@@ -80,7 +80,7 @@ class TestCellLifecycle:
     def test_cell_not_found(self):
         """load_cell raises CellNotFoundError for nonexistent cell."""
         workspace = tempfile.mkdtemp()
-        cells_dir = os.path.join(workspace, '.soma', 'cells')
+        cells_dir = os.path.join(workspace, '.aegis', "rules")
         os.makedirs(cells_dir)
         try:
             with pytest.raises(CellNotFoundError):
@@ -135,7 +135,7 @@ class TestCellLifecycle:
             }
         )
         try:
-            cells_dir = os.path.join(workspace, '.soma', 'cells')
+            cells_dir = os.path.join(workspace, '.aegis', "rules")
             cell = load_cell('fitness-roundtrip', cells_dir=cells_dir)
             assert cell.fitness.triggers == 50
             assert cell.fitness.true_positives == 40

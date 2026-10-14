@@ -11,7 +11,7 @@ from aegis_core.cell_inventory import CellInventoryError, inventory_cells
 from aegis_core.workspace import resolve_workspace as _core_resolve_workspace
 from aegis_mcp.integrity import generate_key, generate_manifest, load_key, save_manifest
 from aegis_mcp.jit_engine import express as jit_express, parse_frontmatter, warn
-from aegis_mcp.security import Workspace, confine_path, confine_workspace, validate_cell_names
+from aegis_mcp.security import Workspace, confine_path, confine_workspace, validate_rule_names
 
 # Try importing Governance SDK
 try:

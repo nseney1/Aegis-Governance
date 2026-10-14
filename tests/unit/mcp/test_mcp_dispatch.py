@@ -7,7 +7,7 @@ import aegis_mcp.server as server_module
 @pytest.fixture(autouse=True)
 def setup_server_globals(monkeypatch):
     import os
-    os.environ["SOMA_EXECUTION_ENABLED"] = "1"
+    os.environ["AEGIS_EXECUTION_ENABLED"] = "1"
     monkeypatch.setattr(server_module, "_canonical_workspace", "/fake/workspace")
     monkeypatch.setattr(server_module, "_execution_enabled", True)
     # Initialize properly instead of mutating private module state directly
@@ -68,7 +68,7 @@ def test_soma_request_receipt_issues_receipt():
     assert "receipt" in content
 
 def test_dispatch_flow_with_receipt(tmp_path, monkeypatch):
-    (tmp_path / ".soma" / "cells").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))
     # Issue receipt
     req1 = {
@@ -146,7 +146,7 @@ def test_porcelain_create_rule_requires_receipt():
 
 
 def test_porcelain_create_rule_dispatch_flow_with_receipt(tmp_path, monkeypatch):
-    (tmp_path / ".soma" / "cells").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))
     # Request receipt for porcelain tool
     req1 = {
@@ -192,8 +192,8 @@ def test_porcelain_create_rule_dispatch_flow_with_receipt(tmp_path, monkeypatch)
 
 
 def test_porcelain_list_rules_dispatch(tmp_path, monkeypatch):
-    (tmp_path / ".soma" / "cells" / "walls").mkdir(parents=True)
-    (tmp_path / ".soma" / "cells" / "walls" / "wall-test.md").write_text(
+    (tmp_path / ".aegis" / "rules" / "walls").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules" / "walls" / "wall-test.md").write_text(
         "---\ntype: wall\nhypothesis: test\n---\nbody\n", encoding="utf-8"
     )
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))
@@ -215,7 +215,7 @@ def test_porcelain_list_rules_dispatch(tmp_path, monkeypatch):
 
 
 def test_porcelain_rule_fitness_dispatch(tmp_path, monkeypatch):
-    (tmp_path / ".soma" / "cells").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))
     from aegis_sdk.governance import Governance
     monkeypatch.setattr(Governance, "fitness_landscape", lambda self, bayesian=False: [{"rule": "test", "score": 1.0}])
@@ -261,7 +261,7 @@ def test_invalid_receipt_does_not_consume_rate_limit(tmp_path, monkeypatch):
 
 
 def test_canonical_create_cell_with_porcelain_args_redemption(tmp_path, monkeypatch):
-    (tmp_path / ".soma" / "cells").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))
     # Request receipt for canonical tool soma_create_cell with porcelain argument rule_type
     req1 = {
@@ -304,8 +304,8 @@ def test_canonical_create_cell_with_porcelain_args_redemption(tmp_path, monkeypa
 
 
 def test_report_outcome_with_rules_alias(tmp_path, monkeypatch):
-    (tmp_path / ".soma" / "cells" / "walls").mkdir(parents=True)
-    (tmp_path / ".soma" / "cells" / "walls" / "wall-test.md").write_text(
+    (tmp_path / ".aegis" / "rules" / "walls").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules" / "walls" / "wall-test.md").write_text(
         "---\ntype: wall\nhypothesis: test\n---\nbody\n", encoding="utf-8"
     )
     monkeypatch.setattr(server_module, "_canonical_workspace", str(tmp_path))

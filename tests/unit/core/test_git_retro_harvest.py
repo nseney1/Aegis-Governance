@@ -35,7 +35,7 @@ def _commit_file(ws: Path, filename: str, content: str, msg: str) -> None:
 
 
 def _create_cell(ws: Path, cell_id: str, target_paths: list[str]) -> Path:
-    cells_dir = ws / ".soma" / "cells" / "vacuoles"
+    cells_dir = ws / ".aegis" / "rules" / "vacuoles"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_path = cells_dir / f"{cell_id}.md"
     fm = {
@@ -54,7 +54,7 @@ def git_workspace(tmp_path: Path) -> Path:
     ws = tmp_path / "repo"
     ws.mkdir()
     _init_git_repo(ws)
-    (ws / ".soma" / "evidence").mkdir(parents=True)
+    (ws / ".aegis" / "evidence").mkdir(parents=True)
     return ws
 
 
@@ -76,7 +76,7 @@ def test_harvest_git_history_seeds_baseline(git_workspace: Path):
     assert stats["cells_matched"] >= 1
     assert stats["signals_minted"] >= 2
 
-    agg = aggregate_signals(str(git_workspace / ".soma" / "evidence"))
+    agg = aggregate_signals(str(git_workspace / ".aegis" / "evidence"))
     assert "cell-parser" in agg.counts
     assert agg.counts["cell-parser"]["triggers"] >= 2
     assert agg.counts["cell-parser"]["tp"] >= 2
@@ -92,7 +92,7 @@ def test_harvest_git_history_dry_run_does_not_write(git_workspace: Path):
     stats = harvest_git_history(str(git_workspace), limit=5, dry_run=True)
     assert stats["signals_minted"] >= 2
 
-    sig_file = git_workspace / ".soma" / "evidence" / "signals.jsonl"
+    sig_file = git_workspace / ".aegis" / "evidence" / "signals.jsonl"
     assert not sig_file.exists()
 
 
@@ -105,11 +105,11 @@ def test_harvest_git_history_idempotent(git_workspace: Path):
     _commit_file(git_workspace, "foo.py", "x = 1\n", "init")
 
     stats1 = harvest_git_history(str(git_workspace), limit=5, dry_run=False)
-    agg1 = aggregate_signals(str(git_workspace / ".soma" / "evidence"))
+    agg1 = aggregate_signals(str(git_workspace / ".aegis" / "evidence"))
     count1 = agg1.counts["cell-parser"]["triggers"]
 
     stats2 = harvest_git_history(str(git_workspace), limit=5, dry_run=False)
-    agg2 = aggregate_signals(str(git_workspace / ".soma" / "evidence"))
+    agg2 = aggregate_signals(str(git_workspace / ".aegis" / "evidence"))
     count2 = agg2.counts["cell-parser"]["triggers"]
 
     assert count1 == count2
@@ -125,7 +125,7 @@ def test_cli_harvest_git_command(git_workspace: Path):
     res = harvest_git_history(workspace=str(git_workspace), limit=10, dry_run=False)
     assert res.get("commits_inspected", 0) >= 1
 
-    sig_file = git_workspace / ".soma" / "evidence" / "signals.jsonl"
+    sig_file = git_workspace / ".aegis" / "evidence" / "signals.jsonl"
     assert sig_file.exists()
 
 
@@ -160,7 +160,7 @@ def test_harvest_git_history_no_cells_dir(tmp_path: Path):
 def test_harvest_git_history_git_error(tmp_path: Path):
     """Test harvest_git_history when git fails."""
     from aegis_core.outcomes.harvest import harvest_git_history
-    cells_dir = tmp_path / ".soma" / "cells"
+    cells_dir = tmp_path / ".aegis" / "rules"
     cells_dir.mkdir(parents=True)
     res = harvest_git_history(str(tmp_path))
     assert res["commits_inspected"] == 0
@@ -171,7 +171,7 @@ def test_harvest_git_history_exception(tmp_path: Path, monkeypatch):
     """Test harvest_git_history when subprocess raises Exception."""
     from aegis_core.outcomes.harvest import harvest_git_history
     import subprocess
-    cells_dir = tmp_path / ".soma" / "cells"
+    cells_dir = tmp_path / ".aegis" / "rules"
     cells_dir.mkdir(parents=True)
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("subprocess failed")))
     res = harvest_git_history(str(tmp_path))

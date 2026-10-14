@@ -29,7 +29,7 @@ def _run_without_fcntl(code, env_extra=None):
 
 
 def _make_workspace(tmp_path, cell_name="trap-example"):
-    cells = tmp_path / ".soma" / "cells" / "vacuoles"
+    cells = tmp_path / ".aegis" / "rules" / "vacuoles"
     cells.mkdir(parents=True)
     (cells / f"{cell_name}.md").write_text(
         "---\n"
@@ -70,7 +70,7 @@ def test_append_signal_writes_record_without_fcntl(tmp_path):
         append_signal({str(tmp_path)!r}, "trap-example", "tp", "mcp")
     """)
     assert proc.returncode == 0, proc.stderr
-    lines = (tmp_path / ".soma" / "evidence" / "signals.jsonl").read_text(
+    lines = (tmp_path / ".aegis" / "evidence" / "signals.jsonl").read_text(
         encoding="utf-8").splitlines()
     assert len(lines) == 1
     record = json.loads(lines[0])
@@ -86,9 +86,9 @@ def test_report_outcome_writes_canonical_signal_without_fcntl(tmp_path):
                               {"outcome": "success", "cells_used": ["trap-example"],
                                "idempotency_key": "no-fcntl-report"})
         print(json.dumps(result))
-    """, env_extra={"SOMA_ROOT": str(workspace)})
+    """, env_extra={"AEGIS_ROOT": str(workspace)})
     assert proc.returncode == 0, proc.stderr
-    signals = (workspace / ".soma" / "evidence" / "signals.jsonl").read_text(
+    signals = (workspace / ".aegis" / "evidence" / "signals.jsonl").read_text(
         encoding="utf-8").splitlines()
     assert [json.loads(line)["cell"] for line in signals] == ["trap-example"]
-    assert not (workspace / ".soma" / "evidence" / "outcomes.jsonl").exists()
+    assert not (workspace / ".aegis" / "evidence" / "outcomes.jsonl").exists()

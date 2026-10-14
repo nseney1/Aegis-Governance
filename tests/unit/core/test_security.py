@@ -13,7 +13,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_mcp.security import confine_workspace, confine_path, validate_cell_names
+from aegis_mcp.security import confine_workspace, confine_path, validate_rule_names
 from aegis_mcp.integrity import (
     generate_manifest,
     verify_manifest,
@@ -28,12 +28,12 @@ from aegis_mcp.integrity import (
 @pytest.fixture
 def soma_workspace(tmp_path):
     """Create a minimal valid Soma workspace."""
-    cells_dir = tmp_path / ".soma" / "cells" / "walls"
+    cells_dir = tmp_path / ".aegis" / "rules" / "walls"
     cells_dir.mkdir(parents=True)
     (cells_dir / "wall-test.md").write_text(
         "---\ntype: wall\nhypothesis: test\n---\nTest cell.\n"
     )
-    evidence_dir = tmp_path / ".soma" / "evidence"
+    evidence_dir = tmp_path / ".aegis" / "evidence"
     evidence_dir.mkdir(parents=True)
     return tmp_path
 
@@ -53,15 +53,15 @@ class TestConfineWorkspace:
             confine_workspace("/nonexistent/path/abc123")
 
     def test_rejects_non_soma_dir(self, tmp_path):
-        """A directory without .soma/cells/ is not a valid workspace."""
-        with pytest.raises(ValueError, match="not a valid Soma workspace"):
+        """A directory without .aegis/rules/ is not a valid workspace."""
+        with pytest.raises(ValueError, match="not a valid Aegis workspace"):
             confine_workspace(str(tmp_path))
 
     def test_accepts_valid_workspace(self, soma_workspace):
-        """A directory with .soma/cells/ is accepted."""
+        """A directory with .aegis/rules/ is accepted."""
         result = confine_workspace(str(soma_workspace))
         assert os.path.isabs(result)
-        assert os.path.isdir(os.path.join(result, ".soma", "cells"))
+        assert os.path.isdir(os.path.join(result, ".aegis", "rules"))
 
 
 # ── Path Confinement: confine_path ────────────────────────────────────
@@ -154,16 +154,16 @@ class TestConfinePath:
 class TestValidateCellNames:
     def test_empty_list_returns_empty(self, soma_workspace):
         """Empty cell list always validates."""
-        assert validate_cell_names([], str(soma_workspace)) == []
+        assert validate_rule_names([], str(soma_workspace)) == []
 
     def test_all_valid_returns_empty(self, soma_workspace):
         """Known cell names return no invalid entries."""
-        result = validate_cell_names(["wall-test"], str(soma_workspace))
+        result = validate_rule_names(["wall-test"], str(soma_workspace))
         assert result == []
 
     def test_unknown_names_returned(self, soma_workspace):
         """Unknown cell names are returned as invalid."""
-        result = validate_cell_names(
+        result = validate_rule_names(
             ["wall-test", "nonexistent-cell", "another-fake"],
             str(soma_workspace),
         )
@@ -172,8 +172,8 @@ class TestValidateCellNames:
         assert "wall-test" not in result
 
     def test_no_cells_dir_all_invalid(self, tmp_path):
-        """When .soma/cells/ doesn't exist, all names are invalid."""
-        result = validate_cell_names(["any-name"], str(tmp_path))
+        """When .aegis/rules/ doesn't exist, all names are invalid."""
+        result = validate_rule_names(["any-name"], str(tmp_path))
         assert result == ["any-name"]
 
 
@@ -183,7 +183,7 @@ class TestValidateCellNames:
 class TestIntegrityManifest:
     def test_generate_manifest(self, soma_workspace):
         """Manifest includes all cell files with SHA-256 hashes."""
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         assert manifest["cell_count"] > 0
         for path, hash_val in manifest["cells"].items():
@@ -192,17 +192,17 @@ class TestIntegrityManifest:
 
     def test_verify_unmodified(self, soma_workspace):
         """Clean cells produce no verification issues."""
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         issues = verify_manifest(cells_dir, manifest)
         assert issues == []
 
     def test_verify_detects_modified(self, soma_workspace):
         """Modified cell content is detected as a hash mismatch."""
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         # Tamper with the cell
-        cell_path = soma_workspace / ".soma" / "cells" / "walls" / "wall-test.md"
+        cell_path = soma_workspace / ".aegis" / "rules" / "walls" / "wall-test.md"
         cell_path.write_text("---\ntype: wall\nhypothesis: TAMPERED\n---\nEvil.\n")
         issues = verify_manifest(cells_dir, manifest)
         types = [i["type"] for i in issues]
@@ -210,10 +210,10 @@ class TestIntegrityManifest:
 
     def test_verify_detects_added(self, soma_workspace):
         """New cell not in manifest is detected as unknown."""
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         # Add a rogue cell
-        rogue = soma_workspace / ".soma" / "cells" / "walls" / "wall-rogue.md"
+        rogue = soma_workspace / ".aegis" / "rules" / "walls" / "wall-rogue.md"
         rogue.write_text("---\ntype: wall\nhypothesis: rogue\n---\nRogue.\n")
         issues = verify_manifest(cells_dir, manifest)
         types = [i["type"] for i in issues]
@@ -221,10 +221,10 @@ class TestIntegrityManifest:
 
     def test_verify_detects_removed(self, soma_workspace):
         """Cell in manifest but missing from disk is detected."""
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         # Delete the cell
-        cell_path = soma_workspace / ".soma" / "cells" / "walls" / "wall-test.md"
+        cell_path = soma_workspace / ".aegis" / "rules" / "walls" / "wall-test.md"
         cell_path.unlink()
         issues = verify_manifest(cells_dir, manifest)
         types = [i["type"] for i in issues]
@@ -236,7 +236,7 @@ class TestIntegrityManifest:
 
     def test_save_and_load_roundtrip(self, soma_workspace):
         """Manifest can be saved and loaded back identically."""
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         original = generate_manifest(cells_dir)
         save_manifest(str(soma_workspace), original)
         loaded = load_manifest(str(soma_workspace))
@@ -250,7 +250,7 @@ class TestIntegrityManifest:
 
 class TestKeyManagement:
     def test_generate_key_creates_file(self, soma_workspace):
-        """Key generation creates .soma/keys/manifest.key."""
+        """Key generation creates .aegis/keys/manifest.key."""
         from aegis_mcp.integrity import generate_key
 
         key_path = generate_key(str(soma_workspace))
@@ -279,7 +279,7 @@ class TestKeyManagement:
         assert old_key != new_key
         # Backup should exist
         bak_path = os.path.join(
-            str(soma_workspace), ".soma", "keys", "manifest.key.bak"
+            str(soma_workspace), ".aegis", "keys", "manifest.key.bak"
         )
         assert os.path.isfile(bak_path)
 
@@ -297,7 +297,7 @@ class TestManifestSigning:
 
         generate_key(str(soma_workspace))
         key = load_key(str(soma_workspace))
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         sig1 = sign_manifest(manifest, key)
         sig2 = sign_manifest(manifest, key)
@@ -307,7 +307,7 @@ class TestManifestSigning:
         """Different key = different signature."""
         from aegis_mcp.integrity import sign_manifest
 
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         key_a = b"key_a_secret_value_for_testing_1"
         key_b = b"key_b_secret_value_for_testing_2"
@@ -323,7 +323,7 @@ class TestManifestSigning:
 
         generate_key(str(soma_workspace))
         key = load_key(str(soma_workspace))
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         manifest["signature"] = sign_manifest(manifest, key)
         assert verify_signature(manifest, key) is True
@@ -336,7 +336,7 @@ class TestManifestSigning:
 
         generate_key(str(soma_workspace))
         key = load_key(str(soma_workspace))
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         manifest["signature"] = sign_manifest(manifest, key)
         # Tamper with cells
@@ -351,7 +351,7 @@ class TestManifestSigning:
 
         generate_key(str(soma_workspace))
         key = load_key(str(soma_workspace))
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         manifest["signature"] = 12345
         assert verify_signature(manifest, key) is False
@@ -364,7 +364,7 @@ class TestManifestSigning:
         from aegis_mcp.integrity import generate_key
 
         generate_key(str(soma_workspace))
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         save_manifest(str(soma_workspace), manifest)
         loaded = load_manifest(str(soma_workspace))
@@ -372,7 +372,7 @@ class TestManifestSigning:
 
     def test_unsigned_manifest_graceful(self, soma_workspace):
         """Manifest without signature works when no key exists."""
-        cells_dir = str(soma_workspace / ".soma" / "cells")
+        cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
         save_manifest(str(soma_workspace), manifest)
         loaded = load_manifest(str(soma_workspace))

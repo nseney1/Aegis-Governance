@@ -12,7 +12,7 @@ import pytest
 from aegis_core.yaml import parse_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
-CELLS_DIR = os.path.join(REPO_ROOT, ".aegis", "rules") if os.path.isdir(os.path.join(REPO_ROOT, ".aegis", "rules")) else os.path.join(REPO_ROOT, ".soma", "cells")
+CELLS_DIR = os.path.join(REPO_ROOT, ".aegis", "rules") if os.path.isdir(os.path.join(REPO_ROOT, ".aegis", "rules")) else os.path.join(REPO_ROOT, ".aegis", "rules")
 
 
 DIR_MAP = {

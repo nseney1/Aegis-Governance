@@ -46,7 +46,7 @@ def harvest_git_history(workspace: Workspace | Path | str, limit: int = 30, dry_
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    cells_dir = ws.rules_dir
     if not cells_dir.is_dir():
         return {"commits_inspected": 0, "cells_matched": 0, "signals_minted": 0}
 

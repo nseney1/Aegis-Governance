@@ -60,7 +60,7 @@ def _handle_report_outcome(args: dict, gov) -> dict:
         cells_used = []
 
     if cells_used:
-        invalid = workspace.validate_cell_names(cells_used)
+        invalid = workspace.validate_rule_names(cells_used)
         if invalid:
             return {
                 "error": f"Unknown cell(s): {invalid}. Only existing cells can be reported.",

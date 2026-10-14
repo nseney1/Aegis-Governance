@@ -60,7 +60,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         )
 
         assert res.verdict == Verdict.SHIP
-        ev_file = tmp_path / ".soma" / "evidence" / "arbitration_cycle_1.json"
+        ev_file = tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json"
         assert ev_file.exists(), "Arbitration evidence must be persisted by VerificationPipeline.run"
         assert res.evidence_path == str(ev_file)
         assert res.persistence_error is None
@@ -88,7 +88,7 @@ class TestPipelineEvidencePersistenceAndFailClosed:
             task_plan="None",
             layer1_only=True,
         )
-        assert not (tmp_path / ".soma" / "evidence" / "arbitration_cycle_1.json").exists()
+        assert not (tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json").exists()
 
     def test_pipeline_evidence_persistence_failure_logs_warning(self, tmp_path, monkeypatch, caplog):
         import logging

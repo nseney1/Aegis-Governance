@@ -19,18 +19,16 @@ class SlotResolutionError(SomaValidationError):
 
 
 class SlotRegistry:
-    """Manages repository slot bindings from .soma/slots.yaml."""
+    """Manages repository slot bindings from .aegis/slots.yaml."""
 
     def __init__(self, slots: Optional[Mapping[str, Any]] = None) -> None:
         self._slots: Dict[str, str] = {str(k): str(v) for k, v in (slots or {}).items() if v is not None}
 
     @classmethod
     def load(cls, workspace_root: Path | str) -> SlotRegistry:
-        """Load slot definitions from .soma/slots.yaml or return empty registry."""
+        """Load slot definitions from .aegis/slots.yaml or return empty registry."""
         root = Path(workspace_root)
         slots_file = root / ".aegis" / "slots.yaml"
-        if not slots_file.exists():
-            slots_file = root / ".soma" / "slots.yaml"
         if not slots_file.exists():
             return cls({})
 
@@ -42,7 +40,7 @@ class SlotRegistry:
                 return cls(raw_slots)
             return cls({})
         except Exception as exc:
-            raise SlotResolutionError(f"Failed to parse .soma/slots.yaml: {exc}") from exc
+            raise SlotResolutionError(f"Failed to parse .aegis/slots.yaml: {exc}") from exc
 
     def get(self, key: str, default: Optional[str] = None) -> Optional[str]:
         return self._slots.get(key, default)

@@ -41,12 +41,12 @@ class TestPrecommitLayer1Verification:
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(repo), check=True)
         subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(repo), check=True)
 
-        # Create a Python file in soma_core/ that attempts an unguarded forbidden import (e.g. pytest or google.genai)
-        core_dir = repo / "soma_core"
+        # Create a Python file in aegis_core/ that attempts an unguarded forbidden import (e.g. pytest or google.genai)
+        core_dir = repo / "aegis_core"
         core_dir.mkdir()
         bad_file = core_dir / "bad_mod.py"
         bad_file.write_text("import google.genai\n\ndef run():\n    return 1\n", encoding="utf-8")
-        subprocess.run(["git", "add", "soma_core/bad_mod.py"], cwd=str(repo), check=True)
+        subprocess.run(["git", "add", "aegis_core/bad_mod.py"], cwd=str(repo), check=True)
 
         exit_code = run_pre_commit(workspace=repo, strict=False)
         assert exit_code == 1
@@ -58,11 +58,11 @@ class TestPrecommitLayer1Verification:
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(repo), check=True)
         subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(repo), check=True)
 
-        core_dir = repo / "soma_core"
+        core_dir = repo / "aegis_core"
         core_dir.mkdir()
         bad_file = core_dir / "bad_mod.py"
         bad_file.write_text("import google.genai\n\ndef run():\n    return 1\n", encoding="utf-8")
-        subprocess.run(["git", "add", "soma_core/bad_mod.py"], cwd=str(repo), check=True)
+        subprocess.run(["git", "add", "aegis_core/bad_mod.py"], cwd=str(repo), check=True)
 
         exit_code = run_pre_commit(workspace=repo, strict=False, use_json=True)
         assert exit_code == 1
