@@ -13,7 +13,8 @@ Only the current minor release line receives security fixes. Fixes land on `deve
 
 Please **do not open a public issue** for a suspected vulnerability.
 
-Report it privately through GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability** (<https://github.com/nseney1/Soma-Governance/security/advisories/new>). The report stays visible only to you and the maintainers.
+Report it privately through GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability** (<https://github.com/nseney1/Aegis-Code/security/advisories/new>). The report stays visible only to you and the maintainers.
+
 
 > [!NOTE]
 > This channel works only after the maintainer enables *Private vulnerability reporting* under **Settings → Code security** for the repository. If the button is missing, open a public issue that asks for a private contact channel, without any vulnerability details.

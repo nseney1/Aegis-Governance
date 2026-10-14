@@ -17,15 +17,22 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
+import re
 import shutil
 import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.workspace import Workspace
 
-__all__ = ["run_migrate", "MigrateCommand", "migrate_workspace"]
+__all__ = [
+    "run_migrate",
+    "MigrateCommand",
+    "migrate_workspace",
+    "ORGANELLE_MAPPING",
+    "LEGACY_TO_MODERN_TYPE",
+]
 
 ORGANELLE_MAPPING = {
     "walls": "invariants",
@@ -34,6 +41,56 @@ ORGANELLE_MAPPING = {
     "chloroplasts": "personas",
     "plasmodesmata": "contracts",
 }
+
+LEGACY_TO_MODERN_TYPE = {
+    "wall": "invariant",
+    "vacuole": "trap",
+    "membrane": "boundary",
+    "chloroplast": "persona",
+    "plasmodesmata": "contract",
+}
+
+_TYPE_LINE_RE = re.compile(r"^(\s*type\s*:\s*)(['\"]?)([A-Za-z_]+)(['\"]?)(\s*(?:#.*)?)$")
+
+
+def _rewrite_frontmatter_type(md_file: Path) -> bool:
+    """Rewrite legacy type: <organelle> in YAML frontmatter to modern type."""
+    try:
+        content = md_file.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+    if not content.startswith("---"):
+        return False
+
+    lines = content.splitlines(keepends=True)
+    closing_idx = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            closing_idx = idx
+            break
+
+    if closing_idx is None:
+        return False
+
+    changed = False
+    for idx in range(1, closing_idx):
+        line_ending = "\r\n" if lines[idx].endswith("\r\n") else ("\n" if lines[idx].endswith("\n") else "")
+        stripped_line = lines[idx].rstrip("\r\n")
+        m = _TYPE_LINE_RE.match(stripped_line)
+        if m:
+            prefix, q1, old_type, q2, suffix = m.groups()
+            new_type = LEGACY_TO_MODERN_TYPE.get(old_type)
+            if new_type:
+                lines[idx] = f"{prefix}{q1}{new_type}{q2}{suffix}{line_ending}"
+                changed = True
+
+    if changed:
+        try:
+            md_file.write_text("".join(lines), encoding="utf-8")
+        except OSError:
+            return False
+    return changed
 
 
 def migrate_workspace(
@@ -124,6 +181,12 @@ def migrate_workspace(
                     shutil.rmtree(str(old_path), ignore_errors=True)
                     changes.append(f"Merged: rules/{old_name}/ into rules/{new_name}/")
 
+        for md_file in sorted(rules_dir.rglob("*.md")):
+            if md_file.name == "README.md":
+                continue
+            if _rewrite_frontmatter_type(md_file):
+                changes.append(f"Updated frontmatter type: {md_file.relative_to(aegis_dir)}")
+
     # 4. Clean lock files
     locks_dir = aegis_dir / "locks"
     if locks_dir.is_dir():
@@ -159,11 +222,15 @@ def migrate_workspace(
     }
 
 
-def run_migrate(args: argparse.Namespace) -> int:
+def run_migrate(args: argparse.Namespace | str | Path, dry_run: bool = False) -> int:
     """CLI handler for aegis migrate."""
-    raw_ws = getattr(args, "workspace", None) or getattr(args, "_project_root", None) or Path.cwd()
-    dry_run = getattr(args, "dry_run", False)
-    use_json = getattr(args, "json", False)
+    if isinstance(args, (str, Path)):
+        raw_ws = args
+        use_json = False
+    else:
+        raw_ws = getattr(args, "workspace", None) or getattr(args, "_project_root", None) or Path.cwd()
+        dry_run = getattr(args, "dry_run", dry_run)
+        use_json = getattr(args, "json", False)
 
     res = migrate_workspace(raw_ws, dry_run=dry_run)
 

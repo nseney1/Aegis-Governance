@@ -297,9 +297,22 @@ def load_cells_for_enforcement(cells_dir: str | Path | Workspace) -> List[Dict[s
     from aegis_core.yaml import parse_frontmatter, _get_body
 
     if isinstance(cells_dir, Workspace):
-        c_dir = str(cells_dir.cells_dir)
+        aegis_rules = cells_dir.root / ".aegis" / "rules"
+        soma_cells = cells_dir.root / ".soma" / "cells"
+        if aegis_rules.is_dir():
+            c_dir = str(aegis_rules)
+        elif soma_cells.is_dir():
+            c_dir = str(soma_cells)
+        else:
+            c_dir = str(cells_dir.cells_dir)
     else:
-        c_dir = str(cells_dir)
+        p = Path(cells_dir)
+        if (p / ".aegis" / "rules").is_dir():
+            c_dir = str(p / ".aegis" / "rules")
+        elif (p / ".soma" / "cells").is_dir():
+            c_dir = str(p / ".soma" / "cells")
+        else:
+            c_dir = str(cells_dir)
 
     for cell_file in glob.glob(os.path.join(c_dir, "**", "*.md"), recursive=True):
         if os.path.basename(cell_file) == "README.md":
@@ -319,6 +332,7 @@ def load_cells_for_enforcement(cells_dir: str | Path | Workspace) -> List[Dict[s
 
 
 load_cells = load_cells_for_enforcement
+_load_cells = load_cells_for_enforcement
 
 
 def generate_precommit_check(cell: Dict[str, Any], workspace: str | Path | Workspace = ".") -> str:
@@ -569,27 +583,54 @@ def _parse_cell_frontmatter(filepath: str) -> Dict[str, Any]:
         return {}
 
 
+def _get_git_changed_files(workspace: str | Path | Workspace) -> List[str]:
+    """Return git changed files relative to workspace root, or [] if unavailable."""
+    ws = as_workspace(workspace)
+    if not (ws.root / ".git").exists():
+        return []
+    try:
+        res = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=str(ws.root),
+            timeout=5,
+        )
+        if res.returncode == 0:
+            return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+    except Exception:
+        pass
+    return []
+
+
 def _match_cells(workspace: str | Path | Workspace, changed_files: List[str]) -> List[Dict[str, Any]]:
     """Match cells to changed files using target_paths fnmatch globs.
 
-    Returns list of dicts with keys: cell, type, target_match, path.
+    Returns list of dicts with keys: cell, rule, type, target_match, path.
     """
     from aegis_core.cell_inventory import find_matching_cells
 
     ws = as_workspace(workspace)
-    cells_dir = str(ws.cells_dir)
+    aegis_rules = ws.root / ".aegis" / "rules"
+    soma_cells = ws.root / ".soma" / "cells"
+    if aegis_rules.is_dir():
+        cells_dir = str(aegis_rules)
+    elif soma_cells.is_dir():
+        cells_dir = str(soma_cells)
+    else:
+        cells_dir = str(ws.cells_dir)
     matches = find_matching_cells(cells_dir, changed_files, allow_basename_match=True)
     matched = []
     for m in matches:
         cell_name = os.path.splitext(os.path.basename(m.cell_path))[0]
         matched.append({
             "cell": cell_name,
+            "rule": cell_name,
             "type": m.cell_type,
             "target_match": m.first_matching_target or "",
             "path": m.cell_path,
         })
     return matched
-
 
 
 def _compute_credit_weights(matched_cells: List[Dict[str, Any]], changed_files: List[str]) -> Dict[str, float]:
@@ -645,20 +686,21 @@ def _format_markdown(
     """Format the report as a markdown summary."""
     status = "\u2705 Passed" if test_passed else "\u274c Failed"
     sha_display = commit_sha[:8] if commit_sha else "unknown"
+    changed_list = changed_files if changed_files is not None else []
 
     lines = [
-        "## \U0001f52c Soma CI Outcome Report",
+        "## \U0001f6e1\ufe0f Aegis CI Outcome Report",
         "",
         f"**Commit**: `{sha_display}` | **Tests**: {status} "
-        f"| **Cells matched**: {len(matched_cells)} "
-        f"| **Files changed**: {len(changed_files)}",
+        f"| **Rules matched**: {len(matched_cells)} "
+        f"| **Files changed**: {len(changed_list)}",
         "",
     ]
 
     if matched_cells:
         lines.extend([
-            "| Cell | Type | Target Match | Credit | Signal |",
-            "|:-----|:-----|:-------------|:-------|:-------|",
+            "| Rule | Type | Matched Files | Credit | Signal |",
+            "|:-----|:-----|:--------------|:-------|:-------|",
         ])
         for cell in sorted(matched_cells, key=lambda c: c["cell"]):
             lines.append(
@@ -668,7 +710,7 @@ def _format_markdown(
                 f'| {cell["proposed_signal"]} |'
             )
     else:
-        lines.append("No cells matched the changed files.")
+        lines.append("No rules matched the changed files.")
 
     lines.append("")
     return "\n".join(lines)
@@ -683,18 +725,23 @@ def generate_ci_report(
     """Generate a CI outcome report.
 
     Args:
-        workspace: Root workspace directory containing .soma/
+        workspace: Root workspace directory containing .aegis/ or .soma/
         changed_files: List of changed file paths (relative to workspace)
         test_passed: Boolean — did the test suite pass?
         commit_sha: Optional commit SHA for the report header
 
     Returns:
         dict with keys:
-          - matched_cells: list of dicts with cell, type, target_match,
+          - changed_files: list of changed file paths
+          - matched_cells: list of dicts with cell, rule, type, target_match,
                            credit_weight, proposed_signal
+          - matched_rules: alias for matched_cells
           - summary: markdown string for step summary
     """
-    changed = changed_files or []
+    if changed_files is None:
+        changed = _get_git_changed_files(workspace)
+    else:
+        changed = list(changed_files)
     matched = _match_cells(workspace, changed)
     weights = _compute_credit_weights(matched, changed)
 
@@ -705,10 +752,12 @@ def generate_ci_report(
         cell["proposed_signal"] = signal
 
     # Generate markdown
-    summary = _format_markdown(matched, test_passed, commit_sha, changed_files)
+    summary = _format_markdown(matched, test_passed, commit_sha, changed)
 
     return {
+        "changed_files": changed,
         "matched_cells": matched,
+        "matched_rules": matched,
         "summary": summary,
     }
 

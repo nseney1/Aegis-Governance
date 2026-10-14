@@ -87,7 +87,7 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
             else:
                 score = tp / triggers
                 if fp > 0 and tp > 0 and fp > 2 * tp:
-                    category = "APOPTOSIS_WARNING" if cell_type == "wall" else "APOPTOSIS"
+                    category = "APOPTOSIS_WARNING" if cell_type in ("wall", "invariant") else "APOPTOSIS"
                 elif score > 0.7:
                     category = "SURVIVE"
                 elif score >= EXTINCTION_THRESHOLD:
@@ -129,6 +129,11 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
 def prune_cells(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
     """Evaluate and prune extinct or apoptotic rules."""
     return run_cell_selection(workspace=workspace, execute=execute)
+
+
+select_cell = run_cell_selection
+prune_rules = prune_cells
+
 
 
 

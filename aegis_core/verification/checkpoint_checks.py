@@ -202,6 +202,40 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
     elif top_dir in ("aegis_sdk", "soma_sdk"):
         candidates.append(test_dir / f"test_sdk_{stem}.py")
 
+    if stem == "compat":
+        candidates.append(test_dir / "test_compat_aliases.py")
+        candidates.append(test_dir / "unit" / "core" / "test_compat_aliases.py")
+        candidates.append(test_dir / "test_canary_dual_brand.py")
+        candidates.append(test_dir / "unit" / "core" / "test_canary_dual_brand.py")
+    if "ast" in parts:
+        candidates.append(test_dir / f"test_ast_{stem}.py")
+        candidates.append(test_dir / "unit" / "core" / f"test_ast_{stem}.py")
+    if stem == "detect":
+        candidates.append(test_dir / "test_ast_detect.py")
+        candidates.append(test_dir / "unit" / "core" / "test_ast_detect.py")
+        candidates.append(test_dir / "test_polyglot_detect.py")
+        candidates.append(test_dir / "unit" / "core" / "test_polyglot_detect.py")
+    if stem == "schema":
+        candidates.append(test_dir / "test_ast_schema.py")
+        candidates.append(test_dir / "unit" / "core" / "test_ast_schema.py")
+        candidates.append(test_dir / "test_normalized_ast_schema.py")
+        candidates.append(test_dir / "unit" / "core" / "test_normalized_ast_schema.py")
+    if stem == "python":
+        candidates.append(test_dir / "test_ast_python.py")
+        candidates.append(test_dir / "unit" / "core" / "test_ast_python.py")
+        candidates.append(test_dir / "test_ast_driver_runner.py")
+        candidates.append(test_dir / "unit" / "core" / "test_ast_driver_runner.py")
+    if stem == "rust_ast":
+        candidates.append(test_dir / "test_ast_rust.py")
+        candidates.append(test_dir / "unit" / "core" / "test_ast_rust.py")
+        candidates.append(test_dir / "test_rust_ast_driver.py")
+        candidates.append(test_dir / "unit" / "core" / "test_rust_ast_driver.py")
+    if stem == "rules":
+        candidates.append(test_dir / "unit" / "sdk" / "test_cells.py")
+        candidates.append(test_dir / "sdk" / "test_cells.py")
+        candidates.append(test_dir / "test_cells.py")
+        candidates.append(test_dir / "unit" / "sdk" / "test_sdk_behavioral.py")
+        candidates.append(test_dir / "test_rule_content.py")
     if stem.startswith("genesis_"):
         candidates.append(test_dir / "test_genesis.py")
     if stem == "checkpoint_checks":

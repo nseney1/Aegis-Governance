@@ -292,18 +292,28 @@ def format_cell_guidance(cell: dict[str, object]) -> dict[str, object]:
 
     type_emoji = {
         'wall': '🧱',
+        'invariant': '🧱',
         'vacuole': '🧫',
+        'trap': '🧫',
         'membrane': '🔬',
+        'boundary': '🔬',
         'chloroplast': '🌿',
-        'plasmodesmata': '🔗'
+        'persona': '🌿',
+        'plasmodesmata': '🔗',
+        'contract': '🔗',
     }.get(ctype, '📋')
 
     type_label = {
         'wall': 'INVARIANT (must not violate)',
+        'invariant': 'INVARIANT (must not violate)',
         'vacuole': 'ANTI-PATTERN TRAP (watch out)',
+        'trap': 'ANTI-PATTERN TRAP (watch out)',
         'membrane': 'ESCALATION GATE (needs review)',
+        'boundary': 'ESCALATION GATE (needs review)',
         'chloroplast': 'BEST PRACTICE (follow this pattern)',
-        'plasmodesmata': 'CONTRACT (cross-service agreement)'
+        'persona': 'BEST PRACTICE (follow this pattern)',
+        'plasmodesmata': 'CONTRACT (cross-service agreement)',
+        'contract': 'CONTRACT (cross-service agreement)',
     }.get(ctype, ctype.upper())
 
     guidance = f"{type_emoji} [{type_label}] {name}\n"
@@ -592,13 +602,22 @@ def express(
     if not changed_files:
         return {
             'relevant_cells': [],
+            'relevant_rules': [],
             'genome_guidance': [],
             'target_constraints': [],
+            'wall_warnings': [],
+            'invariant_warnings': [],
+            'cells_staged': 0,
+            'rules_staged': 0,
             'context': 'No changed files detected. Governance guidance will be provided when files are modified.',
+            'guidance': 'No changed files detected. Governance guidance will be provided when files are modified.',
             'stats': {
                 'total_cells': 0,
+                'total_rules': 0,
                 'matched': 0,
                 'expressed': 0,
+                'cells_staged': 0,
+                'rules_staged': 0,
                 'budget': budget,
                 'changed_files': 0,
                 'estimated_tokens': 0,
@@ -632,13 +651,13 @@ def express(
     except ImportError:
         pass  # Graceful degradation
 
-    # Stage 0: Mandatory invariants — walls and gate-tier cells always load
+    # Stage 0: Mandatory invariants — walls, invariants, and gate-tier cells always load
     mandatory = []
     candidates = []
     for cell in matched:
         cell_type = cell.get('type', 'vacuole')
         enforcement = cell.get('enforcement', 'advisory')
-        if cell_type == 'wall' or enforcement == 'gate':
+        if cell_type in ('wall', 'invariant') or enforcement == 'gate':
             mandatory.append(cell)
         else:
             candidates.append(cell)
@@ -651,7 +670,10 @@ def express(
     # Stage 3: Pre-seed constraints and token budget clamping (Issue #75 & Issue #77)
     target_constraints = extract_target_constraints(matched, changed_files)
     early_warning_parts = []
-    wall_constraints = [c for c in target_constraints if c.get('tier') == 'wall' or c.get('type') == 'wall']
+    wall_constraints = [
+        c for c in target_constraints
+        if c.get('tier') in ('wall', 'invariant') or c.get('type') in ('wall', 'invariant')
+    ]
 
     if wall_constraints:
         early_warning_parts.append("## Pre-Edit Invariants & Constraints\n")
@@ -718,13 +740,22 @@ def express(
 
     return {
         'relevant_cells': expressed_cells,
+        'relevant_rules': expressed_cells,
         'genome_guidance': expressed_genome,
         'target_constraints': target_constraints,
+        'wall_warnings': wall_constraints,
+        'invariant_warnings': wall_constraints,
+        'cells_staged': len(expressed_cells),
+        'rules_staged': len(expressed_cells),
         'context': combined,
+        'guidance': combined,
         'stats': {
             'total_cells': len(all_cells),
+            'total_rules': len(all_cells),
             'matched': len(matched),
             'expressed': len(expressed_cells),
+            'cells_staged': len(expressed_cells),
+            'rules_staged': len(expressed_cells),
             'budget': budget,
             'changed_files': len(changed_files),
             'estimated_tokens': total_tokens,
@@ -732,3 +763,9 @@ def express(
             'clamped': clamped,
         }
     }
+
+
+load_all_rules = load_all_cells
+match_rules_to_files = match_cells_to_files
+format_rule_guidance = format_cell_guidance
+express_for_files = express

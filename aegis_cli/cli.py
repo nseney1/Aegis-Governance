@@ -29,16 +29,15 @@ def _version() -> str:
             pass
     try:
         from importlib.metadata import PackageNotFoundError, version
-        try:
-            return version("aegis-governance")
-        except PackageNotFoundError:
+        for pkg_name in ("aegis-code", "aegis-governance", "soma-governance"):
             try:
-                return version("soma-governance")
+                return version(pkg_name)
             except PackageNotFoundError:
-                pass
+                continue
     except ImportError:
         pass
     return "unknown"
+
 
 
 class AegisParser(argparse.ArgumentParser):

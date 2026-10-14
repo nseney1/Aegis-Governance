@@ -1,6 +1,8 @@
 ---
 id: ci-green-before-release
 domain: governance
+trigger: model_decision
+description: Blocks version tags and releases until CI workflows and verification checks pass on the target commit.
 activation: |
   Any git tag creation, version bump (pyproject.toml, VERSION),
   release branch creation, or merge to main.

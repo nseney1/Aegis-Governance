@@ -1,6 +1,8 @@
 ---
 id: no-pre-existing-excuse
 domain: governance
+trigger: model_decision
+description: Prohibits dismissing test failures or lint errors as pre-existing without root-cause verification and tracking.
 activation: |
   Agent identifies a defect in a file it is actively modifying
   and labels it "pre-existing", "out of scope", or "not introduced

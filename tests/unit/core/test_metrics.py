@@ -1,4 +1,4 @@
-"""Tests for soma_core.metrics — Metrics snapshots, token census, cell quorum, coverage, and immune grading."""
+"""Tests for aegis_core.metrics — Metrics snapshots, token census, rule quorum, coverage, and governance grading."""
 from __future__ import annotations
 
 import json
@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import pytest
 
-from soma_core.metrics import (
+from aegis_core.metrics import (
     letter_grade,
     resolve_metrics_dir,
     compute_token_census,
@@ -16,7 +16,7 @@ from soma_core.metrics import (
     calculate_immune_grade,
     take_snapshot,
 )
-from soma_core.somayaml import dump_frontmatter
+from aegis_core.yaml import dump_frontmatter
 
 
 def test_letter_grade_thresholds() -> None:
@@ -94,41 +94,41 @@ def test_compute_token_census_rules_and_skills(tmp_path: Path) -> None:
 
 
 def test_evaluate_quorum_sub_threshold(tmp_path: Path) -> None:
-    cells_dir = tmp_path / "cells"
-    cells_dir.mkdir()
-    cell_file = cells_dir / "cell1.md"
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    rule_file = rules_dir / "rule1.md"
     fm = {
-        "id": "cell1",
-        "type": "wall",
+        "id": "rule1",
+        "type": "invariant",
         "target_paths": ["src/*.py"],
         "minimum_mode": "breeze",
         "hypothesis": "Hypothesis",
     }
-    cell_file.write_text(f"---\n{dump_frontmatter(fm).strip()}\n---\nBody", encoding="utf-8")
+    rule_file.write_text(f"---\n{dump_frontmatter(fm).strip()}\n---\nBody", encoding="utf-8")
 
-    # Only 1 cell triggered, threshold is 2 -> no quorum
-    res = evaluate_quorum(cells_dir, ["src/main.py"], threshold=2)
+    # Only 1 rule triggered, threshold is 2 -> no quorum
+    res = evaluate_quorum(rules_dir, ["src/main.py"], threshold=2)
     assert res["quorum"] is False
-    assert res["cells_triggered"] == 1
+    assert res["rules_triggered"] == 1
 
 
 def test_evaluate_quorum_escalation(tmp_path: Path) -> None:
-    cells_dir = tmp_path / "cells"
-    cells_dir.mkdir()
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
     for i, mode in enumerate(["breeze", "tempest"]):
-        cfile = cells_dir / f"cell_{i}.md"
+        rfile = rules_dir / f"rule_{i}.md"
         fm = {
-            "id": f"cell_{i}",
-            "type": "wall",
+            "id": f"rule_{i}",
+            "type": "invariant",
             "target_paths": ["src/*.py"],
             "minimum_mode": mode,
             "hypothesis": "Hypothesis",
         }
-        cfile.write_text(f"---\n{dump_frontmatter(fm).strip()}\n---\nBody", encoding="utf-8")
+        rfile.write_text(f"---\n{dump_frontmatter(fm).strip()}\n---\nBody", encoding="utf-8")
 
-    res = evaluate_quorum(cells_dir, ["src/main.py"], threshold=2)
+    res = evaluate_quorum(rules_dir, ["src/main.py"], threshold=2)
     assert res["quorum"] is True
-    assert res["cells_triggered"] == 2
+    assert res["rules_triggered"] == 2
     assert res["escalate_to"] == "tempest"
 
 
@@ -139,3 +139,40 @@ def test_calculate_coverage_and_alias(tmp_path: Path) -> None:
     assert "covered" in res
     assert "coverage_pct" in res
     assert "by_directory" in res
+
+
+def test_calculate_coverage_and_governance_grade_on_aegis_rules_workspace(tmp_path: Path) -> None:
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    (src_dir / "unmatched.py").write_text("print('no')\n", encoding="utf-8")
+
+    inv_dir = tmp_path / ".aegis" / "rules" / "invariants"
+    inv_dir.mkdir(parents=True)
+    (inv_dir / "inv-src-app.md").write_text(
+        "---\n"
+        "id: inv-src-app\n"
+        "type: invariant\n"
+        "enforcement: gate\n"
+        "target_paths:\n"
+        "  - src/app.py\n"
+        "fitness:\n"
+        "  score: 0.9\n"
+        "  triggers: 25\n"
+        "  true_positives: 24\n"
+        "  false_positives: 1\n"
+        "---\n"
+        "# Invariant Src App\n",
+        encoding="utf-8",
+    )
+
+    cov = calculate_coverage(str(tmp_path))
+    assert cov["total_files"] == 2
+    assert cov["covered"] == 1
+    assert cov["coverage_pct"] == 50.0
+
+    grade = calculate_immune_grade(str(tmp_path))
+    assert grade["details"]["total_rules"] == 1
+    assert grade["components"]["invariant_strength"] > 0
+
+

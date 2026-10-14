@@ -32,16 +32,25 @@ GLOBAL_DEMOTION_PATH = {"genome": "wall", "wall": "vacuole"}
 LOCAL_DEMOTION_PATH = {"gate": "wall", "wall": "vacuole"}
 DEMOTION_PATH = GLOBAL_DEMOTION_PATH
 
+MODERN_GLOBAL_PROMOTION_PATH = {"trap": "invariant", "invariant": "genome"}
+MODERN_LOCAL_PROMOTION_PATH = {"trap": "invariant", "invariant": "gate"}
+MODERN_DEMOTION_PATH = {"invariant": "trap"}
+
 TYPE_TO_DIR = {
     "vacuole": "vacuoles",
     "wall": "walls",
     "gate": "gates",
+    "membrane": "membranes",
+    "chloroplast": "chloroplasts",
+    "plasmodesmata": "plasmodesmata",
     "trap": "traps",
     "invariant": "invariants",
     "boundary": "boundaries",
     "persona": "personas",
     "contract": "contracts",
 }
+
+DIR_TO_TYPE = {v: k for k, v in TYPE_TO_DIR.items()}
 
 EXTINCTION_THRESHOLD = 0.15
 PROMOTION_THRESHOLD = 0.85
@@ -89,10 +98,20 @@ METAMORPHOSIS_PATHS = {
         {"target": "wall", "min_fitness": 0.8, "min_sessions": 20},
         {"target": "membrane", "min_fitness": 0.7, "min_sessions": 15},
     ],
+    "trap": [
+        {"target": "invariant", "min_fitness": 0.8, "min_sessions": 20},
+        {"target": "boundary", "min_fitness": 0.7, "min_sessions": 15},
+    ],
     "chloroplast": [
         {"target": "rule", "min_fitness": 0.9, "min_sessions": 30},
     ],
+    "persona": [
+        {"target": "rule", "min_fitness": 0.9, "min_sessions": 30},
+    ],
     "wall": [
+        {"target": "rule", "min_fitness": 0.85, "min_sessions": 25},
+    ],
+    "invariant": [
         {"target": "rule", "min_fitness": 0.85, "min_sessions": 25},
     ],
 }

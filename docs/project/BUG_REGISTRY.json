@@ -586,7 +586,7 @@
         "soma_cli/cli.py",
         ".github/workflows/validate.yml"
       ],
-      "regression_test": "tests/unit/cli/test_hooks_lifecycle.py::TestCliDispatch::test_soma_cli_hook_subcommand",
+      "regression_test": "tests/unit/cli/test_hooks_lifecycle.py::TestCliDispatch::test_aegis_cli_hook_subcommand",
       "pattern": "Cross-platform support claimed while one platform omits a lifecycle subsystem",
       "fixed_in": "v0.93.0",
       "changelog_ref": "v0.93.0"
@@ -1685,6 +1685,97 @@
       "regression_test": "tests/unit/verification/test_mutation_tester.py::TestPolyglotMutationTesterCoverage::test_mutation_tester_reports_diagnostic_baseline_reasons",
       "pattern": "Generic error message swallows subprocess exit codes and stderr during prerequisite checks",
       "changelog_ref": "v1.5.0"
+    },
+    {
+      "id": "BUG-096",
+      "status": "fixed",
+      "title": "Antigravity drops 5 core rules (META.md, gitflow-review-gate.md, core-change-protocol.md, ci-green-before-release.md, no-pre-existing-excuse.md) due to missing trigger/description frontmatter and META.md installer filter",
+      "discovered_in": "v2.0.0",
+      "fixed_in": "v2.1.0",
+      "root_cause": "schema_drift",
+      "severity": "critical",
+      "description": "Five core rules in rules/ declared activation: instead of the Antigravity-required trigger: (always_on / model_decision) and description: fields, and aegis_cli/platforms/base.py explicitly filtered out META.md during installation. Consequently, the IDE dropped all 5 rules from <user_rules>, bypassing mandatory JIT scanning and PR review gates.",
+      "affected_files": [
+        "rules/META.md",
+        "rules/gitflow-review-gate.md",
+        "rules/core-change-protocol.md",
+        "rules/ci-green-before-release.md",
+        "rules/no-pre-existing-excuse.md",
+        "aegis_cli/platforms/base.py"
+      ],
+      "regression_test": "tests/unit/core/test_rule_metadata.py::test_meta_and_gitflow_review_gate_declare_always_on_trigger",
+      "pattern": "Platform rule loader silently ignores rule files missing required frontmatter keys or filtered by installer",
+      "changelog_ref": "v2.1.0"
+    },
+    {
+      "id": "BUG-097",
+      "status": "fixed",
+      "title": "JIT engine, sentinels, metrics, and lifecycle engines ignore modern rule types (invariant, trap, boundary, persona, contract) and .aegis/rules/ directory",
+      "discovered_in": "v2.0.0",
+      "fixed_in": "v2.1.0",
+      "root_cause": "mapping_error",
+      "severity": "critical",
+      "description": "After migrating rules to .aegis/rules/ with modern frontmatter types (invariant, trap, boundary, persona, contract), jit_engine.py still checked type == 'wall', sentinels.py and metrics.py hardcoded .soma/cells, and lifecycle constants only mapped vacuole <-> wall. Fixed: added full support for modern rule types and .aegis/rules/ across JIT, sentinels, metrics, and lifecycle engines.",
+      "affected_files": [
+        "aegis_mcp/jit_engine.py",
+        "aegis_core/sentinels.py",
+        "aegis_core/metrics.py",
+        "aegis_core/lifecycle/constants.py",
+        "aegis_core/lifecycle/parsers.py"
+      ],
+      "regression_test": "tests/unit/mcp/test_jit_engine_behavioral.py::TestModernRuleTypeExecution::test_express_stages_invariant_rule_and_emits_pre_edit_warning",
+      "pattern": "Schema vocabulary migration updates directory names without updating runtime type dispatch tables",
+      "changelog_ref": "v2.1.0"
+    },
+    {
+      "id": "BUG-098",
+      "status": "fixed",
+      "title": "aegis migrate moves rule directories to .aegis/rules/ without upgrading YAML frontmatter type fields",
+      "discovered_in": "v2.1.0",
+      "fixed_in": "v2.1.0",
+      "root_cause": "mapping_error",
+      "severity": "moderate",
+      "description": "aegis_cli/migrate.py moved .soma/cells/{walls,vacuoles,membranes,chloroplasts,plasmodesmata} to .aegis/rules/{invariants,traps,boundaries,personas,contracts} without upgrading the YAML frontmatter type: field inside each migrated markdown file. Fixed: run_migrate now upgrades legacy frontmatter type values to modern rule types.",
+      "affected_files": [
+        "aegis_cli/migrate.py"
+      ],
+      "regression_test": "tests/unit/cli/test_cli_migrate.py::test_migrate_full_cutover",
+      "pattern": "Filesystem migration moves files without transforming embedded schema type identifiers",
+      "changelog_ref": "v2.1.0"
+    },
+    {
+      "id": "BUG-099",
+      "status": "fixed",
+      "title": "generate_ci_report crashes with TypeError when changed_files is None and outputs legacy Soma/Cell markdown headers",
+      "discovered_in": "v2.0.0",
+      "fixed_in": "v2.1.0",
+      "root_cause": "schema_drift",
+      "severity": "moderate",
+      "description": "aegis_core/enforcement.py passed changed_files=None into _format_markdown() when changed_files was omitted, crashing on len(changed_files), and rendered 'Soma CI Outcome Report' / 'Cells matched' instead of Aegis / Rule branding. Fixed: normalized changed_files before formatting and updated markdown report to Aegis / Rule terminology.",
+      "affected_files": [
+        "aegis_core/enforcement.py"
+      ],
+      "regression_test": "tests/unit/core/test_ci_outcome_reporter.py::TestRuleMatching::test_generate_ci_report_defaults_changed_files_when_none",
+      "pattern": "Optional list parameter resolved locally for matching but passed un-normalized to formatter",
+      "changelog_ref": "v2.1.0"
+    },
+    {
+      "id": "BUG-100",
+      "status": "fixed",
+      "title": "Pre-commit hook and init check ignore .aegis/rules and .aegis/enforcement in pure Aegis workspaces",
+      "discovered_in": "v2.0.0",
+      "fixed_in": "v2.1.0",
+      "root_cause": "path_error",
+      "severity": "moderate",
+      "description": "aegis_cli/hooks/runtime.py hardcoded repo_root / '.soma' / 'cells' and '.soma/enforcement' in run_pre_commit(), and aegis_cli/init.py only checked '.soma' in check_existing_install(). Fixed: both modules now prioritize .aegis/rules and .aegis/enforcement with fallback to .soma.",
+      "affected_files": [
+        "aegis_cli/hooks/runtime.py",
+        "aegis_cli/init.py"
+      ],
+      "regression_test": "tests/unit/cli/test_hooks_lifecycle.py::TestPreCommitHook::test_run_pre_commit_triggers_rules_in_aegis_rules_directory",
+      "pattern": "Lifecycle hooks hardcode legacy hidden directory path after workspace namespace migration",
+      "changelog_ref": "v2.1.0"
     }
   ]
 }
+

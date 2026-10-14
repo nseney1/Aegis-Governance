@@ -57,11 +57,17 @@ def test_migrate_full_cutover(tmp_path: Path):
     # Verify .soma is gone
     assert not (tmp_path / ".soma").exists()
 
-    # Verify modern .aegis/rules layout
+    # Verify modern .aegis/rules layout and frontmatter type upgrade
     aegis_dir = tmp_path / ".aegis"
     assert aegis_dir.is_dir()
-    assert (aegis_dir / "rules" / "invariants" / "wall-test.md").is_file()
-    assert (aegis_dir / "rules" / "traps" / "trap-test.md").is_file()
+    inv_file = aegis_dir / "rules" / "invariants" / "wall-test.md"
+    trap_file = aegis_dir / "rules" / "traps" / "trap-test.md"
+    assert inv_file.is_file()
+    assert trap_file.is_file()
+
+    from aegis_core.yaml import parse_frontmatter
+    assert parse_frontmatter(inv_file.read_text(encoding="utf-8"))["type"] == "invariant"
+    assert parse_frontmatter(trap_file.read_text(encoding="utf-8"))["type"] == "trap"
 
     # Verify locks cleaned
     assert not (aegis_dir / "locks" / "stale.lock").exists()

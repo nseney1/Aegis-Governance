@@ -21,6 +21,9 @@ from .constants import (
     MIN_AGE_DAYS_FOR_PROMOTION,
     MIN_TP_RATE_FOR_PROMOTION,
     MIN_TRIGGERS_FOR_PROMOTION,
+    MODERN_DEMOTION_PATH,
+    MODERN_GLOBAL_PROMOTION_PATH,
+    MODERN_LOCAL_PROMOTION_PATH,
     PROMOTION_PATH,
     PROTECTED_RULES,
     TYPE_TO_DIR,
@@ -54,6 +57,15 @@ __all__ = [
 ]
 
 
+def _effective_promotion_path(ws: Workspace) -> dict[str, str]:
+    modern = MODERN_GLOBAL_PROMOTION_PATH if getattr(ws, "is_soma_repo", False) else MODERN_LOCAL_PROMOTION_PATH
+    return {**modern, **get_promotion_path(ws)}
+
+
+def _effective_demotion_path(ws: Workspace) -> dict[str, str]:
+    return {**MODERN_DEMOTION_PATH, **get_demotion_path(ws)}
+
+
 def evaluate_promotions(workspace: Workspace | Path | str) -> list[dict]:
     """Evaluate cells for promotion based on canonical signal evidence.
 
@@ -64,7 +76,7 @@ def evaluate_promotions(workspace: Workspace | Path | str) -> list[dict]:
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    promotion_path = get_promotion_path(ws)
+    promotion_path = _effective_promotion_path(ws)
     evidence = _load_evidence(ws)
     cells = _load_cells(ws)
     candidates = []
@@ -94,6 +106,7 @@ def evaluate_promotions(workspace: Workspace | Path | str) -> list[dict]:
 
         candidates.append({
             "cell_id": cell_id,
+            "rule_id": cell_id,
             "from_type": cell_type,
             "to_type": promotion_path[cell_type],
             "triggers": triggers,
@@ -114,7 +127,7 @@ def evaluate_demotions(workspace: Workspace | Path | str) -> list[dict]:
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    demotion_path = get_demotion_path(ws)
+    demotion_path = _effective_demotion_path(ws)
     evidence = _load_evidence(ws)
     cells = _load_cells(ws)
     candidates = []
@@ -168,6 +181,7 @@ def evaluate_demotions(workspace: Workspace | Path | str) -> list[dict]:
 
         candidates.append({
             "cell_id": cell_id,
+            "rule_id": cell_id,
             "from_type": cell_type,
             "to_type": demotion_path[cell_type],
             "reason": reason,
@@ -185,7 +199,7 @@ def promote_cell(
     force: bool = False,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Execute structural promotion for a cell (vacuole -> wall -> genome)."""
+    """Execute structural promotion for a cell (vacuole/trap -> wall/invariant -> genome)."""
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
@@ -196,7 +210,7 @@ def promote_cell(
             "message": f"Cell '{cell_id}' not found in workspace",
         }
 
-    promotion_path = get_promotion_path(ws)
+    promotion_path = _effective_promotion_path(ws)
     next_type = promotion_path.get(current_type)
     if next_type is None:
         return {
@@ -279,7 +293,7 @@ def demote_cell(
     cell_id: str,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Execute structural demotion for a cell (wall -> vacuole)."""
+    """Execute structural demotion for a cell (wall/invariant -> vacuole/trap)."""
     clean_id = sanitize_cell_id(cell_id)
     if not clean_id:
         return {"status": "invalid_id", "message": f"Invalid cell ID: '{cell_id}'"}
@@ -301,7 +315,7 @@ def demote_cell(
             "message": f"Cell '{clean_id}' not found in workspace",
         }
 
-    demotion_path = get_demotion_path(ws)
+    demotion_path = _effective_demotion_path(ws)
     next_type = demotion_path.get(current_type)
     if next_type is None:
         return {
@@ -333,7 +347,7 @@ def demote_cell(
         new_content = _transform_frontmatter_type(content, next_type)
         _atomic_write_and_unlink(cell_path, target_path, new_content)
 
-        if current_type == "wall" and next_type == "vacuole":
+        if current_type in ("wall", "invariant") and next_type in ("vacuole", "trap"):
             for pfx in ("check-", "gate-"):
                 for sfx in (".sh", ".py"):
                     art = ws.soma_dir / "enforcement" / f"{pfx}{clean_id}{sfx}"

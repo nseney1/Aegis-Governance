@@ -206,7 +206,7 @@ def take_snapshot(
     waste_rate_avg = "18.8%"
 
     cells_count = 0
-    cells_dir = ws / ".soma" / "cells"
+    cells_dir = (ws / ".aegis" / "rules") if (ws / ".aegis" / "rules").is_dir() else (ws / ".soma" / "cells")
     if cells_dir.is_dir():
         for f in cells_dir.rglob("*.md"):
             cells_count += 1
@@ -286,14 +286,47 @@ def take_snapshot(
 _QUORUM_MODES = {'breeze': 0, 'gale': 1, 'trident': 2, 'maelstrom': 3, 'tempest': 4}
 
 
+def _resolve_rules_dir(workspace: str | Path) -> str:
+    ws = Path(workspace)
+    aegis_rules = ws / ".aegis" / "rules"
+    if aegis_rules.is_dir():
+        return str(aegis_rules)
+    return str(ws / ".soma" / "cells")
+
+
+def _list_workspace_files(workspace: str) -> list[str]:
+    result = subprocess.run(['git', 'ls-files'], capture_output=True, text=True, cwd=workspace)
+    if result.returncode == 0 and result.stdout.strip():
+        return [f for f in result.stdout.strip().split('\n') if f]
+    ws_path = Path(workspace)
+    files: list[str] = []
+    if ws_path.is_dir():
+        for p in sorted(ws_path.rglob("*")):
+            if p.is_file():
+                rel = p.relative_to(ws_path).as_posix()
+                files.append(rel)
+    return files
+
+
 def evaluate_quorum(cells_dir: Path | str, changed_files: list[str], threshold: int = 3) -> dict:
     """Core quorum evaluation — pure function."""
     if not changed_files:
-        return {'quorum': False, 'cells_triggered': 0}
+        return {'quorum': False, 'cells_triggered': 0, 'rules_triggered': 0}
 
     cells_path = Path(cells_dir)
     if not cells_path.is_dir():
-        return {'quorum': False, 'cells_triggered': 0}
+        aegis_cand = cells_path / ".aegis" / "rules"
+        soma_cand = cells_path / ".soma" / "cells"
+        if aegis_cand.is_dir():
+            cells_path = aegis_cand
+        elif soma_cand.is_dir():
+            cells_path = soma_cand
+        else:
+            return {'quorum': False, 'cells_triggered': 0, 'rules_triggered': 0}
+    elif (cells_path / ".aegis" / "rules").is_dir():
+        cells_path = cells_path / ".aegis" / "rules"
+    elif (cells_path / ".soma" / "cells").is_dir():
+        cells_path = cells_path / ".soma" / "cells"
 
     triggered = []
     for cell_file in cells_path.rglob("*.md"):
@@ -342,22 +375,25 @@ def evaluate_quorum(cells_dir: Path | str, changed_files: list[str], threshold: 
         return {
             'quorum': True,
             'cells_triggered': len(triggered),
+            'rules_triggered': len(triggered),
             'cell_types': list({t['type'] for t in triggered}),
+            'rule_types': list({t['type'] for t in triggered}),
             'escalate_to': max_mode,
             'triggered_cells': triggered,
+            'triggered_rules': triggered,
         }
     return {
         'quorum': False,
         'cells_triggered': len(triggered),
+        'rules_triggered': len(triggered),
     }
 
 
 def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] = None) -> dict:
     """Calculate cell coverage mapping and directory tier breakdown."""
-    cells_dir = os.path.join(workspace, '.soma', 'cells')
-    result = subprocess.run(['git', 'ls-files'], capture_output=True, text=True, cwd=workspace)
-    all_files = [f for f in result.stdout.strip().split('\n') if f]
-    EXCLUDE_PATTERNS = ['.soma/', 'vendor/', '.git/', 'node_modules/']
+    cells_dir = _resolve_rules_dir(workspace)
+    all_files = _list_workspace_files(workspace)
+    EXCLUDE_PATTERNS = ['.aegis/', '.soma/', 'vendor/', '.git/', 'node_modules/']
     if exclude:
         if isinstance(exclude, str):
             EXCLUDE_PATTERNS.append(exclude)
@@ -440,6 +476,7 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
 
 
 calculate_cell_coverage = calculate_coverage
+calculate_rule_coverage = calculate_coverage
 
 
 def letter_grade(pct: float) -> str:
@@ -460,7 +497,7 @@ def letter_grade(pct: float) -> str:
 
 def calculate_immune_grade(workspace: str) -> Optional[dict]:
     """Calculate complete governance report card."""
-    cells_dir = os.path.join(workspace, '.soma', 'cells')
+    cells_dir = _resolve_rules_dir(workspace)
     cells = []
     if os.path.isdir(cells_dir):
         for cell_file in glob.glob(os.path.join(cells_dir, '**', '*.md'), recursive=True):
@@ -479,9 +516,8 @@ def calculate_immune_grade(workspace: str) -> Optional[dict]:
     if not cells:
         return None
 
-    result = subprocess.run(['git', 'ls-files'], capture_output=True, text=True, cwd=workspace)
-    all_files = [f for f in result.stdout.strip().split('\n') if f]
-    exclude = ['.soma/', 'vendor/', '.git/', 'node_modules/']
+    all_files = _list_workspace_files(workspace)
+    exclude = ['.aegis/', '.soma/', 'vendor/', '.git/', 'node_modules/']
     all_files = [f for f in all_files if not any(p in f for p in exclude)]
 
     all_patterns = []
@@ -510,7 +546,7 @@ def calculate_immune_grade(workspace: str) -> Optional[dict]:
     stale = sum(1 for c in cells if (c.get('fitness') or {}).get('triggers', 0) == 0)
     staleness_pct = 100 - (stale / len(cells) * 100) if cells else 100
 
-    walls = [c for c in cells if c.get('type') == 'wall']
+    walls = [c for c in cells if c.get('type') in ('wall', 'invariant')]
     healthy_walls = sum(1 for w in walls if ((w.get('fitness') or {}).get('score') is not None and (w.get('fitness') or {}).get('score', 0) > 0.3))
     wall_pct = (healthy_walls / len(walls) * 100) if walls else 100
 
@@ -534,11 +570,34 @@ def calculate_immune_grade(workspace: str) -> Optional[dict]:
         'diversity': {'pct': round(diversity, 1), 'grade': letter_grade(diversity)},
         'staleness': {'pct': round(staleness_pct, 1), 'grade': letter_grade(staleness_pct)},
         'wall_integrity': {'pct': round(wall_pct, 1), 'grade': letter_grade(wall_pct)},
+        'invariant_integrity': {'pct': round(wall_pct, 1), 'grade': letter_grade(wall_pct)},
         'tiers': tier_counts,
         'overall': {'pct': round(overall_pct, 1), 'grade': letter_grade(overall_pct)},
         'top_improvement': f'Add cells for {top_gap[0]}/ ({top_gap[1]} uncovered files)',
         'top_gap_count': top_gap[1],
+        'details': {
+            'total_cells': len(cells),
+            'total_rules': len(cells),
+            'walls': len(walls),
+            'invariants': len(walls),
+            'healthy_walls': healthy_walls,
+            'healthy_invariants': healthy_walls,
+            'stale_cells': stale,
+            'stale_rules': stale,
+        },
+        'components': {
+            'coverage': round(coverage_pct, 1),
+            'avg_fitness': round(fitness_pct, 1),
+            'diversity': round(diversity, 1),
+            'staleness': round(staleness_pct, 1),
+            'wall_strength': round(wall_pct, 1),
+            'invariant_strength': round(wall_pct, 1),
+            'wall_integrity': round(wall_pct, 1),
+        },
     }
+
+
+calculate_governance_grade = calculate_immune_grade
 
 
 __all__ = [
@@ -548,6 +607,8 @@ __all__ = [
     "evaluate_quorum",
     "calculate_coverage",
     "calculate_cell_coverage",
+    "calculate_rule_coverage",
     "letter_grade",
     "calculate_immune_grade",
+    "calculate_governance_grade",
 ]

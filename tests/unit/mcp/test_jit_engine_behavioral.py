@@ -292,3 +292,60 @@ class TestMandatoryCellsFitnessScore:
                 f"Cell '{cell.get('name')}' missing fitness key"
             assert isinstance(cell['fitness'], (int, float)), \
                 f"Cell '{cell.get('name')}' fitness is not numeric"
+
+
+class TestModernRuleTypeExecution:
+    """JIT engine must stage modern rule types (invariant, trap, boundary, persona, contract)."""
+
+    def test_express_stages_invariant_rule_and_emits_pre_edit_warning(self, tmp_path):
+        """A rule with type: invariant must be staged as mandatory and emit a Pre-Edit Invariants warning."""
+        from aegis_core.yaml import dump_frontmatter
+        from aegis_mcp.jit_engine import express
+
+        inv_dir = tmp_path / ".aegis" / "rules" / "invariants"
+        inv_dir.mkdir(parents=True)
+        (inv_dir / "invariant-zero-deps.md").write_text(
+            dump_frontmatter(
+                {
+                    "id": "invariant-zero-deps",
+                    "type": "invariant",
+                    "domain": "architecture",
+                    "enforcement": "advisory",
+                    "target_paths": ["aegis_core/*.py"],
+                    "hypothesis": "Zero external runtime dependencies allowed in core",
+                    "prediction": "ImportError in clean stdlib environments",
+                    "falsification": "Inspect pyproject.toml dependencies",
+                },
+                "# Zero Deps Invariant\n\nNever import third-party libraries in aegis_core.",
+            ),
+            encoding="utf-8",
+        )
+
+        res = express(str(tmp_path), changed_files=["aegis_core/yaml.py"], budget=5)
+        selected_names = [r.get("name") for r in res.get("relevant_rules", [])]
+        assert "invariant-zero-deps" in selected_names
+        assert "Pre-Edit Invariants & Constraints" in res.get("guidance", "")
+        assert "🧱 [INVARIANT] invariant-zero-deps" in res.get("guidance", "")
+
+    def test_format_rule_guidance_renders_modern_rule_type_labels_and_icons(self):
+        """format_rule_guidance must map invariant, trap, boundary, persona, and contract to their icons and labels."""
+        from aegis_mcp.jit_engine import format_rule_guidance
+
+        expected_mappings = [
+            ("invariant", "🧱", "INVARIANT (must not violate)"),
+            ("trap", "🧫", "ANTI-PATTERN TRAP (watch out)"),
+            ("boundary", "🔬", "ESCALATION GATE (needs review)"),
+            ("persona", "🌿", "BEST PRACTICE (follow this pattern)"),
+            ("contract", "🔗", "CONTRACT (cross-service agreement)"),
+        ]
+        for rule_type, emoji, label in expected_mappings:
+            fg = format_rule_guidance({
+                "_name": f"rule-{rule_type}",
+                "type": rule_type,
+                "hypothesis": f"Hypothesis for {rule_type}",
+                "_body": "Rule body",
+            })
+            assert emoji in fg["guidance"], f"Missing emoji {emoji} for {rule_type}"
+            assert label in fg["guidance"], f"Missing label {label} for {rule_type}"
+
+

@@ -172,8 +172,8 @@ _hook_block = generate_hook_block
 # ── Installation ────────────────────────────────────────────────────────────
 
 def check_existing_install(project_root: Path) -> bool:
-    """Check if Soma is already installed in this project."""
-    return (Path(project_root) / ".soma").is_dir()
+    """Check if Aegis or Soma is already installed in this project."""
+    return (Path(project_root) / ".aegis").is_dir() or (Path(project_root) / ".soma").is_dir()
 
 
 def _get_soma_root() -> Path:
