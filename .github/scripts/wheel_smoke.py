@@ -36,11 +36,11 @@ def check_module_origins():
 
 
 def make_workspace():
-    ws = tempfile.mkdtemp(prefix="soma-smoke-")
-    cells = os.path.join(ws, ".soma", "cells", "vacuoles")
-    os.makedirs(cells)
-    with open(os.path.join(cells, "trap-smoke.md"), "w", encoding="utf-8") as f:
-        f.write("---\nid: trap-smoke\ntype: vacuole\nhypothesis: smoke\n"
+    ws = tempfile.mkdtemp(prefix="aegis-smoke-")
+    rules = os.path.join(ws, ".aegis", "rules", "traps")
+    os.makedirs(rules)
+    with open(os.path.join(rules, "trap-smoke.md"), "w", encoding="utf-8") as f:
+        f.write("---\nid: trap-smoke\ntype: trap\nhypothesis: smoke\n"
                 "prediction: smoke\ntarget_paths: ['*.py']\n---\n# Smoke\n")
     return ws
 
@@ -58,11 +58,10 @@ def check_mcp(ws):
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-         "params": {"name": "soma_list_cells", "arguments": {}}},
+         "params": {"name": "aegis_list_rules", "arguments": {}}},
     ))
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env["AEGIS_WORKSPACE"] = ws
-    env["SOMA_WORKSPACE"] = ws
     proc = subprocess.run([sys.executable, "-I", "-m", "aegis_mcp"], input=requests,
                           capture_output=True, text=True, timeout=60, cwd=ws, env=env)
     lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
@@ -70,10 +69,10 @@ def check_mcp(ws):
         fail(f"MCP returned {len(lines)} responses: {proc.stdout[-500:]} {proc.stderr[-500:]}")
     if not lines[1]["result"]["tools"]:
         fail("MCP tools/list is empty")
-    cells = json.loads(lines[2]["result"]["content"][0]["text"])
-    if "trap-smoke" not in {c.get("_name") for c in cells}:
-        fail(f"MCP soma_list_cells did not see the workspace cell: {cells!r}")
-    print("ok  aegis_mcp initialize / tools/list / soma_list_cells")
+    rules = json.loads(lines[2]["result"]["content"][0]["text"])
+    if "trap-smoke" not in {c.get("_name") for c in rules}:
+        fail(f"MCP aegis_list_rules did not see the workspace rule: {rules!r}")
+    print("ok  aegis_mcp initialize / tools/list / aegis_list_rules")
 
 
 def check_governance_fitness(ws):
