@@ -13,7 +13,8 @@ __version__ = "2.0.0"
 # Explicit mapping of exported symbol name -> (module_name, attribute_name)
 _EXPORTS: dict[str, tuple[str, str | None]] = {
     # Submodules
-    "arbitration": ("aegis_core.arbitration", None),
+    "arbitration": ("aegis_core.proposals", None),
+    "proposals": ("aegis_core.proposals", None),
     "cell_inventory": ("aegis_core.cell_inventory", None),
     "command_safety": ("aegis_core.command_safety", None),
     "defects": ("aegis_core.defects", None),
@@ -40,6 +41,7 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "sync": ("aegis_core.sync", None),
     "telemetry": ("aegis_core.telemetry", None),
     "verification": ("aegis_core.verification", None),
+    "verification_jobs": ("aegis_core.verification.jobs", None),
     "workspace": ("aegis_core.workspace", None),
     # Core types & functions
     "CommandAnalyzer": ("aegis_core.command_safety", "CommandAnalyzer"),

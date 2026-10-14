@@ -29,6 +29,12 @@ class _SomaAliasLoader(importlib.abc.Loader):
             module.__spec__ = self.target_spec
 
 
+_RELOCATED_MODULES = {
+    "aegis_core.verification_jobs": "aegis_core.verification.jobs",
+    "aegis_core.arbitration": "aegis_core.proposals",
+}
+
+
 class _SomaAliasFinder(importlib.abc.MetaPathFinder):
     """MetaPathFinder that intercepts soma_* imports and routes to aegis_*."""
 
@@ -38,11 +44,22 @@ class _SomaAliasFinder(importlib.abc.MetaPathFinder):
         path: list[str] | None,
         target: Any | None = None,
     ) -> importlib.machinery.ModuleSpec | None:
+        if fullname in _RELOCATED_MODULES:
+            target_name = _RELOCATED_MODULES[fullname]
+            try:
+                import importlib.util
+                target_spec = importlib.util.find_spec(target_name)
+            except Exception:
+                target_spec = None
+            loader = _SomaAliasLoader(target_name, target_spec)
+            return importlib.machinery.ModuleSpec(fullname, loader, is_package=False)
+
         for pkg in _SOMA_PACKAGES:
             if fullname == pkg or fullname.startswith(pkg + "."):
                 if fullname.endswith(".__main__"):
                     return None
                 target_name = "aegis_" + fullname[5:]
+                target_name = _RELOCATED_MODULES.get(target_name, target_name)
                 try:
                     import importlib.util
                     target_spec = importlib.util.find_spec(target_name)

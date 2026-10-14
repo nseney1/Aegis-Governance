@@ -700,6 +700,7 @@ def self_test_verifier() -> int:
 
 
 _classify_cells = _classify_cell
+aegis_propose_change = soma_propose_change
 
 __all__ = [
     "ESCALATION_PROTOCOLS",
@@ -716,6 +717,7 @@ __all__ = [
     "get_escalation_protocol",
     "load_oracles",
     "evaluate_change",
+    "aegis_propose_change",
     "soma_propose_change",
     "generate_checkpoint",
     "_load_fitness_evidence",
@@ -725,3 +727,4 @@ __all__ = [
     "cli_checkpoint",
     "self_test_verifier",
 ]
+

@@ -255,8 +255,12 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_core_lifecycle.py")
     if stem == "inference_provider":
         candidates.append(test_dir / "test_keyring_integration.py")
-    if stem == "verification_jobs":
+    if stem in ("verification_jobs", "jobs"):
         candidates.append(test_dir / "test_mcp_async_verify.py")
+        candidates.append(test_dir / "test_worker_lifecycle.py")
+    if stem in ("arbitration", "proposals"):
+        candidates.append(test_dir / "test_arbitration.py")
+        candidates.append(test_dir / "test_proposals.py")
     if stem == "integrity":
         candidates.append(test_dir / "test_evidence_integrity.py")
     if stem == "server":
