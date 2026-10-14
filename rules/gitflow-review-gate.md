@@ -45,6 +45,6 @@ Every PR review (human or subagent) must verify:
 
 ## 4. Why This Rule Exists
 
-Self-review is the gentleman's agreement problem that Soma was built to solve.
+Self-review is the gentleman's agreement problem that Aegis was built to solve.
 An agent reviewing its own output has the same blind spots that produced the
 output. Structural separation — not trust — is what makes governance real.

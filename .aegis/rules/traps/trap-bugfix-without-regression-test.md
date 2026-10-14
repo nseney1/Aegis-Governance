@@ -15,7 +15,7 @@ triggers:
   - bug_fix
   - commit_review
   - code_modification
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-10-01
@@ -28,15 +28,15 @@ tags:
 fitness:
   score: null
   impact_weight: 1.2
-  triggers: 74
-  true_positives: 21.6929
+  triggers: 78
+  true_positives: 25.6929
   false_positives: 19.2032
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-v0.81 origin: Bugs 1-3 in outcome_engine.py and sync.py were fixed without
+v0.81 origin: Bugs 1-3 in telemetry.py and sync.py were fixed without
 regression tests. The telemetry path (.aegis/outcomes.jsonl → .aegis/evidence/outcomes.jsonl),
-schema key (cells_used → cell_id), and outcome mapping (success→tp, failure→fp) were
-all corrected surgically but had zero test coverage for the fixed behavior. This cell
+schema key (rules_used → rule_id), and outcome mapping (success→tp, failure→fp) were
+all corrected surgically but had zero test coverage for the fixed behavior. This rule
 ensures every bug fix is paired with a test proving the fix works and guarding against
 regression.

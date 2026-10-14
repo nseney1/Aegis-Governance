@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
+from aegis_core.taxonomy import ReviewMode, normalize_review_mode
 from aegis_core.yaml import parse_frontmatter
 from aegis_core.telemetry import EventConflictError, StaleGenerationError
 from aegis_core.workspace import Workspace
@@ -218,7 +219,7 @@ class Governance:
         hypothesis: str,
         type: str = 'trap',
         target_paths: Optional[list[str]] = None,
-        minimum_mode: str = 'breeze',
+        minimum_mode: str = str(ReviewMode.PATROL),
         tags: Optional[list[str]] = None,
         cell_id: Optional[str] = None,
     ) -> dict[str, Any] | str:
@@ -227,10 +228,11 @@ class Governance:
         raw_slug = cell_id or hypothesis[:40]
         safe_slug = re.sub(r'[^a-zA-Z0-9_.-]', '-', raw_slug).strip('-')
         canonical_type = TYPE_TRANSLATION_MAP.get(type, type)
+        normalized_mode = normalize_review_mode(minimum_mode, default=str(ReviewMode.PATROL))
         created_path = core_create_cell(
             cell_type=canonical_type,
             hypothesis=hypothesis,
-            minimum_mode=minimum_mode,
+            minimum_mode=normalized_mode,
             tags=tags,
             target_paths=target_paths,
             id_override=safe_slug,
@@ -243,7 +245,7 @@ class Governance:
         hypothesis: str,
         type: str = 'trap',
         target_paths: Optional[list[str]] = None,
-        minimum_mode: str = 'breeze',
+        minimum_mode: str = str(ReviewMode.PATROL),
         tags: Optional[list[str]] = None,
         cell_id: Optional[str] = None,
         rule_id: Optional[str] = None,
@@ -309,8 +311,8 @@ class Governance:
     
     def grade(self) -> dict[str, Any]:
         """Get governance report card."""
-        from aegis_core.telemetry import calculate_immune_grade
-        report = calculate_immune_grade(workspace=str(self.root))
+        from aegis_core.telemetry import calculate_governance_grade
+        report = calculate_governance_grade(workspace=str(self.root))
         if report is None:
             return {
                 "coverage": {"pct": 0.0, "grade": "F"},

@@ -7,6 +7,8 @@ from typing import Any
 
 from aegis_cli.platforms.base import PlatformAdapter, PlatformInstallResult
 
+__all__ = ["KiroAdapter"]
+
 
 class KiroAdapter(PlatformAdapter):
     """Platform adapter for Kiro steering environments."""
@@ -34,11 +36,16 @@ class KiroAdapter(PlatformAdapter):
             skills_dir.mkdir(parents=True, exist_ok=True)
 
         for src_rule in self.get_source_rules():
-            dest = steering_dir / src_rule.name
+            dest = (
+                (steering_dir / ".oracles" / src_rule.name)
+                if src_rule.parent.name == ".oracles"
+                else (steering_dir / src_rule.name)
+            )
             if dry_run:
                 result.installed_files.append(dest)
             else:
                 try:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src_rule, dest)
                     result.installed_files.append(dest)
                 except Exception as exc:
@@ -71,7 +78,11 @@ class KiroAdapter(PlatformAdapter):
         steering_dir, skills_dir = self.get_target_dirs(local=local)
 
         for src_rule in self.get_source_rules():
-            dest = steering_dir / src_rule.name
+            dest = (
+                (steering_dir / ".oracles" / src_rule.name)
+                if src_rule.parent.name == ".oracles"
+                else (steering_dir / src_rule.name)
+            )
             if dest.is_file():
                 if dry_run:
                     result.uninstalled_files.append(dest)

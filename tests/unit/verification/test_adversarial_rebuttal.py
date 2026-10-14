@@ -23,7 +23,7 @@ from aegis_core.verification import (
     ToolEvidence,
     Verdict,
 )
-from aegis_core.verification import immune_verify, runner, arbiter
+from aegis_core.verification import adversarial_verify, runner, arbiter
 
 
 class TestAdversarialRebuttalPrompt:
@@ -31,7 +31,7 @@ class TestAdversarialRebuttalPrompt:
 
     def test_build_code_prompt_accepts_spec_predictions(self):
         """build_code_prompt must accept spec_predictions parameter."""
-        sig = inspect.signature(immune_verify.build_code_prompt)
+        sig = inspect.signature(adversarial_verify.build_code_prompt)
         assert "spec_predictions" in sig.parameters
 
     def test_code_prompt_renders_predicted_charges(self):
@@ -44,7 +44,7 @@ class TestAdversarialRebuttalPrompt:
                 "affected_function": "express",
             }
         ]
-        prompt = immune_verify.build_code_prompt(
+        prompt = adversarial_verify.build_code_prompt(
             implementation="def express(): return {'target_constraints': {}}",
             test_results="test_express PASSED",
             layer1_output={},
@@ -66,7 +66,7 @@ class TestAdversarialRebuttalPrompt:
                 "affected_function": "express",
             }
         ]
-        prompt = immune_verify.build_code_prompt(
+        prompt = adversarial_verify.build_code_prompt(
             implementation="def express(): pass",
             test_results="",
             layer1_output={},

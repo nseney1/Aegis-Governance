@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis-guardrails"
-version = "3.0.0"
+version = "3.1.0"
 description = "Governance framework that makes AI coding agents trustworthy"
 
 readme = "README.md"
@@ -52,7 +52,7 @@ Changelog = "https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/project/
 [tool.setuptools.packages.find]
 include = [
     "aegis_cli*", "aegis_sdk*", "aegis_core*", "aegis_mcp*",
-    "rules*"
+    "rules*", "skills*"
 ]
 
 [tool.setuptools]
@@ -63,6 +63,7 @@ aegis_sdk = ["py.typed"]
 aegis_cli = ["starter_rules/*.md"]
 aegis_core = ["ast/drivers/templates/*"]
 rules = ["*.md", ".oracles/*.md"]
+skills = ["*/SKILL.md"]
 
 
 [tool.pytest.ini_options]

@@ -265,13 +265,16 @@ def _is_dirty(line: str) -> bool:
     if len(parts) < 2:
         return False
     path = parts[1].strip()
-    # Ignore aegis runtime evidence, metrics, and telemetry
+    # Ignore aegis runtime evidence, metrics, locks, and telemetry
     if (
         path.startswith(".aegis/evidence") or "/.aegis/evidence" in path
         or path.startswith(".aegis/metrics") or "/.aegis/metrics" in path
         or path.startswith(".aegis/telemetry") or "/.aegis/telemetry" in path
         or path.startswith(".aegis/rules") or "/.aegis/rules" in path
         or path.startswith(".aegis/governance") or "/.aegis/governance" in path
+        or path.startswith(".aegis/locks") or "/.aegis/locks" in path
+        or path == ".aegis/receipts.jsonl"
+        or path.endswith("/.aegis/receipts.jsonl")
         or path == ".aegis/human_insights.jsonl"
         or path.endswith("/.aegis/human_insights.jsonl")
     ):

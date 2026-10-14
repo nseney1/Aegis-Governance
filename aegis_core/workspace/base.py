@@ -18,6 +18,7 @@ from aegis_core.workspace.scaffold import scaffold_workspace
 
 if TYPE_CHECKING:
     from aegis_core.workspace.git import GitWorkspace
+    from aegis_core.workspace.layout import WorkspaceLayout
 
 
 @dataclass(frozen=True, eq=False)
@@ -58,9 +59,16 @@ class Workspace(os.PathLike[str]):
         return hash(self.root)
 
     @property
+    def layout(self) -> WorkspaceLayout:
+        """Canonical WorkspaceLayout for this workspace root."""
+        from aegis_core.workspace.layout import WorkspaceLayout
+
+        return WorkspaceLayout(root=self.root)
+
+    @property
     def aegis_dir(self) -> Path:
         """Path to .aegis directory."""
-        return self.root / ".aegis"
+        return self.layout.aegis_dir
 
     @property
     def soma_dir(self) -> Path:
@@ -70,7 +78,7 @@ class Workspace(os.PathLike[str]):
     @property
     def rules_dir(self) -> Path:
         """Path to active rules directory (.aegis/rules)."""
-        return self.aegis_dir / "rules"
+        return self.layout.rules_dir
 
     @property
     def cells_dir(self) -> Path:
@@ -80,22 +88,22 @@ class Workspace(os.PathLike[str]):
     @property
     def metrics_dir(self) -> Path:
         """Path to metrics directory."""
-        return self.aegis_dir / "metrics"
+        return self.layout.metrics_dir
 
     @property
     def evidence_dir(self) -> Path:
         """Path to evidence directory."""
-        return self.aegis_dir / "evidence"
+        return self.layout.evidence_dir
 
     @property
     def locks_dir(self) -> Path:
         """Path to locks directory."""
-        return self.aegis_dir / "locks"
+        return self.layout.locks_dir
 
     @property
     def signals_file(self) -> Path:
         """Path to signals.jsonl file."""
-        return self.evidence_dir / "signals.jsonl"
+        return self.layout.signals_file
 
     @property
     def is_git(self) -> bool:

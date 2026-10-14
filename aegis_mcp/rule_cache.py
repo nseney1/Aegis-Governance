@@ -45,7 +45,7 @@ class RuleCache:
     def _compute_manifest_state_digest(workspace: str) -> str:
         """Compute SHA-256 of manifest.json and manifest.key if they exist."""
         import hashlib
-        from aegis_mcp.integrity import _manifest_path, _key_path
+        from aegis_core.integrity import _manifest_path, _key_path
         h = hashlib.sha256()
         manifest_path = _manifest_path(workspace)
         if os.path.isfile(manifest_path):
@@ -153,7 +153,7 @@ class RuleCache:
         from aegis_mcp.jit_engine import warn
 
         try:
-            from aegis_mcp.integrity import (
+            from aegis_core.integrity import (
                 _manifest_path,
                 load_manifest,
                 verify_manifest,

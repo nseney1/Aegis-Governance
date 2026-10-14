@@ -29,7 +29,7 @@ claim has zero evidentiary weight.
 
 This is the gentleman's agreement problem applied to scope: trusting the agent
 to honestly classify which bugs are "theirs" is exactly the kind of honor-system
-governance that Soma exists to replace.
+governance that Aegis exists to replace.
 
 ## 3. Exceptions
 

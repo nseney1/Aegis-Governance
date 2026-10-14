@@ -22,11 +22,11 @@ enforcement: gate
 
 ## 3. Subagent Model Selection
 - **Model Tiering Protocol** (authoritative source — `subagent-delegation.md §3` defers here):
-  - `flash`: Research, audit, review prongs (Spores/Roots/Thorns/Bedrock/Mulch), diff proposing, verification
+  - `flash`: Research, audit, review prongs (Sentry/Trace/Probe/Gauntlet/Bastion/Debrief), diff proposing, verification
   - `flash`: Mechanical diff application from pre-computed before/after blocks
   - `inherit`: Independent coding lanes under Disjoint Lane Protocol
   - `orchestrator only`: Synthesis, architecture, design authority (never delegated to subagents)
-- **Mechanical Diff Application**: When Roots/Thorns has already produced exact before/after diffs, applying those diffs is syntactic — use `flash` tier, never `inherit` or `pro`.
+- **Mechanical Diff Application**: When Probe/Gauntlet has already produced exact before/after diffs, applying those diffs is syntactic — use `flash` tier, never `inherit` or `pro`.
 
 ## 4. Task Hygiene
 - **Kill Stale Tasks**: Terminate hanging or timed-out background commands before respawning.

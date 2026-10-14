@@ -13,11 +13,8 @@ _HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 # (readOnly, destructive, idempotent, openWorld)
 _EXPECTED = {
     "aegis_scan": (True, False, True, False),
-    "aegis_list_cells": (True, False, True, False),
     "aegis_grade": (True, False, True, False),
     "aegis_coverage": (True, False, True, False),
-    "aegis_fitness": (True, False, True, False),
-    "aegis_create_cell": (False, False, True, False),
     "aegis_propose_change": (False, False, True, True),
     "aegis_audit_security": (True, False, True, False),
     "aegis_audit_performance": (True, False, True, False),

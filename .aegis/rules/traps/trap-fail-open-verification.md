@@ -14,7 +14,7 @@ triggers:
   - verification_modification
   - error_handling_change
   - security_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 50
 expiry_days: 180
 created: 2026-09-30
@@ -27,16 +27,16 @@ tags:
 fitness:
   score: 0.8333
   impact_weight: 1.0
-  triggers: 61
-  true_positives: 11.0506
+  triggers: 65
+  true_positives: 12.0823
   false_positives: 6.2468
-  last_trigger_date: "2026-10-14T19:43:08Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Verification tools MUST fail-closed: any execution error must produce a
 FAIL verdict, never a PASS.
 
-Supercell Cycle 2 incidents:
+Citadel Cycle 2 incidents:
 1. `branch_coverage.py:137` — when trace script crashed, `results_file` didn't
    exist, function returned `[]`, caller computed `verdict = len([]) == 0` → True
    (all branches covered). Fix: return `None` on crash, caller treats as fail.

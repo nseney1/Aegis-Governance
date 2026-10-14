@@ -106,7 +106,7 @@ class PlatformAdapter(ABC):
         self.home = Path(home).resolve() if home else Path.home().resolve()
 
     def get_source_rules(self) -> list[Path]:
-        """Locate genome rules in repository workspace or bundled starter_rules."""
+        """Locate genome rules in repository workspace or bundled rules/starter_rules."""
         rules_dir = (self.workspace / "rules") if (self.workspace / "rules").is_dir() else (self.workspace / "genome")
         if rules_dir.is_dir():
             rules = [p for p in rules_dir.glob("*.md") if p.name not in {"README.md"}]
@@ -115,6 +115,18 @@ class PlatformAdapter(ABC):
                 rules.extend([p for p in oracles_dir.glob("*.md") if p.name not in {"README.md"}])
             if rules:
                 return sorted(rules)
+        try:
+            import importlib.resources
+            pkg_rules = Path(str(importlib.resources.files("rules")))
+            if pkg_rules.is_dir():
+                rules = [p for p in pkg_rules.glob("*.md") if p.name not in {"README.md", "__init__.py"}]
+                oracles_dir = pkg_rules / ".oracles"
+                if oracles_dir.is_dir():
+                    rules.extend([p for p in oracles_dir.glob("*.md") if p.name not in {"README.md", "__init__.py"}])
+                if rules:
+                    return sorted(rules)
+        except Exception:
+            pass
         try:
             import importlib.resources
             pkg = importlib.resources.files("aegis_cli") / "starter_rules"
@@ -129,15 +141,44 @@ class PlatformAdapter(ABC):
         return []
 
     def get_source_skills(self) -> list[Path]:
-        """Locate skills/organs in repository workspace."""
+        """Locate skills in repository workspace or bundled skills package."""
         skills_dir = (self.workspace / "skills") if (self.workspace / "skills").is_dir() else (self.workspace / "organs")
-        if not skills_dir.is_dir():
-            return []
-        skills = []
-        for d in skills_dir.iterdir():
-            if d.is_dir() and (d / "SKILL.md").is_file():
-                skills.append(d)
-        return sorted(skills)
+        if skills_dir.is_dir():
+            skills = [
+                d for d in skills_dir.iterdir()
+                if d.is_dir() and (d / "SKILL.md").is_file()
+            ]
+            if skills:
+                return sorted(skills)
+        try:
+            import importlib.resources
+            pkg_skills = Path(str(importlib.resources.files("skills")))
+            if pkg_skills.is_dir():
+                return sorted([
+                    d for d in pkg_skills.iterdir()
+                    if d.is_dir() and (d / "SKILL.md").is_file()
+                ])
+        except Exception:
+            pass
+        return []
+
+    def render_mcp_entry(self, local: bool = False, command: str = "soma-mcp") -> dict[str, Any]:
+        """Render MCP server entry; include AEGIS_WORKSPACE only for local installs."""
+        entry: dict[str, Any] = {
+            "command": command,
+            "args": [],
+        }
+        if local:
+            entry["env"] = {"AEGIS_WORKSPACE": str(self.workspace)}
+        return entry
+
+    def render_mcp_config(self, local: bool = False) -> dict[str, Any]:
+        """Render standard MCP server configuration."""
+        return {
+            "mcpServers": {
+                "soma": self.render_mcp_entry(local=local),
+            }
+        }
 
     @abstractmethod
     def install(self, local: bool = False, dry_run: bool = False) -> PlatformInstallResult:
@@ -158,3 +199,4 @@ class PlatformAdapter(ABC):
     def render_config(self) -> dict[str, Any] | str:
         """Render the platform-specific configuration."""
         raise NotImplementedError
+

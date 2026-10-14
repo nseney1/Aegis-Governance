@@ -9,12 +9,12 @@
 # Namespaced to avoid collision with Docker/CI PLATFORM env var.
 AEGIS_PLATFORM=gemini
 
-# Default review mode (set by Genesis Lichen or manually).
-# Modes: breeze | gale | trident | maelstrom | tempest
-# DEFAULT_REVIEW_MODE=gale
+# Default review mode (set by Genesis Policy or manually).
+# Modes: patrol | sweep | vanguard | bulwark | fortress | citadel
+# DEFAULT_REVIEW_MODE=sweep
 
 # Minimum review mode floor (cannot go below this).
-# MINIMUM_REVIEW_MODE=breeze
+# MINIMUM_REVIEW_MODE=patrol
 
 # ─── Team Structure ───────────────────────────────────────────────
 
@@ -94,17 +94,17 @@ MAX_JIT_TOKENS=2000
 
 # ─── Data & Metrics ───────────────────────────────────────────────
 
-# CELL_TELOMERE_DAYS: number of days for fitness confidence to halve.
-# Cells that stop being triggered decay naturally. Default: 30.
+# RULE_EXPIRY_DAYS: number of days for fitness confidence to halve.
+# Rules that stop being triggered decay naturally. Default: 30.
 # Set higher for slow-moving projects, lower for fast iteration.
-# CELL_TELOMERE_DAYS=30
-# Per-type telomere shortening overrides (optional).
+# RULE_EXPIRY_DAYS=30
+# Per-type rule expiry overrides (optional).
 # Set to 'null' for types that should never decay (e.g., mathematical invariants).
-# CELL_TELOMERE_WALL=null
-# CELL_TELOMERE_VACUOLE=30
-# CELL_TELOMERE_CHLOROPLAST=60
-# CELL_TELOMERE_MEMBRANE=45
-# CELL_TELOMERE_PLASMODESMATA=60
+# RULE_EXPIRY_INVARIANT=null
+# RULE_EXPIRY_TRAP=30
+# RULE_EXPIRY_PERSONA=60
+# RULE_EXPIRY_BOUNDARY=45
+# RULE_EXPIRY_CONTRACT=60
 
 # STOCHASTIC_GENESIS_INTERVAL: Number of sessions between random cell injections.
 # Injects random diversity (Cambrian Trigger) to prevent local optima. Default: 10.

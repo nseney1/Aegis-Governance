@@ -18,7 +18,7 @@ trigger: model_decision
 | 2 | Red Phase | Tests fail for the right reasons |
 | 3 | Implementation | Only after Gate 2 |
 | 4 | Green Phase | All tests, registries, and verifiers clean |
-| 5 | Tempest Review | Adversarial subagents audit the diff |
+| 5 | Fortress Review | Adversarial subagents audit the diff |
 | 6 | Commit | Only after Gate 5 verdict is SHIP |
 
 Gates are **sequential and non-negotiable**. Skipping a gate or reordering requires explicit user override with documented rationale.
@@ -79,13 +79,13 @@ Only begins after Gate 2 passes:
 All tests, claims, and verification barriers must pass with clean regression before opening a review or PR:
 
 1. **Full Test Suite** — Run the **complete** test suite (`pytest tests/` via project `.venv`), not just the new tests. Zero failures or unexpected skips allowed.
-2. **Deterministic Quality Checkpoint** — Run `soma checkpoint` (or `python -m soma_cli.cli checkpoint`) to verify code structure, AST syntax, and non-LLM safety invariant checks.
+2. **Deterministic Quality Checkpoint** — Run `aegis checkpoint` (or `python -m aegis_cli.cli checkpoint`) to verify code structure, AST syntax, and non-LLM safety invariant checks.
 3. **Claims & Bug Registries Verification** —
    - **README Claims**: Verify all tracked claims in `docs/project/CLAIM_REGISTRY.json` via `cli_verify_readme_claims()`. Every unlocked claim must map to an existing, passing test.
    - **Bug Registry**: Verify all tracked historical fixes in `docs/project/BUG_REGISTRY.json` via `cli_verify_bug_registry()`. Every resolved bug must map to an existing, passing regression test.
 4. **Platform Smoke & Package Validation** —
    - Run `make validate` (verify syntax and config JSON across hooks and packages).
-   - Run dry-run install across supported platforms (`python -m soma_cli.cli install --platform gemini --dry-run`).
+   - Run dry-run install across supported platforms (`python -m aegis_cli.cli install --platform gemini --dry-run`).
    - Check for hardcoded paths outside documentation templates.
 5. **Static Analysis & Import Integrity (`ruff check`)** —
    - Run `ruff check --select F821` (or complete syntax/name checks `E999,F821,F822,F823`) across modified and package directories.
@@ -98,11 +98,11 @@ All tests, claims, and verification barriers must pass with clean regression bef
 
 ---
 
-## Gate 5: Tempest Review
+## Gate 5: Fortress Review
 
 Adversarial review of the complete diff:
 
-1. **Trigger** — Dispatch Tempest review per the project's review protocol (Spores triage → escalation).
+1. **Trigger** — Dispatch Fortress review per the project's review protocol (Sentry triage → escalation).
 2. **Scope** — Review covers all changes since the last clean commit: production code, tests, and configuration.
 3. **Minimum bar** — At least one review prong must examine:
    - Correctness (do the tests actually prove the claimed behavior?)

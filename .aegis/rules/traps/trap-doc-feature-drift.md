@@ -17,7 +17,7 @@ triggers:
   - feature_addition
   - feature_modification
   - commit_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-09-30
@@ -29,13 +29,13 @@ tags:
 fitness:
   score: 0.6364
   impact_weight: 1.0
-  triggers: 85
-  true_positives: 34.3315
+  triggers: 89
+  true_positives: 38.3315
   false_positives: 24.0407
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Supercell doc-drift incident: Supercell intensity added to README and SKILL.md but
+Citadel doc-drift incident: Citadel intensity added to README and SKILL.md but
 CHANGELOG v0.60.0 was not updated. Architecture ASCII box was edited but not
 width-verified. Detection: when a commit adds a feature term to any doc, grep all
 other doc surfaces for the same term.

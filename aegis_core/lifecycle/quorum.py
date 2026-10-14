@@ -15,6 +15,7 @@ from .constants import (
     STATUS_DORMANT,
     STATUS_EXTINCT,
     STATUS_NEW,
+    STATUS_RETIRED,
     STATUS_SURVIVE,
 )
 
@@ -31,7 +32,7 @@ def calculate_fitness_status(
 ) -> str:
     """Evaluate canonical cell lifecycle status from observations, score, and age."""
     if fp > 0 and (tp == 0 or fp > 2 * tp):
-        return STATUS_APOPTOSIS_WARNING if cell_type == "wall" else STATUS_APOPTOSIS
+        return STATUS_APOPTOSIS_WARNING if cell_type == "wall" else STATUS_RETIRED
 
     if not is_unobserved and dec_score is not None:
         if dec_score > 0.7:

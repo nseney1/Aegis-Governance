@@ -75,24 +75,24 @@ class TestSomaScan:
 
 
 class TestSomaListCells:
-    """Tests for soma_list_cells tool."""
+    """Tests for aegis_list_rules tool."""
 
     def test_list_returns_list(self, tmp_path, monkeypatch):
         ws = _setup_workspace(tmp_path)
         monkeypatch.chdir(ws)
-        result = execute_tool('aegis_list_cells', {})
+        result = execute_tool('aegis_list_rules', {})
         assert isinstance(result, list)
         assert len(result) >= 1
         assert any(c.get('id') == 'test-cell' or c.get('_name') == 'test-cell' for c in result)
 
 
 class TestSomaCreateCell:
-    """Tests for soma_create_cell tool."""
+    """Tests for aegis_create_rule tool."""
 
     def test_create_cell_returns_prompt(self, tmp_path, monkeypatch):
         ws = _setup_workspace(tmp_path)
         monkeypatch.chdir(ws)
-        result = execute_tool('aegis_create_cell', {
+        result = execute_tool('aegis_create_rule', {
             'description': 'Test cell for catching null dereferences'
         })
         assert isinstance(result, dict)
@@ -228,8 +228,8 @@ class TestToolOutputSerializability:
     """All tool outputs must be JSON-serializable."""
 
     @pytest.mark.parametrize('tool_name,args', [
-        ('aegis_list_cells', {}),
-        ('aegis_create_cell', {'description': 'test'}),
+        ('aegis_list_rules', {}),
+        ('aegis_create_rule', {'description': 'test'}),
     ])
     def test_output_is_json_serializable(self, tool_name, args, tmp_path, monkeypatch):
         ws = _setup_workspace(tmp_path)

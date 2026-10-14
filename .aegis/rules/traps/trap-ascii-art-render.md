@@ -12,7 +12,7 @@ target_paths:
 triggers:
   - documentation_edit
   - readme_modification
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-09-30
@@ -24,13 +24,13 @@ tags:
 fitness:
   score: 0.3333
   impact_weight: 1.0
-  triggers: 59
-  true_positives: 14.916
+  triggers: 63
+  true_positives: 18.2494
   false_positives: 10.8334
-  last_trigger_date: "2026-10-14T19:45:33Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Supercell doc-drift incident: Adding "→ Supercell" to the architecture diagram
+Citadel doc-drift incident: Adding "→ Citadel" to the architecture diagram
 made the line overflow the fixed-width box border. The text was correct but
 visually broken. Detection: verify all lines between box-drawing chars have equal
 visible width.

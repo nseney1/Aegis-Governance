@@ -24,12 +24,16 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 from aegis_core.evidence import aggregate_signals
+from aegis_core.taxonomy import (
+    ESCALATING_PROTOCOLS,
+    ESCALATION_PROTOCOLS,
+    ReviewMode,
+    normalize_review_mode,
+)
 from aegis_core.workspace import Workspace, confine_path, resolve_workspace
 
 # ── TTC Constants ─────────────────────────────────────────────────────────
 
-ESCALATION_PROTOCOLS = ("breeze", "gale", "trident", "maelstrom", "tempest")
-ESCALATING_PROTOCOLS = ("trident", "maelstrom", "tempest")
 PROTOCOL_UNKNOWN = "unknown"
 
 SENTINEL_TIMEOUT = int(os.environ.get("AEGIS_SENTINEL_TIMEOUT", "30"))
@@ -163,22 +167,23 @@ def _classify_protocol_python(file_path: str, workspace: Workspace | Path | str)
 
     for pat in high_patterns:
         if re.search(pat, norm_path, re.IGNORECASE):
-            return "trident"
+            return str(ReviewMode.VANGUARD)
 
     for pat in test_patterns:
         if re.search(pat, norm_path, re.IGNORECASE):
-            return "gale"
+            return str(ReviewMode.SWEEP)
 
     for pat in low_patterns:
         if re.search(pat, norm_path, re.IGNORECASE):
-            return "breeze"
+            return str(ReviewMode.PATROL)
 
-    return "gale"
+    return str(ReviewMode.SWEEP)
 
 
 def get_escalation_protocol(file_path: str, workspace: Workspace | Path | str) -> str:
     """Determine the review protocol for a file path (fails closed)."""
-    protocol = _classify_protocol_python(file_path, workspace)
+    raw = _classify_protocol_python(file_path, workspace)
+    protocol = normalize_review_mode(raw, default="") if raw else ""
     if protocol in ESCALATION_PROTOCOLS:
         return protocol
     _log(f"[TTC] Python protocol classifier could not determine protocol for {file_path}; failing closed.")

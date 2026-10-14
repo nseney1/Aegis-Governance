@@ -12,7 +12,7 @@ triggers:
   - python_file_creation
   - python_file_modification
   - security_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-09-30
@@ -24,12 +24,12 @@ tags:
 fitness:
   score: 0.625
   impact_weight: 1.0
-  triggers: 83
-  true_positives: 35.3628
+  triggers: 87
+  true_positives: 39.3628
   false_positives: 29.9993
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Supercell S2 incident: `aegis_cli/verify.py` accepted `--files ../../etc/passwd`
+Citadel S2 incident: `aegis_cli/verify.py` accepted `--files ../../etc/passwd`
 without containment, allowing path traversal. Fix: resolve path and check
 `resolved.startswith(root + os.sep)`.

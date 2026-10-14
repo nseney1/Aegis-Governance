@@ -22,14 +22,11 @@ class McpAdapter(PlatformAdapter):
             return self.workspace / ".mcp.json"
         return self.home / ".mcp.json"
 
-    def render_config(self) -> dict[str, Any]:
+    def render_config(self, local: bool = False) -> dict[str, Any]:
         """Render canonical .mcp.json server configuration."""
         return {
             "mcpServers": {
-                "soma": {
-                    "command": "soma-mcp",
-                    "args": [],
-                }
+                "soma": self.render_mcp_entry(local=local),
             }
         }
 
@@ -40,7 +37,7 @@ class McpAdapter(PlatformAdapter):
             scope="local" if local else "global",
         )
         target = self.get_target_file(local=local)
-        config = self.render_config()
+        config = self.render_config(local=local)
 
         if dry_run:
             result.installed_files.append(target)

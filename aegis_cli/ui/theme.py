@@ -7,6 +7,10 @@ import re
 import sys
 from typing import Any, Mapping, Optional
 
+from aegis_core.taxonomy import RULE_TYPE_THEME_STYLES
+
+__all__ = ["ANSI_ESCAPE_RE", "OutputContext", "strip_ansi"]
+
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
 _ANSI_CODES: dict[str, str] = {
@@ -22,16 +26,7 @@ _ANSI_CODES: dict[str, str] = {
     "white": "\x1b[37m",
 }
 
-_RULE_TYPE_STYLES: dict[str, tuple[str, ...]] = {
-    "invariant": ("bold", "magenta"),
-    "wall": ("bold", "magenta"),
-    "boundary": ("blue",),
-    "membrane": ("blue",),
-    "contract": ("blue",),
-    "trap": ("cyan",),
-    "persona": ("cyan",),
-    "core_rule": ("bold", "green"),
-}
+_RULE_TYPE_STYLES: dict[str, tuple[str, ...]] = RULE_TYPE_THEME_STYLES
 
 
 def strip_ansi(text: str) -> str:

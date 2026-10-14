@@ -1,7 +1,8 @@
-"""Soma CLI — user-facing governance commands."""
+"""Aegis CLI — user-facing governance commands."""
 from __future__ import annotations
 
-__version__ = "1.5.0"
+__version__ = "3.1.0"
+
 
 import re
 from pathlib import Path

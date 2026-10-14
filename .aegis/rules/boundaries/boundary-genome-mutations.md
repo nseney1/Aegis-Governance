@@ -5,8 +5,8 @@ type: boundary
 enforcement: advisory
 promotion_threshold: 0.85
 demotion_threshold: 0.3
-hypothesis: "Changes to rules/*.md need elevated review — these are the organism's DNA"
-prediction: Escalation sentinel will apply minimum trident mode for genome mutations
+hypothesis: "Changes to rules/*.md need elevated review — these are the core governance rules"
+prediction: Escalation sentinel will apply minimum vanguard mode for core rule mutations
 falsification: All escalated reviews are over-kill for 10 sessions → prune
 target_paths:
   - "rules/*.md"
@@ -15,19 +15,19 @@ expiry_sessions: 10
 expiry_days: 45
 created: 2026-09-28
 impact_weight: 1.2
-minimum_mode: trident
+minimum_mode: vanguard
 tags:
-  - genome
+  - rules
   - review-escalation
-  - dna
+  - core-rules
 fitness:
-  triggers: 11
-  true_positives: 3.5
+  triggers: 15
+  true_positives: 7.5
   false_positives: 6
   score: 0.6667
-  last_trigger_date: "2026-10-14T07:33:06Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Changes to the genome (rules) directory are high-impact mutations that affect every
-user of Soma. Modifications to these files change the inherited behavioral DNA of
-the organism and require elevated review intensity.
+Changes to the core rules (`rules/`) directory are high-impact changes that affect every
+user of Aegis. Modifications to these files change the inherited behavioral defaults of
+the system and require elevated review intensity.

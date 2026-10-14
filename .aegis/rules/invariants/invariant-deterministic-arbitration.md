@@ -12,9 +12,9 @@ target_paths:
   - "aegis_cli/*.py"
 triggers:
   - review_arbitration
-  - supercell_review
+  - citadel_review
   - verdict_computation
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 50
 expiry_days: 180
 created: 2026-09-30
@@ -27,17 +27,17 @@ tags:
 fitness:
   score: 0.75
   impact_weight: 1.0
-  triggers: 70
-  true_positives: 13.3194
+  triggers: 74
+  true_positives: 16.5732
   false_positives: 8.989
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Review finding arbitration MUST go through the deterministic arbiter, not
 the orchestrator's judgment. The arbiter uses set-algebra on RiskCategory
 enums — no LLM, no subjective filtering.
 
-Supercell arbitration incident: After launching Prosecutor/Defender pairs for
+Citadel arbitration incident: After launching Prosecutor/Defender pairs for
 Cycle 2, the orchestrator planned to manually read both reports and decide
 which findings "survived." This bypasses the entire point of adversarial review
 — the arbiter exists precisely to remove subjective bias from verdict computation.

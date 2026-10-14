@@ -12,7 +12,7 @@ When activated, adopt the persona of a **Senior Technical Writer** producing dev
 ### 1. Codebase & Infrastructure Reconnaissance
 - Inspect entrypoints (`main.py`, `app.ts`, `cmd/`), build manifests (`Makefile`, `package.json`, `setup.py`), and test suites.
 - Cross-reference `polyglot-standards.md` §1: ensure `build`, `run`, `test`, and `lint` targets are accurately reflected.
-- Search for secondary tooling: look in `tools/`, `enzymes/`, or `bin/` for dataset prep, annotation, migration, or diagnostic scripts.
+- Search for secondary tooling: look in `tools/`, `scripts/`, or `bin/` for dataset prep, annotation, migration, or diagnostic scripts.
 - Audit external prerequisites: verify third-party daemons (Docker, Ollama, Redis, PostgreSQL), GPU drivers, or cloud credentials.
 
 ### 2. Structure & Draft Generation

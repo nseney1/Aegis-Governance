@@ -162,7 +162,7 @@ class TestArbitrationWorkspaceInteroperability:
 
     def test_get_escalation_protocol_with_workspace_instance(self, mock_soma_workspace: Workspace):
         proto = get_escalation_protocol("soma_core/test.py", workspace=mock_soma_workspace)
-        assert proto in ("breeze", "gale", "trident", "maelstrom", "tempest", "unknown")
+        assert proto in ("patrol", "sweep", "vanguard", "bulwark", "fortress", "citadel", "unknown")
 
     def test_soma_propose_change_with_workspace_instance(self, mock_soma_workspace: Workspace):
         target = mock_soma_workspace.root / "example.txt"

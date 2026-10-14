@@ -5,6 +5,36 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.0] — 2026-10-14 — "Architecture Hardening, Cryptographic Receipt Burn-Before-Compare & Canonical Aegis Taxonomy"
+
+### Packaging & Standalone Wheel Parity
+- **`rules` & `skills` Package Bundling (`pyproject.toml`, `aegis_cli/platforms/base.py`, `.github/scripts/wheel_smoke.py`)**:
+  - Added `rules` and `skills` (`rules/__init__.py`, `skills/__init__.py`) to `[tool.setuptools.packages.find]` and `[tool.setuptools.package-data]` (`rules = ["*.md", ".oracles/*.md"]`, `skills = ["*/SKILL.md"]`) so standalone `pip install aegis-guardrails` wheels bundle all 18 core rules and 15 agent skills.
+  - Updated `PlatformAdapter.get_source_skills()` (`aegis_cli/platforms/base.py`) to fall back to `importlib.resources.files("skills")` when running outside a git checkout, matching `get_source_rules()`.
+  - Extended `.github/scripts/wheel_smoke.py` to assert non-empty `get_source_rules()` and `get_source_skills()` under `python -I` outside the repository.
+
+### Cryptographic Security Hardening
+- **Burn-Before-Compare Single-Use Receipts & Sidecar Locking (`aegis_core/receipts.py`, `aegis_mcp/server.py`)**:
+  - Hardened `ReceiptManager.verify(..., consume=True)` under exclusive sidecar file lock `.aegis/locks/receipts.lock` to verify HMAC-SHA256 signature and expiration first, immediately append the consumed nonce to `.aegis/receipts.jsonl` (`fsync`), and only then compare `file_digest` and `rule_digest`, preventing pre-burn replay attacks on digest mismatch or path validation failures.
+  - Fixed ledger compaction (`_compact_consumed_locked`) to prune only expired nonces (`exp < now`), eliminating the 1,000-nonce FIFO eviction replay vulnerability.
+  - Wrapped `server.py:_verify_receipt_for_call` `_compute_state_digest` in `try/except ValueError` so invalid path arguments occur after receipt burn and return structured JSON-RPC errors without leaking unburned tokens.
+
+### Verification Engine & MCP Tool Surface Cleanup
+- **Deduplicated `scan_test_issues()` & Narrowed Exception Handling (`aegis_core/ast_checks.py`, `aegis_core/verification/`, `aegis_core/rule_inventory.py`, `aegis_core/telemetry.py`)**:
+  - Extracted shared `scan_test_issues()` in `aegis_core/ast_checks.py` and wired both `aegis_cli/check.py` and `aegis_core/verification/pipeline.py` to eliminate duplicated test AST scanning logic.
+  - Narrowed broad `except Exception:` blocks in `aegis_core/verification/runner.py`, `aegis_core/rule_inventory.py`, and `aegis_core/telemetry.py` to specific exception tuples (`(OSError, ValueError, KeyError, TypeError)` / `(OSError, subprocess.SubprocessError, ValueError, KeyError)`).
+- **17 Canonical `aegis_*` MCP Tools (`aegis_mcp/registry.py`, `aegis_mcp/tools.py`, `aegis_mcp/server.py`)**:
+  - Removed legacy duplicate MCP tool definitions `aegis_list_cells`, `aegis_fitness`, and `aegis_create_cell`, standardizing on the 17 canonical `aegis_*` tools (`aegis_list_rules`, `aegis_rule_fitness`, `aegis_create_rule`, etc.).
+- **Clean-Tree Manifest Generation (`aegis_cli/check.py`, `aegis_core/rule_inventory.py`)**:
+  - Made `aegis check` read-only by default (no longer mutating `.aegis/rules/manifest.json` during read-only checks) and added `RuleInventory.check_manifest_sync()`.
+
+### Canonical Aegis Taxonomy Cutover
+- **Review Modes, Prongs, Genesis Stages & `.aegis/rules/` Metadata (`aegis_core/`, `aegis_cli/`, `rules/`, `skills/`, `.aegis/rules/`)**:
+  - Cut over review modes from weather metaphors (`breeze`, `gale`, `trident`, `maelstrom`, `tempest`, `supercell`) to defensive posture tiers (`patrol`, `sweep`, `vanguard`, `bulwark`, `fortress`, `citadel`).
+  - Cut over review prongs from botanical metaphors (`spores`, `roots`, `thorns`, `bedrock`, `canopy`, `mulch`) to security operations roles (`sentry`, `trace`, `probe`, `bastion`, `gauntlet`, `debrief`).
+  - Cut over Genesis onboarding stages from biological metaphors (`membrane`, `fossil`, `anatomy`, `physio`) to structural reconnaissance stages (`perimeter`, `chronology`, `blueprint`, `policy`).
+  - Updated all 18 core rules (`rules/`), 15 agent skills (`skills/*/SKILL.md`), and 42 `.aegis/rules/` rule files to canonical Aegis v3.1.0 terminology and persisted Citadel v3.0.0 debrief learnings in `governance/debrief_queue.jsonl`.
+
 ## [3.0.0] — 2026-10-14 — "Pure Aegis Clean-Slate Architecture & Zero-Dependency CLI UX"
 
 ### Breaking Changes (Pure Aegis Clean-Slate Cutover)

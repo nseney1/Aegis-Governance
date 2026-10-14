@@ -15,6 +15,8 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from aegis_core.workspace import resolve_workspace
+from aegis_core.workspace.layout import WorkspaceLayout
+from aegis_core.taxonomy import INSIGHT_LAPLACE_PRIOR, ReviewMode, normalize_review_mode
 from aegis_core.defects import find_covering_cells, load_cells
 from aegis_core.yaml import parse_frontmatter, parse_yaml_subset, dump_frontmatter
 from aegis_core.evidence import aggregate_signals
@@ -64,7 +66,8 @@ def capture_insight(
         raise ValueError("insight must not be empty")
 
     ws_path = getattr(workspace, "root", workspace)
-    cells_dir = os.path.join(ws_path, ".aegis", "rules")
+    layout = WorkspaceLayout(ws_path)
+    cells_dir = str(layout.rules_dir)
     if os.path.isdir(cells_dir):
         cells = load_cells(cells_dir)
     else:
@@ -88,7 +91,7 @@ def capture_insight(
     }
 
     if scaffold_wall or wall_id:
-        wall_dir = os.path.join(ws_path, ".aegis", "rules", "walls")
+        wall_dir = str(layout.rules_dir / "walls")
         os.makedirs(wall_dir, exist_ok=True)
         if wall_id:
             clean_stem = wall_id.strip().lower()
@@ -113,7 +116,7 @@ def capture_insight(
         record["wall_file"] = wall_path
         record["wall_id"] = stem
 
-    jsonl_path = os.path.join(ws_path, ".aegis", "human_insights.jsonl")
+    jsonl_path = str(layout.human_insights_file)
     os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
     with open(jsonl_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
@@ -127,7 +130,7 @@ def cluster_insights(
     window_days: int = 30,
 ) -> list[dict]:
     """Read human insights and cluster by category within rolling window."""
-    jsonl_path = os.path.join(workspace, ".aegis", "human_insights.jsonl")
+    jsonl_path = str(WorkspaceLayout(getattr(workspace, "root", workspace)).human_insights_file)
     if not os.path.isfile(jsonl_path):
         return []
 
@@ -182,7 +185,7 @@ def cluster_insights(
                     common_files.append(f)
 
         insight_count = len(group)
-        confidence = round(insight_count / (insight_count + 2), 4)
+        confidence = round(insight_count / (insight_count + INSIGHT_LAPLACE_PRIOR), 4)
 
         slug = category.replace(" ", "-").lower()
         file_hash = hashlib.sha256(
@@ -250,7 +253,7 @@ def create_cell_from_insight_cluster(cluster: dict, workspace: str) -> str:
         "prediction": f"Recurring {category} issues will continue if unaddressed",
         "falsification": f"No {category} insights observed for 60 days",
         "target_paths": list(files),
-        "minimum_mode": "breeze",
+        "minimum_mode": str(ReviewMode.PATROL),
         "origin": "human_insight",
         "tags": ["auto-generated", "insight-cluster", category],
     }

@@ -10,13 +10,13 @@ tags:
 - testing
 - colocality
 - architecture
-- wall
+- invariant
 impact_weight: 1.0
 created: '2026-10-06'
 ---
-# Wall: Canonical Test Colocality & Behavioral Testing
+# Invariant: Canonical Test Colocality & Behavioral Testing
 
-> **Role**: Enforces 1:1 module-to-test colocation, behavioral assertion density, and bans test base-class inheritance across Soma-Governance.
+> **Role**: Enforces 1:1 module-to-test colocation, behavioral assertion density, and bans test base-class inheritance across Aegis-Guardrails.
 
 ## 1. 1:1 Directory Mirroring
 Every production source module MUST map 1:1 to a canonical test file:

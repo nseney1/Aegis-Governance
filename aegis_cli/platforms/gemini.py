@@ -37,11 +37,16 @@ class GeminiAdapter(PlatformAdapter):
 
         # 1. Install rules
         for src_rule in self.get_source_rules():
-            dest = rules_dir / src_rule.name
+            dest = (
+                (rules_dir / ".oracles" / src_rule.name)
+                if src_rule.parent.name == ".oracles"
+                else (rules_dir / src_rule.name)
+            )
             if dry_run:
                 result.installed_files.append(dest)
             else:
                 try:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src_rule, dest)
                     result.installed_files.append(dest)
                 except Exception as exc:
@@ -91,7 +96,11 @@ class GeminiAdapter(PlatformAdapter):
 
         # Remove rules
         for src_rule in self.get_source_rules():
-            dest = rules_dir / src_rule.name
+            dest = (
+                (rules_dir / ".oracles" / src_rule.name)
+                if src_rule.parent.name == ".oracles"
+                else (rules_dir / src_rule.name)
+            )
             if dest.is_file():
                 if dry_run:
                     result.uninstalled_files.append(dest)
@@ -181,3 +190,9 @@ class GeminiAdapter(PlatformAdapter):
                 ]
             },
         }
+
+
+GeminiPlatformAdapter = GeminiAdapter
+
+__all__ = ["GeminiAdapter", "GeminiPlatformAdapter"]
+

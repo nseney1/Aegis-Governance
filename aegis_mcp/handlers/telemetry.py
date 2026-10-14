@@ -17,6 +17,7 @@ __all__ = [
     "_handle_grade",
     "_handle_coverage",
     "_handle_fitness",
+    "_handle_rule_fitness",
 ]
 
 
@@ -146,10 +147,17 @@ def _handle_grade(args: dict, gov) -> dict:
         result = gov.grade()
     else:
         try:
-            from aegis_core.telemetry import calculate_immune_grade
+            import aegis_core.metrics as _metrics
+            import aegis_core.telemetry as _telemetry
 
             workspace = _get_workspace(args)
-            result = calculate_immune_grade(workspace)
+            grade_fn = _telemetry.calculate_governance_grade
+            if (
+                grade_fn is _metrics.calculate_governance_grade
+                and _telemetry.calculate_immune_grade is not _metrics.calculate_governance_grade
+            ):
+                grade_fn = _telemetry.calculate_immune_grade
+            result = grade_fn(workspace)
         except Exception as exc:
             return {"status": _STATUS_FAIL, "error": str(exc)}
     if result is None:
@@ -200,3 +208,7 @@ def _handle_fitness(args: dict, gov):
     if isinstance(result, dict) and "error" in result:
         result["status"] = _STATUS_FAIL
     return result
+
+
+_handle_rule_fitness = _handle_fitness
+

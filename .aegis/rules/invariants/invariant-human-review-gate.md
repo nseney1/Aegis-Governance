@@ -13,7 +13,7 @@ target_paths:
   - rules/gitflow-review-gate.md
 expiry_sessions: 100
 impact_weight: 1.0
-minimum_mode: maelstrom
+minimum_mode: bulwark
 tags:
   - gitflow
   - governance
@@ -21,14 +21,14 @@ tags:
   - human-in-the-loop
 created: 2026-10-07
 fitness:
-  triggers: 51
-  true_positives: 5.3804
+  triggers: 55
+  true_positives: 6.1804
   false_positives: 5.6804
   score: 1.0
-  last_trigger_date: "2026-10-14T19:43:08Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-# Wall: Human Review Gate Enforcement
+# Invariant: Human Review Gate Enforcement
 
 Target: `aegis_core/command_safety.py`, `aegis_cli/hooks.py`
 

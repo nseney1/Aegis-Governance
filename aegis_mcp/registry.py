@@ -7,9 +7,10 @@ import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-from aegis_core.rule_inventory import CellInventoryError, inventory_cells
+from aegis_core.rule_inventory import CellInventoryError, RuleInventoryError, inventory_cells, inventory_rules
+from aegis_core.taxonomy import MCP_SUPPORTED_RULE_TYPE_ENUM, REVIEW_MODES
 from aegis_core.workspace import resolve_workspace as _core_resolve_workspace
-from aegis_mcp.integrity import generate_key, generate_manifest, load_key, save_manifest
+from aegis_core.integrity import generate_key, generate_manifest, load_key, save_manifest
 from aegis_mcp.jit_engine import express as jit_express, parse_frontmatter, warn
 from aegis_mcp.security import Workspace, confine_path, confine_workspace, validate_rule_names
 
@@ -229,7 +230,7 @@ YAML fields required:
 - prediction: (what will happen if the hypothesis is violated)
 - falsification: (how to prove this cell is no longer needed)
 - target_paths: (list of file glob patterns this cell monitors)
-- minimum_mode: (breeze | gale | trident | maelstrom | tempest)
+- minimum_mode: ({' | '.join(REVIEW_MODES)})
 - tags: (list of relevant tags)
 
 Optionally include:
@@ -244,6 +245,9 @@ User description: "{description}"
 Generate ONLY the complete markdown cell file content. Start with --- for the YAML frontmatter. After the closing ---, include a brief description paragraph explaining the cell's purpose. Do not include any other text."""
 
     return prompt
+
+
+build_rule_create_prompt = build_cell_create_prompt
 
 
 # ── Canonical MCP Tool Definitions with Opt-In Response Projection ───────────
@@ -271,48 +275,6 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "aegis_create_cell",
-        "description": "Takes a natural language description and builds an advisory prompt proposal to create a governance cell (does not directly modify the filesystem).",
-        "annotations": {
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-            "title": "Create Rule",
-        },
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "description": {"type": "string", "description": "Natural language description of the rule or pattern to enforce."},
-                "domain": {"type": "string", "description": "Domain hint: efficiency, correctness, security, style, governance."},
-                "cell_type": {"type": "string", "enum": ["invariant", "boundary", "trap", "persona", "contract", "wall", "membrane", "safety-guard", "learned-trap", "agent-persona", "escalation-boundary", "contract-bridge"], "description": "Rule type to scaffold."},
-                "dry_run": {"type": "boolean", "default": False, "description": "If true, only returns the prompt without saving."},
-                "view": {"type": "string", "enum": ["full", "summary", "ids"]},
-                "fields": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["description"],
-        },
-    },
-    {
-        "name": "aegis_list_cells",
-        "description": "List all active governance cells and their metadata.",
-        "annotations": {
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-            "title": "List Cells",
-        },
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "cell_type": {"type": "string", "enum": ["invariant", "boundary", "trap", "persona", "contract", "wall", "membrane", "safety-guard", "learned-trap", "agent-persona", "escalation-boundary", "contract-bridge"], "description": "Filter by cell type."},
-                "view": {"type": "string", "enum": ["full", "summary", "ids"]},
-                "fields": {"type": "array", "items": {"type": "string"}},
-            },
-        },
-    },
-    {
         "name": "aegis_create_rule",
         "description": "Takes a natural language description and builds a prompt to create a governance rule.",
         "annotations": {
@@ -326,9 +288,9 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "description": {"type": "string", "description": "Natural language description"},
-                "rule_type": {"type": "string", "description": "Optional rule type hint (learned-trap, safety-guard, agent-persona)"},
+                "rule_type": {"type": "string", "enum": list(MCP_SUPPORTED_RULE_TYPE_ENUM), "description": "Optional rule type hint"},
                 "domain": {"type": "string", "description": "Optional domain hint"},
-                "dry_run": {"type": "boolean", "description": "Optional dry run flag"},
+                "dry_run": {"type": "boolean", "default": False, "description": "Optional dry run flag"},
                 "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt"},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
@@ -349,7 +311,7 @@ TOOL_DEFINITIONS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "rule_type": {"type": "string", "description": "Optional rule type filter"},
+                "rule_type": {"type": "string", "enum": list(MCP_SUPPORTED_RULE_TYPE_ENUM), "description": "Optional rule type filter"},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
@@ -600,25 +562,6 @@ TOOL_DEFINITIONS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "view": {"type": "string", "enum": ["full", "summary", "ids"]},
-                "fields": {"type": "array", "items": {"type": "string"}},
-            },
-        },
-    },
-    {
-        "name": "aegis_fitness",
-        "description": "Report cell fitness landscape and Bayesian scores.",
-        "annotations": {
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-            "title": "Fitness Landscape",
-        },
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "bayesian": {"type": "boolean", "default": False},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },

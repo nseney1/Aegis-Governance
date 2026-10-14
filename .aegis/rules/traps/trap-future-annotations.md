@@ -24,10 +24,10 @@ tags:
 fitness:
   score: 0.6
   impact_weight: 0.8
-  triggers: 80
-  true_positives: 33.3628
+  triggers: 84
+  true_positives: 37.3628
   false_positives: 28.9993
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Any Python file using `X | None`, `list[str] | None`, or similar PEP 604
@@ -36,7 +36,7 @@ top of the file. Without it, the code crashes on Python 3.9 with a TypeError.
 
 The project declares `python_requires = ">=3.9"` in pyproject.toml.
 
-Known incident: 5 files in immune_system/verification/ and tests/ used pipe
+Known incident: 5 files in aegis_core/verification/ and tests/ used pipe
 unions without the future import, crashing on 3.9 runtimes.
 
 Check: `grep -l '| None' <file> | xargs grep -L 'from __future__'`

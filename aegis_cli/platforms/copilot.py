@@ -22,7 +22,7 @@ class CopilotAdapter(PlatformAdapter):
         return github_dir / "copilot-instructions.md", github_dir / "instructions"
 
     def render_config(self) -> str:
-        rules = self.get_source_rules()
+        rules = [r for r in self.get_source_rules() if r.parent.name != ".oracles"]
         rule_lines = "\n".join(f"- **{r.stem}**: See `.github/instructions/{r.name}`" for r in rules)
         return (
             "# GitHub Copilot Governance Instructions\n\n"
@@ -55,11 +55,16 @@ class CopilotAdapter(PlatformAdapter):
 
         # Copy detailed rules into .github/instructions/
         for src_rule in self.get_source_rules():
-            dest = instructions_dir / src_rule.name
+            dest = (
+                (instructions_dir / ".oracles" / src_rule.name)
+                if src_rule.parent.name == ".oracles"
+                else (instructions_dir / src_rule.name)
+            )
             if dry_run:
                 result.installed_files.append(dest)
             else:
                 try:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src_rule, dest)
                     result.installed_files.append(dest)
                 except Exception as exc:
