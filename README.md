@@ -43,11 +43,12 @@ Explore deep-dive guides for production architecture, workflows, and specificati
 ## Quick Start
 
 ```bash
-pip install aegis-governance   # Pure Python (3.9+), zero runtime dependencies
+pip install aegis-guardrails   # Pure Python (3.9+), zero runtime dependencies
 aegis init                     # Auto-detects Gemini, Claude Code, Cursor, Copilot
 aegis status                   # View active rules and fitness stats
 aegis check                    # Run Layer 1 deterministic AST checks
 ```
+
 
 ### MCP Server (Recommended)
 

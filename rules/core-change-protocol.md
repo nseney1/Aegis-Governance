@@ -1,6 +1,8 @@
 ---
 id: core-change-protocol
 domain: governance
+trigger: model_decision
+description: Requires impact analysis, behavioral test verification, and review gates when modifying core governance rules or skills.
 activation: |
   Changes touching: aegis_core/outcomes/*, aegis_core/lifecycle/*,
   aegis_mcp/jit_engine.py, aegis_core/verification/*, install/hooks/*

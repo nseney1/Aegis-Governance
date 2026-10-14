@@ -12,7 +12,7 @@ import sys
 from typing import Any, Optional
 
 from aegis_core.cell_inventory import find_matching_cells
-from aegis_core.somayaml import _get_body, dump_frontmatter, parse_frontmatter
+from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter
 
 INSIGHT_PRINCIPAL = "outcome_engine"
 INSIGHT_SCOPE = "human_insight"

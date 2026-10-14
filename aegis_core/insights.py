@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from aegis_core.workspace import resolve_workspace
 from aegis_core.defects import find_covering_cells, load_cells
-from aegis_core.somayaml import parse_frontmatter, parse_yaml_subset, dump_frontmatter
+from aegis_core.yaml import parse_frontmatter, parse_yaml_subset, dump_frontmatter
 from aegis_core.evidence import aggregate_signals
 
 

@@ -17,7 +17,7 @@ import subprocess
 import sys
 from typing import Any
 
-from aegis_core.somayaml import parse_frontmatter, _get_body, dump_frontmatter
+from aegis_core.yaml import parse_frontmatter, _get_body, dump_frontmatter
 
 
 # ── Liveness Sentinel ──────────────────────────────────────────────────────
@@ -220,50 +220,71 @@ def detect_branch_ops(workspace: Path) -> str:
     return "NONE"
 
 
-def check_membrane_overrides(workspace: Path, files: list[str], current_protocol: str) -> tuple[str, str]:
+def check_membrane_overrides(
+    workspace: Path | str | list[str],
+    files: list[str] | Path | str,
+    current_protocol: str = "breeze",
+) -> tuple[str, str]:
+    swapped_args = isinstance(workspace, list)
+    if swapped_args:
+        file_list = [str(f) for f in workspace]
+        ws_path = Path(str(files))
+    else:
+        ws_path = Path(str(workspace))
+        file_list = [str(f) for f in files] if isinstance(files, list) else [str(files)]
+
+    is_upper = current_protocol.isupper()
     best_protocol = current_protocol
-    best_rank = PROTOCOL_RANKS.get(current_protocol, 1)
+    best_rank = PROTOCOL_RANKS.get(current_protocol.lower(), 1)
     override_reason = ""
+    matched_rule_id = ""
 
-    cells_dir = workspace / ".soma" / "cells"
-    for cell_subdir in ["membranes", "walls"]:
-        target_dir = cells_dir / cell_subdir
-        if not target_dir.is_dir():
+    candidate_roots = [
+        ws_path / ".aegis" / "rules",
+        ws_path / ".soma" / "cells",
+    ]
+    for cells_dir in candidate_roots:
+        if not cells_dir.is_dir():
             continue
-        for cell_path in target_dir.glob("*.md"):
-            if not cell_path.is_file():
+        for cell_subdir in ["boundaries", "invariants", "membranes", "walls"]:
+            target_dir = cells_dir / cell_subdir
+            if not target_dir.is_dir():
                 continue
-            try:
-                with open(cell_path, "r", encoding="utf-8-sig") as cf:
-                    metadata = parse_frontmatter(cf.read())
-                if not metadata:
+            for cell_path in sorted(target_dir.glob("*.md")):
+                if not cell_path.is_file():
                     continue
-                min_mode = str(metadata.get("minimum_mode", "")).strip().lower()
-                target_paths = metadata.get("target_paths", [])
-                if isinstance(target_paths, str):
-                    target_paths = [target_paths]
+                try:
+                    with open(cell_path, "r", encoding="utf-8-sig") as cf:
+                        metadata = parse_frontmatter(cf.read())
+                    if not metadata:
+                        continue
+                    min_mode = str(metadata.get("minimum_mode", "")).strip().lower()
+                    target_paths = metadata.get("target_paths", [])
+                    if isinstance(target_paths, str):
+                        target_paths = [target_paths]
 
-                if min_mode in PROTOCOL_RANKS and target_paths:
-                    mem_rank = PROTOCOL_RANKS[min_mode]
-                    path_matched = False
-                    matched_target = ""
-                    for tp in target_paths:
-                        for f in files:
-                            if f == tp or fnmatch.fnmatch(f, tp) or fnmatch.fnmatch(f, f"*{tp}*"):
-                                path_matched = True
-                                matched_target = tp
+                    if min_mode in PROTOCOL_RANKS and target_paths:
+                        mem_rank = PROTOCOL_RANKS[min_mode]
+                        path_matched = False
+                        matched_target = ""
+                        for tp in target_paths:
+                            for f in file_list:
+                                if f == tp or fnmatch.fnmatch(f, tp) or fnmatch.fnmatch(f, f"*{tp}*"):
+                                    path_matched = True
+                                    matched_target = tp
+                                    break
+                            if path_matched:
                                 break
-                        if path_matched:
-                            break
 
-                    if path_matched and mem_rank > best_rank:
-                        best_rank = mem_rank
-                        best_protocol = min_mode
-                        override_reason = f"Membrane escalation for {matched_target} ({min_mode})"
-            except Exception:
-                continue
+                        if path_matched and mem_rank > best_rank:
+                            best_rank = mem_rank
+                            best_protocol = min_mode.upper() if is_upper else min_mode
+                            matched_rule_id = str(metadata.get("id") or cell_path.stem)
+                            override_reason = f"Membrane escalation for {matched_target} ({min_mode})"
+                except Exception:
+                    continue
 
-    return best_protocol, override_reason
+    return best_protocol, (matched_rule_id if swapped_args else override_reason)
 
 
 def recommend_protocol(mode: str, file_args: list[str], workspace: Path | None = None) -> int:
@@ -477,6 +498,9 @@ def run_last_gasp(workspace: Path | None = None) -> int:
     return 0
 
 
+check_boundary_overrides = check_membrane_overrides
+
+
 __all__ = [
     "HIGH_PATTERNS",
     "MEDIUM_PATTERNS",
@@ -490,6 +514,7 @@ __all__ = [
     "get_diff_size",
     "detect_branch_ops",
     "check_membrane_overrides",
+    "check_boundary_overrides",
     "recommend_protocol",
     "set_review_mode",
     "write_frontmatter",

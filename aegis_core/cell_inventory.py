@@ -277,7 +277,7 @@ def find_matching_cells(
     allow_basename_match: bool = True,
 ) -> List[CellMatch]:
     """Find all cells in cells_dir whose target_paths match changed_files."""
-    from aegis_core.somayaml import parse_frontmatter
+    from aegis_core.yaml import parse_frontmatter
 
     cells_path = Path(cells_dir)
     if not cells_path.is_dir():
@@ -346,7 +346,7 @@ def find_matching_cells(
     return matches
 
 
-from aegis_core.somayaml import parse_frontmatter
+from aegis_core.yaml import parse_frontmatter
 
 # Backward-compatible and canonical engineering aliases
 RuleInventory = CellInventory

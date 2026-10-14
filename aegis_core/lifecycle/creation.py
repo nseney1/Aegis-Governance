@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 from typing import Optional
 
-from aegis_core.somayaml import dump_frontmatter, parse_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 from aegis_core.workspace import Workspace, resolve_workspace
 from .constants import (
     VALID_ENFORCEMENT,
@@ -56,14 +56,14 @@ def create_cell(
         )
 
     if enforcement is None:
-        enforcement = "gate" if type_lower == "wall" else "advisory"
+        enforcement = "gate" if type_lower in ("wall", "invariant") else "advisory"
     else:
         enforcement_lower = enforcement.lower()
         if enforcement_lower not in VALID_ENFORCEMENT:
             raise ValueError(
                 f"Invalid enforcement '{enforcement}'. Must be one of: {', '.join(VALID_ENFORCEMENT)}."
             )
-        if type_lower == "wall" and enforcement_lower != "gate":
+        if type_lower in ("wall", "invariant") and enforcement_lower != "gate":
             raise ValueError(
                 f"Wall cells must use 'gate' enforcement, got '{enforcement}'."
             )

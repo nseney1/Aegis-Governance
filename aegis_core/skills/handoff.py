@@ -96,8 +96,10 @@ class HandoffRouter:
         root = Path(ws.root)
 
         # 1. Discover SkillGraph
-        project_skills = root / ".soma" / "skills"
-        global_skills = Path.home() / ".soma" / "skills"
+        gov_dir = (root / ".aegis") if (root / ".aegis").is_dir() or not (root / ".soma").is_dir() else (root / ".soma")
+        home_gov = (Path.home() / ".aegis") if (Path.home() / ".aegis").is_dir() or not (Path.home() / ".soma").is_dir() else (Path.home() / ".soma")
+        project_skills = gov_dir / "skills"
+        global_skills = home_gov / "skills"
         graph = SkillGraph.discover([project_skills, global_skills])
 
         from_node = graph.get(from_skill)
@@ -117,7 +119,7 @@ class HandoffRouter:
 
         # 4. Resolve tree hash and secret
         tree_hash = _get_tree_hash(root)
-        secret = session_secret or os.environ.get("SOMA_SESSION_SECRET", "soma_default_session_secret")
+        secret = session_secret or os.environ.get("AEGIS_SESSION_SECRET") or os.environ.get("SOMA_SESSION_SECRET", "aegis_default_session_secret")
 
         # 5. Create signed ArtifactEnvelope
         envelope = ArtifactEnvelope.create(
@@ -129,8 +131,8 @@ class HandoffRouter:
             payload=payload_dict,
         )
 
-        # 6. File buffer: write to .soma/swarm/handoffs/
-        handoffs_dir = root / ".soma" / "swarm" / "handoffs"
+        # 6. File buffer: write to .aegis/swarm/handoffs/ (or .soma/swarm/handoffs/)
+        handoffs_dir = gov_dir / "swarm" / "handoffs"
         handoffs_dir.mkdir(parents=True, exist_ok=True)
 
         cid = cycle_id or str(uuid.uuid4())[:8]
@@ -142,7 +144,7 @@ class HandoffRouter:
         Path(resolved_file).write_text(json.dumps(envelope.to_dict(), indent=2), encoding="utf-8")
 
         # 7. Append disk telemetry
-        telemetry_dir = root / ".soma" / "telemetry"
+        telemetry_dir = gov_dir / "telemetry"
         telemetry_dir.mkdir(parents=True, exist_ok=True)
         telemetry_file = telemetry_dir / "skills.jsonl"
         telemetry_entry = {

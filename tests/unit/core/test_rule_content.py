@@ -303,24 +303,25 @@ def test_cell_subdirs_have_test_coverage():
     )
 
 
-def test_genome_rules_have_content_tests():
-    """Genome rules must be covered by content coherence tests,
+def test_core_rules_have_content_tests():
+    """Core rules must be covered by content coherence tests,
     not just structural/schema tests.
 
     Checks that test_rule_metadata.py contains at least one test function
-    that validates genome rule content beyond basic frontmatter presence.
+    that validates core rule content beyond basic frontmatter presence.
     """
     test_file = REPO_ROOT / "tests" / "unit" / "core" / "test_rule_metadata.py"
     source = test_file.read_text(encoding="utf-8")
 
     # Must have at least these content tests (not just has_frontmatter/has_id)
     content_tests = [
-        "test_genome_has_enforcement",
-        "test_genome_has_body_text",
+        "test_core_rule_has_enforcement",
+        "test_core_rule_has_body_text",
     ]
     missing = [t for t in content_tests if t not in source]
     assert not missing, (
-        f"Missing genome content coherence tests: {missing}. "
-        f"Genome rules need more than frontmatter/id checks."
+        f"Missing core rule content coherence tests: {missing}. "
+        f"Core rules need more than frontmatter/id checks."
     )
+
 

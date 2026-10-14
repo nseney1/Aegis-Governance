@@ -308,3 +308,42 @@ def test_claude_adapter_dry_run_wording(tmp_path):
     # File must still exist after dry-run
     assert (claude_dir / "CLAUDE.md").is_file()
 
+
+def test_gemini_adapter_installs_meta_and_all_gate_rules(tmp_path: Path):
+    """GeminiAdapter.install() must include META.md and all gate rules in installed rule files."""
+    repo_root = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
+    home = tmp_path / "home"
+    home.mkdir()
+    adapter = GeminiAdapter(workspace=repo_root, home=home)
+
+    source_names = {p.name for p in adapter.get_source_rules()}
+    assert "META.md" in source_names
+    assert "gitflow-review-gate.md" in source_names
+    assert "core-change-protocol.md" in source_names
+    assert "ci-green-before-release.md" in source_names
+    assert "no-pre-existing-excuse.md" in source_names
+
+    res = adapter.install(local=False, dry_run=False)
+    assert res.success
+    installed_rules_dir = home / ".gemini" / "config" / "rules"
+    for expected in (
+        "META.md",
+        "gitflow-review-gate.md",
+        "core-change-protocol.md",
+        "ci-green-before-release.md",
+        "no-pre-existing-excuse.md",
+        "providence.md",
+    ):
+        assert (installed_rules_dir / expected).is_file(), f"Missing installed rule: {expected}"
+
+
+def test_gemini_adapter_local_target_dirs_prefers_aegis_workspace(tmp_path: Path):
+    """When installing locally in a pure .aegis workspace, GeminiAdapter resolves .aegis rather than .soma."""
+    ws = tmp_path / "ws"
+    (ws / ".aegis" / "rules").mkdir(parents=True)
+    adapter = GeminiAdapter(workspace=ws, home=tmp_path)
+    rules_dir, skills_dir, hooks_dir = adapter.get_target_dirs(local=True)
+    assert ".aegis" in str(rules_dir)
+    assert ".soma" not in str(rules_dir)
+
+

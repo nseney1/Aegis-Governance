@@ -14,7 +14,7 @@ import argparse
 import re
 import sys
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["generate", "run_completion", "CompletionCommand", "SHELLS"]
 
@@ -301,7 +301,7 @@ def run_completion(args: argparse.Namespace) -> int:
     return 0
 
 
-class CompletionCommand(SomaCommand):
+class CompletionCommand(AegisCommand):
     """Command to print a shell completion script for bash, zsh, or fish."""
 
     name = "completion"

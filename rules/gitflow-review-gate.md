@@ -1,6 +1,8 @@
 ---
 id: gitflow-review-gate
 domain: governance
+trigger: always_on
+description: Mandates independent subagent code review and structured audit output before PR creation or merge.
 activation: |
   Any git merge, PR creation, or branch operation targeting
   main or develop branches.

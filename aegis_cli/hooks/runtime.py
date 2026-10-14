@@ -14,7 +14,7 @@ from aegis_cli.hooks.management import (
     run_hook_uninstall,
 )
 from aegis_cli.hooks.safety import _find_gate_log_dir, run_safety_gate
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_hook", "HookCommand", "run_pre_commit", "run_pre_invocation", "run_session_close"]
 
@@ -155,66 +155,71 @@ def run_pre_commit(
     except Exception:
         pass
 
-    cells_dir = repo_root / ".soma" / "cells"
+    cells_dirs = [repo_root / ".aegis" / "rules", repo_root / ".soma" / "cells"]
     all_target_patterns: list[str] = []
     triggered_cells: list[str] = []
 
-    if cells_dir.is_dir() and staged_files:
-        from aegis_sdk.cells import parse_cell_file
+    for cells_dir in cells_dirs:
+        if cells_dir.is_dir() and staged_files:
+            from aegis_sdk.cells import parse_cell_file
 
-        for cell_file in cells_dir.glob("**/*.md"):
-            if cell_file.name == "README.md":
-                continue
-            try:
-                fm, _ = parse_cell_file(cell_file)
-                targets = fm.get("target_paths", [])
-                all_target_patterns.extend(targets)
-                hypothesis = fm.get("hypothesis", "")
+            for cell_file in cells_dir.glob("**/*.md"):
+                if cell_file.name == "README.md":
+                    continue
+                try:
+                    fm, _ = parse_cell_file(cell_file)
+                    targets = fm.get("target_paths", [])
+                    all_target_patterns.extend(targets)
+                    hypothesis = fm.get("hypothesis", "")
 
-                matched = False
-                for sf in staged_files:
-                    for tp in targets:
-                        if fnmatch.fnmatch(sf, tp) or fnmatch.fnmatch(sf, f"*{tp}*"):
+                    matched = False
+                    for sf in staged_files:
+                        for tp in targets:
+                            if (
+                                fnmatch.fnmatch(sf, tp)
+                                or fnmatch.fnmatch(sf, f"*{tp}*")
+                                or ("**/" in tp and fnmatch.fnmatch(sf, tp.replace("**/", "")))
+                            ):
+                                matched = True
+                                break
+                        if hypothesis and os.path.basename(sf) in hypothesis:
                             matched = True
+                        if matched:
                             break
-                    if os.path.basename(sf) in hypothesis:
-                        matched = True
-                    if matched:
-                        break
-                if matched:
-                    triggered_cells.append(cell_file.stem)
-            except Exception:
-                continue
+                    if matched and cell_file.stem not in triggered_cells:
+                        triggered_cells.append(cell_file.stem)
+                except Exception:
+                    continue
 
     info_file = sys.stderr if use_json else sys.stdout
 
     if triggered_cells:
-        print(f"🧬 Soma: {len(triggered_cells)} governance cell(s) triggered by this commit ({', '.join(triggered_cells)})", file=info_file)
+        print(f"🛡️ Aegis: {len(triggered_cells)} governance rule(s) triggered by this commit ({', '.join(triggered_cells)})", file=info_file)
 
     # 3. Mechanical enforcement scripts
     mechanical_failed = False
-    enforcement_dir = repo_root / ".soma" / "enforcement"
-    if enforcement_dir.is_dir():
-        for check in sorted(enforcement_dir.glob("check-*")):
-            if check.is_file():
-                try:
-                    if check.suffix == ".py":
-                        cmd = [sys.executable, str(check)]
-                    elif check.suffix in [".sh", ""] and os.name != "nt":
-                        cmd = ["bash", str(check)]
-                    elif check.suffix in [".bat", ".cmd"]:
-                        cmd = [str(check)]
-                    else:
-                        continue
-                    res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
-                    if res.returncode != 0:
+    for enforcement_dir in [repo_root / ".aegis" / "enforcement", repo_root / ".soma" / "enforcement"]:
+        if enforcement_dir.is_dir():
+            for check in sorted(enforcement_dir.glob("check-*")):
+                if check.is_file():
+                    try:
+                        if check.suffix == ".py":
+                            cmd = [sys.executable, str(check)]
+                        elif check.suffix in [".sh", ""] and os.name != "nt":
+                            cmd = ["bash", str(check)]
+                        elif check.suffix in [".bat", ".cmd"]:
+                            cmd = [str(check)]
+                        else:
+                            continue
+                        res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+                        if res.returncode != 0:
+                            mechanical_failed = True
+                            print(f"❌ Mechanical enforcement check failed: {check.name}", file=sys.stderr)
+                            if res.stderr:
+                                print(res.stderr.strip(), file=sys.stderr)
+                    except Exception as exc:
                         mechanical_failed = True
-                        print(f"❌ Mechanical enforcement check failed: {check.name}", file=sys.stderr)
-                        if res.stderr:
-                            print(res.stderr.strip(), file=sys.stderr)
-                except Exception as exc:
-                    mechanical_failed = True
-                    print(f"❌ Failed to run mechanical check {check.name}: {exc}", file=sys.stderr)
+                        print(f"❌ Failed to run mechanical check {check.name}: {exc}", file=sys.stderr)
 
     # 4. Uncovered new files check
     new_files: list[str] = []
@@ -232,7 +237,10 @@ def run_pre_commit(
 
     uncovered_files = [
         nf for nf in new_files
-        if all_target_patterns and not any(fnmatch.fnmatch(nf, p) for p in all_target_patterns)
+        if all_target_patterns and not any(
+            fnmatch.fnmatch(nf, p) or ("**/" in p and fnmatch.fnmatch(nf, p.replace("**/", "")))
+            for p in all_target_patterns
+        )
     ]
     if uncovered_files:
         print("🔴 New files without governance coverage:", file=info_file)
@@ -246,6 +254,7 @@ def run_pre_commit(
                 "status": "blocked",
                 "reason": "mechanical_enforcement_failed",
                 "triggered_cells": triggered_cells,
+                "triggered_rules": triggered_cells,
                 "uncovered_files": uncovered_files,
                 "checkpoint_issues": issues,
             }))
@@ -259,6 +268,7 @@ def run_pre_commit(
                     "status": "blocked",
                     "reason": "checkpoint_failed",
                     "triggered_cells": triggered_cells,
+                    "triggered_rules": triggered_cells,
                     "uncovered_files": uncovered_files,
                     "checkpoint_issues": issues,
                 }))
@@ -290,6 +300,8 @@ def run_pre_commit(
                     print(json.dumps({
                         "status": "blocked",
                         "reason": "layer1_failed",
+                        "triggered_cells": triggered_cells,
+                        "triggered_rules": triggered_cells,
                         "layer1_evidence": [
                             {"tool": r.tool, "target": r.target, "verdict": r.verdict, "detail": r.detail}
                             for r in l1_results
@@ -307,6 +319,7 @@ def run_pre_commit(
         print(json.dumps({
             "status": "ok",
             "triggered_cells": triggered_cells,
+            "triggered_rules": triggered_cells,
             "uncovered_files": uncovered_files,
             "checkpoint_issues": issues,
         }))
@@ -402,7 +415,7 @@ def run_hook(args: Any) -> int:
         return 1
 
 
-class HookCommand(SomaCommand):
+class HookCommand(AegisCommand):
     """Command to manage and run cross-platform lifecycle hooks."""
 
     name = "hook"

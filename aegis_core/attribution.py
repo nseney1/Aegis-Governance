@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from aegis_core.somayaml import dump_frontmatter, parse_frontmatter, _get_body
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter, _get_body
 from aegis_core.telemetry import append_signals
 from aegis_core.workspace import Workspace, as_workspace
 from aegis_core.verification import (

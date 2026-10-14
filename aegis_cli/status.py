@@ -7,7 +7,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from aegis_cli import resolve_root, sanitize_display
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.evidence import aggregate_signals
 
 __all__ = ["run_status", "StatusCommand"]
@@ -446,7 +446,7 @@ def run_status(args: argparse.Namespace) -> int:
     return 0
 
 
-class StatusCommand(SomaCommand):
+class StatusCommand(AegisCommand):
     """Command to show active rules, cell inventory, and health stats."""
 
     name = "status"

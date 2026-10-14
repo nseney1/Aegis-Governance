@@ -1,10 +1,10 @@
 # Scripts Reference
 
-This document catalogs 76 executable scripts, command modules, SDK modules, and MCP/core modules in the Aegis governance framework.
+This document catalogs 79 executable scripts, command modules, SDK modules, and MCP/core modules in the Aegis governance framework.
 
 ## Counting Method
 
-Counts are generated from the source tree with mutually exclusive categories: package initializers (`__init__.py`, `__main__.py`) and subpackages (`aegis_core/workspace/`, `aegis_core/lifecycle/`, `aegis_core/schemas/`, `aegis_core/outcomes/`, `aegis_cli/hooks/`) are excluded; `install/hooks/pre-commit` is counted as the lifecycle script; and all non-initializer `aegis_core/*.py` modules are grouped with the MCP modules. This produces 76 unique paths with no double counting.
+Counts are generated from the source tree with mutually exclusive categories: package initializers (`__init__.py`, `__main__.py`) and subpackages (`aegis_core/workspace/`, `aegis_core/lifecycle/`, `aegis_core/schemas/`, `aegis_core/outcomes/`, `aegis_cli/hooks/`) are excluded; `install/hooks/pre-commit` is counted as the lifecycle script; and all non-initializer `aegis_core/*.py` modules are grouped with the MCP modules. This produces 79 unique paths with no double counting.
 
 ## Summary by Category
 
@@ -12,10 +12,10 @@ Counts are generated from the source tree with mutually exclusive categories: pa
 |:---------|:----------------------------|:------|:------------|
 | [Lifecycle Scripts (Hooks)](#lifecycle-scripts-hooks--bash) | bash (`install/hooks/`) | 1 | Git pre-commit lifecycle hook |
 | [Verification Scripts](#verification-scripts--python) | Python (`aegis_core/verification/`) | 14 | Deterministic AST checkers, coverage tools, and adversarial verification |
-| [CLI Commands](#cli-commands--python-aegis_cli) | Python and bash (`aegis_cli/`, root) | 20 | CLI launcher and command implementation modules |
-| [SDK Modules](#sdk-modules--python-aegis_sdk) | Python (`aegis_sdk/`) | 8 | Canonical scoring, parsing, telemetry, hot-zone, and governance APIs |
-| [MCP and Core Modules](#mcp-and-core-modules) | Python (`aegis_mcp/`, `aegis_core/`) | 33 | MCP transport, dispatch, confinement, content inventory, canonical evidence, cache, errors, receipts, and atomic storage |
-| **Total** | | **76** | Unique paths under the method above |
+| [CLI Commands](#cli-commands--python-aegis_cli) | Python and bash (`aegis_cli/`, root) | 21 | CLI launcher and command implementation modules |
+| [SDK Modules](#sdk-modules--python-aegis_sdk) | Python (`aegis_sdk/`) | 9 | Canonical scoring, parsing, telemetry, hot-zone, and governance APIs |
+| [MCP and Core Modules](#mcp-and-core-modules) | Python (`aegis_mcp/`, `aegis_core/`) | 34 | MCP transport, dispatch, confinement, content inventory, canonical evidence, cache, errors, receipts, and atomic storage |
+| **Total** | | **79** | Unique paths under the method above |
 
 ---
 
@@ -54,7 +54,7 @@ These 14 Python scripts form the deterministic and adversarial verification engi
 
 ## CLI Commands — Python (`aegis_cli/`)
 
-These 20 paths provide the root `aegis` launcher and 19 non-initializer Python modules in `aegis_cli/`. Subcommands are organized around the 5 core verbs (`init`, `status`, `check`, `rule`, `system`) plus `agent` plumbing.
+These 21 paths provide the root `aegis` launcher and 20 non-initializer Python modules in `aegis_cli/`. Subcommands are organized around the 5 core verbs (`init`, `status`, `check`, `rule`, `system`) plus `agent` plumbing and `migrate`.
 
 | Command / Script | Location | Purpose |
 |:-----------------|:---------|:--------|
@@ -69,6 +69,7 @@ These 20 paths provide the root `aegis` launcher and 19 non-initializer Python m
 | **`doctor.py`** | `aegis_cli/doctor.py` | System health check verifying workspace structure, rules, configuration, and dependencies. |
 | **`init.py`** | `aegis_cli/init.py` | `aegis init`: Scaffolds governance and platform rules for Gemini, Claude Code, Cursor, Copilot, or Kiro. |
 | **`install.py`** | `aegis_cli/install.py` | `aegis install`, `aegis uninstall`: Installs and uninstalls rules and integrations into user environments. |
+| **`migrate.py`** | `aegis_cli/migrate.py` | `aegis migrate`: One-way atomic upgrade from legacy `.soma` workspace layout to modern `.aegis`. |
 | **`pathcheck.py`** | `aegis_cli/pathcheck.py` | Shell-aware PATH guidance: finds where pip installed `aegis` and prints PATH instructions. |
 | **`registry.py`** | `aegis_cli/registry.py` | Command registry coordinating categorized discovery, subparser population, and grouped help formatting. |
 | **`report.py`** | `aegis_cli/report.py` | `aegis report`: Session report card showing triggered rules, event counts, and activity distributions. |
@@ -87,13 +88,14 @@ These 20 paths provide the root `aegis` launcher and 19 non-initializer Python m
 
 ## SDK Modules — Python (`aegis_sdk/`)
 
-These 8 non-initializer modules provide the canonical Python APIs used by the CLI, MCP server, and governance engines.
+These 9 non-initializer modules provide the canonical Python APIs used by the CLI, MCP server, and governance engines.
 
 | Module | Location | Purpose |
 |:-------|:---------|:--------|
 | **`errors.py`** | `aegis_sdk/errors.py` | Structured error hierarchy for governance operations (parse errors, validation failures, scoring exceptions). |
 | **`scoring.py`** | `aegis_sdk/scoring.py` | Wilson interval confidence-bound scoring and related fitness calculations. |
 | **`cells.py`** | `aegis_sdk/cells.py` | Canonical YAML frontmatter parser and cell file utilities. |
+| **`rules.py`** | `aegis_sdk/rules.py` | Canonical Rule and RuleFitness models and frontmatter utilities. |
 | **`governance.py`** | `aegis_sdk/governance.py` | Governance state API for querying active rules, cells, and configuration. |
 | **`analysis.py`** | `aegis_sdk/analysis.py` | Analytical utilities for fitness landscapes, trends, and evidence aggregation. |
 | **`hot_zones.py`** | `aegis_sdk/hot_zones.py` | Computes file and root-cause heat from the bug registry for antifragile fitness boosts. |
@@ -104,7 +106,7 @@ These 8 non-initializer modules provide the canonical Python APIs used by the CL
 
 ## MCP and Core Modules
 
-These 33 modules implement the MCP server, state-bound authorization, safe cell inventory, YAML frontmatter parsing, verification job orchestration, canonical evidence reading, transactional resource locking, self-healing quarantine, atomic storage, and standardized domain errors. Package initializers and `aegis_mcp/__main__.py` are excluded from the count.
+These 34 modules implement the MCP server, state-bound authorization, safe cell inventory, YAML frontmatter parsing, verification job orchestration, canonical evidence reading, transactional resource locking, self-healing quarantine, atomic storage, and standardized domain errors. Package initializers and `aegis_mcp/__main__.py` are excluded from the count.
 
 | Module | Location | Purpose |
 |:-------|:---------|:--------|
@@ -129,6 +131,7 @@ These 33 modules implement the MCP server, state-bound authorization, safe cell 
 | **`evidence.py`** | `aegis_core/evidence.py` | Standard-library canonical reader for weighted `signals.jsonl` evidence, independent trigger/outcome dimensions, and structured parse errors. |
 | **`errors.py`** | `aegis_core/errors.py` | Standardized typed domain error hierarchy (`SomaError`, `SomaValidationError`, `CellCorruptError`, `ReceiptExpiredError`, `LockTimeoutError`). |
 | **`somayaml.py`** | `aegis_core/somayaml.py` | Zero-dependency YAML and frontmatter parser with DoS recursion guards, anchor attack prevention, and UTF-8 validation. |
+| **`yaml.py`** | `aegis_core/yaml.py` | Zero-dependency AegisYAML and frontmatter parser with DoS recursion guards, anchor attack prevention, and UTF-8 validation. |
 | **`locking.py`** | `aegis_core/locking.py` | Cross-platform transactional resource locking with timeout fences and native Windows fallback. |
 | **`quarantine.py`** | `aegis_core/quarantine.py` | Self-healing quarantine isolating damaged YAML cells and unparseable JSONL files to preserve system availability. |
 | **`storage.py`** | `aegis_core/storage.py` | Crash-resilient atomic file writes via temporary files, directory fsync, and exponential backoff retry on Windows sharing violations (WinError 32). |

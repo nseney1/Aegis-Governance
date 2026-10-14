@@ -12,7 +12,7 @@ import argparse
 import sys
 from typing import Any, List, Optional
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_system", "SystemCommand"]
 
@@ -52,7 +52,7 @@ def run_system(args: argparse.Namespace) -> int:
     return 1
 
 
-class SystemCommand(SomaCommand):
+class SystemCommand(AegisCommand):
     """System diagnostics, driver management, and platform integrations."""
 
     name = "system"

@@ -1,7 +1,8 @@
 ---
 name: Soma Governance
 non_standard: true
-description: Meta-rule that activates Soma's just-in-time governance engine.
+trigger: always_on
+description: Enforces mandatory JIT governance scanning before file edits and verification before commits.
 ---
 
 # Soma Governance

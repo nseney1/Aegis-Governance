@@ -141,7 +141,7 @@ def _key_path(workspace: str) -> str:
     soma_key = os.path.join(workspace, ".soma", _KEY_DIR, _KEY_FILENAME)
     if os.path.exists(soma_key):
         return soma_key
-    if os.path.isdir(os.path.join(workspace, ".aegis")):
+    if os.path.isdir(os.path.join(workspace, ".aegis")) or not os.path.isdir(os.path.join(workspace, ".soma")):
         return aegis_key
     return soma_key
 
@@ -238,7 +238,7 @@ def _manifest_path(workspace: str) -> str:
     soma_cells = os.path.join(workspace, ".soma", "cells", _MANIFEST_FILENAME)
     if os.path.isfile(soma_cells):
         return soma_cells
-    if os.path.isdir(os.path.join(workspace, ".aegis")):
+    if os.path.isdir(os.path.join(workspace, ".aegis")) or not os.path.isdir(os.path.join(workspace, ".soma")):
         return aegis_cand
     return soma_cells
 

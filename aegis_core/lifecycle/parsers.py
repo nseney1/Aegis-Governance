@@ -9,7 +9,7 @@ import re
 import shutil
 from typing import Any, Optional, Tuple
 
-from aegis_core.somayaml import parse_frontmatter
+from aegis_core.yaml import parse_frontmatter
 from aegis_core.workspace import Workspace
 from .constants import (
     TYPE_TO_DIR,
@@ -58,7 +58,7 @@ def generate_slug(hypothesis: str, id_override: str | None = None) -> str:
 
 
 def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Optional[Path], Optional[str]]:
-    """Locate a cell across vacuoles/, walls/, and genome/ directories."""
+    """Locate a cell across .aegis/rules/, .soma/cells/, and rules/ or genome/ directories."""
     clean_id = sanitize_cell_id(cell_id)
     if not clean_id:
         return None, None
@@ -66,13 +66,22 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = ws.cells_dir
+    candidate_dirs = [
+        ws.root / ".aegis" / "rules",
+        ws.cells_dir,
+        ws.root / ".soma" / "cells",
+    ]
     rules_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
 
-    for type_name, dir_name in TYPE_TO_DIR.items():
-        candidate = cells_dir / dir_name / f"{clean_id}.md"
-        if candidate.is_file():
-            return candidate, type_name
+    seen_dirs = set()
+    for cells_dir in candidate_dirs:
+        if cells_dir in seen_dirs or not cells_dir.is_dir():
+            continue
+        seen_dirs.add(cells_dir)
+        for type_name, dir_name in TYPE_TO_DIR.items():
+            candidate = cells_dir / dir_name / f"{clean_id}.md"
+            if candidate.is_file():
+                return candidate, type_name
 
     if ws.is_soma_repo:
         candidate = rules_dir / f"{clean_id}.md"
@@ -86,10 +95,14 @@ def find_cell(workspace: Workspace | Path | str, cell_id: str) -> Optional[str]:
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    cells_dir = str(ws.cells_dir)
-    matches = glob.glob(os.path.join(cells_dir, "**", f"*{cell_id}*"), recursive=True)
-    matches = [m for m in matches if os.path.isfile(m) and m.endswith(".md")]
-    return matches[0] if matches else None
+    for cand_dir in (ws.root / ".aegis" / "rules", ws.cells_dir, ws.root / ".soma" / "cells"):
+        if not cand_dir.is_dir():
+            continue
+        matches = glob.glob(os.path.join(str(cand_dir), "**", f"*{cell_id}*"), recursive=True)
+        matches = [m for m in matches if os.path.isfile(m) and m.endswith(".md")]
+        if matches:
+            return matches[0]
+    return None
 
 
 def parse_cell(file_path: Path | str) -> tuple[Optional[dict], str]:
@@ -128,7 +141,8 @@ def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    evidence_dir = str(ws.evidence_dir)
+    aegis_ev = ws.root / ".aegis" / "evidence"
+    evidence_dir = str(aegis_ev if aegis_ev.is_dir() else ws.evidence_dir)
     aggregation = aggregate_signals(evidence_dir)
     return {
         cell_id: {
@@ -143,7 +157,7 @@ def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any
 
 
 def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
-    """Load cell metadata from .soma/cells/**/*.md and genome/**/*.md files.
+    """Load cell metadata from .aegis/rules/**/*.md, .soma/cells/**/*.md, and genome/**/*.md files.
 
     Returns:
         List of cell metadata dicts with at minimum: id, type, created, source_path.
@@ -152,18 +166,26 @@ def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
     cells = []
-    scan_roots = [str(ws.cells_dir)]
+    scan_roots = []
+    for cand in (ws.root / ".aegis" / "rules", ws.cells_dir, ws.root / ".soma" / "cells"):
+        cand_str = str(cand)
+        if cand_str not in scan_roots:
+            scan_roots.append(cand_str)
     if ws.is_soma_repo:
         rules_root = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
-        scan_roots.append(str(rules_root))
+        if str(rules_root) not in scan_roots:
+            scan_roots.append(str(rules_root))
 
+    seen_paths = set()
     for cells_root in scan_roots:
         if not os.path.isdir(cells_root):
             continue
 
         for md_path in glob.glob(os.path.join(cells_root, "**", "*.md"), recursive=True):
-            if os.path.basename(md_path) == "README.md":
+            real_md = os.path.abspath(md_path)
+            if real_md in seen_paths or os.path.basename(md_path) == "README.md":
                 continue
+            seen_paths.add(real_md)
             try:
                 with open(md_path, encoding="utf-8") as f:
                     content = f.read()
@@ -225,16 +247,16 @@ def _transform_frontmatter_type(content: str, new_type: str) -> str:
             new_lines.append(f"{indent}type: {new_type}")
             type_updated = True
         elif stripped.startswith("enforcement:"):
-            if new_type in ("wall", "gate"):
+            if new_type in ("wall", "gate", "invariant"):
                 indent = line[:len(line) - len(line.lstrip())]
                 new_lines.append(f"{indent}enforcement: gate")
                 enforcement_updated = True
-            elif new_type == "vacuole":
+            elif new_type in ("vacuole", "trap"):
                 pass
             else:
                 new_lines.append(line)
         elif stripped.startswith("enforcement_artifact:"):
-            if new_type == "vacuole":
+            if new_type in ("vacuole", "trap"):
                 pass
             else:
                 new_lines.append(line)
@@ -244,7 +266,7 @@ def _transform_frontmatter_type(content: str, new_type: str) -> str:
     if not type_updated:
         new_lines.append(f"type: {new_type}")
 
-    if new_type in ("wall", "gate") and not enforcement_updated:
+    if new_type in ("wall", "gate", "invariant") and not enforcement_updated:
         new_lines.append("enforcement: gate")
 
     return "---\n" + "\n".join(new_lines).strip() + "\n" + body

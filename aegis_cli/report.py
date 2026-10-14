@@ -9,7 +9,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 
 from aegis_cli import resolve_root, sanitize_display
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_cli.init import STARTER_RULES
 from aegis_core.evidence import aggregate_signals
 
@@ -164,7 +164,7 @@ def run_report(args: argparse.Namespace) -> int:
     return 0
 
 
-class ReportCommand(SomaCommand):
+class ReportCommand(AegisCommand):
     """Command to show session report card."""
 
     name = "report"

@@ -342,7 +342,7 @@ class TestSomaYAMLBranchHardening:
         assert doc.source_path == "/tmp/doc.md"
         assert doc.to_dict() == {"kind": "skill", "id": "s1", "type": "wall", "tier": "method", "consumes": [], "produces": [], "handoff_targets": []}
         assert list(iter(doc)) == ["kind", "id", "type", "tier", "consumes", "produces", "handoff_targets"]
-        assert "SomaDocument" in repr(doc)
+        assert ("AegisDocument" in repr(doc) or "SomaDocument" in repr(doc))
         assert doc["id"] == "s1"
         assert doc.get("nonexistent", "fallback") == "fallback"
         assert "id" in doc.keys()

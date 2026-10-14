@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
 from aegis_core.errors import SomaValidationError
-from aegis_core.somayaml import SomaDocument, SomaYAML
+from aegis_core.yaml import SomaDocument, SomaYAML
 
 __all__ = ["SkillNode", "SkillGraph"]
 

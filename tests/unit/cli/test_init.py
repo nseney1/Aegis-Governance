@@ -162,17 +162,23 @@ class TestInstallStarterRules:
         assert set(STARTER_RULES) == expected
 
 
-class TestExistingSomaDir:
-    """Verify behavior when .soma/ already exists."""
+class TestExistingWorkspaceDir:
+    """Verify behavior when .aegis/ or .soma/ already exists."""
+
+    def test_existing_aegis_dir_detected(self, tmp_path):
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+        from aegis_cli.init import check_existing_install
+        assert check_existing_install(tmp_path) is True
 
     def test_existing_soma_dir_detected(self, tmp_path):
         (tmp_path / ".soma").mkdir()
-        from soma_cli.init import check_existing_install
+        from aegis_cli.init import check_existing_install
         assert check_existing_install(tmp_path) is True
 
-    def test_no_soma_dir(self, tmp_path):
-        from soma_cli.init import check_existing_install
+    def test_no_governance_dir(self, tmp_path):
+        from aegis_cli.init import check_existing_install
         assert check_existing_install(tmp_path) is False
+
 
 
 class TestRunInit:

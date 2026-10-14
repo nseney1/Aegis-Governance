@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_cli.verify import (
     run_verify,
     resolve_target_files,
@@ -75,7 +75,7 @@ def run_check(args: argparse.Namespace) -> int:
     return run_verify(args)
 
 
-class CheckCommand(SomaCommand):
+class CheckCommand(AegisCommand):
     """Unified verification gate for AI coding agent changes."""
 
     name = "check"

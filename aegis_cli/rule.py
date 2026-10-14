@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.workspace import Workspace
 from aegis_core.lifecycle import (
     promote_cell,
@@ -75,7 +75,7 @@ def _resolve_workspace_root(args: argparse.Namespace) -> Path:
 
 def _run_list(args: argparse.Namespace) -> int:
     """List active rules and fitness metrics."""
-    from aegis_core.somayaml import parse_frontmatter
+    from aegis_core.yaml import parse_frontmatter
     root = _resolve_workspace_root(args)
     rules_dir = (root / ".aegis" / "rules") if (root / ".aegis" / "rules").is_dir() else (root / ".soma" / "cells")
     if not rules_dir.is_dir():
@@ -138,7 +138,7 @@ def _run_promote(args: argparse.Namespace) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
     root = _resolve_workspace_root(args)
-    rule_id = getattr(args, "rule_id", None) or getattr(args, "cell", None) or getattr(args, "cell_id", None)
+    rule_id = getattr(args, "rule", None) or getattr(args, "rule_id", None) or getattr(args, "cell", None) or getattr(args, "cell_id", None)
     dry_run = getattr(args, "dry_run", False)
     use_json = getattr(args, "json", False)
     force = getattr(args, "force", False)
@@ -221,7 +221,7 @@ def _run_demote(args: argparse.Namespace) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
     root = _resolve_workspace_root(args)
-    rule_id = getattr(args, "rule_id", None) or getattr(args, "cell", None) or getattr(args, "cell_id", None)
+    rule_id = getattr(args, "rule", None) or getattr(args, "rule_id", None) or getattr(args, "cell", None) or getattr(args, "cell_id", None)
     dry_run = getattr(args, "dry_run", False)
     use_json = getattr(args, "json", False)
 
@@ -351,7 +351,7 @@ def is_purge_candidate(file_path: Path) -> tuple[bool, str]:
         return True, "leaked_internal_rule"
 
     try:
-        from aegis_core.somayaml import parse_frontmatter
+        from aegis_core.yaml import parse_frontmatter
         content = file_path.read_text(encoding="utf-8-sig", errors="replace")
         meta = parse_frontmatter(content)
         if meta and isinstance(meta, dict):
@@ -510,7 +510,7 @@ def _run_clean(args: argparse.Namespace) -> int:
 run_clean_rules = _run_clean
 
 
-class RuleCommand(SomaCommand):
+class RuleCommand(AegisCommand):
     """Unified rule lifecycle management."""
 
     name = "rule"
@@ -529,6 +529,7 @@ class RuleCommand(SomaCommand):
         # promote
         p_prom = sub.add_parser("promote", help="Promote a rule up lifecycle tiers")
         p_prom.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to promote")
+        p_prom.add_argument("--rule", default=None, help="Rule identifier to promote")
         p_prom.add_argument("--cell", default=None, help="Rule identifier alias")
         p_prom.add_argument("--reason", help="Audit explanation for promotion")
         p_prom.add_argument("--force", action="store_true", help="Bypass evidence threshold checks")
@@ -538,6 +539,7 @@ class RuleCommand(SomaCommand):
         # demote
         p_dem = sub.add_parser("demote", help="Demote a rule down lifecycle tiers")
         p_dem.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to demote")
+        p_dem.add_argument("--rule", default=None, help="Rule identifier to demote")
         p_dem.add_argument("--cell", default=None, help="Rule identifier alias")
         p_dem.add_argument("--reason", help="Audit explanation for demotion")
         p_dem.add_argument("--force", action="store_true", help="Force demotion")

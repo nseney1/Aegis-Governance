@@ -1,4 +1,4 @@
-"""Tests for soma_core.sentinels — Subagent liveness, deadlock detection, and escalation sentinels."""
+"""Tests for aegis_core.sentinels — Subagent liveness, deadlock detection, and escalation sentinels."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 import pytest
 
-from soma_core.sentinels import (
+from aegis_core.sentinels import (
+    check_boundary_overrides,
     check_liveness,
     classify_file,
     is_test_file,
@@ -15,7 +16,7 @@ from soma_core.sentinels import (
     write_frontmatter,
     recommend_protocol,
 )
-from soma_core.somayaml import parse_frontmatter
+from aegis_core.yaml import parse_frontmatter
 
 
 def test_check_liveness_healthy_and_stalled() -> None:
@@ -40,7 +41,7 @@ def test_check_liveness_invalid_json() -> None:
 def test_classify_file_sensitivity() -> None:
     assert classify_file("Makefile") == "HIGH"
     assert classify_file("install.sh") == "HIGH"
-    assert classify_file("soma_core/auth.py") == "HIGH"
+    assert classify_file("aegis_core/auth.py") == "HIGH"
     assert classify_file(".github/workflows/ci.yml") == "HIGH"
     assert classify_file("requirements.txt") == "HIGH"
 
@@ -49,8 +50,8 @@ def test_classify_file_sensitivity() -> None:
     assert classify_file("LICENSE") == "LOW"
     assert classify_file("data.json") == "LOW"
 
-    assert classify_file("soma_core/lifecycle.py") == "MEDIUM"
-    assert classify_file("genome/testing.md") == "MEDIUM"
+    assert classify_file("aegis_core/lifecycle.py") == "MEDIUM"
+    assert classify_file("rules/testing.md") == "MEDIUM"
 
 
 def test_is_test_file() -> None:
@@ -70,18 +71,58 @@ def test_set_review_mode(tmp_path: Path) -> None:
 
 
 def test_write_frontmatter(tmp_path: Path) -> None:
-    target = tmp_path / "cell.md"
-    metadata = {"id": "test-cell", "type": "wall"}
+    target = tmp_path / "rule.md"
+    metadata = {"id": "test-rule", "type": "invariant"}
     body = "Body description\n"
     write_frontmatter(str(target), metadata, body)
 
     content = target.read_text(encoding="utf-8")
     fm = parse_frontmatter(content)
-    assert fm["id"] == "test-cell"
-    assert fm["type"] == "wall"
+    assert fm["id"] == "test-rule"
+    assert fm["type"] == "invariant"
     assert "Body description" in content
 
 
 def test_recommend_protocol_no_changes(tmp_path: Path) -> None:
     ret = recommend_protocol("--staged", [], tmp_path)
     assert ret == 1
+
+
+def test_check_boundary_overrides_escalates_on_aegis_boundaries_and_invariants(tmp_path: Path) -> None:
+    boundaries_dir = tmp_path / ".aegis" / "rules" / "boundaries"
+    invariants_dir = tmp_path / ".aegis" / "rules" / "invariants"
+    boundaries_dir.mkdir(parents=True)
+    invariants_dir.mkdir(parents=True)
+
+    (boundaries_dir / "boundary-core.md").write_text(
+        "---\n"
+        "id: boundary-core\n"
+        "type: boundary\n"
+        "target_paths:\n"
+        "  - aegis_core/**\n"
+        "minimum_mode: GALE\n"
+        "---\n"
+        "# Boundary Core\n",
+        encoding="utf-8",
+    )
+    (invariants_dir / "inv-auth.md").write_text(
+        "---\n"
+        "id: inv-auth\n"
+        "type: invariant\n"
+        "target_paths:\n"
+        "  - aegis_core/auth.py\n"
+        "minimum_mode: TEMPEST\n"
+        "---\n"
+        "# Invariant Auth\n",
+        encoding="utf-8",
+    )
+
+    mode, rule_id = check_boundary_overrides(["aegis_core/engine.py"], str(tmp_path), "BREEZE")
+    assert mode == "GALE"
+    assert rule_id == "boundary-core"
+
+    mode2, rule_id2 = check_boundary_overrides(["aegis_core/auth.py"], str(tmp_path), "BREEZE")
+    assert mode2 == "TEMPEST"
+    assert rule_id2 == "inv-auth"
+
+

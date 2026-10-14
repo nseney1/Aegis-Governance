@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from aegis_core.cell_inventory import CellInventoryError, inventory_cells
-from aegis_core.somayaml import parse_frontmatter
+from aegis_core.yaml import parse_frontmatter
 from aegis_core.telemetry import EventConflictError, StaleGenerationError
 from aegis_core.workspace import Workspace
 
