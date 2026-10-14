@@ -120,6 +120,22 @@ def run_report(args: argparse.Namespace) -> int:
     fires_col_width = 2 + fires_num_width + 1 + 5 + 2
     inner_width = 2 + 2 + 2 + name_width + 8 + fires_col_width
 
+    trig_count = sum(1 for _, c in rule_stats if c > 0)
+    total_rules = len(rule_stats)
+    total_events = len(selected_session)
+
+    if getattr(args, "json", False) or getattr(args, "format", None) == "json":
+        import json
+        payload = {
+            "rules_triggered": trig_count,
+            "total_rules": total_rules,
+            "total_events": total_events,
+            "session": session_idx,
+            "rules": [{"rule": name, "fires": count} for name, count in rule_stats],
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
     lines = []
     lines.append(f"╭{'─' * inner_width}╮")
 
@@ -133,12 +149,9 @@ def run_report(args: argparse.Namespace) -> int:
 
     lines.append(f"├{'─' * inner_width}┤")
 
-    trig_count = sum(1 for _, c in rule_stats if c > 0)
-    total_rules = len(rule_stats)
     trig_line = f"  Rules triggered:    {trig_count} of {total_rules}"
     lines.append(f"│{trig_line:<{inner_width}}│")
 
-    total_events = len(selected_session)
     ev_line = f"  Total events:       {total_events}"
     lines.append(f"│{ev_line:<{inner_width}}│")
 
@@ -160,8 +173,15 @@ def run_report(args: argparse.Namespace) -> int:
         lines.append(line)
 
     lines.append(f"╰{'─' * inner_width}╯")
-    print("\n".join(lines))
+    output = "\n".join(lines)
+    if getattr(args, "plain", False) or getattr(args, "no_emoji", False):
+        from aegis_cli import format_plain
+        for em in ("📊", "🛡️", "📋", "🔒", "💰", "🌿", "📌", "😴"):
+            output = output.replace(em, "  ")
+        output = format_plain(output)
+    print(output)
     return 0
+
 
 
 class ReportCommand(AegisCommand):

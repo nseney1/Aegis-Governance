@@ -185,7 +185,7 @@ def test_check_ast_drivers_missing_driver_warns_and_fixes(tmp_path, capsys):
     assert _check_ast_drivers(tmp_path, fix=False) is False
     out = capsys.readouterr().out
     assert "unconfigured driver for detected source language" in out
-    assert "Run 'soma doctor --fix' to provision" in out
+    assert "Run 'aegis doctor --fix' to provision" in out
 
     # With fix flag: auto-provisions and returns True
     assert _check_ast_drivers(tmp_path, fix=True) is True
@@ -254,7 +254,8 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
         res = run_doctor(args)
     assert not (tmp_path / ".soma" / "slots.yaml").exists()
     out = capsys.readouterr().out
-    assert "Run 'soma doctor --fix' to provision" in out
+    assert "Run 'aegis doctor --fix' to provision" in out
+
 
 
 def test_run_doctor_drivers_flag(tmp_path):
@@ -337,3 +338,37 @@ def test_check_precommit_hook_all_branches(tmp_path, capsys):
     hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\nsoma checkpoint --pre-commit\n# <<< aegis pre-commit <<<\n", encoding="utf-8")
     assert _check_precommit_hook(tmp_path) is False
     assert "Pre-commit hook uses an old block" in capsys.readouterr().out
+
+
+def test_doctor_json_mode_and_warning_counts(tmp_path, monkeypatch, capsys):
+    """v3.0.0: doctor supports --json, prints 'aegis doctor', tallies warnings, and includes Fix: lines."""
+    import json
+
+    (tmp_path / ".gemini").mkdir()
+    (tmp_path / ".aegis" / "evidence").mkdir(parents=True)
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+
+    monkeypatch.chdir(tmp_path)
+    with patch("soma_cli.doctor.shutil.which", return_value="/usr/local/bin/aegis"), \
+         patch("soma_cli.init.get_rules_dir", return_value=rules_dir):
+        # 1. Text mode with missing rules -> fails with Fix: remediation and warning/fail summary
+        rc_text = run_doctor(argparse.Namespace())
+        assert rc_text == 1
+        out_text = capsys.readouterr().out
+        assert "aegis doctor — running health checks" in out_text
+        assert "Fix:" in out_text
+        assert "warning" in out_text and "failed" in out_text
+
+        # 2. JSON mode -> valid JSON with zero ANSI codes
+        (rules_dir / "example.md").write_text("# rule", encoding="utf-8")
+        rc_json = run_doctor(argparse.Namespace(json=True))
+        assert rc_json == 0
+        raw_json = capsys.readouterr().out
+        assert "\x1b[" not in raw_json
+        payload = json.loads(raw_json)
+        assert payload["ok"] is True
+        assert payload["passed"] >= 6
+        assert "warnings" in payload
+        assert payload["failed"] == 0
+

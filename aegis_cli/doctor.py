@@ -65,6 +65,7 @@ def _check_platform(project_root: Path | None = None) -> str | None:
         print(f"  ✅ Platform detected: {platform}")
         return platform
     print("  ❌ No AI platform detected")
+    print("    Fix: Run 'aegis init' to initialize workspace governance rules.")
     return None
 
 
@@ -72,6 +73,7 @@ def _check_rules(platform: str | None, project_root: Path | None = None) -> bool
     """Check that rules directory has ≥1 .md file."""
     if platform is None:
         print("  ❌ Rules check skipped (no platform)")
+        print("    Fix: Run 'aegis init' to install starter rules.")
         return False
     from aegis_cli.init import get_rules_dir
 
@@ -84,6 +86,7 @@ def _check_rules(platform: str | None, project_root: Path | None = None) -> bool
         print(f"  ✅ Rules installed ({len(md_files)} .md files in {rules_dir})")
         return True
     print(f"  ❌ No .md rules found in {rules_dir}")
+    print("    Fix: Run 'aegis init' to install starter rules.")
     return False
 
 
@@ -96,6 +99,7 @@ def _check_evidence_dir(project_root: Path | None = None) -> bool:
             print(f"  ✅ Evidence directory writable ({evidence})")
             return True
         print(f"  ❌ Evidence directory not writable ({evidence})")
+        print(f"    Fix: Verify write permissions on {evidence}.")
         return False
     # Directory doesn't exist — check if parent is writable
     parent = evidence.parent
@@ -103,7 +107,9 @@ def _check_evidence_dir(project_root: Path | None = None) -> bool:
         print(f"  ✅ Evidence directory can be created ({evidence})")
         return True
     print(f"  ❌ Evidence directory does not exist ({evidence})")
+    print("    Fix: Run 'aegis init' to create workspace directories.")
     return False
+
 
 
 def _check_cli_resolvable() -> bool:
@@ -217,7 +223,7 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
             else:
                 missing_exts = sorted(set().union(*(d.get("extensions", []) for d in non_py_langs.values())))
                 ext_str = ", ".join(missing_exts) if missing_exts else ", ".join(non_py_langs.keys())
-                print(f"  ⚠️  AST drivers: unconfigured driver for detected source language(s): {ext_str}. Run 'soma doctor --fix' to provision.")
+                print(f"  ⚠️  AST drivers: unconfigured driver for detected source language(s): {ext_str}. Run 'aegis doctor --fix' to provision.")
                 return False
         if not slots_path.is_file():
             print("  ✅ AST drivers: native Python stdlib (in-process)")
@@ -254,8 +260,9 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
                         ext = slot_name[len("ast_driver_"):]
                         ast_drivers[f".{ext}"] = str(slot_val)
         else:
-            print(f"  ⚠️  AST drivers: unconfigured driver for detected source extension(s): {', '.join(missing)}. Run 'soma doctor --fix' to provision.")
+            print(f"  ⚠️  AST drivers: unconfigured driver for detected source extension(s): {', '.join(missing)}. Run 'aegis doctor --fix' to provision.")
             return False
+
 
     if not ast_drivers:
         print("  ✅ AST drivers: native Python stdlib (in-process)")
@@ -532,42 +539,72 @@ def run_doctor(args: argparse.Namespace) -> int:
         return fix_path(yes=getattr(args, "yes", False))
     if getattr(args, "yes", False):
         print("--yes only applies to --fix-path", file=sys.stderr)
+    import contextlib
+    import io
+    from aegis_cli.ui.theme import strip_ansi
     from aegis_core.workspace import Workspace
 
     ws_obj = getattr(args, "ws", None) or Workspace.resolve(
         getattr(args, "workspace", None) or getattr(args, "_project_root", None)
     )
     ws = ws_obj.root
+    use_json = bool(getattr(args, "json", False) or getattr(args, "format", None) == "json")
 
     if getattr(args, "drivers", False):
-        print(f"soma doctor — AST driver health check ({ws}):\n")
+        if not use_json:
+            print(f"aegis doctor — AST driver health check ({ws}):\n")
         fix = getattr(args, "fix", False)
         ok = _check_ast_drivers(ws, fix=fix)
         return 0 if ok else 1
 
-    print(f"soma doctor — running health checks ({ws}):\n")
-    results: list[bool] = []
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf) if use_json else contextlib.nullcontext():
+        if not use_json:
+            print(f"aegis doctor — running health checks ({ws}):\n")
+        results: list[bool] = []
 
-    results.append(_check_python_version())
-    results.append(_check_zero_dependencies())
-    platform = _check_platform(ws)
-    results.append(platform is not None)
-    results.append(_check_rules(platform, ws))
-    results.append(_check_evidence_dir(ws))
-    results.append(_check_cli_resolvable())
-    hook_ok = _check_precommit_hook(ws)
-    if hook_ok is not None:
-        results.append(hook_ok)
-    fix = getattr(args, "fix", False)
-    # Advisory: report configured AST drivers (polyglot drivers are optional)
-    _check_ast_drivers(ws, fix=fix)
-    # Advisory: only MCP users need it, so it does not fail the run.
-    _check_mcp_launcher()
+        results.append(_check_python_version())
+        results.append(_check_zero_dependencies())
+        platform = _check_platform(ws)
+        results.append(platform is not None)
+        results.append(_check_rules(platform, ws))
+        results.append(_check_evidence_dir(ws))
+        results.append(_check_cli_resolvable())
+        hook_ok = _check_precommit_hook(ws)
+        if hook_ok is not None:
+            results.append(hook_ok)
+        fix = getattr(args, "fix", False)
+        # Advisory: report configured AST drivers (polyglot drivers are optional)
+        ast_ok = _check_ast_drivers(ws, fix=fix)
+        # Advisory: only MCP users need it, so it does not fail the run.
+        mcp_ok = _check_mcp_launcher()
 
     passed = sum(results)
     total = len(results)
-    print(f"\n{passed}/{total} checks passed.")
+    failed = total - passed
+    warnings = (0 if ast_ok else 1) + (0 if mcp_ok else 1)
+
+    if use_json:
+        payload = {
+            "workspace": str(ws),
+            "passed": passed,
+            "warnings": warnings,
+            "failed": failed,
+            "total": total,
+            "ok": failed == 0,
+            "details": [
+                strip_ansi(line.strip())
+                for line in buf.getvalue().splitlines()
+                if line.strip()
+            ],
+        }
+        print(json.dumps(payload, indent=2))
+        return 0 if all(results) else 1
+
+    warn_label = "warning" if warnings == 1 else "warnings"
+    print(f"\n{passed}/{total} checks passed ({passed} passed, {warnings} {warn_label}, {failed} failed).")
     return 0 if all(results) else 1
+
 
 
 class DoctorCommand(AegisCommand):

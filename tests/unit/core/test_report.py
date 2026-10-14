@@ -260,3 +260,32 @@ class TestReportEdgeCases:
         with patch("soma_cli.report.run_report", return_value=0) as mock_run:
             assert cmd.execute(parsed) == 0
             mock_run.assert_called_once_with(parsed)
+
+    def test_report_json_and_plain_modes(self, tmp_path, capsys):
+        """v3.0.0: report supports --json and --plain without leaking ANSI or Unicode emojis."""
+        base_time = datetime(2026, 9, 30, 14, 0, 0, tzinfo=timezone.utc)
+        _write_ledger(
+            tmp_path,
+            [
+                _create_event("providence", base_time),
+                _create_event("providence", base_time + timedelta(minutes=1)),
+            ],
+        )
+
+        # JSON mode
+        assert run_report(argparse.Namespace(session=-1, _root=tmp_path, json=True)) == 0
+        raw_json = capsys.readouterr().out
+        assert "\x1b[" not in raw_json
+        payload = json.loads(raw_json)
+        assert payload["total_events"] == 2
+        assert payload["rules_triggered"] == 1
+        assert any(r["rule"] == "providence" and r["fires"] == 2 for r in payload["rules"])
+
+        # Plain mode
+        assert run_report(argparse.Namespace(session=-1, _root=tmp_path, plain=True)) == 0
+        out_plain = capsys.readouterr().out
+        assert "\x1b[" not in out_plain
+        assert "📊" not in out_plain
+        assert "🛡️" not in out_plain
+        assert "Rules triggered:    1 of 5" in out_plain
+
