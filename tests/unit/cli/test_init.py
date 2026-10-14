@@ -567,6 +567,34 @@ class TestRuleDiscovery:
         monkeypatch.setattr("importlib.resources.files", lambda mod: pkg_with_rules / "aegis_cli")
         assert init_mod._get_soma_root() == pkg_with_rules
 
+    def test_init_delegates_detect_platform_and_get_rules_dir_to_platforms_module(self):
+        """v3.0.0: init.py re-exports detect_platform and get_rules_dir from aegis_cli.platforms."""
+        from aegis_cli import init as init_mod
+        from aegis_cli import platforms as platforms_mod
 
+        assert hasattr(platforms_mod, "detect_platform")
+        assert hasattr(platforms_mod, "get_rules_dir")
+        assert init_mod.detect_platform is platforms_mod.detect_platform
+        assert init_mod.get_rules_dir is platforms_mod.get_rules_dir
 
+    def test_init_branded_aegis_header_and_dry_run_badges(self, tmp_path, capsys):
+        """v3.0.0: init prints Aegis Guardrails header, aegis report, and [DRY-RUN]/[SKIP] badges."""
+        from aegis_cli.init import run_init
 
+        (tmp_path / ".gemini").mkdir()
+        args_dry = argparse.Namespace(
+            dry_run=True,
+            platform="gemini",
+            yes=True,
+            force=False,
+            rules="minimal",
+            _project_root=tmp_path,
+            _home=tmp_path,
+        )
+        assert run_init(args_dry) == 0
+        out_dry = capsys.readouterr().out
+        assert "Aegis Guardrails — Workspace Setup" in out_dry
+        assert "Soma Governance" not in out_dry
+        assert "aegis report" in out_dry
+        assert "[DRY-RUN] providence" in out_dry
+        assert "✅ providence" not in out_dry
