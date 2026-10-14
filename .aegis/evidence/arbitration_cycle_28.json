@@ -1,6 +1,6 @@
 {
   "cycle": 28,
-  "timestamp": "2026-10-14T09:17:00.816791+00:00",
+  "timestamp": "2026-10-14T09:21:37.276213+00:00",
   "verdict": "ship",
   "divergence_count": 0,
   "convergence_count": 4,
@@ -343,6 +343,6 @@
     "tests/unit/verification/test_call_graph_dispatch.py",
     "tests/unit/verification/test_static_invariants.py"
   ],
-  "commit_sha": "2aff4bf64e0c1c28d2ca65bd73ef9f30b9f6674f",
-  "tree_hash": "10fadfb2e7218b0b68ab039b351c59cb96216958"
+  "commit_sha": "b9e0ab0d2091328557d92954819690b1078b5a4a",
+  "tree_hash": "80398484ee3d924750b02b32a72929945f14bd95"
 }
