@@ -11,7 +11,7 @@ import shutil
 import sys
 from typing import Optional
 
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter
 from aegis_core.workspace import Workspace, resolve_workspace
 from .constants import (
     EXTINCTION_THRESHOLD,
@@ -60,26 +60,25 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
             except Exception:
                 continue
 
-            fm_match = re.search(r"^---\n(.*?)\n---", content, re.DOTALL)
-            if not fm_match:
+            meta = parse_frontmatter(content)
+            if not meta:
                 continue
-            fm = fm_match.group(1)
+            fitness = meta.get("fitness") if isinstance(meta.get("fitness"), dict) else {}
 
             def get_val(key: str, default: float = 0.0) -> float:
-                m = re.search(rf"{key}:\s*(\S+)", fm)
-                if m and m.group(1) != "null":
+                raw = fitness.get(key, meta.get(key))
+                if raw is not None and str(raw) != "null":
                     try:
-                        return float(m.group(1))
-                    except ValueError:
+                        return float(raw)
+                    except (ValueError, TypeError):
                         return default
                 return default
 
             triggers = get_val("triggers", 0.0)
             tp = get_val("true_positives", 0.0)
             fp = get_val("false_positives", 0.0)
-            type_match = re.search(r"type:\s*([^\s\n]+)", fm)
-            cell_type = type_match.group(1) if type_match else ""
-            dormant = "dormant_since" in fm
+            cell_type = str(meta.get("type", ""))
+            dormant = "dormant_since" in meta or "dormant_since" in fitness
 
             if triggers == 0:
                 category = "DORMANT"
@@ -112,8 +111,9 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
                         action = "moved_to_archive"
                 elif category == "DORMANT" and not dormant:
                     timestamp = datetime.now(timezone.utc).isoformat() + "Z"
-                    new_content = content.replace("fitness:", f"dormant_since: {timestamp}\nfitness:")
-                    fpath.write_text(new_content, encoding="utf-8")
+                    meta["dormant_since"] = timestamp
+                    body = _get_body(content).lstrip()
+                    fpath.write_text(dump_frontmatter(meta, body=body), encoding="utf-8")
                     action = "marked_dormant"
 
                 if action:

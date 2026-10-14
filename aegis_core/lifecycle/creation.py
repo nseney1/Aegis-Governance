@@ -392,9 +392,9 @@ def transfer_cell(
     dest_dir = target_dir / ".soma" / "cells" / target_sub
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / source_path.name
+    from aegis_core.yaml import _get_body
     new_fm = dump_frontmatter(meta)
-    end_idx = content.find("---", 3)
-    body = content[end_idx + 3:].lstrip() if end_idx != -1 else ""
+    body = _get_body(content).lstrip()
     new_content = f"---\n{new_fm.strip()}\n---\n\n{body}\n" if body else f"---\n{new_fm.strip()}\n---\n"
     dest_path.write_text(new_content, encoding="utf-8")
 

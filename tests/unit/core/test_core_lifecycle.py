@@ -256,3 +256,17 @@ class TestCellPromoteAndDemote:
         res = demote_cell(workspace, "guarded-cell")
         assert res["status"] == "demoted"
         assert not gate_script.exists()
+
+    def test_lifecycle_frontmatter_and_storage_consolidation(self):
+        """Ensure lifecycle, sync, and telemetry delegate frontmatter and fsync/atomic storage to yaml.py and storage.py."""
+        import inspect
+        from aegis_core import storage, sync, telemetry
+        from aegis_core.lifecycle import creation, parsers, promotion, selection
+
+        assert hasattr(storage, "atomic_write_and_unlink")
+        for mod in (creation, parsers, promotion, selection, sync, telemetry):
+            src = inspect.getsource(mod)
+            assert 'find("---", 3)' not in src, f"{mod.__name__} still uses naive find('---', 3)"
+            assert "def _fsync_dir" not in src, f"{mod.__name__} still defines duplicate _fsync_dir"
+            assert "def _atomic_write_and_unlink" not in src, f"{mod.__name__} still defines duplicate _atomic_write_and_unlink"
+

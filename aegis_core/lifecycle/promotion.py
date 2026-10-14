@@ -398,11 +398,11 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
                 content = f.read()
         except Exception:
             continue
-        end_idx = content.find("---", 3)
-        if end_idx == -1:
+        from aegis_core.yaml import _get_body, parse_rule_frontmatter
+        try:
+            metadata, body = parse_rule_frontmatter(content)
+        except Exception:
             continue
-        frontmatter_str = content[3:end_idx].strip("\n")
-        metadata = parse_frontmatter(content) or {}
 
         cell_name = os.path.basename(file_path)
         cell_base = os.path.splitext(cell_name)[0]
@@ -445,7 +445,6 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
                 reason = "FP rate > 0.30 or escaped defects spike"
 
         evaluated += 1
-        lines = frontmatter_str.split("\n")
 
         if new_tier != enforcement:
             changes.append({
@@ -454,39 +453,11 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
                 "new_tier": new_tier,
                 "reason": reason,
             })
-            for i, line in enumerate(lines):
-                if line.startswith("enforcement:"):
-                    lines[i] = f"enforcement: {new_tier}"
-                    break
-            else:
-                lines.append(f"enforcement: {new_tier}")
+            metadata["enforcement"] = new_tier
 
         if execute:
-            has_decay_epoch = False
-            for i, line in enumerate(lines):
-                stripped = line.lstrip()
-                if stripped.startswith("triggers:"):
-                    lines[i] = line[:len(line) - len(stripped)] + f"triggers: {fitness.get('triggers', 0)}"
-                elif stripped.startswith("true_positives:"):
-                    lines[i] = line[:len(line) - len(stripped)] + f"true_positives: {fitness.get('true_positives', 0)}"
-                elif stripped.startswith("false_positives:"):
-                    lines[i] = line[:len(line) - len(stripped)] + f"false_positives: {fitness.get('false_positives', 0)}"
-                elif stripped.startswith("score:"):
-                    lines[i] = line[:len(line) - len(stripped)] + f"score: {fitness.get('score', 0.5)}"
-                elif stripped.startswith("last_decay_epoch:"):
-                    lines[i] = line[:len(line) - len(stripped)] + f"last_decay_epoch: {fitness.get('last_decay_epoch', 0)}"
-                    has_decay_epoch = True
-
-            if not has_decay_epoch and "last_decay_epoch" in fitness:
-                for i, line in enumerate(lines):
-                    if line.lstrip().startswith("score:"):
-                        indent = line[:len(line) - len(line.lstrip())]
-                        lines.insert(i + 1, f"{indent}last_decay_epoch: {fitness['last_decay_epoch']}")
-                        break
-
-            new_frontmatter = "\n".join(lines)
             with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"---\n{new_frontmatter}\n---{content[end_idx + 3:]}")
+                f.write(dump_frontmatter(metadata, body=body))
 
             if new_tier in ("mechanical", "gate") and new_tier != enforcement:
                 try:
@@ -507,6 +478,7 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
                     with open(artifact_path, "w", encoding="utf-8") as af:
                         af.write(artifact_content)
                     os.chmod(artifact_path, 0o755)
+                    metadata["_path"] = file_path
                     update_cell_enforcement_artifact(metadata, artifact_path, str(ws.root))
                 except Exception:
                     pass
@@ -585,9 +557,9 @@ def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) ->
         target_path = target_dir / cell_path.name
 
     target_dir.mkdir(parents=True, exist_ok=True)
+    from aegis_core.yaml import _get_body
     nfm = dump_frontmatter(meta)
-    end_idx = content.find("---", 3)
-    body = content[end_idx + 3:].lstrip() if end_idx != -1 else ""
+    body = _get_body(content).lstrip()
     target_path.write_text(f"---\n{nfm.strip()}\n---\n\n{body}\n" if body else f"---\n{nfm.strip()}\n---\n", encoding="utf-8")
     cell_path.unlink()
 
@@ -641,6 +613,7 @@ def adapt_cell(workspace: Workspace | Path | str, generate: bool = False) -> lis
             results.append(item)
 
             if generate:
+                from aegis_core.yaml import _get_body
                 v2_name = f"{fpath.stem}_v2.md"
                 v2_path = fpath.parent / v2_name
                 meta_v2 = dict(meta)
@@ -649,8 +622,7 @@ def adapt_cell(workspace: Workspace | Path | str, generate: bool = False) -> lis
                 meta_v2["lineage"] = [fpath.name]
                 meta_v2["created"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 nfm = dump_frontmatter(meta_v2)
-                end_idx = content.find("---", 3)
-                body = content[end_idx + 3:].lstrip() if end_idx != -1 else ""
+                body = _get_body(content).lstrip()
                 v2_path.write_text(f"---\n{nfm.strip()}\n---\n\n{body}\n" if body else f"---\n{nfm.strip()}\n---\n", encoding="utf-8")
                 item["generated"] = str(v2_path)
 
