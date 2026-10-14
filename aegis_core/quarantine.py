@@ -30,19 +30,25 @@ def _resolve_workspace(file_path: Path, workspace: Optional[Path | str] = None) 
         return file_path.resolve().parent
 
 
+def _resolve_quarantine_dir(ws: Path) -> Path:
+    if (ws / ".aegis").is_dir() or not (ws / ".soma").is_dir():
+        return ws / ".aegis" / QUARANTINE_DIR
+    return ws / ".soma" / QUARANTINE_DIR
+
+
 def quarantine_file(
     file_path: Path,
     reason: str,
     workspace: Optional[Path | str] = None,
 ) -> Path:
-    """Isolate a damaged file into .soma/quarantine/ and record diagnostics.
+    """Isolate a damaged file into .aegis/quarantine/ (or .soma/quarantine/) and record diagnostics.
 
     Returns:
         The new quarantined file path.
     """
     path = Path(file_path).resolve()
     ws = _resolve_workspace(path, workspace)
-    q_dir = ws / ".soma" / QUARANTINE_DIR
+    q_dir = _resolve_quarantine_dir(ws)
     q_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = int(time.time())
@@ -172,7 +178,7 @@ def _extract_timestamp(filename: str, log_ts_str: Optional[str] = None, fallback
 def list_quarantine(workspace: Optional[Path | str] = None) -> list[dict[str, Any]]:
     """List all quarantined files with reasons, timestamps, and sizes."""
     ws = Path(workspace).resolve() if workspace else Path.cwd()
-    q_dir = ws / ".soma" / QUARANTINE_DIR
+    q_dir = _resolve_quarantine_dir(ws)
     if not q_dir.exists():
         return []
 
@@ -212,7 +218,7 @@ def list_quarantine(workspace: Optional[Path | str] = None) -> list[dict[str, An
 def inspect_quarantined_file(filename_or_path: str, workspace: Optional[Path | str] = None) -> Optional[dict[str, Any]]:
     """Inspect a quarantined file and return preview content and diagnostics."""
     ws = Path(workspace).resolve() if workspace else Path.cwd()
-    q_dir = ws / ".soma" / QUARANTINE_DIR
+    q_dir = _resolve_quarantine_dir(ws)
     target_name = Path(filename_or_path).name
     target_file = q_dir / target_name
     if not target_file.exists():
@@ -248,7 +254,7 @@ def prune_quarantine(older_than_days: int = 30, workspace: Optional[Path | str] 
     Returns the number of deleted files.
     """
     ws = Path(workspace).resolve() if workspace else Path.cwd()
-    q_dir = ws / ".soma" / QUARANTINE_DIR
+    q_dir = _resolve_quarantine_dir(ws)
     if not q_dir.exists():
         return 0
 

@@ -28,7 +28,9 @@ class SlotRegistry:
     def load(cls, workspace_root: Path | str) -> SlotRegistry:
         """Load slot definitions from .soma/slots.yaml or return empty registry."""
         root = Path(workspace_root)
-        slots_file = root / ".soma" / "slots.yaml"
+        slots_file = root / ".aegis" / "slots.yaml"
+        if not slots_file.exists():
+            slots_file = root / ".soma" / "slots.yaml"
         if not slots_file.exists():
             return cls({})
 
