@@ -21,7 +21,7 @@ except ImportError:
     _HAS_SDK = False
 
 try:
-    from aegis_core.arbitration import soma_propose_change
+    from aegis_core.proposals import soma_propose_change
 except ImportError:
     soma_propose_change = None
 

@@ -11,10 +11,10 @@ Counts are generated from the source tree with mutually exclusive categories: pa
 | Category | Primary Language / Location | Count | Description |
 |:---------|:----------------------------|:------|:------------|
 | [Lifecycle Scripts (Hooks)](#lifecycle-scripts-hooks--bash) | bash (`install/hooks/`) | 1 | Git pre-commit lifecycle hook |
-| [Verification Scripts](#verification-scripts--python) | Python (`aegis_core/verification/`) | 14 | Deterministic AST checkers, coverage tools, and adversarial verification |
+| [Verification Scripts](#verification-scripts--python) | Python (`aegis_core/verification/`) | 15 | Deterministic AST checkers, coverage tools, and adversarial verification |
 | [CLI Commands](#cli-commands--python-aegis_cli) | Python and bash (`aegis_cli/`, root) | 21 | CLI launcher and command implementation modules |
 | [SDK Modules](#sdk-modules--python-aegis_sdk) | Python (`aegis_sdk/`) | 9 | Canonical scoring, parsing, telemetry, hot-zone, and governance APIs |
-| [MCP and Core Modules](#mcp-and-core-modules) | Python (`aegis_mcp/`, `aegis_core/`) | 34 | MCP transport, dispatch, confinement, content inventory, canonical evidence, cache, errors, receipts, and atomic storage |
+| [MCP and Core Modules](#mcp-and-core-modules) | Python (`aegis_mcp/`, `aegis_core/`) | 33 | MCP transport, dispatch, confinement, content inventory, canonical evidence, cache, errors, receipts, and atomic storage |
 | **Total** | | **79** | Unique paths under the method above |
 
 ---
@@ -31,7 +31,7 @@ This bash script is invoked automatically by git triggers. Following the v0.97.0
 
 ## Verification Scripts — Python
 
-These 14 Python scripts form the deterministic and adversarial verification engine in `aegis_core/verification/`.
+These 15 Python scripts form the deterministic and adversarial verification engine in `aegis_core/verification/`.
 
 | Script | Location | Purpose |
 |:-------|:---------|:--------|
@@ -41,6 +41,7 @@ These 14 Python scripts form the deterministic and adversarial verification engi
 | **`checkpoint_checks.py`** | `aegis_core/verification/checkpoint_checks.py` | Canonical stdlib-only verification implementations (test coverage, git cleanliness, docstring presence) shared by CLI and MCP. |
 | **`immune_verify.py`** | `aegis_core/verification/immune_verify.py` | Adversarial pair enzyme orchestrating the information-partitioned Spec Agent vs Code Agent verification protocol. |
 | **`import_guard.py`** | `aegis_core/verification/import_guard.py` | Layer 1 AST tool detecting unguarded third-party imports to prevent runtime `ImportError` failures. |
+| **`jobs.py`** | `aegis_core/verification/jobs.py` | In-memory asynchronous verification job store and background thread worker for Layer 2 verification. |
 | **`mutation_tester.py`** | `aegis_core/verification/mutation_tester.py` | Lightweight AST mutation tester that synthesizes mutant functions to evaluate test suite fault-detection capabilities. |
 | **`persistence_checker.py`** | `aegis_core/verification/persistence_checker.py` | Layer 1 AST checker verifying that in-memory state mutations have corresponding persistent serialization paths. |
 | **`pipeline.py`** | `aegis_core/verification/pipeline.py` | Composable verification pipeline and OOP verifier hierarchy with zero-key in-band charge sheets and MCP sampling. |
@@ -106,7 +107,7 @@ These 9 non-initializer modules provide the canonical Python APIs used by the CL
 
 ## MCP and Core Modules
 
-These 34 modules implement the MCP server, state-bound authorization, safe cell inventory, YAML frontmatter parsing, verification job orchestration, canonical evidence reading, transactional resource locking, self-healing quarantine, atomic storage, and standardized domain errors. Package initializers and `aegis_mcp/__main__.py` are excluded from the count.
+These 33 modules implement the MCP server, state-bound authorization, safe cell inventory, YAML frontmatter parsing, canonical evidence reading, transactional resource locking, self-healing quarantine, atomic storage, and standardized domain errors. Package initializers and `aegis_mcp/__main__.py` are excluded from the count.
 
 | Module | Location | Purpose |
 |:-------|:---------|:--------|
@@ -119,7 +120,7 @@ These 34 modules implement the MCP server, state-bound authorization, safe cell 
 | **`cell_cache.py`** | `aegis_mcp/cell_cache.py` | Content-fingerprinted parsed-cell cache using the canonical race-detecting inventory; stale or unsafe trees fail closed. |
 | **`jit_engine.py`** | `aegis_mcp/jit_engine.py` | JIT cell matching, frontmatter parsing, and governance expression. |
 | **`scoring.py`** | `aegis_core/scoring.py` | Zero-dependency Wilson interval lower bound and SNR confidence calculations. |
-| **`arbitration.py`** | `aegis_core/arbitration.py` | Test-to-code (TTC) verification, deterministic oracle scoring, and checkpoint validation. |
+| **`proposals.py`** | `aegis_core/proposals.py` | Test-to-code (TTC) verification, deterministic oracle scoring, and checkpoint validation. |
 | **`enforcement.py`** | `aegis_core/enforcement.py` | Cell enforcement, CI outcome reporting, bug registry integrity, and documentation claim verification. |
 | **`defects.py`** | `aegis_core/defects.py` | Escaped defect tracking, cell expiry pruning, and hot zone diagnosis. |
 | **`insights.py`** | `aegis_core/insights.py` | Structured insight capture and correlation engine. |
@@ -135,7 +136,6 @@ These 34 modules implement the MCP server, state-bound authorization, safe cell 
 | **`locking.py`** | `aegis_core/locking.py` | Cross-platform transactional resource locking with timeout fences and native Windows fallback. |
 | **`quarantine.py`** | `aegis_core/quarantine.py` | Self-healing quarantine isolating damaged YAML cells and unparseable JSONL files to preserve system availability. |
 | **`storage.py`** | `aegis_core/storage.py` | Crash-resilient atomic file writes via temporary files, directory fsync, and exponential backoff retry on Windows sharing violations (WinError 32). |
-| **`verification_jobs.py`** | `aegis_core/verification_jobs.py` | In-memory asynchronous verification job store and background thread worker for Layer 2 verification. |
 | **`inference_provider.py`** | `aegis_core/inference_provider.py` | Inference provider abstraction layer with secure credential lookup and key management for AI-assisted operations. |
 | **`sweep_session.py`** | `aegis_core/sweep_session.py` | Session transcript scanning, signal aggregation, and metric collection for sweep operations. |
 | **`evidence_collector.py`** | `aegis_core/evidence_collector.py` | Ground-truth evidence collection and observation processing for rule evaluation. |

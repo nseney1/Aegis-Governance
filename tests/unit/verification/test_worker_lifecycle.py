@@ -121,4 +121,20 @@ class TestWorkerLifecycleAndPersistence:
         assert j2.status == JOB_STATUS_FAILED
         assert "interrupted" in (j2.error or "")
 
+    def test_canonical_module_cohesion_paths(self):
+        """Verify verification_jobs moved to aegis_core/verification/jobs.py and arbitration renamed to aegis_core/proposals.py."""
+        from aegis_core.verification import jobs as v_jobs
+        from aegis_core import proposals
+
+        assert hasattr(v_jobs, "submit_verification_job")
+        assert hasattr(proposals, "TTCVerifier")
+        assert hasattr(proposals, "aegis_propose_change")
+
+        repo_root = Path(__file__).resolve().parents[3]
+        assert (repo_root / "aegis_core" / "verification" / "jobs.py").is_file()
+        assert (repo_root / "aegis_core" / "proposals.py").is_file()
+        assert not (repo_root / "aegis_core" / "verification_jobs.py").exists()
+        assert not (repo_root / "aegis_core" / "arbitration.py").exists()
+
+
 

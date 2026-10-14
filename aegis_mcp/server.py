@@ -387,7 +387,7 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
             if not job_id or not isinstance(job_id, str):
                 _rollback_rate_limit(name, session_id=active_session_id)
                 return _error(req_id, -32602, "Missing or invalid 'job_id'")
-            from aegis_core.verification_jobs import get_job
+            from aegis_core.verification.jobs import get_job
             if get_job(job_id) is None:
                 _rollback_rate_limit(name, session_id=active_session_id)
                 return _error(req_id, -32602, f"Verification job '{job_id}' not found or expired.")

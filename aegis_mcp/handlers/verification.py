@@ -43,7 +43,7 @@ def _handle_verify_changes(args: dict, gov) -> dict:
     layer1_only = args.get("layer1_only", True)
     async_mode = args.get("async_mode", False)
     if async_mode:
-        from aegis_core.verification_jobs import submit_verification_job
+        from aegis_core.verification.jobs import submit_verification_job
 
         ws_str = str(getattr(workspace, "root", workspace))
         job = submit_verification_job(
@@ -158,7 +158,7 @@ def _handle_poll_verification(args: dict, gov) -> dict:
     job_id = args.get("job_id")
     if not job_id:
         return {"error": "Missing required argument 'job_id'", "status": _STATUS_FAIL}
-    from aegis_core.verification_jobs import get_job
+    from aegis_core.verification.jobs import get_job
 
     job = get_job(job_id)
     if job is None:
