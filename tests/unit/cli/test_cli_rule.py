@@ -1,0 +1,177 @@
+"""Unit tests for aegis rule command (aegis_cli/rule.py) and BUG-067."""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from aegis_cli.rule import (
+    RuleCommand,
+    _force_demote,
+    _force_promote,
+    run_demote,
+    run_promote,
+    run_rule,
+)
+
+
+def test_rule_command_contract():
+    cmd = RuleCommand()
+    assert cmd.name == "rule"
+    assert cmd.aliases == ()
+
+    parser = argparse.ArgumentParser()
+    cmd.configure_parser(parser)
+
+    # Test list
+    args_list = parser.parse_args(["list", "--type", "invariant", "--min-fitness", "0.8"])
+    assert args_list.rule_action == "list"
+    assert args_list.type == "invariant"
+    assert args_list.min_fitness == 0.8
+
+    # Test promote
+    args_prom = parser.parse_args(["promote", "test-rule", "--force", "--dry-run"])
+    assert args_prom.rule_action == "promote"
+    assert args_prom.rule_id == "test-rule"
+    assert args_prom.force is True
+    assert args_prom.dry_run is True
+
+    # Test demote
+    args_dem = parser.parse_args(["demote", "bad-rule", "--dry-run"])
+    assert args_dem.rule_action == "demote"
+    assert args_dem.rule_id == "bad-rule"
+    assert args_dem.dry_run is True
+
+    # Test archive
+    args_arch = parser.parse_args(["archive", "--dry-run"])
+    assert args_arch.rule_action == "archive"
+    assert args_arch.dry_run is True
+
+    # Test clean
+    args_clean = parser.parse_args(["clean", "--apply"])
+    assert args_clean.rule_action == "clean"
+    assert args_clean.apply is True
+
+
+def test_demote_core_rule_fails(tmp_path, capsys):
+    """BUG-067: demoting a protected core rule must fail closed."""
+    args = argparse.Namespace(
+        rule_action="demote",
+        rule_id="cost-optimization",
+        workspace=str(tmp_path),
+        dry_run=False,
+        json=False,
+    )
+    rc = run_rule(args)
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "Cannot demote core rule" in out or "error" in out.lower()
+
+
+def test_rule_list_empty(tmp_path, capsys):
+    args = argparse.Namespace(
+        rule_action="list",
+        workspace=str(tmp_path),
+        json=False,
+        type=None,
+        min_fitness=None,
+    )
+    rc = run_rule(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "No rules directory found" in out
+
+
+def test_rule_list_with_rules(tmp_path, capsys):
+    rules_dir = tmp_path / ".aegis" / "rules" / "invariants"
+    rules_dir.mkdir(parents=True)
+    rule_file = rules_dir / "inv-test.md"
+    rule_file.write_text(
+        "---\nid: inv-test\ntype: invariant\nenforcement: strict\nfitness:\n  score: 0.95\n---\nRule body\n",
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        rule_action="list",
+        workspace=str(tmp_path),
+        json=False,
+        type="invariant",
+        min_fitness=0.9,
+    )
+    rc = run_rule(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "inv-test" in out
+
+
+def test_rule_promote_and_force_promote(tmp_path, capsys):
+    with patch("aegis_cli.rule.promote_cell", return_value={"status": "already_terminal", "current_type": "invariant"}):
+        args = argparse.Namespace(
+            rule_action="promote",
+            rule_id="inv-test",
+            workspace=str(tmp_path),
+            dry_run=False,
+            json=False,
+        )
+        rc = run_rule(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "already at terminal" in out
+
+        # Test _force_promote helper
+        rc2 = _force_promote(tmp_path, "inv-test")
+        assert rc2 == 0
+
+
+def test_rule_demote_and_force_demote(tmp_path, capsys):
+    with patch("aegis_cli.rule.demote_cell", return_value={"status": "already_base", "current_type": "trap"}):
+        args = argparse.Namespace(
+            rule_action="demote",
+            rule_id="trap-test",
+            workspace=str(tmp_path),
+            dry_run=False,
+            json=False,
+        )
+        rc = run_rule(args)
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "already at base" in out
+
+        # Test _force_demote helper
+        rc2 = _force_demote(tmp_path, "trap-test")
+        assert rc2 == 1
+
+
+def test_rule_archive(tmp_path):
+    with patch("aegis_cli.rule.prune_cells", return_value=0) as mock_prune:
+        args = argparse.Namespace(
+            rule_action="archive",
+            workspace=str(tmp_path),
+            dry_run=False,
+            apply=True,
+        )
+        rc = run_rule(args)
+        assert rc == 0
+        mock_prune.assert_called_once_with(workspace=tmp_path, execute=True)
+
+
+def test_rule_clean(tmp_path):
+    mock_res = {
+        "dry_run": True,
+        "purged_rules": ["leaked.md"],
+        "retained_rules": ["kept.md"],
+        "quarantine_dir": str(tmp_path / "q"),
+    }
+    with patch("aegis_cli.rule.clean_global_rules", return_value=mock_res) as mock_clean:
+        args = argparse.Namespace(
+            rule_action="clean",
+            workspace=str(tmp_path),
+            dry_run=True,
+            apply=False,
+        )
+        rc = run_rule(args)
+        assert rc == 0
+        mock_clean.assert_called_once_with(dry_run=True, force=False, quarantine_dir=None)

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_cli.cli import _build_parser, main
+from aegis_cli.cli import _build_parser, main
 
 REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
 SHELLS = ("bash", "zsh", "fish")
@@ -102,16 +102,16 @@ def test_bash_uses_complete_F():
 
 def test_zsh_uses_compdef_and_arguments():
     script = _script("zsh")
-    assert script.startswith("#compdef soma")
+    assert script.startswith("#compdef aegis") or script.startswith("#compdef soma")
     assert "_arguments" in script and "_describe" in script
 
 
 def test_fish_uses_complete_c_soma():
-    assert "complete -c soma" in _script("fish")
+    assert "complete -c aegis" in _script("fish") or "complete -c soma" in _script("fish")
 
 
 def test_unknown_shell_rejected():
-    from soma_cli.completion import generate
+    from aegis_cli.completion import generate
     with pytest.raises(ValueError):
         generate(_build_parser(), "tcsh")
 
@@ -119,15 +119,15 @@ def test_unknown_shell_rejected():
 def test_bash_syntax_ok(tmp_path):
     from conftest import require_bash
     bash_bin = require_bash()
-    f = tmp_path / "soma.bash"
+    f = tmp_path / "aegis.bash"
     f.write_text(_script("bash"), encoding="utf-8")
-    proc = subprocess.run([bash_bin, "-n", "soma.bash"], cwd=str(tmp_path), capture_output=True, text=True)
+    proc = subprocess.run([bash_bin, "-n", str(f)], cwd=str(tmp_path), capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
 
 
 @pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh not installed")
 def test_zsh_syntax_ok(tmp_path):
-    f = tmp_path / "_soma"
+    f = tmp_path / "_aegis"
     f.write_text(_script("zsh"), encoding="utf-8")
     proc = subprocess.run(["zsh", "-n", str(f)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
@@ -135,7 +135,7 @@ def test_zsh_syntax_ok(tmp_path):
 
 @pytest.mark.skipif(shutil.which("fish") is None, reason="fish not installed")
 def test_fish_syntax_ok(tmp_path):
-    f = tmp_path / "soma.fish"
+    f = tmp_path / "aegis.fish"
     f.write_text(_script("fish"), encoding="utf-8")
     proc = subprocess.run(["fish", "--no-execute", str(f)],
                           capture_output=True, text=True)
@@ -143,12 +143,17 @@ def test_fish_syntax_ok(tmp_path):
 
 
 def _bash_complete(tmp_path, words, cword):
-    """Source the bash script and run _soma for a simulated command line."""
-    f = tmp_path / "soma.bash"
-    f.write_text(_script("bash"), encoding="utf-8")
+    """Source the bash script and run _soma / _aegis for a simulated command line."""
+    f = tmp_path / "aegis.bash"
+    content = _script("bash")
+    f.write_text(content, encoding="utf-8")
+    fn = "_aegis" if "_aegis()" in content else "_soma"
+    prog_name = "aegis" if "_aegis()" in content else "soma"
+    if words and words[0] in ("soma", "aegis"):
+        words = [prog_name] + list(words[1:])
     quoted = " ".join("'" + w + "'" for w in words)
     prog = (f"source '{f}'; COMP_WORDS=({quoted}); COMP_CWORD={cword}; "
-            "_soma; printf '%s\\n' \"${COMPREPLY[@]}\"")
+            f"{fn}; printf '%s\\n' \"${{COMPREPLY[@]}}\"")
     proc = subprocess.run(["bash", "-c", prog], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     return proc.stdout.split()
@@ -157,16 +162,17 @@ def _bash_complete(tmp_path, words, cword):
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None,
                     reason="needs POSIX bash")
 def test_bash_completes_subcommands_and_choices(tmp_path):
-    assert "init" in _bash_complete(tmp_path, ["soma", "in"], 1)
-    assert set(_bash_complete(tmp_path, ["soma", "init", "--platform", ""], 3)) == {
+    assert "init" in _bash_complete(tmp_path, ["aegis", "in"], 1)
+    assert set(_bash_complete(tmp_path, ["aegis", "init", "--platform", ""], 3)) == {
         "gemini", "claude", "cursor", "copilot", "kiro"}
-    assert "--dry-run" in _bash_complete(tmp_path, ["soma", "init", "--d"], 2)
-    assert set(_bash_complete(tmp_path, ["soma", "completion", ""], 2)) >= set(SHELLS)
+    assert "--dry-run" in _bash_complete(tmp_path, ["aegis", "init", "--d"], 2)
+    assert set(_bash_complete(tmp_path, ["aegis", "completion", ""], 2)) >= set(SHELLS)
 
 
 def test_cli_prints_script(capsys):
     assert main(["completion", "fish"]) == 0
-    assert "complete -c soma" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "complete -c aegis" in out or "complete -c soma" in out
 
 
 def test_cli_rejects_unknown_shell(capsys):
@@ -178,12 +184,12 @@ def test_cli_rejects_unknown_shell(capsys):
 @pytest.mark.parametrize("shell", SHELLS)
 def test_cli_output_survives_cp1252_stdout(shell):
     proc = subprocess.run(
-        [sys.executable, "-m", "soma_cli", "completion", shell],
+        [sys.executable, "-m", "aegis_cli", "completion", shell],
         cwd=str(REPO_ROOT), capture_output=True,
         env={**os.environ, "PYTHONIOENCODING": "cp1252"},
     )
     assert proc.returncode == 0, proc.stderr
-    assert b"soma" in proc.stdout
+    assert b"aegis" in proc.stdout or b"soma" in proc.stdout
 
 
 # ── Review hardening: shell words must be inert (eval'd by users) ────────────

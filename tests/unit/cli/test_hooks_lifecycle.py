@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from soma_cli.hooks import (
+from aegis_cli.hooks import (
     log_gate_event,
     main,
     redact_secrets,
@@ -322,11 +322,11 @@ class TestPreCommitHook:
 
 
 class TestCliDispatch:
-    """Test CLI and module dispatch for soma hook."""
+    """Test CLI and module dispatch for aegis hook."""
 
     def test_python_module_safety_gate(self):
         proc = subprocess.run(
-            [sys.executable, "-m", "soma_cli.hooks", "safety-gate", "--cmd", "git reset --hard"],
+            [sys.executable, "-m", "aegis_cli.hooks", "safety-gate", "--cmd", "git reset --hard"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -337,7 +337,7 @@ class TestCliDispatch:
 
     def test_soma_cli_hook_subcommand(self):
         proc = subprocess.run(
-            [sys.executable, "-m", "soma_cli", "hook", "safety-gate", "--cmd", "git status"],
+            [sys.executable, "-m", "aegis_cli", "hook", "safety-gate", "--cmd", "git status"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -348,7 +348,7 @@ class TestCliDispatch:
 
     def test_pre_commit_json_stdout_purity(self, tmp_path):
         proc = subprocess.run(
-            [sys.executable, "-m", "soma_cli", "hook", "pre-commit", "--workspace", str(tmp_path), "--json"],
+            [sys.executable, "-m", "aegis_cli", "hook", "pre-commit", "--workspace", str(tmp_path), "--json"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -363,7 +363,7 @@ class TestCliDispatch:
         transcript_file = tmp_path / "transcript.jsonl"
         transcript_file.write_text('{"event": "test"}\n', encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, "-m", "soma_cli", "hook", "post-session", "--transcript", str(transcript_file), "--workspace", str(tmp_path), "--json"],
+            [sys.executable, "-m", "aegis_cli", "hook", "post-session", "--transcript", str(transcript_file), "--workspace", str(tmp_path), "--json"],
             capture_output=True,
             text=True,
             encoding="utf-8",

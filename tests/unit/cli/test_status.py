@@ -234,3 +234,33 @@ class TestStatus:
         captured = capsys.readouterr()
         assert "2 active" in captured.out
 
+    def test_genome_heading_map_coverage(self, tmp_path):
+        from aegis_cli.status import _genome_heading_map
+        # Test fallback to genome
+        g_dir = tmp_path / "fallback" / "genome"
+        g_dir.mkdir(parents=True)
+        (g_dir / "r1.md").write_text("# R1 Heading\nBody", encoding="utf-8")
+        mapping = _genome_heading_map(tmp_path / "fallback")
+        assert mapping.get("R1 Heading") == "r1"
+
+        # Test rules dir
+        r_dir = tmp_path / "primary" / "rules"
+        r_dir.mkdir(parents=True)
+        (r_dir / "r2.md").write_text("# R2 Heading\nBody", encoding="utf-8")
+        mapping2 = _genome_heading_map(tmp_path / "primary")
+        assert mapping2.get("R2 Heading") == "r2"
+
+    def test_format_status_summary(self):
+        from aegis_cli.status import format_status_summary
+        data = {
+            "active_rules": 5,
+            "trap_count": 2,
+            "wall_count": 3,
+            "archived_count": 1,
+        }
+        summary = format_status_summary(data)
+        assert "Active Rules:    5 active" in summary
+        assert "Invariants:      3 enforced" in summary
+        assert "Adaptive Traps:  2 active" in summary
+        assert "Archived Rules:  1 archived" in summary
+

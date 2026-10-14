@@ -1,4 +1,4 @@
-Soma
+Aegis (formerly Soma)
 Copyright 2026 Nicholas Seney
 
 This product is licensed under the Apache License, Version 2.0.
@@ -8,7 +8,7 @@ See the LICENSE file for the full license text.
 
 ## Data Privacy Statement
 
-Soma is a **local-only governance framework**. It installs
+Aegis is a **local-only governance framework**. It installs
 configuration files (rules, skills, hooks) into your local AI assistant
 directory. It does not operate as a service and has no server component.
 
@@ -23,18 +23,18 @@ directory. It does not operate as a service and has no server component.
 ### What This Software Does
 
 - ✅ Installs markdown rule files and skill files (15 skills) to your local filesystem
-- ✅ Runs local bash scripts (39 scripts) for installation, validation, and metrics
-- ✅ Collects **aggregate counts only** (e.g., "11 rules", "15 skills", "39 scripts", "1.1% waste rate")
-- ✅ All metrics are local-only and gitignored by default
+- ✅ Runs local CLI checks and scripts for installation, validation, and metrics
+- ✅ Collects **aggregate counts only** (e.g., rule counts, skill counts, waste rate)
+- ✅ All metrics and evidence are local-only (.aegis/evidence) and gitignored by default
 
 ### Network Access Disclosure
 
-The optional `enzymes/token_census.py` script calls the **Google Gemini API**
+Optional token measurement utilities call the **Google Gemini API**
 (`client.models.count_tokens`) to measure accurate token counts for governance
 files. This sends the content of rule and skill files (which are part of this
 open-source repository) to the Gemini API for tokenization measurement only.
 
-- This script is **optional** — the system falls back to local word-count
+- This feature is **optional** — the system falls back to local word-count
   estimation if the Gemini SDK is not installed or no API key is configured
 - No user-generated content, project files, or private data is ever sent
 - Only the open-source governance files from this repository are transmitted
@@ -54,15 +54,6 @@ scripts, metrics, and probes:
 | Tool version numbers              | Session transcripts or logs           |
 | Boolean environment flags         | Environment variables or secrets      |
 
-### Genesis Environment Probes
-
-The Genesis onboarding skill includes optional environment probes that detect
-local development tools. These probes output **sanitized aggregates only**:
-
-- ✅ Outputs: `python: 3.11, venv: true` or `tools: [make, npm, go]`
-- ❌ Never outputs: raw file paths, `which` command output, usernames,
-  hostnames, or environment variable values
-
 ---
 
 ## Attribution
@@ -70,6 +61,5 @@ local development tools. These probes output **sanitized aggregates only**:
 This project was created and is maintained by Nicholas Seney.
 
 The governance framework, review protocol architecture (Breeze through Tempest),
-review prong system (Spores through Mulch), and biological naming conventions
-(Cytogenesis, Natural Selection, Chloroplast/Vacuole/Cell Wall/Membrane/
-Plasmodesmata) are original works by Nicholas Seney.
+review prong system (Spores through Mulch), and evolutionary rule lifecycle
+are original works by Nicholas Seney.

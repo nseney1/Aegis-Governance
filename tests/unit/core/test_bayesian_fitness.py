@@ -24,7 +24,7 @@ from tests.helpers_cell import (
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
-sys.path.insert(0, os.path.join(REPO_ROOT, 'soma_mcp'))
+sys.path.insert(0, os.path.join(REPO_ROOT, 'aegis_mcp'))
 
 
 # ── Bayesian Fitness Scoring (cell_fitness.py) ────────────────────────────

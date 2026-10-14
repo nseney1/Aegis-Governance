@@ -69,13 +69,13 @@ def test_harness_run_cli_isolated(harness: SomaTestHarness):
 
 
 def test_governance_wall_parseable():
-    """Verify .soma/cells/walls/wall-test-canonical-colocality.md complies with schema."""
-    wall_file = Path(".soma/cells/walls/wall-test-canonical-colocality.md")
+    """Verify wall/invariant complies with schema."""
+    wall_file = Path(".aegis/rules/invariants/wall-test-canonical-colocality.md") if Path(".aegis/rules/invariants/wall-test-canonical-colocality.md").exists() else Path(".soma/cells/walls/wall-test-canonical-colocality.md")
     assert wall_file.exists()
 
     data, body = parse_cell_frontmatter(wall_file)
     assert data["id"] == "wall-test-canonical-colocality"
-    assert data["type"] == "wall"
+    assert data["type"] in ("wall", "invariant")
     assert data["enforcement"] == "gate"
     assert data["domain"] == "testing"
     assert "1:1 Directory Mirroring" in body

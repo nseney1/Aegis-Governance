@@ -17,7 +17,7 @@ import sys
 import sysconfig
 import tempfile
 
-PACKAGES = ("soma_cli", "soma_sdk", "soma_core", "soma_mcp")
+PACKAGES = ("aegis_cli", "aegis_sdk", "aegis_core", "aegis_mcp")
 
 
 def fail(msg):
@@ -46,11 +46,11 @@ def make_workspace():
 
 
 def check_cli():
-    proc = subprocess.run([sys.executable, "-I", "-m", "soma_cli.cli", "--help"],
+    proc = subprocess.run([sys.executable, "-I", "-m", "aegis_cli.cli", "--help"],
                           capture_output=True, text=True, timeout=60)
     if proc.returncode != 0:
-        fail(f"soma --help exited {proc.returncode}: {proc.stderr[-500:]}")
-    print("ok  soma --help")
+        fail(f"aegis --help exited {proc.returncode}: {proc.stderr[-500:]}")
+    print("ok  aegis --help")
 
 
 def check_mcp(ws):
@@ -61,8 +61,9 @@ def check_mcp(ws):
          "params": {"name": "soma_list_cells", "arguments": {}}},
     ))
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["AEGIS_WORKSPACE"] = ws
     env["SOMA_WORKSPACE"] = ws
-    proc = subprocess.run([sys.executable, "-I", "-m", "soma_mcp"], input=requests,
+    proc = subprocess.run([sys.executable, "-I", "-m", "aegis_mcp"], input=requests,
                           capture_output=True, text=True, timeout=60, cwd=ws, env=env)
     lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
     if len(lines) != 3:
@@ -72,11 +73,11 @@ def check_mcp(ws):
     cells = json.loads(lines[2]["result"]["content"][0]["text"])
     if "trap-smoke" not in {c.get("_name") for c in cells}:
         fail(f"MCP soma_list_cells did not see the workspace cell: {cells!r}")
-    print("ok  soma_mcp initialize / tools/list / soma_list_cells")
+    print("ok  aegis_mcp initialize / tools/list / soma_list_cells")
 
 
 def check_governance_fitness(ws):
-    from soma_sdk.governance import Governance
+    from aegis_sdk.governance import Governance
     result = Governance(project_root=ws).fitness_landscape()
     if isinstance(result, dict) and "error" in result:
         fail(f"governance fitness_landscape failed: {result}")
@@ -84,9 +85,9 @@ def check_governance_fitness(ws):
 
 
 def check_full_rule_preset(ws):
-    """Prove the wheel contains the full genome, not only starter rules."""
+    """Prove the wheel contains the full rules, not only starter rules."""
     from pathlib import Path
-    from soma_cli.init import install_rules
+    from aegis_cli.init import install_rules
 
     target = Path(ws) / "full-rules"
     installed = install_rules(target, preset="full")

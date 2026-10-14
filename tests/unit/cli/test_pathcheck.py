@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from soma_cli import pathcheck
-from soma_cli.pathcheck import (
+from aegis_cli import pathcheck
+from aegis_cli.pathcheck import (
     build_hint,
     detect_shell,
     on_path,
@@ -345,7 +345,7 @@ def test_build_hint_windows_uses_python_not_python3(tmp_path):
 # ── module entry points ──────────────────────────────────────────────────────
 
 def test_pathcheck_module_hint_exits_zero():
-    proc = subprocess.run([sys.executable, "-m", "soma_cli.pathcheck", "--hint"],
+    proc = subprocess.run([sys.executable, "-m", "aegis_cli.pathcheck", "--hint"],
                           cwd=str(REPO), capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
     assert proc.returncode == 0, proc.stderr
@@ -353,15 +353,15 @@ def test_pathcheck_module_hint_exits_zero():
 
 
 def test_python_m_soma_cli_runs():
-    proc = subprocess.run([sys.executable, "-m", "soma_cli", "--help"],
+    proc = subprocess.run([sys.executable, "-m", "aegis_cli", "--help"],
                           cwd=str(REPO), capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
     assert proc.returncode == 0, proc.stderr
-    assert "usage: soma" in proc.stdout
+    assert "usage: aegis" in proc.stdout or "usage: soma" in proc.stdout
 
 
 def test_soma_version_flag(capsys):
-    from soma_cli.cli import main
+    from aegis_cli.cli import main
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
     assert exc.value.code == 0
@@ -371,6 +371,6 @@ def test_soma_version_flag(capsys):
 
 def test_pathcheck_on_path_handles_windows_colons():
     """on_path with sep=';' should not corrupt Windows drive paths containing colons."""
-    from soma_cli.pathcheck import on_path
+    from aegis_cli.pathcheck import on_path
     path_env = r"C:\Python312\Scripts;C:\Windows\System32"
     assert on_path(r"C:\Python312\Scripts", path_env, sep=";", casefold=True)

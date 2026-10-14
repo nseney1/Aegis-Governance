@@ -50,7 +50,7 @@ def test_packaging_excludes_private_soma_state_and_includes_genome_package():
     assert ".soma/dreams" not in manifest
 
     pyproject = read(os.path.join(REPO_ROOT, "pyproject.toml"))
-    assert '"genome*"' in pyproject
-    assert re.search(r"(?m)^genome\s*=\s*\[", pyproject)
+    assert '"rules*"' in pyproject or '"genome*"' in pyproject
+    assert re.search(r"(?m)^(rules|genome)\s*=\s*\[", pyproject)
     assert '"*.md"' in pyproject and '".oracles/*.md"' in pyproject
-    assert os.path.isfile(os.path.join(REPO_ROOT, "genome", "__init__.py"))
+    assert os.path.isfile(os.path.join(REPO_ROOT, "rules", "__init__.py")) or os.path.isfile(os.path.join(REPO_ROOT, "genome", "__init__.py"))

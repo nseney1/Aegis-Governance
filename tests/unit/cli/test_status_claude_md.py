@@ -20,7 +20,7 @@ import pytest
 from soma_cli.status import run_status
 
 REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
-GENOME = REPO_ROOT / "genome"
+GENOME = (REPO_ROOT / "rules") if (REPO_ROOT / "rules").is_dir() else (REPO_ROOT / "genome")
 
 INSTALL_HEADER = (
     "# Soma Governance Rules\n\n"
@@ -176,3 +176,12 @@ def test_bom_prefixed_loose_rule_uses_frontmatter_and_dedupes(env, capsys):
     assert count == 1, out
     assert len(re.findall(r"^\s+alpha-rule\s", out, re.M)) == 1, out
     assert "alpha_loose" not in out, out
+
+
+def test_genome_heading_map_fallback_coverage(tmp_path):
+    from aegis_cli.status import _genome_heading_map
+    genome_dir = tmp_path / "genome"
+    genome_dir.mkdir()
+    (genome_dir / "test.md").write_text("# Test Heading\nBody", encoding="utf-8")
+    mapping = _genome_heading_map(tmp_path)
+    assert mapping.get("Test Heading") == "test"

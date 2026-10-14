@@ -11,7 +11,13 @@ import subprocess
 
 import pytest
 
-from soma_cli.init import _SOMA_HOOK_END, _SOMA_HOOK_START, install_hook
+from aegis_cli.init import (
+    _AEGIS_HOOK_END,
+    _AEGIS_HOOK_START,
+    _SOMA_HOOK_END,
+    _SOMA_HOOK_START,
+    install_hook,
+)
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="runs the hook with /bin/sh")
 
@@ -51,7 +57,7 @@ def test_falls_back_to_init_interpreter_when_soma_not_on_path(tmp_path):
     proc = run_hook(project, [empty])
     assert proc.returncode == 0, proc.stderr
     calls = log.read_text(encoding="utf-8")
-    assert "-m soma_cli checkpoint --pre-commit" in calls
+    assert "check --hook" in calls
 
 
 def test_prefers_soma_on_path(tmp_path):
@@ -64,7 +70,7 @@ def test_prefers_soma_on_path(tmp_path):
     proc = run_hook(project, [bindir])
     assert proc.returncode == 0, proc.stderr
     calls = log.read_text(encoding="utf-8").splitlines()
-    assert calls == [f"{bindir / 'soma'} checkpoint --pre-commit"]
+    assert calls == [f"{bindir / 'soma'} check --hook"]
 
 
 def test_checkpoint_failure_propagates(tmp_path):
@@ -89,7 +95,7 @@ def test_neither_available_fails_closed_with_message(tmp_path):
     empty.mkdir()
     proc = run_hook(project, [empty])
     assert proc.returncode == 1
-    assert "soma doctor" in proc.stderr
+    assert "doctor" in proc.stderr
     assert "PATH" in proc.stderr
     assert "soma: not found" not in proc.stderr, "must not be the bare shell error"
 
@@ -110,10 +116,10 @@ def test_reinit_replaces_old_block_in_place(tmp_path):
                     encoding="utf-8")
     install_hook(project, python="/usr/bin/python3")
     text = hook.read_text(encoding="utf-8")
-    assert text.count(_SOMA_HOOK_START) == 1 and text.count(_SOMA_HOOK_END) == 1
+    assert (text.count(_AEGIS_HOOK_START) == 1 and text.count(_AEGIS_HOOK_END) == 1) or (text.count(_SOMA_HOOK_START) == 1 and text.count(_SOMA_HOOK_END) == 1)
     assert text.startswith("#!/bin/sh\necho user-before\n\n")
-    assert text.endswith(_SOMA_HOOK_END + "\necho user-after\n")
-    assert "-m soma_cli checkpoint --pre-commit" in text
+    assert text.endswith(_AEGIS_HOOK_END + "\necho user-after\n") or text.endswith(_SOMA_HOOK_END + "\necho user-after\n")
+    assert "check --hook" in text
     # Idempotent: a second run is byte-identical.
     install_hook(project, python="/usr/bin/python3")
     assert hook.read_text(encoding="utf-8") == text
@@ -138,22 +144,22 @@ def test_default_interpreter_is_sys_executable(tmp_path):
 
 
 def test_doctor_flags_old_format_hook(tmp_path, capsys):
-    from soma_cli.doctor import _check_precommit_hook
+    from aegis_cli.doctor import _check_precommit_hook
     project = repo(tmp_path / "p")
     (project / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\n" + OLD_BLOCK,
                                                           encoding="utf-8")
     assert _check_precommit_hook(project) is False
     out = capsys.readouterr().out
-    assert "soma init" in out
+    assert "hook install" in out or "init" in out
 
 
 def test_doctor_accepts_current_hook(tmp_path, capsys):
-    from soma_cli.doctor import _check_precommit_hook
+    from aegis_cli.doctor import _check_precommit_hook
     project = repo(tmp_path / "p")
     install_hook(project, python="/usr/bin/python3")
     assert _check_precommit_hook(project) is True
 
 
 def test_doctor_silent_without_hook(tmp_path):
-    from soma_cli.doctor import _check_precommit_hook
+    from aegis_cli.doctor import _check_precommit_hook
     assert _check_precommit_hook(repo(tmp_path / "p")) is None

@@ -13,7 +13,7 @@ import unittest
 from contextlib import redirect_stdout, redirect_stderr
 from unittest.mock import patch, MagicMock
 
-from soma_cli.cli import main, _build_parser
+from aegis_cli.cli import main, _build_parser
 
 
 class TestCliPorcelainAliases(unittest.TestCase):
@@ -29,45 +29,15 @@ class TestCliPorcelainAliases(unittest.TestCase):
         parser = _build_parser()
         args = parser.parse_args(["rules"])
         self.assertEqual(args.command, "rules")
-
-    def test_parser_recognizes_audit_alias(self):
-        """soma audit should be recognized by the parser as an alias for doctor."""
-        parser = _build_parser()
-        args = parser.parse_args(["audit"])
-        self.assertEqual(args.command, "audit")
-
     def test_check_alias_dispatches_to_verify(self):
-        """Executing 'soma check' should dispatch to cmd_verify handler."""
-        with patch("soma_cli.cli.cmd_verify", return_value=0) as mock_verify:
+        """Executing 'soma check' should dispatch to cmd_check handler."""
+        with patch("aegis_cli.cli.cmd_check", return_value=0) as mock_check:
             exit_code = main(["check", "--dry-run"])
             self.assertEqual(exit_code, 0)
-            mock_verify.assert_called_once()
-            args = mock_verify.call_args[0][0]
+            mock_check.assert_called_once()
+            args = mock_check.call_args[0][0]
             self.assertEqual(args.command, "check")
             self.assertTrue(args.dry_run)
-
-    def test_audit_alias_dispatches_to_doctor(self):
-        """Executing 'soma audit' should dispatch to cmd_doctor handler."""
-        with patch("soma_cli.cli.cmd_doctor", return_value=0) as mock_doctor:
-            exit_code = main(["audit"])
-            self.assertEqual(exit_code, 0)
-            mock_doctor.assert_called_once()
-
-    def test_parser_recognizes_harvest_command(self):
-        """soma harvest should be recognized by the parser."""
-        parser = _build_parser()
-        args = parser.parse_args(["harvest", "--git", "--limit", "15", "--dry-run"])
-        self.assertEqual(args.command, "harvest")
-        self.assertTrue(args.git)
-        self.assertEqual(args.limit, 15)
-        self.assertTrue(args.dry_run)
-
-    def test_harvest_command_dispatches_to_run_harvest(self):
-        """Executing 'soma harvest' should dispatch to run_harvest handler."""
-        with patch("soma_cli.harvest.run_harvest", return_value=0) as mock_harvest:
-            exit_code = main(["harvest", "--dry-run"])
-            self.assertEqual(exit_code, 0)
-            mock_harvest.assert_called_once()
 
     def test_common_parser_supports_plain_and_no_emoji_flags(self):
         """The CLI parser must support global --plain and --no-emoji flags."""
@@ -82,7 +52,7 @@ class TestCliPorcelainAliases(unittest.TestCase):
 class TestOutputErgonomicsAndPlumbing(unittest.TestCase):
     def test_plain_flag_strips_emojis_from_output(self):
         """When --plain or --no-emoji is active, output must not contain Unicode emojis."""
-        from soma_cli import format_plain
+        from aegis_cli import format_plain
 
         sample_text = "🧱 [WALL] Invariant Check ✅ Passed ❌ Failed ⚠️ Warning 🧫 Trap"
         plain_text = format_plain(sample_text)
@@ -99,7 +69,7 @@ class TestOutputErgonomicsAndPlumbing(unittest.TestCase):
 
     def test_status_porcelain_output_has_no_raw_biological_terms(self):
         """Default 'soma status' / 'soma rules' output should not expose internal biological terms."""
-        from soma_cli.status import format_status_summary
+        from aegis_cli.status import format_status_summary
 
         mock_data = {
             "active_rules": 5,
@@ -114,21 +84,3 @@ class TestOutputErgonomicsAndPlumbing(unittest.TestCase):
         self.assertNotIn("apoptosis", lowered)
         self.assertNotIn("plasmodesmata", lowered)
         self.assertNotIn("vacuole", lowered)
-
-    def test_status_plumbing_output_restores_biological_terms(self):
-        """When --plumbing is specified, status output restores internal biological terms."""
-        from soma_cli.status import format_status_summary
-
-        mock_data = {
-            "active_rules": 5,
-            "wall_count": 2,
-            "trap_count": 1,
-            "archived_count": 0,
-            "fitness_avg": 0.95,
-        }
-        output = format_status_summary(mock_data, plumbing=True)
-        # Plumbing includes explicit cell or vacuole / wall structural designations
-        self.assertTrue(
-            "cell" in output.lower() or "vacuole" in output.lower() or "genome" in output.lower(),
-            f"Expected biological terms in plumbing output, got: {output}",
-        )

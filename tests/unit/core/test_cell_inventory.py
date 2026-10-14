@@ -127,3 +127,21 @@ def test_find_matching_cells(tmp_path):
     # Non-existent dir or empty files
     assert find_matching_cells(tmp_path / "nonexistent", ["src/index.py"]) == []
     assert find_matching_cells(cells_dir, []) == []
+
+
+def test_inventory_aegis_rules_and_soma_rules(tmp_path):
+    from soma_core.cell_inventory import inventory_cells, inventory_rules
+
+    # Test .aegis/rules
+    ws_aegis = tmp_path / "ws_aegis"
+    rule_aegis = ws_aegis / ".aegis" / "rules" / "invariants" / "inv1.md"
+    _write_cell(rule_aegis, "inv1")
+    inv = inventory_rules(str(ws_aegis))
+    assert [e.relative_path for e in inv.entries] == [".aegis/rules/invariants/inv1.md"]
+
+    # Test .soma/rules
+    ws_soma_rules = tmp_path / "ws_soma_rules"
+    rule_soma = ws_soma_rules / ".soma" / "rules" / "invariants" / "inv2.md"
+    _write_cell(rule_soma, "inv2")
+    inv2 = inventory_cells(str(ws_soma_rules))
+    assert [e.relative_path for e in inv2.entries] == [".soma/rules/invariants/inv2.md"]

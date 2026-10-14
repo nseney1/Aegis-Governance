@@ -4,8 +4,8 @@ from __future__ import annotations
 import argparse
 import pytest
 
-from soma_cli.base import CommandCategory, SomaCommand
-from soma_cli.registry import CommandRegistry
+from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.registry import CommandRegistry, get_default_registry
 
 
 class DummyInitCommand(SomaCommand):
@@ -123,180 +123,147 @@ def test_registry_formatted_help():
 
 
 def test_category_1_setup_commands():
-    from soma_cli.init import InitCommand
-    from soma_cli.detect import DetectCommand
-    from soma_cli.doctor import DoctorCommand
-    from soma_cli.install import InstallCommand, UninstallCommand
+    from aegis_cli.init import InitCommand
+    from aegis_cli.system import SystemCommand
 
-    cmds = [InitCommand(), DetectCommand(), DoctorCommand(), InstallCommand(), UninstallCommand()]
+    cmds = [InitCommand(), SystemCommand()]
     reg = CommandRegistry()
 
     for cmd in cmds:
         assert cmd.category == CommandCategory.SETUP
-        assert cmd.name in ("init", "detect", "doctor", "install", "uninstall")
+        assert cmd.name in ("init", "system")
         reg.register(cmd)
 
     # Verify alias resolution
-    assert reg.get("languages").name == "detect"
-    assert reg.get("drivers").name == "detect"
-    assert reg.get("audit").name == "doctor"
+    assert reg.get("sys").name == "system"
 
     # Verify subparser creation
-    parser = argparse.ArgumentParser(prog="soma")
+    parser = argparse.ArgumentParser(prog="aegis")
     sub = parser.add_subparsers(dest="command")
     reg.populate_subparsers(sub)
 
-    args = parser.parse_args(["detect", "--dry-run"])
-    assert args.command == "detect"
+    args = parser.parse_args(["init", "--dry-run"])
+    assert args.command == "init"
     assert args.dry_run is True
 
-    args_alias = parser.parse_args(["languages", "--fix"])
-    assert args_alias.command in ("detect", "languages")
-    assert args_alias.fix is True
+    args_sys = parser.parse_args(["system", "doctor", "--json"])
+    assert args_sys.command == "system"
+    assert args_sys.system_action == "doctor"
+    assert args_sys.json is True
 
 
 def test_category_2_workflow_commands():
-    from soma_cli.verify import VerifyCommand
-    from soma_cli.status import StatusCommand
-    from soma_cli.checkpoint import CheckpointCommand
-    from soma_cli.report import ReportCommand
-    from soma_cli.sync import SyncCommand
+    from aegis_cli.check import CheckCommand
+    from aegis_cli.status import StatusCommand
 
-    cmds = [VerifyCommand(), StatusCommand(), CheckpointCommand(), ReportCommand(), SyncCommand()]
+    cmds = [CheckCommand(), StatusCommand()]
     reg = CommandRegistry()
 
     for cmd in cmds:
         assert cmd.category == CommandCategory.WORKFLOW
-        assert cmd.name in ("verify", "status", "checkpoint", "report", "sync")
+        assert cmd.name in ("check", "status")
         reg.register(cmd)
 
     # Verify alias resolution
-    assert reg.get("check").name == "verify"
+    assert reg.get("verify").name == "check"
+    assert reg.get("checkpoint").name == "check"
     assert reg.get("rules").name == "status"
 
     # Verify subparser creation
-    parser = argparse.ArgumentParser(prog="soma")
+    parser = argparse.ArgumentParser(prog="aegis")
     sub = parser.add_subparsers(dest="command")
     reg.populate_subparsers(sub)
 
-    args = parser.parse_args(["verify", "--layer1-only"])
-    assert args.command == "verify"
-    assert args.layer1_only is True
+    args = parser.parse_args(["check", "--hook"])
+    assert args.command == "check"
+    assert args.hook is True
 
-    args_alias = parser.parse_args(["check", "--dry-run"])
-    assert args_alias.command in ("verify", "check")
-    assert args_alias.dry_run is True
-
-    args_cp = parser.parse_args(["checkpoint", "--strict"])
-    assert args_cp.command == "checkpoint"
-    assert args_cp.strict is True
+    args_status = parser.parse_args(["status"])
+    assert args_status.command == "status"
 
 
 def test_category_3_lifecycle_commands():
-    from soma_cli.genesis import GenesisCommand
-    from soma_cli.oracle import OracleCommand
-    from soma_cli.promote import PromoteCommand
-    from soma_cli.demote import DemoteCommand
-    from soma_cli.prune import PruneCommand
-    from soma_cli.harvest import HarvestCommand
-    from soma_cli.capture_insight import CaptureInsightCommand
+    from aegis_cli.rule import RuleCommand
 
-    cmds = [
-        GenesisCommand(),
-        OracleCommand(),
-        PromoteCommand(),
-        DemoteCommand(),
-        PruneCommand(),
-        HarvestCommand(),
-        CaptureInsightCommand(),
-    ]
+    cmd = RuleCommand()
     reg = CommandRegistry()
-
-    for cmd in cmds:
-        assert cmd.category == CommandCategory.LIFECYCLE
-        reg.register(cmd)
-
-    # Verify alias resolution
-    assert reg.get("analyze").name == "genesis"
+    assert cmd.category == CommandCategory.LIFECYCLE
+    assert cmd.name == "rule"
+    reg.register(cmd)
 
     # Verify subparser creation
-    parser = argparse.ArgumentParser(prog="soma")
+    parser = argparse.ArgumentParser(prog="aegis")
     sub = parser.add_subparsers(dest="command")
     reg.populate_subparsers(sub)
 
-    args = parser.parse_args(["genesis", "--dry-run", "--min-confidence", "0.8"])
-    assert args.command == "genesis"
+    args = parser.parse_args(["rule", "promote", "test-rule", "--dry-run"])
+    assert args.command == "rule"
+    assert args.rule_action == "promote"
+    assert args.rule_id == "test-rule"
     assert args.dry_run is True
-    assert args.min_confidence == 0.8
 
-    args_alias = parser.parse_args(["analyze", "--force"])
-    assert args_alias.command in ("genesis", "analyze")
-    assert args_alias.force is True
+    args_demote = parser.parse_args(["rule", "demote", "bad-rule"])
+    assert args_demote.command == "rule"
+    assert args_demote.rule_action == "demote"
+    assert args_demote.rule_id == "bad-rule"
 
-    args_insight = parser.parse_args(["capture-insight", "-i", "Test insight", "-c", "file1.py", "--scaffold-wall"])
-    assert args_insight.command == "capture-insight"
-    assert args_insight.insight == "Test insight"
-    assert args_insight.context_files == ["file1.py"]
-    assert args_insight.scaffold_wall is True
+    args_clean = parser.parse_args(["rule", "clean", "--dry-run"])
+    assert args_clean.command == "rule"
+    assert args_clean.rule_action == "clean"
+    assert args_clean.dry_run is True
 
 
 def test_category_4_plumbing_commands():
-    from soma_cli.hooks import HookCommand
-    from soma_cli.skills import SkillCommand, HandoffCommand
-    from soma_cli.transfer import TransferCommand
-    from soma_cli.quarantine import QuarantineCommand
-    from soma_cli.clean_rules import CleanRulesCommand
-    from soma_cli.completion import CompletionCommand
+    from aegis_cli.agent import AgentCommand
+    from aegis_cli.completion import CompletionCommand
+    from aegis_cli.hooks import HookCommand
 
-    cmds = [
-        HookCommand(),
-        SkillCommand(),
-        HandoffCommand(),
-        TransferCommand(),
-        QuarantineCommand(),
-        CleanRulesCommand(),
-        CompletionCommand(),
-    ]
+    cmds = [AgentCommand(), CompletionCommand(), HookCommand()]
     reg = CommandRegistry()
 
     for cmd in cmds:
         assert cmd.category == CommandCategory.PLUMBING
         reg.register(cmd)
 
-    parser = argparse.ArgumentParser(prog="soma")
+    parser = argparse.ArgumentParser(prog="aegis")
     sub = parser.add_subparsers(dest="command")
     reg.populate_subparsers(sub)
 
-    args_handoff = parser.parse_args([
-        "handoff", "--from", "skillA", "--to", "skillB", "--artifact", "DiffProposal", "--payload", '{"foo": "bar"}'
-    ])
-    assert args_handoff.command == "handoff"
-    assert args_handoff.from_skill == "skillA"
-    assert args_handoff.to_skill == "skillB"
+    args_agent = parser.parse_args(["agent", "scan"])
+    assert args_agent.command == "agent"
+    assert args_agent.agent_action == "scan"
 
-    args_clean = parser.parse_args(["clean-global-rules", "--force"])
-    assert args_clean.command == "clean-global-rules"
-    assert args_clean.force is True
+    args_grade = parser.parse_args(["agent", "grade"])
+    assert args_grade.command == "agent"
+    assert args_grade.agent_action == "grade"
 
     args_comp = parser.parse_args(["completion", "bash"])
     assert args_comp.command == "completion"
     assert args_comp.shell == "bash"
 
+    args_hook = parser.parse_args(["hook", "status"])
+    assert args_hook.command == "hook"
+    assert args_hook.hook_action == "status"
+
 
 def test_default_registry_completeness():
-    from soma_cli.registry import get_default_registry
-
     reg = get_default_registry()
     commands = reg.list_commands()
-    assert len(commands) == 24
+    assert len(commands) == 8
 
     expected_verbs = {
-        "init", "status", "rules", "report", "doctor", "audit",
-        "detect", "languages", "drivers", "verify", "check", "checkpoint",
-        "sync", "oracle", "promote", "demote", "harvest", "genesis",
-        "analyze", "completion", "hook", "transfer", "quarantine", "prune",
-        "install", "uninstall", "clean-global-rules", "capture-insight",
-        "skill", "handoff",
+        "init",
+        "system",
+        "sys",
+        "check",
+        "verify",
+        "checkpoint",
+        "status",
+        "rules",
+        "rule",
+        "agent",
+        "completion",
+        "hook",
     }
 
     for verb in expected_verbs:

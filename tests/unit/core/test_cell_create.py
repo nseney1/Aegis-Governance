@@ -14,7 +14,7 @@ def _env(tmp_path, **extra):
 def test_cell_create_in_process(tmp_path):
     proj = tmp_path / "proj"
     (proj / ".soma" / "cells").mkdir(parents=True)
-    proc = run([sys.executable, "-c", "import sys; from soma_core.lifecycle import cli_cell_create; sys.exit(cli_cell_create(sys.argv[1:]))",
+    proc = run([sys.executable, "-c", "import sys; from aegis_core.lifecycle import cli_cell_create; sys.exit(cli_cell_create(sys.argv[1:]))",
                 "--type", "vacuole", "--hypothesis", "linked", "--id", "vac-linked"],
                cwd=str(proj), env=_env(tmp_path))
     assert "No such file" not in proc.stderr, proc.stderr

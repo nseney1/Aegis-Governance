@@ -1210,7 +1210,7 @@
       "affected_files": [
         "soma_cli/demote.py"
       ],
-      "regression_test": "tests/unit/cli/test_cli_demote.py",
+      "regression_test": "tests/unit/cli/test_cli_rule.py::test_demote_core_rule_fails",
       "pattern": "Destructive mutation command lacks validation guard on protected core rules",
       "changelog_ref": "v0.92.3"
     },

@@ -104,7 +104,7 @@ def test_oracle_transitions_from_unobserved_after_ambient_verification(clean_pro
 def test_oracle_transitions_from_unobserved_after_git_harvest(clean_project: Path):
     """Running soma harvest --git must transition historical cells out of unobserved."""
     from soma_core.arbitration import generate_checkpoint
-    from soma_cli.harvest import run_harvest
+    from aegis_core.outcomes import harvest_git_history
 
     _create_cell(clean_project, "cell-service", ["service/*.py"])
     _commit_file(clean_project, "service/user.py", "class User: pass\n", "feat: add user service")
@@ -114,14 +114,8 @@ def test_oracle_transitions_from_unobserved_after_git_harvest(clean_project: Pat
     assert "cell-service" in [c["cell_id"] for c in report1["classifications"].get("unobserved", [])]
 
     # 2. Harvest git history
-    args = argparse.Namespace(
-        git=True,
-        limit=10,
-        dry_run=False,
-        workspace=str(clean_project),
-    )
-    rc = run_harvest(args)
-    assert rc == 0
+    res = harvest_git_history(clean_project, limit=10, dry_run=False)
+    assert res.get("commits_inspected", 0) >= 1
 
     # 3. Post-harvest
     report2 = generate_checkpoint(str(clean_project))

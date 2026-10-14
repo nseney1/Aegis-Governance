@@ -7,7 +7,7 @@ exit code mappings, and file target resolution:
 - --dry-run: reports planned verification targets without executing verification
 - Exit code mapping: SHIP=0, BLOCK=1, REVISE=1
 - --files flag: passes explicit file list, defaulting to git staged/changed files
-- Importability: run_verify(args) importable from soma_cli.verify and wired to CLI
+- Importability: run_verify(args) importable from aegis_cli.verify and wired to CLI
 """
 import argparse
 import inspect
@@ -23,7 +23,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from soma_core.verification import (
+from aegis_core.verification import (
     ArbitrationResult,
     Claim,
     Divergence,
@@ -33,20 +33,20 @@ from soma_core.verification import (
     ToolEvidence,
     Verdict,
 )
-from soma_cli.cli import _build_parser, main
+from aegis_cli.cli import _build_parser, main
 
 
 class TestVerifyImport:
-    """Requirement 6: Test that run_verify(args) is importable from soma_cli.verify."""
+    """Requirement 6: Test that run_verify(args) is importable from aegis_cli.verify."""
 
     def test_run_verify_importable(self):
-        """run_verify must be importable from soma_cli.verify and be callable."""
-        from soma_cli.verify import run_verify
-        assert callable(run_verify), "soma_cli.verify.run_verify must be a callable function"
+        """run_verify must be importable from aegis_cli.verify and be callable."""
+        from aegis_cli.verify import run_verify
+        assert callable(run_verify), "aegis_cli.verify.run_verify must be a callable function"
 
     def test_run_verify_accepts_args_parameter(self):
         """run_verify must accept an args parameter (argparse.Namespace)."""
-        from soma_cli.verify import run_verify
+        from aegis_cli.verify import run_verify
         sig = inspect.signature(run_verify)
         assert len(sig.parameters) >= 1, "run_verify must accept at least one argument (args)"
         first_param = next(iter(sig.parameters.values()))
@@ -55,16 +55,16 @@ class TestVerifyImport:
         )
 
     def test_cli_registers_verify_in_commands(self):
-        """soma_cli.cli.COMMANDS dict must register the 'verify' command handler."""
-        from soma_cli.cli import COMMANDS
-        assert "verify" in COMMANDS, "COMMANDS dictionary in soma_cli.cli must contain 'verify'"
+        """aegis_cli.cli.COMMANDS dict must register the 'verify' command handler."""
+        from aegis_cli.cli import COMMANDS
+        assert "verify" in COMMANDS, "COMMANDS dictionary in aegis_cli.cli must contain 'verify'"
         assert callable(COMMANDS["verify"]), "COMMANDS['verify'] must be a callable handler"
 
     def test_cli_cmd_verify_handler_exists(self):
-        """soma_cli.cli must define cmd_verify handler function."""
-        import soma_cli.cli as cli_mod
-        assert hasattr(cli_mod, "cmd_verify"), "soma_cli.cli must have cmd_verify function"
-        assert callable(cli_mod.cmd_verify), "soma_cli.cli.cmd_verify must be callable"
+        """aegis_cli.cli must define cmd_verify handler function."""
+        import aegis_cli.cli as cli_mod
+        assert hasattr(cli_mod, "cmd_verify"), "aegis_cli.cli must have cmd_verify function"
+        assert callable(cli_mod.cmd_verify), "aegis_cli.cli.cmd_verify must be callable"
 
 
 class TestVerifyParsing:
@@ -111,8 +111,8 @@ class TestVerifyParsing:
     def test_verify_files_flag_single_file(self):
         """--files flag accepts a single file path."""
         parser = _build_parser()
-        args = parser.parse_args(["verify", "--files", "soma_cli/verify.py"])
-        assert args.files == ["soma_cli/verify.py"]
+        args = parser.parse_args(["verify", "--files", "aegis_cli/verify.py"])
+        assert args.files == ["aegis_cli/verify.py"]
 
     def test_verify_files_flag_multiple_files(self):
         """--files flag accepts multiple file paths as a list."""
@@ -241,7 +241,7 @@ class TestVerifyDryRun:
 
     def test_dry_run_exits_zero(self, capsys):
         """--dry-run produces output and exits with code 0."""
-        exit_code = main(["verify", "--dry-run", "--files", "soma_cli/cli.py"])
+        exit_code = main(["verify", "--dry-run", "--files", "aegis_cli/cli.py"])
         assert exit_code == 0
         captured = capsys.readouterr()
         assert len(captured.out) > 0, "--dry-run must print output to stdout"
@@ -251,12 +251,12 @@ class TestVerifyDryRun:
         exit_code = main([
             "verify",
             "--dry-run",
-            "--files", "soma_cli/cli.py", "soma_cli/doctor.py",
+            "--files", "aegis_cli/cli.py", "aegis_cli/doctor.py",
         ])
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "soma_cli/cli.py" in captured.out
-        assert "soma_cli/doctor.py" in captured.out
+        assert "aegis_cli/cli.py" in captured.out
+        assert "aegis_cli/doctor.py" in captured.out
 
     def test_dry_run_does_not_fail_on_defective_files(self, tmp_path, capsys):
         """--dry-run must exit 0 without failing verification even on files with defects."""
@@ -283,7 +283,7 @@ class TestVerifyDryRun:
             "verify",
             "--dry-run",
             "--layer1-only",
-            "--files", "soma_cli/cli.py",
+            "--files", "aegis_cli/cli.py",
         ])
         assert exit_code == 0
         captured = capsys.readouterr()
@@ -295,22 +295,22 @@ class TestVerifyExitCodes:
 
     def test_verdict_to_exit_code_ship_returns_zero(self):
         """Verdict.SHIP maps to exit code 0."""
-        from soma_cli.verify import verdict_to_exit_code
+        from aegis_cli.verify import verdict_to_exit_code
         assert verdict_to_exit_code(Verdict.SHIP) == 0
 
     def test_verdict_to_exit_code_block_returns_one(self):
         """Verdict.BLOCK maps to exit code 1."""
-        from soma_cli.verify import verdict_to_exit_code
+        from aegis_cli.verify import verdict_to_exit_code
         assert verdict_to_exit_code(Verdict.BLOCK) == 1
 
     def test_verdict_to_exit_code_revise_returns_one(self):
         """Verdict.REVISE maps to exit code 1."""
-        from soma_cli.verify import verdict_to_exit_code
+        from aegis_cli.verify import verdict_to_exit_code
         assert verdict_to_exit_code(Verdict.REVISE) == 1
 
     def test_verdict_exit_codes_dict_mapping(self):
         """VERDICT_EXIT_CODES dictionary defines exact mappings for all Verdict members."""
-        from soma_cli.verify import VERDICT_EXIT_CODES
+        from aegis_cli.verify import VERDICT_EXIT_CODES
         assert VERDICT_EXIT_CODES[Verdict.SHIP] == 0
         assert VERDICT_EXIT_CODES[Verdict.BLOCK] == 1
         assert VERDICT_EXIT_CODES[Verdict.REVISE] == 1
@@ -318,7 +318,7 @@ class TestVerifyExitCodes:
 
     def test_run_verify_returns_zero_on_ship_verdict(self, tmp_path):
         """Direct call to run_verify returning SHIP verdict yields exit code 0."""
-        from soma_cli.verify import run_verify
+        from aegis_cli.verify import run_verify
 
         clean_file = tmp_path / "healthy.py"
         clean_file.write_text(textwrap.dedent("""\
@@ -341,7 +341,7 @@ class TestVerifyExitCodes:
 
     def test_run_verify_returns_one_on_block_verdict(self, tmp_path):
         """Direct call to run_verify encountering BLOCK verdict yields exit code 1."""
-        from soma_cli.verify import run_verify
+        from aegis_cli.verify import run_verify
 
         bad_file = tmp_path / "blocked.py"
         bad_file.write_text(textwrap.dedent("""\
@@ -403,7 +403,7 @@ class TestVerifyFilesFlag:
 
     def test_resolve_target_files_uses_explicit_files(self):
         """resolve_target_files returns explicit files list when --files is provided."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
 
         parser = _build_parser()
         args = parser.parse_args(["verify", "--files", "src/foo.py", "src/bar.py"])
@@ -412,7 +412,7 @@ class TestVerifyFilesFlag:
 
     def test_resolve_target_files_defaults_to_git_changes_when_no_files_flag(self):
         """When --files is omitted, resolve_target_files queries git staged/changed files."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
 
         parser = _build_parser()
         args = parser.parse_args(["verify"])
@@ -431,7 +431,7 @@ class TestVerifyFilesFlag:
 
     def test_resolve_rejects_out_of_tree_paths(self, tmp_path):
         """Files outside repo_root should be skipped with warning."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
 
         # Create a repo structure
         repo = tmp_path / "myrepo"
@@ -525,18 +525,18 @@ class TestVerifyPlanParsing:
 
 
 class TestVerifyPlanResolution:
-    """Test plan resolution logic in soma_cli.verify."""
+    """Test plan resolution logic in aegis_cli.verify."""
 
     def test_resolve_task_plan_from_argument(self, tmp_path):
         """Explicit --plan string takes highest precedence."""
-        from soma_cli.verify import resolve_task_plan
+        from aegis_cli.verify import resolve_task_plan
         args = argparse.Namespace(plan="Implement caching", plan_file=None)
         plan = resolve_task_plan(args, str(tmp_path))
         assert plan == "Implement caching"
 
     def test_resolve_task_plan_from_file(self, tmp_path):
         """--plan-file reads the plan file from disk."""
-        from soma_cli.verify import resolve_task_plan
+        from aegis_cli.verify import resolve_task_plan
         plan_doc = tmp_path / "task_spec.md"
         plan_doc.write_text("Build persistent ledger")
         args = argparse.Namespace(plan=None, plan_file="task_spec.md")
@@ -545,7 +545,7 @@ class TestVerifyPlanResolution:
 
     def test_resolve_task_plan_missing_file_returns_none(self, tmp_path, capsys):
         """Missing --plan-file prints error and returns None."""
-        from soma_cli.verify import resolve_task_plan
+        from aegis_cli.verify import resolve_task_plan
         args = argparse.Namespace(plan=None, plan_file="nonexistent_spec.md")
         plan = resolve_task_plan(args, str(tmp_path))
         assert plan is None
@@ -610,7 +610,7 @@ class TestVerifyLayer2Execution:
                         }
                     ])
 
-        monkeypatch.setattr("soma_cli.verify.resolve_cli_provider", lambda args, root: MockProvider())
+        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda args, root: MockProvider())
 
         target = tmp_path / "worker.py"
         target.write_text(textwrap.dedent("""\
@@ -642,18 +642,18 @@ class TestVerifyLayer2Execution:
 
     def test_run_verify_records_telemetry_on_layer2(self, tmp_path, monkeypatch):
         """run_verify records telemetry on Layer 2 completion."""
-        from soma_cli.verify import run_verify
+        from aegis_cli.verify import run_verify
 
         telemetry_calls = []
         def mock_record(**kwargs):
             telemetry_calls.append(kwargs)
-        monkeypatch.setattr("soma_core.outcomes.record_verification_telemetry", mock_record)
+        monkeypatch.setattr("aegis_core.outcomes.record_verification_telemetry", mock_record)
 
         class MockProvider:
             def generate(self, prompt: str, model: str = None) -> str:
                 return "[]"
 
-        monkeypatch.setattr("soma_cli.verify.resolve_cli_provider", lambda a, r: MockProvider())
+        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda a, r: MockProvider())
 
         target = tmp_path / "worker.py"
         target.write_text("def compute(x: int) -> int:\n    return x\n\ndef main():\n    return compute(1)\n")
@@ -696,7 +696,7 @@ class TestVerifyLayer2Execution:
                 else:
                     return json.dumps([])  # Code agent provides no contradictory claim
 
-        monkeypatch.setattr("soma_cli.verify.resolve_cli_provider", lambda args, root: MockBlockingProvider())
+        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda args, root: MockBlockingProvider())
 
         target = tmp_path / "insecure.py"
         target.write_text(textwrap.dedent("""\
@@ -756,16 +756,16 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_no_evidence_returns_false(self, tmp_path):
         """verify_release_gate directly returns (False, msg) when no evidence exists."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         passed, msg = verify_release_gate(str(tmp_path))
         assert passed is False
         assert "No arbitration evidence found" in msg
 
     def test_verify_release_gate_cycle_zero_with_data(self, tmp_path, monkeypatch):
         """verify_release_gate returns False when cycle is 0 even if data is present."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         monkeypatch.setattr(
-            "soma_core.verification.review_adapter.get_latest_arbitration_evidence",
+            "aegis_core.verification.review_adapter.get_latest_arbitration_evidence",
             lambda ws: (0, {"verdict": "ship"}),
         )
         passed, msg = verify_release_gate(str(tmp_path))
@@ -774,9 +774,9 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_none_data_with_cycle(self, tmp_path, monkeypatch):
         """verify_release_gate returns False when data is None even if cycle > 0."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         monkeypatch.setattr(
-            "soma_core.verification.review_adapter.get_latest_arbitration_evidence",
+            "aegis_core.verification.review_adapter.get_latest_arbitration_evidence",
             lambda ws: (1, None),
         )
         passed, msg = verify_release_gate(str(tmp_path))
@@ -785,7 +785,7 @@ class TestReleaseGateCheck:
 
     def test_release_gate_block_verdict_exits_one(self, tmp_path, capsys):
         """Release gate check fails with code 1 if latest cycle verdict is BLOCK."""
-        from soma_cli.verify import run_verify
+        from aegis_cli.verify import run_verify
         ev_dir = tmp_path / ".soma" / "evidence"
         ev_dir.mkdir(parents=True)
         (ev_dir / "arbitration_cycle_1.json").write_text(
@@ -801,7 +801,7 @@ class TestReleaseGateCheck:
 
     def test_release_gate_revise_verdict_exits_one(self, tmp_path, capsys):
         """Release gate check fails with code 1 if latest cycle verdict is REVISE."""
-        from soma_cli.verify import run_verify
+        from aegis_cli.verify import run_verify
         ev_dir = tmp_path / ".soma" / "evidence"
         ev_dir.mkdir(parents=True)
         (ev_dir / "arbitration_cycle_1.json").write_text(
@@ -817,7 +817,7 @@ class TestReleaseGateCheck:
 
     def test_release_gate_ship_verdict_exits_zero(self, tmp_path, capsys, monkeypatch):
         """Release gate check passes with code 0 if latest cycle verdict is SHIP."""
-        from soma_cli.verify import run_verify
+        from aegis_cli.verify import run_verify
         import subprocess
 
         ev_dir = tmp_path / ".soma" / "evidence"
@@ -859,7 +859,7 @@ class TestReleaseGateCheck:
                 "cycle": 1,
                 "verdict": "ship",
                 "divergence_count": 0,
-                "target_files": ["soma_core/app.py"],
+                "target_files": ["aegis_core/app.py"],
                 "tree_hash": "tree_dummy_hash",
             }),
             encoding="utf-8",
@@ -872,7 +872,7 @@ class TestReleaseGateCheck:
                 if cmd[1] == "rev-parse":
                     return subprocess.CompletedProcess(cmd, 0, stdout="tree_dummy_hash\n", stderr="")
                 if cmd[1] == "diff":
-                    return subprocess.CompletedProcess(cmd, 0, stdout="soma_core/app.py\nsoma_core/uncovered.py\n", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/app.py\naegis_core/uncovered.py\n", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         monkeypatch.setattr(subprocess, "run", mock_run)
 
@@ -883,7 +883,7 @@ class TestReleaseGateCheck:
 
     def test_resolve_target_files_github_base_ref(self, tmp_path, monkeypatch):
         """resolve_target_files falls back to GITHUB_BASE_REF when repo diff is empty."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
         import subprocess
 
         monkeypatch.setenv("GITHUB_BASE_REF", "main")
@@ -893,18 +893,18 @@ class TestReleaseGateCheck:
                     assert kwargs.get("timeout") == 10
                     assert kwargs.get("capture_output") is True
                     assert kwargs.get("text") is True
-                    return subprocess.CompletedProcess(cmd, 0, stdout="soma_core/mod.py\n", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/mod.py\n", stderr="")
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         monkeypatch.setattr(subprocess, "run", mock_run)
 
         args = argparse.Namespace(files=None, workspace=str(tmp_path))
         files = resolve_target_files(args)
-        assert files == ["soma_core/mod.py"]
+        assert files == ["aegis_core/mod.py"]
 
     def test_resolve_target_files_preserves_existing_files_when_github_base_ref_set(self, tmp_path, monkeypatch):
         """resolve_target_files does not query GITHUB_BASE_REF if files were already discovered."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
         import subprocess
 
         monkeypatch.setenv("GITHUB_BASE_REF", "main")
@@ -923,7 +923,7 @@ class TestReleaseGateCheck:
 
     def test_resolve_target_files_github_base_ref_subprocess_error(self, tmp_path, monkeypatch):
         """resolve_target_files handles SubprocessError when querying GITHUB_BASE_REF."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
         import subprocess
 
         monkeypatch.setenv("GITHUB_BASE_REF", "main")
@@ -940,7 +940,7 @@ class TestReleaseGateCheck:
 
     def test_resolve_target_files_clean_tree_branch_diff_fallback(self, tmp_path, monkeypatch):
         """resolve_target_files queries origin/main...HEAD when working tree is clean."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
         import subprocess
 
         monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
@@ -958,7 +958,7 @@ class TestReleaseGateCheck:
 
     def test_resolve_target_files_head_parent_fallback(self, tmp_path, monkeypatch):
         """resolve_target_files falls back to HEAD~1 when branch diffs are unavailable."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
         import subprocess
 
         monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
@@ -978,7 +978,7 @@ class TestReleaseGateCheck:
 
     def test_resolve_target_files_github_base_ref(self, tmp_path, monkeypatch):
         """resolve_target_files honors GITHUB_BASE_REF when present in environment."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
         import subprocess
 
         monkeypatch.setenv("GITHUB_BASE_REF", "release-1.0")
@@ -995,7 +995,7 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_ignores_cells_and_evidence(self, tmp_path, monkeypatch):
         """verify_release_gate ignores modifications in .soma/cells and .soma/evidence."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         evidence_dir = tmp_path / ".soma" / "evidence"
@@ -1025,7 +1025,7 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_git_diff_exception(self, tmp_path, monkeypatch):
         """verify_release_gate fails closed if git commands fail."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         evidence_dir = tmp_path / ".soma" / "evidence"
@@ -1033,7 +1033,7 @@ class TestReleaseGateCheck:
         (evidence_dir / "arbitration_cycle_1.json").write_text(json.dumps({
             "verdict": "ship",
             "cycle": 1,
-            "target_files": ["soma_core/app.py"],
+            "target_files": ["aegis_core/app.py"],
             "tree_hash": "abc12345",
         }))
 
@@ -1048,8 +1048,8 @@ class TestReleaseGateCheck:
     def test_run_verify_save_arbitration_evidence_exception(self, tmp_path, monkeypatch, capsys):
         """run_verify catches exception and fails closed (exit 1) if saving arbitration evidence fails."""
         import json
-        from soma_cli.verify import run_verify
-        from soma_core.verification import ToolEvidence, ArbitrationResult, Verdict
+        from aegis_cli.verify import run_verify
+        from aegis_core.verification import ToolEvidence, ArbitrationResult, Verdict
 
         target = tmp_path / "worker.py"
         target.write_text("def run(): return 1\n")
@@ -1068,7 +1068,7 @@ class TestReleaseGateCheck:
             provider=None,
         )
 
-        monkeypatch.setattr("soma_core.verification.runner.run_layer1", lambda *a, **kw: [
+        monkeypatch.setattr("aegis_core.verification.runner.run_layer1", lambda *a, **kw: [
             ToolEvidence("call_graph", str(target), True, "ok")
         ])
 
@@ -1080,12 +1080,12 @@ class TestReleaseGateCheck:
             predictions=[],
             claims=[],
         )
-        monkeypatch.setattr("soma_core.verification.pipeline.AdversarialVerifier.verify", lambda *a, **kw: ([], [], False))
-        monkeypatch.setattr("soma_cli.verify.resolve_cli_provider", lambda a, r: (lambda p: "[]"))
+        monkeypatch.setattr("aegis_core.verification.pipeline.AdversarialVerifier.verify", lambda *a, **kw: ([], [], False))
+        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda a, r: (lambda p: "[]"))
 
         def mock_save(*a, **kw):
             raise OSError("disk full simulation")
-        monkeypatch.setattr("soma_core.verification.review_adapter.save_arbitration_evidence", mock_save)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.save_arbitration_evidence", mock_save)
 
         exit_code = run_verify(args)
         assert exit_code == 1
@@ -1094,34 +1094,34 @@ class TestReleaseGateCheck:
 
     def test_resolve_target_files_github_base_ref_local_branch_fallback(self, tmp_path, monkeypatch):
         """resolve_target_files falls back to local ref when origin/ref returns empty."""
-        from soma_cli.verify import resolve_target_files
+        from aegis_cli.verify import resolve_target_files
         import subprocess
 
         monkeypatch.setenv("GITHUB_BASE_REF", "main")
         def mock_run(cmd, *args, **kwargs):
             if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "diff":
                 if "main...HEAD" in cmd and "origin/main...HEAD" not in cmd:
-                    return subprocess.CompletedProcess(cmd, 0, stdout="soma_core/local.py\n", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/local.py\n", stderr="")
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         monkeypatch.setattr(subprocess, "run", mock_run)
 
         args = argparse.Namespace(files=None, workspace=str(tmp_path))
         files = resolve_target_files(args)
-        assert files == ["soma_core/local.py"]
+        assert files == ["aegis_core/local.py"]
 
     def test_verify_release_gate_passes_and_run_verify_exit_code_zero(self, tmp_path, monkeypatch, capsys):
         """verify_release_gate returns True on SHIP evidence and run_verify returns 0."""
-        from soma_cli.verify import verify_release_gate, run_verify
+        from aegis_cli.verify import verify_release_gate, run_verify
         import subprocess
 
         def mock_evidence(root):
             return 1, {
                 "verdict": "ship",
-                "target_files": ["soma_core/runner.py"],
+                "target_files": ["aegis_core/runner.py"],
                 "tree_hash": "tree_hash_abc123",
             }
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         def mock_git(cmd, *args, **kwargs):
             if isinstance(cmd, list):
@@ -1130,7 +1130,7 @@ class TestReleaseGateCheck:
                 if cmd[1] == "rev-parse":
                     return subprocess.CompletedProcess(cmd, 0, stdout="tree_hash_abc123\n", stderr="")
                 if cmd[1] == "diff":
-                    return subprocess.CompletedProcess(cmd, 0, stdout="soma_core/runner.py\n", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/runner.py\n", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         monkeypatch.setattr(subprocess, "run", mock_git)
 
@@ -1150,12 +1150,12 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_fails_when_tree_hash_missing(self, tmp_path, monkeypatch):
         """verify_release_gate fails closed if arbitration receipt lacks tree_hash."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
-            return 1, {"verdict": "ship", "target_files": ["soma_core/runner.py"]}
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+            return 1, {"verdict": "ship", "target_files": ["aegis_core/runner.py"]}
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
         monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
 
         passed, msg = verify_release_gate(str(tmp_path))
@@ -1164,16 +1164,16 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_fails_when_tree_hash_mismatches(self, tmp_path, monkeypatch):
         """verify_release_gate fails closed if current HEAD^{tree} differs from receipt."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
             return 1, {
                 "verdict": "ship",
-                "target_files": ["soma_core/runner.py"],
+                "target_files": ["aegis_core/runner.py"],
                 "tree_hash": "tree_receipt_111",
             }
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         def mock_git(cmd, *args, **kwargs):
             if isinstance(cmd, list):
@@ -1182,27 +1182,27 @@ class TestReleaseGateCheck:
                 if cmd[1] == "rev-parse":
                     return subprocess.CompletedProcess(cmd, 0, stdout="tree_current_222\n", stderr="")
                 if cmd[1] == "diff-tree":
-                    return subprocess.CompletedProcess(cmd, 0, stdout="soma_core/runner.py\n", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/runner.py\n", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         monkeypatch.setattr(subprocess, "run", mock_git)
 
         passed, msg = verify_release_gate(str(tmp_path))
         assert passed is False
         assert "Tree hash mismatch" in msg
-        assert "soma_core/runner.py" in msg
+        assert "aegis_core/runner.py" in msg
 
     def test_verify_release_gate_passes_when_tree_diff_is_evidence_only(self, tmp_path, monkeypatch):
         """verify_release_gate passes when tree diff between receipt and HEAD is strictly evidence."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
             return 1, {
                 "verdict": "ship",
-                "target_files": ["soma_core/runner.py"],
+                "target_files": ["aegis_core/runner.py"],
                 "tree_hash": "tree_receipt_111",
             }
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         def mock_git(cmd, *args, **kwargs):
             if isinstance(cmd, list):
@@ -1214,7 +1214,7 @@ class TestReleaseGateCheck:
                     # Only .soma/evidence file committed
                     return subprocess.CompletedProcess(cmd, 0, stdout=".soma/evidence/arbitration_cycle_1.json\n", stderr="")
                 if cmd[1] == "diff":
-                    return subprocess.CompletedProcess(cmd, 0, stdout="soma_core/runner.py\n", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/runner.py\n", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         monkeypatch.setattr(subprocess, "run", mock_git)
 
@@ -1224,16 +1224,16 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_fails_when_diff_tree_returns_error(self, tmp_path, monkeypatch):
         """verify_release_gate fails closed when diff-tree returns non-zero returncode."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
             return 1, {
                 "verdict": "ship",
-                "target_files": ["soma_core/runner.py"],
+                "target_files": ["aegis_core/runner.py"],
                 "tree_hash": "tree_receipt_111",
             }
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         def mock_git(cmd, *args, **kwargs):
             if isinstance(cmd, list):
@@ -1252,16 +1252,16 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_fails_when_working_tree_dirty(self, tmp_path, monkeypatch):
         """verify_release_gate fails closed if uncommitted/unstaged changes exist."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
             return 1, {
                 "verdict": "ship",
-                "target_files": ["soma_core/runner.py"],
+                "target_files": ["aegis_core/runner.py"],
                 "tree_hash": "tree_123",
             }
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         def mock_git(cmd, *args, **kwargs):
             if isinstance(cmd, list) and cmd[1] == "status":
@@ -1275,7 +1275,7 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_fails_when_target_files_empty(self, tmp_path, monkeypatch):
         """verify_release_gate fails closed if target_files is empty but python files modified."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
@@ -1284,7 +1284,7 @@ class TestReleaseGateCheck:
                 "target_files": [],
                 "tree_hash": "tree_123",
             }
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         def mock_git(cmd, *args, **kwargs):
             if isinstance(cmd, list):
@@ -1293,7 +1293,7 @@ class TestReleaseGateCheck:
                 if cmd[1] == "rev-parse":
                     return subprocess.CompletedProcess(cmd, 0, stdout="tree_123\n", stderr="")
                 if cmd[1] == "diff":
-                    return subprocess.CompletedProcess(cmd, 0, stdout="soma_core/mod.py\n", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/mod.py\n", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         monkeypatch.setattr(subprocess, "run", mock_git)
 
@@ -1304,9 +1304,9 @@ class TestReleaseGateCheck:
 
     def test_run_verify_fails_closed_when_evidence_persistence_fails(self, tmp_path, monkeypatch, capsys):
         """run_verify must exit 1 (fail closed) if arbitration evidence fails to persist."""
-        from soma_cli.verify import run_verify
-        from soma_core.verification.pipeline import VerificationPipeline, VerificationPipelineResult
-        from soma_core.verification import Verdict, ToolEvidence
+        from aegis_cli.verify import run_verify
+        from aegis_core.verification.pipeline import VerificationPipeline, VerificationPipelineResult
+        from aegis_core.verification import Verdict, ToolEvidence
 
         dummy_file = tmp_path / "mod.py"
         dummy_file.write_text("def f(): pass\n", encoding="utf-8")
@@ -1339,19 +1339,19 @@ class TestReleaseGateCheck:
                 return "Layer 1 passed"
 
         monkeypatch.setattr(
-            "soma_cli.verify._get_verification",
+            "aegis_cli.verify._get_verification",
             lambda: (MockRunner, Verdict),
         )
         monkeypatch.setattr(
-            "soma_cli.verify.resolve_cli_provider",
+            "aegis_cli.verify.resolve_cli_provider",
             lambda args, root: MockProvider(),
         )
         monkeypatch.setattr(
-            "soma_cli.verify.resolve_task_plan",
+            "aegis_cli.verify.resolve_task_plan",
             lambda args, root: "Dummy plan",
         )
         monkeypatch.setattr(
-            "soma_cli.verify.discover_test_evidence",
+            "aegis_cli.verify.discover_test_evidence",
             lambda targets, root: (["test_f"], "1 passed"),
         )
         monkeypatch.setattr(
@@ -1362,7 +1362,7 @@ class TestReleaseGateCheck:
 
         telemetry_calls = []
         monkeypatch.setattr(
-            "soma_core.outcomes.record_verification_telemetry",
+            "aegis_core.outcomes.record_verification_telemetry",
             lambda *args, **kwargs: telemetry_calls.append(kwargs),
         )
 
@@ -1387,16 +1387,16 @@ class TestReleaseGateCheck:
 
     def test_verify_release_gate_ignores_soma_evidence_and_pycache(self, tmp_path, monkeypatch):
         """verify_release_gate ignores runtime evidence, telemetry, insights, and python/pytest caches."""
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
             return 1, {
                 "verdict": "ship",
-                "target_files": ["soma_core/runner.py"],
+                "target_files": ["aegis_core/runner.py"],
                 "tree_hash": "tree_clean_123",
             }
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         status_output = (
             "??\n"
@@ -1417,7 +1417,7 @@ class TestReleaseGateCheck:
                 if cmd[1] == "rev-parse":
                     return subprocess.CompletedProcess(cmd, 0, stdout="tree_clean_123\n", stderr="")
                 if cmd[1] == "diff":
-                    return subprocess.CompletedProcess(cmd, 0, stdout="soma_core/runner.py\n", stderr="")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/runner.py\n", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         monkeypatch.setattr(subprocess, "run", mock_git)
 
@@ -1426,12 +1426,12 @@ class TestReleaseGateCheck:
         assert "Release Gate 4.5 PASS" in msg
 
     def test_verify_release_gate_git_status_failure(self, tmp_path, monkeypatch):
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
             return 1, {"verdict": "ship", "target_files": ["runner.py"], "tree_hash": "t1"}
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         # Non-zero exit code
         def mock_fail(cmd, *a, **k):
@@ -1450,12 +1450,12 @@ class TestReleaseGateCheck:
         assert "git status execution failed" in msg
 
     def test_verify_release_gate_git_rev_parse_and_diff_failures(self, tmp_path, monkeypatch):
-        from soma_cli.verify import verify_release_gate
+        from aegis_cli.verify import verify_release_gate
         import subprocess
 
         def mock_evidence(root):
             return 1, {"verdict": "ship", "target_files": ["runner.py"], "tree_hash": "t1"}
-        monkeypatch.setattr("soma_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
+        monkeypatch.setattr("aegis_core.verification.review_adapter.get_latest_arbitration_evidence", mock_evidence)
 
         # rev-parse non-zero
         def mock_git(cmd, *a, **k):
@@ -1513,7 +1513,7 @@ class TestReleaseGateCheck:
 def test_verify_command_contract():
     import argparse
     from unittest.mock import patch
-    from soma_cli.verify import VerifyCommand
+    from aegis_cli.verify import VerifyCommand
     cmd = VerifyCommand()
     parser = argparse.ArgumentParser()
     cmd.configure_parser(parser)
@@ -1531,9 +1531,27 @@ def test_verify_command_contract():
     assert parsed.in_band is True
     assert parsed.release_gate is True
 
-    with patch("soma_cli.verify.run_verify", return_value=0) as mock_run:
+    with patch("aegis_cli.verify.run_verify", return_value=0) as mock_run:
         assert cmd.execute(parsed) == 0
         mock_run.assert_called_once_with(parsed)
+
+
+def test_verify_command_hook_mode():
+    import argparse
+    from unittest.mock import patch
+    from aegis_cli.verify import VerifyCommand, run_verify
+
+    cmd = VerifyCommand()
+    parser = argparse.ArgumentParser()
+    cmd.configure_parser(parser)
+    parsed = parser.parse_args(["--hook"])
+    assert parsed.hook is True
+
+    with patch("aegis_cli.check.run_check", return_value=0) as mock_check:
+        rc = run_verify(parsed)
+        assert rc == 0
+        mock_check.assert_called_once_with(parsed)
+
 
 
 

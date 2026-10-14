@@ -3,14 +3,14 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "soma-governance"
-version = "1.5.1"
+name = "aegis-governance"
+version = "2.0.0"
 description = "Governance framework that makes AI coding agents trustworthy"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
 authors = [
-    {name = "Soma Contributors"}
+    {name = "Aegis Contributors"}
 ]
 keywords = [
     "ai-governance", "agent-alignment", "evolutionary-rules",
@@ -30,8 +30,8 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-soma = "soma_cli.cli:main"
-soma-mcp = "soma_mcp.server:main"
+aegis = "aegis_cli.cli:main"
+aegis-mcp = "aegis_mcp.server:main"
 
 [project.optional-dependencies]
 ai = ["google-genai>=1.0"]
@@ -47,16 +47,19 @@ Documentation = "https://github.com/nseney1/Soma-Governance/tree/main/docs"
 Changelog = "https://github.com/nseney1/Soma-Governance/blob/main/docs/project/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
-include = ["soma_cli*", "soma_sdk*", "soma_core*", "soma_mcp*", "genome*"]
+include = [
+    "aegis_cli*", "aegis_sdk*", "aegis_core*", "aegis_mcp*",
+    "rules*"
+]
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.package-data]
-soma_sdk = ["py.typed"]
-soma_cli = ["starter_rules/*.md"]
-soma_core = ["ast/drivers/templates/*"]
-genome = ["*.md", ".oracles/*.md"]
+aegis_sdk = ["py.typed"]
+aegis_cli = ["starter_rules/*.md"]
+aegis_core = ["ast/drivers/templates/*"]
+rules = ["*.md", ".oracles/*.md"]
 
 
 [tool.pytest.ini_options]

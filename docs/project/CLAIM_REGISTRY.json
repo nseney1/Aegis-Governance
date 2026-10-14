@@ -81,7 +81,7 @@
     },
     "claim_structured_crossover": {
       "phase": 3,
-      "status": "unlocked",
+      "status": "removed",
       "readme_text": "Structured field-level rule merging",
       "required_tests": [
         "tests/unit/core/test_crossover_structured.py::TestCrossoverMergeRules::test_same_type_parents_produce_same_type",

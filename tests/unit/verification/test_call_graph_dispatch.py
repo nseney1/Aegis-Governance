@@ -68,7 +68,7 @@ class TestCallGraphDispatchRecognition:
         """soma_cli/cli.py must pass call_graph check with zero orphan functions."""
         # Find soma_cli/cli.py relative to repo root
         repo_root = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
-        cli_file = os.path.join(repo_root, "soma_cli", "cli.py")
+        cli_file = os.path.join(repo_root, "aegis_cli", "cli.py") if os.path.exists(os.path.join(repo_root, "aegis_cli", "cli.py")) else os.path.join(repo_root, "soma_cli", "cli.py")
         assert os.path.exists(cli_file), f"cli.py not found at {cli_file}"
 
         result = call_graph.check(

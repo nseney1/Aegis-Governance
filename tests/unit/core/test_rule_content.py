@@ -104,7 +104,7 @@ def _collect_target_paths_from_rules():
     """Collect target_paths values from all cell frontmatter."""
     from soma_core.somayaml import parse_frontmatter
     results = []
-    cells_dir = REPO_ROOT / ".soma" / "cells"
+    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".soma" / "cells")
     if not cells_dir.exists():
         return results
     for md_file in cells_dir.rglob("*.md"):
@@ -155,8 +155,11 @@ def test_parsers_agree_on_id_and_domain():
     from soma_mcp.jit_engine import parse_frontmatter as jit_parser
 
     rule_dirs = [
+        REPO_ROOT / "rules",
+        REPO_ROOT / "rules" / ".oracles",
         REPO_ROOT / "genome",
         REPO_ROOT / "genome" / ".oracles",
+        REPO_ROOT / ".aegis" / "rules",
         REPO_ROOT / ".soma" / "cells",
     ]
     checked = 0
@@ -206,7 +209,7 @@ def _collect_glob_paths_from_cells():
     """Collect glob target_paths from all cell frontmatter."""
     from soma_core.somayaml import parse_frontmatter
     results = []
-    cells_dir = REPO_ROOT / ".soma" / "cells"
+    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".soma" / "cells")
     if not cells_dir.exists():
         return results
     for md_file in cells_dir.rglob("*.md"):
@@ -261,9 +264,9 @@ def test_cell_subdirs_have_test_coverage():
     """
     import ast
 
-    cells_dir = REPO_ROOT / ".soma" / "cells"
+    cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".soma" / "cells")
     if not cells_dir.exists():
-        pytest.skip("No .soma/cells/ directory")
+        pytest.skip("No .aegis/rules/ or .soma/cells/ directory")
 
     # Find all cell subdirectories that contain .md files
     cell_subdirs = set()
@@ -279,13 +282,17 @@ def test_cell_subdirs_have_test_coverage():
     test_file = REPO_ROOT / "tests" / "unit" / "core" / "test_rule_metadata.py"
     source = test_file.read_text(encoding="utf-8")
 
-    # Known cell type mappings — test functions reference these
-    # by directory name or type name
+    SUBDIR_ALIASES = {
+        "invariants": "walls",
+        "traps": "vacuoles",
+        "boundaries": "membranes",
+        "personas": "chloroplasts",
+        "contracts": "plasmodesmata",
+    }
     tested_types = set()
-    # Check for function names and string references to cell subdirs
     for subdir in cell_subdirs:
-        # Look for the subdirectory name in parametrize IDs or function names
-        if subdir in source:
+        alias = SUBDIR_ALIASES.get(subdir, subdir)
+        if subdir in source or alias in source:
             tested_types.add(subdir)
 
     untested = cell_subdirs - tested_types

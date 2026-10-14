@@ -1,0 +1,9 @@
+# Evidence data — reproducible from transcripts
+fitness.jsonl
+signals.jsonl
+sessions_processed.jsonl
+
+# Lock file soma_sdk.telemetry.evidence_lock() keeps between runs (BUG-040)
+.signals.lock
+.evidence.lock
+.cycle_counter

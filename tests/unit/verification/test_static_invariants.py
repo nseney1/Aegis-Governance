@@ -81,7 +81,7 @@ def test_all_text_open_calls_specify_encoding():
     """SOMA-H04: requires-python >=3.9 means PEP 686 does not apply, so Windows
     uses the locale codepage. Rule files contain characters cp1252 cannot encode."""
     offenders = []
-    for sub in ("soma_mcp", "soma_sdk"):
+    for sub in ("soma_mcp", "soma_sdk", "aegis_mcp", "aegis_sdk"):
         root = os.path.join(REPO_ROOT, sub)
         if not os.path.isdir(root):
             continue
@@ -158,7 +158,7 @@ def test_no_infinity_emitted_in_json_payloads():
     """SOMA-M01: json.dumps(float('inf')) emits bare `Infinity`, which RFC 8259
     forbids; strict non-Python MCP clients reject the frame."""
     offenders = []
-    for sub in ("soma_mcp", "soma_sdk"):
+    for sub in ("soma_mcp", "soma_sdk", "aegis_mcp", "aegis_sdk"):
         root = os.path.join(REPO_ROOT, sub)
         if not os.path.isdir(root):
             continue
@@ -204,8 +204,9 @@ def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
         + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}) + "\n"
     )
     env = {"PYTHONPATH": REPO_ROOT}
+    mcp_pkg = "aegis_mcp" if os.path.exists(os.path.join(REPO_ROOT, "aegis_mcp")) else "soma_mcp"
     proc = subprocess.run(
-        [sys.executable, "-m", "soma_mcp"],
+        [sys.executable, "-m", mcp_pkg],
         cwd=str(tmp_path), input=requests, capture_output=True, text=True,
         timeout=120, env={**os.environ, **env},
     )
@@ -215,7 +216,7 @@ def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
     for ln in lines:
         json.loads(ln)  # every framed response must be valid JSON
     first = json.loads(lines[0])
-    assert first["result"]["serverInfo"]["name"] == "soma-mcp"
+    assert first["result"]["serverInfo"]["name"] in ("aegis-mcp", "soma-mcp")
     tools = json.loads(lines[1])["result"]["tools"]
     assert len(tools) >= 1
 
@@ -231,16 +232,20 @@ def test_entire_runtime_has_zero_third_party_imports():
     from soma_core.verification.import_guard import _get_stdlib_modules
 
     stdlib = set(_get_stdlib_modules()) | set(sys.builtin_module_names)
-    internal_prefixes = ("soma_", "install", "genome")
+    internal_prefixes = ("soma_", "aegis_", "install", "genome", "rules")
     soma_core_dir = os.path.join(REPO_ROOT, "soma_core")
+    aegis_core_dir = os.path.join(REPO_ROOT, "aegis_core")
     soma_core_modules = {
         f[:-3] for f in os.listdir(soma_core_dir) if f.endswith(".py")
     } if os.path.isdir(soma_core_dir) else set()
-    internal_names = soma_core_modules | {"conftest"}
+    aegis_core_modules = {
+        f[:-3] for f in os.listdir(aegis_core_dir) if f.endswith(".py")
+    } if os.path.isdir(aegis_core_dir) else set()
+    internal_names = soma_core_modules | aegis_core_modules | {"conftest"}
     optional_allowed = {"google", "anthropic", "openai", "keyring"}
 
     offenders = []
-    runtime_dirs = ["soma_cli", "soma_core", "soma_mcp", "soma_sdk"]
+    runtime_dirs = ["soma_cli", "soma_core", "soma_mcp", "soma_sdk", "aegis_cli", "aegis_core", "aegis_mcp", "aegis_sdk"]
     for rdir in runtime_dirs:
         dir_path = os.path.join(REPO_ROOT, rdir)
         for path in iter_source_files(dir_path, (".py",)):
@@ -311,18 +316,26 @@ def test_version_is_single_sourced():
         f"pyproject.toml ({match.group(1)}) != VERSION ({version_file})"
     )
 
-    python_sdk = read(os.path.join(REPO_ROOT, "soma_sdk", "__init__.py"))
-    sdk_match = re.search(r"^__version__\s*=\s*['\"]([^'\"]+)['\"]", python_sdk, re.M)
-    assert sdk_match and sdk_match.group(1) == version_file, (
-        f"Python SDK ({sdk_match.group(1) if sdk_match else 'missing'}) != VERSION ({version_file})"
-    )
+    for sdk_pkg in ("soma_sdk", "aegis_sdk"):
+        sdk_path = os.path.join(REPO_ROOT, sdk_pkg, "__init__.py")
+        if not os.path.exists(sdk_path):
+            continue
+        python_sdk = read(sdk_path)
+        sdk_match = re.search(r"^__version__\s*=\s*['\"]([^'\"]+)['\"]", python_sdk, re.M)
+        assert sdk_match and sdk_match.group(1) == version_file, (
+            f"Python SDK {sdk_pkg} ({sdk_match.group(1) if sdk_match else 'missing'}) != VERSION ({version_file})"
+        )
 
-    from soma_mcp.server import _server_version
+    try:
+        from aegis_mcp.server import _server_version
+    except ImportError:
+        from soma_mcp.server import _server_version
     assert _server_version() == version_file, (
         f"MCP runtime ({_server_version()}) != VERSION ({version_file})"
     )
 
-    server = read(os.path.join(REPO_ROOT, "soma_mcp", "server.py"))
+    mcp_server_file = os.path.join(REPO_ROOT, "aegis_mcp", "server.py") if os.path.exists(os.path.join(REPO_ROOT, "aegis_mcp", "server.py")) else os.path.join(REPO_ROOT, "soma_mcp", "server.py")
+    server = read(mcp_server_file)
     assert f'"{version_file}"' not in server.replace('_server_version', ''), (
         "server.py still hardcodes the version string"
     )
@@ -383,8 +396,12 @@ def test_no_undefined_names_in_python_code():
     ruff_bin = shutil.which("ruff") or os.path.expanduser("~/.local/bin/ruff")
     if not os.path.exists(ruff_bin):
         pytest.skip("ruff binary not found")
+    targets = [
+        d for d in ("soma_core", "soma_cli", "soma_sdk", "soma_mcp", "aegis_core", "aegis_cli", "aegis_sdk", "aegis_mcp")
+        if os.path.isdir(os.path.join(REPO_ROOT, d))
+    ]
     proc = subprocess.run(
-        [ruff_bin, "check", "--select", "F821", "soma_core", "soma_cli", "soma_sdk"],
+        [ruff_bin, "check", "--select", "F821", *targets],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

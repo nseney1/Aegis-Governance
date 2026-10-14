@@ -10,7 +10,7 @@ import sys
 import subprocess
 import pytest
 
-from soma_core.somayaml import parse_frontmatter
+from aegis_core.somayaml import parse_frontmatter
 from tests.helpers_cell import soma_workspace, write_cell_with_fitness
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
@@ -33,7 +33,7 @@ class TestDecayIntegration:
 
         result = subprocess.run(
             [sys.executable, "-c",
-             "import sys; from soma_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
+             "import sys; from aegis_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
              "--tier-check", "--execute"],
             cwd=str(soma_workspace),
             capture_output=True, text=True, timeout=30,
@@ -64,7 +64,7 @@ class TestDecayIntegration:
 
         result = subprocess.run(
             [sys.executable, "-c",
-             "import sys; from soma_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
+             "import sys; from aegis_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
              "--tier-check", "--execute"],
             cwd=str(soma_workspace),
             capture_output=True, text=True, timeout=30,
@@ -84,7 +84,7 @@ class TestDecayIntegration:
 
         result = subprocess.run(
             [sys.executable, "-c",
-             "import sys; from soma_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
+             "import sys; from aegis_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
              "--tier-check"],  # No --execute
             cwd=str(soma_workspace),
             capture_output=True, text=True, timeout=30,
@@ -102,7 +102,7 @@ class TestDecayIntegration:
         write_cell_with_fitness(cells_dir, "idempotent-cell", "advisory", 100, 90, 10)
 
         cmd = [sys.executable, "-c",
-               "import sys; from soma_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
+               "import sys; from aegis_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
                "--tier-check", "--execute"]
         env = {**os.environ, "PYTHONPATH": REPO_ROOT}
 
