@@ -106,8 +106,8 @@ def _check_evidence_dir(project_root: Path | None = None) -> bool:
 
 
 def _check_cli_resolvable() -> bool:
-    """Check that 'soma' CLI is on PATH."""
-    path = shutil.which("soma")
+    """Check that 'aegis' or 'soma' CLI is on PATH."""
+    path = shutil.which("aegis") or shutil.which("soma")
     if path:
         print(f"  ✅ soma CLI resolvable ({path})")
         return True
@@ -124,7 +124,10 @@ def _check_cli_resolvable() -> bool:
 # MCP configs start the server as `python3 -m aegis_mcp`. The import probe runs
 # without -I so user site-packages count, but drops the implicit CWD entry so
 # doctor never imports (executes) a aegis_mcp that happens to sit in the cwd.
-_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; import soma_mcp"
+_IMPORT_PROBE = (
+    "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; "
+    "try:\n    import aegis_mcp\nexcept ImportError:\n    import soma_mcp"
+)
 
 
 def probe_mcp_launcher(path_env: str | None = None,
