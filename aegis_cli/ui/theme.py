@@ -28,11 +28,8 @@ _RULE_TYPE_STYLES: dict[str, tuple[str, ...]] = {
     "boundary": ("blue",),
     "membrane": ("blue",),
     "contract": ("blue",),
-    "plasmodesmata": ("blue",),
     "trap": ("cyan",),
-    "vacuole": ("cyan",),
     "persona": ("cyan",),
-    "chloroplast": ("cyan",),
     "core_rule": ("bold", "green"),
 }
 

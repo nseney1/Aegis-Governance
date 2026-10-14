@@ -537,7 +537,7 @@ class RuleCommand(AegisCommand):
 
         # list
         p_list = sub.add_parser("list", help="List active rules and fitness metrics")
-        p_list.add_argument("--type", choices=["invariant", "trap", "boundary", "persona", "contract", "wall", "vacuole"], help="Filter by rule type")
+        p_list.add_argument("--type", choices=["invariant", "trap", "boundary", "persona", "contract", "wall"], help="Filter by rule type")
         p_list.add_argument("--min-fitness", type=float, help="Filter by minimum fitness score")
 
         # promote

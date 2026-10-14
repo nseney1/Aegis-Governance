@@ -289,7 +289,7 @@ class TestStatus:
             encoding="utf-8",
         )
         (rules_dir / "traps" / "trap-retry.md").write_text(
-            "---\nid: trap-retry\ntype: vacuole\nfitness:\n  score: 0.42\n---\n# Retry Trap\n",
+            "---\nid: trap-retry\ntype: trap\nfitness:\n  score: 0.42\n---\n# Retry Trap\n",
             encoding="utf-8",
         )
 

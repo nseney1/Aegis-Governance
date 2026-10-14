@@ -199,7 +199,7 @@ def promote_cell(
     force: bool = False,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Execute structural promotion for a cell (vacuole/trap -> wall/invariant -> genome)."""
+    """Execute structural promotion for a rule (trap -> invariant -> genome)."""
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
@@ -293,7 +293,7 @@ def demote_cell(
     cell_id: str,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Execute structural demotion for a cell (wall/invariant -> vacuole/trap)."""
+    """Execute structural demotion for a rule (invariant -> trap)."""
     clean_id = sanitize_cell_id(cell_id)
     if not clean_id:
         return {"status": "invalid_id", "message": f"Invalid cell ID: '{cell_id}'"}
@@ -347,7 +347,7 @@ def demote_cell(
         new_content = _transform_frontmatter_type(content, next_type)
         _atomic_write_and_unlink(cell_path, target_path, new_content)
 
-        if current_type in ("wall", "invariant") and next_type in ("vacuole", "trap"):
+        if current_type in ("wall", "invariant") and next_type == "trap":
             for pfx in ("check-", "gate-"):
                 for sfx in (".sh", ".py"):
                     art = ws.aegis_dir / "enforcement" / f"{pfx}{clean_id}{sfx}"

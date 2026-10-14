@@ -26,11 +26,11 @@ def test_is_promotable_with_age_fails_closed_on_invalid_date():
 
 def test_load_cell_populates_created_date(tmp_path):
     """load_cell must populate created_date on the loaded Cell instance."""
-    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "traps"
     cells_dir.mkdir(parents=True)
     cell_file = cells_dir / "test-cell.md"
     cell_file.write_text(
-        "---\nname: test-cell\ntype: vacuole\ncreated_date: '2026-01-01T00:00:00Z'\n---\nHypothesis\n",
+        "---\nname: test-cell\ntype: trap\ncreated_date: '2026-01-01T00:00:00Z'\n---\nHypothesis\n",
         encoding="utf-8"
     )
 
@@ -59,13 +59,13 @@ def test_force_promote_handles_genome_cells(tmp_path, capsys):
 def test_force_promote_rollback_on_unlink_failure(tmp_path, monkeypatch):
     """If cell_path.unlink() fails after target_path is written, target_path must be cleaned up."""
     cells_dir = tmp_path / ".aegis" / "rules"
-    vac_dir = cells_dir / "vacuoles"
+    vac_dir = cells_dir / "traps"
     vac_dir.mkdir(parents=True)
-    wall_dir = cells_dir / "walls"
+    wall_dir = cells_dir / "invariants"
     wall_dir.mkdir(parents=True)
 
     cell_file = vac_dir / "test-cell.md"
-    cell_file.write_text("---\nname: test-cell\ntype: vacuole\n---\nHypothesis\n", encoding="utf-8")
+    cell_file.write_text("---\nname: test-cell\ntype: trap\n---\nHypothesis\n", encoding="utf-8")
 
     def mock_unlink(self, *args, **kwargs):
         raise OSError("Permission denied / disk locked")

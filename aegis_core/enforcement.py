@@ -329,7 +329,7 @@ _load_cells = load_cells_for_enforcement
 def generate_precommit_check(cell: Dict[str, Any], workspace: str | Path | Workspace = ".") -> str:
     """Generate a pre-commit check script for a 'mechanical' cell."""
     name = cell.get("_name") or cell.get("id") or cell.get("name", "unnamed")
-    cell_type = cell.get("type", "vacuole")
+    cell_type = cell.get("type", "trap")
     hypothesis = cell.get("hypothesis", "")
     target_paths = cell.get("target_paths") or []
 
@@ -340,7 +340,7 @@ def generate_precommit_check(cell: Dict[str, Any], workspace: str | Path | Works
     quoted_hyp = shlex.quote(hypothesis[:80])
     quoted_patterns = " ".join(shlex.quote(p) for p in target_paths)
 
-    if cell_type == "wall":
+    if cell_type in ("wall", "invariant"):
         check = f"""#!/bin/bash
 # Auto-generated enforcement artifact for: {clean_name}
 # Type: {cell_type} | Tier: mechanical
@@ -382,7 +382,7 @@ fi
 
 exit 0  # No match: allow commit
 """
-    elif cell_type == "membrane":
+    elif cell_type in ("membrane", "boundary"):
         check = f"""#!/bin/bash
 # Auto-generated enforcement artifact for: {clean_name}
 # Type: {cell_type} | Tier: mechanical
@@ -461,7 +461,7 @@ exit 0  # No match: allow commit
 def generate_gate_assertion(cell: Dict[str, Any], workspace: str | Path | Workspace = ".") -> str:
     """Generate a runtime assertion for a 'gate' cell."""
     name = cell.get("_name") or cell.get("id") or cell.get("name", "unnamed")
-    cell_type = cell.get("type", "vacuole")
+    cell_type = cell.get("type", "trap")
     hypothesis = cell.get("hypothesis", "")
     target_paths = cell.get("target_paths") or []
 

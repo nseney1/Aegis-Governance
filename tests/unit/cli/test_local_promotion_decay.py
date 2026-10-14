@@ -27,12 +27,12 @@ class TestPromotionZeroTriggerGuard:
         from aegis_core.lifecycle import evaluate_promotions
         from tests.helpers_rule import make_cell
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "zero-cell", cell_type="vacuole", created_days_ago=60)
+        make_cell(str(cells_dir), "zero-cell", cell_type="trap", created_days_ago=60)
         # 0 triggers in evidence
         candidates = evaluate_promotions(str(tmp_path))
         assert not any(c["cell_id"] == "zero-cell" for c in candidates), \
@@ -43,12 +43,12 @@ class TestPromotionZeroTriggerGuard:
         from aegis_core.lifecycle import evaluate_promotions
         from tests.helpers_rule import make_cell, write_evidence
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "high-cell", cell_type="vacuole", created_days_ago=60)
+        make_cell(str(cells_dir), "high-cell", cell_type="trap", created_days_ago=60)
         write_evidence(str(evidence_dir), "high-cell", triggers=50, tp=48, fp=1)
 
         candidates = evaluate_promotions(str(tmp_path))

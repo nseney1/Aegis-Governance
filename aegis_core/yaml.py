@@ -89,7 +89,7 @@ class AegisDocument(collections.abc.Mapping):
 
         # Auto-Inference for Active Cells, Rules, and Skills
         cell_types = {
-            "wall", "membrane", "vacuole", "chloroplast", "plasmodesma", "plasmodesmata",
+            "wall", "membrane",
             "invariant", "boundary", "trap", "persona", "contract", "gate"
         }
         m_type = str(self._metadata.get("type", "")).lower()

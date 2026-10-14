@@ -61,34 +61,34 @@ class TestPromotionCriteria:
     """Deterministic promotion: triggers ≥ 20 AND tp_rate > 0.85 AND age > 30 days."""
 
     def test_promotes_qualifying_vacuole(self, tmp_path):
-        """Vacuole with 25 triggers, 90% tp_rate, 45 days old → promote to wall."""
+        """Trap with 25 triggers, 90% tp_rate, 45 days old → promote to invariant."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "proven-cell", cell_type="vacuole",
+        make_cell(str(cells_dir), "proven-cell", cell_type="trap",
                   created_days_ago=45)
         write_evidence(str(evidence_dir), "proven-cell", triggers=25, tp=23, fp=2)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 1
         assert candidates[0]["cell_id"] == "proven-cell"
-        assert candidates[0]["from_type"] == "vacuole"
-        assert candidates[0]["to_type"] == "wall"
+        assert candidates[0]["from_type"] == "trap"
+        assert candidates[0]["to_type"] == "invariant"
 
     def test_rejects_too_few_triggers(self, tmp_path):
         """Only 10 triggers → not enough for promotion."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "young-cell", cell_type="vacuole",
+        make_cell(str(cells_dir), "young-cell", cell_type="trap",
                   created_days_ago=45)
         write_evidence(str(evidence_dir), "young-cell", triggers=10, tp=9, fp=1)
 
@@ -99,12 +99,12 @@ class TestPromotionCriteria:
         """tp_rate = 0.60 → below 0.85 threshold."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "noisy-cell", cell_type="vacuole",
+        make_cell(str(cells_dir), "noisy-cell", cell_type="trap",
                   created_days_ago=45)
         write_evidence(str(evidence_dir), "noisy-cell", triggers=25, tp=15, fp=10)
 
@@ -115,12 +115,12 @@ class TestPromotionCriteria:
         """Cell only 15 days old → must be > 30 days."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "new-cell", cell_type="vacuole",
+        make_cell(str(cells_dir), "new-cell", cell_type="trap",
                   created_days_ago=15)
         write_evidence(str(evidence_dir), "new-cell", triggers=30, tp=28, fp=2)
 
@@ -214,7 +214,7 @@ class TestDemotionCriteria:
         assert len(candidates) == 0
 
     def test_wall_demotes_to_vacuole(self, tmp_path):
-        """Demoted wall should become a vacuole."""
+        """Demoted wall should become a trap."""
         from aegis_core.lifecycle import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
@@ -229,7 +229,7 @@ class TestDemotionCriteria:
         candidates = evaluate_demotions(str(tmp_path))
         assert len(candidates) == 1
         assert candidates[0]["from_type"] == "wall"
-        assert candidates[0]["to_type"] == "vacuole"
+        assert candidates[0]["to_type"] == "trap"
 
     def test_empty_workspace_returns_empty(self, tmp_path):
         """No cells → no demotion candidates."""
@@ -249,12 +249,12 @@ class TestLifecycleBoundaries:
         """19 triggers should NOT promote (need >=20)."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "edge-cell-19", cell_type="vacuole",
+        make_cell(str(cells_dir), "edge-cell-19", cell_type="trap",
                   created_days_ago=45)
         # 19 triggers, all TP → tp_rate = 1.0 (passes rate check)
         write_evidence(str(evidence_dir), "edge-cell-19", triggers=19, tp=19, fp=0)
@@ -266,12 +266,12 @@ class TestLifecycleBoundaries:
         """Exactly 20 triggers should promote."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "edge-cell-20", cell_type="vacuole",
+        make_cell(str(cells_dir), "edge-cell-20", cell_type="trap",
                   created_days_ago=45)
         # 20 triggers, 18 TP → tp_rate = 0.90 (passes >=0.85)
         write_evidence(str(evidence_dir), "edge-cell-20", triggers=20, tp=18, fp=2)
@@ -284,12 +284,12 @@ class TestLifecycleBoundaries:
         """0.84 tp_rate should NOT promote (need >=0.85)."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "low-tp-cell", cell_type="vacuole",
+        make_cell(str(cells_dir), "low-tp-cell", cell_type="trap",
                   created_days_ago=45)
         # 25 triggers, 21 TP → tp_rate = 0.84
         write_evidence(str(evidence_dir), "low-tp-cell", triggers=25, tp=21, fp=4)
@@ -339,12 +339,12 @@ class TestLifecycleBoundaries:
         """Exactly 0.85 tp_rate should promote (inclusive >=)."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "tp-085-cell", cell_type="vacuole",
+        make_cell(str(cells_dir), "tp-085-cell", cell_type="trap",
                   created_days_ago=45)
         # 20 triggers, 17 TP → tp_rate = 0.85
         write_evidence(str(evidence_dir), "tp-085-cell", triggers=20, tp=17, fp=3)
@@ -358,13 +358,13 @@ class TestLifecycleBoundaries:
         """29 days old should NOT promote (need >=30)."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
         # created_days_ago=28 → actual age_days=29 (date truncation adds ~1 day)
-        make_cell(str(cells_dir), "age-29-cell", cell_type="vacuole",
+        make_cell(str(cells_dir), "age-29-cell", cell_type="trap",
                   created_days_ago=28)
         # Passes trigger and tp_rate checks
         write_evidence(str(evidence_dir), "age-29-cell", triggers=25, tp=24, fp=1)
@@ -376,12 +376,12 @@ class TestLifecycleBoundaries:
         """Exactly 30 days old should promote."""
         from aegis_core.lifecycle import evaluate_promotions
 
-        cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+        cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
         evidence_dir = tmp_path / ".aegis" / "evidence"
         evidence_dir.mkdir(parents=True)
 
-        make_cell(str(cells_dir), "age-30-cell", cell_type="vacuole",
+        make_cell(str(cells_dir), "age-30-cell", cell_type="trap",
                   created_days_ago=30)
         # Passes trigger and tp_rate checks
         write_evidence(str(evidence_dir), "age-30-cell", triggers=25, tp=24, fp=1)

@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 
-def make_rule(cells_dir, name, cell_type="vacuole", created_days_ago=10,
+def make_rule(cells_dir, name, cell_type="trap", created_days_ago=10,
               expiry_days=365, expiry_sessions=100):
     """Create a minimal rule markdown file with YAML frontmatter."""
     created = (datetime.now() - timedelta(days=created_days_ago)).strftime("%Y-%m-%d")
@@ -52,7 +52,7 @@ make_cell = make_rule
 
 
 def write_rule_with_fitness(cells_dir, name, enforcement="advisory",
-                            triggers=0, tp=0, fp=0, cell_type="vacuole",
+                            triggers=0, tp=0, fp=0, cell_type="trap",
                             hypothesis=None):
     """Write a rule markdown file with fitness data in YAML frontmatter."""
     score = tp / max(triggers, 1)

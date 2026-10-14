@@ -17,17 +17,13 @@ SKIP_DIRS = {
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", "egg-info",
 }
 DIR_TO_TYPE = {
-    "vacuoles": ("vacuole", "trap"),
-    "walls": ("wall", "invariant"),
-    "chloroplasts": ("chloroplast", "persona"),
-    "membranes": ("membrane", "boundary"),
-    "plasmodesmata": ("plasmodesmata", "contract"),
-    # Engineering canonical directories
-    "traps": ("trap", "vacuole"),
+    "traps": ("trap",),
     "invariants": ("invariant", "wall"),
-    "personas": ("persona", "chloroplast"),
+    "personas": ("persona",),
     "boundaries": ("boundary", "membrane"),
-    "contracts": ("contract", "plasmodesmata"),
+    "contracts": ("contract",),
+    "walls": ("wall", "invariant"),
+    "membranes": ("membrane", "boundary"),
 }
 
 
@@ -579,7 +575,7 @@ def check_cell_conventions(root: Path) -> list[dict]:
             continue
 
         required = ["id", "domain", "type"]
-        if any(t in ("wall", "vacuole", "invariant", "trap") for t in allowed_types):
+        if any(t in ("wall", "invariant", "trap") for t in allowed_types):
             required.append("enforcement")
         for field in required:
             if field not in meta:

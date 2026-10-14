@@ -116,7 +116,7 @@ def parse_cell(file_path: Path | str) -> tuple[Optional[dict], str]:
 
 def get_type_plural(cell_type: str) -> str:
     cell_type = cell_type.lower()
-    return VALID_TYPES.get(cell_type, "vacuoles")
+    return VALID_TYPES.get(cell_type, "traps")
 
 
 def _naive_utc(timestamp: Any) -> Optional[datetime]:
@@ -190,7 +190,7 @@ def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
                 continue
 
             cell_id = meta.get("id", os.path.splitext(os.path.basename(md_path))[0])
-            cell_type = meta.get("type", "vacuole")
+            cell_type = meta.get("type", "trap")
             created = meta.get("created", "")
 
             cells.append({
@@ -229,7 +229,7 @@ def _transform_frontmatter_type(content: str, new_type: str) -> str:
     meta["type"] = new_type
     if new_type in ("wall", "gate", "invariant"):
         meta["enforcement"] = "gate"
-    elif new_type in ("vacuole", "trap"):
+    elif new_type == "trap":
         meta.pop("enforcement", None)
         meta.pop("enforcement_artifact", None)
 

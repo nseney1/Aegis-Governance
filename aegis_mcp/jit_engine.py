@@ -290,26 +290,20 @@ def format_cell_guidance(cell: dict[str, object]) -> dict[str, object]:
     type_emoji = {
         'wall': '🧱',
         'invariant': '🧱',
-        'vacuole': '🧫',
         'trap': '🧫',
         'membrane': '🔬',
         'boundary': '🔬',
-        'chloroplast': '🌿',
         'persona': '🌿',
-        'plasmodesmata': '🔗',
         'contract': '🔗',
     }.get(ctype, '📋')
 
     type_label = {
         'wall': 'INVARIANT (must not violate)',
         'invariant': 'INVARIANT (must not violate)',
-        'vacuole': 'ANTI-PATTERN TRAP (watch out)',
         'trap': 'ANTI-PATTERN TRAP (watch out)',
         'membrane': 'ESCALATION GATE (needs review)',
         'boundary': 'ESCALATION GATE (needs review)',
-        'chloroplast': 'BEST PRACTICE (follow this pattern)',
         'persona': 'BEST PRACTICE (follow this pattern)',
-        'plasmodesmata': 'CONTRACT (cross-service agreement)',
         'contract': 'CONTRACT (cross-service agreement)',
     }.get(ctype, ctype.upper())
 
@@ -652,7 +646,7 @@ def express(
     mandatory = []
     candidates = []
     for cell in matched:
-        cell_type = cell.get('type', 'vacuole')
+        cell_type = cell.get('type', 'trap')
         enforcement = cell.get('enforcement', 'advisory')
         if cell_type in ('wall', 'invariant') or enforcement == 'gate':
             mandatory.append(cell)

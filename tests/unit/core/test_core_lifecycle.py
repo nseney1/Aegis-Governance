@@ -30,7 +30,8 @@ from aegis_core.lifecycle import (
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     """Create a minimal workspace with .aegis/rules directories."""
-    (tmp_path / ".aegis" / "rules" / "vacuoles").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules" / "traps").mkdir(parents=True)
+    (tmp_path / ".aegis" / "rules" / "invariants").mkdir(parents=True)
     (tmp_path / ".aegis" / "rules" / "walls").mkdir(parents=True)
     (tmp_path / "genome").mkdir(parents=True)
     (tmp_path / "aegis_core").mkdir(parents=True)
@@ -63,7 +64,7 @@ class TestFitnessStatusEvaluation:
 
     def test_apoptosis_for_vacuole_when_false_positives_dominate(self):
         status = calculate_fitness_status(
-            cell_type="vacuole", tp=5, fp=15, triggers=20, dec_score=0.25
+            cell_type="trap", tp=5, fp=15, triggers=20, dec_score=0.25
         )
         assert status == STATUS_APOPTOSIS
 
@@ -75,33 +76,33 @@ class TestFitnessStatusEvaluation:
 
     def test_survive_status_high_score(self):
         status = calculate_fitness_status(
-            cell_type="vacuole", tp=18, fp=2, triggers=20, dec_score=0.85
+            cell_type="trap", tp=18, fp=2, triggers=20, dec_score=0.85
         )
         assert status == STATUS_SURVIVE
 
     def test_adapt_status_medium_score(self):
         status = calculate_fitness_status(
-            cell_type="vacuole", tp=10, fp=10, triggers=20, dec_score=0.5
+            cell_type="trap", tp=10, fp=10, triggers=20, dec_score=0.5
         )
         assert status == STATUS_ADAPT
 
     def test_extinct_status_below_threshold(self):
         status = calculate_fitness_status(
-            cell_type="vacuole", tp=1, fp=1, triggers=20, dec_score=0.10
+            cell_type="trap", tp=1, fp=1, triggers=20, dec_score=0.10
         )
         assert status == STATUS_EXTINCT
 
     def test_dormant_vs_new_unobserved(self):
         # Unobserved older than expiry -> DORMANT
         status_old = calculate_fitness_status(
-            cell_type="vacuole", tp=0, fp=0, triggers=0, is_unobserved=True,
+            cell_type="trap", tp=0, fp=0, triggers=0, is_unobserved=True,
             created_str="2020-01-01T00:00:00Z", expiry_days=30
         )
         assert status_old == STATUS_DORMANT
 
         # Unobserved recent -> NEW
         status_new = calculate_fitness_status(
-            cell_type="vacuole", tp=0, fp=0, triggers=0, is_unobserved=True,
+            cell_type="trap", tp=0, fp=0, triggers=0, is_unobserved=True,
             created_str="2099-01-01T00:00:00Z", expiry_days=30
         )
         assert status_new == STATUS_NEW
@@ -161,32 +162,32 @@ class TestCellPromoteAndDemote:
     """Verifies file movements and frontmatter updates for promotions and demotions."""
 
     def test_find_cell_file(self, workspace: Path):
-        vacuole = _create_cell_file(workspace / ".aegis" / "rules" / "vacuoles" / "test-v.md", "test-v", "vacuole")
+        trap = _create_cell_file(workspace / ".aegis" / "rules" / "traps" / "test-v.md", "test-v", "trap")
         found_path, found_type = find_cell_file(workspace, "test-v")
-        assert found_path == vacuole
-        assert found_type == "vacuole"
+        assert found_path == trap
+        assert found_type == "trap"
 
         # Traversal attempt returns None
         assert find_cell_file(workspace, "../etc/passwd") == (None, None)
 
     def test_promote_vacuole_to_wall(self, workspace: Path):
-        vacuole = _create_cell_file(
-            workspace / ".aegis" / "rules" / "vacuoles" / "promote-me.md",
-            "promote-me", "vacuole", triggers=25, tp=24, fp=1
+        trap = _create_cell_file(
+            workspace / ".aegis" / "rules" / "traps" / "promote-me.md",
+            "promote-me", "trap", triggers=25, tp=24, fp=1
         )
         res = promote_cell(workspace, "promote-me", force=False)
         assert res["status"] == "promoted"
-        assert res["from_type"] == "vacuole"
-        assert res["to_type"] == "wall"
+        assert res["from_type"] == "trap"
+        assert res["to_type"] == "invariant"
 
-        # Original vacuole path no longer exists
-        assert not vacuole.exists()
+        # Original trap path no longer exists
+        assert not trap.exists()
 
-        # Wall path exists with updated frontmatter
-        wall_path = workspace / ".aegis" / "rules" / "walls" / "promote-me.md"
-        assert wall_path.exists()
-        content = wall_path.read_text(encoding="utf-8")
-        assert "type: wall" in content
+        # Invariant path exists with updated frontmatter
+        inv_path = workspace / ".aegis" / "rules" / "invariants" / "promote-me.md"
+        assert inv_path.exists()
+        content = inv_path.read_text(encoding="utf-8")
+        assert "type: invariant" in content
 
     def test_promote_wall_to_genome(self, workspace: Path):
         wall = _create_cell_file(
@@ -209,11 +210,11 @@ class TestCellPromoteAndDemote:
         res = demote_cell(workspace, "demote-wall")
         assert res["status"] == "demoted"
         assert res["from_type"] == "wall"
-        assert res["to_type"] == "vacuole"
+        assert res["to_type"] == "trap"
         assert not wall.exists()
-        vacuole_path = workspace / ".aegis" / "rules" / "vacuoles" / "demote-wall.md"
-        assert vacuole_path.exists()
-        assert "type: vacuole" in vacuole_path.read_text(encoding="utf-8")
+        trap_path = workspace / ".aegis" / "rules" / "traps" / "demote-wall.md"
+        assert trap_path.exists()
+        assert "type: trap" in trap_path.read_text(encoding="utf-8")
 
     def test_demote_protected_rules_blocked(self, workspace: Path):
         for rule in ("providence", "cost-optimization", "git-workflow"):

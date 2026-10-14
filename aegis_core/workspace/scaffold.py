@@ -1,6 +1,6 @@
-"""Workspace scaffolding and initialization for Soma (Layer 0 Core).
+"""Workspace scaffolding and initialization for Aegis (Layer 0 Core).
 
-Creates canonical directory structure (.soma/cells/{walls,vacuoles,gates}, .soma/evidence, .soma/metrics).
+Creates canonical directory structure (.aegis/rules/{invariants,traps,gates}, .aegis/evidence, .aegis/metrics).
 Guards against bare git repositories.
 Strictly zero-dependency: uses only Python standard library.
 """

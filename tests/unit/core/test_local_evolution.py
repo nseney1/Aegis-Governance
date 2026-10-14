@@ -30,10 +30,10 @@ from aegis_mcp.jit_engine import load_genome_rules
 
 def test_promotion_paths_definition():
     """Verify promotion and demotion path dictionaries."""
-    assert GLOBAL_PROMOTION_PATH == {"vacuole": "wall", "wall": "genome"}
-    assert LOCAL_PROMOTION_PATH == {"vacuole": "wall", "wall": "gate"}
-    assert GLOBAL_DEMOTION_PATH == {"genome": "wall", "wall": "vacuole"}
-    assert LOCAL_DEMOTION_PATH == {"gate": "wall", "wall": "vacuole"}
+    assert GLOBAL_PROMOTION_PATH == {"trap": "invariant", "invariant": "genome", "wall": "genome"}
+    assert LOCAL_PROMOTION_PATH == {"trap": "invariant", "invariant": "gate", "wall": "gate"}
+    assert GLOBAL_DEMOTION_PATH == {"genome": "invariant", "invariant": "trap", "wall": "trap"}
+    assert LOCAL_DEMOTION_PATH == {"gate": "invariant", "invariant": "trap", "wall": "trap"}
 
 
 def test_is_aegis_repo_detection(tmp_path: Path):
@@ -59,16 +59,16 @@ def test_is_aegis_repo_detection(tmp_path: Path):
 
 
 def test_foreign_repo_local_promotion(tmp_path: Path):
-    """Foreign repositories promote vacuole -> wall -> gate without touching genome/."""
+    """Foreign repositories promote trap -> invariant -> gate without touching genome/."""
     repo = tmp_path / "app"
     repo.mkdir()
-    vacuoles_dir = repo / ".aegis" / "rules" / "vacuoles"
-    vacuoles_dir.mkdir(parents=True)
+    traps_dir = repo / ".aegis" / "rules" / "traps"
+    traps_dir.mkdir(parents=True)
 
-    cell_file = vacuoles_dir / "safety-check.md"
+    cell_file = traps_dir / "safety-check.md"
     cell_meta = {
         "id": "safety-check",
-        "type": "vacuole",
+        "type": "trap",
         "enforcement": "advisory",
         "fitness": {"triggers": 25, "true_positives": 24, "false_positives": 1},
     }
@@ -77,26 +77,26 @@ def test_foreign_repo_local_promotion(tmp_path: Path):
     ws = Workspace(root=repo)
     assert not ws.is_aegis_repo
 
-    # Step 1: Promote vacuole -> wall
+    # Step 1: Promote trap -> invariant
     res1 = promote_cell(ws, "safety-check", force=True)
     assert res1["status"] == "promoted"
-    assert res1["from_type"] == "vacuole"
-    assert res1["to_type"] == "wall"
+    assert res1["from_type"] == "trap"
+    assert res1["to_type"] == "invariant"
     assert not cell_file.exists()
-    wall_file = repo / ".aegis" / "rules" / "walls" / "safety-check.md"
-    assert wall_file.exists()
+    inv_file = repo / ".aegis" / "rules" / "invariants" / "safety-check.md"
+    assert inv_file.exists()
     assert not (repo / "genome").exists()
 
-    wall_meta = parse_frontmatter(wall_file.read_text(encoding="utf-8"))
-    assert wall_meta["type"] == "wall"
-    assert wall_meta["enforcement"] == "gate"
+    inv_meta = parse_frontmatter(inv_file.read_text(encoding="utf-8"))
+    assert inv_meta["type"] == "invariant"
+    assert inv_meta["enforcement"] == "gate"
 
-    # Step 2: Promote wall -> gate
+    # Step 2: Promote invariant -> gate
     res2 = promote_cell(ws, "safety-check", force=True)
     assert res2["status"] == "promoted"
-    assert res2["from_type"] == "wall"
+    assert res2["from_type"] == "invariant"
     assert res2["to_type"] == "gate"
-    assert not wall_file.exists()
+    assert not inv_file.exists()
     gate_file = repo / ".aegis" / "rules" / "gates" / "safety-check.md"
     assert gate_file.exists()
     assert not (repo / "genome").exists()
@@ -112,7 +112,7 @@ def test_foreign_repo_local_promotion(tmp_path: Path):
 
 
 def test_foreign_repo_local_demotion(tmp_path: Path):
-    """Foreign repositories demote gate -> wall -> vacuole."""
+    """Foreign repositories demote gate -> invariant -> trap."""
     repo = tmp_path / "app"
     repo.mkdir()
     gates_dir = repo / ".aegis" / "rules" / "gates"
@@ -130,23 +130,23 @@ def test_foreign_repo_local_demotion(tmp_path: Path):
     ws = Workspace(root=repo)
     assert not ws.is_aegis_repo
 
-    # Demote gate -> wall
+    # Demote gate -> invariant
     res1 = demote_cell(ws, "strict-check")
     assert res1["status"] == "demoted"
     assert res1["from_type"] == "gate"
-    assert res1["to_type"] == "wall"
-    wall_file = repo / ".aegis" / "rules" / "walls" / "strict-check.md"
-    assert wall_file.exists()
+    assert res1["to_type"] == "invariant"
+    inv_file = repo / ".aegis" / "rules" / "invariants" / "strict-check.md"
+    assert inv_file.exists()
     assert not cell_file.exists()
 
-    # Demote wall -> vacuole
+    # Demote invariant -> trap
     res2 = demote_cell(ws, "strict-check")
     assert res2["status"] == "demoted"
-    assert res2["from_type"] == "wall"
-    assert res2["to_type"] == "vacuole"
-    vacuole_file = repo / ".aegis" / "rules" / "vacuoles" / "strict-check.md"
-    assert vacuole_file.exists()
-    assert not wall_file.exists()
+    assert res2["from_type"] == "invariant"
+    assert res2["to_type"] == "trap"
+    trap_file = repo / ".aegis" / "rules" / "traps" / "strict-check.md"
+    assert trap_file.exists()
+    assert not inv_file.exists()
 
 
 def test_foreign_repo_metamorphose_cell(tmp_path: Path):

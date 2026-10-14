@@ -678,7 +678,7 @@ def self_test_verifier() -> int:
 
     sys.stdin = io.StringIO()
     mock_playbooks = [
-        {"name": "chloroplast-react-idioms", "hypothesis": "React components must be functional.", "body": "Never use class components."},
+        {"name": "persona-react-idioms", "hypothesis": "React components must be functional.", "body": "Never use class components."},
         {"name": "wall-test-assertions", "hypothesis": "Tests must carry meaningful assertions.", "body": "Meaningless assertions are forbidden."},
     ]
     target = "src/App.jsx"

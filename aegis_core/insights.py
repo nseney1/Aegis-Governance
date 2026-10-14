@@ -221,7 +221,7 @@ def generate_cell_candidates(
             "hypothesis": hypothesis,
             "target_paths": list(files),
             "origin": "human_insight",
-            "type": "vacuole",
+            "type": "trap",
             "enforcement": "advisory",
         })
 
@@ -240,11 +240,11 @@ def create_cell_from_insight_cluster(cluster: dict, workspace: str) -> str:
     hypothesis = f"Human attention pattern detected: {category} in {files_str}"
  
     slug = re.sub(r"[^a-z0-9]+", "-", category.lower())[:50].strip("-") or "unknown"
-    cell_id = f"vacuole-{slug}"
+    cell_id = f"trap-{slug}"
  
     frontmatter = {
         "id": cell_id,
-        "type": "vacuole",
+        "type": "trap",
         "domain": "correctness",
         "hypothesis": hypothesis,
         "prediction": f"Recurring {category} issues will continue if unaddressed",
@@ -258,13 +258,13 @@ def create_cell_from_insight_cluster(cluster: dict, workspace: str) -> str:
     fm_text = dump_frontmatter(frontmatter)
  
     body = (
-        f"This vacuole was auto-generated from a cluster of human insights "
+        f"This trap was auto-generated from a cluster of human insights "
         f"about **{category}** (confidence {confidence:.2f}).\n"
     )
     cell_content = f"---\n{fm_text}---\n\n{body}"
  
-    filename = f"vacuole-{slug}.md"
-    target_dir = os.path.join(workspace, ".aegis", "rules", "vacuoles")
+    filename = f"trap-{slug}.md"
+    target_dir = os.path.join(workspace, ".aegis", "rules", "traps")
     os.makedirs(target_dir, exist_ok=True)
  
     filepath = os.path.join(target_dir, filename)

@@ -16,16 +16,18 @@ from aegis_core.telemetry import EventConflictError, StaleGenerationError
 from aegis_core.workspace import Workspace
 
 TYPE_TRANSLATION_MAP: dict[str, str] = {
-    "safety-guard": "wall",
-    "learned-trap": "vacuole",
-    "agent-persona": "chloroplast",
-    "escalation-boundary": "membrane",
-    "contract-bridge": "plasmodesmata",
-    "wall": "wall",
-    "vacuole": "vacuole",
-    "chloroplast": "chloroplast",
-    "membrane": "membrane",
-    "plasmodesmata": "plasmodesmata",
+    "safety-guard": "invariant",
+    "learned-trap": "trap",
+    "agent-persona": "persona",
+    "escalation-boundary": "boundary",
+    "contract-bridge": "contract",
+    "invariant": "invariant",
+    "trap": "trap",
+    "persona": "persona",
+    "boundary": "boundary",
+    "contract": "contract",
+    "wall": "invariant",
+    "membrane": "boundary",
 }
 
 __all__ = ["Governance", "TYPE_TRANSLATION_MAP"]
@@ -214,7 +216,7 @@ class Governance:
     def create_cell(
         self,
         hypothesis: str,
-        type: str = 'vacuole',
+        type: str = 'trap',
         target_paths: Optional[list[str]] = None,
         minimum_mode: str = 'breeze',
         tags: Optional[list[str]] = None,
@@ -239,7 +241,7 @@ class Governance:
     def create_rule(
         self,
         hypothesis: str,
-        type: str = 'vacuole',
+        type: str = 'trap',
         target_paths: Optional[list[str]] = None,
         minimum_mode: str = 'breeze',
         tags: Optional[list[str]] = None,

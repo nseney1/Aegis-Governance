@@ -216,21 +216,21 @@ def build_cell_create_prompt(description: str, domain_hint: str = None, cell_typ
     domain_context = f"\nDomain hint: {domain_hint}" if domain_hint else ""
     type_hint = f"\nPreferred cell type: {cell_type}" if cell_type else ""
 
-    prompt = f"""You are a governance cell generator for Soma.
+    prompt = f"""You are a governance rule generator for Aegis.
 
-Given a natural language description of a concern, generate a governance cell in markdown with YAML frontmatter.
+Given a natural language description of a concern, generate a governance rule in markdown with YAML frontmatter.
 
-Cell types:
-- wall: Non-negotiable invariant (hard safety gate). Use for things that must ALWAYS hold.
-- vacuole: Learned anti-pattern trap. Use for known failure modes to watch for.
-- membrane: Escalation gate. Use when sensitive areas need elevated review.
-- chloroplast: Domain persona/accelerator. Use for idiomatic patterns to follow.
-- plasmodesmata: Cross-service contract. Use for API/data shape agreements.
+Rule types:
+- invariant: Non-negotiable invariant (hard safety gate). Use for things that must ALWAYS hold.
+- trap: Learned anti-pattern trap. Use for known failure modes to watch for.
+- boundary: Escalation gate. Use when sensitive areas need elevated review.
+- persona: Domain persona/accelerator. Use for idiomatic patterns to follow.
+- contract: Cross-service contract. Use for API/data shape agreements.
 
 YAML fields required:
 - type: (one of above)
 - domain: (one of: efficiency, correctness, security, style, governance)
-- enforcement: (gate for walls, advisory for vacuoles)
+- enforcement: (gate for invariants, advisory for traps)
 - hypothesis: (clear, testable statement)
 - prediction: (what will happen if the hypothesis is violated)
 - falsification: (how to prove this cell is no longer needed)
@@ -291,7 +291,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "description": {"type": "string", "description": "Natural language description of the rule or pattern to enforce."},
                 "domain": {"type": "string", "description": "Domain hint: efficiency, correctness, security, style, governance."},
-                "cell_type": {"type": "string", "enum": ["wall", "membrane", "vacuole", "chloroplast", "plasmodesmata", "safety-guard", "learned-trap", "agent-persona", "escalation-boundary", "contract-bridge"], "description": "Cell type to scaffold."},
+                "cell_type": {"type": "string", "enum": ["invariant", "boundary", "trap", "persona", "contract", "wall", "membrane", "safety-guard", "learned-trap", "agent-persona", "escalation-boundary", "contract-bridge"], "description": "Cell type to scaffold."},
                 "dry_run": {"type": "boolean", "default": False, "description": "If true, only returns the prompt without saving."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
@@ -312,7 +312,7 @@ TOOL_DEFINITIONS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "cell_type": {"type": "string", "enum": ["wall", "membrane", "vacuole", "chloroplast", "plasmodesmata", "safety-guard", "learned-trap", "agent-persona", "escalation-boundary", "contract-bridge"], "description": "Filter by cell type."},
+                "cell_type": {"type": "string", "enum": ["invariant", "boundary", "trap", "persona", "contract", "wall", "membrane", "safety-guard", "learned-trap", "agent-persona", "escalation-boundary", "contract-bridge"], "description": "Filter by cell type."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },

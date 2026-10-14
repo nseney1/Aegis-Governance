@@ -14,7 +14,7 @@ class TestCreateCellFromInsightCluster:
     """Tests for create_cell_from_insight_cluster()."""
 
     def test_creates_cell_file(self, tmp_path):
-        """A cluster produces a cell file in .aegis/rules/vacuoles/."""
+        """A cluster produces a cell file in .aegis/rules/traps/."""
 
         workspace = str(tmp_path)
         cluster = {
@@ -27,7 +27,7 @@ class TestCreateCellFromInsightCluster:
 
         filepath = create_cell_from_insight_cluster(cluster, workspace)
         assert os.path.isfile(filepath)
-        assert "vacuoles" in filepath
+        assert "traps" in filepath
 
     def test_cell_contains_frontmatter(self, tmp_path):
         """Generated cell has YAML frontmatter with required fields."""
@@ -46,7 +46,7 @@ class TestCreateCellFromInsightCluster:
             content = f.read()
 
         assert content.startswith("---")
-        assert "type: vacuole" in content
+        assert "type: trap" in content
         assert "origin: human_insight" in content
         assert "src/*.py" in content
 

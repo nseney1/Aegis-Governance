@@ -30,14 +30,14 @@ def _signal(cell: str, signal: str, timestamp: str = "2026-01-01T00:00:00Z", wei
     return record
 
 
-def _cell(path: Path, cell_id: str, cell_type: str = "vacuole", age_days: int = 45) -> None:
+def _cell(path: Path, cell_id: str, cell_type: str = "trap", age_days: int = 45) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     created = (datetime.now() - timedelta(days=age_days)).strftime("%Y-%m-%d")
     metadata = {
         "id": cell_id,
         "domain": "testing",
         "type": cell_type,
-        "enforcement": "gate" if cell_type == "wall" else "advisory",
+        "enforcement": "gate" if cell_type in ("wall", "invariant") else "advisory",
         "created": created,
         "expiry_days": 365,
         "expiry_sessions": 365,
@@ -117,7 +117,7 @@ def test_oracle_and_lifecycle_use_weighted_canonical_signals(tmp_path):
     from aegis_core.proposals import generate_checkpoint
     from aegis_core.lifecycle import evaluate_promotions
 
-    cells = tmp_path / ".aegis" / "rules" / "vacuoles"
+    cells = tmp_path / ".aegis" / "rules" / "traps"
     _cell(cells / "canonical.md", "canonical")
     evidence = tmp_path / ".aegis" / "evidence"
     signals = [_signal("canonical", "trigger", f"2026-01-01T00:{index:02d}:00Z") for index in range(20)]

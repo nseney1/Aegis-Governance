@@ -38,19 +38,19 @@ from aegis_core.workspace import Workspace
 def mock_soma_workspace(tmp_path: Path) -> Workspace:
     """Create a temporary initialized Soma workspace structure."""
     cells_dir = tmp_path / ".aegis" / "rules"
-    vacuoles_dir = cells_dir / "vacuoles"
-    walls_dir = cells_dir / "walls"
+    traps_dir = cells_dir / "traps"
+    walls_dir = cells_dir / "invariants"
     metrics_dir = tmp_path / ".aegis" / "metrics"
     evidence_dir = tmp_path / ".aegis" / "evidence"
-    for d in (vacuoles_dir, walls_dir, metrics_dir, evidence_dir):
+    for d in (traps_dir, walls_dir, metrics_dir, evidence_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     # Add a sample cell
-    sample_cell = vacuoles_dir / "test-rule.md"
+    sample_cell = traps_dir / "test-rule.md"
     sample_cell.write_text(
         "---\n"
         "id: test-rule\n"
-        "type: vacuole\n"
+        "type: trap\n"
         "enforcement: advisory\n"
         "hypothesis: \"Avoid raw SQL queries\"\n"
         "prediction: \"SQL injection risk reduced\"\n"
@@ -63,7 +63,7 @@ def mock_soma_workspace(tmp_path: Path) -> Workspace:
         "  false_positives: 1\n"
         "  score: 0.8\n"
         "---\n"
-        "## Vacuole: Avoid raw SQL queries\n"
+        "## Trap: Avoid raw SQL queries\n"
         "Always use parameterized queries or an ORM.\n",
         encoding="utf-8",
     )
@@ -101,7 +101,7 @@ class TestLifecycleWorkspaceInteroperability:
 
     def test_create_cell_with_workspace_instance(self, mock_soma_workspace: Workspace):
         created = create_cell(
-            cell_type="vacuole",
+            cell_type="trap",
             hypothesis="Always validate user inputs",
             workspace=mock_soma_workspace,
         )
@@ -119,7 +119,7 @@ class TestLifecycleWorkspaceInteroperability:
             source_workspace=mock_soma_workspace,
         )
         assert res == 0
-        dest_cell = dest_dir / ".aegis" / "rules" / "vacuoles" / "test-rule.md"
+        dest_cell = dest_dir / ".aegis" / "rules" / "traps" / "test-rule.md"
         assert dest_cell.is_file()
 
     def test_compute_cells_fitness_with_workspace_instance(self, mock_soma_workspace: Workspace):
@@ -143,7 +143,7 @@ class TestLifecycleWorkspaceInteroperability:
         cand_file, ctype = find_cell_file(mock_soma_workspace, "test-rule")
         assert cand_file is not None
         assert cand_file.is_file()
-        assert ctype == "vacuole"
+        assert ctype == "trap"
 
         promotions = evaluate_promotions(mock_soma_workspace)
         assert isinstance(promotions, list)

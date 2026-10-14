@@ -52,7 +52,7 @@ def create_cell(
     type_lower = cell_type.lower()
     if type_lower not in VALID_TYPES:
         raise ValueError(
-            f"Invalid type '{cell_type}'. Must be one of: vacuole, chloroplast, wall, membrane, plasmodesmata."
+            f"Invalid type '{cell_type}'. Must be one of: trap, persona, invariant, boundary, contract."
         )
 
     if enforcement is None:
@@ -83,7 +83,7 @@ def create_cell(
         minimum_mode = "tempest"
         decay_to_yaml = (
             "decay_to:\n"
-            "  type: membrane\n"
+            "  type: boundary\n"
             "  impact_weight: 1.0\n"
             "  minimum_mode: trident\n"
             "  response_type: memory\n"
@@ -218,22 +218,22 @@ def create_cell_from_description(
     domain_context = f"\nDomain hint: {domain_hint}" if domain_hint else ""
     type_hint = f"\nPreferred cell type: {cell_type}" if cell_type else ""
 
-    prompt = f"""You are a governance cell generator for Soma.
+    prompt = f"""You are a governance rule generator for Aegis.
 
-Given a natural language description of a concern, generate a governance cell in markdown with YAML frontmatter.
+Given a natural language description of a concern, generate a governance rule in markdown with YAML frontmatter.
 
-Cell types:
-- wall: Non-negotiable invariant (hard safety gate). Use for things that must ALWAYS hold.
-- vacuole: Learned anti-pattern trap. Use for known failure modes to watch for.
-- membrane: Escalation gate. Use when sensitive areas need elevated review.
-- chloroplast: Domain persona/accelerator. Use for idiomatic patterns to follow.
-- plasmodesmata: Cross-service contract. Use for API/data shape agreements.
+Rule types:
+- invariant: Non-negotiable invariant (hard safety gate). Use for things that must ALWAYS hold.
+- trap: Learned anti-pattern trap. Use for known failure modes to watch for.
+- boundary: Escalation gate. Use when sensitive areas need elevated review.
+- persona: Domain persona/accelerator. Use for idiomatic patterns to follow.
+- contract: Cross-service contract. Use for API/data shape agreements.
 
 YAML fields required:
 - id: (filename stem, e.g. 'trap-missing-tests' for trap-missing-tests.md)
 - type: (one of above)
 - domain: (one of: efficiency, correctness, security, style, governance)
-- enforcement: (gate for walls, advisory for vacuoles)
+- enforcement: (gate for invariants, advisory for traps)
 - hypothesis: (clear, testable statement)
 - prediction: (what will happen if the hypothesis is violated)
 - falsification: (how to prove this cell is no longer needed)
@@ -253,7 +253,7 @@ Generate ONLY the complete markdown cell file content. Start with --- for the YA
 
 
 def cli_cell_create(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Programmatic Cell Creation for Soma", add_help=False)
+    parser = argparse.ArgumentParser(description="Programmatic Cell Creation for Aegis", add_help=False)
     parser.add_argument("--help", action="store_true", default=False)
     parser.add_argument("-t", "--type", dest="cell_type", default="")
     parser.add_argument("-h", "--hypothesis", dest="hypothesis", default="")
@@ -288,7 +288,7 @@ def cli_cell_create(argv: list[str] | None = None) -> int:
     if args.description:
         try:
             created = create_cell(
-                cell_type=args.cell_type or "vacuole",
+                cell_type=args.cell_type or "trap",
                 hypothesis=args.description,
                 id_override=args.cell_id or None,
                 domain=args.domain,
