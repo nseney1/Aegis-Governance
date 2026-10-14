@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.yaml import _get_body, parse_frontmatter
 from aegis_core.storage import atomic_write_text
 
 QUARANTINE_DIR = "quarantine"
@@ -95,11 +95,7 @@ def safe_parse_cell_file(
         if metadata is None:
             quarantine_file(path, reason="unparseable_or_unclosed_frontmatter", workspace=workspace)
             return {}, "", "quarantined"
-        if content.startswith("---"):
-            end = content.find("---", 3)
-            body = content[end + 3:].strip() if end != -1 else content
-        else:
-            body = content.strip()
+        body = _get_body(content).strip()
         return metadata, body, "ok"
     except Exception as exc:
         quarantine_file(path, reason=f"frontmatter_parse_error: {exc}", workspace=workspace)

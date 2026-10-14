@@ -538,28 +538,14 @@ def update_cell_enforcement_artifact(cell: Dict[str, Any], artifact_path: str, w
 
     ws = as_workspace(workspace)
     rel_path = os.path.relpath(artifact_path, str(ws.root))
-    if not content.startswith("---"):
+    from aegis_core.yaml import dump_frontmatter, parse_rule_frontmatter
+    try:
+        fm, body = parse_rule_frontmatter(content)
+    except Exception:
         return
-    end_idx = content.find("---", 3)
-    if end_idx == -1:
-        return
 
-    yaml_block = content[3:end_idx]
-    body = content[end_idx:]
-
-    lines = yaml_block.split("\n")
-    new_lines = []
-    inserted = False
-    for line in lines:
-        new_lines.append(line)
-        if line.strip().startswith("enforcement:") and not inserted:
-            new_lines.append(f"enforcement_artifact: {rel_path}")
-            inserted = True
-
-    if not inserted:
-        new_lines.append(f"enforcement_artifact: {rel_path}")
-
-    new_content = "---" + "\n".join(new_lines) + body
+    fm["enforcement_artifact"] = rel_path
+    new_content = dump_frontmatter(fm, body=body)
     with open(cell_path, "w", encoding="utf-8") as f:
         f.write(new_content)
 

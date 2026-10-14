@@ -12,7 +12,7 @@ import sys
 from typing import Any, Optional
 
 from aegis_core.cell_inventory import find_matching_cells
-from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter
+from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter, parse_rule_frontmatter
 
 INSIGHT_PRINCIPAL = "outcome_engine"
 INSIGHT_SCOPE = "human_insight"
@@ -169,12 +169,11 @@ def update_cell_fitness(workspace: str, fitness_signals: list[dict]) -> None:
         try:
             with open(fpath, "r", encoding="utf-8") as f:
                 content = f.read()
-            end = content.find("---", 3)
-            if end == -1:
+            try:
+                fm, raw_body = parse_rule_frontmatter(content)
+            except Exception:
                 continue
-
-            fm = parse_frontmatter(content) or {}
-            body = _get_body(content)
+            body = raw_body.strip()
 
             fitness = fm.get("fitness")
             if fitness is None or isinstance(fitness, bool):

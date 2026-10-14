@@ -188,3 +188,34 @@ def test_update_fitness_transcript(tmp_path: Path) -> None:
     assert len(events) == 1
     assert events[0]["cell"] == "cell-transcript"
     assert events[0]["signal"] == "trigger"
+
+
+def test_frontmatter_consolidation_handles_embedded_dashes(tmp_path: Path) -> None:
+    """Verify enforcement, quarantine, metrics, and fitness use aegis_core.yaml instead of naive find('---', 3)."""
+    import inspect
+    from aegis_core import enforcement, metrics, quarantine
+    from aegis_core.outcomes import fitness as fitness_mod
+
+    for mod in (enforcement, metrics, quarantine, fitness_mod):
+        src = inspect.getsource(mod)
+        assert 'find("---", 3)' not in src, f"{mod.__name__} still uses naive find('---', 3)"
+        assert "def _extract_fm" not in src, f"{mod.__name__} still defines regex _extract_fm"
+
+    cell_file = tmp_path / "rule-embedded-dashes.md"
+    cell_file.write_text(
+        '---\nid: rule-embedded-dashes\ntype: invariant\nhypothesis: "Avoid --- inline delimiters"\n---\nActual body text.\n',
+        encoding="utf-8",
+    )
+    meta, body, status = quarantine.safe_parse_cell_file(cell_file, workspace=tmp_path)
+    assert status == "ok"
+    assert meta["id"] == "rule-embedded-dashes"
+    assert body == "Actual body text."
+
+    artifact = tmp_path / "gate_check.py"
+    artifact.write_text("# gate\n", encoding="utf-8")
+    enforcement.update_cell_enforcement_artifact({"_path": str(cell_file)}, str(artifact), workspace=tmp_path)
+    meta2, body2, status2 = quarantine.safe_parse_cell_file(cell_file, workspace=tmp_path)
+    assert status2 == "ok"
+    assert meta2.get("enforcement_artifact") == "gate_check.py"
+    assert body2 == "Actual body text."
+

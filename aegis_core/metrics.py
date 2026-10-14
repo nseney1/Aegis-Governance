@@ -21,7 +21,7 @@ import sys
 from typing import List, Optional, Union
 
 from aegis_core.workspace import Workspace, resolve_workspace
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 
 
 def resolve_metrics_dir(workspace: Path | str) -> Path:
@@ -74,22 +74,15 @@ def compute_token_census(workspace: Workspace | Path | str | None = None, model:
     def _wc(text: str) -> int:
         return len(text.split())
 
-    def _extract_fm(text: str) -> str:
-        m = re.match(r"^---\n(.*?)\n---", text, re.DOTALL)
-        return m.group(1) if m else ""
-
-    def _get_trig(fm: str) -> str:
-        m = re.search(r"^trigger:\s*(.*)$", fm, re.MULTILINE)
-        return m.group(1).strip() if m else "unknown"
-
     if ws.is_soma_repo and rules_dir.is_dir():
         for fpath in sorted(rules_dir.glob("*.md")):
             try:
                 content = fpath.read_text(encoding="utf-8")
             except OSError:
                 continue
-            fm = _extract_fm(content)
-            trig = _get_trig(fm)
+            fm_dict = parse_frontmatter(content) or {}
+            fm = dump_frontmatter(fm_dict) if fm_dict else ""
+            trig = str(fm_dict.get("trigger", "unknown")).strip()
             w_full = _wc(content)
             w_fm = _wc(fm)
 
@@ -125,7 +118,8 @@ def compute_token_census(workspace: Workspace | Path | str | None = None, model:
                 content = fpath.read_text(encoding="utf-8")
             except OSError:
                 continue
-            fm = _extract_fm(content)
+            fm_dict = parse_frontmatter(content) or {}
+            fm = dump_frontmatter(fm_dict) if fm_dict else ""
             w_full = _wc(content)
             w_fm = _wc(fm)
             t_idle = int(w_fm * fallback_ratio)
