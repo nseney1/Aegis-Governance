@@ -101,7 +101,7 @@ def run_session_close(workspace: Path | None = None) -> tuple[int, dict[str, Any
     except Exception:
         pass
 
-    # 2. Cell fitness calculation
+    # 2. Rule fitness calculation
     try:
         from aegis_core.lifecycle import compute_cells_fitness
 
@@ -109,7 +109,7 @@ def run_session_close(workspace: Path | None = None) -> tuple[int, dict[str, Any
     except Exception:
         pass
 
-    # 3. Cell selection pressure (archive extinct cells)
+    # 3. Rule selection pressure (archive extinct cells)
     try:
         from aegis_core.lifecycle import run_cell_selection
 
@@ -161,13 +161,13 @@ def run_pre_commit(
 
     for cells_dir in cells_dirs:
         if cells_dir.is_dir() and staged_files:
-            from aegis_sdk.rules import parse_cell_file
+            from aegis_sdk.rules import parse_rule_file
 
             for cell_file in cells_dir.glob("**/*.md"):
                 if cell_file.name == "README.md":
                     continue
                 try:
-                    fm, _ = parse_cell_file(cell_file)
+                    fm, _ = parse_rule_file(cell_file)
                     targets = fm.get("target_paths", [])
                     all_target_patterns.extend(targets)
                     hypothesis = fm.get("hypothesis", "")

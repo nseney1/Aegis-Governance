@@ -1,4 +1,4 @@
-"""Tests for aegis_core.yaml — Pure-Python SomaYAML engine & unified domain model."""
+"""Tests for aegis_core.yaml — Pure-Python AegisYAML engine & unified domain model."""
 from __future__ import annotations
 
 import os
@@ -7,13 +7,13 @@ import pytest
 
 from conftest import symlink_or_skip
 from aegis_core.yaml import (
-    SomaYAML,
-    SomaDocument,
-    SomaYAMLError,
+    AegisYAML,
+    AegisDocument,
+    AegisYAMLError,
     FrontmatterError,
     dump_frontmatter,
     parse_frontmatter,
-    parse_cell_frontmatter,
+    parse_rule_frontmatter,
     parse_yaml_subset,
     _get_body,
     MAX_DOC_BYTES,
@@ -109,31 +109,31 @@ class TestSomaYAMLSafetyAndDoSGuards:
 
     def test_max_doc_bytes_limit(self):
         oversized = "a: " + ("x" * (MAX_DOC_BYTES + 10))
-        with pytest.raises(SomaYAMLError, match="exceeds maximum allowed size"):
-            SomaYAML.parse_text(oversized)
+        with pytest.raises(AegisYAMLError, match="exceeds maximum allowed size"):
+            AegisYAML.parse_text(oversized)
 
     def test_max_lines_limit(self):
         too_many_lines = "\n".join(f"k{i}: v" for i in range(MAX_LINES + 5))
-        with pytest.raises(SomaYAMLError, match="exceeds maximum line limit"):
-            SomaYAML.parse_text(too_many_lines)
+        with pytest.raises(AegisYAMLError, match="exceeds maximum line limit"):
+            AegisYAML.parse_text(too_many_lines)
 
     def test_max_scalar_chars_limit(self):
         long_scalar = "key: " + ("A" * (MAX_SCALAR_CHARS + 1))
-        with pytest.raises(SomaYAMLError, match=r"Scalar length \(\d+\) exceeds maximum limit"):
-            SomaYAML.parse_text(long_scalar)
+        with pytest.raises(AegisYAMLError, match=r"Scalar length \(\d+\) exceeds maximum limit"):
+            AegisYAML.parse_text(long_scalar)
 
     def test_max_depth_block_limit(self):
         nested = ""
         for i in range(MAX_DEPTH + 2):
             nested += f"{'  ' * i}nest_{i}:\n"
         nested += f"{'  ' * (MAX_DEPTH + 2)}val: leaf\n"
-        with pytest.raises(SomaYAMLError, match="Maximum YAML nesting depth exceeded"):
-            SomaYAML.parse_text(nested)
+        with pytest.raises(AegisYAMLError, match="Maximum YAML nesting depth exceeded"):
+            AegisYAML.parse_text(nested)
 
     def test_max_depth_flow_limit(self):
         nested_flow = "a: " + ("[" * (MAX_DEPTH + 2)) + ("0" * 1) + ("]" * (MAX_DEPTH + 2))
-        with pytest.raises(SomaYAMLError, match="Maximum YAML nesting depth exceeded"):
-            SomaYAML.parse_text(nested_flow)
+        with pytest.raises(AegisYAMLError, match="Maximum YAML nesting depth exceeded"):
+            AegisYAML.parse_text(nested_flow)
 
     def test_duplicate_key_prohibition_block(self):
         text = """
@@ -141,30 +141,30 @@ id: wall-1
 enforcement: advisory
 enforcement: gate
 """
-        with pytest.raises(SomaYAMLError, match="Duplicate key 'enforcement' detected"):
-            SomaYAML.parse_text(text)
+        with pytest.raises(AegisYAMLError, match="Duplicate key 'enforcement' detected"):
+            AegisYAML.parse_text(text)
 
     def test_duplicate_key_prohibition_flow(self):
         text = "map: {key: 1, key: 2}"
-        with pytest.raises(SomaYAMLError, match="Duplicate key 'key' detected"):
-            SomaYAML.parse_text(text)
+        with pytest.raises(AegisYAMLError, match="Duplicate key 'key' detected"):
+            AegisYAML.parse_text(text)
 
     def test_zero_width_sanitization(self):
         # Hidden zero-width characters in key or value
         text = "\ufeffid:\u200b cell-sanitized\n\u200ctier: \u200dmethod"
-        doc = SomaYAML.parse_text(text)
+        doc = AegisYAML.parse_text(text)
         assert doc["id"] == "cell-sanitized"
         assert doc["tier"] == "method"
 
     def test_control_character_rejection(self):
         text = "key: bad\x07bell"
-        with pytest.raises(SomaYAMLError, match="Control character"):
-            SomaYAML.parse_text(text)
+        with pytest.raises(AegisYAMLError, match="Control character"):
+            AegisYAML.parse_text(text)
 
     def test_null_byte_escape_rejection(self):
         text = 'key: "null\\0byte"'
-        with pytest.raises(SomaYAMLError, match="Escape sequence \\\\0 is not permitted"):
-            SomaYAML.parse_text(text)
+        with pytest.raises(AegisYAMLError, match="Escape sequence \\\\0 is not permitted"):
+            AegisYAML.parse_text(text)
 
 
 class TestSomaDocumentAndDomainModel:
@@ -178,8 +178,8 @@ enforcement: gate
 ---
 # Wall Symlink
 """
-        doc = SomaYAML.parse_text(text)
-        assert isinstance(doc, SomaDocument)
+        doc = AegisYAML.parse_text(text)
+        assert isinstance(doc, AegisDocument)
         assert doc.kind == "rule"
         assert doc.id == "wall-symlink"
         assert doc.enforcement == "gate"
@@ -198,7 +198,7 @@ produces: [VerifiedPatch]
 ---
 # TDD Cycle
 """
-        doc = SomaYAML.parse_text(text)
+        doc = AegisYAML.parse_text(text)
         assert doc.kind == "skill"
         assert doc.id == "tdd-cycle"
         assert doc.tier == "method"
@@ -208,7 +208,7 @@ produces: [VerifiedPatch]
         assert doc.handoff_targets == []
 
     def test_mapping_interface(self):
-        doc = SomaDocument(metadata={"id": "test", "num": 42}, body="# Body", kind="generic")
+        doc = AegisDocument(metadata={"id": "test", "num": 42}, body="# Body", kind="generic")
         assert len(doc) == 2
         assert "id" in doc
         assert "missing" not in doc
@@ -226,7 +226,7 @@ produces: [VerifiedPatch]
         rule_file = tmp_path / "cell.md"
         rule_file.write_text("---\nid: local-cell\n---\n# Body\n", encoding="utf-8")
 
-        doc = SomaYAML.parse_file("cell.md", ws)
+        doc = AegisYAML.parse_file("cell.md", ws)
         assert doc.id == "local-cell"
 
     def test_parse_file_rejects_symlinks(self, tmp_path: Path):
@@ -240,8 +240,8 @@ produces: [VerifiedPatch]
         except OSError:
             pytest.skip("Symlinks not supported on this platform")
 
-        with pytest.raises(SomaYAMLError, match="Symlink parsing prohibited"):
-            SomaYAML.parse_file("symlink.md", ws)
+        with pytest.raises(AegisYAMLError, match="Symlink parsing prohibited"):
+            AegisYAML.parse_file("symlink.md", ws)
 
 
 class TestBackwardCompatibilityParity:
@@ -258,11 +258,11 @@ class TestBackwardCompatibilityParity:
         f = tmp_path / "rule.md"
         f.write_text("---\nid: from-file\n---\n# Body from file", encoding="utf-8")
 
-        meta1, body1 = parse_cell_frontmatter(str(f))
+        meta1, body1 = parse_rule_frontmatter(str(f))
         assert meta1["id"] == "from-file"
         assert body1 == "# Body from file"
 
-        meta2, body2 = parse_cell_frontmatter("---\nid: from-str\n---\n# Body from str")
+        meta2, body2 = parse_rule_frontmatter("---\nid: from-str\n---\n# Body from str")
         assert meta2["id"] == "from-str"
         assert body2 == "# Body from str"
 
@@ -276,7 +276,7 @@ class TestBackwardCompatibilityParity:
         }
         body = "# Header\nBody text"
         dumped = dump_frontmatter(data, body=body)
-        meta, parsed_body = parse_cell_frontmatter(dumped)
+        meta, parsed_body = parse_rule_frontmatter(dumped)
         assert meta == data
         assert parsed_body == body
 
@@ -297,7 +297,7 @@ class TestBackwardCompatibilityParity:
             parse_yaml_subset("  key1: val1\nkey2: val2")
 
     def test_string_escapes_and_comments(self):
-        with pytest.raises(SomaYAMLError, match="Escape sequence \\\\0"):
+        with pytest.raises(AegisYAMLError, match="Escape sequence \\\\0"):
             parse_yaml_subset('key: "\\0"')
 
         # line continuation
@@ -332,7 +332,7 @@ class TestSomaYAMLBranchHardening:
     """Systematic branch coverage hardening for aegis_core.yaml."""
 
     def test_soma_document_comprehensive_properties(self, tmp_path: Path):
-        doc = SomaDocument(metadata={"kind": "skill", "id": "s1", "type": "wall"}, body="body text", source_path="/tmp/doc.md")
+        doc = AegisDocument(metadata={"kind": "skill", "id": "s1", "type": "wall"}, body="body text", source_path="/tmp/doc.md")
         assert doc.kind == "skill"
         assert doc.id == "s1"
         assert doc.name == "s1"
@@ -342,7 +342,7 @@ class TestSomaYAMLBranchHardening:
         assert doc.source_path == "/tmp/doc.md"
         assert doc.to_dict() == {"kind": "skill", "id": "s1", "type": "wall", "tier": "method", "consumes": [], "produces": [], "handoff_targets": []}
         assert list(iter(doc)) == ["kind", "id", "type", "tier", "consumes", "produces", "handoff_targets"]
-        assert ("AegisDocument" in repr(doc) or "SomaDocument" in repr(doc))
+        assert ("AegisDocument" in repr(doc) or "AegisDocument" in repr(doc))
         assert doc["id"] == "s1"
         assert doc.get("nonexistent", "fallback") == "fallback"
         assert "id" in doc.keys()
@@ -356,62 +356,62 @@ class TestSomaYAMLBranchHardening:
         assert doc.decay is False
 
         # rule kind auto inference
-        doc_rule = SomaDocument(metadata={"id": "r1", "type": "wall", "enforcement": "strict", "target_paths": ["a.py"]})
+        doc_rule = AegisDocument(metadata={"id": "r1", "type": "wall", "enforcement": "strict", "target_paths": ["a.py"]})
         assert doc_rule.kind == "rule"
         assert doc_rule.enforcement == "strict"
         assert doc_rule.target_paths == ["a.py"]
         assert doc_rule.decay is True
 
         # explicit kind
-        doc_explicit = SomaDocument(metadata={"id": "e1"}, kind="custom_kind")
+        doc_explicit = AegisDocument(metadata={"id": "e1"}, kind="custom_kind")
         assert doc_explicit.kind == "custom_kind"
 
     def test_somayaml_parse_text_and_dump(self):
         # parse_text with frontmatter and body
-        doc = SomaYAML.parse_text("---\nid: cell-abc\nkind: skill\n---\n# Markdown Body\nHello world")
+        doc = AegisYAML.parse_text("---\nid: cell-abc\nkind: skill\n---\n# Markdown Body\nHello world")
         assert doc.id == "cell-abc"
         assert doc.body == "# Markdown Body\nHello world"
 
         # parse_text with only yaml mapping
-        doc_raw = SomaYAML.parse_text("id: cell-raw\nscore: 1.0\n")
+        doc_raw = AegisYAML.parse_text("id: cell-raw\nscore: 1.0\n")
         assert doc_raw.id == "cell-raw"
         assert doc_raw.body == ""
 
         # parse_text error branches
         with pytest.raises(FrontmatterError, match="Expected YAML mapping at document root"):
-            SomaYAML.parse_text("---\n- item 1\n- item 2\n---\n")
+            AegisYAML.parse_text("---\n- item 1\n- item 2\n---\n")
 
         with pytest.raises(FrontmatterError, match="Expected YAML mapping at document root"):
-            SomaYAML.parse_text("- item 1\n- item 2\n")
+            AegisYAML.parse_text("- item 1\n- item 2\n")
 
-        # dump SomaDocument
-        dumped1 = SomaYAML.dump(doc)
+        # dump AegisDocument
+        dumped1 = AegisYAML.dump(doc)
         assert "id: cell-abc" in dumped1
         assert "Hello world" in dumped1
 
         # dump dict with body
-        dumped2 = SomaYAML.dump({"id": "d1"}, body="Body from dict")
+        dumped2 = AegisYAML.dump({"id": "d1"}, body="Body from dict")
         assert "id: d1" in dumped2
         assert "Body from dict" in dumped2
 
     def test_somayaml_parse_file_and_write_frontmatter(self, tmp_path: Path):
-        # workspace without confine_path raises SomaYAMLError
+        # workspace without confine_path raises AegisYAMLError
         class BadWS:
             pass
-        with pytest.raises(SomaYAMLError, match="confine_path"):
-            SomaYAML.parse_file("foo.md", BadWS())
+        with pytest.raises(AegisYAMLError, match="confine_path"):
+            AegisYAML.parse_file("foo.md", BadWS())
 
         # real Workspace
         ws = Workspace(tmp_path)
 
         # nonexistent file
         with pytest.raises(FileNotFoundError, match="File does not exist"):
-            SomaYAML.parse_file("missing.md", ws)
+            AegisYAML.parse_file("missing.md", ws)
 
         # valid file
         real_file = tmp_path / "target.md"
         real_file.write_text("---\nid: sym-target\n---\n", encoding="utf-8")
-        doc = SomaYAML.parse_file("target.md", ws)
+        doc = AegisYAML.parse_file("target.md", ws)
         assert doc.id == "sym-target"
         assert doc.source_path == str(real_file.resolve())
 
@@ -419,14 +419,14 @@ class TestSomaYAMLBranchHardening:
         class StringWS:
             def confine_path(self, p):
                 return str(real_file.resolve())
-        doc_str = SomaYAML.parse_file("target.md", StringWS())
+        doc_str = AegisYAML.parse_file("target.md", StringWS())
         assert doc_str.id == "sym-target"
 
         # write_frontmatter
         out_file = tmp_path / "written.md"
         write_frontmatter(out_file, {"id": "written-id"}, "Written body")
         assert out_file.exists()
-        doc_written = SomaYAML.parse_file("written.md", ws)
+        doc_written = AegisYAML.parse_file("written.md", ws)
         assert doc_written.id == "written-id"
         assert doc_written.body == "Written body"
 
@@ -436,32 +436,32 @@ class TestSomaYAMLBranchHardening:
         real_file.write_text("---\nid: sym-target\n---\n", encoding="utf-8")
         symlink_file = tmp_path / "link.md"
         symlink_or_skip(real_file, symlink_file)
-        with pytest.raises(SomaYAMLError, match="Symlink parsing prohibited"):
-            SomaYAML.parse_file("link.md", ws)
+        with pytest.raises(AegisYAMLError, match="Symlink parsing prohibited"):
+            AegisYAML.parse_file("link.md", ws)
 
         # workspace returning symlink path
         class SymlinkReturnWS:
             def confine_path(self, p):
                 return str(symlink_file)
-        with pytest.raises(SomaYAMLError, match="Symlink parsing prohibited"):
-            SomaYAML.parse_file("link.md", SymlinkReturnWS())
+        with pytest.raises(AegisYAMLError, match="Symlink parsing prohibited"):
+            AegisYAML.parse_file("link.md", SymlinkReturnWS())
 
     def test_parse_cell_frontmatter_branches(self, tmp_path: Path):
         with pytest.raises(ValueError, match="No frontmatter delimiter"):
-            parse_cell_frontmatter("not frontmatter content")
+            parse_rule_frontmatter("not frontmatter content")
 
         with pytest.raises(ValueError, match="Unclosed frontmatter"):
-            parse_cell_frontmatter("---")
+            parse_rule_frontmatter("---")
 
         with pytest.raises(ValueError, match="Unclosed frontmatter"):
-            parse_cell_frontmatter("---\nid: unclosed\nline 2")
+            parse_rule_frontmatter("---\nid: unclosed\nline 2")
 
         with pytest.raises(ValueError, match="Expected YAML mapping"):
-            parse_cell_frontmatter("---\n- item1\n- item2\n---\n")
+            parse_rule_frontmatter("---\n- item1\n- item2\n---\n")
 
         # Zero-width spaces stripping
         zw_text = "\u200b---\nid: zw\n---\nBody"
-        meta, body = parse_cell_frontmatter(zw_text)
+        meta, body = parse_rule_frontmatter(zw_text)
         assert meta["id"] == "zw"
         assert body == "Body"
 
@@ -503,7 +503,7 @@ class TestSomaYAMLBranchHardening:
             parse_yaml_subset("key:\n\tval: 1")
 
         # Escapes
-        with pytest.raises(SomaYAMLError, match="Escape sequence \\\\0"):
+        with pytest.raises(AegisYAMLError, match="Escape sequence \\\\0"):
             parse_yaml_subset('key: "\\0"')
 
         # Invalid hex/unicode escape fallback
@@ -569,7 +569,7 @@ items:
   - dup: 1
     dup: 2
 """
-        with pytest.raises(SomaYAMLError, match="Duplicate key 'dup'"):
+        with pytest.raises(AegisYAMLError, match="Duplicate key 'dup'"):
             parse_yaml_subset(dup_seq_yaml)
 
         # Unterminated quote in sequence
@@ -586,7 +586,7 @@ items:
 
         # Depth limits (nest > MAX_DEPTH=30)
         deep_flow = "[" * 35 + "1" + "]" * 35
-        with pytest.raises(SomaYAMLError, match="nesting depth"):
+        with pytest.raises(AegisYAMLError, match="nesting depth"):
             parse_yaml_subset(f"key: {deep_flow}")
 
         # Unterminated / mismatched quote scalar in _parse_scalar
@@ -661,15 +661,15 @@ items:
 
         # Depth limits on helper functions directly
         from aegis_core.yaml import _parse_flow_map, _parse_block_map, _parse_block_seq
-        with pytest.raises(SomaYAMLError, match="nesting depth"):
+        with pytest.raises(AegisYAMLError, match="nesting depth"):
             _parse_flow("a", 0, depth=35)
-        with pytest.raises(SomaYAMLError, match="nesting depth"):
+        with pytest.raises(AegisYAMLError, match="nesting depth"):
             _parse_flow_map("{a: 1}", 0, depth=35)
-        with pytest.raises(SomaYAMLError, match="nesting depth"):
+        with pytest.raises(AegisYAMLError, match="nesting depth"):
             _parse_block_map([], 0, 0, depth=35)
-        with pytest.raises(SomaYAMLError, match="nesting depth"):
+        with pytest.raises(AegisYAMLError, match="nesting depth"):
             _parse_block_seq([], 0, 0, depth=35)
-        with pytest.raises(SomaYAMLError, match="Escape sequence"):
+        with pytest.raises(AegisYAMLError, match="Escape sequence"):
             _unescape_double(r"\0")
 
 

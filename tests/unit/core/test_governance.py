@@ -197,11 +197,11 @@ def test_rule_fitness_alias(tmp_path, monkeypatch):
 
 
 def test_sdk_exports():
-    from aegis_sdk import Governance, Cell, CellFitness, SomaError
+    from aegis_sdk import Governance, Rule, RuleFitness, AegisError
     assert Governance is not None
-    assert Cell is not None
-    assert CellFitness is not None
-    assert issubclass(SomaError, Exception)
+    assert Rule is not None
+    assert RuleFitness is not None
+    assert issubclass(AegisError, Exception)
 
 
 def test_sdk_scoring_reexports():
@@ -211,16 +211,16 @@ def test_sdk_scoring_reexports():
 
 
 def test_cell_fitness_snr_db_delegation():
-    from aegis_sdk.rules import CellFitness
+    from aegis_sdk.rules import RuleFitness
     from aegis_core.scoring import calculate_snr
 
-    cf = CellFitness(true_positives=10, false_positives=2)
+    cf = RuleFitness(true_positives=10, false_positives=2)
     assert cf.snr_db == calculate_snr(10, 2)
 
-    cf_inf = CellFitness(true_positives=5, false_positives=0)
+    cf_inf = RuleFitness(true_positives=5, false_positives=0)
     assert cf_inf.snr_db is None
 
-    cf_zero = CellFitness(true_positives=0, false_positives=5)
+    cf_zero = RuleFitness(true_positives=0, false_positives=5)
     assert cf_zero.snr_db == -99.0
 
 
@@ -229,7 +229,7 @@ def test_write_cell_frontmatter_zero_dep_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(sdk_cells, "yaml", None)
 
     target_file = tmp_path / "cell_zero_dep.md"
-    sdk_cells.write_cell_frontmatter(
+    sdk_cells.write_rule_frontmatter(
         str(target_file),
         {"name": "test-cell", "type": "wall"},
         "## Hypothesis\nZero dep fallback.\n",

@@ -1,14 +1,14 @@
-"""Contract and behavioral invariants for SomaCommand protocol and CommandRegistry."""
+"""Contract and behavioral invariants for AegisCommand protocol and CommandRegistry."""
 from __future__ import annotations
 
 import argparse
 import pytest
 
-from aegis_cli.base import CommandCategory, SomaCommand
+from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_cli.registry import CommandRegistry, get_default_registry
 
 
-class DummyInitCommand(SomaCommand):
+class DummyInitCommand(AegisCommand):
     name = "dummy-init"
     aliases = ("d-init", "di")
     category = CommandCategory.SETUP
@@ -21,7 +21,7 @@ class DummyInitCommand(SomaCommand):
         return 42 if getattr(args, "flag", False) else 0
 
 
-class DummyVerifyCommand(SomaCommand):
+class DummyVerifyCommand(AegisCommand):
     name = "dummy-verify"
     aliases = ("dv",)
     category = CommandCategory.WORKFLOW
@@ -36,7 +36,7 @@ class DummyVerifyCommand(SomaCommand):
 
 def test_command_abstract_contract():
     # Attempting to instantiate incomplete subclass should fail
-    class IncompleteCommand(SomaCommand):
+    class IncompleteCommand(AegisCommand):
         pass
 
     with pytest.raises(TypeError):

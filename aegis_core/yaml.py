@@ -34,7 +34,6 @@ class AegisYAMLError(ValueError):
     """Base error raised when AegisYAML validation, parsing, or security limits fail."""
 
 
-SomaYAMLError = AegisYAMLError
 FrontmatterError = AegisYAMLError
 
 
@@ -228,7 +227,7 @@ def _unescape_double(body: str) -> str:
         if ch == "\\" and i + 1 < len(body):
             nxt = body[i + 1]
             if nxt == "0":
-                raise SomaYAMLError("Escape sequence \\0 is not permitted")
+                raise AegisYAMLError("Escape sequence \\0 is not permitted")
             if nxt == "\r" and i + 2 < len(body) and body[i + 2] == "\n":
                 i += 3
                 continue
@@ -379,9 +378,9 @@ def _parse_scalar(raw: str, lineno: int = 1) -> Any:
     """Convert a raw scalar token to a Python value with DoS scalar limits."""
     text = raw.strip()
     if "\\0" in raw:
-        raise SomaYAMLError("Escape sequence \\0 is not permitted")
+        raise AegisYAMLError("Escape sequence \\0 is not permitted")
     if len(text) > MAX_SCALAR_CHARS:
-        raise SomaYAMLError(
+        raise AegisYAMLError(
             f"Scalar length ({len(text)}) exceeds maximum limit ({MAX_SCALAR_CHARS}) at line {lineno}"
         )
 
@@ -413,7 +412,7 @@ def _parse_scalar(raw: str, lineno: int = 1) -> Any:
 
 def _parse_flow(text: str, i: int, lineno: int = 1, depth: int = 0) -> Tuple[Any, int]:
     if depth > MAX_DEPTH:
-        raise SomaYAMLError("Maximum YAML nesting depth exceeded")
+        raise AegisYAMLError("Maximum YAML nesting depth exceeded")
     i = _skip_ws(text, i)
     if i >= len(text):
         raise FrontmatterError("unexpected end of flow collection")
@@ -429,7 +428,7 @@ def _parse_flow(text: str, i: int, lineno: int = 1, depth: int = 0) -> Tuple[Any
 
 def _parse_flow_seq(text: str, i: int, lineno: int = 1, depth: int = 0) -> Tuple[List[Any], int]:
     if depth > MAX_DEPTH:
-        raise SomaYAMLError("Maximum YAML nesting depth exceeded")
+        raise AegisYAMLError("Maximum YAML nesting depth exceeded")
     items = []
     i = _skip_ws(text, i + 1)
     if i < len(text) and text[i] == "]":
@@ -451,7 +450,7 @@ def _parse_flow_seq(text: str, i: int, lineno: int = 1, depth: int = 0) -> Tuple
 
 def _parse_flow_map(text: str, i: int, lineno: int = 1, depth: int = 0) -> Tuple[Dict[str, Any], int]:
     if depth > MAX_DEPTH:
-        raise SomaYAMLError("Maximum YAML nesting depth exceeded")
+        raise AegisYAMLError("Maximum YAML nesting depth exceeded")
     mapping: Dict[str, Any] = {}
     i = _skip_ws(text, i + 1)
     if i < len(text) and text[i] == "}":
@@ -464,7 +463,7 @@ def _parse_flow_map(text: str, i: int, lineno: int = 1, depth: int = 0) -> Tuple
             raise FrontmatterError("empty key in flow mapping")
         key = str(_parse_scalar(raw_key, lineno=lineno))
         if key in mapping:
-            raise SomaYAMLError(f"Duplicate key '{key}' detected at line {lineno}")
+            raise AegisYAMLError(f"Duplicate key '{key}' detected at line {lineno}")
         i = _skip_ws(text, i + 1)
         value, i = _parse_flow(text, i, lineno=lineno, depth=depth)
         mapping[key] = value
@@ -484,7 +483,7 @@ def _prepare_lines(text: str) -> List[Tuple[int, str, int]]:
     """Tokenize YAML lines with indentation tracking and comment stripping."""
     raw_lines = text.splitlines()
     if len(raw_lines) > MAX_LINES:
-        raise SomaYAMLError(f"Document line count ({len(raw_lines)}) exceeds maximum line limit ({MAX_LINES})")
+        raise AegisYAMLError(f"Document line count ({len(raw_lines)}) exceeds maximum line limit ({MAX_LINES})")
 
     prepared: List[Tuple[int, str, int]] = []
     in_block_scalar = False
@@ -494,7 +493,7 @@ def _prepare_lines(text: str) -> List[Tuple[int, str, int]]:
     for lineno, raw in enumerate(raw_lines, 1):
         for ch in raw:
             if ord(ch) < 32 and ch not in ("\t", "\n", "\r"):
-                raise SomaYAMLError(f"Control character {ord(ch):#04x} is prohibited at line {lineno}")
+                raise AegisYAMLError(f"Control character {ord(ch):#04x} is prohibited at line {lineno}")
         if raw.startswith("\t") or (len(raw) - len(raw.lstrip(" ")) > 0 and raw.lstrip(" ").startswith("\t")):
             raise FrontmatterError(f"line {lineno}: tab characters are not allowed for indentation in YAML")
         indent = len(raw) - len(raw.lstrip(" "))
@@ -550,7 +549,7 @@ def _prepare_lines(text: str) -> List[Tuple[int, str, int]]:
 
 def _parse_collection(lines: List[Tuple[int, str, int]], start: int, indent: int, depth: int = 0) -> Tuple[Any, int]:
     if depth > MAX_DEPTH:
-        raise SomaYAMLError("Maximum YAML nesting depth exceeded")
+        raise AegisYAMLError("Maximum YAML nesting depth exceeded")
     content = lines[start][1]
     if content == "-" or content.startswith("- "):
         return _parse_block_seq(lines, start, indent, depth=depth)
@@ -594,7 +593,7 @@ def _parse_block_map(
     lines: List[Tuple[int, str, int]], start: int, indent: int, depth: int = 0
 ) -> Tuple[Dict[str, Any], int]:
     if depth > MAX_DEPTH:
-        raise SomaYAMLError("Maximum YAML nesting depth exceeded")
+        raise AegisYAMLError("Maximum YAML nesting depth exceeded")
     mapping: Dict[str, Any] = {}
     i = start
     while i < len(lines):
@@ -612,7 +611,7 @@ def _parse_block_map(
             raise FrontmatterError(f"line {lineno}: missing key")
         key = str(_parse_scalar(raw_key, lineno=lineno))
         if key in mapping:
-            raise SomaYAMLError(f"Duplicate key '{key}' detected at line {lineno}")
+            raise AegisYAMLError(f"Duplicate key '{key}' detected at line {lineno}")
         rest = content[idx + 1 :].strip()
 
         # Block scalar (| or >)
@@ -671,7 +670,7 @@ def _parse_block_seq(
     lines: List[Tuple[int, str, int]], start: int, indent: int, depth: int = 0
 ) -> Tuple[List[Any], int]:
     if depth > MAX_DEPTH:
-        raise SomaYAMLError("Maximum YAML nesting depth exceeded")
+        raise AegisYAMLError("Maximum YAML nesting depth exceeded")
     items: List[Any] = []
     i = start
     while i < len(lines):
@@ -707,7 +706,7 @@ def _parse_block_seq(
                     nv = nc[nidx + 1 :].strip()
                     nkey = str(_parse_scalar(nk, lineno=nl))
                     if nkey in item_map:
-                        raise SomaYAMLError(f"Duplicate key '{nkey}' detected at line {nl}")
+                        raise AegisYAMLError(f"Duplicate key '{nkey}' detected at line {nl}")
                     item_map[nkey] = _parse_scalar(nv, lineno=nl) if nv else None
                 j += 1
             items.append(item_map)
@@ -733,10 +732,10 @@ def _parse_block_seq(
 
 
 def parse_yaml_subset(text: str) -> Dict[str, Any]:
-    """Parse YAML subset with DoS guards. Raises FrontmatterError/SomaYAMLError."""
+    """Parse YAML subset with DoS guards. Raises FrontmatterError/AegisYAMLError."""
     raw_bytes = text.encode("utf-8")
     if len(raw_bytes) > MAX_DOC_BYTES:
-        raise SomaYAMLError(f"Document size ({len(raw_bytes)} bytes) exceeds maximum allowed size ({MAX_DOC_BYTES} bytes)")
+        raise AegisYAMLError(f"Document size ({len(raw_bytes)} bytes) exceeds maximum allowed size ({MAX_DOC_BYTES} bytes)")
 
     working_text = text
     for zw in ZERO_WIDTH_CHARS:
@@ -864,8 +863,8 @@ def parse_frontmatter(content: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def parse_cell_frontmatter(content_or_path: str) -> Tuple[Dict[str, Any], str]:
-    """Parse a cell file or markdown string into (frontmatter_dict, body)."""
+def parse_rule_frontmatter(content_or_path: str) -> Tuple[Dict[str, Any], str]:
+    """Parse a rule file or markdown string into (frontmatter_dict, body)."""
     if os.path.exists(content_or_path) and os.path.isfile(content_or_path):
         with open(content_or_path, "r", encoding="utf-8-sig") as f:
             content = f.read()
@@ -962,12 +961,6 @@ class AegisYAML:
         return dump_frontmatter(doc, body=body)
 
 
-# Backward-compatibility aliases
-SomaDocument = AegisDocument
-SomaYAML = AegisYAML
-parse_rule_frontmatter = parse_cell_frontmatter
-
-
 __all__ = [
     "AegisDocument",
     "AegisYAML",
@@ -977,12 +970,8 @@ __all__ = [
     "MAX_DOC_BYTES",
     "MAX_LINES",
     "MAX_SCALAR_CHARS",
-    "SomaDocument",
-    "SomaYAML",
-    "SomaYAMLError",
     "ZERO_WIDTH_CHARS",
     "dump_frontmatter",
-    "parse_cell_frontmatter",
     "parse_frontmatter",
     "parse_rule_frontmatter",
     "parse_yaml_subset",

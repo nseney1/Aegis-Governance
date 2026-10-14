@@ -486,7 +486,7 @@ def check_cell_fitness(root: Path) -> list[dict]:
                 "check": "cell_fitness",
                 "cell_id": cell_id,
                 "message": (
-                    f"Cell '{cell_id}' has unhealthy fitness: "
+                    f"Rule '{cell_id}' has unhealthy fitness: "
                     f"{fp}/{total} false positives "
                     f"({rate:.0%} FP rate)"
                 ),

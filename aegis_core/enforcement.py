@@ -545,7 +545,7 @@ def update_cell_enforcement_artifact(cell: Dict[str, Any], artifact_path: str, w
 # ── CI Outcome Reporter ───────────────────────────────────────────────────
 
 
-def _parse_cell_frontmatter(filepath: str) -> Dict[str, Any]:
+def _parse_rule_frontmatter(filepath: str) -> Dict[str, Any]:
     """Parse YAML frontmatter from a cell markdown file using zero-dep parser."""
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -618,7 +618,7 @@ def _compute_credit_weights(matched_cells: List[Dict[str, Any]], changed_files: 
         cell_name = cell["cell"]
         cell_path = cell["path"]
         try:
-            fm = _parse_cell_frontmatter(cell_path)
+            fm = _parse_rule_frontmatter(cell_path)
         except Exception:
             fm = {}
         tp = fm.get("target_paths", [])

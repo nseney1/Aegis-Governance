@@ -16,7 +16,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_sdk.rules import CellFitness
+from aegis_sdk.rules import RuleFitness
 from aegis_sdk.analysis import antifragile_bonus
 
 
@@ -24,7 +24,7 @@ class TestAntifragileBonus:
     """Tests for the antifragile bonus calculation."""
 
     def test_zero_stress_no_bonus(self):
-        """Cell with 0 stress events gets no bonus (multiplier = 1.0)."""
+        """Rule with 0 stress events gets no bonus (multiplier = 1.0)."""
         assert antifragile_bonus(0) == 1.0
 
     def test_one_stress_event(self):
@@ -46,13 +46,13 @@ class TestAntifragileBonus:
         assert abs(antifragile_bonus(10, cap=5) - 1.25) < 0.001
 
     def test_cell_fitness_stress_survived_field(self):
-        """CellFitness.stress_survived defaults to 0."""
-        f = CellFitness()
+        """RuleFitness.stress_survived defaults to 0."""
+        f = RuleFitness()
         assert f.stress_survived == 0
 
     def test_cell_fitness_stress_survived_custom(self):
-        """CellFitness.stress_survived can be set."""
-        f = CellFitness(stress_survived=3)
+        """RuleFitness.stress_survived can be set."""
+        f = RuleFitness(stress_survived=3)
         bonus = antifragile_bonus(f.stress_survived)
         assert abs(bonus - 1.15) < 0.001
 

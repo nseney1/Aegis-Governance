@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
-from aegis_core.yaml import dump_frontmatter, parse_cell_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_rule_frontmatter
 
 
 CELL_TYPE_DIRS = {

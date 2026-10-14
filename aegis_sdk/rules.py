@@ -9,9 +9,6 @@ import os
 from typing import Optional, Tuple, Union
 
 from aegis_sdk.errors import (
-    CellNotFoundError,
-    CellParseError,
-    CellPathTraversalError,
     RuleNotFoundError,
     RuleParseError,
     RulePathTraversalError,
@@ -35,18 +32,11 @@ def _stdlib_parse_frontmatter(yaml_text: str) -> dict:
 __all__ = [
     "Rule",
     "RuleFitness",
-    "Cell",
-    "CellFitness",
     "parse_rule_file",
-    "parse_cell_file",
     "write_rule_frontmatter",
-    "write_cell_frontmatter",
     "save_rule_file",
-    "save_cell_file",
     "load_rule",
-    "load_cell",
     "dump_rule",
-    "dump_cell",
 ]
 
 
@@ -324,11 +314,4 @@ def dump_rule(frontmatter: dict, body: str = "") -> str:
     return content
 
 
-Cell = Rule
-CellFitness = RuleFitness
-parse_cell_file = parse_rule_file
-write_cell_frontmatter = write_rule_frontmatter
 save_rule_file = write_rule_frontmatter
-save_cell_file = write_rule_frontmatter
-load_cell = load_rule
-dump_cell = dump_rule

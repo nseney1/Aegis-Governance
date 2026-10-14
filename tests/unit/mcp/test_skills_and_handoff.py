@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from aegis_core.errors import HandoffAuthorizationError, InvalidHandoffPayloadError, SomaValidationError
+from aegis_core.errors import HandoffAuthorizationError, InvalidHandoffPayloadError, AegisValidationError
 from aegis_core.schemas.artifacts import (
     ArtifactEnvelope,
     ArtifactRegistry,
@@ -20,7 +20,7 @@ from aegis_core.schemas.artifacts import (
 from aegis_core.skills.graph import SkillGraph, SkillNode
 from aegis_core.skills.handoff import HandoffRouter, HandoffTicket, soma_handoff
 from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
-from aegis_core.yaml import SomaYAML
+from aegis_core.yaml import AegisYAML
 from aegis_core.workspace import Workspace
 
 
@@ -132,7 +132,7 @@ class TestSkillGraphAndHandoffRouter:
         graph.validate_handoff_path("spec_scout", "fixer_lane", "ChargeSheet")
 
         # Validate illegal target
-        with pytest.raises(SomaValidationError, match="cannot handoff to 'unknown'"):
+        with pytest.raises(AegisValidationError, match="cannot handoff to 'unknown'"):
             graph.validate_handoff_path("spec_scout", "unknown", "ChargeSheet")
 
     def test_file_buffered_soma_handoff(self, tmp_path: Path):
@@ -400,13 +400,13 @@ class TestArtifactsAndSkillsBranchHardening:
         assert graph2.get_downstream("builder")[0].id == "tester"
 
         # validate_handoff_path errors
-        with pytest.raises(SomaValidationError, match="does not produce"):
+        with pytest.raises(AegisValidationError, match="does not produce"):
             graph2.validate_handoff_path("builder", "tester", "WrongArtifact")
 
-        with pytest.raises(SomaValidationError, match="cannot handoff to"):
+        with pytest.raises(AegisValidationError, match="cannot handoff to"):
             graph2.validate_handoff_path("builder", "other", "TestVerdict")
 
-        with pytest.raises(SomaValidationError, match="does not consume"):
+        with pytest.raises(AegisValidationError, match="does not consume"):
             other_tester = SkillNode(id="other_tester", consumes=("ChargeSheet",))
             graph3 = SkillGraph({"builder": SkillNode(id="builder", produces=("TestVerdict",), handoff_targets=("other_tester",)), "other_tester": other_tester})
             graph3.validate_handoff_path("builder", "other_tester", "TestVerdict")
@@ -538,8 +538,8 @@ class TestArtifactsAndSkillsBranchHardening:
 
     def test_skill_node_from_doc_mutant_kills(self):
         from aegis_core.skills.graph import SkillNode
-        from aegis_core.yaml import SomaDocument
-        doc = SomaDocument(metadata={"id": "skill-custom", "tier": "specialist", "description": "desc"})
+        from aegis_core.yaml import AegisDocument
+        doc = AegisDocument(metadata={"id": "skill-custom", "tier": "specialist", "description": "desc"})
         node = SkillNode.from_doc(doc)
         assert node.tier == "specialist"
         assert node.tier != "method"

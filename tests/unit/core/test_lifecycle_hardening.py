@@ -7,13 +7,13 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
 
-from aegis_sdk.rules import Cell, CellFitness, load_cell
+from aegis_sdk.rules import Rule, RuleFitness, load_rule
 from aegis_cli.rule import _force_promote, _force_demote, run_promote
 
 
 def test_is_promotable_with_age_fails_closed_on_invalid_date():
     """Unparseable or invalid created_date MUST return False, not True."""
-    c = Cell(name="test", type="vacuole", fitness=CellFitness(triggers=20, true_positives=19))
+    c = Rule(name="test", type="vacuole", fitness=RuleFitness(triggers=20, true_positives=19))
     
     # Unparseable string date
     c.created_date = "invalid-date-format"
@@ -25,7 +25,7 @@ def test_is_promotable_with_age_fails_closed_on_invalid_date():
 
 
 def test_load_cell_populates_created_date(tmp_path):
-    """load_cell must populate created_date on the loaded Cell instance."""
+    """load_rule must populate created_date on the loaded Rule instance."""
     cells_dir = tmp_path / ".aegis" / "rules" / "traps"
     cells_dir.mkdir(parents=True)
     cell_file = cells_dir / "test-cell.md"
@@ -34,7 +34,7 @@ def test_load_cell_populates_created_date(tmp_path):
         encoding="utf-8"
     )
 
-    cell = load_cell("test-cell", cells_dir=str(tmp_path / ".aegis" / "rules"))
+    cell = load_rule("test-cell", cells_dir=str(tmp_path / ".aegis" / "rules"))
     assert hasattr(cell, "created_date")
     assert cell.created_date is not None
     assert isinstance(cell.created_date, (datetime, str))

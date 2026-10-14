@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from aegis_core.yaml import SomaYAML
+from aegis_core.yaml import AegisYAML
 
 __all__ = [
     "detect_project_languages",
@@ -195,7 +195,7 @@ def provision_ast_driver_slots(
     current_slots: Dict[str, str] = {}
     if slots_path.is_file():
         try:
-            doc = SomaYAML.parse_text(slots_path.read_text(encoding="utf-8"))
+            doc = AegisYAML.parse_text(slots_path.read_text(encoding="utf-8"))
             if isinstance(doc, dict) and isinstance(doc.get("slots"), dict):
                 current_slots = {str(k): str(v) for k, v in doc["slots"].items()}
         except Exception:

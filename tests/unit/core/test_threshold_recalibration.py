@@ -13,7 +13,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 sys.path.insert(0, REPO_ROOT)
 
 from aegis_sdk.scoring import bayesian_posterior, laplace_score, _wilson_interval
-from aegis_sdk.rules import Cell, CellFitness
+from aegis_sdk.rules import Rule, RuleFitness
 
 
 class TestLaplaceThresholds:
@@ -22,41 +22,41 @@ class TestLaplaceThresholds:
     def test_promotion_boundary_above(self):
         """Score just above 0.85 with triggers >= 20 → promotable."""
         # tp=19, triggers=20 → (19+1)/(20+2) = 0.909
-        cell = Cell(name='t', type='vacuole',
-                    fitness=CellFitness(triggers=20, true_positives=19))
+        cell = Rule(name='t', type='vacuole',
+                    fitness=RuleFitness(triggers=20, true_positives=19))
         assert cell.is_promotable is True
 
     def test_promotion_boundary_below(self):
         """Score just below 0.85 → not promotable."""
         # tp=17, triggers=20 → (17+1)/(20+2) = 0.818
-        cell = Cell(name='t', type='vacuole',
-                    fitness=CellFitness(triggers=20, true_positives=17))
+        cell = Rule(name='t', type='vacuole',
+                    fitness=RuleFitness(triggers=20, true_positives=17))
         assert cell.is_promotable is False
 
     def test_promotion_insufficient_triggers(self):
         """Perfect score but triggers < 20 → not promotable."""
-        cell = Cell(name='t', type='vacuole',
-                    fitness=CellFitness(triggers=10, true_positives=10))
+        cell = Rule(name='t', type='vacuole',
+                    fitness=RuleFitness(triggers=10, true_positives=10))
         assert cell.is_promotable is False
 
     def test_extinction_boundary_above(self):
         """Score just above 0.15 → not extinct."""
         # tp=2, triggers=10 → (2+1)/(10+2) = 0.25
-        cell = Cell(name='t', type='vacuole',
-                    fitness=CellFitness(triggers=10, true_positives=2))
+        cell = Rule(name='t', type='vacuole',
+                    fitness=RuleFitness(triggers=10, true_positives=2))
         assert cell.is_extinct is False
 
     def test_extinction_boundary_below(self):
         """Score at 0.15 → extinct."""
         # tp=0, triggers=10 → (0+1)/(10+2) = 0.083
-        cell = Cell(name='t', type='vacuole',
-                    fitness=CellFitness(triggers=10, true_positives=0))
+        cell = Rule(name='t', type='vacuole',
+                    fitness=RuleFitness(triggers=10, true_positives=0))
         assert cell.is_extinct is True
 
     def test_zero_triggers_neither(self):
         """Zero triggers → neither extinct nor promotable."""
-        cell = Cell(name='t', type='vacuole',
-                    fitness=CellFitness(triggers=0, true_positives=0))
+        cell = Rule(name='t', type='vacuole',
+                    fitness=RuleFitness(triggers=0, true_positives=0))
         assert cell.is_extinct is False
         assert cell.is_promotable is False
 

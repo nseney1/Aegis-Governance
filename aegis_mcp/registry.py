@@ -278,14 +278,14 @@ TOOL_DEFINITIONS = [
             "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": False,
-            "title": "Create Cell",
+            "title": "Create Rule",
         },
         "inputSchema": {
             "type": "object",
             "properties": {
                 "description": {"type": "string", "description": "Natural language description of the rule or pattern to enforce."},
                 "domain": {"type": "string", "description": "Domain hint: efficiency, correctness, security, style, governance."},
-                "cell_type": {"type": "string", "enum": ["invariant", "boundary", "trap", "persona", "contract", "wall", "membrane", "safety-guard", "learned-trap", "agent-persona", "escalation-boundary", "contract-bridge"], "description": "Cell type to scaffold."},
+                "cell_type": {"type": "string", "enum": ["invariant", "boundary", "trap", "persona", "contract", "wall", "membrane", "safety-guard", "learned-trap", "agent-persona", "escalation-boundary", "contract-bridge"], "description": "Rule type to scaffold."},
                 "dry_run": {"type": "boolean", "default": False, "description": "If true, only returns the prompt without saving."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
@@ -515,7 +515,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "outcome": {"type": "string", "enum": ["success", "partial", "failure", "tp", "fp", "pass", "fail"], "description": "Verification outcome."},
                 "idempotency_key": {"type": "string", "description": "Unique key to prevent duplicate reporting."},
-                "cells_used": {"type": "array", "items": {"type": "string"}, "description": "Cell names used in verification."},
+                "cells_used": {"type": "array", "items": {"type": "string"}, "description": "Rule names used in verification."},
                 "tests_passed": {"type": "boolean"},
                 "rework_count": {"type": "integer", "default": 0},
                 "notes": {"type": "string"},

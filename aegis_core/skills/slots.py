@@ -6,15 +6,15 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Mapping, Optional
 
-from aegis_core.errors import SomaValidationError
-from aegis_core.yaml import SomaYAML
+from aegis_core.errors import AegisValidationError
+from aegis_core.yaml import AegisYAML
 
 __all__ = ["SlotResolutionError", "SlotRegistry", "SLOT_REF_PATTERN"]
 
 SLOT_REF_PATTERN = re.compile(r"\$\{(?:SLOT|RULE)\.([A-Za-z0-9_\-]+)\}|\$\{([A-Za-z0-9_\-]+)\}")
 
 
-class SlotResolutionError(SomaValidationError):
+class SlotResolutionError(AegisValidationError):
     """Raised when a required skill slot cannot be resolved fail-closed."""
 
 
@@ -34,7 +34,7 @@ class SlotRegistry:
 
         try:
             content = slots_file.read_text(encoding="utf-8")
-            doc = SomaYAML.parse_text(content)
+            doc = AegisYAML.parse_text(content)
             raw_slots = doc.get("slots", {})
             if isinstance(raw_slots, Mapping):
                 return cls(raw_slots)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JIT Cell Expression Engine — Soma v0.30
+"""JIT Rule Expression Engine — Soma v0.30
 
 Implements just-in-time governance delivery based on context engineering research:
 - Gloaguen et al. (2026): Static context files don't improve task success

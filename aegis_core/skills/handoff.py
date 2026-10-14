@@ -11,7 +11,7 @@ import time
 from typing import Any, Dict, Mapping, Optional, Union
 import uuid
 
-from aegis_core.errors import SomaError, SomaValidationError
+from aegis_core.errors import AegisError, AegisValidationError
 from aegis_core.schemas.artifacts import ArtifactEnvelope, ArtifactRegistry
 from aegis_core.skills.graph import SkillGraph, SkillNode
 from aegis_core.workspace import Workspace, as_workspace

@@ -16,7 +16,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from aegis_sdk.rules import parse_cell_file
+from aegis_sdk.rules import parse_rule_file
 
 
 def _make_cell(workspace, cell_id, target_paths, cell_type='vacuole', fitness=None):
@@ -151,7 +151,7 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-pos', '_path': path, 'signal': 1.0,
                      'reasons': ['test passed'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         from fractions import Fraction
         assert Fraction(str(fm['fitness']['true_positives'])) >= 4
 
@@ -164,7 +164,7 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-neg', '_path': path, 'signal': -1.0,
                      'reasons': ['test failed'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         from fractions import Fraction
         assert Fraction(str(fm['fitness']['false_positives'])) >= 2
 
@@ -177,7 +177,7 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-trg', '_path': path, 'signal': 0.5,
                      'reasons': ['partial'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         assert int(fm['fitness']['triggers']) >= 6
 
     def test_frontmatter_survives_roundtrip(self, tmp_path):
@@ -189,7 +189,7 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-rt', '_path': path, 'signal': 1.0,
                      'reasons': ['test'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, body = parse_cell_file(path)
+        fm, body = parse_rule_file(path)
         assert fm['id'] == 'cell-rt'
         assert fm['type'] == 'vacuole'
         assert 'Body text' in body
@@ -214,7 +214,7 @@ class TestUpdateCellFitness:
         signals = [{'cell': 'cell-nofitness', '_path': path, 'signal': 1.0,
                      'reasons': ['test'], 'verified': True}]
         update_cell_fitness(ws, signals)
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         assert 'fitness' in fm
         assert int(fm['fitness'].get('triggers', 0)) >= 1
 
@@ -231,7 +231,7 @@ class TestUpdateCellFitness:
         # Another update
         update_cell_fitness(ws, signals)
         
-        fm, _ = parse_cell_file(path)
+        fm, _ = parse_rule_file(path)
         assert fm['fitness']['true_positives'] in ["1.0", "1", "1/1"] or str(fm['fitness']['true_positives']) in ["1.0", "1", "1/1"]
 
 class TestAppendFitnessLogGenerationFence:

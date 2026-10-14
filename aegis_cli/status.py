@@ -12,7 +12,7 @@ from aegis_core.evidence import aggregate_signals
 
 __all__ = ["run_status", "StatusCommand"]
 
-from aegis_sdk.rules import parse_cell_file
+from aegis_sdk.rules import parse_rule_file
 
 
 def _repo_root(args: argparse.Namespace) -> Path:
@@ -31,7 +31,7 @@ def _parse_frontmatter(filepath: str) -> dict:
     Falls back to empty dict on any error.
     """
     try:
-        fm, _body = parse_cell_file(filepath)
+        fm, _body = parse_rule_file(filepath)
         return fm
     except Exception:
         return {}

@@ -3,7 +3,7 @@
 Consolidates:
 - Hot zone analysis and diagnostics (formerly aegis_sdk.hot_zones & enzymes/diagnose_hot_zones.py)
 - Escaped defect detection and prevention rate tracking (formerly enzymes/cell_escaped_defects.py)
-- Cell lifecycle expiry enforcement and pruning (formerly enzymes/cell_expiry.py)
+- Rule lifecycle expiry enforcement and pruning (formerly enzymes/cell_expiry.py)
 """
 from __future__ import annotations
 
@@ -480,7 +480,7 @@ def generate_report(cells: list[dict], workspace: str) -> tuple[list[dict], int]
 
 
 
-# ── Cell Expiry Enforcement ────────────────────────────────────────────────
+# ── Rule Expiry Enforcement ────────────────────────────────────────────────
 
 
 def audit_expiry(workspace: Workspace | Path | str, session_count: Optional[int] = None) -> list[dict]:

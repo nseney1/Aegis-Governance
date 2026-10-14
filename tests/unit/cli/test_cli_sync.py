@@ -240,7 +240,7 @@ class TestSyncFrontmatter:
 
     def test_sync_preserves_both_when_has_outcomes_is_false(self, tmp_path):
         """When ledger has only triggers (has_outcomes=False), tp and fp are preserved."""
-        from aegis_sdk.rules import parse_cell_file
+        from aegis_sdk.rules import parse_rule_file
         cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
         cell_file = cells_dir / "cell-a.md"
@@ -269,7 +269,7 @@ class TestSyncFrontmatter:
         assert len(changes) == 1
         assert changes[0]["triggers"] == "5 → 6"
 
-        fm, _ = parse_cell_file(str(cell_file))
+        fm, _ = parse_rule_file(str(cell_file))
         assert fm["fitness"]["triggers"] == 6
         assert fm["fitness"]["true_positives"] == 2
         assert fm["fitness"]["false_positives"] == 1
@@ -372,7 +372,7 @@ class TestBug4ScoreClobber:
     """sync.py must NOT clobber scores when no outcome data exists."""
 
     def test_score_preserved_when_no_outcomes(self, tmp_path):
-        """Cell with triggers but zero tp/fp keeps existing score."""
+        """Rule with triggers but zero tp/fp keeps existing score."""
         from aegis_cli.sync import sync_frontmatter
 
         cells_dir = str(tmp_path / 'cells')
@@ -401,7 +401,7 @@ class TestBug4ScoreClobber:
         )
 
     def test_score_updated_when_outcomes_exist(self, tmp_path):
-        """Cell with both triggers and tp/fp gets correct score."""
+        """Rule with both triggers and tp/fp gets correct score."""
         from aegis_cli.sync import sync_frontmatter
 
         cells_dir = str(tmp_path / 'cells')
@@ -427,7 +427,7 @@ class TestBug4ScoreClobber:
         assert fitness['score'] == 0.7  # 7/10
 
     def test_zero_triggers_score_is_none(self, tmp_path):
-        """Cell with 0 triggers → score = None."""
+        """Rule with 0 triggers → score = None."""
         from aegis_cli.sync import sync_frontmatter
 
         cells_dir = str(tmp_path / 'cells')

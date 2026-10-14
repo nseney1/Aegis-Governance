@@ -56,7 +56,7 @@ class Governance:
         self.cells_dir: Path = self.workspace.rules_dir
         self.metrics_dir: Path = self.workspace.metrics_dir
     
-    # === Cell & Rule Management ===
+    # === Rule & Rule Management ===
     
     def list_cells(self, cell_type: Optional[str] = None) -> list[dict[str, Any]]:
         """List immune cells, optionally filtered by cell_type or porcelain alias.
@@ -156,7 +156,7 @@ class Governance:
                 if Path(entry.relative_path).name != 'README.md'
             }
             if known_cells and rule_id not in known_cells:
-                warnings.warn(f"Cell '{rule_id}' not found in active inventory", UserWarning, stacklevel=2)
+                warnings.warn(f"Rule '{rule_id}' not found in active inventory", UserWarning, stacklevel=2)
         except Exception:
             pass
 
@@ -258,12 +258,12 @@ class Governance:
             cell_id=rule_id or cell_id,
         )
 
-    def parse_cell_file(self, filepath: str) -> tuple[dict, str]:
+    def parse_rule_file(self, filepath: str) -> tuple[dict, str]:
         """Parse a cell markdown file into (frontmatter_dict, body_text)."""
         from aegis_sdk.rules import parse_rule_file
         return parse_rule_file(filepath)
 
-    parse_rule_file = parse_cell_file
+    parse_rule_file = parse_rule_file
     
     def create_cell_from_description(
         self, description: str, domain: Optional[str] = None, cell_type: Optional[str] = None,

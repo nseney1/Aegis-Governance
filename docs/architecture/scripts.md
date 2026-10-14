@@ -1,10 +1,10 @@
 # Scripts Reference
 
-This document catalogs 78 executable scripts, command modules, SDK modules, and MCP/core modules in the Aegis governance framework.
+This document catalogs 77 executable scripts, command modules, SDK modules, and MCP/core modules in the Aegis governance framework.
 
 ## Counting Method
 
-Counts are generated from the source tree with mutually exclusive categories: package initializers (`__init__.py`, `__main__.py`) and subpackages (`aegis_core/workspace/`, `aegis_core/lifecycle/`, `aegis_core/schemas/`, `aegis_core/outcomes/`, `aegis_cli/hooks/`) are excluded; `install/hooks/pre-commit` is counted as the lifecycle script; and all non-initializer `aegis_core/*.py` modules are grouped with the MCP modules. This produces 78 unique paths with no double counting.
+Counts are generated from the source tree with mutually exclusive categories: package initializers (`__init__.py`, `__main__.py`) and subpackages (`aegis_core/workspace/`, `aegis_core/lifecycle/`, `aegis_core/schemas/`, `aegis_core/outcomes/`, `aegis_cli/hooks/`) are excluded; `install/hooks/pre-commit` is counted as the lifecycle script; and all non-initializer `aegis_core/*.py` modules are grouped with the MCP modules. This produces 77 unique paths with no double counting.
 
 ## Summary by Category
 
@@ -14,8 +14,8 @@ Counts are generated from the source tree with mutually exclusive categories: pa
 | [Verification Scripts](#verification-scripts--python) | Python (`aegis_core/verification/`) | 15 | Deterministic AST checkers, coverage tools, and adversarial verification |
 | [CLI Commands](#cli-commands--python-aegis_cli) | Python and bash (`aegis_cli/`, root) | 21 | CLI launcher and command implementation modules |
 | [SDK Modules](#sdk-modules--python-aegis_sdk) | Python (`aegis_sdk/`) | 8 | Canonical scoring, parsing, telemetry, hot-zone, and governance APIs |
-| [MCP and Core Modules](#mcp-and-core-modules) | Python (`aegis_mcp/`, `aegis_core/`) | 33 | MCP transport, dispatch, confinement, content inventory, canonical evidence, cache, errors, receipts, and atomic storage |
-| **Total** | | **78** | Unique paths under the method above |
+| [MCP and Core Modules](#mcp-and-core-modules) | Python (`aegis_mcp/`, `aegis_core/`) | 32 | MCP transport, dispatch, confinement, content inventory, canonical evidence, cache, errors, receipts, and atomic storage |
+| **Total** | | **77** | Unique paths under the method above |
 
 ---
 
@@ -106,11 +106,11 @@ These 8 non-initializer modules provide the canonical Python APIs used by the CL
 
 ## MCP and Core Modules
 
-These 33 modules implement the MCP server, state-bound authorization, safe cell inventory, YAML frontmatter parsing, canonical evidence reading, transactional resource locking, self-healing quarantine, atomic storage, and standardized domain errors. Package initializers and `aegis_mcp/__main__.py` are excluded from the count.
+These 32 modules implement the MCP server, state-bound authorization, safe cell inventory, YAML frontmatter parsing, canonical evidence reading, transactional resource locking, self-healing quarantine, atomic storage, and standardized domain errors. Package initializers and `aegis_mcp/__main__.py` are excluded from the count.
 
 | Module | Location | Purpose |
 |:-------|:---------|:--------|
-| **`server.py`** | `aegis_mcp/server.py` | JSON-RPC transport, capability filtering, canonical `SOMA_WORKSPACE` injection, and receipt issuance/redemption. |
+| **`server.py`** | `aegis_mcp/server.py` | JSON-RPC transport, capability filtering, canonical `AEGIS_WORKSPACE` injection, and receipt issuance/redemption. |
 | **`tools.py`** | `aegis_mcp/tools.py` | Canonical 20-tool router with input normalization, response projection, and dispatch (<150 LOC). |
 | **`registry.py`** | `aegis_mcp/registry.py` | MCP Control Plane: Tool definitions, canonical schemas, parameter translation, and workspace boundary confinement. |
 | **`projection.py`** | `aegis_mcp/projection.py` | Opt-in response projection engine for token reduction and SOMA-V01 credential scrubbing. |
@@ -129,8 +129,7 @@ These 33 modules implement the MCP server, state-bound authorization, safe cell 
 | **`receipts.py`** | `aegis_core/receipts.py` | In-memory single-use receipts bound to session, workspace, operation, exact arguments, target-file digest, canonical cell fingerprint, and expiry. |
 | **`rule_inventory.py`** | `aegis_core/rule_inventory.py` | Captures stable rule bytes and content fingerprints without following symlinks; detects concurrent changes and unsafe trees. |
 | **`evidence.py`** | `aegis_core/evidence.py` | Standard-library canonical reader for weighted `signals.jsonl` evidence, independent trigger/outcome dimensions, and structured parse errors. |
-| **`errors.py`** | `aegis_core/errors.py` | Standardized typed domain error hierarchy (`SomaError`, `SomaValidationError`, `CellCorruptError`, `ReceiptExpiredError`, `LockTimeoutError`). |
-| **`somayaml.py`** | `aegis_core/somayaml.py` | Zero-dependency YAML and frontmatter parser with DoS recursion guards, anchor attack prevention, and UTF-8 validation. |
+| **`errors.py`** | `aegis_core/errors.py` | Standardized typed domain error hierarchy (`AegisError`, `AegisValidationError`, `RuleCorruptError`, `ReceiptExpiredError`, `LockTimeoutError`). |
 | **`yaml.py`** | `aegis_core/yaml.py` | Zero-dependency AegisYAML and frontmatter parser with DoS recursion guards, anchor attack prevention, and UTF-8 validation. |
 | **`locking.py`** | `aegis_core/locking.py` | Cross-platform transactional resource locking with timeout fences and native Windows fallback. |
 | **`quarantine.py`** | `aegis_core/quarantine.py` | Self-healing quarantine isolating damaged YAML cells and unparseable JSONL files to preserve system availability. |

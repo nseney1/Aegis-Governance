@@ -98,7 +98,7 @@ def test_fitness_updater_retry_completes_every_cell_once(tmp_path):
 
 def test_sync_outcome_only_preserves_trigger_dimension(tmp_path):
     from aegis_cli.sync import aggregate_evidence, sync_frontmatter
-    from aegis_sdk.rules import parse_cell_file
+    from aegis_sdk.rules import parse_rule_file
 
     path = _cell(tmp_path, "cell-a", triggers=7, tp=1, fp=1, score=1 / 7)
     evidence = tmp_path / ".aegis" / "evidence"
@@ -107,7 +107,7 @@ def test_sync_outcome_only_preserves_trigger_dimension(tmp_path):
         json.dumps({"cell": "cell-a", "signal": "tp", "metadata": {"credit_weight": 0.25}}) + "\n",
         encoding="utf-8")
     changes = sync_frontmatter(str(path.parent.parent), aggregate_evidence(str(evidence)))
-    fm, _ = parse_cell_file(str(path))
+    fm, _ = parse_rule_file(str(path))
     assert len(changes) == 1
     assert fm["fitness"]["triggers"] == 7
     assert fm["fitness"]["true_positives"] == 0.25

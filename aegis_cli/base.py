@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 if TYPE_CHECKING:
     from aegis_cli.ui.theme import OutputContext
 
-__all__ = ["CommandCategory", "AegisCommand", "SomaCommand"]
+__all__ = ["CommandCategory", "AegisCommand"]
 
 
 class CommandCategory(str, Enum):
@@ -50,6 +50,3 @@ class AegisCommand(ABC):
     def execute(self, args: argparse.Namespace) -> int:
         """Execute command logic. Common options are pre-handled by the dispatcher."""
         ...
-
-
-SomaCommand = AegisCommand

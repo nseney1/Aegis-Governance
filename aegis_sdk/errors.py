@@ -1,6 +1,6 @@
-"""Soma error hierarchy.
+"""Aegis error hierarchy.
 
-All soma-specific exceptions inherit from SomaError.
+All Aegis-specific exceptions inherit from AegisError.
 Engine/pipeline code that cannot raise uses Result[T] instead.
 """
 from __future__ import annotations
@@ -11,18 +11,14 @@ from typing import Generic, Optional, TypeVar
 T = TypeVar('T')
 
 
-from aegis_core.errors import AegisError, SomaError
+from aegis_core.errors import AegisError
 
 
 __all__ = [
     "AegisError",
-    "SomaError",
     "RuleParseError",
-    "CellParseError",
     "RuleNotFoundError",
-    "CellNotFoundError",
     "RulePathTraversalError",
-    "CellPathTraversalError",
     "FitnessError",
     "ScoringError",
     "Result",
@@ -33,28 +29,19 @@ class RuleParseError(AegisError):
     """Raised when a rule file cannot be parsed (missing/malformed frontmatter)."""
 
 
-CellParseError = RuleParseError
-
-
 class RuleNotFoundError(AegisError):
     """Raised when a rule file does not exist."""
-
-
-CellNotFoundError = RuleNotFoundError
 
 
 class RulePathTraversalError(AegisError):
     """Raised when a rule_id or path attempts directory traversal."""
 
 
-CellPathTraversalError = RulePathTraversalError
-
-
-class FitnessError(SomaError):
+class FitnessError(AegisError):
     """Raised when fitness computation encounters invalid data."""
 
 
-class ScoringError(SomaError):
+class ScoringError(AegisError):
     """Raised when scoring computation encounters invalid inputs."""
 
 
@@ -70,7 +57,7 @@ class Result(Generic[T]):
             log(result.error)
     """
     value: Optional[T]
-    error: Optional[SomaError] = None
+    error: Optional[AegisError] = None
 
     @property
     def ok(self) -> bool:

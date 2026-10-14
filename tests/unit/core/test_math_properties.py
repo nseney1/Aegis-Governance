@@ -10,7 +10,7 @@ pytest.importorskip("hypothesis")
 from hypothesis import given, settings, strategies as st
 
 from aegis_sdk.scoring import laplace_score, wilson_lower_bound, bayesian_posterior, bayesian_score
-from aegis_sdk.rules import CellFitness
+from aegis_sdk.rules import RuleFitness
 from aegis_core.lifecycle import (
     calculate_fitness_status,
     apply_exponential_decay,
@@ -148,8 +148,8 @@ class TestMathematicalInvariants:
         fp=st.integers(min_value=0, max_value=10_000),
     )
     def test_cell_fitness_snr_invariants(self, tp: int, fp: int):
-        """CellFitness SNR respects signal detection theory boundary conditions."""
-        f = CellFitness(triggers=tp + fp, true_positives=tp, false_positives=fp)
+        """RuleFitness SNR respects signal detection theory boundary conditions."""
+        f = RuleFitness(triggers=tp + fp, true_positives=tp, false_positives=fp)
         snr = f.snr_db
         if tp > 0 and fp > 0:
             assert isinstance(snr, float)

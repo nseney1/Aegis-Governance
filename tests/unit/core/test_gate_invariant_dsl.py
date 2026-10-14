@@ -31,7 +31,7 @@ class TestImportBanned:
     def test_allows_compliant(self, tmp_path):
         """A file with a specific named import (not wildcard *) passes clean."""
         source = tmp_path / 'good.py'
-        source.write_text('from aegis_sdk.rules import parse_cell_file\n',
+        source.write_text('from aegis_sdk.rules import parse_rule_file\n',
                           encoding='utf-8')
         from aegis_sdk.invariants import check_import_banned
         violation = check_import_banned(
@@ -101,7 +101,7 @@ class TestCheckInvariants:
     """The aggregate check_invariants function evaluates all invariants."""
 
     def test_no_invariants_passes(self):
-        """Cell without invariants always passes."""
+        """Rule without invariants always passes."""
         from aegis_sdk.invariants import check_invariants
         violations = check_invariants(invariant_specs=[], target_files=[], workspace='/tmp')
         assert violations == []

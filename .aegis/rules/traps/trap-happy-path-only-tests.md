@@ -21,10 +21,10 @@ tags:
 fitness:
   score: 0.6
   impact_weight: 1.0
-  triggers: 68
-  true_positives: 21.6996
+  triggers: 69
+  true_positives: 22.6996
   false_positives: 19.5173
-  last_trigger_date: "2026-10-14T19:26:54Z"
+  last_trigger_date: "2026-10-14T19:36:50Z"
 ---
 
 When reviewing test files, check that every public function under test has at
