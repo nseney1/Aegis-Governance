@@ -177,6 +177,17 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
                 prog = "soma"
         else:
             prog = "soma"
+    args_list = sys.argv[1:] if argv is None else list(argv)
+    if args_list and args_list[0] in ("install", "uninstall"):
+        from aegis_cli.install import InstallCommand, UninstallCommand
+        cmd_cls = InstallCommand if args_list[0] == "install" else UninstallCommand
+        cmd = cmd_cls()
+        p = argparse.ArgumentParser(prog=f"{prog} {args_list[0]}", description=cmd.help)
+        cmd.configure_parser(p)
+        cmd_args = p.parse_args(args_list[1:])
+        cmd_args._project_root = getattr(cmd_args, "workspace", None) or Path.cwd()
+        return cmd.execute(cmd_args)
+
     parser = _build_parser(prog=prog)
     args = parser.parse_args(argv)
     args.prog = prog
