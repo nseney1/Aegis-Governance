@@ -444,9 +444,15 @@ def run_verify(args: argparse.Namespace) -> int:
         print(f"Error: repo root does not exist: {repo_root}", file=sys.stderr)
         return 1
 
+    use_json = bool(getattr(args, "json", False) or getattr(args, "format", None) == "json")
+
     # ── Release Gate 4.5 Check ────────────────────────────────────────
     if getattr(args, 'release_gate', False):
         passed, msg = verify_release_gate(repo_root)
+        if use_json:
+            import json
+            print(json.dumps({"release_gate": True, "passed": passed, "message": msg}, indent=2))
+            return 0 if passed else 1
         if passed:
             print(f"✅ {msg}")
             return 0
@@ -477,6 +483,10 @@ def run_verify(args: argparse.Namespace) -> int:
     # ── Dry Run ───────────────────────────────────────────────────────
     if getattr(args, 'dry_run', False):
         layer_mode = "Layer 1 only" if getattr(args, 'layer1_only', False) else "Layer 1 + Layer 2"
+        if use_json:
+            import json
+            print(json.dumps({"dry_run": True, "mode": layer_mode, "repo_root": repo_root, "files": target_files}, indent=2))
+            return 0
         print(f"Dry run — {layer_mode}")
         print(f"Repo root: {repo_root}")
         print(f"Files to verify ({len(target_files)}):")
@@ -486,6 +496,10 @@ def run_verify(args: argparse.Namespace) -> int:
 
     # ── Clean Repository ──────────────────────────────────────────────
     if not target_files:
+        if use_json:
+            import json
+            print(json.dumps({"passed": True, "files": [], "layer1": [], "summary": "Layer 1: 0 files changed (clean repository)"}, indent=2))
+            return 0
         print("Layer 1: 0 files changed (clean repository)")
         return 0
 
@@ -499,12 +513,13 @@ def run_verify(args: argparse.Namespace) -> int:
     )
 
     layer1_pass = runner.gate_verdict(results)
-    if not layer1_pass:
-        for r in results:
-            if not r.verdict:
-                print(f"🔴 {r.tool}: {r.target} — {r.detail}")
     summary = runner.format_summary(results)
-    print(summary)
+    if not use_json:
+        if not layer1_pass:
+            for r in results:
+                if not r.verdict:
+                    print(f"🔴 {r.tool}: {r.target} — {r.detail}")
+        print(summary)
 
     def _record_telemetry(passed: bool, verdict: Any):
         try:
@@ -522,6 +537,23 @@ def run_verify(args: argparse.Namespace) -> int:
 
     if getattr(args, 'layer1_only', False):
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
+        if use_json:
+            import json
+            payload = {
+                "passed": layer1_pass,
+                "files": target_files,
+                "layer1": [
+                    {
+                        "tool": r.tool,
+                        "target": r.target,
+                        "verdict": bool(r.verdict),
+                        "detail": r.detail,
+                    }
+                    for r in results
+                ],
+                "summary": summary,
+            }
+            print(json.dumps(payload, indent=2))
         return 0 if layer1_pass else 1
 
     # ── In-Band Verification Mode ─────────────────────────────────────
@@ -536,7 +568,7 @@ def run_verify(args: argparse.Namespace) -> int:
             rebuttal=None,
         )
         if pipeline_res.charge_sheet:
-            print("\n📋 SOMA IN-BAND CHARGE SHEET (SOMA-V01)")
+            print("\n📋 AEGIS VERIFICATION REPORT — IN-BAND CHARGE SHEET (AEGIS-V01)")
             print(f"Target files ({len(pipeline_res.charge_sheet.target_files)}): {', '.join(pipeline_res.charge_sheet.target_files)}")
             print(f"Prosecution charges ({len(pipeline_res.charge_sheet.predictions)}):")
             for idx, p in enumerate(pipeline_res.charge_sheet.predictions, 1):
@@ -548,6 +580,7 @@ def run_verify(args: argparse.Namespace) -> int:
             print("  Submit defense claims citing evidence_file, evidence_line, and tests covering the fix.")
             _record_telemetry(False, "REVISE")
             return 1
+
 
     # ── Run Layer 2 (full verification) ───────────────────────────────
     provider = resolve_cli_provider(args, repo_root)

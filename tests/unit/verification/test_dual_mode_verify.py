@@ -171,6 +171,8 @@ class TestCLIDualModeVerify:
         assert exit_code == 1
 
         out, _err = capsys.readouterr()
-        assert "SOMA IN-BAND CHARGE SHEET (SOMA-V01)" in out
+        assert "AEGIS VERIFICATION REPORT" in out
+        assert "SOMA IN-BAND CHARGE SHEET" not in out
         assert "run_feature" in out
         assert "Rebuttal instructions" in out
+
