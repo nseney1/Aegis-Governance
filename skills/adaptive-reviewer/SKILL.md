@@ -1,12 +1,12 @@
 ---
 name: Adaptive Review Orchestrator
-description: Autonomously selects review protocols and dispatches nested subagents based on Spores finding severity.
+description: Autonomously selects review protocols and dispatches nested subagents based on Sentry finding severity.
 trigger: user_request
 ---
 
 # Adaptive Review Orchestrator
 
-> **Role**: Autonomously execute review protocols by dispatching nested subagents. Eliminates manual protocol selection — the orchestrator starts with Spores and auto-escalates based on finding severity.
+> **Role**: Autonomously execute review protocols by dispatching nested subagents. Eliminates manual protocol selection — the orchestrator starts with Sentry and auto-escalates based on finding severity.
 
 ## Setup
 
@@ -34,20 +34,20 @@ The orchestrator handles everything internally and reports back with a structure
 
 ## Auto-Escalation Logic
 
-The orchestrator runs Spores first, then decides:
+The orchestrator runs Sentry first, then decides:
 
-| Spores Result | Auto-Decision |
+| Sentry Result | Auto-Decision |
 |:---|:---|
-| 0 findings or all ℹ️ | **STOP as Gale** — synthesize and report |
-| 1-3 ⚠️ warnings, 0 🔴 | **Roots only** — targeted fixes |
-| Any 🔴 critical | **Full Trident** — Roots + Bedrock |
-| 2+ 🔴 or security finding | **Maelstrom** — Roots + Thorns + Bedrock |
-| Infra/auth/schema 🔴 | **Tempest** — + Mycelium + Mulch |
-| Pre-release / user-requested | **Supercell** — 8 orthogonal prongs, adversarial pairs, iterative until clean |
+| 0 findings or all ℹ️ | **STOP as Sweep** — synthesize and report |
+| 1-3 ⚠️ warnings, 0 🔴 | **Probe only** — targeted fixes |
+| Any 🔴 critical | **Full Vanguard** — Probe + Bastion |
+| 2+ 🔴 or security finding | **Bulwark** — Probe + Gauntlet + Bastion |
+| Infra/auth/schema 🔴 | **Fortress** — + Trace + Debrief |
+| Pre-release / user-requested | **Citadel** — 8 orthogonal prongs, adversarial pairs, iterative until clean |
 
-## Supercell Protocol
+## Citadel Protocol
 
-Supercell applies the same adversarial information-partitioning principle as Layer 2 verification,
+Citadel applies the same adversarial information-partitioning principle as Layer 2 verification,
 but to the review process itself.
 
 ### Cycle Structure
@@ -70,22 +70,22 @@ For each prong pair (e.g., Correctness + Portability):
 
 ## Self-Healing
 
-If Bedrock returns BLOCK:
-1. Re-dispatch Roots on failed fixes with Bedrock's objections
-2. Re-run Bedrock (max 1 retry)
+If Bastion returns BLOCK:
+1. Re-dispatch Probe on failed fixes with Bastion's objections
+2. Re-run Bastion (max 1 retry)
 3. If still BLOCK → report to parent
 
-If Thorns breaks fixes:
-1. Re-dispatch Roots with Thorns attack vectors as context
-2. Continue to Bedrock with revised fixes
+If Gauntlet breaks fixes:
+1. Re-dispatch Probe with Gauntlet attack vectors as context
+2. Continue to Bastion with revised fixes
 
 ## Phase 0: Triage (No Subagent)
 
 Before dispatching, the orchestrator inspects the target:
-- `enzymes/**`, `Makefile`, `install*` → HIGH sensitivity (Security lens mandatory)
-- `genome/*.md` (semantic) → MEDIUM (Compliance lens)
-- `docs/**`, `README` → LOW (may stop at Gale)
-- Read `governance/mulch_queue.jsonl` for known anti-patterns
+- `hooks/**`, `Makefile`, `install*` → HIGH sensitivity (Security lens mandatory)
+- `rules/*.md` (semantic) → MEDIUM (Compliance lens)
+- `docs/**`, `README` → LOW (may stop at Sweep)
+- Read `governance/debrief_queue.jsonl` for known anti-patterns
 
 ## Subagent Rules
 
@@ -99,12 +99,12 @@ Before dispatching, the orchestrator inspects the target:
 
 ```markdown
 # Adaptive Review — [Target]
-## Protocol: [auto-selected] (escalated from Spores)
+## Protocol: [auto-selected] (escalated from Sentry)
 ## Verdict: SHIP / BLOCK / REVISE
 
 ## 🔴 Critical Findings
 ## ⚠️ Warnings
-## Proposed Fixes (post-Thorns if applicable)
+## Proposed Fixes (post-Gauntlet if applicable)
 ## Stats (dispatches, prongs, wall-clock)
 ```
 
@@ -114,11 +114,11 @@ Before dispatching, the orchestrator inspects the target:
 |:-------|:--------------------:|:---------------------:|
 | Parent context consumed | ~6 turns per review | **1 turn** (dispatch + receive) |
 | Protocol selection | Manual (user guesses) | **Empirical** (data-driven) |
-| Thorns revision loop | Manual relay | **Autonomous** |
+| Gauntlet revision loop | Manual relay | **Autonomous** |
 | Dispatches | Same count | Same count, 0 wasted |
 
 ## When NOT to Use
 
-- **Breeze** (known single-file defect): Use `review_orchestrator` directly with Breeze mode — adaptive triage adds unnecessary overhead for known defects.
-- **Post-mortem analysis**: Use standalone Spores — no fixes needed.
+- **Patrol** (known single-file defect): Use `review_orchestrator` directly with Patrol mode — adaptive triage adds unnecessary overhead for known defects.
+- **Post-mortem analysis**: Use standalone Sentry — no fixes needed.
 - **Live monitoring**: Use `session-monitor` skill instead.

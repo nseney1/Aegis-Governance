@@ -17,7 +17,7 @@ expiry_sessions: 10
 expiry_days: 30
 created: 2026-09-28
 impact_weight: 1.3
-minimum_mode: gale
+minimum_mode: sweep
 tags:
   - rename
   - migration
@@ -26,16 +26,16 @@ tags:
 fitness:
   score: 0.5
   impact_weight: 1.0
-  triggers: 80
-  true_positives: 30.5235
+  triggers: 84
+  true_positives: 34.5235
   false_positives: 26.3697
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-After the Phase 22 Soma Rebirth rename, multiple stale references survived:
+After the Phase 22 repository rename, multiple stale references survived:
 - `scripts_dir = "$repo_dir/scripts"` in common.sh (CRITICAL — broke all hooks)
-- `prism_root` variable names in soma_resolve.py and aegis_mcp/tools.py  
-- `.prism` directory check in cell_transfer.sh (always false after rename)
+- `prism_root` variable names in aegis_core/resolver.py and aegis_mcp/tools.py
+- `.prism` directory check in aegis_core/import_export.py (always false after rename)
 - "Installing steering rules" banners in install.sh and install.ps1
 
 Any future rename operation must include a post-rename grep sweep.

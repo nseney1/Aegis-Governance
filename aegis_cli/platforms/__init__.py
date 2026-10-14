@@ -11,7 +11,7 @@ from aegis_cli.platforms.base import (
 )
 from aegis_cli.platforms.claude import ClaudeAdapter
 from aegis_cli.platforms.copilot import CopilotAdapter
-from aegis_cli.platforms.gemini import GeminiAdapter
+from aegis_cli.platforms.gemini import GeminiAdapter, GeminiPlatformAdapter
 from aegis_cli.platforms.kiro import KiroAdapter
 from aegis_cli.platforms.mcp import McpAdapter
 
@@ -42,6 +42,7 @@ __all__ = [
     "PlatformAdapter",
     "PlatformInstallResult",
     "GeminiAdapter",
+    "GeminiPlatformAdapter",
     "ClaudeAdapter",
     "KiroAdapter",
     "CopilotAdapter",
@@ -51,4 +52,5 @@ __all__ = [
     "detect_platform",
     "get_rules_dir",
 ]
+
 

@@ -191,8 +191,8 @@ class TestCellPromoteAndDemote:
 
     def test_promote_wall_to_genome(self, workspace: Path):
         wall = _create_cell_file(
-            workspace / ".aegis" / "rules" / "walls" / "wall-cell.md",
-            "wall-cell", "wall", triggers=30, tp=29, fp=1
+            workspace / ".aegis" / "rules" / "invariants" / "wall-cell.md",
+            "wall-cell", "invariant", triggers=30, tp=29, fp=1
         )
         res = promote_cell(workspace, "wall-cell", force=True)
         assert res["status"] == "promoted"
@@ -206,10 +206,10 @@ class TestCellPromoteAndDemote:
         assert res["status"] == "already_terminal"
 
     def test_demote_wall_to_vacuole(self, workspace: Path):
-        wall = _create_cell_file(workspace / ".aegis" / "rules" / "walls" / "demote-wall.md", "demote-wall", "wall")
+        wall = _create_cell_file(workspace / ".aegis" / "rules" / "invariants" / "demote-wall.md", "demote-wall", "invariant")
         res = demote_cell(workspace, "demote-wall")
         assert res["status"] == "demoted"
-        assert res["from_type"] == "wall"
+        assert res["from_type"] in ("invariant", "wall")
         assert res["to_type"] == "trap"
         assert not wall.exists()
         trap_path = workspace / ".aegis" / "rules" / "traps" / "demote-wall.md"
@@ -224,8 +224,8 @@ class TestCellPromoteAndDemote:
 
     def test_promote_protected_rule_blocked(self, workspace: Path):
         _create_cell_file(
-            workspace / ".aegis" / "rules" / "walls" / "providence.md",
-            "providence", "wall", triggers=30, tp=29, fp=1
+            workspace / ".aegis" / "rules" / "invariants" / "providence.md",
+            "providence", "invariant", triggers=30, tp=29, fp=1
         )
         res = promote_cell(workspace, "providence", force=True)
         assert res["status"] == "protected_rule_immutable"
@@ -245,8 +245,8 @@ class TestCellPromoteAndDemote:
 
     def test_demote_wall_cleans_enforcement_artifacts(self, workspace: Path):
         wall = _create_cell_file(
-            workspace / ".aegis" / "rules" / "walls" / "guarded-cell.md",
-            "guarded-cell", "wall"
+            workspace / ".aegis" / "rules" / "invariants" / "guarded-cell.md",
+            "guarded-cell", "invariant"
         )
         # Create gate enforcement artifact
         enf_dir = workspace / ".aegis" / "enforcement"

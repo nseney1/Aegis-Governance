@@ -10,6 +10,7 @@ import sys
 from typing import Optional
 
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
+from aegis_core.taxonomy import REVIEW_MODES, ReviewMode, normalize_review_mode
 from aegis_core.workspace import Workspace, resolve_workspace
 from .constants import (
     VALID_ENFORCEMENT,
@@ -46,7 +47,7 @@ def create_cell(
     workspace: Workspace | Path | str | None = None,
     enforcement: str | None = None,
 ) -> Path:
-    """Create a new Soma cell file with validated frontmatter and body."""
+    """Create a new Aegis rule file with validated frontmatter and body."""
     validate_cell_id(id_override)
 
     type_lower = cell_type.lower()
@@ -72,6 +73,9 @@ def create_cell(
     if effector and memory:
         raise ValueError("--effector and --memory are mutually exclusive.")
 
+    if minimum_mode:
+        minimum_mode = normalize_review_mode(minimum_mode, default=minimum_mode.strip().lower())
+
     response_type = ""
     activation = ""
     decay_to_yaml = ""
@@ -80,12 +84,12 @@ def create_cell(
         expiry_sessions = 3
         weight = 3.0
         response_type = "effector"
-        minimum_mode = "tempest"
+        minimum_mode = str(ReviewMode.FORTRESS)
         decay_to_yaml = (
             "decay_to:\n"
             "  type: boundary\n"
             "  impact_weight: 1.0\n"
-            "  minimum_mode: trident\n"
+            f"  minimum_mode: {ReviewMode.VANGUARD}\n"
             "  response_type: memory\n"
             "  activation: dormant\n"
         )
@@ -94,7 +98,7 @@ def create_cell(
         expiry_sessions = None
         weight = 1.5
         response_type = "memory"
-        minimum_mode = "maelstrom"
+        minimum_mode = str(ReviewMode.BULWARK)
         activation = "dormant"
 
     if not prediction:
@@ -238,7 +242,7 @@ YAML fields required:
 - prediction: (what will happen if the hypothesis is violated)
 - falsification: (how to prove this cell is no longer needed)
 - target_paths: (list of file glob patterns this cell monitors)
-- minimum_mode: (breeze | gale | trident | maelstrom | tempest)
+- minimum_mode: ({' | '.join(REVIEW_MODES)})
 - tags: (list of relevant tags)
 
 Existing cells in this project for reference:

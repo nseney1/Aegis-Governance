@@ -9,12 +9,12 @@ activation: |
 enforcement: gate
 ---
 
-# Core Change Protocol
+# Core Rule & Skill Change Protocol
 
 Sensitive governance systems **must** follow the full TDD Protocol
 (see `rules/.oracles/tdd-protocol.md`) without exception.
 
-These files control cell fitness scoring, rule lifecycle, and verification verdicts.
+These files control rule fitness scoring, rule lifecycle, and verification verdicts.
 A bug here doesn't just break a feature — it corrupts the governance layer's ability
 to detect future bugs. The blast radius is recursive.
 

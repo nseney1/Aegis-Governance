@@ -52,7 +52,7 @@ def test_sdk_and_mcp_direct_list_reject_symlinked_directory(tmp_path, monkeypatc
 
     monkeypatch.setattr(tools, "_HAS_SDK", False)
     monkeypatch.chdir(workspace)
-    result = tools.execute_tool("aegis_list_cells", {})
+    result = tools.execute_tool("aegis_list_rules", {})
     assert result["status"] == "FAIL"
     assert "symlink" in result["error"]
 
@@ -70,7 +70,7 @@ def test_mcp_transport_marks_inventory_failure_as_error(tmp_path, monkeypatch):
         "jsonrpc": "2.0",
         "id": 1,
         "method": "tools/call",
-        "params": {"name": "aegis_list_cells", "arguments": {}},
+        "params": {"name": "aegis_list_rules", "arguments": {}},
     })
 
     assert response["result"]["isError"] is True
@@ -89,7 +89,7 @@ def test_same_size_restored_mtime_edit_is_visible_to_sdk_and_mcp(tmp_path, monke
 
     monkeypatch.setattr(tools, "_HAS_SDK", False)
     monkeypatch.chdir(tmp_path)
-    assert tools.execute_tool("aegis_list_cells", {})[0]["id"] == "alpha"
+    assert tools.execute_tool("aegis_list_rules", {})[0]["id"] == "alpha"
 
     original_stat = cell_path.stat()
     original = cell_path.read_text(encoding="utf-8")
@@ -99,7 +99,7 @@ def test_same_size_restored_mtime_edit_is_visible_to_sdk_and_mcp(tmp_path, monke
     os.utime(cell_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
 
     assert governance.list_cells()[0]["id"] == "bravo"
-    assert tools.execute_tool("aegis_list_cells", {})[0]["id"] == "bravo"
+    assert tools.execute_tool("aegis_list_rules", {})[0]["id"] == "bravo"
 
 
 def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypatch):
@@ -118,7 +118,7 @@ def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypa
 
     monkeypatch.setattr(tools, "_HAS_SDK", False)
     monkeypatch.chdir(tmp_path)
-    mcp_records = tools.execute_tool("aegis_list_cells", {})
+    mcp_records = tools.execute_tool("aegis_list_rules", {})
     assert len(mcp_records) == 1
     assert mcp_records[0]["_name"] == "bad"
     assert mcp_records[0]["_path"] == ".aegis/rules/walls/bad.md"
@@ -164,7 +164,7 @@ def test_mcp_fallback_parses_inventory_when_yaml_is_absent(tmp_path, monkeypatch
     monkeypatch.setattr(jit_engine, "yaml", None)
     monkeypatch.chdir(tmp_path)
 
-    cells = tools.execute_tool("aegis_list_cells", {})
+    cells = tools.execute_tool("aegis_list_rules", {})
     assert cells[0]["id"] == "fallback"
     assert cells[0]["target_paths"] == ["src/*.py"]
     assert cells[0]["_path"] == ".aegis/rules/walls/fallback.md"

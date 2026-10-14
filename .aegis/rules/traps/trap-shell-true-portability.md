@@ -12,7 +12,7 @@ triggers:
   - python_file_creation
   - python_file_modification
   - portability_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-09-30
@@ -24,13 +24,13 @@ tags:
 fitness:
   score: 0.6
   impact_weight: 1.0
-  triggers: 80
-  true_positives: 33.3628
+  triggers: 84
+  true_positives: 37.3628
   false_positives: 28.9993
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Supercell C6 incident: `jit_engine.py` used
+Citadel C6 incident: `jit_engine.py` used
 `subprocess.check_output(cmd, shell=True)` for git diff commands. On Windows,
 shell quoting differs and paths with spaces break. Fix: pass command as a list
 without shell=True.

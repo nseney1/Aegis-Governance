@@ -36,10 +36,10 @@ Before parallelizing implementation:
 5. **Merge verification**: After all lanes complete, run the test suite once to catch integration issues.
 
 **Parallelizable** (disjoint files, no shared interfaces):
-- Lane A edits `genome/git-workflow.md`, Lane B edits `genome/testing.md`
+- Lane A edits `rules/git-workflow.md`, Lane B edits `rules/testing.md`
 
 **Must serialize** (shared interface):
-- Task 1 alters `log_finding.sh` signature → Task 2 calls `log_finding.sh` from `immune_init.sh`
+- Task 1 alters `aegis_core/receipts.py` signature → Task 2 calls `aegis_core/receipts.py` from `aegis_mcp/server.py`
 
 - **Review Sentinels**: For coding sessions exceeding ~75 steps, dispatch a lightweight Flash review probe (`git diff` + test suite) after each logical unit of work. This is a 30-second sanity check catching regressions before they compound (see `staff-review` Continuous Review).
 - **Concurrency Limits**: Fan out up to 4 read-only subagents concurrently; limit to 3 concurrent writers with strict Disjoint Lane Protocol. If waste exceeds 8%, revert to 2–3 concurrency.
@@ -73,7 +73,7 @@ Every subagent prompt should prepend a compact context block (~200 tokens, or ~3
 
 | Subagent Role | Model Tier | Persona Mandate | Workspace Mode |
 |:---|:---:|:---|:---:|
-| Review prongs (Spores–Mulch) | `flash` | **Orthogonal lenses required** (e.g., correctness, performance, red-team). Homogeneous reviewers banned. | `inherit` (read-only) |
+| Review prongs (Sentry–Debrief) | `flash` | **Orthogonal lenses required** (e.g., correctness, performance, red-team). Homogeneous reviewers banned. | `inherit` (read-only) |
 | Research / Audit | `flash` | Domain-focused scout | `inherit` (read-only) |
 | Coding lanes | `inherit` | Disjoint lane implementer | `inherit` (`branch` only for destructive ops) |
 | Architecture / Synthesis | Orchestrator only | Global arbiter | Parent workspace |
@@ -93,7 +93,7 @@ Every subagent prompt should prepend a compact context block (~200 tokens, or ~3
 - **Prompt Cleanup**: Kill completed subagents immediately upon receiving their completion debrief rather than deferring to a batch kill_all. If zero files were produced, explicitly state that and explain why.
 - **No Collateral Kills**: Never use `kill_all` when sibling subagents from the same fan-out are still running. Kill only the completed subagent by its `ConversationId`. Premature `kill_all` forces the orchestrator to redo in-flight work manually.
 - **Read-Only Awareness**: Research subagents cannot write files. Instruct them to return results via `send_message`, not file creation. Only subagents with write tools can create or modify files.
-- **Mulch Execution Invariant**: In Tempest reviews, Mulch must be dispatched as an unskippable post-Bedrock learning extraction step. If Mulch is omitted, the orchestrator must explicitly document the omission rationale before session close. Mulch output should be persisted to `governance/mulch_queue.jsonl` for cross-session learning.
+- **Debrief Execution Invariant**: In Fortress reviews, Debrief must be dispatched as an unskippable post-Bastion learning extraction step. If Debrief is omitted, the orchestrator must explicitly document the omission rationale before session close. Debrief output should be persisted to `governance/debrief_queue.jsonl` for cross-session learning.
 
 ## 6. Boundary Verification Protocol
 Before acting on subagent findings, the orchestrator **must spot-check claims against the actual codebase** (not exhaustively — protect context window):

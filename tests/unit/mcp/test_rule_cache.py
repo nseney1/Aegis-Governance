@@ -232,7 +232,7 @@ class TestCellCacheContentFingerprint:
         assert cells[0]['id'] == 'trap-test'
 
     def test_manifest_tampering_invalidates_cache_and_raises(self, tmp_path):
-        from aegis_mcp.integrity import generate_key, generate_manifest, save_manifest
+        from aegis_core.integrity import generate_key, generate_manifest, save_manifest
         from aegis_mcp.rule_cache import CellCacheError
 
         cells_dir = str(tmp_path / '.aegis' / 'rules')

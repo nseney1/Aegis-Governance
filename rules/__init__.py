@@ -1,1 +1,1 @@
-"""Soma governance genome package."""
+"""Aegis Guardrails governance rules package."""

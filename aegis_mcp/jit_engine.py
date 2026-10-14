@@ -48,6 +48,8 @@ def warn(message: str) -> None:
         pass
 
 
+from pathlib import Path
+
 from aegis_core.yaml import (
     FrontmatterError,
     parse_yaml_subset,
@@ -55,7 +57,18 @@ from aegis_core.yaml import (
     _get_body,
 )
 from aegis_core.scoring import compute_cell_fitness, compute_salience
-from aegis_core.ast_match import match_ast_triggers, prefilter_ast_tokens
+from aegis_core.taxonomy import (
+    JIT_DEFAULT_MAX_TOKENS,
+    JIT_DEFAULT_RULE_COUNT_BUDGET,
+    JIT_GATE_TIER_RATIO,
+    SUBPROCESS_DEFAULT_TIMEOUT_SECONDS,
+    WORDS_TO_TOKENS_FACTOR,
+)
+from aegis_core.workspace.layout import WorkspaceLayout
+try:
+    from aegis_core.ast.match import match_ast_triggers, prefilter_ast_tokens
+except ImportError:
+    from aegis_core.ast_match import match_ast_triggers, prefilter_ast_tokens
 
 def estimate_tokens(text: object | None) -> int:
     """Estimate token count using fast stdlib heuristic (~1.35 tokens per word).
@@ -70,7 +83,7 @@ def estimate_tokens(text: object | None) -> int:
         except Exception:
             return 0
     words = len(text.split())
-    return int(words * 1.35)
+    return int(words * WORDS_TO_TOKENS_FACTOR)
 
 
 def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -> int:
@@ -109,7 +122,7 @@ def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -
                 pass
 
     # 4. Default fallback: 2000 tokens
-    return 2000
+    return JIT_DEFAULT_MAX_TOKENS
 
 
 def get_git_diff_files(workspace: str) -> list[str]:
@@ -120,7 +133,7 @@ def get_git_diff_files(workspace: str) -> list[str]:
         try:
             output = subprocess.check_output(
                 cmd, cwd=workspace, text=True, stderr=subprocess.DEVNULL,
-                timeout=10,
+                timeout=SUBPROCESS_DEFAULT_TIMEOUT_SECONDS,
             ).strip()
             if output:
                 files.update(f for f in output.splitlines() if f)
@@ -132,7 +145,7 @@ def get_git_diff_files(workspace: str) -> list[str]:
 def load_all_cells(workspace: str) -> list[dict[str, object]]:
     """Load all rules from .aegis/rules/ using stdlib parser."""
     cells = []
-    cells_dir = os.path.join(workspace, '.aegis', 'rules')
+    cells_dir = str(WorkspaceLayout(Path(workspace)).rules_dir)
     if not os.path.isdir(cells_dir):
         return cells
 
@@ -369,8 +382,8 @@ def compress_to_atomic_directive(cell: dict[str, Any]) -> str:
 def pack_two_tier_context(
     gates: list[dict[str, Any]],
     advisory: list[dict[str, Any]],
-    total_budget: int = 2000,
-    tier1_ratio: float = 0.60,
+    total_budget: int = JIT_DEFAULT_MAX_TOKENS,
+    tier1_ratio: float = JIT_GATE_TIER_RATIO,
 ) -> dict[str, Any]:
     """Partitioned 2-Tier Token Budget packing with Incompressible Gate Guarantee.
 
@@ -585,7 +598,7 @@ def express(
     token_budget = resolve_token_budget(workspace, max_tokens)
 
     if budget is None:
-        budget = int(os.environ.get('AEGIS_CONTEXT_BUDGET', '3'))
+        budget = int(os.environ.get('AEGIS_CONTEXT_BUDGET', str(JIT_DEFAULT_RULE_COUNT_BUDGET)))
 
     if not changed_files:
         changed_files = get_git_diff_files(workspace)

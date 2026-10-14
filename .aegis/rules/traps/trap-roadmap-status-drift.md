@@ -16,7 +16,7 @@ triggers:
   - feature_addition
   - version_bump
   - commit_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-10-01
@@ -29,16 +29,16 @@ tags:
 fitness:
   score: null
   impact_weight: 1.0
-  triggers: 30
-  true_positives: 17
+  triggers: 34
+  true_positives: 21
   false_positives: 7.5
-  last_trigger_date: "2026-10-14T08:55:41Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 v0.81 origin: Phase 4 features (Quorum Sensing, Gate Enforcement) shipped in v0.80
 but ROADMAP.md still listed them as "Implementation planned (Phase 4)" with status
 "(NEXT)". The CI Outcome Reporter shipped in v0.81 but the roadmap had no entry for
-Phase 4.5 at all. This cell ensures that every release that ships features listed in
+Phase 4.5 at all. This rule ensures that every release that ships features listed in
 the roadmap also updates their status markers, and that new phases are added to the
 roadmap as they are defined.
 

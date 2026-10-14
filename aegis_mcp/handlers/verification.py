@@ -216,12 +216,16 @@ def _handle_request_receipt(args: dict, gov) -> dict:
     if not isinstance(op_args, dict):
         return {"error": "arguments must be an object", "status": _STATUS_FAIL}
     from aegis_core.receipts import (
-        compute_cell_digest,
         compute_file_digest,
         issue_receipt,
         strip_server_owned,
         target_paths,
     )
+    try:
+        from aegis_core.receipts import compute_rule_digest
+    except ImportError:
+        from aegis_core.receipts import compute_cell_digest as compute_rule_digest
+    from aegis_core.taxonomy import INTERACTIVE_SESSION_TTL_SECONDS
 
     workspace = (
         args.get("workspace")
@@ -232,21 +236,34 @@ def _handle_request_receipt(args: dict, gov) -> dict:
     session_id = args.get("session_id") or args.get("_sessionToken") or "local-session"
     try:
         file_digest = compute_file_digest(workspace, target_paths(clean_args))
-        cell_digest = compute_cell_digest(workspace)
+        rule_digest = compute_rule_digest(workspace)
     except (ValueError, RuntimeError, OSError) as exc:
         return {"error": str(exc), "status": _STATUS_FAIL}
 
-    receipt_id = issue_receipt(
-        session_id=session_id,
-        workspace=workspace,
-        operation=operation,
-        args=clean_args,
-        file_digest=file_digest,
-        cell_digest=cell_digest,
-        ttl_seconds=300,
-    )
+    try:
+        receipt_id = issue_receipt(
+            session_id=session_id,
+            workspace=workspace,
+            operation=operation,
+            args=clean_args,
+            file_digest=file_digest,
+            rule_digest=rule_digest,
+            ttl_seconds=INTERACTIVE_SESSION_TTL_SECONDS,
+        )
+    except TypeError:
+        receipt_id = issue_receipt(
+            session_id=session_id,
+            workspace=workspace,
+            operation=operation,
+            args=clean_args,
+            file_digest=file_digest,
+            cell_digest=rule_digest,
+            ttl_seconds=INTERACTIVE_SESSION_TTL_SECONDS,
+        )
     return {
         "receipt": receipt_id,
         "operation": operation,
         "status": "ISSUED",
     }
+
+

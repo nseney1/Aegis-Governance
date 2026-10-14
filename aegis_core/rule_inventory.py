@@ -150,7 +150,7 @@ def _empty_inventory() -> CellInventory:
     return CellInventory(entries=(), fingerprint=digest)
 
 
-def inventory_cells(workspace: str) -> CellInventory:
+def inventory_rules(workspace: str) -> CellInventory:
     """Capture every ``.md`` below ``.aegis/rules`` without following links.
 
     The returned content bytes are the same bytes used to calculate each entry
@@ -243,6 +243,13 @@ def inventory_cells(workspace: str) -> CellInventory:
         aggregate.update(bytes.fromhex(entry.digest))
         aggregate.update(b"\0")
     return CellInventory(entries=tuple(entries), fingerprint=aggregate.hexdigest())
+
+
+def find_rules_dirs(workspace: str | Path) -> List[Path]:
+    """Return existing rules directories for a workspace (.aegis/rules and rules)."""
+    ws_path = Path(os.fspath(workspace)).resolve()
+    candidates = [ws_path / ".aegis" / "rules", ws_path / "rules"]
+    return [p for p in candidates if p.is_dir()]
 
 
 @dataclass(frozen=True)
@@ -340,7 +347,8 @@ RuleInventory = CellInventory
 RuleInventoryEntry = CellInventoryEntry
 RuleInventoryError = CellInventoryError
 RuleMatch = CellMatch
-inventory_rules = inventory_cells
+inventory_cells = inventory_rules
+find_cells_dirs = find_rules_dirs
 find_matching_rules = find_matching_cells
 
 __all__ = [
@@ -352,8 +360,10 @@ __all__ = [
     "RuleInventoryEntry",
     "RuleInventoryError",
     "RuleMatch",
+    "find_cells_dirs",
     "find_matching_cells",
     "find_matching_rules",
+    "find_rules_dirs",
     "inventory_cells",
     "inventory_rules",
     "parse_frontmatter",

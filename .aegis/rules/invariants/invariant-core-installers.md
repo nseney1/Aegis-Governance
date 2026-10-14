@@ -18,7 +18,7 @@ expiry_sessions: 15
 expiry_days: 60
 created: 2026-09-28
 impact_weight: 1.5
-minimum_mode: trident
+minimum_mode: vanguard
 tags:
   - install
   - cross-platform
@@ -26,10 +26,10 @@ tags:
 fitness:
   score: null
   impact_weight: 1.0
-  triggers: 58
-  true_positives: 5.3989
+  triggers: 62
+  true_positives: 8.245
   false_positives: 7.0844
-  last_trigger_date: "2026-10-14T19:43:08Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 The install flow is the first thing every user touches. Breakage here means

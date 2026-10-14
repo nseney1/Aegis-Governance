@@ -8,6 +8,7 @@ import math
 import os
 from typing import Optional, Tuple, Union
 
+from aegis_core.taxonomy import ReviewMode, normalize_review_mode
 from aegis_sdk.errors import (
     RuleNotFoundError,
     RuleParseError,
@@ -119,10 +120,15 @@ class Rule:
     prediction: str = ""
     falsification: str = ""
     target_paths: list = field(default_factory=list)
-    minimum_mode: str = "breeze"
+    minimum_mode: str = str(ReviewMode.PATROL)
     tags: list = field(default_factory=list)
     fitness: RuleFitness = field(default_factory=RuleFitness)
     created_date: Optional[Union[datetime, date, str]] = None
+
+    def __post_init__(self) -> None:
+        self.minimum_mode = normalize_review_mode(
+            self.minimum_mode, default=str(ReviewMode.PATROL)
+        )
 
     @property
     def is_invariant(self) -> bool:
@@ -281,7 +287,9 @@ def load_rule(
             prediction=frontmatter.get("prediction", ""),
             falsification=frontmatter.get("falsification", ""),
             target_paths=frontmatter.get("target_paths", []),
-            minimum_mode=frontmatter.get("minimum_mode", "breeze"),
+            minimum_mode=normalize_review_mode(
+                frontmatter.get("minimum_mode"), default=str(ReviewMode.PATROL)
+            ),
             tags=frontmatter.get("tags", []),
             fitness=RuleFitness(
                 triggers=fitness_data.get("triggers", 0),

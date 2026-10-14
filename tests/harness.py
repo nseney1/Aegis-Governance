@@ -1,4 +1,4 @@
-"""SomaTestHarness: Zero-dependency sandboxed test harness for Soma Governance."""
+"""AegisTestHarness: Zero-dependency sandboxed test harness for Aegis Guardrails."""
 from __future__ import annotations
 
 import json
@@ -9,18 +9,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
+from aegis_core.taxonomy import RULE_TYPE_DIRS
 from aegis_core.yaml import dump_frontmatter, parse_rule_frontmatter
 
 
-CELL_TYPE_DIRS = {
-    "wall": "walls",
-    "membrane": "membranes",
-    "vacuole": "vacuoles",
-    "chloroplast": "chloroplasts",
-    "mitochondria": "mitochondria",
-    "nucleus": "nucleus",
-    "ribosome": "ribosomes",
-}
+CELL_TYPE_DIRS = RULE_TYPE_DIRS
 
 
 class AegisTestHarness:
@@ -136,5 +129,6 @@ class AegisTestHarness:
 __all__ = [
     "AegisTestHarness",
     "CELL_TYPE_DIRS",
+    "RULE_TYPE_DIRS",
 ]
 

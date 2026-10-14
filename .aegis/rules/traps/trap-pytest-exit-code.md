@@ -11,22 +11,22 @@ target_paths:
   - "aegis_core/*.py"
 expiry_sessions: 30
 impact_weight: 0.7
-minimum_mode: breeze
+minimum_mode: patrol
 tags:
   - pytest
   - exit-code
   - testing
 created: 2026-09-28
 fitness:
-  triggers: 76
-  true_positives: 29.1287
+  triggers: 80
+  true_positives: 33.1287
   false_positives: 25.2037
   score: 0.6667
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Trap: Pytest Exit Code 5
 
-Target: `enzymes/outcome_engine.py`
+Target: `aegis_core/telemetry.py`
 
 Description: Pytest exit code 5 penalizes uncollected tests. We need to handle this appropriately so it doesn't cause false negatives in outcome evaluation.

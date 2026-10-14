@@ -9,6 +9,13 @@ from pathlib import Path
 from aegis_cli import resolve_root, sanitize_display
 from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.evidence import aggregate_signals
+from aegis_core.taxonomy import (
+    CHARS_PER_TOKEN_ESTIMATE,
+    JIT_DEFAULT_MAX_TOKENS,
+    RULE_TYPE_DISPLAY_ORDER,
+    RULE_TYPE_NORMALIZATION,
+)
+from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = ["run_status", "StatusCommand"]
 
@@ -264,7 +271,7 @@ def _merged_claude_rules(claude_md: Path, heading_map: dict[str, str]) -> tuple[
 def format_status_summary(data: dict, plumbing: bool = False, plain: bool = False) -> str:
     """Format status summary text."""
     active = data.get("active_rules", data.get("active_cells", 0))
-    traps = data.get("trap_count", data.get("vacuole_count", 0))
+    traps = data.get("trap_count", 0)
     invariants = data.get("wall_count", data.get("invariant_count", 0))
     archived = data.get("archived_count", data.get("apoptotic_count", 0))
     lines = [
@@ -350,39 +357,20 @@ def run_status(args: argparse.Namespace) -> int:
 
     # 2. Count adaptive rules: .md files in .aegis/rules/ recursively (exclude README.md)
     adaptive_files: list[Path] = []
-    cells_dir = proj / ".aegis" / "rules"
+    layout = WorkspaceLayout(proj)
+    cells_dir = layout.rules_dir
     if cells_dir.is_dir():
         for p in sorted(cells_dir.rglob("*.md")):
             if p.is_file() and p.name.lower() != "readme.md":
                 adaptive_files.append(p)
 
     # 3. Read canonical trigger counts from .aegis/evidence/signals.jsonl
-    evidence_dir = proj / ".aegis" / "evidence"
+    evidence_dir = layout.evidence_dir
     trigger_counts = _read_trigger_counts(evidence_dir)
 
     # 4. Process all rules and calculate character overhead
-    _type_norm = {
-        "wall": "invariant",
-        "invariants": "invariant",
-        "membrane": "boundary",
-        "boundaries": "boundary",
-        "traps": "trap",
-        "patterns": "trap",
-        "personas": "persona",
-        "contracts": "contract",
-        "genome": "core",
-        "core_rule": "core",
-        "cells": "trap",
-        "rules": "trap",
-    }
-    _type_order = {
-        "core": 0,
-        "invariant": 1,
-        "boundary": 2,
-        "contract": 3,
-        "persona": 4,
-        "trap": 5,
-    }
+    _type_norm = RULE_TYPE_NORMALIZATION
+    _type_order = RULE_TYPE_DISPLAY_ORDER
 
     total_chars = 0
     all_rules: list[dict] = []
@@ -443,7 +431,7 @@ def run_status(args: argparse.Namespace) -> int:
         })
 
     # Context load: total characters / 4
-    estimated_tokens = total_chars // 4
+    estimated_tokens = total_chars // CHARS_PER_TOKEN_ESTIMATE
 
     # Sort rules grouped by modern type, then triggers descending, fitness descending, name
     all_rules.sort(
@@ -472,7 +460,7 @@ def run_status(args: argparse.Namespace) -> int:
 
     existing_ui = getattr(args, "ui", None)
     ui = existing_ui if isinstance(existing_ui, OutputContext) else OutputContext.from_env_and_args(args)
-    max_budget = int(os.environ.get("AEGIS_MAX_JIT_TOKENS", "2000"))
+    max_budget = int(os.environ.get("AEGIS_MAX_JIT_TOKENS", str(JIT_DEFAULT_MAX_TOKENS)))
 
     header_title = "🛡️ Aegis Workspace Status" if ui.emoji_enabled else "Aegis Workspace Status"
     print(f"{ui.style(header_title, 'bold', 'cyan')}\n")

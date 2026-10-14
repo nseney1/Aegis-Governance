@@ -10,14 +10,18 @@ from typing import Any, Dict, Optional
 
 from aegis_core.yaml import parse_frontmatter
 from aegis_core.scoring import bayesian_posterior, bayesian_score, calculate_snr, laplace_score
+from aegis_core.taxonomy import RULE_EXPIRY_DAYS
 from aegis_core.workspace import Workspace, resolve_workspace
 from .constants import (
+    CELL_TELOMERE_DAYS,
     DECAY_FACTOR,
     DEFAULT_DECAY_FACTOR,
 )
 from .quorum import calculate_fitness_status
 
 __all__ = [
+    "CELL_TELOMERE_DAYS",
+    "RULE_EXPIRY_DAYS",
     "apply_decay",
     "apply_exponential_decay",
     "bayesian_fitness",
@@ -223,7 +227,12 @@ def compute_cells_fitness(
             except Exception:
                 pass
 
-        hl_val = os.environ.get(f"CELL_TELOMERE_{cell_type.upper()}") or os.environ.get("CELL_TELOMERE_DAYS", "30")
+        hl_val = (
+            os.environ.get(f"RULE_EXPIRY_{cell_type.upper()}")
+            or os.environ.get(f"CELL_TELOMERE_{cell_type.upper()}")
+            or os.environ.get("RULE_EXPIRY_DAYS")
+            or os.environ.get("CELL_TELOMERE_DAYS", "30")
+        )
         if hl_val == "null":
             dec_score = score
         else:

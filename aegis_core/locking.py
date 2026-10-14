@@ -31,6 +31,12 @@ _THREAD_STATE = threading.local()
 
 
 from aegis_core.errors import LockTimeoutError
+from aegis_core.taxonomy import (
+    DEFAULT_LOCK_TIMEOUT_SECONDS,
+    LOCK_MAX_BACKOFF_SECONDS,
+    LOCK_RETRY_INTERVAL_SECONDS,
+)
+from aegis_core.workspace.layout import LockResource, WorkspaceLayout
 
 
 def _get_thread_lock(lock_path: str) -> threading.RLock:
@@ -45,7 +51,7 @@ def _get_thread_lock(lock_path: str) -> threading.RLock:
 
 def _acquire_os_lock(fileno: int, timeout_sec: float) -> bool:
     start_time = time.monotonic()
-    retry_interval = 0.01
+    retry_interval = LOCK_RETRY_INTERVAL_SECONDS
 
     while True:
         if fcntl is not None:
@@ -69,7 +75,7 @@ def _acquire_os_lock(fileno: int, timeout_sec: float) -> bool:
             return False
 
         time.sleep(retry_interval)
-        retry_interval = min(retry_interval * 1.5, 0.05)
+        retry_interval = min(retry_interval * 1.5, LOCK_MAX_BACKOFF_SECONDS)
 
 
 def _release_os_lock(fileno: int) -> None:
@@ -89,23 +95,23 @@ def _release_os_lock(fileno: int) -> None:
 @contextmanager
 def workspace_lock(
     workspace: str | Path,
-    resource: str,
-    timeout_sec: float = 5.0,
+    resource: str = LockResource.RULES,
+    timeout_sec: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
 ) -> Generator[Path, None, None]:
     """Acquire a cross-process and thread-safe lock for a workspace resource.
 
     Args:
         workspace: Path to governed project workspace.
-        resource: Logical resource name (e.g. 'cells', 'evidence', 'jobs').
+        resource: Logical resource name (e.g. LockResource.RULES, LockResource.EVIDENCE, LockResource.RECEIPTS).
         timeout_sec: Maximum duration in seconds to wait before raising LockTimeoutError.
 
     Yields:
         Path to the active lock file.
     """
     ws = Path(workspace).resolve()
-    locks_dir = ws / ".aegis" / LOCK_DIRNAME
-    locks_dir.mkdir(parents=True, exist_ok=True)
-    lock_file = locks_dir / f"{resource}.lock"
+    layout = WorkspaceLayout(ws)
+    lock_file = layout.lock_file(str(resource))
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
     str_path = str(lock_file)
 
     thread_lock = _get_thread_lock(str_path)
@@ -116,7 +122,7 @@ def workspace_lock(
     if not acquired_thread:
         raise LockTimeoutError(
             f"Could not acquire lock for '{resource}' within {timeout_sec:.2f}s (thread contention)",
-            resource=resource,
+            resource=str(resource),
         )
 
     norm = os.path.abspath(str_path)
@@ -145,7 +151,7 @@ def workspace_lock(
         if not acquired_os:
             raise LockTimeoutError(
                 f"Could not acquire lock for '{resource}' within {timeout_sec:.2f}s (process contention)",
-                resource=resource,
+                resource=str(resource),
             )
         held[norm] = 1
         yield lock_file
@@ -160,9 +166,15 @@ def workspace_lock(
         thread_lock.release()
 
 
+acquire_lock = workspace_lock
+
+
 __all__ = [
     "LOCK_DIRNAME",
+    "LockResource",
     "LockTimeoutError",
+    "acquire_lock",
     "workspace_lock",
 ]
+
 

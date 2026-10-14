@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 from aegis_core.locking import workspace_lock
 from aegis_core.workspace import Workspace, resolve_workspace
+from aegis_core.workspace.layout import LockResource
 from .constants import (
     DEMOTION_PATH,
     DORMANT_DAYS_THRESHOLD,
@@ -25,8 +26,11 @@ from .constants import (
     MODERN_GLOBAL_PROMOTION_PATH,
     MODERN_LOCAL_PROMOTION_PATH,
     PROMOTION_PATH,
+    PROMOTION_TRANSITIONS,
     PROTECTED_RULES,
     TYPE_TO_DIR,
+    VALID_METAMORPHOSIS_TARGETS,
+    VALID_PROMOTION_TARGETS,
     get_demotion_path,
     get_promotion_path,
 )
@@ -274,7 +278,7 @@ def promote_cell(
         }
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    with workspace_lock(ws.root, "cells"):
+    with workspace_lock(ws.root, LockResource.RULES):
         content = cell_path.read_text(encoding="utf-8")
         new_content = _transform_frontmatter_type(content, next_type)
         _atomic_write_and_unlink(cell_path, target_path, new_content)
@@ -342,7 +346,7 @@ def demote_cell(
         }
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    with workspace_lock(ws.root, "cells"):
+    with workspace_lock(ws.root, LockResource.RULES):
         content = cell_path.read_text(encoding="utf-8")
         new_content = _transform_frontmatter_type(content, next_type)
         _atomic_write_and_unlink(cell_path, target_path, new_content)
@@ -521,7 +525,7 @@ def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) ->
     content = cell_path.read_text(encoding="utf-8")
     meta = parse_frontmatter(content) or {}
     current_type = meta.get("type")
-    if not current_type or current_type not in METAMORPHOSIS_PATHS:
+    if not current_type or current_type not in PROMOTION_TRANSITIONS:
         return {"status": "no_paths", "type": current_type}
 
     fitness = meta.get("fitness") or {}
@@ -530,7 +534,7 @@ def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) ->
     score = fitness.get("score") or (tp / triggers if triggers > 0 else 0)
 
     best_path = None
-    for p in METAMORPHOSIS_PATHS[current_type]:
+    for p in PROMOTION_TRANSITIONS[current_type]:
         if score >= p["min_fitness"] and triggers >= p["min_sessions"]:
             best_path = p
             break

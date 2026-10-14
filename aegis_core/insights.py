@@ -15,6 +15,8 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from aegis_core.workspace import resolve_workspace
+from aegis_core.workspace.layout import WorkspaceLayout
+from aegis_core.taxonomy import INSIGHT_LAPLACE_PRIOR, ReviewMode, normalize_review_mode
 from aegis_core.defects import find_covering_cells, load_cells
 from aegis_core.yaml import parse_frontmatter, parse_yaml_subset, dump_frontmatter
 from aegis_core.evidence import aggregate_signals
@@ -182,7 +184,7 @@ def cluster_insights(
                     common_files.append(f)
 
         insight_count = len(group)
-        confidence = round(insight_count / (insight_count + 2), 4)
+        confidence = round(insight_count / (insight_count + INSIGHT_LAPLACE_PRIOR), 4)
 
         slug = category.replace(" ", "-").lower()
         file_hash = hashlib.sha256(
@@ -250,7 +252,7 @@ def create_cell_from_insight_cluster(cluster: dict, workspace: str) -> str:
         "prediction": f"Recurring {category} issues will continue if unaddressed",
         "falsification": f"No {category} insights observed for 60 days",
         "target_paths": list(files),
-        "minimum_mode": "breeze",
+        "minimum_mode": str(ReviewMode.PATROL),
         "origin": "human_insight",
         "tags": ["auto-generated", "insight-cluster", category],
     }

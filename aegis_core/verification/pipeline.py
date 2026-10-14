@@ -1,4 +1,4 @@
-"""Unified Verification Pipeline and OOP Class Hierarchy for Soma (Phase 20).
+"""Unified Verification Pipeline and OOP Class Hierarchy for Aegis (Phase 20).
 
 Provides:
 - BaseVerifier (ABC)
@@ -7,7 +7,7 @@ Provides:
 - DirectSDKBackend: Headless SDK execution via environment API keys
 - MCPSamplingBackend: Zero-key / client-side sampling via MCP transport
 - InBandChargeSheetBackend: Zero-key interactive in-session verification
-- ChargeSheet: Information-partitioned prosecution charges (SOMA-V01)
+- ChargeSheet: Information-partitioned prosecution charges (AEGIS-V01)
 - AdversarialVerifier: Layer 2 prosecution and defense rebuttal
 - Arbiter: Pure deterministic set-logic judge
 - VerificationPipeline: Composes Layer 1 -> Layer 2 -> Arbiter
@@ -33,9 +33,11 @@ from . import (
     ToolEvidence,
     Verdict,
 )
+from . import adversarial_verify
 from . import arbiter as arbiter_module
-from . import immune_verify
 from . import runner
+
+immune_verify = adversarial_verify
 
 logger = logging.getLogger(__name__)
 
@@ -209,14 +211,14 @@ class InBandChargeSheetBackend(AgentBackend):
         return json.dumps(predictions)
 
 
-# ── Charge Sheet (Information Partitioning Guard SOMA-V01) ─────────────────
+# ── Charge Sheet (Information Partitioning Guard AEGIS-V01) ─────────────────
 
 
 @dataclass
 class ChargeSheet:
     """Information-partitioned prosecution charges for active agent rebuttal.
 
-    Upholds Information Partitioning Guard (SOMA-V01):
+    Upholds Information Partitioning Guard (AEGIS-V01):
     Strictly scrubs raw task plans and confidential prompt instructions,
     exposing only abstract risk categories, mechanisms, and affected functions.
     """
@@ -291,7 +293,7 @@ class AdversarialVerifier(BaseVerifier):
             if basename.startswith("test_") or basename in ("__init__.py", "conftest.py"):
                 continue
             try:
-                sigs = immune_verify.extract_signatures(str(full_path))
+                sigs = adversarial_verify.extract_signatures(str(full_path))
                 all_signatures.extend(sigs)
                 all_implementation.append(full_path.read_text(encoding="utf-8", errors="replace"))
             except Exception:
@@ -312,14 +314,14 @@ class AdversarialVerifier(BaseVerifier):
         active_backend = self._resolve_backend(backend)
         signatures, _ = self.extract_target_data(changed_files, workspace)
 
-        spec_prompt = immune_verify.build_spec_prompt(
+        spec_prompt = adversarial_verify.build_spec_prompt(
             plan=task_plan,
             signatures=signatures,
             test_names=test_names or [],
         )
         spec_response = active_backend.generate(spec_prompt)
         raw_predictions = self._parse_json(spec_response)
-        predictions = immune_verify.parse_predictions(raw_predictions)
+        predictions = adversarial_verify.parse_predictions(raw_predictions)
 
         return ChargeSheet(
             target_files=list(changed_files),
@@ -346,7 +348,7 @@ class AdversarialVerifier(BaseVerifier):
         signatures, implementation_text = self.extract_target_data(changed_files, workspace)
 
         # Phase 1: Prosecution
-        spec_prompt = immune_verify.build_spec_prompt(
+        spec_prompt = adversarial_verify.build_spec_prompt(
             plan=task_plan,
             signatures=signatures,
             test_names=test_names or [],
@@ -359,7 +361,7 @@ class AdversarialVerifier(BaseVerifier):
             raw_predictions = []
             spec_agent_failed = True
 
-        predictions = immune_verify.parse_predictions(raw_predictions)
+        predictions = adversarial_verify.parse_predictions(raw_predictions)
 
         # Phase 2: Defense
         if rebuttal_claims is not None:
@@ -368,7 +370,7 @@ class AdversarialVerifier(BaseVerifier):
                 if isinstance(c, Claim):
                     parsed_claims.append(c)
                 elif isinstance(c, dict):
-                    parsed_claims.extend(immune_verify.parse_claims([c]))
+                    parsed_claims.extend(adversarial_verify.parse_claims([c]))
             return predictions, parsed_claims, spec_agent_failed
 
         # Otherwise run Code Agent prompt
@@ -378,7 +380,7 @@ class AdversarialVerifier(BaseVerifier):
                 {"target": e.target, "verdict": e.verdict, "detail": e.detail}
             )
 
-        code_prompt = immune_verify.build_code_prompt(
+        code_prompt = adversarial_verify.build_code_prompt(
             implementation=implementation_text,
             test_results=test_results or "",
             layer1_output=layer1_output,
@@ -389,7 +391,7 @@ class AdversarialVerifier(BaseVerifier):
             raw_claims = self._parse_json(code_response)
         except Exception:
             raw_claims = []
-        claims = immune_verify.parse_claims(raw_claims)
+        claims = adversarial_verify.parse_claims(raw_claims)
 
         return predictions, claims, spec_agent_failed
 

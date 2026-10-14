@@ -12,7 +12,7 @@ triggers:
   - python_file_creation
   - python_file_modification
   - security_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 50
 expiry_days: 180
 created: 2026-09-30
@@ -24,17 +24,17 @@ tags:
 fitness:
   score: 0.7
   impact_weight: 1.0
-  triggers: 85
-  true_positives: 37.3628
+  triggers: 89
+  true_positives: 41.3628
   false_positives: 29.9993
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 When generating executable code (Python scripts, shell commands) via string
 formatting, all user-controlled or path-derived variables MUST be escaped
 with `repr()` or `shlex.quote()` before interpolation.
 
-Supercell S1 incident: `branch_coverage.py` used `_TRACE_SCRIPT_TEMPLATE.format(
+Citadel S1 incident: `branch_coverage.py` used `_TRACE_SCRIPT_TEMPLATE.format(
 test_file=test_file)` to inject file paths directly into Python string literals.
 A path containing `"); import os; os.system("id` would execute arbitrary code.
 

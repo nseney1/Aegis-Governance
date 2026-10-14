@@ -13,7 +13,7 @@ triggers:
   - arbitration_complete
   - cycle_increment
   - review_finding_repeat
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 50
 expiry_days: 180
 created: 2026-09-30
@@ -26,10 +26,10 @@ tags:
 fitness:
   score: 0.75
   impact_weight: 1.0
-  triggers: 42
-  true_positives: 8.4945
+  triggers: 46
+  true_positives: 8.6685
   false_positives: 7.6805
-  last_trigger_date: "2026-10-14T07:33:06Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Findings that appear in consecutive review cycles MUST be resolved, not deferred.
@@ -39,10 +39,10 @@ When the same finding survives 2+ cycles, it indicates one of:
 2. The finding is misclassified (should be INFO, not BLOCK) and wastes review bandwidth
 3. The orchestrator acknowledges it but implicitly deprioritizes it
 
-Supercell incident: The DRY violation between `aegis_mcp/tools.py` and
+Citadel incident: The DRY violation between `aegis_mcp/tools.py` and
 `aegis_cli/checkpoint.py` was flagged in Cycles 1, 2, and 3. Each cycle it
 was noted but deferred. Meanwhile the copies diverged — tools.py was missing
-`_check_cell_conventions` and `_check_arbitration_evidence`, causing the MCP
+`_check_rule_conventions` and `_check_arbitration_evidence`, causing the MCP
 checkpoint to silently skip 2 of 6 checks.
 
 Resolution protocol:

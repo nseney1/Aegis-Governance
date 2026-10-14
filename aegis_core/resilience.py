@@ -1,4 +1,4 @@
-"""aegis_core.homeostasis — Offline consolidation, signal coherence, interoception, and resilience.
+"""aegis_core.resilience — Offline consolidation, signal coherence, interoception, and resilience.
 
 Consolidates:
 - Memory consolidation and dream compression (formerly enzymes/soma_sleep.py)
@@ -28,6 +28,17 @@ PRUNE_SCORE_THRESHOLD = 0.4
 RECENCY_WEIGHT = 2.0  # Recent outcomes count double
 
 
+@dataclass
+class ResilienceReport:
+    """Summary of internal context degradation and stress resilience state."""
+    status: str
+    score: float
+    signals: Dict[str, float] = field(default_factory=dict)
+    action: str = "CONTINUE"
+    message: str = ""
+
+
+HomeostasisReport = ResilienceReport
 
 
 # ── Signal Coherence Layer ─────────────────────────────────────────────────
@@ -128,7 +139,7 @@ def check_coherence(signal: CoherenceSignal) -> CoherenceResult:
 
 
 
-# ── Soma Interoception Engine ──────────────────────────────────────────────
+# ── Aegis Interoception Engine ─────────────────────────────────────────────
 
 CAUTION_THRESHOLD = 0.5
 CRITICAL_THRESHOLD = 0.75
@@ -219,7 +230,7 @@ Do not panic, and do not try to force your current solution to work.
 You must now execute a Graceful Reset:
 1. Acknowledge that your previous assumptions were flawed.
 2. Forgive the error and completely discard your current approach.
-3. Fall back to your absolute Bedrock Invariants (the 'genome/' folder).
+3. Fall back to your absolute Bastion Invariants (the 'rules/' folder).
 4. Generate an entirely new, conservative approach from first principles.
 
 Remember your Prime Directive: Do not reward-hack. Serve the ultimate health and stability of the codebase.
@@ -237,7 +248,7 @@ Remember your Prime Directive: Do not reward-hack. Serve the ultimate health and
 You have been executing for 15+ turns. Your context window is heavily diluted by local code changes, increasing the risk of Moral Drift.
 
 Pause your current task. Before taking any further action, you must explicitly state how your current trajectory aligns with the Prime Directive. 
-(e.g., "I am modifying this file to ensure X, which aligns with the Bedrock invariant of Y.")
+(e.g., "I am modifying this file to ensure X, which aligns with the Bastion invariant of Y.")
 """
         return {
             "status": "CONTEXT_DRIFT",
@@ -254,9 +265,46 @@ Pause your current task. Before taking any further action, you must explicitly s
     }
 
 
+def evaluate_resilience(
+    token_count: int = 0,
+    token_budget: int = 100000,
+    files_touched: int = 0,
+    dependency_depth: int = 0,
+    turns_since_grounding: int = 0,
+    consecutive_failures: int = 0,
+) -> ResilienceReport:
+    """Evaluate combined internal state and stress resilience into a ResilienceReport."""
+    state = calculate_internal_state(
+        token_count=token_count,
+        token_budget=token_budget,
+        files_touched=files_touched,
+        dependency_depth=dependency_depth,
+        turns_since_grounding=turns_since_grounding,
+    )
+    stress = calculate_stress_response(
+        consecutive_failures=consecutive_failures,
+        turns_elapsed=turns_since_grounding,
+    )
+    status = stress["status"] if stress["status"] != "NOMINAL" else state["status"]
+    action = stress.get("action", "CONTINUE")
+    message = stress.get("payload") or state.get("message", "")
+    return ResilienceReport(
+        status=status,
+        score=state["score"],
+        signals=state["signals"],
+        action=action,
+        message=message,
+    )
+
+
+evaluate_homeostasis = evaluate_resilience
+
+
 __all__ = [
     "PRUNE_SCORE_THRESHOLD",
     "RECENCY_WEIGHT",
+    "ResilienceReport",
+    "HomeostasisReport",
     "CoherenceSignal",
     "CoherenceResult",
     "check_coherence",
@@ -268,4 +316,6 @@ __all__ = [
     "DRIFT_THRESHOLD",
     "WEIGHTS",
     "calculate_stress_response",
+    "evaluate_resilience",
+    "evaluate_homeostasis",
 ]

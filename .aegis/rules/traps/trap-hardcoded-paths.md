@@ -6,7 +6,7 @@ enforcement: advisory
 promotion_threshold: 0.85
 demotion_threshold: 0.3
 hypothesis: "Hardcoded platform paths (e.g. ~/.gemini, ~/.kiro) in scripts break cross-platform installs"
-prediction: Will flag hardcoded paths where dynamic SOMA_PLATFORM logic is required
+prediction: Will flag hardcoded paths where dynamic AEGIS_PLATFORM logic is required
 falsification: 0 findings in 10 sessions → prune
 target_paths:
   - "aegis_cli/platforms/*.py"
@@ -23,12 +23,12 @@ tags:
 fitness:
   score: 0.6667
   impact_weight: 1.0
-  triggers: 77
-  true_positives: 21.9439
+  triggers: 81
+  true_positives: 25.9439
   false_positives: 18.0668
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Scripts should use SOMA_PLATFORM and resolve_home() to determine paths dynamically,
+Scripts should use AEGIS_PLATFORM and resolve_home() to determine paths dynamically,
 not hardcode ~/.gemini or ~/.kiro. Hardcoded paths break on other platforms and
 prevent new platform support (e.g., Claude Code).

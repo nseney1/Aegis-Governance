@@ -5,7 +5,7 @@ type: trap
 enforcement: advisory
 hypothesis: "Agents rationalize persistent CI failures as \"pre-existing\" or \"environment issues\" without reading the actual CI log, causing stacked failures to accumulate"
 prediction: "When an agent declares a fix complete based only on local test results, the CI build will reveal at least one additional failure layer that local testing did not surface"
-falsification: "If 5 consecutive CI-touching changes pass CI on first push without any post-push fixes, this vacuole is unnecessary"
+falsification: "If 5 consecutive CI-touching changes pass CI on first push without any post-push fixes, this trap is unnecessary"
 target_paths:
   - ".github/workflows/*.yml"
   - "tests/*.py"
@@ -22,10 +22,10 @@ expiry_sessions: 30
 fitness:
   score: 0.5
   impact_weight: 1.0
-  triggers: 78
-  true_positives: 32.1622
+  triggers: 82
+  true_positives: 36.1622
   false_positives: 29.8304
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 ## Trap: Local Green ≠ CI Green

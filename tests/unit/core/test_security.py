@@ -14,7 +14,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 sys.path.insert(0, REPO_ROOT)
 
 from aegis_mcp.security import confine_workspace, confine_path, validate_rule_names
-from aegis_mcp.integrity import (
+from aegis_core.integrity import (
     generate_manifest,
     verify_manifest,
     load_manifest,
@@ -251,7 +251,7 @@ class TestIntegrityManifest:
 class TestKeyManagement:
     def test_generate_key_creates_file(self, soma_workspace):
         """Key generation creates .aegis/keys/manifest.key."""
-        from aegis_mcp.integrity import generate_key
+        from aegis_core.integrity import generate_key
 
         key_path = generate_key(str(soma_workspace))
         assert os.path.isfile(key_path)
@@ -262,7 +262,7 @@ class TestKeyManagement:
 
     def test_generate_key_rejects_overwrite(self, soma_workspace):
         """Second key generation raises FileExistsError."""
-        from aegis_mcp.integrity import generate_key
+        from aegis_core.integrity import generate_key
 
         generate_key(str(soma_workspace))
         with pytest.raises(FileExistsError):
@@ -270,7 +270,7 @@ class TestKeyManagement:
 
     def test_rotate_key_backs_up_old(self, soma_workspace):
         """Key rotation creates .bak and new key differs."""
-        from aegis_mcp.integrity import generate_key, rotate_key, load_key
+        from aegis_core.integrity import generate_key, rotate_key, load_key
 
         generate_key(str(soma_workspace))
         old_key = load_key(str(soma_workspace))
@@ -285,7 +285,7 @@ class TestKeyManagement:
 
     def test_load_key_returns_none_when_missing(self, soma_workspace):
         """No key file returns None, not an error."""
-        from aegis_mcp.integrity import load_key
+        from aegis_core.integrity import load_key
 
         assert load_key(str(soma_workspace)) is None
 
@@ -293,7 +293,7 @@ class TestKeyManagement:
 class TestManifestSigning:
     def test_sign_manifest_deterministic(self, soma_workspace):
         """Same manifest + same key = same signature."""
-        from aegis_mcp.integrity import generate_key, load_key, sign_manifest
+        from aegis_core.integrity import generate_key, load_key, sign_manifest
 
         generate_key(str(soma_workspace))
         key = load_key(str(soma_workspace))
@@ -305,7 +305,7 @@ class TestManifestSigning:
 
     def test_sign_manifest_different_key(self, soma_workspace):
         """Different key = different signature."""
-        from aegis_mcp.integrity import sign_manifest
+        from aegis_core.integrity import sign_manifest
 
         cells_dir = str(soma_workspace / ".aegis" / "rules")
         manifest = generate_manifest(cells_dir)
@@ -317,7 +317,7 @@ class TestManifestSigning:
 
     def test_verify_signature_valid(self, soma_workspace):
         """Valid signature verifies True."""
-        from aegis_mcp.integrity import (
+        from aegis_core.integrity import (
             generate_key, load_key, sign_manifest, verify_signature,
         )
 
@@ -330,7 +330,7 @@ class TestManifestSigning:
 
     def test_verify_signature_tampered(self, soma_workspace):
         """Tampered manifest fails verification."""
-        from aegis_mcp.integrity import (
+        from aegis_core.integrity import (
             generate_key, load_key, sign_manifest, verify_signature,
         )
 
@@ -345,7 +345,7 @@ class TestManifestSigning:
 
     def test_verify_signature_non_string_rejected(self, soma_workspace):
         """Non-string signature fails verification safely."""
-        from aegis_mcp.integrity import (
+        from aegis_core.integrity import (
             generate_key, load_key, sign_manifest, verify_signature,
         )
 
@@ -361,7 +361,7 @@ class TestManifestSigning:
 
     def test_save_manifest_auto_signs(self, soma_workspace):
         """save_manifest includes signature when key exists."""
-        from aegis_mcp.integrity import generate_key
+        from aegis_core.integrity import generate_key
 
         generate_key(str(soma_workspace))
         cells_dir = str(soma_workspace / ".aegis" / "rules")
@@ -391,7 +391,7 @@ class TestSessionAuth:
         from aegis_mcp.server import _READ_TOOLS
 
         assert "aegis_scan" in _READ_TOOLS
-        assert "aegis_list_cells" in _READ_TOOLS
+        assert "aegis_list_rules" in _READ_TOOLS
 
     def test_write_and_execute_tools_defined(self):
         """Write and execute tools are classified."""

@@ -66,28 +66,8 @@ def _script_groups():
 
 
 def _tool_definition_names(path):
-    targets = [path]
-    if path.name == "tools.py":
-        targets.insert(0, path.parent / "registry.py")
-    if path.parent.name.startswith("soma_"):
-        canonical_dir = ROOT / ("aegis_" + path.parent.name[5:])
-        if (canonical_dir / "tools.py").exists():
-            targets.append(canonical_dir / "tools.py")
-        if (canonical_dir / "registry.py").exists():
-            targets.append(canonical_dir / "registry.py")
-    for p in targets:
-        if not p.exists():
-            continue
-        tree = ast.parse(read(str(p)))
-        for node in tree.body:
-            if not isinstance(node, ast.Assign):
-                continue
-            if not any(isinstance(target, ast.Name) and target.id == "TOOL_DEFINITIONS"
-                       for target in node.targets):
-                continue
-            definitions = ast.literal_eval(node.value)
-            return {definition["name"] for definition in definitions}
-    raise AssertionError("TOOL_DEFINITIONS not found")
+    from aegis_mcp.registry import TOOL_DEFINITIONS
+    return {definition["name"] for definition in TOOL_DEFINITIONS}
 
 
 def test_readme_mcp_tool_inventory_matches_code():
@@ -97,7 +77,7 @@ def test_readme_mcp_tool_inventory_matches_code():
     tools_path = ROOT / "aegis_mcp" / "tools.py" if (ROOT / "aegis_mcp").exists() else ROOT / "soma_mcp" / "tools.py"
     expected = _tool_definition_names(tools_path)
     assert documented == expected
-    assert len(expected) == 20
+    assert len(expected) == 17
 
 
 def test_readme_mcp_tiers_match_server_definitions():
@@ -110,7 +90,7 @@ def test_readme_mcp_tiers_match_server_definitions():
     }
     documented = {label: _readme_mcp_row(readme, label) for label in expected}
     assert documented == expected
-    assert len(set().union(*documented.values())) == 20
+    assert len(set().union(*documented.values())) == 17
 
 
 def test_documentation_index_local_links_exist():
@@ -178,7 +158,7 @@ def test_readme_core_rule_count_and_inventory_match_genome():
 
 def test_readme_m8ven_trust_badge_exists():
     readme = read(str(ROOT / "README.md"))
-    expected_markdown = r"\[\!\[M8ven Score\]\(https://m8ven\.ai/badge/mcp/nseney1-soma-governance-yv4xbk\)\]\(https://m8ven\.ai/mcp/nseney1/soma-governance\?s=readme\)"
+    expected_markdown = r"\[\!\[M8ven Score\]\(https://m8ven\.ai/badge/mcp/nseney1-Aegis-Guardrails\)\]\(https://m8ven\.ai/mcp/nseney1/Aegis-Guardrails\?s=readme\)"
     assert re.search(expected_markdown, readme), "m8ven badge missing or malformed in README"
 
 

@@ -15,7 +15,7 @@ triggers:
   - feature_implementation
   - refactor
   - delegation
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 50
 expiry_days: 180
 created: 2026-10-14
@@ -29,13 +29,13 @@ tags:
 fitness:
   score: null
   impact_weight: 1.0
-  triggers: 29
-  true_positives: 7.0464
+  triggers: 33
+  true_positives: 11.0464
   false_positives: 6.7256
-  last_trigger_date: "2026-10-14T19:43:08Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-# Wall: Prefer Subagent Delegation Protocol
+# Invariant: Prefer Subagent Delegation Protocol
 
 Enforces a strict delegation-first architecture. The orchestrator functions as
 the Lead Architect, System Integrator, and Release Gatekeeper, delegating all

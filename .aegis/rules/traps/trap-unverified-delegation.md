@@ -5,7 +5,7 @@ type: trap
 enforcement: advisory
 hypothesis: Subagent self-reports are cheap talk — edits must be verified against file contents
 prediction: Accepting subagent completion reports without grepping for actual file changes leads to silent regressions where claimed fixes never landed
-falsification: "If 20 consecutive subagent delegations all pass post-hoc file verification, this vacuole is unnecessary"
+falsification: "If 20 consecutive subagent delegations all pass post-hoc file verification, this trap is unnecessary"
 target_paths:
   - "aegis_core/*.py"
   - "aegis_cli/*.py"
@@ -14,16 +14,16 @@ target_paths:
 triggers:
   - delegation
   - subagent
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 fitness:
   score: 0.5
   impact_weight: 1.0
-  triggers: 78
-  true_positives: 31.6628
+  triggers: 82
+  true_positives: 35.6628
   false_positives: 29.3898
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Trap: Unverified Delegation

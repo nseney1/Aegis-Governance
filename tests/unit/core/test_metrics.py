@@ -129,7 +129,7 @@ def test_evaluate_quorum_escalation(tmp_path: Path) -> None:
     res = evaluate_quorum(rules_dir, ["src/main.py"], threshold=2)
     assert res["quorum"] is True
     assert res["rules_triggered"] == 2
-    assert res["escalate_to"] == "tempest"
+    assert res["escalate_to"] == "fortress"
 
 
 def test_calculate_coverage_and_alias(tmp_path: Path) -> None:

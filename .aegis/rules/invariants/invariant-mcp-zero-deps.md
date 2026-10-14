@@ -12,19 +12,19 @@ expiry_sessions: 20
 expiry_days: 90
 created: 2026-09-28
 impact_weight: 1.4
-minimum_mode: gale
+minimum_mode: sweep
 tags:
   - mcp
   - zero-deps
   - portability
-  - wall
+  - invariant
 fitness:
   score: 0.0
   impact_weight: 1.0
-  triggers: 60
-  true_positives: 5.0162
+  triggers: 64
+  true_positives: 7.3038
   false_positives: 3.8075
-  last_trigger_date: "2026-10-14T19:43:08Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 The MCP stdio server is the primary entry point for Claude Code, Cursor, and other

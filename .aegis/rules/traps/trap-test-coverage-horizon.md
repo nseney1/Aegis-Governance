@@ -12,7 +12,7 @@ triggers:
   - test_creation
   - documentation_edit
   - consistency_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-09-30
@@ -24,12 +24,12 @@ tags:
 fitness:
   score: 0.3333
   impact_weight: 1.0
-  triggers: 67
-  true_positives: 21.6099
+  triggers: 71
+  true_positives: 24.7637
   false_positives: 19.434
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Supercell doc-drift incident: `test_review_intensity.py` verified README ↔ SKILL.md
+Citadel doc-drift incident: `test_review_intensity.py` verified README ↔ SKILL.md
 consistency for intensity levels but did not check CHANGELOG or SCRIPTS.md. The test
 caught exactly what it tested for and nothing more — the "flashlight effect".

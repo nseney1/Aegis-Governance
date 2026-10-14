@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 import pytest
 
-from aegis_core.ast_match import match_ast_triggers, prefilter_ast_tokens
+from aegis_core.ast.match import match_ast_triggers, prefilter_ast_tokens
 from aegis_mcp.jit_engine import match_cells_for_diff
 
 

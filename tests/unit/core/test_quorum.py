@@ -149,7 +149,7 @@ class TestQuorumEscalation:
             threshold=2
         )
         assert result['quorum'] is True
-        assert result['escalate_to'] == 'tempest'
+        assert result['escalate_to'] == 'fortress'
 
     def test_single_mode_escalates_to_itself(self, tmp_path):
         ws = str(tmp_path)
@@ -163,7 +163,7 @@ class TestQuorumEscalation:
             changed_files=['foo.py'],
             threshold=2
         )
-        assert result['escalate_to'] == 'gale'
+        assert result['escalate_to'] == 'sweep'
 
 
 # ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ from aegis_core.workspace.discovery import (
 )
 from aegis_core.workspace.git import GitWorkspace, _parse_worktree_porcelain
 from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
+from aegis_core.workspace.layout import LockResource, WorkspaceLayout
 from aegis_core.workspace.scaffold import scaffold_workspace
 
 
@@ -92,7 +93,9 @@ def validate_rule_names(
 __all__ = [
     "GitWorkspace",
     "LEGACY_SOMA_UPGRADE_MSG",
+    "LockResource",
     "Workspace",
+    "WorkspaceLayout",
     "as_workspace",
     "check_legacy_soma_sentinel",
     "confine_path",

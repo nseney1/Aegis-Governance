@@ -231,8 +231,8 @@ jobs:
       # hit (BUG-012, BUG-038), even if a future Python defaults to UTF-8 mode.
       - name: Run test suite
         env:
-          HOME: ${{ runner.temp }}\soma-home
-          USERPROFILE: ${{ runner.temp }}\soma-home
+          HOME: ${{ runner.temp }}\aegis-home
+          USERPROFILE: ${{ runner.temp }}\aegis-home
           PYTHONUTF8: '0'
         run: |
           python -c "import os; os.makedirs(os.environ['USERPROFILE'], exist_ok=True)"

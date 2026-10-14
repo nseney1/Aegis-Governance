@@ -51,7 +51,7 @@ def test_soma_coverage_executes_real_governance_engine():
     assert "coverage_pct" in data
 
 def test_soma_list_cells_executes_real_governance_engine():
-    resp = _call("aegis_list_cells")
+    resp = _call("aegis_list_rules")
     assert "error" not in resp, resp.get("error")
     result_text = resp["result"]["content"][0]["text"]
     data = json.loads(result_text)

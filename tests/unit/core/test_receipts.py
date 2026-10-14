@@ -196,3 +196,51 @@ def test_receipt_dataclass_model():
 
     with pytest.raises(FrozenInstanceError):
         r.receipt_id = "r-456"  # type: ignore[misc]
+
+
+def test_receipt_manager_burns_nonce_to_ledger_before_digest_comparison(tmp_path):
+    """S3: ReceiptManager.verify(..., consume=True) burns nonce to .aegis/receipts.jsonl before digest comparison."""
+    import json
+    from aegis_core.receipts import ReceiptManager
+
+    (tmp_path / ".aegis").mkdir()
+    mgr = ReceiptManager(workspace=tmp_path)
+    rid = mgr.issue(
+        session_id="sess_s3",
+        workspace=tmp_path,
+        operation="aegis_propose_change",
+        args={"file_path": "target.py"},
+        file_digest="orig_file_digest",
+        rule_digest="orig_rule_digest",
+    )
+
+    # Attempt redemption with a stale file_digest -> returns False AND burns nonce to .aegis/receipts.jsonl
+    assert mgr.verify(
+        rid,
+        "sess_s3",
+        tmp_path,
+        "aegis_propose_change",
+        {"file_path": "target.py"},
+        "stale_file_digest",
+        "orig_rule_digest",
+        consume=True,
+    ) is False
+
+    ledger_file = tmp_path / ".aegis" / "receipts.jsonl"
+    assert ledger_file.is_file()
+    records = [json.loads(line) for line in ledger_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert any(r.get("nonce") == rid and r.get("status") == "consumed" for r in records)
+
+    # Even if the file is reverted back to orig_file_digest (or verified via a fresh ReceiptManager process), replay fails
+    mgr_restarted = ReceiptManager(workspace=tmp_path)
+    assert mgr_restarted.verify(
+        rid,
+        "sess_s3",
+        tmp_path,
+        "aegis_propose_change",
+        {"file_path": "target.py"},
+        "orig_file_digest",
+        "orig_rule_digest",
+        consume=True,
+    ) is False
+

@@ -1,4 +1,4 @@
-"""Smoke-test an installed Soma distribution with the source checkout hidden.
+"""Smoke-test an installed Aegis distribution with the source checkout hidden.
 
 Run with an interpreter that has the built wheel (or sdist) installed, from a
 directory OUTSIDE the repository, in isolated mode so neither PYTHONPATH nor
@@ -6,12 +6,14 @@ the current directory can shadow site-packages:
 
     cd "$(mktemp -d)" && python -I /path/to/wheel_smoke.py
 
-Fails (non-zero exit) if any Soma module resolves from outside site-packages,
+Fails (non-zero exit) if any Aegis module resolves from outside site-packages,
 or if the CLI, the MCP server, or Governance SDK do not work.
 """
 import importlib
+import importlib.util
 import json
 import os
+import site
 import subprocess
 import sys
 import sysconfig
@@ -20,18 +22,40 @@ import tempfile
 PACKAGES = ("aegis_cli", "aegis_sdk", "aegis_core", "aegis_mcp")
 
 
+def _ensure_site_packages():
+    """Return (valid_site_roots, subprocess_isolation_flag).
+
+    Under ``python -I``, user site-packages (``~/.local/lib/pythonX.Y/site-packages``)
+    is omitted from ``sys.path``. When ``pip install`` defaulted to ``--user`` on a
+    non-venv POSIX host, re-attach user site-packages while keeping CWD isolated.
+    """
+    roots = {os.path.realpath(sysconfig.get_paths()[k]) for k in ("purelib", "platlib")}
+    user_site = getattr(site, "USER_SITE", None) or os.path.expanduser(
+        f"~/.local/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    if user_site and os.path.isdir(user_site):
+        real_user_site = os.path.realpath(user_site)
+        roots.add(real_user_site)
+        if importlib.util.find_spec("aegis_cli") is None:
+            site.addsitedir(real_user_site)
+            return roots, "-P"
+    return roots, "-I"
+
+
+_SITE_ROOTS, _SUBPROC_FLAG = _ensure_site_packages()
+
+
 def fail(msg):
     print(f"wheel smoke FAILED: {msg}", file=sys.stderr)
     sys.exit(1)
 
 
 def check_module_origins():
-    roots = {os.path.realpath(sysconfig.get_paths()[k]) for k in ("purelib", "platlib")}
     for name in PACKAGES:
         mod = importlib.import_module(name)
         origin = os.path.realpath(getattr(mod, "__file__", "") or "")
-        if not any(origin.startswith(r + os.sep) for r in roots):
-            fail(f"{name} imported from {origin!r}, not from site-packages {sorted(roots)}")
+        if not any(origin.startswith(r + os.sep) for r in _SITE_ROOTS):
+            fail(f"{name} imported from {origin!r}, not from site-packages {sorted(_SITE_ROOTS)}")
         print(f"ok  {name:14s} {origin}")
 
 
@@ -46,7 +70,7 @@ def make_workspace():
 
 
 def check_cli():
-    proc = subprocess.run([sys.executable, "-I", "-m", "aegis_cli.cli", "--help"],
+    proc = subprocess.run([sys.executable, _SUBPROC_FLAG, "-m", "aegis_cli.cli", "--help"],
                           capture_output=True, text=True, timeout=60)
     if proc.returncode != 0:
         fail(f"aegis --help exited {proc.returncode}: {proc.stderr[-500:]}")
@@ -62,17 +86,18 @@ def check_mcp(ws):
     ))
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env["AEGIS_WORKSPACE"] = ws
-    proc = subprocess.run([sys.executable, "-I", "-m", "aegis_mcp"], input=requests,
+    proc = subprocess.run([sys.executable, _SUBPROC_FLAG, "-m", "aegis_mcp"], input=requests,
                           capture_output=True, text=True, timeout=60, cwd=ws, env=env)
     lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
     if len(lines) != 3:
         fail(f"MCP returned {len(lines)} responses: {proc.stdout[-500:]} {proc.stderr[-500:]}")
-    if not lines[1]["result"]["tools"]:
-        fail("MCP tools/list is empty")
+    tools = lines[1]["result"]["tools"]
+    if len(tools) != 13:
+        fail(f"MCP tools/list expected 13 default tools, got {len(tools)}")
     rules = json.loads(lines[2]["result"]["content"][0]["text"])
     if "trap-smoke" not in {c.get("_name") for c in rules}:
         fail(f"MCP aegis_list_rules did not see the workspace rule: {rules!r}")
-    print("ok  aegis_mcp initialize / tools/list / aegis_list_rules")
+    print("ok  aegis_mcp initialize / tools/list (13 default tools) / aegis_list_rules")
 
 
 def check_governance_fitness(ws):
@@ -96,6 +121,24 @@ def check_full_rule_preset(ws):
     print(f"ok  packaged full rule preset ({len(installed)} rules)")
 
 
+def check_packaged_skills_and_platform_adapter(ws):
+    """Prove the wheel packages skills/ and PlatformAdapter resolves rules + skills from site-packages."""
+    from pathlib import Path
+    from aegis_cli.platforms.gemini import GeminiPlatformAdapter
+    from aegis_mcp.registry import TOOL_DEFINITIONS
+
+    if len(TOOL_DEFINITIONS) != 17:
+        fail(f"TOOL_DEFINITIONS expected 17 canonical tools, got {len(TOOL_DEFINITIONS)}")
+    adapter = GeminiPlatformAdapter(workspace=Path(ws), home=Path(ws))
+    rules = adapter.get_source_rules()
+    skills = adapter.get_source_skills()
+    if len(rules) < 15:
+        fail(f"GeminiPlatformAdapter.get_source_rules() found only {len(rules)} rules in wheel: {rules!r}")
+    if len(skills) < 15:
+        fail(f"GeminiPlatformAdapter.get_source_skills() found only {len(skills)} skills in wheel: {skills!r}")
+    print(f"ok  packaged platform adapter ({len(rules)} rules, {len(skills)} skills, 17 MCP tools)")
+
+
 def main():
     if os.environ.get("PYTHONPATH"):
         fail("PYTHONPATH must be unset for a source-hidden smoke test")
@@ -107,8 +150,10 @@ def main():
     check_mcp(ws)
     check_governance_fitness(ws)
     check_full_rule_preset(ws)
+    check_packaged_skills_and_platform_adapter(ws)
     print("wheel smoke passed")
 
 
 if __name__ == "__main__":
     main()
+

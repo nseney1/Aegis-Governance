@@ -8,8 +8,10 @@ from aegis_mcp.handlers.audit import (
 )
 from aegis_mcp.handlers.governance import (
     _handle_create_cell,
+    _handle_create_rule,
     _handle_generate_manifest,
     _handle_list_cells,
+    _handle_list_rules,
     _handle_propose_change,
     _handle_soma_handoff,
 )
@@ -19,6 +21,7 @@ from aegis_mcp.handlers.telemetry import (
     _handle_fitness,
     _handle_grade,
     _handle_report_outcome,
+    _handle_rule_fitness,
 )
 from aegis_mcp.handlers.verification import (
     _handle_checkpoint,
@@ -29,7 +32,9 @@ from aegis_mcp.handlers.verification import (
 
 __all__ = [
     "_handle_create_cell",
+    "_handle_create_rule",
     "_handle_list_cells",
+    "_handle_list_rules",
     "_handle_propose_change",
     "_handle_generate_manifest",
     "_handle_soma_handoff",
@@ -45,4 +50,6 @@ __all__ = [
     "_handle_grade",
     "_handle_coverage",
     "_handle_fitness",
+    "_handle_rule_fitness",
 ]
+
