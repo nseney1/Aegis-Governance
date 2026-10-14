@@ -1,48 +1,19 @@
-"""Execution plane tool handlers for Soma MCP gateway."""
+"""Backward-compatibility forwarding shim for aegis_mcp.handlers."""
 from __future__ import annotations
 
-from soma_mcp.handlers.audit import (
-    _handle_audit_performance,
-    _handle_audit_security,
-    _handle_scan,
-)
-from soma_mcp.handlers.governance import (
-    _handle_create_cell,
-    _handle_generate_manifest,
-    _handle_list_cells,
-    _handle_propose_change,
-    _handle_soma_handoff,
-)
-from soma_mcp.handlers.telemetry import (
-    _handle_capture_insight,
-    _handle_coverage,
-    _handle_fitness,
-    _handle_grade,
-    _handle_report_outcome,
-)
-from soma_mcp.handlers.verification import (
-    _handle_checkpoint,
-    _handle_poll_verification,
-    _handle_request_receipt,
-    _handle_verify_changes,
-)
+import importlib
+import sys
 
-__all__ = [
-    "_handle_create_cell",
-    "_handle_list_cells",
-    "_handle_propose_change",
-    "_handle_generate_manifest",
-    "_handle_soma_handoff",
-    "_handle_verify_changes",
-    "_handle_poll_verification",
-    "_handle_checkpoint",
-    "_handle_request_receipt",
-    "_handle_audit_security",
-    "_handle_audit_performance",
-    "_handle_scan",
-    "_handle_report_outcome",
-    "_handle_capture_insight",
-    "_handle_grade",
-    "_handle_coverage",
-    "_handle_fitness",
-]
+_mod = importlib.import_module("aegis_mcp.handlers")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
+
+
+def __getattr__(name: str):
+    return getattr(_mod, name)

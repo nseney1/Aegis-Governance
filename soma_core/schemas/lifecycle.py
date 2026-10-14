@@ -1,16 +1,19 @@
-"""Immutable lifecycle transition result schema."""
+"""Backward-compatibility forwarding shim for aegis_core.schemas.lifecycle."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+import importlib
+import sys
+
+_mod = importlib.import_module("aegis_core.schemas.lifecycle")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-@dataclass(frozen=True)
-class TransitionResult:
-    """Strongly-typed outcome of a cell state transition (promotion/demotion/adaptation)."""
-
-    cell_id: str
-    from_type: str
-    to_type: str
-    success: bool
-    reason: str
-    timestamp: str
+def __getattr__(name: str):
+    return getattr(_mod, name)

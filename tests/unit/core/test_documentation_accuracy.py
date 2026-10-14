@@ -10,16 +10,22 @@ ROOT = Path(REPO_ROOT)
 
 
 def _literal_assignment(path, name):
-    tree = ast.parse(read(str(path)))
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        if not any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
-            continue
-        value = node.value
-        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "frozenset":
-            value = value.args[0]
-        return set(ast.literal_eval(value))
+    targets = [path]
+    if path.parent.name.startswith("soma_"):
+        canonical = ROOT / ("aegis_" + path.parent.name[5:]) / path.name
+        if canonical.exists():
+            targets.append(canonical)
+    for p in targets:
+        tree = ast.parse(read(str(p)))
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            if not any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+                continue
+            value = node.value
+            if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "frozenset":
+                value = value.args[0]
+            return set(ast.literal_eval(value))
     raise AssertionError(f"{name} not found in {path.relative_to(ROOT)}")
 
 
@@ -49,7 +55,7 @@ def _script_groups():
             path for directory in (ROOT / "soma_mcp", ROOT / "soma_core")
             for path in directory.iterdir()
             if path.is_file() and path.suffix == ".py"
-            and path.name not in {"__init__.py", "__main__.py"}
+            and path.name not in {"__init__.py", "__main__.py", "compat.py"}
         },
     }
 
@@ -58,6 +64,12 @@ def _tool_definition_names(path):
     targets = [path]
     if path.name == "tools.py":
         targets.insert(0, path.parent / "registry.py")
+    if path.parent.name.startswith("soma_"):
+        canonical_dir = ROOT / ("aegis_" + path.parent.name[5:])
+        if (canonical_dir / "tools.py").exists():
+            targets.append(canonical_dir / "tools.py")
+        if (canonical_dir / "registry.py").exists():
+            targets.append(canonical_dir / "registry.py")
     for p in targets:
         if not p.exists():
             continue

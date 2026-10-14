@@ -1,78 +1,19 @@
-"""Soma error hierarchy.
-
-All soma-specific exceptions inherit from SomaError.
-Engine/pipeline code that cannot raise uses Result[T] instead.
-"""
+"""Backward-compatibility forwarding shim for aegis_sdk.errors."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Generic, Optional, TypeVar
+import importlib
+import sys
 
-T = TypeVar('T')
+_mod = importlib.import_module("aegis_sdk.errors")
+sys.modules[__name__] = _mod
 
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
 
-from soma_core.errors import SomaError
-
-
-__all__ = [
-    "SomaError",
-    "AegisError",
-    "CellParseError",
-    "RuleParseError",
-    "CellNotFoundError",
-    "RuleNotFoundError",
-    "CellPathTraversalError",
-    "RulePathTraversalError",
-    "FitnessError",
-    "ScoringError",
-    "Result",
-]
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-class CellParseError(SomaError):
-    """Raised when a cell file cannot be parsed (missing/malformed frontmatter)."""
-
-
-RuleParseError = CellParseError
-
-
-class CellNotFoundError(SomaError):
-    """Raised when a cell file does not exist."""
-
-
-RuleNotFoundError = CellNotFoundError
-
-
-class CellPathTraversalError(SomaError):
-    """Raised when a cell_id or path attempts directory traversal."""
-
-
-RulePathTraversalError = CellPathTraversalError
-AegisError = SomaError
-
-
-class FitnessError(SomaError):
-    """Raised when fitness computation encounters invalid data."""
-
-
-class ScoringError(SomaError):
-    """Raised when scoring computation encounters invalid inputs."""
-
-
-@dataclass
-class Result(Generic[T]):
-    """Structured result for engine/pipeline functions that cannot raise.
-
-    Usage:
-        result = some_engine_fn(...)
-        if result.ok:
-            use(result.value)
-        else:
-            log(result.error)
-    """
-    value: Optional[T]
-    error: Optional[SomaError] = None
-
-    @property
-    def ok(self) -> bool:
-        return self.error is None
+def __getattr__(name: str):
+    return getattr(_mod, name)

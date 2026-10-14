@@ -29,10 +29,10 @@ tags:
 fitness:
   score: 1.0
   impact_weight: 1.2
-  triggers: 8
-  true_positives: 4.2556
-  false_positives: 1.0168
-  last_trigger_date: "2026-10-08T07:35:17Z"
+  triggers: 12
+  true_positives: 7.2556
+  false_positives: 2.0168
+  last_trigger_date: "2026-10-14T06:50:24Z"
 ---
 
 All hook scripts communicate with their caller via JSON on stdout. Any

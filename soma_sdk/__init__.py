@@ -1,25 +1,20 @@
-"""Soma SDK — Adaptive governance for AI coding assistants."""
-from soma_sdk.governance import Governance
-from soma_sdk.cells import Cell, CellFitness, parse_cell_file, Rule, RuleFitness, parse_rule_file
-from soma_sdk.errors import CellNotFoundError, CellParseError, SomaError, RuleNotFoundError, RuleParseError, AegisError
-from soma_core.scoring import wilson_lower_bound
-from soma_core.lifecycle import bayesian_fitness
+"""Backward-compatibility forwarding shim for aegis_sdk."""
+from __future__ import annotations
+__version__ = "2.0.0"
 
-__version__ = '1.5.1'
-__all__ = [
-    'Governance',
-    'Cell',
-    'CellFitness',
-    'Rule',
-    'RuleFitness',
-    'SomaError',
-    'AegisError',
-    'CellNotFoundError',
-    'RuleNotFoundError',
-    'CellParseError',
-    'RuleParseError',
-    'parse_cell_file',
-    'parse_rule_file',
-    'wilson_lower_bound',
-    'bayesian_fitness',
-]
+import importlib
+import sys
+
+_mod = importlib.import_module("aegis_sdk")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
+
+
+def __getattr__(name: str):
+    return getattr(_mod, name)

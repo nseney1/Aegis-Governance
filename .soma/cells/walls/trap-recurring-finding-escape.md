@@ -26,10 +26,10 @@ tags:
 fitness:
   score: 0.75
   impact_weight: 1.0
-  triggers: 32
-  true_positives: 7.364
-  false_positives: 2.637
-  last_trigger_date: "2026-10-09T04:28:57Z"
+  triggers: 36
+  true_positives: 7.4945
+  false_positives: 2.6805
+  last_trigger_date: "2026-10-14T06:50:24Z"
 ---
 
 Findings that appear in consecutive review cycles MUST be resolved, not deferred.

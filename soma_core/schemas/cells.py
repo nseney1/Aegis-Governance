@@ -1,24 +1,19 @@
-"""Immutable cell frontmatter metadata schema."""
+"""Backward-compatibility forwarding shim for aegis_core.schemas.cells."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Mapping
+import importlib
+import sys
+
+_mod = importlib.import_module("aegis_core.schemas.cells")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-@dataclass(frozen=True)
-class CellMetadata:
-    """Strongly-typed immutable frontmatter model for governance cells."""
-
-    id: str
-    type: str
-    domain: str
-    enforcement: str = "advisory"
-    hypothesis: str = ""
-    prediction: str = ""
-    falsification: str = ""
-    tags: tuple[str, ...] = ()
-    impact_weight: float = 1.0
-    expiry_days: int | None = None
-    expiry_sessions: int | None = None
-    created: str = ""
-    fitness: Mapping[str, Any] | None = None
+def __getattr__(name: str):
+    return getattr(_mod, name)

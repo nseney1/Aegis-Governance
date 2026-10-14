@@ -1,19 +1,19 @@
-"""Immutable receipt value object schema."""
+"""Backward-compatibility forwarding shim for aegis_core.schemas.receipts."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+import importlib
+import sys
+
+_mod = importlib.import_module("aegis_core.schemas.receipts")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-@dataclass(frozen=True)
-class Receipt:
-    """Strongly-typed immutable receipt model."""
-
-    receipt_id: str
-    session_id: str
-    workspace: str
-    operation: str
-    args_hash: str
-    file_digest: str
-    cell_digest: str
-    created_at: float
-    expires_at: float
+def __getattr__(name: str):
+    return getattr(_mod, name)

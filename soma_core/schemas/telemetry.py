@@ -1,18 +1,19 @@
-"""Immutable telemetry signal event schema."""
+"""Backward-compatibility forwarding shim for aegis_core.schemas.telemetry."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Mapping
+import importlib
+import sys
+
+_mod = importlib.import_module("aegis_core.schemas.telemetry")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-@dataclass(frozen=True)
-class SignalEvent:
-    """Strongly-typed canonical event model for signals.jsonl records."""
-
-    event_id: str
-    cell_id: str
-    signal_type: str
-    score: float
-    timestamp: str
-    session_id: str = ""
-    details: Mapping[str, Any] | None = None
+def __getattr__(name: str):
+    return getattr(_mod, name)

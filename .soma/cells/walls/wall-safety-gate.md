@@ -17,11 +17,11 @@ tags:
   - gate
 created: 2026-09-28
 fitness:
-  triggers: 3
-  true_positives: 2
-  false_positives: 0.25
+  triggers: 7
+  true_positives: 2.72
+  false_positives: 0.49
   score: 1.0
-  last_trigger_date: "2026-10-08T07:35:17Z"
+  last_trigger_date: "2026-10-14T06:50:24Z"
 ---
 
 # Wall: Safety Gate

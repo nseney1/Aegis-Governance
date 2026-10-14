@@ -1,14 +1,19 @@
-"""Horizontal Skill Graph and Swarm Handoff system for Soma Governance."""
-from soma_core.skills.graph import SkillGraph, SkillNode
-from soma_core.skills.handoff import HandoffRouter, HandoffTicket, soma_handoff
-from soma_core.skills.slots import SlotRegistry, SlotResolutionError
+"""Backward-compatibility forwarding shim for aegis_core.skills."""
+from __future__ import annotations
 
-__all__ = [
-    "HandoffRouter",
-    "HandoffTicket",
-    "SkillGraph",
-    "SkillNode",
-    "SlotRegistry",
-    "SlotResolutionError",
-    "soma_handoff",
-]
+import importlib
+import sys
+
+_mod = importlib.import_module("aegis_core.skills")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
+
+
+def __getattr__(name: str):
+    return getattr(_mod, name)

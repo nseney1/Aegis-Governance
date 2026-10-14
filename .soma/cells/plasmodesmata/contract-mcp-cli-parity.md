@@ -23,11 +23,11 @@ tags:
   - parity
   - cross-service
 fitness:
-  triggers: 37
-  true_positives: 4.9467
-  false_positives: 2.7075
+  triggers: 41
+  true_positives: 5.6832
+  false_positives: 2.953
   score: 0.6667
-  last_trigger_date: "2026-10-08T09:12:32Z"
+  last_trigger_date: "2026-10-14T06:50:24Z"
 ---
 
 The MCP server (soma_mcp/tools.py) is the API contract for external agents.

@@ -1,22 +1,19 @@
-"""Shared security utilities for the Soma MCP server.
-
-Delegates path confinement, workspace validation, and cell name verification
-to the canonical single-authority implementation in soma_core.workspace.
-"""
+"""Backward-compatibility forwarding shim for aegis_mcp.security."""
 from __future__ import annotations
 
-from soma_core.workspace import (
-    _WINDOWS_DEVICE_NAMES,
-    Workspace,
-    confine_path,
-    confine_workspace,
-    validate_cell_names,
-)
+import importlib
+import sys
 
-__all__ = [
-    "_WINDOWS_DEVICE_NAMES",
-    "Workspace",
-    "confine_path",
-    "confine_workspace",
-    "validate_cell_names",
-]
+_mod = importlib.import_module("aegis_mcp.security")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
+
+
+def __getattr__(name: str):
+    return getattr(_mod, name)

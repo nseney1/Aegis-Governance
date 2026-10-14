@@ -1,183 +1,19 @@
-"""Gemini platform installation adapter."""
+"""Backward-compatibility forwarding shim for aegis_cli.platforms.gemini."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
-import shutil
-from typing import Any
+import importlib
+import sys
 
-from soma_cli.platforms.base import PlatformAdapter, PlatformInstallResult
+_mod = importlib.import_module("aegis_cli.platforms.gemini")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-class GeminiAdapter(PlatformAdapter):
-    """Platform adapter for Google Gemini / Antigravity environments."""
-
-    name: str = "gemini"
-
-    def get_target_dirs(self, local: bool = False) -> tuple[Path, Path, Path]:
-        """Return (rules_dir, skills_dir, hooks_dir)."""
-        if local:
-            base = self.workspace / ".soma"
-            return base / "rules", base / "skills", base / "plugins" / "governance"
-        base = self.home / ".gemini" / "config"
-        return base / "rules", base / "skills", base / "plugins" / "governance"
-
-    def install(self, local: bool = False, dry_run: bool = False) -> PlatformInstallResult:
-        result = PlatformInstallResult(
-            platform=self.name,
-            success=True,
-            scope="local" if local else "global",
-        )
-        rules_dir, skills_dir, hooks_dir = self.get_target_dirs(local=local)
-
-        if not dry_run:
-            rules_dir.mkdir(parents=True, exist_ok=True)
-            skills_dir.mkdir(parents=True, exist_ok=True)
-            hooks_dir.mkdir(parents=True, exist_ok=True)
-
-        # 1. Install rules
-        for src_rule in self.get_source_rules():
-            dest = rules_dir / src_rule.name
-            if dry_run:
-                result.installed_files.append(dest)
-            else:
-                try:
-                    shutil.copy2(src_rule, dest)
-                    result.installed_files.append(dest)
-                except Exception as exc:
-                    result.errors.append(f"Failed to copy rule {src_rule.name}: {exc}")
-                    result.success = False
-
-        # 2. Install skills
-        for src_skill_dir in self.get_source_skills():
-            dest_skill_dir = skills_dir / src_skill_dir.name
-            if dry_run:
-                result.installed_files.append(dest_skill_dir / "SKILL.md")
-            else:
-                try:
-                    if dest_skill_dir.exists():
-                        shutil.rmtree(dest_skill_dir)
-                    shutil.copytree(src_skill_dir, dest_skill_dir)
-                    result.installed_files.append(dest_skill_dir / "SKILL.md")
-                except Exception as exc:
-                    result.errors.append(f"Failed to copy skill {src_skill_dir.name}: {exc}")
-                    result.success = False
-
-        # 3. Install hooks configuration
-        hooks_dest = hooks_dir / "hooks.json"
-        hooks_config = self.render_config()
-        if dry_run:
-            result.installed_files.append(hooks_dest)
-        else:
-            try:
-                hooks_dest.write_text(json.dumps(hooks_config, indent=2), encoding="utf-8")
-                result.installed_files.append(hooks_dest)
-            except Exception as exc:
-                result.errors.append(f"Failed to write hooks.json: {exc}")
-                result.success = False
-
-        result.messages.append(
-            f"Successfully installed {len(result.installed_files)} items to {self.name} ({result.scope})"
-        )
-        return result
-
-    def uninstall(self, local: bool = False, dry_run: bool = False) -> PlatformInstallResult:
-        result = PlatformInstallResult(
-            platform=self.name,
-            success=True,
-            scope="local" if local else "global",
-        )
-        rules_dir, skills_dir, hooks_dir = self.get_target_dirs(local=local)
-
-        # Remove rules
-        for src_rule in self.get_source_rules():
-            dest = rules_dir / src_rule.name
-            if dest.is_file():
-                if dry_run:
-                    result.uninstalled_files.append(dest)
-                else:
-                    try:
-                        dest.unlink()
-                        result.uninstalled_files.append(dest)
-                    except Exception as exc:
-                        result.errors.append(f"Failed to remove {dest}: {exc}")
-                        result.success = False
-
-        # Remove skills
-        for src_skill_dir in self.get_source_skills():
-            dest_skill_dir = skills_dir / src_skill_dir.name
-            if dest_skill_dir.is_dir():
-                if dry_run:
-                    result.uninstalled_files.append(dest_skill_dir)
-                else:
-                    try:
-                        shutil.rmtree(dest_skill_dir)
-                        result.uninstalled_files.append(dest_skill_dir)
-                    except Exception as exc:
-                        result.errors.append(f"Failed to remove {dest_skill_dir}: {exc}")
-                        result.success = False
-
-        # Remove hooks
-        hooks_dest = hooks_dir / "hooks.json"
-        if hooks_dest.is_file():
-            if dry_run:
-                result.uninstalled_files.append(hooks_dest)
-            else:
-                try:
-                    hooks_dest.unlink()
-                    result.uninstalled_files.append(hooks_dest)
-                except Exception as exc:
-                    result.errors.append(f"Failed to remove {hooks_dest}: {exc}")
-                    result.success = False
-
-        result.messages.append(
-            f"Uninstalled {len(result.uninstalled_files)} items from {self.name} ({result.scope})"
-        )
-        return result
-
-    def verify(self, local: bool = False) -> bool:
-        rules_dir, skills_dir, hooks_dir = self.get_target_dirs(local=local)
-        if not rules_dir.is_dir() or not (hooks_dir / "hooks.json").is_file():
-            return False
-        # Check that core rules are present
-        source_rules = self.get_source_rules()
-        if source_rules and not any((rules_dir / r.name).is_file() for r in source_rules):
-            return False
-        return True
-
-    def render_config(self) -> dict[str, Any]:
-        """Render standard Gemini/Antigravity hooks configuration."""
-        return {
-            "governance-monitor": {
-                "PreInvocation": [
-                    {
-                        "type": "command",
-                        "command": "soma hook pre-invocation",
-                        "timeout": 15,
-                    }
-                ]
-            },
-            "safety-gate": {
-                "PreToolUse": [
-                    {
-                        "matcher": "run_command",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": "soma hook safety-gate",
-                                "timeout": 5,
-                            }
-                        ],
-                    }
-                ]
-            },
-            "session-close": {
-                "Stop": [
-                    {
-                        "type": "command",
-                        "command": "soma hook session-close",
-                        "timeout": 30,
-                    }
-                ]
-            },
-        }
+def __getattr__(name: str):
+    return getattr(_mod, name)

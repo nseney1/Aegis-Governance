@@ -104,7 +104,7 @@ doctor: ## Verify installation health & dependencies
 	@command -v awk >/dev/null 2>&1 && echo "  ✅ awk" || echo "  ❌ awk not found"
 	@echo ""
 	@echo "Packages:"
-	@for mod in soma_core soma_cli soma_sdk soma_mcp; do \
+	@for mod in aegis_core aegis_cli aegis_sdk aegis_mcp soma_core soma_cli soma_sdk soma_mcp; do \
 	  if [ -d "$$mod" ]; then echo "  ✅ $$mod (package)"; else echo "  ❌ $$mod missing"; fi; \
 	done
 	@echo ""
@@ -142,7 +142,7 @@ validate: ## Check script syntax and config values
 	  fi; \
 	done; \
 	if [ -n "$(SOMA_PYTHON_BIN)" ]; then \
-	  for p in soma_cli/*.py soma_core/*.py soma_core/**/*.py soma_mcp/*.py soma_sdk/*.py; do \
+	  for p in aegis_cli/*.py aegis_core/*.py aegis_core/**/*.py aegis_mcp/*.py aegis_sdk/*.py soma_cli/*.py soma_core/*.py soma_core/**/*.py soma_mcp/*.py soma_sdk/*.py; do \
 	    if [ -f "$$p" ]; then \
 	      if "$(SOMA_PYTHON_BIN)" -c "import ast, sys; ast.parse(open(sys.argv[1], encoding='utf-8').read())" "$$p" 2>/dev/null; then :; \
 	      else echo "  ❌ $$p (syntax error)"; failed=1; fi; \
@@ -198,8 +198,8 @@ test: validate ## Run validation tests (auto-parallelized when pytest-xdist is i
 	fi
 
 verify-layer1: ## Run Layer 1 deterministic quality tools on changed files
-	@$(SOMA_PYTHON_BIN) -m soma_cli.verify --layer1-only
+	@$(SOMA_PYTHON_BIN) -m aegis_cli.verify --layer1-only
 
 release-gate: ## Assert Release Gate 4.5 passes with a valid SHIP arbitration receipt
-	@$(SOMA_PYTHON_BIN) -m soma_cli.verify --release-gate
+	@$(SOMA_PYTHON_BIN) -m aegis_cli.verify --release-gate
 

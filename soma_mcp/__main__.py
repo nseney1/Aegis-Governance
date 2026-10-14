@@ -1,5 +1,6 @@
+"""Backward-compatibility entrypoint forwarding to aegis_mcp.__main__."""
 import sys
-from .server import run_stdio_server
+from aegis_mcp.__main__ import main
 
 if __name__ == "__main__":
-    sys.exit(run_stdio_server())
+    sys.exit(main())

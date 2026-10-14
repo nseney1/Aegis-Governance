@@ -1,43 +1,19 @@
-"""Normalized AST package for language-agnostic Layer 1 static analysis."""
+"""Backward-compatibility forwarding shim for aegis_core.ast."""
 from __future__ import annotations
 
-from .schema import (
-    CallSiteNode,
-    DefinitionNode,
-    ImportNode,
-    MutationPoint,
-    NormalizedAST,
-)
-from .drivers.python import parse_python_ast
-from .runner import (
-    ASTDriverError,
-    ASTDriverRegistry,
-    ASTDriverRunner,
-    ASTDriverTimeoutError,
-    NoDriverConfiguredError,
-)
+import importlib
+import sys
 
-from .detect import (
-    LANGUAGE_DEFINITIONS,
-    detect_project_languages,
-    provision_ast_driver_slots,
-    resolve_recommended_drivers,
-)
+_mod = importlib.import_module("aegis_core.ast")
+sys.modules[__name__] = _mod
 
-__all__ = [
-    "ASTDriverError",
-    "ASTDriverRegistry",
-    "ASTDriverRunner",
-    "ASTDriverTimeoutError",
-    "CallSiteNode",
-    "DefinitionNode",
-    "ImportNode",
-    "LANGUAGE_DEFINITIONS",
-    "MutationPoint",
-    "NoDriverConfiguredError",
-    "NormalizedAST",
-    "detect_project_languages",
-    "parse_python_ast",
-    "provision_ast_driver_slots",
-    "resolve_recommended_drivers",
-]
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
+
+
+def __getattr__(name: str):
+    return getattr(_mod, name)

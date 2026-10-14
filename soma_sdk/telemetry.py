@@ -1,69 +1,19 @@
-"""Unified telemetry signal writer for the Soma evidence pipeline (SDK facade).
-
-Delegates all atomic evidence logging, process-level locking, idempotency,
-and epoch generation tracking to the canonical single-authority implementation
-in soma_core.telemetry.
-"""
+"""Backward-compatibility forwarding shim for aegis_sdk.telemetry."""
 from __future__ import annotations
 
+import importlib
 import sys
-import types
-from typing import Any
 
-from soma_core.telemetry import (
-    DEFAULT_GENERATION,
-    EPOCH_FILENAME,
-    LOCK_FILENAME,
-    SIGNALS_FILENAME,
-    VALID_SIGNAL_TYPES,
-    VALID_SOURCES,
-    EventConflictError,
-    StaleGenerationError,
-    append_signal,
-    append_signals,
-    compute_event_id,
-    compute_payload_digest,
-    current_generation,
-    evidence_lock,
-    increment_generation,
-    read_generation,
-    read_signals,
-    _validate_event,
-)
+_mod = importlib.import_module("aegis_sdk.telemetry")
+sys.modules[__name__] = _mod
 
-__all__ = [
-    "VALID_SIGNAL_TYPES",
-    "VALID_SOURCES",
-    "SIGNALS_FILENAME",
-    "LOCK_FILENAME",
-    "EPOCH_FILENAME",
-    "DEFAULT_GENERATION",
-    "EventConflictError",
-    "StaleGenerationError",
-    "evidence_lock",
-    "read_generation",
-    "current_generation",
-    "increment_generation",
-    "compute_payload_digest",
-    "compute_event_id",
-    "append_signal",
-    "append_signals",
-    "read_signals",
-    "_validate_event",
-]
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-class _TelemetryFacadeModule(types.ModuleType):
-    """Module proxy that mirrors attribute mutations down to canonical soma_core.telemetry."""
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        super().__setattr__(name, value)
-        try:
-            import soma_core.telemetry as _core
-            if hasattr(_core, name):
-                setattr(_core, name, value)
-        except Exception:
-            pass
-
-
-sys.modules[__name__].__class__ = _TelemetryFacadeModule
+def __getattr__(name: str):
+    return getattr(_mod, name)

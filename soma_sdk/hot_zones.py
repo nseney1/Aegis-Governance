@@ -1,25 +1,19 @@
-"""Hot Zone Analysis SDK (Layer 1).
-
-Public interface for defect pattern analysis and cell fitness boosting:
-    Bugs → Registry → Hot zones + pattern clusters →
-    Cell fitness boost → Better cell selection → Fewer bugs → ♻️
-"""
+"""Backward-compatibility forwarding shim for aegis_sdk.hot_zones."""
 from __future__ import annotations
 
-from soma_core.defects import (
-    BoostConfig,
-    HotZoneReport,
-    compute_cell_boost,
-    compute_hot_zones,
-    load_config,
-    load_report_from_workspace,
-)
+import importlib
+import sys
 
-__all__ = [
-    "BoostConfig",
-    "HotZoneReport",
-    "load_config",
-    "compute_hot_zones",
-    "compute_cell_boost",
-    "load_report_from_workspace",
-]
+_mod = importlib.import_module("aegis_sdk.hot_zones")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
+
+
+def __getattr__(name: str):
+    return getattr(_mod, name)

@@ -1,7 +1,6 @@
-"""Allow `python3 -m soma_cli` when the soma script is not on PATH (BUG-041)."""
+"""Backward-compatibility entrypoint forwarding to aegis_cli.cli.main."""
 import sys
-
-from soma_cli.cli import main
+from aegis_cli.cli import main
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(prog="soma"))

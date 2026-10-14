@@ -1,41 +1,19 @@
-"""Declarative CLI Command Protocol and Category Definitions."""
+"""Backward-compatibility forwarding shim for aegis_cli.base."""
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-import argparse
-from enum import Enum
-from typing import Optional, Tuple
+import importlib
+import sys
 
-__all__ = ["CommandCategory", "SomaCommand"]
+_mod = importlib.import_module("aegis_cli.base")
+sys.modules[__name__] = _mod
 
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
 
-class CommandCategory(str, Enum):
-    """Categorical grouping for Soma commands in help screens and documentation."""
-    SETUP = "Setup & Environment"
-    WORKFLOW = "Daily Workflow & Verification"
-    LIFECYCLE = "Rule Evolution & Intelligence"
-    PLUMBING = "Plumbing & Swarm Protocol"
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-class SomaCommand(ABC):
-    """Abstract Base Class defining the lifecycle contract for all Soma CLI subcommands."""
-
-    name: str
-    aliases: Tuple[str, ...] = ()
-    category: CommandCategory
-    help: str
-    description: Optional[str] = None
-
-    def get_names(self) -> Tuple[str, ...]:
-        """Return the primary command name and all registered aliases."""
-        return (self.name, *self.aliases)
-
-    @abstractmethod
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        """Register command-specific flags and arguments onto its subparser."""
-        ...
-
-    @abstractmethod
-    def execute(self, args: argparse.Namespace) -> int:
-        """Execute command logic. Common options are pre-handled by the dispatcher."""
-        ...
+def __getattr__(name: str):
+    return getattr(_mod, name)

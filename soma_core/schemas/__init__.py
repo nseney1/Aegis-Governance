@@ -1,27 +1,19 @@
-from soma_core.schemas.artifacts import (
-    ArtifactEnvelope,
-    ArtifactRegistry,
-    ChargeSheet,
-    DiffProposal,
-    InspectionReceipt,
-    TestVerdict,
-    validate_artifact_production,
-)
-from soma_core.schemas.cells import CellMetadata
-from soma_core.schemas.lifecycle import TransitionResult
-from soma_core.schemas.receipts import Receipt
-from soma_core.schemas.telemetry import SignalEvent
+"""Backward-compatibility forwarding shim for aegis_core.schemas."""
+from __future__ import annotations
 
-__all__ = [
-    "ArtifactEnvelope",
-    "ArtifactRegistry",
-    "CellMetadata",
-    "ChargeSheet",
-    "DiffProposal",
-    "InspectionReceipt",
-    "Receipt",
-    "SignalEvent",
-    "TestVerdict",
-    "TransitionResult",
-    "validate_artifact_production",
-]
+import importlib
+import sys
+
+_mod = importlib.import_module("aegis_core.schemas")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
+
+
+def __getattr__(name: str):
+    return getattr(_mod, name)

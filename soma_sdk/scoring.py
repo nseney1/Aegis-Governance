@@ -1,28 +1,19 @@
-"""Unified scoring module for soma-governance (SDK interface).
-Re-exports canonical scoring functions from soma_core.scoring.
-"""
+"""Backward-compatibility forwarding shim for aegis_sdk.scoring."""
 from __future__ import annotations
 
-from soma_core.scoring import (
-    _to_num,
-    _wilson_interval,
-    bayesian_posterior,
-    bayesian_score,
-    calculate_composite_fitness,
-    calculate_snr,
-    compute_cell_fitness,
-    laplace_score,
-    wilson_lower_bound,
-)
+import importlib
+import sys
 
-__all__ = [
-    "_wilson_interval",
-    "_to_num",
-    "bayesian_posterior",
-    "wilson_lower_bound",
-    "laplace_score",
-    "bayesian_score",
-    "compute_cell_fitness",
-    "calculate_composite_fitness",
-    "calculate_snr",
-]
+_mod = importlib.import_module("aegis_sdk.scoring")
+sys.modules[__name__] = _mod
+
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
+
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
+
+
+def __getattr__(name: str):
+    return getattr(_mod, name)

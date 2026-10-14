@@ -1,100 +1,19 @@
-"""Constants and mappings for cell lifecycle, tiers, and metamorphosis."""
+"""Backward-compatibility forwarding shim for aegis_core.lifecycle.constants."""
 from __future__ import annotations
 
-STATUS_NEW = "NEW"
-STATUS_SURVIVE = "SURVIVE"
-STATUS_ADAPT = "ADAPT"
-STATUS_EXTINCT = "EXTINCT"
-STATUS_APOPTOSIS = "APOPTOSIS"
-STATUS_APOPTOSIS_WARNING = "APOPTOSIS_WARNING"
-STATUS_DORMANT = "DORMANT"
+import importlib
+import sys
 
-# The 11 protected core genome rules that must never be demoted
-PROTECTED_RULES = frozenset({
-    "providence",
-    "cost-optimization",
-    "subagent-delegation",
-    "architectural-tenets",
-    "polyglot-standards",
-    "feature-specs",
-    "testing",
-    "documentation",
-    "destructive-ops",
-    "git-workflow",
-    "desktop-automation",
-})
+_mod = importlib.import_module("aegis_core.lifecycle.constants")
+sys.modules[__name__] = _mod
 
-GLOBAL_PROMOTION_PATH = {"vacuole": "wall", "wall": "genome"}
-LOCAL_PROMOTION_PATH = {"vacuole": "wall", "wall": "gate"}
-PROMOTION_PATH = GLOBAL_PROMOTION_PATH
+for _k, _v in _mod.__dict__.items():
+    if not _k.startswith("__"):
+        globals()[_k] = _v
 
-GLOBAL_DEMOTION_PATH = {"genome": "wall", "wall": "vacuole"}
-LOCAL_DEMOTION_PATH = {"gate": "wall", "wall": "vacuole"}
-DEMOTION_PATH = GLOBAL_DEMOTION_PATH
-
-TYPE_TO_DIR = {
-    "vacuole": "vacuoles",
-    "wall": "walls",
-    "gate": "gates",
-    "trap": "traps",
-    "invariant": "invariants",
-    "boundary": "boundaries",
-    "persona": "personas",
-    "contract": "contracts",
-}
-
-EXTINCTION_THRESHOLD = 0.15
-PROMOTION_THRESHOLD = 0.85
-MIN_PROMOTION_TRIGGERS = 20
-DEFAULT_DECAY_FACTOR = 0.95
-
-MIN_TRIGGERS_FOR_PROMOTION = MIN_PROMOTION_TRIGGERS
-MIN_TP_RATE_FOR_PROMOTION = PROMOTION_THRESHOLD
-MIN_AGE_DAYS_FOR_PROMOTION = 30
-MAX_FP_RATE_FOR_DEMOTION = 0.5
-DORMANT_DAYS_THRESHOLD = 90
-
-VALID_TYPES = {
-    "vacuole": "vacuoles",
-    "chloroplast": "chloroplasts",
-    "wall": "walls",
-    "membrane": "membranes",
-    "plasmodesmata": "plasmodesmata",
-    "gate": "gates",
-    # Engineering types
-    "trap": "traps",
-    "persona": "personas",
-    "invariant": "invariants",
-    "boundary": "boundaries",
-    "contract": "contracts",
-}
+if hasattr(_mod, "__all__"):
+    __all__ = _mod.__all__
 
 
-def get_promotion_path(ws: object) -> dict[str, str]:
-    """Return promotion path based on whether workspace is a Soma repository."""
-    is_soma = getattr(ws, "is_soma_repo", False)
-    return GLOBAL_PROMOTION_PATH if is_soma else LOCAL_PROMOTION_PATH
-
-
-def get_demotion_path(ws: object) -> dict[str, str]:
-    """Return demotion path based on whether workspace is a Soma repository."""
-    is_soma = getattr(ws, "is_soma_repo", False)
-    return GLOBAL_DEMOTION_PATH if is_soma else LOCAL_DEMOTION_PATH
-
-
-VALID_ENFORCEMENT = ("advisory", "mechanical", "gate")
-
-METAMORPHOSIS_PATHS = {
-    "vacuole": [
-        {"target": "wall", "min_fitness": 0.8, "min_sessions": 20},
-        {"target": "membrane", "min_fitness": 0.7, "min_sessions": 15},
-    ],
-    "chloroplast": [
-        {"target": "rule", "min_fitness": 0.9, "min_sessions": 30},
-    ],
-    "wall": [
-        {"target": "rule", "min_fitness": 0.85, "min_sessions": 25},
-    ],
-}
-
-DECAY_FACTOR = 0.95  # Multiply counts by this each application; ~20-session memory window
+def __getattr__(name: str):
+    return getattr(_mod, name)

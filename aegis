@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Aegis CLI wrapper
+PRG="${BASH_SOURCE[0]}"
+while [ -h "$PRG" ]; do
+  DIR="$(cd -P "$(dirname "$PRG")" && pwd)"
+  PRG="$(readlink "$PRG")"
+  [[ $PRG != /* ]] && PRG="$DIR/$PRG"
+done
+REPO_DIR="$(cd -P "$(dirname "$PRG")" && pwd)"
+PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m aegis_cli.cli "$@"
