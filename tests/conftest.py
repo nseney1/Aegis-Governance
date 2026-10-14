@@ -105,12 +105,12 @@ def iter_source_files(root, extensions):
 
 @pytest.fixture
 def harness(tmp_path):
-    """Yield an isolated SomaTestHarness instance rooted in tmp_path."""
+    """Yield an isolated AegisTestHarness instance rooted in tmp_path."""
     try:
-        from harness import SomaTestHarness
+        from harness import AegisTestHarness
     except ImportError:
-        from tests.harness import SomaTestHarness
-    return SomaTestHarness(tmp_path)
+        from tests.harness import AegisTestHarness
+    return AegisTestHarness(tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -122,13 +122,15 @@ def hermetic_environment_and_mcp_isolation():
     os.environ.clear()
     os.environ.update(old_env)
 
-    # Reset MCP server singletons if soma_mcp.server is loaded
-    if "soma_mcp.server" in sys.modules:
-        mcp_server = sys.modules["soma_mcp.server"]
-        if hasattr(mcp_server, "_session_tokens") and isinstance(mcp_server._session_tokens, set):
-            mcp_server._session_tokens.clear()
-        if hasattr(mcp_server, "_tool_call_times") and hasattr(mcp_server._tool_call_times, "clear"):
-            mcp_server._tool_call_times.clear()
-        if hasattr(mcp_server, "_session_token"):
-            mcp_server._session_token = None
+    # Reset MCP server singletons if aegis_mcp.server is loaded
+    for mod_name in ("aegis_mcp.server", "soma_mcp.server"):
+        if mod_name in sys.modules:
+            mcp_server = sys.modules[mod_name]
+            if hasattr(mcp_server, "_session_tokens") and isinstance(mcp_server._session_tokens, set):
+                mcp_server._session_tokens.clear()
+            if hasattr(mcp_server, "_tool_call_times") and hasattr(mcp_server._tool_call_times, "clear"):
+                mcp_server._tool_call_times.clear()
+            if hasattr(mcp_server, "_session_token"):
+                mcp_server._session_token = None
+
 

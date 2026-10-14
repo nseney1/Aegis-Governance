@@ -133,11 +133,8 @@ class AegisTestHarness:
         )
 
 
-SomaTestHarness = AegisTestHarness
-
-
 __all__ = [
     "AegisTestHarness",
     "CELL_TYPE_DIRS",
-    "SomaTestHarness",
 ]
+
