@@ -10,7 +10,7 @@ import warnings
 from pathlib import Path
 from typing import Any, Optional
 
-from aegis_core.cell_inventory import CellInventoryError, inventory_cells
+from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
 from aegis_core.yaml import parse_frontmatter
 from aegis_core.telemetry import EventConflictError, StaleGenerationError
 from aegis_core.workspace import Workspace
@@ -34,7 +34,7 @@ VALID_SOURCES = ('ci', 'manual', 'mcp', 'session')
 
 
 class Governance:
-    """Soma governance interface.
+    """Aegis governance interface.
     
     Usage:
         from aegis_sdk import Governance
@@ -64,8 +64,8 @@ class Governance:
         distinguish an empty tree from an incomplete one.
         """
         try:
-            inventory = inventory_cells(str(self.root))
-        except CellInventoryError as exc:
+            inventory = inventory_rules(str(self.root))
+        except RuleInventoryError as exc:
             raise RuntimeError(str(exc)) from exc
 
         canonical_filter = TYPE_TRANSLATION_MAP.get(cell_type, cell_type) if cell_type else None
@@ -147,7 +147,7 @@ class Governance:
         """
         # I-03: Validate rule_id against active inventory (advisory warning)
         try:
-            inventory = inventory_cells(str(self.root))
+            inventory = inventory_rules(str(self.root))
             known_cells = {
                 Path(entry.relative_path).stem
                 for entry in inventory.entries
@@ -258,8 +258,10 @@ class Governance:
 
     def parse_cell_file(self, filepath: str) -> tuple[dict, str]:
         """Parse a cell markdown file into (frontmatter_dict, body_text)."""
-        from aegis_sdk.cells import parse_cell_file
-        return parse_cell_file(filepath)
+        from aegis_sdk.rules import parse_rule_file
+        return parse_rule_file(filepath)
+
+    parse_rule_file = parse_cell_file
     
     def create_cell_from_description(
         self, description: str, domain: Optional[str] = None, cell_type: Optional[str] = None,

@@ -66,7 +66,7 @@ def test_hardcoded_path_read_failure_is_an_issue(tmp_path, monkeypatch):
 
 
 def test_cell_stat_failure_is_an_issue(tmp_path, monkeypatch):
-    import aegis_core.cell_inventory as inventory
+    import aegis_core.rule_inventory as inventory
 
     cell = _write_wall(tmp_path)
     real_stat = inventory.os.stat

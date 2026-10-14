@@ -184,7 +184,7 @@ def test_receipt_is_single_use(workspaces):
 
 
 def test_receipt_digest_rejects_symlinked_cell(workspaces):
-    from aegis_core.cell_inventory import CellInventoryError
+    from aegis_core.rule_inventory import CellInventoryError
 
     canonical, _ = workspaces
     target = canonical / '.aegis' / 'rules' / 'vacuoles' / 'cell-canonical.md'

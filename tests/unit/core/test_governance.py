@@ -211,7 +211,7 @@ def test_sdk_scoring_reexports():
 
 
 def test_cell_fitness_snr_db_delegation():
-    from aegis_sdk.cells import CellFitness
+    from aegis_sdk.rules import CellFitness
     from aegis_core.scoring import calculate_snr
 
     cf = CellFitness(true_positives=10, false_positives=2)
@@ -225,7 +225,7 @@ def test_cell_fitness_snr_db_delegation():
 
 
 def test_write_cell_frontmatter_zero_dep_fallback(tmp_path, monkeypatch):
-    import aegis_sdk.cells as sdk_cells
+    import aegis_sdk.rules as sdk_cells
     monkeypatch.setattr(sdk_cells, "yaml", None)
 
     target_file = tmp_path / "cell_zero_dep.md"

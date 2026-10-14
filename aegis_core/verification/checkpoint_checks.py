@@ -500,7 +500,7 @@ def check_cell_fitness(root: Path) -> list[dict]:
 
 def check_cell_conventions(root: Path) -> list[dict]:
     issues = []  # type: List[dict]
-    from aegis_core.cell_inventory import CellInventoryError, inventory_cells
+    from aegis_core.rule_inventory import CellInventoryError, inventory_cells
 
     try:
         inventory = inventory_cells(str(root))
@@ -511,7 +511,7 @@ def check_cell_conventions(root: Path) -> list[dict]:
         ))
         return issues
 
-    from aegis_core.cell_inventory import parse_frontmatter
+    from aegis_core.rule_inventory import parse_frontmatter
 
     for entry in inventory.entries:
         if os.path.basename(entry.relative_path) == "README.md":

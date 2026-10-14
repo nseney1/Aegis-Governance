@@ -311,7 +311,7 @@ class TestMainCursorCommitOrdering:
             assert int(f.read()) == os.path.getsize(os.path.join(ws, ".aegis", "human_insights.jsonl"))
 
 def _fitness(ws, name):
-    from aegis_sdk.cells import parse_cell_file
+    from aegis_sdk.rules import parse_cell_file
     fm, _ = parse_cell_file(os.path.join(ws, ".aegis", "rules", "vacuoles", f"{name}.md"))
     return fm["fitness"]
 

@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 def test_load_cell_uses_created_field(tmp_path):
     """load_cell must read 'created' field from cell frontmatter."""
-    from aegis_sdk.cells import load_cell
+    from aegis_sdk.rules import load_cell
     cell_file = tmp_path / ".aegis" / "rules" / "vacuoles" / "created-test.md"
     cell_file.parent.mkdir(parents=True, exist_ok=True)
     cell_file.write_text("""---

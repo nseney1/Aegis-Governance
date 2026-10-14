@@ -16,7 +16,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_sdk.cells import CellFitness
+from aegis_sdk.rules import CellFitness
 from aegis_sdk.analysis import antifragile_bonus
 
 

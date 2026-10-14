@@ -1,10 +1,10 @@
 # Scripts Reference
 
-This document catalogs 79 executable scripts, command modules, SDK modules, and MCP/core modules in the Aegis governance framework.
+This document catalogs 78 executable scripts, command modules, SDK modules, and MCP/core modules in the Aegis governance framework.
 
 ## Counting Method
 
-Counts are generated from the source tree with mutually exclusive categories: package initializers (`__init__.py`, `__main__.py`) and subpackages (`aegis_core/workspace/`, `aegis_core/lifecycle/`, `aegis_core/schemas/`, `aegis_core/outcomes/`, `aegis_cli/hooks/`) are excluded; `install/hooks/pre-commit` is counted as the lifecycle script; and all non-initializer `aegis_core/*.py` modules are grouped with the MCP modules. This produces 79 unique paths with no double counting.
+Counts are generated from the source tree with mutually exclusive categories: package initializers (`__init__.py`, `__main__.py`) and subpackages (`aegis_core/workspace/`, `aegis_core/lifecycle/`, `aegis_core/schemas/`, `aegis_core/outcomes/`, `aegis_cli/hooks/`) are excluded; `install/hooks/pre-commit` is counted as the lifecycle script; and all non-initializer `aegis_core/*.py` modules are grouped with the MCP modules. This produces 78 unique paths with no double counting.
 
 ## Summary by Category
 
@@ -13,9 +13,9 @@ Counts are generated from the source tree with mutually exclusive categories: pa
 | [Lifecycle Scripts (Hooks)](#lifecycle-scripts-hooks--bash) | bash (`install/hooks/`) | 1 | Git pre-commit lifecycle hook |
 | [Verification Scripts](#verification-scripts--python) | Python (`aegis_core/verification/`) | 15 | Deterministic AST checkers, coverage tools, and adversarial verification |
 | [CLI Commands](#cli-commands--python-aegis_cli) | Python and bash (`aegis_cli/`, root) | 21 | CLI launcher and command implementation modules |
-| [SDK Modules](#sdk-modules--python-aegis_sdk) | Python (`aegis_sdk/`) | 9 | Canonical scoring, parsing, telemetry, hot-zone, and governance APIs |
+| [SDK Modules](#sdk-modules--python-aegis_sdk) | Python (`aegis_sdk/`) | 8 | Canonical scoring, parsing, telemetry, hot-zone, and governance APIs |
 | [MCP and Core Modules](#mcp-and-core-modules) | Python (`aegis_mcp/`, `aegis_core/`) | 33 | MCP transport, dispatch, confinement, content inventory, canonical evidence, cache, errors, receipts, and atomic storage |
-| **Total** | | **79** | Unique paths under the method above |
+| **Total** | | **78** | Unique paths under the method above |
 
 ---
 
@@ -89,13 +89,12 @@ These 21 paths provide the root `aegis` launcher and 20 non-initializer Python m
 
 ## SDK Modules — Python (`aegis_sdk/`)
 
-These 9 non-initializer modules provide the canonical Python APIs used by the CLI, MCP server, and governance engines.
+These 8 non-initializer modules provide the canonical Python APIs used by the CLI, MCP server, and governance engines.
 
 | Module | Location | Purpose |
 |:-------|:---------|:--------|
 | **`errors.py`** | `aegis_sdk/errors.py` | Structured error hierarchy for governance operations (parse errors, validation failures, scoring exceptions). |
 | **`scoring.py`** | `aegis_sdk/scoring.py` | Wilson interval confidence-bound scoring and related fitness calculations. |
-| **`cells.py`** | `aegis_sdk/cells.py` | Canonical YAML frontmatter parser and cell file utilities. |
 | **`rules.py`** | `aegis_sdk/rules.py` | Canonical Rule and RuleFitness models and frontmatter utilities. |
 | **`governance.py`** | `aegis_sdk/governance.py` | Governance state API for querying active rules, cells, and configuration. |
 | **`analysis.py`** | `aegis_sdk/analysis.py` | Analytical utilities for fitness landscapes, trends, and evidence aggregation. |
@@ -117,7 +116,7 @@ These 33 modules implement the MCP server, state-bound authorization, safe cell 
 | **`projection.py`** | `aegis_mcp/projection.py` | Opt-in response projection engine for token reduction and SOMA-V01 credential scrubbing. |
 | **`security.py`** | `aegis_mcp/security.py` | Workspace/path confinement and cell-name validation. |
 | **`integrity.py`** | `aegis_mcp/integrity.py` | Cell manifest generation, signing, and verification. |
-| **`cell_cache.py`** | `aegis_mcp/cell_cache.py` | Content-fingerprinted parsed-cell cache using the canonical race-detecting inventory; stale or unsafe trees fail closed. |
+| **`rule_cache.py`** | `aegis_mcp/rule_cache.py` | Content-fingerprinted parsed-rule cache using the canonical race-detecting inventory; stale or unsafe trees fail closed. |
 | **`jit_engine.py`** | `aegis_mcp/jit_engine.py` | JIT cell matching, frontmatter parsing, and governance expression. |
 | **`scoring.py`** | `aegis_core/scoring.py` | Zero-dependency Wilson interval lower bound and SNR confidence calculations. |
 | **`proposals.py`** | `aegis_core/proposals.py` | Test-to-code (TTC) verification, deterministic oracle scoring, and checkpoint validation. |
@@ -128,7 +127,7 @@ These 33 modules implement the MCP server, state-bound authorization, safe cell 
 | **`sync.py`** | `aegis_core/sync.py` | Escalation sentinel, liveness sentinel, team sync, HGT ribosome, immune sweep, and post-session hooks. |
 | **`telemetry.py`** | `aegis_core/telemetry.py` | Telemetry signal collection, outcome processing, fitness updating, metrics snapshots, cell quorum, coverage, and immune grading. |
 | **`receipts.py`** | `aegis_core/receipts.py` | In-memory single-use receipts bound to session, workspace, operation, exact arguments, target-file digest, canonical cell fingerprint, and expiry. |
-| **`cell_inventory.py`** | `aegis_core/cell_inventory.py` | Captures stable cell bytes and content fingerprints without following symlinks; detects concurrent changes and unsafe trees. |
+| **`rule_inventory.py`** | `aegis_core/rule_inventory.py` | Captures stable rule bytes and content fingerprints without following symlinks; detects concurrent changes and unsafe trees. |
 | **`evidence.py`** | `aegis_core/evidence.py` | Standard-library canonical reader for weighted `signals.jsonl` evidence, independent trigger/outcome dimensions, and structured parse errors. |
 | **`errors.py`** | `aegis_core/errors.py` | Standardized typed domain error hierarchy (`SomaError`, `SomaValidationError`, `CellCorruptError`, `ReceiptExpiredError`, `LockTimeoutError`). |
 | **`somayaml.py`** | `aegis_core/somayaml.py` | Zero-dependency YAML and frontmatter parser with DoS recursion guards, anchor attack prevention, and UTF-8 validation. |

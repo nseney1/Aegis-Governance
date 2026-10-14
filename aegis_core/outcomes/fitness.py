@@ -11,7 +11,7 @@ import secrets
 import sys
 from typing import Any, Optional
 
-from aegis_core.cell_inventory import find_matching_cells
+from aegis_core.rule_inventory import find_matching_cells
 from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter, parse_rule_frontmatter
 
 INSIGHT_PRINCIPAL = "outcome_engine"

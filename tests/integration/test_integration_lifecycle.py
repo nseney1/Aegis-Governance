@@ -14,7 +14,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_sdk.cells import (
+from aegis_sdk.rules import (
     Cell, CellFitness, parse_cell_file, write_cell_frontmatter, load_cell
 )
 from aegis_sdk.scoring import bayesian_posterior, laplace_score

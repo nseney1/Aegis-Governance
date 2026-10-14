@@ -16,7 +16,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from aegis_sdk.cells import parse_cell_file
+from aegis_sdk.rules import parse_cell_file
 
 
 def _make_cell(workspace, cell_id, target_paths, cell_type='vacuole', fitness=None):

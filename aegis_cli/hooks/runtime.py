@@ -161,7 +161,7 @@ def run_pre_commit(
 
     for cells_dir in cells_dirs:
         if cells_dir.is_dir() and staged_files:
-            from aegis_sdk.cells import parse_cell_file
+            from aegis_sdk.rules import parse_cell_file
 
             for cell_file in cells_dir.glob("**/*.md"):
                 if cell_file.name == "README.md":

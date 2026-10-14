@@ -585,7 +585,7 @@ def _match_cells(workspace: str | Path | Workspace, changed_files: List[str]) ->
 
     Returns list of dicts with keys: cell, rule, type, target_match, path.
     """
-    from aegis_core.cell_inventory import find_matching_cells
+    from aegis_core.rule_inventory import find_matching_cells
 
     ws = as_workspace(workspace)
     cells_dir = str(ws.rules_dir)

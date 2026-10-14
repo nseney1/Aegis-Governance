@@ -12,7 +12,7 @@ from aegis_core.evidence import aggregate_signals
 
 __all__ = ["run_status", "StatusCommand"]
 
-from aegis_sdk.cells import parse_cell_file
+from aegis_sdk.rules import parse_cell_file
 
 
 def _repo_root(args: argparse.Namespace) -> Path:

@@ -39,7 +39,7 @@ def test_soma_core_has_zero_upward_imports():
 
 def test_parse_frontmatter_in_soma_core():
     """parse_frontmatter must be available directly in aegis_core."""
-    from aegis_core.cell_inventory import parse_frontmatter
+    from aegis_core.rule_inventory import parse_frontmatter
     content = "---\ntype: learned-trap\nname: test-trap\n---\nBody here"
     fm = parse_frontmatter(content)
     assert isinstance(fm, dict)

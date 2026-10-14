@@ -240,7 +240,7 @@ class TestSyncFrontmatter:
 
     def test_sync_preserves_both_when_has_outcomes_is_false(self, tmp_path):
         """When ledger has only triggers (has_outcomes=False), tp and fp are preserved."""
-        from aegis_sdk.cells import parse_cell_file
+        from aegis_sdk.rules import parse_cell_file
         cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
         cells_dir.mkdir(parents=True)
         cell_file = cells_dir / "cell-a.md"

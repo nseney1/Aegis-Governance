@@ -28,7 +28,7 @@ import fnmatch
 
 yaml = None  # Backward-compatible sentinel: zero-dependency runtime
 
-from aegis_mcp.cell_cache import CellCache
+from aegis_mcp.rule_cache import CellCache
 
 # Module-level singleton — persists across MCP tool invocations
 _cell_cache = CellCache()

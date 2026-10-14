@@ -20,7 +20,7 @@ from aegis_sdk.errors import (
     FitnessError,
     ScoringError,
 )
-from aegis_sdk.cells import parse_cell_file, load_cell, _sanitize_cell_id
+from aegis_sdk.rules import parse_cell_file, load_cell, _sanitize_cell_id
 
 
 class TestErrorHierarchy:

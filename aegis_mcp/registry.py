@@ -7,7 +7,7 @@ import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-from aegis_core.cell_inventory import CellInventoryError, inventory_cells
+from aegis_core.rule_inventory import CellInventoryError, inventory_cells
 from aegis_core.workspace import resolve_workspace as _core_resolve_workspace
 from aegis_mcp.integrity import generate_key, generate_manifest, load_key, save_manifest
 from aegis_mcp.jit_engine import express as jit_express, parse_frontmatter, warn

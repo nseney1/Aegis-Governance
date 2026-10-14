@@ -126,7 +126,7 @@ def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypa
 
 
 def test_create_prompt_uses_inventory_bytes_without_reopen(tmp_path, monkeypatch):
-    from aegis_core.cell_inventory import inventory_cells
+    from aegis_core.rule_inventory import inventory_cells
     import aegis_mcp.tools as tools
 
     cell_path = _write_cell(tmp_path, "snapshot", "captured hypothesis")
@@ -146,7 +146,7 @@ def test_create_prompt_uses_inventory_bytes_without_reopen(tmp_path, monkeypatch
 
 
 def test_create_prompt_rejects_outside_symlinked_example(tmp_path):
-    from aegis_core.cell_inventory import CellInventoryError
+    from aegis_core.rule_inventory import CellInventoryError
     from aegis_mcp.tools import build_cell_create_prompt
 
     workspace = _symlinked_cell_directory(tmp_path)

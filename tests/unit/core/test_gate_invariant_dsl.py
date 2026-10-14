@@ -19,7 +19,7 @@ class TestImportBanned:
     def test_catches_violation(self, tmp_path):
         """A file with a banned import triggers a violation."""
         source = tmp_path / 'bad.py'
-        source.write_text('from aegis_sdk.cells import *\n', encoding='utf-8')
+        source.write_text('from aegis_sdk.rules import *\n', encoding='utf-8')
         from aegis_sdk.invariants import check_import_banned
         violation = check_import_banned(
             pattern='from aegis_sdk.* import *',
@@ -31,7 +31,7 @@ class TestImportBanned:
     def test_allows_compliant(self, tmp_path):
         """A file with a specific named import (not wildcard *) passes clean."""
         source = tmp_path / 'good.py'
-        source.write_text('from aegis_sdk.cells import parse_cell_file\n',
+        source.write_text('from aegis_sdk.rules import parse_cell_file\n',
                           encoding='utf-8')
         from aegis_sdk.invariants import check_import_banned
         violation = check_import_banned(

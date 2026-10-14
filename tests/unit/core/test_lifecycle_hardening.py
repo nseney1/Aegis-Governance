@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
 
-from aegis_sdk.cells import Cell, CellFitness, load_cell
+from aegis_sdk.rules import Cell, CellFitness, load_cell
 from aegis_cli.rule import _force_promote, _force_demote, run_promote
 
 

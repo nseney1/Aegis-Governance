@@ -1,16 +1,16 @@
-"""Content-fingerprinted in-memory cell cache for the MCP hot path."""
+"""Content-fingerprinted in-memory rule cache for the MCP hot path."""
 from __future__ import annotations
 
 import os
 import threading
 from typing import Any, Iterable, Optional
 
-from aegis_core import cell_inventory
-from aegis_core.cell_inventory import CellInventoryEntry, CellInventoryError
+from aegis_core import rule_inventory
+from aegis_core.rule_inventory import RuleInventoryEntry, RuleInventoryError
 
 
-class CellCacheError(RuntimeError):
-    """Cell loading failed; cached or partial results were not returned."""
+class RuleCacheError(RuntimeError):
+    """Rule loading failed; cached or partial results were not returned."""
 
     def __init__(
         self,
@@ -29,8 +29,11 @@ class CellCacheError(RuntimeError):
             super().__init__(operation)
 
 
-class CellCache:
-    """Thread-safe parsed-cell cache keyed by canonical content fingerprint."""
+CellCacheError = RuleCacheError
+
+
+class RuleCache:
+    """Thread-safe parsed-rule cache keyed by canonical content fingerprint."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -67,13 +70,13 @@ class CellCache:
         return h.hexdigest()
 
     def get_cells(self, workspace: str) -> list[dict[str, Any]]:
-        """Return cells, reparsing only when canonical inventory bytes change."""
+        """Return rules, reparsing only when canonical inventory bytes change."""
         workspace_key = os.path.abspath(os.fspath(workspace))
         with self._lock:
             try:
-                inventory = cell_inventory.inventory_cells(workspace_key)
-            except CellInventoryError as exc:
-                raise CellCacheError(
+                inventory = rule_inventory.inventory_rules(workspace_key)
+            except RuleInventoryError as exc:
+                raise RuleCacheError(
                     exc.operation, exc.path, str(exc), exc
                 ) from exc
 
@@ -92,6 +95,8 @@ class CellCache:
             self._workspace = workspace_key
             return self._cells
 
+    get_rules = get_cells
+
     def invalidate(self) -> None:
         """Force parsing on the next successful inventory."""
         with self._lock:
@@ -101,7 +106,7 @@ class CellCache:
     @staticmethod
     def _load(
         workspace: str,
-        entries: Iterable[CellInventoryEntry],
+        entries: Iterable[RuleInventoryEntry],
     ) -> list[dict[str, Any]]:
         """Parse the exact bytes already captured by canonical inventory."""
         from aegis_mcp.jit_engine import parse_frontmatter, _get_body, warn
@@ -192,14 +197,24 @@ class CellCache:
                             manifest_path,
                             "HMAC signature verification FAILED — manifest may be tampered",
                         )
-        except CellCacheError:
+        except RuleCacheError:
             raise
         except Exception as exc:
             if key is not None:
-                raise CellCacheError(
+                raise RuleCacheError(
                     "integrity",
                     manifest_path,
                     f"HMAC integrity verification failed unexpectedly: {exc}",
                 ) from exc
             warn(f"integrity check failed (non-fatal): {exc}")
+
+
+CellCache = RuleCache
+
+__all__ = [
+    "RuleCache",
+    "RuleCacheError",
+    "CellCache",
+    "CellCacheError",
+]
 

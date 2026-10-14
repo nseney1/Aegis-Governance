@@ -13,7 +13,7 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 sys.path.insert(0, REPO_ROOT)
 
 from aegis_sdk.scoring import bayesian_posterior, laplace_score, _wilson_interval
-from aegis_sdk.cells import Cell, CellFitness
+from aegis_sdk.rules import Cell, CellFitness
 
 
 class TestLaplaceThresholds:

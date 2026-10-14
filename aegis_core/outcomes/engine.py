@@ -8,7 +8,7 @@ import subprocess
 import sys
 from typing import Any, Optional
 
-from aegis_core.cell_inventory import find_matching_cells
+from aegis_core.rule_inventory import find_matching_cells
 from aegis_core.workspace import Workspace, as_workspace, resolve_workspace
 
 __all__ = ["match_cells_to_changes", "run_outcome_engine", "main"]
