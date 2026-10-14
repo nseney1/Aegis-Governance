@@ -69,6 +69,8 @@ def run_check(args: argparse.Namespace) -> int:
     # Mode 5: Default (Fast Layer 1 verification)
     if not getattr(args, "full", False) and not getattr(args, "plan", None) and not getattr(args, "plan_file", None):
         args.layer1_only = True
+        args.fast = True
+        args.fast_mode = True
 
     return run_verify(args)
 
