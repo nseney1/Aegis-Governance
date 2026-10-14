@@ -14,7 +14,7 @@ triggers:
   - import_modification
   - module_creation
   - architecture_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-09-30
@@ -26,13 +26,13 @@ tags:
 fitness:
   score: 0.6
   impact_weight: 1.0
-  triggers: 76
-  true_positives: 20.4353
+  triggers: 80
+  true_positives: 24.4353
   false_positives: 17.423
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Supercell C5 incident: `aegis_mcp/tools.py` imported `_check_test_coverage`,
-`_check_hardcoded_paths`, `_check_assertion_density`, `_check_cell_fitness` from
+Citadel C5 incident: `aegis_mcp/tools.py` imported `_check_test_coverage`,
+`_check_hardcoded_paths`, `_check_assertion_density`, `_check_rule_fitness` from
 `aegis_cli.checkpoint`. MCP should not reach into CLI internals. Fix: extract shared
 logic to aegis_core or inline it.

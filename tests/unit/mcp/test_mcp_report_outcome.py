@@ -60,8 +60,8 @@ def test_report_outcome_accepts_tp_and_fp(tmp_path, monkeypatch):
 
 def test_soma_create_cell_description_clarifies_advisory():
     from aegis_mcp.tools import TOOL_DEFINITIONS
-    tool_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "aegis_create_cell")
-    assert "advisory" in tool_def["description"].lower()
+    tool_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "aegis_create_rule")
+    assert "prompt" in tool_def["description"].lower()
 
 
 def test_report_outcome_accepts_pass_and_fail(tmp_path, monkeypatch):

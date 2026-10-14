@@ -9,8 +9,21 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Optional, Tuple, Union
 
+from aegis_core.taxonomy import (
+    DEFAULT_CONFIDENCE_LEVEL,
+    SALIENT_DECAY_FLOOR,
+    SALIENT_EXPLORATION_PRIOR,
+    SALIENT_GATE_UNTESTED,
+    SALIENT_GATE_WEIGHT,
+    SALIENT_INVARIANT_WEIGHT,
+    SALIENT_TRAP_WEIGHT,
+    WILSON_CONFIDENCE_Z_SCORES,
+)
 
-def _wilson_interval(tp: int | float, total: int | float, z: float = 1.645) -> Tuple[float, float]:
+_DEFAULT_Z = WILSON_CONFIDENCE_Z_SCORES[DEFAULT_CONFIDENCE_LEVEL]
+
+
+def _wilson_interval(tp: int | float, total: int | float, z: float = _DEFAULT_Z) -> Tuple[float, float]:
     """Wilson score interval — correct for small n, no scipy needed.
 
     Args:
@@ -59,7 +72,7 @@ def _to_num(val: Any, default: float = 0.0) -> float:
 def bayesian_posterior(
     tp: int | float,
     fp: int | float,
-    confidence: float = 0.90,
+    confidence: float = DEFAULT_CONFIDENCE_LEVEL,
 ) -> Dict[str, Union[float, str, int]]:
     """Wilson-bounded fitness scoring with Jeffrey's prior.
 
@@ -79,7 +92,7 @@ def bayesian_posterior(
     a = tp_num + 0.5
     b = fp_num + 0.5
     mean = a / (a + b)
-    z = {0.90: 1.645, 0.95: 1.96, 0.99: 2.576}.get(confidence, 1.645)
+    z = WILSON_CONFIDENCE_Z_SCORES.get(confidence, _DEFAULT_Z)
     total = tp_num + fp_num
     lower, upper = _wilson_interval(tp_num, total, z)
     lower = round(lower, 4)
@@ -98,7 +111,7 @@ def bayesian_posterior(
 def wilson_lower_bound(
     tp: int | float,
     triggers: int | float,
-    z: float = 1.645,
+    z: float = _DEFAULT_Z,
 ) -> float:
     """Wilson score lower bound for success rate with confidence z.
 
@@ -217,12 +230,8 @@ calculate_composite_fitness = compute_cell_fitness
 
 # ── Salience Scoring Engine (Phase 22 / v0.119.0) ──────────────────────────
 
-SALIENT_EXPLORATION_PRIOR = 0.20  # S_base
-SALIENT_DECAY_FLOOR = 0.20        # R_min
-SALIENT_GATE_WEIGHT = 5.0         # W_gate
-SALIENT_WALL_WEIGHT = 2.0         # W_wall
-SALIENT_VACUOLE_WEIGHT = 1.0      # W_vacuole
-SALIENT_GATE_UNTESTED = 1.0       # S_gate_untested
+SALIENT_WALL_WEIGHT = SALIENT_INVARIANT_WEIGHT
+SALIENT_VACUOLE_WEIGHT = SALIENT_TRAP_WEIGHT
 
 SPECIFICITY_MULTIPLIERS = {
     "ast_match": 1.5,
@@ -267,9 +276,9 @@ def compute_salience(
     if is_gate:
         w_tier = SALIENT_GATE_WEIGHT
     elif cell_type in ("wall", "invariant") or enforcement == "wall":
-        w_tier = SALIENT_WALL_WEIGHT
+        w_tier = SALIENT_INVARIANT_WEIGHT
     elif cell_type == "trap":
-        w_tier = SALIENT_VACUOLE_WEIGHT
+        w_tier = SALIENT_TRAP_WEIGHT
     else:
         w_tier = 1.0
 
@@ -284,7 +293,7 @@ def compute_salience(
     if is_gate and triggers == 0:
         empirical_prior = SALIENT_GATE_UNTESTED
     else:
-        wlb_95 = wilson_lower_bound(tp, triggers, z=1.96) if triggers > 0 else 0.0
+        wlb_95 = wilson_lower_bound(tp, triggers, z=WILSON_CONFIDENCE_Z_SCORES[0.95]) if triggers > 0 else 0.0
         empirical_prior = s_base + (1.0 - s_base) * wlb_95
 
     # 3. Clamped Temporal Decay Floor R(t)
@@ -328,9 +337,12 @@ __all__ = [
     "SALIENT_EXPLORATION_PRIOR",
     "SALIENT_DECAY_FLOOR",
     "SALIENT_GATE_WEIGHT",
+    "SALIENT_INVARIANT_WEIGHT",
+    "SALIENT_TRAP_WEIGHT",
     "SALIENT_WALL_WEIGHT",
     "SALIENT_VACUOLE_WEIGHT",
     "SALIENT_GATE_UNTESTED",
     "SPECIFICITY_MULTIPLIERS",
     "compute_salience",
 ]
+

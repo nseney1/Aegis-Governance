@@ -8,7 +8,7 @@ prediction: Sessions with ≥1 negative test per public function will have fewer
 falsification: Negative test ratio shows no correlation with audit finding count after 20 sessions
 target_paths:
   - "tests/*.py"
-minimum_mode: breeze
+minimum_mode: patrol
 origin: human_insight
 created: 2026-09-30
 expiry_sessions: 10
@@ -21,10 +21,10 @@ tags:
 fitness:
   score: 0.6
   impact_weight: 1.0
-  triggers: 71
-  true_positives: 23.7765
+  triggers: 75
+  true_positives: 27.0137
   false_positives: 19.5173
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 When reviewing test files, check that every public function under test has at
@@ -41,7 +41,7 @@ one test that asserts a "should NOT" behavior:
 
 ## Evidence (from session 2026-09-30)
 
-The evidence collector (`enzymes/evidence_collector.py`) shipped with 19 passing
+The evidence collector (`aegis_core/telemetry.py`) shipped with 19 passing
 tests and zero failures. Two independent auditors then found 4 critical bugs:
 
 | Bug | Category | Would a negative test have caught it? |

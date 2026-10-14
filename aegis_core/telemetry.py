@@ -22,9 +22,12 @@ import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from aegis_core.locking import _acquire_os_lock, _get_thread_lock, _release_os_lock
+from aegis_core.taxonomy import TELEMETRY_LOCK_TIMEOUT_SECONDS
+from aegis_core.workspace.layout import LockResource, WorkspaceLayout
 
 
 # ── Evidence Ledger & Atomic Locking ──────────────────────────────────────
@@ -57,15 +60,6 @@ def _resolve_evidence_dir(workspace: str) -> str:
     return os.path.join(ws, '.aegis', 'evidence')
 
 
-def _resolve_governance_dir(workspace: str) -> str:
-    """Resolve canonical governance directory (.aegis)."""
-    ws = str(workspace)
-    from aegis_core.workspace.discovery import check_legacy_soma_sentinel
-    check_legacy_soma_sentinel(ws)
-    return os.path.join(ws, '.aegis')
-
-
-
 @contextmanager
 def evidence_lock(workspace: str):
     """Context manager acquiring both the per-process thread lock and the OS file lock.
@@ -74,7 +68,16 @@ def evidence_lock(workspace: str):
     """
     evidence_dir = _resolve_evidence_dir(workspace)
     os.makedirs(evidence_dir, exist_ok=True)
-    lock_path = os.path.realpath(os.path.join(evidence_dir, LOCK_FILENAME))
+    legacy_lock_path = os.path.join(evidence_dir, LOCK_FILENAME)
+    try:
+        if not os.path.exists(legacy_lock_path):
+            with open(legacy_lock_path, "a", encoding="utf-8"):
+                pass
+    except OSError:
+        pass
+    canonical_lock = WorkspaceLayout(Path(str(workspace))).lock_file(LockResource.SIGNALS)
+    os.makedirs(str(canonical_lock.parent), exist_ok=True)
+    lock_path = os.path.realpath(str(canonical_lock))
     thread_lock = _get_thread_lock(lock_path)
     with thread_lock:
         if not hasattr(_lock_tls, "held"):
@@ -92,7 +95,7 @@ def evidence_lock(workspace: str):
                     _lock_tls.held[lock_path] = (d - 1, h)
         else:
             with open(lock_path, 'a+') as new_fh:
-                if not _acquire_os_lock(new_fh.fileno(), timeout_sec=10.0):
+                if not _acquire_os_lock(new_fh.fileno(), timeout_sec=TELEMETRY_LOCK_TIMEOUT_SECONDS):
                     raise TimeoutError("Timed out waiting for file lock")
                 _lock_tls.held[lock_path] = (1, new_fh)
                 try:
@@ -139,7 +142,7 @@ def get_signals_path(workspace: str) -> str:
 
 
 def get_lock_path(workspace: str) -> str:
-    return os.path.join(_resolve_evidence_dir(workspace), LOCK_FILENAME)
+    return str(WorkspaceLayout(Path(str(workspace))).lock_file(LockResource.SIGNALS))
 
 
 def read_signals(workspace: str) -> list[dict]:
@@ -218,8 +221,10 @@ def _atomic_replace_bytes(path: str, data: bytes) -> None:
 
 
 def _migration_in_progress(workspace: str) -> bool:
+    layout = WorkspaceLayout(Path(str(workspace)))
     return (
-        os.path.exists(os.path.join(workspace, '.aegis', 'migration.lock'))
+        os.path.exists(str(layout.lock_file(LockResource.MIGRATION)))
+        or os.path.exists(os.path.join(workspace, '.aegis', 'migration.lock'))
         or os.path.exists(os.path.join(workspace, '.aegis', 'evidence', '.migration.lock'))
     )
 
@@ -421,7 +426,7 @@ def main(*args, **kwargs) -> int:
     return run_outcome_engine(*args, mod=sys.modules[__name__], **kwargs)
 
 
-# ── Metrics Snapshot, Quorum, Coverage & Immune Grade ─────────────────────
+# ── Metrics Snapshot, Quorum, Coverage & Governance Grade ──────────────────
 from aegis_core.metrics import (
     resolve_metrics_dir,
     compute_token_census,
@@ -429,7 +434,9 @@ from aegis_core.metrics import (
     evaluate_quorum,
     calculate_coverage,
     calculate_cell_coverage,
+    calculate_rule_coverage,
     letter_grade,
+    calculate_governance_grade,
     calculate_immune_grade,
 )
 from aegis_core.workspace import resolve_workspace
@@ -490,7 +497,9 @@ __all__ = [
     "evaluate_quorum",
     "calculate_coverage",
     "calculate_cell_coverage",
+    "calculate_rule_coverage",
     "letter_grade",
+    "calculate_governance_grade",
     "calculate_immune_grade",
     "resolve_workspace",
 ]

@@ -55,8 +55,8 @@ Before making a technical assertion or implementing a change, verify the followi
 ## 9. Plan Adherence & Phase Gate Enforcement
 - **Respect Phase Gates**: When an approved plan defines sequential phases with verification gates, do not begin a later phase until preceding gate criteria have been verified. Flag any out-of-order execution for user approval.
 - **No Coding While Scouting**: Never dispatch coding subagents while research/review subagents from the same review cycle are still running. Research must complete and be synthesized before implementation begins. If both are requested simultaneously, serialize them: complete research first, then code.
-- **Conflicting Commands**: When commands imply different phases (e.g., "run a tempest" + "start executing"), treat them as sequential, not parallel. Complete the first before starting the second.
-- **Escalation Sentinel**: Before selecting a review protocol, classify changed files by sensitivity (HIGH: enzymes/infra/auth, MEDIUM: genome/code, LOW: docs/README) and select the minimum protocol covering the highest-sensitivity file.
+- **Conflicting Commands**: When commands imply different phases (e.g., "run a fortress review" + "start executing"), treat them as sequential, not parallel. Complete the first before starting the second.
+- **Escalation Sentinel**: Before selecting a review protocol, classify changed files by sensitivity (HIGH: hooks/infra/auth, MEDIUM: rules/code, LOW: docs/README) and select the minimum protocol covering the highest-sensitivity file.
 
 ## 10. Fail-Fast Validation
 - **Validate Before Investing**: Before committing to an approach spanning >5 files or >20 steps, validate core assumptions with a 1–3 step probe:

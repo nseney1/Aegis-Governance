@@ -13,7 +13,7 @@ triggers:
   - cli_modification
   - new_subcommand
   - flag_registration
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 50
 expiry_days: 180
 created: 2026-09-30
@@ -26,18 +26,18 @@ tags:
 fitness:
   score: 0.5
   impact_weight: 0.9
-  triggers: 70
-  true_positives: 11.9861
+  triggers: 74
+  true_positives: 13.9063
   false_positives: 8.3225
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Every CLI flag registered in argparse MUST be consumed by the handler function.
 
-Supercell Cycle 2 incident:
-`aegis_cli/cli.py:93-96` registered `--force` and `--cell` flags for `soma demote`.
+Citadel Cycle 2 incident:
+`aegis_cli/cli.py:93-96` registered `--force` and `--rule` flags for `aegis demote`.
 However, `run_demote()` in `aegis_cli/demote.py` completely ignored `args.force`
-and `args.cell`. The command accepted the flags and silently did nothing.
+and `args.rule`. The command accepted the flags and silently did nothing.
 
 Detection: For each subcommand parser, grep for `add_argument('--flag')` and
 verify the handler function reads `args.flag` or `getattr(args, 'flag')`.

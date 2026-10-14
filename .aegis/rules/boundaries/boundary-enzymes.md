@@ -3,31 +3,31 @@ id: boundary-enzymes
 domain: governance
 type: boundary
 enforcement: advisory
-hypothesis: Core enzymes and workflows dictate agent behavior.
-prediction: Maelstrom mode enforcement here guarantees safe behavior modification.
-falsification: Enzymes are purely descriptive and have no operational power.
+hypothesis: Core modules and workflows dictate agent behavior.
+prediction: Bulwark mode enforcement here guarantees safe behavior modification.
+falsification: Core modules are purely descriptive and have no operational power.
 target_paths:
   - "aegis_core/**"
   - ".github/workflows/**"
 expiry_sessions: 80
 impact_weight: 1.0
-minimum_mode: maelstrom
+minimum_mode: bulwark
 tags:
-  - enzymes
+  - core
   - workflows
   - review-escalation
 created: 2026-09-28
 fitness:
-  triggers: 74
-  true_positives: 24.1604
+  triggers: 78
+  true_positives: 28.1604
   false_positives: 21.424
   score: 0.5
-  last_trigger_date: "2026-10-14T19:43:08Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-# Membrane: Enzymes Escalation
+# Boundary: Core & Workflow Escalation
 
-Target: `enzymes/`, `.github/workflows/`
-Minimum Mode: maelstrom
+Target: `aegis_core/`, `.github/workflows/`
+Minimum Mode: bulwark
 
-Description: Escalation membrane for enzymes and workflows (`enzymes/cell_enforce.py`, `enzymes/cell_promote.py`, `enzymes/outcome_engine.py`, etc.), requiring Maelstrom+ review protocols.
+Description: Escalation boundary for core modules and workflows (`aegis_core/enforcement.py`, `aegis_core/lifecycle/promotion.py`, `aegis_core/outcomes/`, etc.), requiring Bulwark+ review protocols.

@@ -78,7 +78,7 @@ def test_dispatch_flow_with_receipt(tmp_path, monkeypatch):
         "params": {
             "name": "aegis_request_receipt",
             "arguments": {
-                "operation": "aegis_create_cell",
+                "operation": "aegis_create_rule",
                 "arguments": {
                     "description": "Add security check"
                 }
@@ -96,7 +96,7 @@ def test_dispatch_flow_with_receipt(tmp_path, monkeypatch):
         "id": 5,
         "method": "tools/call",
         "params": {
-            "name": "aegis_create_cell",
+            "name": "aegis_create_rule",
             "arguments": {
                 "description": "Add security check",
                 "receipt": receipt_id
@@ -271,7 +271,7 @@ def test_canonical_create_cell_with_porcelain_args_redemption(tmp_path, monkeypa
         "params": {
             "name": "aegis_request_receipt",
             "arguments": {
-                "operation": "aegis_create_cell",
+                "operation": "aegis_create_rule",
                 "arguments": {
                     "description": "Add boundary check",
                     "rule_type": "safety-guard"
@@ -290,7 +290,7 @@ def test_canonical_create_cell_with_porcelain_args_redemption(tmp_path, monkeypa
         "id": 14,
         "method": "tools/call",
         "params": {
-            "name": "aegis_create_cell",
+            "name": "aegis_create_rule",
             "arguments": {
                 "description": "Add boundary check",
                 "rule_type": "safety-guard",
@@ -475,14 +475,11 @@ def test_session_partitioned_rate_limiting():
             "_sessionToken": token_a
         }
     }
-    # Simulate 5 calls consumed in rate limit table for token_a
+    # Simulate max_calls consumed in rate limit table for token_a
     import time
+    max_calls, _ = server_module._RATE_LIMITS["aegis_propose_change"]
     server_module._tool_call_times[(token_a, "aegis_propose_change")] = [
-        ("lease-1", time.monotonic()),
-        ("lease-2", time.monotonic()),
-        ("lease-3", time.monotonic()),
-        ("lease-4", time.monotonic()),
-        ("lease-5", time.monotonic()),
+        (f"lease-{i}", time.monotonic()) for i in range(max_calls)
     ]
 
     # Next call from client A hits rate limit

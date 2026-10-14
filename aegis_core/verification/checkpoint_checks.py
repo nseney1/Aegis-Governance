@@ -9,21 +9,13 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from aegis_core.evidence import aggregate_signals
+from aegis_core.taxonomy import DIR_TO_ALLOWED_RULE_TYPES as DIR_TO_TYPE
 
 
 HARDCODED_PATH_RE = re.compile(r'''(?:"|')(/home/|/Users/|/tmp/)''')
 SKIP_DIRS = {
     "__pycache__", ".git", ".soma", ".aegis", "node_modules", ".venv", "venv",
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", "egg-info",
-}
-DIR_TO_TYPE = {
-    "traps": ("trap",),
-    "invariants": ("invariant", "wall"),
-    "personas": ("persona",),
-    "boundaries": ("boundary", "membrane"),
-    "contracts": ("contract",),
-    "walls": ("wall", "invariant"),
-    "membranes": ("membrane", "boundary"),
 }
 
 
@@ -265,6 +257,19 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_rule_cache.py")
     if stem == "integrity":
         candidates.append(test_dir / "test_evidence_integrity.py")
+        candidates.append(test_dir / "unit" / "mcp" / "test_manifest_hmac.py")
+    if stem in ("resilience", "homeostasis"):
+        candidates.append(test_dir / "test_resilience.py")
+        candidates.append(test_dir / "test_homeostasis.py")
+    if stem in ("adversarial_verify", "immune_verify"):
+        candidates.append(test_dir / "unit" / "verification" / "test_adversarial_verify.py")
+        candidates.append(test_dir / "unit" / "verification" / "test_immune_verify.py")
+    if stem in ("match", "ast_match"):
+        candidates.append(test_dir / "unit" / "core" / "test_ast_grep_upgrade.py")
+    if stem in ("taxonomy", "operations", "layout", "discovery"):
+        candidates.append(test_dir / "unit" / "core" / "test_v3_zero_legacy_invariants.py")
+        candidates.append(test_dir / "unit" / "core" / "test_storage.py")
+        candidates.append(test_dir / "unit" / "core" / "test_workspace.py")
     if stem == "server":
         candidates.append(test_dir / "test_mcp_dispatch.py")
     if stem == "tools":
@@ -496,10 +501,10 @@ def check_cell_fitness(root: Path) -> list[dict]:
 
 def check_cell_conventions(root: Path) -> list[dict]:
     issues = []  # type: List[dict]
-    from aegis_core.rule_inventory import CellInventoryError, inventory_cells
+    from aegis_core.rule_inventory import CellInventoryError, inventory_rules
 
     try:
-        inventory = inventory_cells(str(root))
+        inventory = inventory_rules(str(root))
     except CellInventoryError as exc:
         path = Path(exc.path)
         issues.append(_failure(

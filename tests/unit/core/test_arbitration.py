@@ -38,10 +38,10 @@ class TestArbitrationCore:
         assert res["status"] == VERDICT_APPROVED
 
     def test_escalation_protocol_classification(self):
-        assert get_escalation_protocol("enzymes/common.sh", "/tmp") == "trident"
-        assert get_escalation_protocol("install.sh", "/tmp") == "trident"
-        assert get_escalation_protocol("tests/test_foo.py", "/tmp") == "gale"
-        assert get_escalation_protocol("README.md", "/tmp") == "breeze"
+        assert get_escalation_protocol("enzymes/common.sh", "/tmp") == "vanguard"
+        assert get_escalation_protocol("install.sh", "/tmp") == "vanguard"
+        assert get_escalation_protocol("tests/test_foo.py", "/tmp") == "sweep"
+        assert get_escalation_protocol("README.md", "/tmp") == "patrol"
 
     def test_soma_propose_change_containment(self, tmp_path: Path):
         ws = tmp_path / "workspace"

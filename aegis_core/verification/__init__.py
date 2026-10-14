@@ -39,7 +39,7 @@ class RiskCategory(Enum):
     TAUTOLOGICAL_TEST = "tautological_test"      # Test that passes regardless of implementation
     MISSING_COVERAGE = "missing_coverage"        # Changed code not exercised by any test
 
-    # Security (added for Supercell review)
+    # Security (added for Citadel review)
     CODE_INJECTION = "code_injection"            # Untrusted input in exec/eval/format
     PATH_TRAVERSAL = "path_traversal"            # User paths escape containment root
     SHELL_INJECTION = "shell_injection"          # subprocess shell=True with user input
@@ -189,6 +189,7 @@ CLAIM_SCHEMA = {
 }
 
 
+from . import adversarial_verify
 from .pipeline import (
     AdversarialVerifier,
     AgentBackend,
@@ -202,6 +203,8 @@ from .pipeline import (
     VerificationPipeline,
     VerificationPipelineResult,
 )
+
+immune_verify = adversarial_verify
 
 __all__ = [
     "CLAIM_SCHEMA",
@@ -225,4 +228,7 @@ __all__ = [
     "Verdict",
     "VerificationPipeline",
     "VerificationPipelineResult",
+    "adversarial_verify",
+    "immune_verify",
 ]
+

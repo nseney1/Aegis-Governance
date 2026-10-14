@@ -149,7 +149,7 @@ class TestMCPSecurityAndToolsWorkspace:
 
     def test_mcp_execute_tool_with_workspace_object(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
-        result = execute_tool("aegis_list_cells", {"workspace": ws})
+        result = execute_tool("aegis_list_rules", {"workspace": ws})
         data = json.loads(result) if isinstance(result, str) else result
         assert isinstance(data, list)
         assert any(c.get("name") == "sample-rule" or c.get("_name") == "sample_rule" for c in data)

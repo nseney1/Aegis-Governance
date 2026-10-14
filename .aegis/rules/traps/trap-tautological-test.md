@@ -13,7 +13,7 @@ triggers:
   - test_creation
   - test_modification
   - review_cycle
-minimum_mode: gale
+minimum_mode: sweep
 expiry_sessions: 50
 expiry_days: 180
 created: 2026-10-01
@@ -26,10 +26,10 @@ tags:
 fitness:
   score: 0.7143
   impact_weight: 1.0
-  triggers: 73
-  true_positives: 25.7765
+  triggers: 77
+  true_positives: 29.0137
   false_positives: 19.5173
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Tests must exercise the function-under-test with inputs that DISTINGUISH
@@ -38,9 +38,9 @@ of whether the implementation is right or wrong is worse than no test —
 it inflates the pass count and creates false confidence.
 
 Phase 3 incidents (test_critical_fixes.py, 4 tests):
-1. `test_cell_promote_normalize_fitness_callable` — asserted only
+1. `test_rule_promote_normalize_fitness_callable` — asserted only
    `isinstance(result, dict)`. Would pass for ANY function returning a dict.
-2. `test_cell_fitness_agrees_with_shared_module` — tested with tp=0, fp=0
+2. `test_rule_fitness_agrees_with_shared_module` — tested with tp=0, fp=0
    where Jeffreys prior (0.5) and Laplace posterior (0.5) trivially agree.
    Masked a real divergence on all non-zero inputs.
 3. `test_normalize_fitness_zero_triggers_not_promoted` — called

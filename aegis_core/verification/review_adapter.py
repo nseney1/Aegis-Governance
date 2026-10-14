@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Review adapter: converts Prosecutor/Defender findings to arbiter inputs.
 
-Maps Supercell review findings (JSON) into Prediction/Claim objects that the
+Maps Citadel review findings (JSON) into Prediction/Claim objects that the
 deterministic arbiter can process. This is the bridge between prose-based
 review and set-algebra arbitration.
 
@@ -20,6 +20,7 @@ import re
 import subprocess
 import tempfile
 
+from aegis_core.workspace.layout import LockResource, WorkspaceLayout
 from . import (
     ArbitrationResult, Claim, Prediction, RiskCategory,
     Severity, ToolEvidence,
@@ -204,7 +205,12 @@ def get_next_cycle_number(workspace: str | os.PathLike) -> int:
         pass
 
     counter_file = evidence_dir / ".cycle_counter"
-    lock_file = evidence_dir / ".evidence.lock"
+    layout = WorkspaceLayout(Path(workspace))
+    lock_file = layout.lock_file(LockResource.EVIDENCE)
+    try:
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:  # pragma: no cover
+        pass
 
     lock_fd = None
     try:

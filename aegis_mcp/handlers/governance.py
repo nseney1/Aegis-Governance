@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict
 
-from aegis_mcp.integrity import generate_key, generate_manifest, load_key, save_manifest
+from aegis_core.integrity import generate_key, generate_manifest, load_key, save_manifest
 from aegis_mcp.jit_engine import express as jit_express
 from aegis_mcp.registry import (
     _STATUS_FAIL,
@@ -18,7 +18,9 @@ from aegis_mcp.registry import (
 
 __all__ = [
     "_handle_create_cell",
+    "_handle_create_rule",
     "_handle_list_cells",
+    "_handle_list_rules",
     "_handle_propose_change",
     "_handle_generate_manifest",
     "_handle_soma_handoff",
@@ -47,6 +49,9 @@ def _handle_create_cell(args: dict, gov) -> dict:
     }
 
 
+_handle_create_rule = _handle_create_cell
+
+
 def _handle_list_cells(args: dict, gov):
     cell_type = args.get("rule_type") or args.get("cell_type")
     if gov:
@@ -59,6 +64,9 @@ def _handle_list_cells(args: dict, gov):
     except ValueError as exc:
         return {"status": _STATUS_FAIL, "error": str(exc)}
     return _list_cells_stdlib(workspace, cell_type=cell_type)
+
+
+_handle_list_rules = _handle_list_cells
 
 
 def _handle_propose_change(args: dict, gov) -> dict:

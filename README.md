@@ -4,14 +4,14 @@
 [![Core Rules](https://img.shields.io/badge/Core_Rules-18-green?style=flat-square)](#-core-rules)
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-15-purple?style=flat-square)](#-agent-skills)
 [![Architecture](https://img.shields.io/badge/Architecture-Pure_Python-blue?style=flat-square)](#-core-architecture)
-[![Version](https://img.shields.io/badge/Version-3.0.0-informational?style=flat-square)](docs/project/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-3.1.0-informational?style=flat-square)](docs/project/CHANGELOG.md)
 [![Zero Runtime Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen?style=flat-square)](#)
 [![Blog Post](https://img.shields.io/badge/Blog-dev.to-black?style=flat-square&logo=devdotto)](https://dev.to/nseney1/your-ai-agents-rules-file-is-a-gentlemans-agreement-heres-what-happens-when-you-build-2dml)
-[![M8ven Score](https://m8ven.ai/badge/mcp/nseney1-soma-governance-yv4xbk)](https://m8ven.ai/mcp/nseney1/soma-governance?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/nseney1-Aegis-Guardrails)](https://m8ven.ai/mcp/nseney1/Aegis-Guardrails?s=readme)
 
 **Production-grade governance framework making AI coding agents trustworthy through observable, self-evolving constraints.**
 
-Aegis (formerly Soma) replaces static, unverified prompt rules (`.cursorrules`, `CLAUDE.md`) with a closed-loop governance engine: JIT context injection, deterministic AST verification, and Wilson-bounded rule evolution. Rules prove their value or decay to zero.
+Aegis replaces static, unverified prompt rules (`.cursorrules`, `CLAUDE.md`) with a closed-loop governance engine: JIT context injection, deterministic AST verification, and Wilson-bounded rule evolution. Rules prove their value or decay to zero.
 
 ```mermaid
 flowchart LR
@@ -70,8 +70,8 @@ Add Aegis to your agent's configuration (`AEGIS_WORKSPACE` points to your projec
 
 | Tier | Available tools |
 |:-----|:----------------|
-| Read (default) | `aegis_request_receipt`, `aegis_scan`, `aegis_list_cells`, `aegis_grade`, `aegis_coverage`, `aegis_fitness`, `aegis_audit_security`, `aegis_audit_performance`, `aegis_poll_verification`, `aegis_list_rules`, `aegis_rule_fitness` |
-| Write (default; receipt required) | `aegis_report_outcome`, `aegis_capture_insight`, `aegis_create_cell`, `aegis_create_rule`, `aegis_handoff` |
+| Read (default) | `aegis_request_receipt`, `aegis_scan`, `aegis_list_rules`, `aegis_grade`, `aegis_coverage`, `aegis_rule_fitness`, `aegis_audit_security`, `aegis_audit_performance`, `aegis_poll_verification` |
+| Write (default; receipt required) | `aegis_report_outcome`, `aegis_capture_insight`, `aegis_create_rule`, `aegis_handoff` |
 | Execute (opt-in; receipt required) | `aegis_propose_change`, `aegis_verify_changes`, `aegis_checkpoint`, `aegis_generate_manifest` |
 
 *Receipt flow*: Call `aegis_request_receipt` with the operation and arguments to obtain a single-use, state-bound token (300s TTL). See [MCP Gateway Guide](docs/guides/mcp_gateway.md).
@@ -89,7 +89,7 @@ print(gov.grade(), gov.fitness_landscape(bayesian=True))
 
 ## 📐 Core Rules
 
-The system's foundational rules — 19 inherited behavioral defaults:
+The system's foundational rules — 18 inherited behavioral defaults:
 
 | Rule | Trigger | Purpose |
 |:-----|:--------|:--------|

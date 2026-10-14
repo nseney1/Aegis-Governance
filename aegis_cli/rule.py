@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from aegis_cli.base import CommandCategory, AegisCommand
+from aegis_core.taxonomy import RULE_TYPE_DIRS
 from aegis_core.workspace import Workspace
+from aegis_core.workspace.layout import WorkspaceLayout
 from aegis_core.lifecycle import (
     promote_cell,
     demote_cell,
@@ -77,7 +79,7 @@ def _run_list(args: argparse.Namespace) -> int:
     """List active rules and fitness metrics."""
     from aegis_core.yaml import parse_frontmatter
     root = _resolve_workspace_root(args)
-    rules_dir = root / ".aegis" / "rules"
+    rules_dir = WorkspaceLayout(root).rules_dir
     if not rules_dir.is_dir():
         if getattr(args, "json", False):
             print(json.dumps([]))
@@ -434,7 +436,7 @@ def clean_global_rules(
     execute = bool(force and not dry_run)
     home = Path(home_dir).resolve() if home_dir else Path(os.environ.get("HOME") or Path.home()).resolve()
 
-    q_base = Path(quarantine_dir).resolve() if quarantine_dir else (home / ".aegis" / "quarantine")
+    q_base = Path(quarantine_dir).resolve() if quarantine_dir else WorkspaceLayout(home).quarantine_dir
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     q_backup = q_base / f"global_rules_backup_{timestamp}"
 
@@ -546,7 +548,7 @@ class RuleCommand(AegisCommand):
 
         # list
         p_list = sub.add_parser("list", parents=[common], help="List active rules and fitness metrics")
-        p_list.add_argument("--type", choices=["invariant", "trap", "boundary", "persona", "contract", "wall"], help="Filter by rule type")
+        p_list.add_argument("--type", choices=list(RULE_TYPE_DIRS.keys()), help="Filter by rule type")
         p_list.add_argument("--min-fitness", type=float, help="Filter by minimum fitness score")
 
         # promote

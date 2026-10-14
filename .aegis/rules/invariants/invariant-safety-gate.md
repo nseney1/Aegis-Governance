@@ -10,7 +10,7 @@ target_paths:
   - "aegis_cli/hooks/**"
 expiry_sessions: 100
 impact_weight: 1.0
-minimum_mode: maelstrom
+minimum_mode: bulwark
 tags:
   - safety
   - security
@@ -24,8 +24,8 @@ fitness:
   last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
-# Wall: Safety Gate
+# Invariant: Safety Gate
 
-Target: `enzymes/safety_gate.sh`
+Target: `install/hooks/safety_gate.sh`
 
 Description: Security boundary for the safety gate. It has a hardcoded log path `~/.gemini/antigravity/scratch/ai-conversation-logs/governance/gate_events.jsonl` which needs careful management.

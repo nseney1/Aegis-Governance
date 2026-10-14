@@ -117,7 +117,7 @@ class ClaudeAdapter(PlatformAdapter):
 
     def render_config(self) -> str:
         """Render governance instructions to embed in CLAUDE.md."""
-        rules = self.get_source_rules()
+        rules = [r for r in self.get_source_rules() if r.parent.name != ".oracles"]
         sections = []
         for r in rules:
             try:
@@ -139,14 +139,11 @@ class ClaudeAdapter(PlatformAdapter):
             )
         return f"{SOMA_MARKER_START}\n{body}\n{SOMA_MARKER_END}\n"
 
-    def render_mcp_config(self) -> dict[str, Any]:
+    def render_mcp_config(self, local: bool = False) -> dict[str, Any]:
         """Render standard MCP server configuration for Claude."""
         return {
             "mcpServers": {
-                "soma": {
-                    "command": "soma-mcp",
-                    "args": [],
-                }
+                "soma": self.render_mcp_entry(local=local),
             }
         }
 
@@ -161,10 +158,14 @@ class ClaudeAdapter(PlatformAdapter):
 
         # 1. Install rule files
         for rule in self.get_source_rules():
-            dest = rules_dir / rule.name
+            dest = (
+                (rules_dir / ".oracles" / rule.name)
+                if rule.parent.name == ".oracles"
+                else (rules_dir / rule.name)
+            )
             if not dest.exists():
                 if not dry_run:
-                    rules_dir.mkdir(parents=True, exist_ok=True)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(rule, dest)
                 result.installed_files.append(dest)
 
@@ -206,7 +207,11 @@ class ClaudeAdapter(PlatformAdapter):
         # 2. Clean rule files from rules_dir
         if rules_dir.is_dir():
             for rule in self.get_source_rules():
-                rule_file = rules_dir / rule.name
+                rule_file = (
+                    (rules_dir / ".oracles" / rule.name)
+                    if rule.parent.name == ".oracles"
+                    else (rules_dir / rule.name)
+                )
                 if rule_file.is_file():
                     if dry_run:
                         result.uninstalled_files.append(rule_file)

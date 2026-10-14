@@ -11,7 +11,7 @@ target_paths:
   - Makefile
 expiry_sessions: 60
 impact_weight: 0.8
-minimum_mode: breeze
+minimum_mode: patrol
 tags:
   - bash
   - shell

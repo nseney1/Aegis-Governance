@@ -1,6 +1,6 @@
 ---
 name: Staff Review Protocol
-description: Multi-lens review fan-out with staff-level synthesis across five modes from Breeze to Tempest.
+description: Multi-lens review fan-out with staff-level synthesis across six modes from Patrol to Citadel.
 trigger: user_request
 aliases: ["review this code", "code review", "PR review"]
 ---
@@ -12,11 +12,12 @@ aliases: ["review this code", "code review", "PR review"]
 
 | Mode | Alias | Prongs | Flash Dispatches | Output Budget | When to Use |
 |:-----|:------|:------:|:----------------:|:-------------:|:------------|
-| **Breeze** | "breeze", "quick fix" | Roots → Bedrock | 2 | ≤2k output | Known defect, single-file fix, rename |
-| **Gale** | "gale", "quick review", "review this code", "code review", "PR review" | Spores → Synthesize | 3–4 | ≤3k output | Quick reviews, PR reviews, code diffs, minor changes |
-| **Trident** | "trident", "deep review" | Spores → Roots → Bedrock | 5–8 | ≤6k output | Feature reviews, refactors |
-| **Maelstrom** | "maelstrom", "max review" | Spores → Roots → Thorns → Bedrock | 7–12 | ≤10k output | Architecture, security, breaking changes |
-| **Tempest** | "tempest", "full assurance" | Spores → Mycelium → Roots → Thorns → Bedrock → Mulch | 8–12 | ≤15k output | Catastrophic risk, infra, auth, schema migrations |
+| **Patrol** | "patrol", "quick fix" | Probe → Bastion | 2 | ≤2k output | Known defect, single-file fix, rename |
+| **Sweep** | "sweep", "quick review", "review this code", "code review", "PR review" | Sentry → Synthesize | 3–4 | ≤3k output | Quick reviews, PR reviews, code diffs, minor changes |
+| **Vanguard** | "vanguard", "deep review" | Sentry → Probe → Bastion | 5–8 | ≤6k output | Feature reviews, refactors |
+| **Bulwark** | "bulwark", "max review" | Sentry → Probe → Gauntlet → Bastion | 7–12 | ≤10k output | Architecture, security, breaking changes |
+| **Fortress** | "fortress", "full assurance" | Sentry → Trace → Probe → Gauntlet → Bastion → Debrief | 8–12 | ≤15k output | Catastrophic risk, infra, auth, schema migrations |
+| **Citadel** | "citadel", "adversarial release" | 8 orthogonal Prosecutor/Defender prongs → Arbiter → Debrief | 12–16 | ≤20k output | Pre-release audit, full adversarial cycle until clean |
 
 > [!NOTE]
 > Subagents do **NOT** inherit parent rules. Each scout gets a clean context window with only its task prompt (~200 tokens pre-seeding). Total protocol cost = (N dispatches × per-scout input context) + total output. Parent rule cost is paid ONCE by the orchestrator, not per-scout.
@@ -27,41 +28,42 @@ Choose protocol by **failure severity**, not scope:
 
 | Risk Level | Failure Impact | Protocol | Example |
 |:-----------|:---------------|:---------|:--------|
-| Trivial | Known bug, rename, doc sync | Breeze | Single-file fix, string rename |
-| Low | Cosmetic, docs | Gale | README update, style fix |
-| Medium | Feature regression | Trident (Spores + Roots + Bedrock) | New feature, bug fix |
-| High | API breakage, data loss | Trident (full 3-prong) | Public API change, refactor |
-| Critical | Security breach, rule bypass | Maelstrom | Auth flow, governance rule changes |
-| Catastrophic | Production outage, data corruption | Tempest + `ask_question` human gate | Infra, schema migration, core protocol |
+| Trivial | Known bug, rename, doc sync | Patrol | Single-file fix, string rename |
+| Low | Cosmetic, docs | Sweep | README update, style fix |
+| Medium | Feature regression | Vanguard (Sentry + Probe + Bastion) | New feature, bug fix |
+| High | API breakage, data loss | Vanguard (full 3-prong) | Public API change, refactor |
+| Critical | Security breach, rule bypass | Bulwark | Auth flow, governance rule changes |
+| Catastrophic | Production outage, data corruption | Fortress + `ask_question` human gate | Infra, schema migration, core protocol |
+| Release | Zero-defect release certification | Citadel | Pre-release adversarial verification |
 
 ### Individual Prongs (run standalone)
 
 | Prong | Alias | Max Output Tokens | What It Does |
 |:------|:------|:-----------------|:-------------|
-| 🍄 **Spores** | "spores", "scout" | **500 tokens** (max 5 findings, ~100 each) | Broad parallel survey — finds problems, ranks by severity, no fixes |
-| 🍄 **Mycelium** | "mycelium", "dependencies" | **800 tokens** | Maps blast radius, cross-repo state, dependency chains — what does this change touch? |
-| 🌿 **Roots** | "roots", "deep dive" | **1,000 tokens** per finding | Focused analysis on specific findings — proposes concrete fixes |
-| 🌹 **Thorns** | "thorns", "break it", "red team" | **800 tokens** per fix tested | Adversarial falsification — actively tries to break proposed fixes |
-| 🪨 **Bedrock** | "bedrock", "verify" | **300 tokens** (SHIP/BLOCK + max 3 issues) | Final verification gate — checks structural correctness, pass/fail |
-| 🍂 **Mulch** | "mulch", "learnings" | **500 tokens** | Post-ship decomposition — extracts patterns into taxonomy, rules, and skills |
+| 🛡️ **Sentry** | "sentry", "scout" | **500 tokens** (max 5 findings, ~100 each) | Broad parallel survey — finds problems, ranks by severity, no fixes |
+| 🕸️ **Trace** | "trace", "dependencies" | **800 tokens** | Maps blast radius, cross-repo state, dependency chains — what does this change touch? |
+| 🔍 **Probe** | "probe", "deep dive" | **1,000 tokens** per finding | Focused analysis on specific findings — proposes concrete fixes |
+| ⚔️ **Gauntlet** | "gauntlet", "break it", "red team" | **800 tokens** per fix tested | Adversarial falsification — actively tries to break proposed fixes |
+| 🏰 **Bastion** | "bastion", "verify" | **300 tokens** (SHIP/BLOCK + max 3 issues) | Final verification gate — checks structural correctness, pass/fail |
+| 📋 **Debrief** | "debrief", "learnings" | **500 tokens** | Post-ship decomposition — extracts patterns into taxonomy, rules, and skills (`governance/debrief_queue.jsonl`) |
 
-The orchestrator selects the mode based on risk level. Default to Gale for routine reviews, code reviews, PR reviews, or when asked to review or critique code, diffs, or implementation plans. Maelstrom for anything that could be exploited or bypassed.
+The orchestrator selects the mode based on risk level. Default to Sweep for routine reviews, code reviews, PR reviews, or when asked to review or critique code, diffs, or implementation plans. Bulwark for anything that could be exploited or bypassed.
 
 ### Incremental Escalation
 
-When the user upgrades a review mid-session (e.g., "actually run a maelstrom"), **do not restart from scratch**. Map completed work to the new protocol's prongs and execute only the delta:
+When the user upgrades a review mid-session (e.g., "actually run a bulwark"), **do not restart from scratch**. Map completed work to the new protocol's prongs and execute only the delta:
 
 | Already Done | Upgrade To | Execute Only |
 |:-------------|:-----------|:-------------|
-| Breeze (Roots) | Trident | Run Spores for broader survey, then re-run Roots + Bedrock |
-| Gale (fan-out) | Trident | Map fan-out → Spores, then run Roots + Bedrock |
-| Gale (fan-out) | Maelstrom | Re-run Spores with security lens, then full Roots → Thorns → Bedrock |
-| Trident (Spores + Roots) | Maelstrom | Inject Thorns on existing Roots output, then Bedrock |
-| Trident (full) | Maelstrom | Inject Thorns, re-run Bedrock with adversarial context |
-| Maelstrom (full) | Tempest | Run Mycelium on existing Spores output, then Mulch after Bedrock |
-| Any | Tempest | Run delta prongs needed; Mycelium slots after Spores, Mulch after Bedrock |
+| Patrol (Probe) | Vanguard | Run Sentry for broader survey, then re-run Probe + Bastion |
+| Sweep (fan-out) | Vanguard | Map fan-out → Sentry, then run Probe + Bastion |
+| Sweep (fan-out) | Bulwark | Re-run Sentry with security lens, then full Probe → Gauntlet → Bastion |
+| Vanguard (Sentry + Probe) | Bulwark | Inject Gauntlet on existing Probe output, then Bastion |
+| Vanguard (full) | Bulwark | Inject Gauntlet, re-run Bastion with adversarial context |
+| Bulwark (full) | Fortress | Run Trace on existing Sentry output, then Debrief after Bastion |
+| Any | Fortress | Run delta prongs needed; Trace slots after Sentry, Debrief after Bastion |
 
-**Caveat**: If code was modified between prongs, verify `git status` is clean before escalating. Stale Roots proposals against a drifted codebase produce invalid Thorns results.
+**Caveat**: If code was modified between prongs, verify `git status` is clean before escalating. Stale Probe proposals against a drifted codebase produce invalid Gauntlet results.
 
 ### Empirical Refutation Gate
 
@@ -76,28 +78,28 @@ Speculative findings meeting only 1 criterion are logged as ⚠️ warning, not 
 
 ---
 
-## Breeze Protocol (Targeted Fix)
+## Patrol Protocol (Targeted Fix)
 
-For known defects, renames, or single-file fixes where the problem is already identified. Skips Spores entirely.
+For known defects, renames, or single-file fixes where the problem is already identified. Skips Sentry entirely.
 
-### Phase 1: Roots (Direct Fix)
+### Phase 1: Probe (Direct Fix)
 Dispatch 1 Flash analyst directly on the known issue. Provide:
 - The specific file(s) and defect description
 - Expected behavior vs actual behavior
 - The analyst proposes a fix; the **orchestrator** applies the diff
 
-### Phase 2: Bedrock (Verify)
+### Phase 2: Bastion (Verify)
 Dispatch 1 Flash verifier to confirm the applied fix is structurally sound (imports resolve, no orphan references, blast radius check).
 
-**On BLOCK**: If Bedrock issues BLOCK, the orchestrator revises the fix (max 1 revision cycle). If still blocked, escalate to Trident for broader survey.
+**On BLOCK**: If Bastion issues BLOCK, the orchestrator revises the fix (max 1 revision cycle). If still blocked, escalate to Vanguard for broader survey.
 
-**When to use**: `"breeze"`, `"quick fix"` — trivial known bugs, string renames, doc freshness sweeps, lint fixes.
+**When to use**: `"patrol"`, `"quick fix"` — trivial known bugs, string renames, doc freshness sweeps, lint fixes.
 
 ---
 
-## Gale Protocol (Single-Pass)
+## Sweep Protocol (Single-Pass)
 
-**When to use**: `"gale"`, `"quick review"`, `"review this code"`, `"code review"`, `"PR review"` — routine code reviews, diff audits, PR reviews, implementation plan critique, minor changes. Absorbs general code review triggers: activate when asked to review, audit, or critique code, plans, PRs, or diffs.
+**When to use**: `"sweep"`, `"quick review"`, `"review this code"`, `"code review"`, `"PR review"` — routine code reviews, diff audits, PR reviews, implementation plan critique, minor changes. Absorbs general code review triggers: activate when asked to review, audit, or critique code, plans, PRs, or diffs.
 
 ### Phase 1: Fan-Out (Independent Analysis)
 
@@ -149,12 +151,12 @@ The final artifact follows feature-specs format:
 
 ---
 
-## Trident Protocol (Progressive Deep Review)
+## Vanguard Protocol (Progressive Deep Review)
 
-Three prongs, each sharper than the last. Scouts find problems, root analysts propose solutions, bedrock verifiers confirm them. Each round narrows focus based on the previous round's findings.
+Three prongs, each sharper than the last. Scouts find problems, probe analysts propose solutions, bastion verifiers confirm them. Each round narrows focus based on the previous round's findings.
 
 ```
-  Spores (width)        Roots (depth)         Bedrock (verification)
+  Sentry (width)        Probe (depth)         Bastion (verification)
   ┌─────────────┐      ┌─────────────┐       ┌──────────────┐
   │ 3-4 Flash   │      │ 1-2 Flash   │       │ 1 Flash      │
   │ broad survey│ ───► │ root cause  │  ───► │ verify fixes │
@@ -165,11 +167,11 @@ Three prongs, each sharper than the last. Scouts find problems, root analysts pr
     Top 3-5 findings     Concrete fixes        Ship or abort
 ```
 
-### Prong 1: Spores (Broad Survey)
+### Prong 1: Sentry (Broad Survey)
 
-Dispatch 3–4 Flash scouts with orthogonal lenses (same as Gale Protocol Phase 1).
+Dispatch 3–4 Flash scouts with orthogonal lenses (same as Sweep Protocol Phase 1).
 
-**Key difference from Gale**: Scouts do NOT propose fixes. They only:
+**Key difference from Sweep**: Scouts do NOT propose fixes. They only:
 - Identify problems with evidence (file:line citations)
 - Rank findings by severity (🔴 critical / ⚠️ warning / ℹ️ info)
 - Flag areas that need deeper investigation
@@ -177,11 +179,11 @@ Dispatch 3–4 Flash scouts with orthogonal lenses (same as Gale Protocol Phase 
 - **Output budget**: 500 tokens max (max 5 findings, ~100 tokens each)
 
 **Orthogonal Personas Note**:
-If `.soma/cells/chloroplasts/` contains repo-specific personas, use them to supplement the built-in Orthogonal Personas. Chloroplasts provide domain expertise that generic personas lack.
+If `.aegis/rules/personas/` contains repo-specific personas, use them to supplement the built-in Orthogonal Personas. Personas provide domain expertise that generic personas lack.
 
 **Scout prompt suffix**:
 ```
-IMPORTANT: Your role is Spores only. Identify and rank problems.
+IMPORTANT: Your role is Sentry only. Identify and rank problems.
 Do NOT propose solutions. Return your top 5 findings ranked by severity.
 Output budget: 500 tokens max (max 5 findings, ~100 tokens each).
 Format: 🔴/⚠️/ℹ️ [finding] — Evidence: [file:line]
@@ -190,12 +192,12 @@ Format: 🔴/⚠️/ℹ️ [finding] — Evidence: [file:line]
 **Orchestrator triage** (between prongs):
 After scouts report, the orchestrator:
 1. Deduplicates findings across scouts (multi-scout = high confidence)
-2. Selects the top 3–5 critical findings for the Roots round
+2. Selects the top 3–5 critical findings for the Probe round
 3. Drops ℹ️ info-level findings (address later or never)
 
-### Prong 2: Roots (Focused Deep-Dive)
+### Prong 2: Probe (Focused Deep-Dive)
 
-Dispatch 1–2 Flash analysts on ONLY the critical findings from Spores.
+Dispatch 1–2 Flash analysts on ONLY the critical findings from Sentry.
 
 **Key differences**:
 - Analysts receive the scout findings as input context
@@ -204,11 +206,11 @@ Dispatch 1–2 Flash analysts on ONLY the critical findings from Spores.
 - Each analyst owns a disjoint subset of findings (no overlap)
 - **Output budget**: 1,000 tokens per finding
 
-**Roots prompt template**:
+**Probe prompt template**:
 ```
 <!-- CONTEXT: [PROJECT] from Context Pre-Seeding Protocol -->
 
-ROOTS ANALYSIS — You are investigating these findings from the Spores round:
+PROBE ANALYSIS — You are investigating these findings from the Sentry round:
 
 Output budget: 1,000 tokens max per finding.
 
@@ -226,9 +228,9 @@ For each finding:
 [How to confirm the fix works — specific test command]
 ```
 
-### Prong 3: Bedrock (Verification Gate)
+### Prong 3: Bastion (Verification Gate)
 
-Dispatch 1 Flash verifier that receives the proposed fixes from Roots.
+Dispatch 1 Flash verifier that receives the proposed fixes from Probe.
 
 **Output budget**: 300 tokens (SHIP/BLOCK + max 3 issues).
 
@@ -238,7 +240,7 @@ Dispatch 1 Flash verifier that receives the proposed fixes from Roots.
 - Is the blast radius accurately scoped?
 - Are there internal contradictions between the fix and existing code?
 
-*Note: Bedrock does NOT execute test suites (read-only subagent). It verifies structural correctness. The orchestrator runs tests after applying fixes.*
+*Note: Bastion does NOT execute test suites (read-only subagent). It verifies structural correctness. The orchestrator runs tests after applying fixes.*
 
 **Verifier output**: `{verdict: "SHIP" | "BLOCK", issues: [...]}` (capped at 300 tokens max, max 3 issues)
 
@@ -246,12 +248,12 @@ If BLOCK: orchestrator reviews issues and either revises fixes or escalates to u
 
 ---
 
-## Maelstrom Protocol (Full Adversarial Review)
+## Bulwark Protocol (Full Adversarial Review)
 
-Extends Trident with an adversarial **Thorns** prong. Use for changes where cooperative review is insufficient — security, governance rules, breaking changes, core infrastructure.
+Extends Vanguard with an adversarial **Gauntlet** prong. Use for changes where cooperative review is insufficient — security, governance rules, breaking changes, core infrastructure.
 
 ```
-  Spores (width)     Roots (depth)      Thorns (adversarial)   Bedrock (verify)
+  Sentry (width)     Probe (depth)      Gauntlet (adversarial) Bastion (verify)
   ┌────────────┐    ┌────────────┐     ┌────────────────┐    ┌─────────────┐
   │ 3-4 scouts │    │ 1-2 fixers │     │ 1-2 breakers   │    │ 1 verifier  │
   │ find issues│ ►  │ propose    │  ►  │ BREAK the fixes│ ►  │ final gate  │
@@ -262,9 +264,9 @@ Extends Trident with an adversarial **Thorns** prong. Use for changes where coop
                                          adversarial
 ```
 
-### Prong 3b: Thorns (Adversarial Falsification)
+### Prong 3b: Gauntlet (Adversarial Falsification)
 
-Dispatch 1–2 Flash breakers with **explicit falsification objectives**. Breakers receive Roots' proposed fixes and actively try to break them.
+Dispatch 1–2 Flash breakers with **explicit falsification objectives**. Breakers receive Probe's proposed fixes and actively try to break them.
 
 **Output budget**: 800 tokens per fix tested.
 
@@ -273,24 +275,24 @@ Dispatch 1–2 Flash breakers with **explicit falsification objectives**. Breake
 2. **Does it NOT do what it must NOT do?** — Test negative invariants (data leaks, regressions, side effects)
 3. **Does it handle adverse conditions?** — Edge cases, malformed input, truncated context, concurrent access
 
-*(Note: Chloroplast personas inform edge cases to test here. Use their domain expertise to identify project-specific vulnerabilities.)*
+*(Note: Persona rules inform edge cases to test here. Use their domain expertise to identify project-specific vulnerabilities.)*
 
-**Key differences from Bedrock**:
-- Bedrock is cooperative ("does this look right?")
-- Thorns is adversarial ("how can I break this?")
+**Key differences from Bastion**:
+- Bastion is cooperative ("does this look right?")
+- Gauntlet is adversarial ("how can I break this?")
 - Breakers are **rewarded for finding breaks**, not for confirming correctness
 
 **Breaker prompt template**:
 ```
 <!-- CONTEXT: [PROJECT] from Context Pre-Seeding Protocol -->
 
-THORNS ANALYSIS — You are an adversarial reviewer. Your job is to BREAK these fixes.
+GAUNTLET ANALYSIS — You are an adversarial reviewer. Your job is to BREAK these fixes.
 Output budget: 800 tokens max per fix tested.
 
 Read ALL of these files for context:
-[explicit file list — same as Roots received]
+[explicit file list — same as Probe received]
 
-Proposed changes from Roots:
+Proposed changes from Probe:
 1. [fix summary + file:line]
 2. [fix summary + file:line]
 
@@ -307,38 +309,39 @@ For each fix, attempt to falsify it:
 Output: {broken: [{fix_id, how, severity}], survived: [fix_ids]}
 ```
 
-**Orchestrator response to Thorns findings**:
-- If `broken` is non-empty: revise fixes and re-run Roots on broken items (**max 2 revision cycles** — if still broken after 2 cycles, escalate to user)
-- If all `survived`: proceed to Bedrock
+**Orchestrator response to Gauntlet findings**:
+- If `broken` is non-empty: revise fixes and re-run Probe on broken items (**max 2 revision cycles** — if still broken after 2 cycles, escalate to user)
+- If all `survived`: proceed to Bastion
 - If breaker finds a bypass vector: escalate to user before proceeding
 
 ### When to Skip Prongs
 
 | Scenario | Protocol | Prongs Used | Rationale |
 |:---------|:---------|:-----------:|:----------|
-| Known bug / rename | Breeze | Roots + Bedrock | Defect already located, skip scouting |
-| Style/docs | Gale | Spores only | No fixes needed |
-| Bug fix | Trident | Spores + Roots + Bedrock | Structural check catches regressions |
-| Feature | Trident | Spores + Roots + Bedrock | Blast radius check needed |
-| Architecture | Maelstrom | Spores + Roots + Thorns + Bedrock | High blast radius + adversarial edge cases |
-| Security/governance | Maelstrom | Spores + Roots + Thorns + Bedrock | Must verify no bypass vectors |
-| Schema migration / infra | Tempest | All 6 prongs | Cross-repo impact + post-ship learnings |
-| Post-mortem | Standalone | Spores only | Findings, not fixes |
+| Known bug / rename | Patrol | Probe + Bastion | Defect already located, skip scouting |
+| Style/docs | Sweep | Sentry only | No fixes needed |
+| Bug fix | Vanguard | Sentry + Probe + Bastion | Structural check catches regressions |
+| Feature | Vanguard | Sentry + Probe + Bastion | Blast radius check needed |
+| Architecture | Bulwark | Sentry + Probe + Gauntlet + Bastion | High blast radius + adversarial edge cases |
+| Security/governance | Bulwark | Sentry + Probe + Gauntlet + Bastion | Must verify no bypass vectors |
+| Schema migration / infra | Fortress | All 6 prongs | Cross-repo impact + post-ship learnings |
+| Pre-release certification | Citadel | 8 adversarial prongs + Debrief | Zero surviving findings across Prosecutor/Defender pairs |
+| Post-mortem | Standalone | Sentry only | Findings, not fixes |
 
 ---
 
-## Tempest Protocol (Full Assurance)
+## Fortress Protocol (Full Assurance)
 
-The highest-assurance review mode. Extends Maelstrom with **Mycelium** (dependency impact mapping) after Spores and **Mulch** (learning extraction) after Bedrock. For catastrophic-risk changes: infrastructure, auth pipelines, schema migrations, core governance. Uses 8–12 dispatches across 4 turns (optimized from 6 turns via parallel execution).
+The full-assurance review mode. Extends Bulwark with **Trace** (dependency impact mapping) after Sentry and **Debrief** (learning extraction) after Bastion. For catastrophic-risk changes: infrastructure, auth pipelines, schema migrations, core governance. Uses 8–12 dispatches across 4 turns (optimized from 6 turns via parallel execution).
 
-**Optimization**: Mycelium may run in parallel with Spores when target files are known upfront. Thorns may run concurrently with Bedrock.
+**Optimization**: Trace may run in parallel with Sentry when target files are known upfront. Gauntlet may run concurrently with Bastion.
 
-**Flash mandate**: All review prongs (Spores, Mycelium, Roots, Thorns, Bedrock, Mulch) use strictly Flash-tier models. No inherit/pro for diff proposers — reserve heavyweight models for orchestrator synthesis only.
+**Flash mandate**: All review prongs (Sentry, Trace, Probe, Gauntlet, Bastion, Debrief) use strictly Flash-tier models. No inherit/pro for diff proposers — reserve heavyweight models for orchestrator synthesis only.
 
-**Human gate**: Before Bedrock issues final verdict, the orchestrator presents the Thorns findings and proposed fixes via `ask_question` for explicit user approval. User may approve, reject, or request revision.
+**Human gate**: Before Bastion issues final verdict, the orchestrator presents the Gauntlet findings and proposed fixes via `ask_question` for explicit user approval. User may approve, reject, or request revision.
 
 ```
-  Spores (scout)     Mycelium (map)       Roots (fix)
+  Sentry (scout)     Trace (map)          Probe (fix)
   ┌────────────┐    ┌──────────────┐    ┌─────────────┐
   │ 3-4 Flash  │    │ 1-2 Flash    │    │ 1-2 Flash   │
   │ find issues│ ─► │ trace deps   │ ─► │ propose     │
@@ -346,7 +349,7 @@ The highest-assurance review mode. Extends Maelstrom with **Mycelium** (dependen
   └────────────┘    │ cross-repo   │    └──────┬──────┘
                     └──────────────┘           │
                                                ▼
-  Mulch (learn)      Bedrock (verify)     Thorns (break)
+  Debrief (learn)    Bastion (verify)     Gauntlet (break)
   ┌────────────┐    ┌──────────────┐    ┌──────────────┐
   │ 1 Flash    │    │ 1 Flash      │    │ 1-2 Flash    │
   │ extract    │ ◄─ │ SHIP/BLOCK   │ ◄─ │ falsify      │
@@ -355,9 +358,9 @@ The highest-assurance review mode. Extends Maelstrom with **Mycelium** (dependen
   └────────────┘
 ```
 
-### Prong: Mycelium (Dependency Impact Mapping)
+### Prong: Trace (Dependency Impact Mapping)
 
-Dispatch 1–2 Flash analysts to map the **blast radius** of the files and symbols identified by Spores. Mycelium receives the Spores findings (affected files, flagged symbols) and traces their dependency graph:
+Dispatch 1–2 Flash analysts to map the **blast radius** of the files and symbols identified by Sentry. Trace receives the Sentry findings (affected files, flagged symbols) and traces their dependency graph:
 
 **Output budget**: 800 tokens max.
 
@@ -366,15 +369,15 @@ Dispatch 1–2 Flash analysts to map the **blast radius** of the files and symbo
 3. **Type consumers**: Who depends on the interfaces in the flagged files? List downstream consumers
 4. **Config propagation**: Environment variables, feature flags, or serialized state affected
 
-Mycelium output is passed to Roots alongside Spores findings, so Roots analysts have full blast radius context before proposing fixes.
+Trace output is passed to Probe alongside Sentry findings, so Probe analysts have full blast radius context before proposing fixes.
 
-**Mycelium prompt template**:
+**Trace prompt template**:
 ```
-MYCELIUM ANALYSIS — You are mapping the blast radius of flagged files/symbols.
+TRACE ANALYSIS — You are mapping the blast radius of flagged files/symbols.
 Output budget: 800 tokens max.
 
-Spores identified these files and issues:
-[Spores findings summary with file:line citations]
+Sentry identified these files and issues:
+[Sentry findings summary with file:line citations]
 
 Read ALL of these files for context:
 [explicit file list — flagged files + their direct importers]
@@ -390,9 +393,9 @@ For each flagged file/symbol:
 Output: {blast_radius: [{file, symbol, affected_files: [], affected_repos: [], risk_level}]}
 ```
 
-### Prong: Mulch (Post-Review Learning Extraction)
+### Prong: Debrief (Post-Review Learning Extraction)
 
-After Bedrock renders its verdict (**SHIP or BLOCK** — Mulch runs either way), dispatch 1 Flash analyst to decompose the review's findings into **proposed learnings**. Mulch is read-only; it proposes changes that the **orchestrator queues for the next session** (not applied immediately, to avoid triggering recursive governance reviews).
+After Bastion renders its verdict (**SHIP or BLOCK** — Debrief runs either way), dispatch 1 Flash analyst to decompose the review's findings into **proposed learnings** (`DEBRIEF-XXX` entries in `governance/debrief_queue.jsonl`). Debrief is read-only; it proposes changes that the **orchestrator queues for the next session** (not applied immediately, to avoid triggering recursive governance reviews).
 
 **Output budget**: 500 tokens max.
 
@@ -401,15 +404,15 @@ After Bedrock renders its verdict (**SHIP or BLOCK** — Mulch runs either way),
 3. **Skill recipes**: Successful repair patterns — propose `skill_name`, `trigger`, `steps`
 4. **Observable metrics**: Agent dispatches, prong count, findings count, breakage count (only metrics directly observable from the review artifacts — do NOT estimate token costs or accuracy rates)
 
-**Circuit breaker**: Mulch proposals are queued, not applied. The orchestrator presents them to the user at session end. Applying rule changes requires a separate review in a future session.
+**Circuit breaker**: Debrief proposals are queued in `governance/debrief_queue.jsonl` (`DEBRIEF-XXX`), not applied immediately. The orchestrator presents them to the user at session end. Applying rule changes requires a separate review in a future session.
 
-**Mulch prompt template**:
+**Debrief prompt template**:
 ```
-MULCH ANALYSIS — You are extracting reusable learnings from this completed review.
+DEBRIEF ANALYSIS — You are extracting reusable learnings from this completed review.
 Output budget: 500 tokens max.
 
 Read the review artifacts:
-[Spores findings, Roots fixes, Thorns breakages, Bedrock verdict]
+[Sentry findings, Probe fixes, Gauntlet breakages, Bastion verdict]
 
 Propose (do NOT apply directly):
 ### New Taxonomy Patterns
@@ -459,7 +462,7 @@ If critical findings exist, orchestrator must fix before continuing.
 
 When a staff review identifies that specialist analysis is needed, the orchestrator can activate dedicated skills as additional reviewers:
 
-### Discovery & Context (activate during Spores)
+### Discovery & Context (activate during Sentry)
 
 | Need | Skill | How |
 |:-----|:------|:----|
@@ -468,7 +471,7 @@ When a staff review identifies that specialist analysis is needed, the orchestra
 | Performance hot-paths suspected | `performance-audit` | Dispatch with hot-path file list + profiling data |
 | Environment/infra issues found | `session-preflight` | Activate to verify venv, git state, display health |
 
-### Depth & Fix Proposal (activate during Roots)
+### Depth & Fix Proposal (activate during Probe)
 
 | Need | Skill | How |
 |:-----|:------|:----|
@@ -476,7 +479,7 @@ When a staff review identifies that specialist analysis is needed, the orchestra
 | Live bug found during review | `incident-debug` | Dispatch with error logs + reproduction steps |
 | Multiple reports need consolidation | `spec-synthesizer` | Dispatch with artifact list + constraints |
 
-### Adversarial & Compliance (activate during Thorns)
+### Adversarial & Compliance (activate during Gauntlet)
 
 | Need | Skill | How |
 |:-----|:------|:----|
@@ -496,23 +499,23 @@ Specialists run as **Flash subagents** and report back like standard reviewers. 
 ## Anti-Patterns
 
 - **Don't dispatch a subagent for synthesis** — the orchestrator retains design authority and cross-cutting context that subagents lack
-- **Don't let reviewers see each other's work** — independence prevents confirmation bias (scouts in Spores are independent; Roots analysts receive scout findings but not each other's)
+- **Don't let reviewers see each other's work** — independence prevents confirmation bias (scouts in Sentry are independent; Probe analysts receive scout findings but not each other's)
 - **Don't skip fact-checking** — reviewer claims must be verified against actual data before presenting to user
 - **Don't fan out >4 reviewers per prong** — diminishing returns; 4 orthogonal lenses catch ~98% of issues
 - **Don't use inherit/pro for reviewers** — Flash is sufficient for read-only analysis; reserve heavyweight models for synthesis. This is a strict mandate for all prongs including diff proposers (see E14, E15 experiments)
-- **Don't let scouts propose fixes** (Trident) — separation of concerns keeps Spores fast and unbiased
-- **Don't let Roots analysts find new problems** (Trident) — scope creep; if new issues surface, log them for the next review cycle
+- **Don't let scouts propose fixes** (Vanguard) — separation of concerns keeps Sentry fast and unbiased
+- **Don't let Probe analysts find new problems** (Vanguard) — scope creep; if new issues surface, log them for the next review cycle
 
 ## Model Selection
 
 | Role | Model | Max Output | Rationale |
 |:-----|:------|:----------:|:----------|
-| Spores scout | `flash` | 500 tokens | Read-heavy, structured output, max 5 findings |
-| Mycelium analyst | `flash` | 800 tokens | Dependency tracing, grep-based, blast radius map |
-| Roots analyst | `flash` | 1,000 tokens/finding | Focused analysis, concrete fix proposals |
-| Thorns breaker | `flash` | 800 tokens/fix | Adversarial falsification, edge-case probing |
-| Bedrock verifier | `flash` | 300 tokens | Checklist-based, SHIP/BLOCK + max 3 issues |
-| Mulch extractor | `flash` | 500 tokens | Pattern extraction, structured taxonomy output |
+| Sentry scout | `flash` | 500 tokens | Read-heavy, structured output, max 5 findings |
+| Trace analyst | `flash` | 800 tokens | Dependency tracing, grep-based, blast radius map |
+| Probe analyst | `flash` | 1,000 tokens/finding | Focused analysis, concrete fix proposals |
+| Gauntlet breaker | `flash` | 800 tokens/fix | Adversarial falsification, edge-case probing |
+| Bastion verifier | `flash` | 300 tokens | Checklist-based, SHIP/BLOCK + max 3 issues |
+| Debrief extractor | `flash` | 500 tokens | Pattern extraction, structured taxonomy output |
 | Staff synthesizer | orchestrator (self) | Uncapped | Needs cross-cutting context, design authority, write access |
 
 ## Example Prompt Template for Reviewers

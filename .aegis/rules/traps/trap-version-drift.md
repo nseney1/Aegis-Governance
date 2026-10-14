@@ -14,7 +14,7 @@ expiry_sessions: 10
 expiry_days: 45
 created: 2026-09-28
 impact_weight: 1.0
-minimum_mode: breeze
+minimum_mode: patrol
 tags:
   - versioning
   - consistency
@@ -22,10 +22,10 @@ tags:
 fitness:
   score: 0.7273
   impact_weight: 1.0
-  triggers: 43
-  true_positives: 25.3
+  triggers: 47
+  true_positives: 29.3
   false_positives: 9.6
-  last_trigger_date: "2026-10-14T19:43:08Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Version consistency is enforced across 3 sources:

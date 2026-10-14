@@ -17,6 +17,12 @@ import subprocess
 import sys
 from typing import Any
 
+from aegis_core.taxonomy import (
+    REVIEW_MODE_RANKS as PROTOCOL_RANKS,
+    SENTINEL_BOUNDARY_SUBDIRS,
+    ReviewMode,
+    normalize_review_mode,
+)
 from aegis_core.yaml import parse_frontmatter, _get_body, dump_frontmatter
 
 
@@ -99,14 +105,6 @@ TEST_PATTERNS = [
     r"_test\.",
     r"^tests/",
 ]
-
-PROTOCOL_RANKS = {
-    "breeze": 1,
-    "gale": 2,
-    "trident": 3,
-    "maelstrom": 4,
-    "tempest": 5,
-}
 
 
 def classify_file(filepath: str) -> str:
@@ -223,7 +221,7 @@ def detect_branch_ops(workspace: Path) -> str:
 def check_membrane_overrides(
     workspace: Path | str | list[str],
     files: list[str] | Path | str,
-    current_protocol: str = "breeze",
+    current_protocol: str = ReviewMode.PATROL,
 ) -> tuple[str, str]:
     swapped_args = isinstance(workspace, list)
     if swapped_args:
@@ -234,8 +232,9 @@ def check_membrane_overrides(
         file_list = [str(f) for f in files] if isinstance(files, list) else [str(files)]
 
     is_upper = current_protocol.isupper()
-    best_protocol = current_protocol
-    best_rank = PROTOCOL_RANKS.get(current_protocol.lower(), 1)
+    norm_current = normalize_review_mode(current_protocol, default=str(ReviewMode.PATROL))
+    best_protocol = norm_current.upper() if is_upper else norm_current
+    best_rank = PROTOCOL_RANKS.get(norm_current, 1)
     override_reason = ""
     matched_rule_id = ""
 
@@ -245,7 +244,7 @@ def check_membrane_overrides(
     for cells_dir in candidate_roots:
         if not cells_dir.is_dir():
             continue
-        for cell_subdir in ["boundaries", "invariants", "membranes", "walls"]:
+        for cell_subdir in SENTINEL_BOUNDARY_SUBDIRS:
             target_dir = cells_dir / cell_subdir
             if not target_dir.is_dir():
                 continue
@@ -257,7 +256,8 @@ def check_membrane_overrides(
                         metadata = parse_frontmatter(cf.read())
                     if not metadata:
                         continue
-                    min_mode = str(metadata.get("minimum_mode", "")).strip().lower()
+                    raw_mode = str(metadata.get("minimum_mode", "")).strip()
+                    min_mode = normalize_review_mode(raw_mode, default="") if raw_mode else ""
                     target_paths = metadata.get("target_paths", [])
                     if isinstance(target_paths, str):
                         target_paths = [target_paths]
@@ -279,7 +279,7 @@ def check_membrane_overrides(
                             best_rank = mem_rank
                             best_protocol = min_mode.upper() if is_upper else min_mode
                             matched_rule_id = str(metadata.get("id") or cell_path.stem)
-                            override_reason = f"Membrane escalation for {matched_target} ({min_mode})"
+                            override_reason = f"Boundary escalation for {matched_target} ({min_mode})"
                 except Exception:
                     continue
 
@@ -319,45 +319,45 @@ def recommend_protocol(mode: str, file_args: list[str], workspace: Path | None =
     branch_ops = detect_branch_ops(root)
     diff_lines = get_diff_size(mode, file_args, root)
 
-    protocol = "breeze"
+    protocol = str(ReviewMode.PATROL)
     reasons_list: list[str] = []
 
     if branch_ops == "CRITICAL":
-        protocol = "maelstrom"
+        protocol = str(ReviewMode.BULWARK)
         reasons_list.append("Branch operation detected (rename/force-push/rebase)")
 
     if high_count >= 3:
-        protocol = "maelstrom"
+        protocol = str(ReviewMode.BULWARK)
         reasons_list.append(f"{high_count} high-sensitivity files: {high_files}")
     elif high_count >= 1:
-        if protocol not in ("maelstrom", "tempest"):
-            protocol = "trident"
+        if protocol not in (ReviewMode.BULWARK, ReviewMode.FORTRESS, ReviewMode.CITADEL):
+            protocol = str(ReviewMode.VANGUARD)
             reasons_list.append(f"High-sensitivity file(s): {high_files}")
 
     if re.search(r"auth|credential|secret|token|password", high_files, re.IGNORECASE):
-        protocol = "maelstrom"
+        protocol = str(ReviewMode.BULWARK)
         reasons_list.append("Security-sensitive path detected")
 
     if diff_lines > 200:
-        if protocol == "breeze":
-            protocol = "gale"
+        if protocol == ReviewMode.PATROL:
+            protocol = str(ReviewMode.SWEEP)
             reasons_list.append(f"Large diff ({diff_lines} lines)")
-        elif protocol == "gale":
-            protocol = "trident"
+        elif protocol == ReviewMode.SWEEP:
+            protocol = str(ReviewMode.VANGUARD)
             reasons_list.append(f"Large diff ({diff_lines} lines)")
-        elif protocol == "trident":
-            protocol = "maelstrom"
+        elif protocol == ReviewMode.VANGUARD:
+            protocol = str(ReviewMode.BULWARK)
             reasons_list.append(f"Large diff ({diff_lines} lines)")
 
     if high_count == 0 and medium_count == 0 and low_count > 0:
-        protocol = "breeze"
+        protocol = str(ReviewMode.PATROL)
         reasons_list = ["All changes are low-sensitivity (docs/README)"]
 
     if high_count == 0 and test_count > 0 and (test_count + low_count) == total_files:
-        protocol = "gale"
-        reasons_list = [f"Test-only changes ({test_count} test file(s); test changes do not need Trident)"]
+        protocol = str(ReviewMode.SWEEP)
+        reasons_list = [f"Test-only changes ({test_count} test file(s); test changes do not need Vanguard)"]
 
-    if protocol == "breeze" and total_files == 1 and high_count == 0 and test_count == 0:
+    if protocol == ReviewMode.PATROL and total_files == 1 and high_count == 0 and test_count == 0:
         reasons_list = ["Single file, non-infrastructure change"]
 
     protocol, mem_override = check_membrane_overrides(root, files, protocol)
@@ -441,13 +441,13 @@ def run_last_gasp(workspace: Path | None = None) -> int:
             continue
 
         organ = metadata.get("organ", "governance-auditor")
-        print(f"[Sentinel] Cell {filename} faces APOPTOSIS. Invoking Last Gasp Organ: {organ}...")
+        print(f"[Sentinel] Cell {filename} faces RETIREMENT. Invoking Last Gasp Skill: {organ}...")
 
         result_file = os.path.join(last_gasp_dir, filename.replace(".md", ".result"))
         organ_validates_cell = os.path.exists(result_file)
 
         if organ_validates_cell:
-            print(f"[Sentinel] Organ '{organ}' VALIDATED the cell! Saving from Apoptosis.")
+            print(f"[Sentinel] Skill '{organ}' VALIDATED the rule! Saving from Retirement.")
             conf_path = os.path.join(ws, "steering.conf")
             if os.path.exists(conf_path):
                 with open(conf_path, "r", encoding="utf-8") as f:
@@ -455,7 +455,7 @@ def run_last_gasp(workspace: Path | None = None) -> int:
                 with open(conf_path, "w", encoding="utf-8") as f:
                     for line in lines:
                         if line.startswith("REVIEW_MODE="):
-                            f.write("REVIEW_MODE=TEMPEST\n")
+                            f.write("REVIEW_MODE=FORTRESS\n")
                         else:
                             f.write(line)
 

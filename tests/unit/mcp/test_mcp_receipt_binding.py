@@ -93,7 +93,7 @@ def test_write_tool_cannot_be_redirected_to_another_workspace(workspaces):
 
 def test_read_tool_ignores_client_workspace(workspaces):
     canonical, other = workspaces
-    resp = _call("aegis_list_cells", {"workspace": str(other)})
+    resp = _call("aegis_list_rules", {"workspace": str(other)})
     names = {c.get("_name") for c in json.loads(_text(resp))}
     assert "cell-canonical" in names
     assert "cell-other" not in names, "read tool served a caller-selected workspace"
@@ -183,6 +183,43 @@ def test_receipt_is_single_use(workspaces):
     assert "error" in second, "receipt was redeemed twice"
 
 
+def test_receipt_burned_on_stale_digest_and_cannot_replay_when_reverted(workspaces):
+    """S3 burn-before-compare invariant: presenting a receipt when target file digest
+    mismatches burns the nonce in .aegis/receipts.jsonl so reverting the file cannot replay it."""
+    canonical, _ = workspaces
+    target = canonical / "target.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    args = {"file_path": "target.py", "proposed_content": "x = 2\n"}
+    receipt = _request_receipt("aegis_propose_change", args)
+
+    # Mutate file so digest mismatches on first presentation
+    target.write_text("x = 999\n", encoding="utf-8")
+    first = _call("aegis_propose_change", dict(args, receipt=receipt))
+    assert first.get("error", {}).get("message") == STALE_RECEIPT
+    assert (canonical / ".aegis" / "receipts.jsonl").is_file()
+
+    # Revert file back to original state and attempt replay -> must fail because nonce was burned
+    target.write_text("x = 1\n", encoding="utf-8")
+    replay = _call("aegis_propose_change", dict(args, receipt=receipt))
+    assert "error" in replay, "burned receipt was replayed after reverting file"
+
+
+def test_receipt_burned_on_path_traversal_value_error_in_server(workspaces):
+    """S3 burn-before-compare invariant: if _state_digests raises ValueError (e.g. path traversal)
+    during redemption, server.py burns the receipt before returning -32602."""
+    canonical, _ = workspaces
+    args = {"outcome": "success", "cells_used": [], "idempotency_key": "burn-traversal"}
+    receipt = _request_receipt("aegis_report_outcome", args)
+
+    # Redeem with a path traversal file_path injected into arguments
+    bad_call = _call("aegis_report_outcome", dict(args, file_path="../escape.py", receipt=receipt))
+    assert bad_call.get("error", {}).get("code") == -32602
+
+    # Attempting to redeem with the original valid arguments must now fail because receipt was burned
+    replay = _call("aegis_report_outcome", dict(args, receipt=receipt))
+    assert "error" in replay, "receipt was not burned after ValueError in server.py"
+
+
 def test_receipt_digest_rejects_symlinked_cell(workspaces):
     from aegis_core.rule_inventory import CellInventoryError
 
@@ -195,4 +232,4 @@ def test_receipt_digest_rejects_symlinked_cell(workspaces):
         pytest.skip('symlinks are unavailable')
 
     with pytest.raises(CellInventoryError, match='symlink'):
-        receipts.compute_cell_digest(str(canonical))
+        receipts.compute_rule_digest(str(canonical))

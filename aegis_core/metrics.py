@@ -20,6 +20,14 @@ import subprocess
 import sys
 from typing import List, Optional, Union
 
+from aegis_core.taxonomy import (
+    LEGACY_REVIEW_PRONG_ALIASES,
+    REVIEW_MODE_RANKS,
+    REVIEW_PRONGS,
+    WORDS_TO_TOKENS_FACTOR,
+    ReviewMode,
+    normalize_review_mode,
+)
 from aegis_core.workspace import Workspace, resolve_workspace
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 
@@ -59,7 +67,7 @@ def resolve_metrics_dir(workspace: Path | str) -> Path:
 
 
 def compute_token_census(workspace: Workspace | Path | str | None = None, model: str = "gemini-3.8-flash") -> dict:
-    """Compute token census across genome rules and organ skills without subprocess."""
+    """Compute token census across rules and skills without subprocess."""
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace.resolve(workspace) if workspace is not None else Workspace.resolve()
     )
@@ -69,7 +77,7 @@ def compute_token_census(workspace: Workspace | Path | str | None = None, model:
     results = []
     total_words = 0
     total_tokens = 0
-    fallback_ratio = 1.35
+    fallback_ratio = WORDS_TO_TOKENS_FACTOR
 
     def _wc(text: str) -> int:
         return len(text.split())
@@ -130,7 +138,7 @@ def compute_token_census(workspace: Workspace | Path | str | None = None, model:
             total_words += w_full
             total_tokens += t_active
             results.append({
-                "filename": f"organs/{skill_name}/SKILL.md",
+                "filename": f"skills/{skill_name}/SKILL.md",
                 "type": "skill",
                 "idle_words": w_idle,
                 "idle_tokens": t_idle,
@@ -184,15 +192,29 @@ def take_snapshot(
     skills_count = sum(1 for r in census["files"] if r.get("type") == "skill")
 
     prong_budgets = {}
-    staff_review_path = ws / "organs" / "staff-review" / "SKILL.md"
+    staff_review_content: str | None = None
+    staff_review_path = ws / "skills" / "staff-review" / "SKILL.md"
+    if not staff_review_path.is_file():
+        staff_review_path = ws / "organs" / "staff-review" / "SKILL.md"
     if staff_review_path.is_file():
-        content = staff_review_path.read_text(encoding="utf-8")
-        for line in content.splitlines():
-            match = re.search(
-                r'\|\s*.*?(Spores|Mycelium|Roots|Thorns|Bedrock|Mulch).*?\|\s*\**([0-9,]+\s*tokens).*?\|',
-                line,
-                re.IGNORECASE,
-            )
+        staff_review_content = staff_review_path.read_text(encoding="utf-8")
+    else:
+        try:
+            import importlib.resources
+            pkg_file = importlib.resources.files("skills") / "staff-review" / "SKILL.md"
+            if pkg_file.is_file():
+                staff_review_content = pkg_file.read_text(encoding="utf-8")
+        except Exception:
+            staff_review_content = None
+
+    if staff_review_content:
+        prong_names = REVIEW_PRONGS + tuple(k.capitalize() for k in LEGACY_REVIEW_PRONG_ALIASES)
+        prong_pattern = re.compile(
+            r"\|\s*.*?(" + "|".join(re.escape(p) for p in prong_names) + r").*?\|\s*\**([0-9,]+\s*tokens).*?\|",
+            re.IGNORECASE,
+        )
+        for line in staff_review_content.splitlines():
+            match = prong_pattern.search(line)
             if match:
                 prong_budgets[match.group(1)] = match.group(2).strip()
 
@@ -277,7 +299,7 @@ def take_snapshot(
     return 0
 
 
-_QUORUM_MODES = {'breeze': 0, 'gale': 1, 'trident': 2, 'maelstrom': 3, 'tempest': 4}
+_QUORUM_MODES = REVIEW_MODE_RANKS
 
 
 def _resolve_rules_dir(workspace: str | Path) -> str:
@@ -346,10 +368,11 @@ def evaluate_quorum(cells_dir: Path | str, changed_files: list[str], threshold: 
                         break
 
             if matched:
+                min_mode = normalize_review_mode(fm.get('minimum_mode'), default=str(ReviewMode.PATROL))
                 triggered.append({
                     'name': fm.get('id', cell_file.stem),
                     'type': fm.get('type', 'unknown'),
-                    'minimum_mode': fm.get('minimum_mode', 'breeze'),
+                    'minimum_mode': min_mode,
                     'fitness': (fm.get('fitness') or {}).get('score'),
                     'hypothesis': hypothesis[:80]
                 })
@@ -357,7 +380,13 @@ def evaluate_quorum(cells_dir: Path | str, changed_files: list[str], threshold: 
             pass
 
     if len(triggered) >= threshold:
-        max_mode = max(triggered, key=lambda t: _QUORUM_MODES.get(t.get('minimum_mode', 'breeze'), 0))['minimum_mode']
+        max_mode = max(
+            triggered,
+            key=lambda t: REVIEW_MODE_RANKS.get(
+                normalize_review_mode(t.get('minimum_mode'), default=str(ReviewMode.PATROL)),
+                1,
+            ),
+        )['minimum_mode']
         return {
             'quorum': True,
             'cells_triggered': len(triggered),
@@ -481,7 +510,7 @@ def letter_grade(pct: float) -> str:
     return 'F'
 
 
-def calculate_immune_grade(workspace: str) -> Optional[dict]:
+def calculate_governance_grade(workspace: str) -> Optional[dict]:
     """Calculate complete governance report card."""
     cells_dir = _resolve_rules_dir(workspace)
     cells = []
@@ -559,7 +588,7 @@ def calculate_immune_grade(workspace: str) -> Optional[dict]:
         'invariant_integrity': {'pct': round(wall_pct, 1), 'grade': letter_grade(wall_pct)},
         'tiers': tier_counts,
         'overall': {'pct': round(overall_pct, 1), 'grade': letter_grade(overall_pct)},
-        'top_improvement': f'Add cells for {top_gap[0]}/ ({top_gap[1]} uncovered files)',
+        'top_improvement': f'Add rules for {top_gap[0]}/ ({top_gap[1]} uncovered files)',
         'top_gap_count': top_gap[1],
         'details': {
             'total_cells': len(cells),
@@ -583,7 +612,7 @@ def calculate_immune_grade(workspace: str) -> Optional[dict]:
     }
 
 
-calculate_governance_grade = calculate_immune_grade
+calculate_immune_grade = calculate_governance_grade
 
 
 __all__ = [
@@ -595,6 +624,7 @@ __all__ = [
     "calculate_cell_coverage",
     "calculate_rule_coverage",
     "letter_grade",
-    "calculate_immune_grade",
     "calculate_governance_grade",
+    "calculate_immune_grade",
 ]
+

@@ -27,8 +27,17 @@ from aegis_core.receipts import (
     strip_server_owned,
     target_paths,
     compute_file_digest,
-    compute_cell_digest,
 )
+try:
+    from aegis_core.receipts import compute_rule_digest
+except ImportError:
+    from aegis_core.receipts import compute_cell_digest as compute_rule_digest
+from aegis_core.taxonomy import (
+    DEFAULT_LOCK_TIMEOUT_SECONDS,
+    INTERACTIVE_SESSION_TTL_SECONDS,
+    MCP_DEFAULT_RATE_LIMITS,
+)
+from aegis_core.workspace.layout import LockResource
 
 _session_tokens: set[str] = set()
 _session_token = None
@@ -37,12 +46,12 @@ _execution_enabled = False
 
 
 _READ_TOOLS = frozenset({
-    "aegis_scan", "aegis_list_cells", "aegis_grade", "aegis_coverage", "aegis_fitness",
+    "aegis_scan", "aegis_grade", "aegis_coverage",
     "aegis_request_receipt", "aegis_audit_security", "aegis_audit_performance",
     "aegis_poll_verification", "aegis_list_rules", "aegis_rule_fitness",
 })
 _WRITE_TOOLS = frozenset({
-    "aegis_report_outcome", "aegis_capture_insight", "aegis_create_cell", "aegis_create_rule",
+    "aegis_report_outcome", "aegis_capture_insight", "aegis_create_rule",
     "aegis_handoff",
 })
 _EXECUTE_TOOLS = frozenset({
@@ -52,13 +61,13 @@ _EXECUTE_TOOLS = frozenset({
 
 _tool_call_times = defaultdict(list)
 _RATE_LIMITS = {
-    "aegis_request_receipt": (60, 60),
-    "aegis_propose_change": (5, 60),
-    "aegis_report_outcome": (20, 60),
-    "aegis_verify_changes": (5, 60),
-    "aegis_checkpoint": (3, 60),
-    "aegis_poll_verification": (60, 60),
-    "aegis_handoff": (20, 60),
+    "aegis_request_receipt": MCP_DEFAULT_RATE_LIMITS["READ"],
+    "aegis_propose_change": MCP_DEFAULT_RATE_LIMITS["EXECUTION"],
+    "aegis_report_outcome": MCP_DEFAULT_RATE_LIMITS["MUTATION"],
+    "aegis_verify_changes": MCP_DEFAULT_RATE_LIMITS["VERIFICATION"],
+    "aegis_checkpoint": MCP_DEFAULT_RATE_LIMITS["CHECKPOINT"],
+    "aegis_poll_verification": MCP_DEFAULT_RATE_LIMITS["READ"],
+    "aegis_handoff": MCP_DEFAULT_RATE_LIMITS["MUTATION"],
 }
 
 
@@ -188,12 +197,28 @@ def _error(req_id: Any, code: int, message: str) -> Dict[str, Any]:
 
 
 def _state_digests(args: Dict[str, Any]):
-    """(file_digest, cell_digest) for the canonical workspace and the
+    """(file_digest, rule_digest) for the canonical workspace and the
     target paths named in args. Raises ValueError on a path escape."""
     return (
         compute_file_digest(_canonical_workspace, target_paths(args)),
-        compute_cell_digest(_canonical_workspace),
+        compute_rule_digest(_canonical_workspace),
     )
+
+
+def _issue_receipt_compat(**kwargs: Any) -> str:
+    rule_digest = kwargs.pop("rule_digest")
+    try:
+        return issue_receipt(**kwargs, rule_digest=rule_digest)
+    except TypeError:
+        return issue_receipt(**kwargs, cell_digest=rule_digest)
+
+
+def _verify_receipt_compat(**kwargs: Any) -> bool:
+    rule_digest = kwargs.pop("rule_digest")
+    try:
+        return verify_receipt(**kwargs, rule_digest=rule_digest)
+    except TypeError:
+        return verify_receipt(**kwargs, cell_digest=rule_digest)
 
 
 def send_error(id: Any, code: int, message: str):
@@ -299,7 +324,7 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
 
         if name == "aegis_request_receipt":
             if not _check_rate_limit("aegis_request_receipt", session_id=active_session_id):
-                limit_info = _RATE_LIMITS.get("aegis_request_receipt", (60, 60))
+                limit_info = _RATE_LIMITS.get("aegis_request_receipt", MCP_DEFAULT_RATE_LIMITS["READ"])
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,
@@ -326,21 +351,21 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
             # Bind the receipt to exactly what will be dispatched: the client
             # arguments minus server-owned keys (workspace is always the
             # operator-configured one), plus the current content of the target
-            # files and the governance cells. Any change before redemption
+            # files and the governance rules. Any change before redemption
             # makes the receipt stale.
             op_args = strip_server_owned(args.get("arguments", {}))
             try:
-                file_digest, cell_digest = _state_digests(op_args)
+                file_digest, rule_digest = _state_digests(op_args)
             except (ValueError, RuntimeError, OSError) as exc:
                 return _error(req_id, -32602, str(exc))
-            receipt_id = issue_receipt(
+            receipt_id = _issue_receipt_compat(
                 session_id=active_session_id,
                 workspace=_canonical_workspace,
                 operation=operation,
                 args=op_args,
                 file_digest=file_digest,
-                cell_digest=cell_digest,
-                ttl_seconds=300
+                rule_digest=rule_digest,
+                ttl_seconds=INTERACTIVE_SESSION_TTL_SECONDS
             )
             return {
                 "jsonrpc": "2.0",
@@ -394,33 +419,34 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
                 _rollback_rate_limit(name, session_id=active_session_id)
                 return _error(req_id, -32600, f"Tool '{name}' requires a valid 'receipt'.")
 
-            # Recompute the state digests now; a target file or cell edited
+            # Recompute the state digests now; a target file or rule edited
             # since issuance no longer matches and the receipt is consumed.
             try:
-                file_digest, cell_digest = _state_digests(args)
+                file_digest, rule_digest = _state_digests(args)
             except ValueError as exc:
-                verify_receipt(
+                _verify_receipt_compat(
                     receipt_id=receipt,
                     session_id=active_session_id,
                     workspace=_canonical_workspace,
                     operation=name,
                     args=args,
                     file_digest="",
-                    cell_digest="",
+                    rule_digest="",
                     consume=True,
                 )
+                _rollback_rate_limit(name, session_id=active_session_id)
                 return _error(req_id, -32602, str(exc))
             except (RuntimeError, OSError) as exc:
                 _rollback_rate_limit(name, session_id=active_session_id)
                 return _error(req_id, -32602, str(exc))
-            if not verify_receipt(
+            if not _verify_receipt_compat(
                 receipt_id=receipt,
                 session_id=active_session_id,
                 workspace=_canonical_workspace,
                 operation=name,
                 args=args,
                 file_digest=file_digest,
-                cell_digest=cell_digest,
+                rule_digest=rule_digest,
                 consume=True
             ):
                 _rollback_rate_limit(name, session_id=active_session_id)
@@ -441,7 +467,7 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
             # are re-routed to stderr instead of corrupting the stream.
             if _canonical_workspace and (name in _WRITE_TOOLS or name in _EXECUTE_TOOLS):
                 from aegis_core.locking import workspace_lock
-                with workspace_lock(_canonical_workspace, "cells", timeout_sec=5.0):
+                with workspace_lock(_canonical_workspace, LockResource.RULES, timeout_sec=DEFAULT_LOCK_TIMEOUT_SECONDS):
                     with contextlib.redirect_stdout(sys.stderr):
                         result = execute_tool(name, args)
             else:

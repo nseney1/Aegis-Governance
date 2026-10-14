@@ -5,7 +5,7 @@ from aegis_sdk.errors import RuleNotFoundError, RuleParseError, AegisError
 from aegis_core.scoring import wilson_lower_bound
 from aegis_core.lifecycle import bayesian_fitness
 
-__version__ = '3.0.0'
+__version__ = '3.1.0'
 __all__ = [
     'Governance',
     'Rule',

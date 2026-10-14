@@ -53,34 +53,56 @@ def _run_agent_scan(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _run_agent_grade(args: argparse.Namespace, ws: Workspace) -> int:
-    from aegis_core.telemetry import calculate_immune_grade
+    import aegis_core.metrics as _metrics
+    import aegis_core.telemetry as _telemetry
 
-    result = calculate_immune_grade(ws)
+    grade_fn = _telemetry.calculate_governance_grade
+    if (
+        grade_fn is _metrics.calculate_governance_grade
+        and _telemetry.calculate_immune_grade is not _metrics.calculate_governance_grade
+    ):
+        grade_fn = _telemetry.calculate_immune_grade
+    result = grade_fn(ws)
     print(json.dumps(result, indent=2))
     return 0
 
 
 def _run_agent_receipt(args: argparse.Namespace, ws: Workspace) -> int:
     from aegis_core.receipts import (
-        compute_cell_digest,
         compute_file_digest,
         issue_receipt,
     )
+    try:
+        from aegis_core.receipts import compute_rule_digest
+    except ImportError:
+        from aegis_core.receipts import compute_cell_digest as compute_rule_digest
+    from aegis_core.taxonomy import INTERACTIVE_SESSION_TTL_SECONDS
 
     operation = getattr(args, "operation", "verify")
     session_id = getattr(args, "session_id", "local-session")
     file_digest = compute_file_digest(ws.root, [])
-    cell_digest = compute_cell_digest(ws.root)
+    rule_digest = compute_rule_digest(ws.root)
 
-    receipt_id = issue_receipt(
-        session_id=session_id,
-        workspace=str(ws.root),
-        operation=operation,
-        args={},
-        file_digest=file_digest,
-        cell_digest=cell_digest,
-        ttl_seconds=300,
-    )
+    try:
+        receipt_id = issue_receipt(
+            session_id=session_id,
+            workspace=str(ws.root),
+            operation=operation,
+            args={},
+            file_digest=file_digest,
+            rule_digest=rule_digest,
+            ttl_seconds=INTERACTIVE_SESSION_TTL_SECONDS,
+        )
+    except TypeError:
+        receipt_id = issue_receipt(
+            session_id=session_id,
+            workspace=str(ws.root),
+            operation=operation,
+            args={},
+            file_digest=file_digest,
+            cell_digest=rule_digest,
+            ttl_seconds=INTERACTIVE_SESSION_TTL_SECONDS,
+        )
     print(json.dumps({"status": "ISSUED", "receipt": receipt_id, "operation": operation}, indent=2))
     return 0
 

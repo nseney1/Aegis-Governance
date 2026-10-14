@@ -23,12 +23,21 @@ from .detect import (
     provision_ast_driver_slots,
     resolve_recommended_drivers,
 )
+from . import match
+from .match import (
+    ASTTriggerVisitor,
+    match_ast_triggers,
+    prefilter_ast_tokens,
+)
+
+triggers = match
 
 __all__ = [
     "ASTDriverError",
     "ASTDriverRegistry",
     "ASTDriverRunner",
     "ASTDriverTimeoutError",
+    "ASTTriggerVisitor",
     "CallSiteNode",
     "DefinitionNode",
     "ImportNode",
@@ -37,7 +46,11 @@ __all__ = [
     "NoDriverConfiguredError",
     "NormalizedAST",
     "detect_project_languages",
+    "match",
+    "match_ast_triggers",
     "parse_python_ast",
+    "prefilter_ast_tokens",
     "provision_ast_driver_slots",
     "resolve_recommended_drivers",
+    "triggers",
 ]

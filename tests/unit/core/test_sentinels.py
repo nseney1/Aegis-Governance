@@ -118,11 +118,11 @@ def test_check_boundary_overrides_escalates_on_aegis_boundaries_and_invariants(t
     )
 
     mode, rule_id = check_boundary_overrides(["aegis_core/engine.py"], str(tmp_path), "BREEZE")
-    assert mode == "GALE"
+    assert mode == "SWEEP"
     assert rule_id == "boundary-core"
 
     mode2, rule_id2 = check_boundary_overrides(["aegis_core/auth.py"], str(tmp_path), "BREEZE")
-    assert mode2 == "TEMPEST"
+    assert mode2 == "FORTRESS"
     assert rule_id2 == "inv-auth"
 
 

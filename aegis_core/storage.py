@@ -1,4 +1,4 @@
-"""Cross-platform atomic storage utilities for Soma Governance.
+"""Cross-platform atomic storage utilities for Aegis Guardrails.
 
 Provides crash-resilient atomic file writes via temporary files, directory fsync,
 and exponential backoff retry on Windows sharing violations (WinError 32).
@@ -10,6 +10,11 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from typing import Any, Iterable
+
+from aegis_core.operations import Operations
+from aegis_core.taxonomy import STORAGE_INITIAL_DELAY_SECONDS, STORAGE_MAX_RETRIES
+from aegis_core.workspace.layout import WorkspaceLayout
 
 
 def fsync_dir(directory: Path | str) -> None:
@@ -31,8 +36,8 @@ def fsync_dir(directory: Path | str) -> None:
 def _replace_with_retry(
     src: str,
     dst: str,
-    max_retries: int = 8,
-    initial_delay: float = 0.01,
+    max_retries: int = STORAGE_MAX_RETRIES,
+    initial_delay: float = STORAGE_INITIAL_DELAY_SECONDS,
 ) -> None:
     """Replace destination with source, retrying on transient Windows sharing violations.
 
@@ -55,8 +60,8 @@ def _replace_with_retry(
 def atomic_write_bytes(
     path: Path | str,
     data: bytes,
-    max_retries: int = 8,
-    initial_delay: float = 0.01,
+    max_retries: int = STORAGE_MAX_RETRIES,
+    initial_delay: float = STORAGE_INITIAL_DELAY_SECONDS,
 ) -> None:
     """Atomically write binary data to path via a temporary file in the same directory.
 
@@ -91,8 +96,8 @@ def atomic_write_text(
     path: Path | str,
     text: str,
     encoding: str = "utf-8",
-    max_retries: int = 8,
-    initial_delay: float = 0.01,
+    max_retries: int = STORAGE_MAX_RETRIES,
+    initial_delay: float = STORAGE_INITIAL_DELAY_SECONDS,
 ) -> None:
     """Atomically write string text to path."""
     atomic_write_bytes(
@@ -107,8 +112,8 @@ def atomic_write_file(
     path: Path | str,
     content: str | bytes,
     encoding: str = "utf-8",
-    max_retries: int = 8,
-    initial_delay: float = 0.01,
+    max_retries: int = STORAGE_MAX_RETRIES,
+    initial_delay: float = STORAGE_INITIAL_DELAY_SECONDS,
 ) -> None:
     """Polymorphic atomic write supporting either text string or raw bytes."""
     if isinstance(content, bytes):
@@ -132,8 +137,8 @@ async def async_atomic_write_text(
     path: Path | str,
     text: str,
     encoding: str = "utf-8",
-    max_retries: int = 8,
-    initial_delay: float = 0.01,
+    max_retries: int = STORAGE_MAX_RETRIES,
+    initial_delay: float = STORAGE_INITIAL_DELAY_SECONDS,
 ) -> None:
     """Asynchronously and atomically write string text to path off the main event loop."""
     await asyncio.to_thread(
@@ -173,7 +178,50 @@ def atomic_write_and_unlink(
         raise
 
 
+class Storage:
+    """Workspace-scoped storage manager composing Operations (S2)."""
+
+    def __init__(self, workspace: Path | str | Any) -> None:
+        self._ops = Operations(workspace)
+
+    @property
+    def ops(self) -> Operations:
+        return self._ops
+
+    @property
+    def layout(self) -> WorkspaceLayout:
+        return self._ops.layout
+
+    @property
+    def root(self) -> Path:
+        return self._ops.root
+
+    def read_text(self, path: Path | str, default: str = "") -> str:
+        return self._ops.read_text(path, default=default)
+
+    def write_text(self, path: Path | str, content: str) -> None:
+        self._ops.write_text(path, content)
+
+    def write_atomic(self, path: Path | str, content: str) -> None:
+        self._ops.write_text(path, content)
+
+    atomic_write = write_atomic
+
+    def write_bytes(self, path: Path | str, data: bytes) -> None:
+        self._ops.write_bytes(path, data)
+
+    def read_jsonl(self, path: Path | str) -> list[dict[str, Any]]:
+        return self._ops.read_jsonl(path)
+
+    def append_jsonl(self, path: Path | str, record: dict[str, Any]) -> None:
+        self._ops.append_jsonl(path, record)
+
+    def write_jsonl(self, path: Path | str, records: Iterable[dict[str, Any]]) -> None:
+        self._ops.write_jsonl(path, records)
+
+
 __all__ = [
+    "Storage",
     "async_atomic_write_text",
     "atomic_write_and_unlink",
     "atomic_write_bytes",
@@ -182,5 +230,6 @@ __all__ = [
     "fsync_dir",
     "read_text_utf8",
 ]
+
 
 

@@ -13,7 +13,7 @@ triggers:
   - threshold_modification
   - docstring_update
   - correctness_review
-minimum_mode: standard
+minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
 created: 2026-09-30
@@ -25,13 +25,13 @@ tags:
 fitness:
   score: 0.75
   impact_weight: 1.0
-  triggers: 78
-  true_positives: 21.0077
+  triggers: 82
+  true_positives: 25.0077
   false_positives: 15.1222
-  last_trigger_date: "2026-10-14T19:48:15Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
-Supercell C3 incident: `lifecycle.py` docstring said `tp_rate > 0.85` and
+Citadel C3 incident: `lifecycle.py` docstring said `tp_rate > 0.85` and
 `age > 30 days` but code used `<` operator which permits equality (>= semantics).
 Also: demotion had no minimum sample size (1 trigger with 1 FP = immediate
 demotion) and dormancy check was unreachable.

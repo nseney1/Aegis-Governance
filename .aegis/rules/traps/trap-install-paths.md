@@ -11,18 +11,18 @@ target_paths:
   - Makefile
 expiry_sessions: 40
 impact_weight: 0.9
-minimum_mode: breeze
+minimum_mode: patrol
 tags:
   - install
   - paths
   - correctness
 created: 2026-09-28
 fitness:
-  triggers: 48
-  true_positives: 4.7866
+  triggers: 52
+  true_positives: 5.6327
   false_positives: 4.5289
   score: 0.5
-  last_trigger_date: "2026-10-14T08:55:41Z"
+  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Trap: Install Paths Divergence

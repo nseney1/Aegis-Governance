@@ -2,20 +2,22 @@
 from dataclasses import FrozenInstanceError
 import pytest
 
-from aegis_core.schemas import CellMetadata, TransitionResult, SignalEvent
+from aegis_core.schemas import RuleMetadata, TransitionResult, SignalEvent
+from aegis_core.schemas.rules import RuleMetadata as DirectRuleMetadata
 
 
-def test_cell_metadata_immutability():
-    meta = CellMetadata(
-        id="cell-guard-1",
-        type="wall",
+def test_rule_metadata_immutability():
+    meta = RuleMetadata(
+        id="rule-guard-1",
+        type="gate",
         domain="security",
         enforcement="gate",
         tags=("security", "auth"),
     )
-    assert meta.id == "cell-guard-1"
+    assert meta.id == "rule-guard-1"
     assert meta.enforcement == "gate"
     assert meta.tags == ("security", "auth")
+    assert DirectRuleMetadata is RuleMetadata
 
     with pytest.raises(FrozenInstanceError):
         meta.id = "modified"  # type: ignore[misc]
