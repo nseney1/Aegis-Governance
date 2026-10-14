@@ -26,10 +26,10 @@ tags:
 fitness:
   score: 0.3333
   impact_weight: 1.0
-  triggers: 73
-  true_positives: 18.3877
+  triggers: 74
+  true_positives: 18.4353
   false_positives: 17.423
-  last_trigger_date: "2026-10-14T19:43:08Z"
+  last_trigger_date: "2026-10-14T19:48:15Z"
 ---
 
 Supercell C4 incident: `quality_gate.py` had 30 passing unit tests and proper

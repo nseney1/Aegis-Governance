@@ -24,8 +24,8 @@ tags:
 fitness:
   score: 0.3333
   impact_weight: 1.0
-  triggers: 58
-  true_positives: 14.5827
+  triggers: 59
+  true_positives: 14.916
   false_positives: 10.8334
   last_trigger_date: "2026-10-14T19:45:33Z"
 ---

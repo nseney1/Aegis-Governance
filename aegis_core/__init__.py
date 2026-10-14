@@ -4,7 +4,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-__version__ = "2.1.0"
+__version__ = "3.0.0"
 
 # Explicit mapping of exported symbol name -> (module_name, attribute_name)
 _EXPORTS: dict[str, tuple[str, str | None]] = {

@@ -5,6 +5,27 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.0.0] — 2026-10-14 — "Pure Aegis Clean-Slate Architecture & Zero-Dependency CLI UX"
+
+### Breaking Changes (Pure Aegis Clean-Slate Cutover)
+- **Legacy `soma_*` Shims & `Soma*` / `Cell*` Aliases Removed**:
+  - Deleted `aegis_core/compat.py`, `aegis_core/somayaml.py`, `aegis_sdk/cells.py`, `aegis_core/cell_inventory.py`, and `aegis_mcp/cell_cache.py`. Importing `soma_core`, `soma_cli`, `soma_sdk`, or `soma_mcp` now raises `ModuleNotFoundError`.
+  - Removed all `Soma*` and `Cell*` class/error aliases (`SomaError`, `SomaValidationError`, `SomaYAMLError`, `SomaDocument`, `SomaYAML`, `SomaCommand`, `SomaParser`, `Cell`, `CellFitness`, `CellNotFoundError`, `CellParseError`, `CellPathTraversalError`).
+- **Pure `.aegis/rules/` Workspace & Upgrade Sentinel**:
+  - Removed `.soma/` and `.soma/cells/` fallback resolution across `aegis_core/workspace/`, `aegis_core/locking.py`, `aegis_core/rule_inventory.py`, `aegis_mcp/rule_cache.py`, and `aegis_sdk/rules.py`.
+  - Unmigrated `.soma/` workspaces now trigger an immediate Upgrade Sentinel diagnostic instructing users to run `aegis migrate` on v2.1.x before upgrading to v3.0.0.
+  - Renamed all repository rules in `.aegis/rules/invariants/` and `.aegis/rules/boundaries/` from `wall-*.md` / `membrane-*.md` to `invariant-*.md` / `boundary-*.md` and removed legacy biological rule types (`vacuole`, `chloroplast`, `plasmodesmata`).
+- **Pure `aegis_*` MCP Tool Namespace**:
+  - Cut over all 20 MCP tools in `aegis_mcp/registry.py`, `aegis_mcp/tools.py`, and `aegis_mcp/server.py` to the `aegis_*` namespace (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`, `aegis_verify_changes`, `aegis_checkpoint`, `aegis_handoff`, etc.) and removed `_CANONICAL_TOOL_MAP`.
+
+### Zero-Dependency Terminal UI & CLI Unification
+- **Terminal Theme & Adaptive Table Engine (`aegis_cli/ui/`)**:
+  - Added `OutputContext` (`aegis_cli/ui/theme.py`) honoring `NO_COLOR`, `FORCE_COLOR`, `TERM=dumb`, `isatty()`, `--plain`, `--no-emoji`, and `--json` with zero ANSI leakage in non-TTY/JSON modes.
+  - Added ANSI-aware `Table`, `Grid`, `Column`, `render_table`, `render_box`, and `render_error_panel` (`aegis_cli/ui/table.py`) while preserving `dependencies = []` in `pyproject.toml`.
+- **Unified Command Registry & Core Deduplication**:
+  - Registered `doctor`, `report`, `install`, and `uninstall` directly in `CommandRegistry` (`aegis_cli/registry.py`) and unified `aegis init` onto `aegis_cli/platforms/` adapters.
+  - Consolidated frontmatter parsing onto `aegis_core/yaml.py`, atomic writes onto `aegis_core/storage.py`, relocated `aegis_core/verification/jobs.py`, and renamed `aegis_core/proposals.py`.
+
 ## [2.1.0] — 2026-10-14 — "Pure Aegis Unification, Migration Bridge & aegis-guardrails Cutover"
 
 ### Package & Repository Cutover
