@@ -21,11 +21,11 @@ tags:
   - review-escalation
   - dna
 fitness:
-  triggers: 4
-  true_positives: 2.25
+  triggers: 5
+  true_positives: 2.5
   false_positives: 1
   score: 0.6667
-  last_trigger_date: "2026-10-14T04:36:35Z"
+  last_trigger_date: "2026-10-14T04:44:03Z"
 ---
 
 Changes to the genome (rules) directory are high-impact mutations that affect every
