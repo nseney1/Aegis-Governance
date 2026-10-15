@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-import aegis_mcp.security as mcp_security
 from aegis_core.workspace import Workspace
 from aegis_mcp.tools import execute_tool
 from aegis_sdk import Governance
@@ -62,12 +61,8 @@ class TestGovernanceWorkspacePorcelain:
         assert cells[0]["_name"] == "sample_rule"
 
 
-class TestMCPSecurityAndToolsWorkspace:
-    """Verifies soma_mcp security and tool handlers with Workspace."""
-
-    def test_security_module_reexports_workspace(self):
-        assert hasattr(mcp_security, "Workspace")
-        assert mcp_security.Workspace is Workspace
+class TestMCPToolsWorkspace:
+    """Verifies MCP tool handlers with Workspace."""
 
     def test_mcp_execute_tool_with_workspace_object(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
