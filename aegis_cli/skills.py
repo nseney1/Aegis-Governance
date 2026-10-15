@@ -8,7 +8,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from aegis_core.skills.graph import SkillGraph
-from aegis_core.skills.handoff import soma_handoff
+from aegis_core.skills.handoff import HandoffRouter, soma_handoff
 from aegis_core.skills.slots import SlotRegistry
 from aegis_cli.base import CommandCategory, AegisCommand
 
@@ -81,10 +81,47 @@ def run_skill(args: argparse.Namespace) -> int:
 
 
 def run_handoff(args: argparse.Namespace) -> int:
-    """Execute typed handoff between swarm skills and emit compact ticket."""
+    """Execute typed handoff between swarm skills or consume an inbound handoff ticket."""
     ws = getattr(args, "ws", None)
     if not ws:
-        print("Error: Workspace resolution required for handoff", file=sys.stderr)
+        raw_ws = getattr(args, "workspace", None)
+        if raw_ws:
+            from aegis_core.workspace import as_workspace
+            ws = as_workspace(raw_ws)
+        else:
+            print("Error: Workspace resolution required for handoff", file=sys.stderr)
+            return 1
+
+    action = getattr(args, "handoff_action", None) or getattr(args, "action", None)
+    if action == "consume":
+        ticket_id = getattr(args, "ticket_id", None)
+        if not ticket_id:
+            print("Error: ticket_id required for handoff consume", file=sys.stderr)
+            return 1
+        verify_tree = not getattr(args, "no_verify_tree", False)
+        try:
+            router = HandoffRouter(ws)
+            ticket = router.consume_handoff(ticket_id, verify_tree=verify_tree)
+            if getattr(args, "json", False):
+                out_data = {
+                    **ticket.to_dict(),
+                    "status": ticket.status,
+                    "payload": ticket.payload or {},
+                    **(ticket.payload or {}),
+                }
+                print(json.dumps(out_data, indent=2))
+            else:
+                print(json.dumps(ticket.payload or ticket.to_dict(), indent=2))
+            return 0
+        except Exception as exc:
+            print(f"Handoff Error: {exc}", file=sys.stderr)
+            return 1
+
+    from_skill = getattr(args, "from_skill", None)
+    to_skill = getattr(args, "to_skill", None)
+    artifact = getattr(args, "artifact", None)
+    if not from_skill or not to_skill or not artifact:
+        print("Error: --from, --to, and --artifact are required for handoff creation", file=sys.stderr)
         return 1
 
     payload_arg = getattr(args, "payload", "{}") or "{}"
@@ -104,9 +141,9 @@ def run_handoff(args: argparse.Namespace) -> int:
     try:
         ticket = soma_handoff(
             workspace=ws,
-            from_skill=args.from_skill,
-            to_skill=args.to_skill,
-            artifact_type=args.artifact,
+            from_skill=from_skill,
+            to_skill=to_skill,
+            artifact_type=artifact,
             payload=payload_data,
             cycle_id=getattr(args, "cycle_id", None),
         )
@@ -149,12 +186,32 @@ class HandoffCommand(AegisCommand):
     category = CommandCategory.PLUMBING
     help = "Execute file-buffered swarm handoff between skills"
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--from", "-f", dest="from_skill", required=True, type=str, help="Origin skill ID")
-        parser.add_argument("--to", "-t", dest="to_skill", required=True, type=str, help="Target skill ID")
-        parser.add_argument("--artifact", "-a", required=True, type=str, help="Artifact type (e.g. ChargeSheet, DiffProposal)")
+    def configure_parser(
+        self,
+        parser: argparse.ArgumentParser,
+        parents: Optional[List[argparse.ArgumentParser]] = None,
+    ) -> None:
+        parser.add_argument("handoff_action", nargs="?", default=None, help="Optional subcommand (e.g. 'consume')")
+        parser.add_argument("ticket_id", nargs="?", default=None, help="Ticket ID when consuming a handoff")
+        parser.add_argument("--from", "-f", dest="from_skill", required=False, default=None, type=str, help="Origin skill ID")
+        parser.add_argument("--to", "-t", dest="to_skill", required=False, default=None, type=str, help="Target skill ID")
+        parser.add_argument("--artifact", "-a", required=False, default=None, type=str, help="Artifact type (e.g. ChargeSheet, DiffProposal)")
         parser.add_argument("--payload", "-p", type=str, default="{}", help="Artifact payload JSON or file path")
         parser.add_argument("--cycle-id", type=str, default=None, help="Optional arbitration cycle ID")
+        parser.add_argument(
+            "--no-verify-tree",
+            dest="no_verify_tree",
+            action="store_true",
+            default=False,
+            help="Skip git tree_hash verification when consuming a ticket",
+        )
+        if "--json" not in parser._option_string_actions:
+            parser.add_argument(
+                "--json",
+                action="store_true",
+                default=False,
+                help="Emit machine-readable JSON output",
+            )
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_handoff(args)

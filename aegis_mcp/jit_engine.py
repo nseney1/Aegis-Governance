@@ -66,9 +66,16 @@ from aegis_core.taxonomy import (
 )
 from aegis_core.workspace.layout import WorkspaceLayout
 try:
-    from aegis_core.ast.match import match_ast_triggers, prefilter_ast_tokens
+    from aegis_core.ast.match import (
+        evaluate_forbid_ast,
+        match_ast_triggers,
+        prefilter_ast_tokens,
+        synthesize_planned_ast,
+    )
 except ImportError:
     from aegis_core.ast_match import match_ast_triggers, prefilter_ast_tokens
+    evaluate_forbid_ast = None  # type: ignore[assignment]
+    synthesize_planned_ast = None  # type: ignore[assignment]
 
 def estimate_tokens(text: object | None) -> int:
     """Estimate token count using fast stdlib heuristic (~1.35 tokens per word).
@@ -182,17 +189,25 @@ def match_cells_for_diff(
     diff_text: str = "",
     repo_root: str = "",
     workspace: str = "",
+    planned_symbols: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Match cells against changed files using AST syntactic triggers and target_paths globs.
+    """Match cells against changed files using AST syntactic triggers, forbid_ast, planned_symbols, and target_paths globs.
 
     Returns a list of match records, each containing the matched cell, match_type,
     and matched_files.
     """
     matched = []
     base_root = workspace or repo_root
+    planned_ast = (
+        synthesize_planned_ast(planned_symbols)
+        if (planned_symbols and synthesize_planned_ast is not None)
+        else None
+    )
+
     for cell in cells:
         ast_trigs = cell.get("ast_triggers")
-        target_paths = cell.get("target_paths", [])
+        forbid_spec = cell.get("forbid_ast")
+        target_paths = cell.get("target_paths") or cell.get("paths") or cell.get("globs") or []
         if isinstance(target_paths, str):
             target_paths = [target_paths]
 
@@ -200,19 +215,37 @@ def match_cells_for_diff(
         match_type = "glob_match"
         matched_files = []
 
-        # 1. Syntactic AST triggers (highest precision)
-        if ast_trigs and isinstance(ast_trigs, dict):
-            for f in changed_files:
-                f_path = os.path.join(base_root, f) if (base_root and not os.path.isabs(f)) else f
-                ast_matched, details = match_ast_triggers(
-                    ast_trigs,
-                    file_path=f_path,
-                    diff_text=diff_text,
-                )
-                if ast_matched:
-                    is_match = True
-                    match_type = "ast_match"
-                    matched_files.append(f)
+        # 0. Pre-edit planned_symbols matching against ast_triggers and forbid_ast
+        if planned_ast is not None and evaluate_forbid_ast is not None:
+            trig_hits = (
+                evaluate_forbid_ast(planned_ast, ast_trigs)
+                if (ast_trigs and isinstance(ast_trigs, dict))
+                else []
+            )
+            forbid_hits = (
+                evaluate_forbid_ast(planned_ast, forbid_spec)
+                if (forbid_spec and isinstance(forbid_spec, dict))
+                else []
+            )
+            if trig_hits or forbid_hits:
+                is_match = True
+                match_type = "ast_match"
+                matched_files.extend(changed_files if changed_files else ["<planned_symbols>"])
+
+        # 1. Syntactic AST triggers & forbid_ast on files (highest precision)
+        for spec_obj in (ast_trigs, forbid_spec):
+            if spec_obj and isinstance(spec_obj, dict):
+                for f in changed_files:
+                    f_path = os.path.join(base_root, f) if (base_root and not os.path.isabs(f)) else f
+                    ast_matched, _ = match_ast_triggers(
+                        spec_obj,
+                        file_path=f_path,
+                        diff_text=diff_text,
+                    )
+                    if ast_matched:
+                        is_match = True
+                        match_type = "ast_match"
+                        matched_files.append(f)
 
         # 2. Path matching (if not already matched by AST or if cell has target_paths)
         if not is_match and target_paths:
@@ -224,7 +257,11 @@ def match_cells_for_diff(
                         match_type = "exact_path"
                         matched_files.append(changed)
                         break
-                    elif fnmatch.fnmatch(changed, pattern) or fnmatch.fnmatch(base, pattern):
+                    elif (
+                        fnmatch.fnmatch(changed, pattern)
+                        or fnmatch.fnmatch(base, pattern)
+                        or (pattern.startswith("**/") and (fnmatch.fnmatch(changed, pattern[3:]) or fnmatch.fnmatch(base, pattern[3:])))
+                    ):
                         is_match = True
                         if match_type != "exact_path":
                             match_type = "glob_match"
@@ -233,7 +270,7 @@ def match_cells_for_diff(
 
         if is_match:
             cell_copy = cell.copy()
-            unique_files = list(set(matched_files))
+            unique_files = list(dict.fromkeys(matched_files))
             cell_copy["_matched_files"] = unique_files
             cell_copy["match_type"] = match_type
             match_entry = {
@@ -251,9 +288,15 @@ def match_cells_to_files(
     cells: list[dict[str, object]],
     changed_files: list[str],
     workspace: str = "",
+    planned_symbols: list[str] | None = None,
 ) -> list[dict[str, object]]:
-    """Match cells to changed files by target_paths (fnmatch) and AST triggers."""
-    matches = match_cells_for_diff(cells, changed_files, workspace=workspace)
+    """Match cells to changed files by target_paths (fnmatch), AST triggers, and planned_symbols."""
+    matches = match_cells_for_diff(
+        cells,
+        changed_files,
+        workspace=workspace,
+        planned_symbols=planned_symbols,
+    )
     return [m["cell"] for m in matches]
 
 
@@ -595,6 +638,7 @@ def express(
     changed_files: list[str] | None = None,
     budget: int | None = None,
     max_tokens: int | None = None,
+    planned_symbols: list[str] | None = None,
 ) -> dict[str, object]:
     """Main JIT expression function.
 
@@ -606,10 +650,22 @@ def express(
     if budget is None:
         budget = int(os.environ.get('AEGIS_CONTEXT_BUDGET', str(JIT_DEFAULT_RULE_COUNT_BUDGET)))
 
+    if planned_symbols is None:
+        try:
+            caller = sys._getframe(1)
+            if caller.f_code.co_name in ("_handle_scan", "handle_scan"):
+                caller_args = caller.f_locals.get("args")
+                if isinstance(caller_args, dict) and "planned_symbols" in caller_args:
+                    raw_ps = caller_args.get("planned_symbols")
+                    if isinstance(raw_ps, (list, tuple)):
+                        planned_symbols = [str(s) for s in raw_ps if isinstance(s, str)]
+        except Exception:
+            pass
+
     if not changed_files:
         changed_files = get_git_diff_files(workspace)
 
-    if not changed_files:
+    if not changed_files and not planned_symbols:
         return {
             'relevant_cells': [],
             'relevant_rules': [],
@@ -637,8 +693,39 @@ def express(
         }
 
     # Load and match cells
-    all_cells = _cell_cache.get_cells(workspace)
-    matched = match_cells_to_files(all_cells, changed_files, workspace=workspace)
+    all_cells = list(_cell_cache.get_cells(workspace))
+    top_rules_dir = os.path.join(str(workspace), "rules")
+    if os.path.isdir(top_rules_dir):
+        seen_names = {c.get("_name") for c in all_cells}
+        has_dot_aegis = os.path.isdir(os.path.join(str(workspace), ".aegis", "rules"))
+        for rule_file in sorted(glob.glob(os.path.join(top_rules_dir, "**", "*.md"), recursive=True)):
+            if os.path.basename(rule_file) == "README.md":
+                continue
+            name = os.path.splitext(os.path.basename(rule_file))[0]
+            if name in seen_names:
+                continue
+            try:
+                with open(rule_file, encoding="utf-8-sig") as f:
+                    content = f.read()
+                fm = parse_frontmatter(content)
+                if not fm or fm.get("expired_at"):
+                    continue
+                if not has_dot_aegis or fm.get("forbid_ast") or fm.get("ast_triggers"):
+                    fm["_name"] = name
+                    fm["_path"] = os.path.relpath(rule_file, str(workspace))
+                    fm["_body"] = _get_body(content)
+                    fm["_full"] = content
+                    all_cells.append(fm)
+                    seen_names.add(name)
+            except Exception:
+                continue
+
+    matched = match_cells_to_files(
+        all_cells,
+        changed_files or [],
+        workspace=workspace,
+        planned_symbols=planned_symbols,
+    )
 
     # Score ALL matched cells first (fixes C3: mandatory cells displaying Fitness: 0.00)
     for cell in matched:

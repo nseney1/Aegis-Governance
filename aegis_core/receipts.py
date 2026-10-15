@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import subprocess
 import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional, Set
@@ -86,6 +87,10 @@ class ReceiptManager:
         self._ephemeral_key: bytes = secrets.token_bytes(32)
         self._known_ledgers: Set[Path] = set()
 
+    @property
+    def _key(self) -> bytes:
+        return self._get_hmac_key(self._storage)
+
     def _get_storage_for(self, workspace: Any) -> Optional[Storage]:
         if self._storage is not None:
             return self._storage
@@ -97,8 +102,13 @@ class ReceiptManager:
     def _get_hmac_key(self, storage: Optional[Storage]) -> bytes:
         if storage is None:
             return self._ephemeral_key
+        legacy_key_file = storage.layout.aegis_dir / "receipt_key"
         key_file = storage.layout.keys_dir / "receipt.key"
         try:
+            if legacy_key_file.is_file():
+                raw = legacy_key_file.read_bytes().strip()
+                if raw:
+                    return raw
             if key_file.is_file():
                 raw = key_file.read_bytes().strip()
                 if len(raw) >= 32:
@@ -445,6 +455,31 @@ def compute_file_digest(
     canonical_items.sort(key=lambda x: x[0])
 
     h = hashlib.sha256(b"soma-file-digest-v1\0")
+    if not canonical_items:
+        if ws_root.is_dir() and (ws_root / ".git").exists():
+            try:
+                head_res = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=str(ws_root),
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                status_res = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=str(ws_root),
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if status_res.returncode == 0:
+                    head_str = head_res.stdout.strip() if head_res.returncode == 0 else "NO_HEAD"
+                    git_state = f"{head_str}\n{status_res.stdout}"
+                    h.update(b"git-working-tree\0" + git_state.encode("utf-8") + b"\0")
+            except Exception:
+                pass
+        return h.hexdigest()
+
     for rel_posix, resolved in canonical_items:
         h.update(rel_posix.encode("utf-8") + b"\0")
         if os.path.isfile(resolved):

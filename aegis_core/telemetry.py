@@ -12,8 +12,9 @@ Consolidates:
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import gzip
 import hashlib
 import json
 import os
@@ -146,10 +147,15 @@ def get_lock_path(workspace: str) -> str:
 
 
 def read_signals(workspace: str) -> list[dict]:
-    """Read all signals from the canonical evidence log."""
-    path = get_signals_path(str(workspace))
+    """Read all signals from the canonical evidence or telemetry log."""
+    ws = str(workspace)
+    path = get_signals_path(ws)
     if not os.path.isfile(path):
-        return []
+        alt_path = os.path.join(ws, ".aegis", "telemetry", SIGNALS_FILENAME)
+        if os.path.isfile(alt_path):
+            path = alt_path
+        else:
+            return []
     records = []
     with open(path, 'r', encoding='utf-8', errors='surrogatepass') as f:
         for line in f:
@@ -160,6 +166,12 @@ def read_signals(workspace: str) -> list[dict]:
                 except Exception:
                     pass
     return records
+
+
+def load_signals(workspace: Path | str | None = None) -> list[dict]:
+    """Alias for read_signals supporting optional workspace resolution."""
+    ws = str(workspace) if workspace is not None else str(resolve_workspace())
+    return read_signals(ws)
 
 
 def compute_payload_digest(cell_name: str, signal_type: str, source: str, metadata: Any) -> str:
@@ -183,6 +195,328 @@ def compute_event_id(principal: str, idempotency_scope: str, idempotency_key: st
 
 
 _SIGNALS_CACHE: dict[str, tuple[tuple[int, int, int], bytes, dict[str, dict]]] = {}
+
+
+def invalidate_signals_cache() -> None:
+    """Clear the in-memory signals file fingerprint cache."""
+    _SIGNALS_CACHE.clear()
+
+
+CHECKPOINT_ROLLUP_FILENAME = "checkpoint_rollup.json"
+
+
+def _parse_signal_timestamp(ts: Any) -> Optional[datetime]:
+    """Parse an ISO-8601 or numeric timestamp into a UTC-aware datetime."""
+    if ts is None or isinstance(ts, bool):
+        return None
+    if isinstance(ts, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(ts), tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+    if isinstance(ts, str):
+        text = ts.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _extract_rule_ids(record: dict) -> list[str]:
+    """Extract rule/cell IDs associated with a signal record."""
+    for key in ("rule_id", "cell", "cell_id", "cell_name", "rule"):
+        val = record.get(key)
+        if isinstance(val, str) and val.strip():
+            return [val.strip()]
+    cells_used = record.get("cells_used")
+    if isinstance(cells_used, list):
+        return [str(c).strip() for c in cells_used if isinstance(c, str) and c.strip()]
+    return []
+
+
+def _new_rollup_rule_entry() -> dict[str, Any]:
+    return {
+        "applied": 0,
+        "helped": 0,
+        "harmed": 0,
+        "ignored": 0,
+        "alpha_delta": 0.0,
+        "beta_delta": 0.0,
+    }
+
+
+def _accumulate_record_into_rules(rules_map: dict[str, dict[str, Any]], record: dict) -> None:
+    """Accumulate a single signal record into a per-rule rollup map."""
+    if not isinstance(record, dict):
+        return
+    rule_ids = _extract_rule_ids(record)
+    if not rule_ids:
+        return
+    sig = str(
+        record.get("signal")
+        or record.get("signal_type")
+        or record.get("outcome")
+        or record.get("action")
+        or ""
+    ).strip().lower()
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    try:
+        weight = float(record.get("credit_weight") or metadata.get("credit_weight", 1.0))
+    except (TypeError, ValueError):
+        weight = 1.0
+    weight = max(0.0, weight)
+
+    for rid in rule_ids:
+        entry = rules_map.setdefault(rid, _new_rollup_rule_entry())
+        if sig in ("tp", "helped", "success", "pass", "true_positive"):
+            entry["applied"] = int(entry.get("applied", 0)) + 1
+            entry["helped"] = int(entry.get("helped", 0)) + 1
+            entry["alpha_delta"] = round(float(entry.get("alpha_delta", 0.0)) + weight, 6)
+        elif sig in ("fp", "harmed", "failure", "fail", "false_positive"):
+            entry["applied"] = int(entry.get("applied", 0)) + 1
+            entry["harmed"] = int(entry.get("harmed", 0)) + 1
+            entry["beta_delta"] = round(float(entry.get("beta_delta", 0.0)) + weight, 6)
+        elif sig in ("fn", "ignored", "skip", "skipped"):
+            entry["ignored"] = int(entry.get("ignored", 0)) + 1
+        elif sig in ("trigger", "applied", "scan"):
+            entry["applied"] = int(entry.get("applied", 0)) + 1
+
+
+def load_checkpoint_rollup(workspace: Path | str | None = None) -> dict[str, Any]:
+    """Load checkpoint_rollup.json from .aegis/telemetry or .aegis/evidence if present."""
+    ws_path = Path(workspace).resolve() if workspace is not None else Path(resolve_workspace()).resolve()
+    candidates = [
+        ws_path / ".aegis" / "telemetry" / CHECKPOINT_ROLLUP_FILENAME,
+        ws_path / ".aegis" / "evidence" / CHECKPOINT_ROLLUP_FILENAME,
+        ws_path / CHECKPOINT_ROLLUP_FILENAME,
+    ]
+    for cand in candidates:
+        if cand.is_file():
+            try:
+                data = json.loads(cand.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    data.setdefault("rules", {})
+                    data.setdefault("compacted_count", 0)
+                    data.setdefault("last_compacted_at", "")
+                    return data
+            except Exception:
+                continue
+    return {"rules": {}, "compacted_count": 0, "last_compacted_at": ""}
+
+
+def get_rule_stats(workspace: Path | str | None = None, rule_id: Optional[str] = None) -> dict[str, Any]:
+    """Compute aggregated rule stats combining checkpoint_rollup.json and active signals.jsonl."""
+    ws_path = Path(workspace).resolve() if workspace is not None else Path(resolve_workspace()).resolve()
+    rollup = load_checkpoint_rollup(ws_path)
+    rules_map: dict[str, dict[str, Any]] = {}
+    for rid, counts in (rollup.get("rules") or {}).items():
+        if isinstance(counts, dict):
+            rules_map[rid] = {
+                "applied": int(counts.get("applied", 0)),
+                "helped": int(counts.get("helped", 0)),
+                "harmed": int(counts.get("harmed", 0)),
+                "ignored": int(counts.get("ignored", 0)),
+                "alpha_delta": float(counts.get("alpha_delta", float(counts.get("helped", 0)))),
+                "beta_delta": float(counts.get("beta_delta", float(counts.get("harmed", 0)))),
+            }
+
+    active_records = read_signals(str(ws_path))
+    for rec in active_records:
+        _accumulate_record_into_rules(rules_map, rec)
+
+    for rid, entry in rules_map.items():
+        alpha = round(1.0 + float(entry["alpha_delta"]), 6)
+        beta = round(1.0 + float(entry["beta_delta"]), 6)
+        entry["alpha"] = alpha
+        entry["beta"] = beta
+        entry["mean"] = round(alpha / (alpha + beta), 6) if (alpha + beta) > 0 else 0.5
+
+    if rule_id is not None:
+        if rule_id not in rules_map:
+            empty = _new_rollup_rule_entry()
+            empty["alpha"] = 1.0
+            empty["beta"] = 1.0
+            empty["mean"] = 0.5
+            return empty
+        return rules_map[rule_id]
+    return rules_map
+
+
+def compute_cell_fitness(
+    cell_or_workspace: Any,
+    rule_id: Optional[str] = None,
+    workspace: Path | str | None = None,
+) -> float:
+    """Compute cell/rule fitness incorporating both active signals.jsonl and checkpoint_rollup.json.
+
+    Supports both:
+    - compute_cell_fitness(cell_dict[, workspace=...])
+    - compute_cell_fitness(workspace, rule_id)
+    """
+    from aegis_core.scoring import compute_cell_fitness as _scoring_cell_fitness, laplace_score
+
+    if isinstance(cell_or_workspace, dict):
+        cell = dict(cell_or_workspace)
+        ws = workspace
+        rid = rule_id or cell.get("_name") or cell.get("id") or cell.get("rule_id")
+        if ws is not None and rid:
+            stats = get_rule_stats(ws, str(rid))
+            helped = float(stats.get("alpha_delta", stats.get("helped", 0)))
+            harmed = float(stats.get("beta_delta", stats.get("harmed", 0)))
+            total = max(float(stats.get("applied", 0)), helped + harmed)
+            if total > 0:
+                impact_weight = float(cell.get("impact_weight", 1.0) or 1.0)
+                return laplace_score(helped, helped + harmed, impact_weight)
+        return _scoring_cell_fitness(cell)
+
+    ws_target = workspace if workspace is not None else cell_or_workspace
+    target_rule = rule_id
+    if target_rule is None and isinstance(cell_or_workspace, str) and workspace is not None:
+        target_rule = cell_or_workspace
+        ws_target = workspace
+    if not target_rule:
+        return 0.5
+    stats = get_rule_stats(ws_target, str(target_rule))
+    return float(stats.get("mean", 0.5))
+
+
+def compact_signals(
+    workspace: Path | str | None = None,
+    retention_days: int = 30,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Compact expired signals older than retention_days into gzip archives and checkpoint_rollup.json."""
+    ws_path = Path(workspace).resolve() if workspace is not None else Path(resolve_workspace()).resolve()
+    telemetry_dir = ws_path / ".aegis" / "telemetry"
+    evidence_dir = ws_path / ".aegis" / "evidence"
+
+    telemetry_signals = telemetry_dir / SIGNALS_FILENAME
+    evidence_signals = evidence_dir / SIGNALS_FILENAME
+
+    source_files: list[Path] = []
+    if telemetry_signals.is_file():
+        source_files.append(telemetry_signals)
+    if evidence_signals.is_file():
+        source_files.append(evidence_signals)
+
+    raw_records: list[dict] = []
+    if source_files:
+        primary_source = source_files[0]
+        with open(primary_source, "r", encoding="utf-8", errors="surrogatepass") as f:
+            for line in f:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    rec = json.loads(line_str)
+                    if isinstance(rec, dict):
+                        raw_records.append(rec)
+                except Exception:
+                    continue
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=int(retention_days))
+
+    expired: list[dict] = []
+    retained: list[dict] = []
+    for rec in raw_records:
+        ts_val = rec.get("timestamp") or rec.get("created_at") or rec.get("ts")
+        dt = _parse_signal_timestamp(ts_val)
+        if dt is not None and dt < cutoff:
+            expired.append(rec)
+        else:
+            retained.append(rec)
+
+    rollup = load_checkpoint_rollup(ws_path)
+    rules_map: dict[str, dict[str, Any]] = {}
+    for rid, counts in (rollup.get("rules") or {}).items():
+        if isinstance(counts, dict):
+            rules_map[rid] = {
+                "applied": int(counts.get("applied", 0)),
+                "helped": int(counts.get("helped", 0)),
+                "harmed": int(counts.get("harmed", 0)),
+                "ignored": int(counts.get("ignored", 0)),
+                "alpha_delta": float(counts.get("alpha_delta", 0.0)),
+                "beta_delta": float(counts.get("beta_delta", 0.0)),
+            }
+
+    for rec in expired:
+        _accumulate_record_into_rules(rules_map, rec)
+
+    compacted_total = int(rollup.get("compacted_count", 0)) + len(expired)
+    last_compacted_at = now.strftime("%Y-%m-%dT%H:%M:%SZ") if expired else rollup.get("last_compacted_at", "")
+    updated_rollup = {
+        "rules": rules_map,
+        "compacted_count": compacted_total,
+        "last_compacted_at": last_compacted_at,
+    }
+
+    archive_paths: list[str] = []
+    rollup_path = telemetry_dir / CHECKPOINT_ROLLUP_FILENAME
+
+    if not dry_run and expired:
+        # Group expired lines by YYYY-MM
+        by_month: dict[str, list[str]] = {}
+        for rec in expired:
+            ts_val = rec.get("timestamp") or rec.get("created_at") or rec.get("ts")
+            dt = _parse_signal_timestamp(ts_val)
+            month_key = dt.strftime("%Y-%m") if dt is not None else now.strftime("%Y-%m")
+            by_month.setdefault(month_key, []).append(json.dumps(rec, ensure_ascii=False) + "\n")
+
+        target_dirs = [telemetry_dir]
+        if evidence_dir.is_dir() or evidence_signals.is_file():
+            target_dirs.append(evidence_dir)
+
+        retained_bytes = "".join(
+            json.dumps(rec, ensure_ascii=False) + "\n" for rec in retained
+        ).encode("utf-8", errors="surrogatepass")
+        rollup_bytes = (json.dumps(updated_rollup, indent=2, ensure_ascii=False) + "\n").encode(
+            "utf-8", errors="surrogatepass"
+        )
+
+        for tdir in target_dirs:
+            arch_dir = tdir / "archive"
+            arch_dir.mkdir(parents=True, exist_ok=True)
+            for month_key, lines in sorted(by_month.items()):
+                gz_path = arch_dir / f"signals-{month_key}.jsonl.gz"
+                existing_text = ""
+                if gz_path.is_file():
+                    try:
+                        with gzip.open(gz_path, "rt", encoding="utf-8", errors="surrogatepass") as gf:
+                            existing_text = gf.read()
+                    except Exception:
+                        existing_text = ""
+                combined_bytes = (existing_text + "".join(lines)).encode("utf-8", errors="surrogatepass")
+                _atomic_replace_bytes(str(gz_path), gzip.compress(combined_bytes))
+                if tdir == telemetry_dir:
+                    archive_paths.append(str(gz_path))
+
+            _atomic_replace_bytes(str(tdir / CHECKPOINT_ROLLUP_FILENAME), rollup_bytes)
+            _atomic_replace_bytes(str(tdir / SIGNALS_FILENAME), retained_bytes)
+
+        invalidate_signals_cache()
+
+    return {
+        "workspace": str(ws_path),
+        "dry_run": dry_run,
+        "retention_days": int(retention_days),
+        "expired_count": len(expired),
+        "retained_count": len(retained),
+        "compacted_count": len(expired),
+        "total_compacted": compacted_total,
+        "archive_files": archive_paths,
+        "rollup_path": str(rollup_path),
+        "rollup": updated_rollup,
+    }
+
 
 
 def _read_existing_events(log_path: str) -> tuple[bytes, dict[str, dict]]:
@@ -484,6 +818,12 @@ __all__ = [
     "get_signals_path",
     "get_lock_path",
     "read_signals",
+    "load_signals",
+    "invalidate_signals_cache",
+    "load_checkpoint_rollup",
+    "get_rule_stats",
+    "compute_cell_fitness",
+    "compact_signals",
     "compute_payload_digest",
     "compute_event_id",
     "append_signals",
