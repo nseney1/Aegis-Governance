@@ -1,8 +1,8 @@
 from pathlib import Path
-"""TDD tests for human insight signals in enzymes/outcome_engine.py.
+"""Human insight signal reader (aegis_core.outcomes.insights) and the outcome engine.
 
-Gate 1 of Core Change Protocol. Tests the integration of human insight
-signals into the existing fitness scoring pipeline.
+The reader and its cursor survive until wave B1b deletes them with their re-export
+facades; the outcome engine itself no longer consumes insights.
 """
 import json
 import os
@@ -257,96 +257,30 @@ def _stub_main(monkeypatch, ws):
     return oe
 
 
-class TestMainCursorCommitOrdering:
+class TestEngineIgnoresTheInsightLog:
+    """v4 removed insight capture (aegis_capture_insight), so the outcome engine no
+    longer reads .aegis/human_insights.jsonl or advances its cursor (ADR 0005 §5)."""
 
-    def _setup(self, tmp_path):
+    def test_engine_neither_credits_nor_consumes_logged_insights(self, tmp_path, monkeypatch):
         ws = str(tmp_path)
         _write_cell(ws, "vacuole-api-check", ["api/*.py"])
         _write_insights(ws, [_covered("vacuole-api-check")])
-        return ws
-
-    def test_crash_in_append_leaves_cursor_and_insight_is_reread(self, tmp_path, monkeypatch):
-        ws = self._setup(tmp_path)
-        oe = _stub_main(monkeypatch, ws)
-        real_append = oe.append_fitness_log
-
-        def crash(*args, **kwargs):
-            raise KeyboardInterrupt("simulated crash before evidence persisted")
-
-        monkeypatch.setattr(oe, "append_fitness_log", crash)
-        with pytest.raises(KeyboardInterrupt):
-            oe.main()
-        assert not os.path.exists(_cursor_path(ws))
-
-        monkeypatch.setattr(oe, "append_fitness_log", real_append)
-        oe.main()
-        rows = _signals_log(ws)
-        assert [r["cell"] for r in rows] == ["vacuole-api-check"]
-        with open(_cursor_path(ws)) as f:
-            assert int(f.read()) == os.path.getsize(os.path.join(ws, ".aegis", "human_insights.jsonl"))
-
-    def test_failed_append_does_not_commit_cursor(self, tmp_path, monkeypatch):
-        import aegis_sdk.telemetry as telemetry
-        ws = self._setup(tmp_path)
         oe = _stub_main(monkeypatch, ws)
 
-        def boom(*args, **kwargs):
-            raise RuntimeError("migration in progress")
+        assert oe.main() == 0
 
-        monkeypatch.setattr(telemetry, "append_signals", boom)
-        oe.main()  # must not raise
-        assert not os.path.exists(_cursor_path(ws))
-        signals, _ = oe.read_human_insight_signals(ws)
-        assert len(signals) == 1  # still pending
+        assert _signals_log(ws) == [], "an insight row was credited to a rule"
+        assert not os.path.exists(_cursor_path(ws)), "the engine advanced the insight cursor"
 
-    def test_blind_spots_only_commit_cursor(self, tmp_path, monkeypatch):
+    def test_blind_spot_insight_is_not_reported(self, tmp_path, monkeypatch, capsys):
         ws = str(tmp_path)
         os.makedirs(os.path.join(ws, ".aegis", "rules"), exist_ok=True)
         _write_insights(ws, [{"insight": "Nobody watches this", "context_files": ["orphan.py"],
                               "category": "attention", "timestamp": "2026-09-29T10:00:00Z",
                               "was_covered": False, "covering_cells": []}])
         oe = _stub_main(monkeypatch, ws)
-        oe.main()
-        with open(_cursor_path(ws)) as f:
-            assert int(f.read()) == os.path.getsize(os.path.join(ws, ".aegis", "human_insights.jsonl"))
 
-def _fitness(ws, name):
-    from aegis_sdk.rules import parse_rule_file
-    fm, _ = parse_rule_file(os.path.join(ws, ".aegis", "rules", "vacuoles", f"{name}.md"))
-    return fm["fitness"]
+        assert oe.main() == 0
 
-def test_retry_after_partial_append_neither_duplicates_nor_reinflates(tmp_path, monkeypatch):
-    import aegis_sdk.telemetry as telemetry
-    ws = str(tmp_path)
-    _write_cell(ws, "vacuole-a", ["a/*.py"])
-    _write_cell(ws, "vacuole-b", ["b/*.py"])
-    _write_insights(ws, [_covered("vacuole-a"), _covered("vacuole-b")])
-    oe = _stub_main(monkeypatch, ws)
-    before_a, before_b = _fitness(ws, "vacuole-a"), _fitness(ws, "vacuole-b")
-
-    real_append = telemetry.append_signals
-    calls = {"n": 0}
-
-    def flaky(*args, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("disk full")
-        return real_append(*args, **kwargs)
-
-    monkeypatch.setattr(telemetry, "append_signals", flaky)
-    oe.main()  # atomic batch fails before any signal lands
-    assert not os.path.exists(_cursor_path(ws)), "cursor advanced past unpersisted insight"
-    assert _signals_log(ws) == [], "failed batch persisted partial evidence"
-    oe.main()  # retry
-    rows = _signals_log(ws)
-    assert sorted(r["cell"] for r in rows) == ["vacuole-a", "vacuole-b"], (
-        "retry duplicated an already-logged insight event"
-    )
-    after_a, after_b = _fitness(ws, "vacuole-a"), _fitness(ws, "vacuole-b")
-    assert after_a["true_positives"] == before_a["true_positives"] + 1
-    assert after_b["true_positives"] == before_b["true_positives"] + 1
-
-    oe.main()  # nothing new: cursor committed, no further change
-    assert len(_signals_log(ws)) == 2
-    assert _fitness(ws, "vacuole-a")["true_positives"] == after_a["true_positives"]
-
+        assert "blind spot" not in capsys.readouterr().out
+        assert not os.path.exists(_cursor_path(ws))
