@@ -282,6 +282,67 @@ class TestSessionClose:
         assert rc == 0
         assert res == {}
 
+    # AD-1: hooks never rewrite rule files. session-close used to run cell selection
+    # (every never-triggered rule -> DORMANT) and the outcome engine (frontmatter
+    # fitness rewrite + ledger rows) on every host Stop event.
+
+    @staticmethod
+    def _tree(root: Path) -> dict[str, bytes]:
+        return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+    @staticmethod
+    def _git(repo: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+             "-c", "commit.gpgsign=false", *args],
+            cwd=repo, check=True, capture_output=True,
+        )
+
+    def test_does_not_modify_rules_after_fresh_init(self, tmp_path: Path, monkeypatch, capsys):
+        from aegis_cli.cli import main as cli_main
+
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-q")
+        assert cli_main(["init", "--yes", "--no-hooks", "--platform", "claude",
+                         "--workspace", str(repo)]) == 0
+        before = self._tree(repo / ".aegis")
+        assert any(name.endswith(".md") for name in before), "init installed no rules"
+        capsys.readouterr()
+
+        rc = cli_main(["hook", "session-close", "--workspace", str(repo)])
+
+        assert rc == 0
+        assert self._tree(repo / ".aegis") == before
+        assert json.loads(capsys.readouterr().out) == {}, "hook stdout must be only its JSON reply"
+
+    def test_does_not_modify_rules_or_ledger_when_changes_match_a_rule(self, tmp_path: Path):
+        from aegis_core.yaml import dump_frontmatter
+
+        repo = tmp_path / "repo"
+        rules = repo / ".aegis" / "rules" / "traps"
+        rules.mkdir(parents=True)
+        fm = {"id": "guard-src", "type": "trap", "target_paths": ["src/*.py"],
+              "hypothesis": "h", "prediction": "p"}
+        (rules / "guard-src.md").write_text(dump_frontmatter(fm, body="Body\n"), encoding="utf-8")
+        (repo / "src").mkdir()
+        (repo / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        self._git(repo, "init", "-q")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "one")
+        (repo / "src" / "app.py").write_text("x = 2\n", encoding="utf-8")
+        self._git(repo, "commit", "-q", "-am", "two")
+        before = self._tree(repo / ".aegis")
+
+        rc, res = run_session_close(workspace=repo)
+
+        assert (rc, res) == (0, {})
+        assert self._tree(repo / ".aegis") == before
+
 
 class TestPostSessionHook:
     """Test post-session hook execution."""

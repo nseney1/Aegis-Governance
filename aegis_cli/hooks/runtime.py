@@ -88,35 +88,15 @@ def run_pre_invocation(
 
 
 def run_session_close(workspace: Path | None = None) -> tuple[int, dict[str, Any]]:
-    """Run session close lifecycle tasks (outcome evaluation, cell evolution, and consolidation)."""
-    import random
+    """Session-close (host Stop) hook: deliberately a no-op.
 
-    root = workspace or Path.cwd()
-
-    # 1. Outcome engine (in-process ACE reflector)
-    try:
-        from aegis_core.telemetry import run_outcome_engine
-
-        run_outcome_engine(workspace=str(root))
-    except Exception:
-        pass
-
-    # 2. Rule fitness calculation
-    try:
-        from aegis_core.lifecycle import compute_cells_fitness
-
-        compute_cells_fitness(workspace=str(root))
-    except Exception:
-        pass
-
-    # 3. Rule selection pressure (archive extinct cells)
-    try:
-        from aegis_core.lifecycle import run_cell_selection
-
-        run_cell_selection(workspace=root, execute=True)
-    except Exception:
-        pass
-
+    Hooks never rewrite rule files or reflect on close (ADR 0005 AD-1). This hook ran
+    cell selection, which marked every never-triggered rule DORMANT after a fresh
+    `aegis init`, and the outcome engine, which rewrote rule frontmatter and appended
+    a ledger batch on every Stop event (Stop fires per turn on some hosts). Fitness
+    and promotion are derived views now, rebuilt only by an explicit command. The
+    phase stays so already-installed host hooks keep exiting 0 until it is cut (D15).
+    """
     return 0, {}
 
 
