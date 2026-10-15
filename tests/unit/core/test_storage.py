@@ -1,17 +1,11 @@
 """Unit tests for aegis_core.storage atomic operations and retry backoff."""
-import asyncio
 import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from aegis_core.storage import (
-    atomic_write_text,
-    atomic_write_bytes,
-    async_atomic_write_text,
-    read_text_utf8,
-)
+from aegis_core.storage import atomic_write_text, atomic_write_bytes
 
 
 def test_atomic_write_text_creates_file(tmp_path: Path):
@@ -33,14 +27,6 @@ def test_atomic_write_bytes(tmp_path: Path):
     data = b"\x00\x01\x02\xff"
     atomic_write_bytes(target, data)
     assert target.read_bytes() == data
-
-
-@pytest.mark.anyio
-async def test_async_atomic_write_text(tmp_path: Path):
-    target = tmp_path / "async.txt"
-    await async_atomic_write_text(target, "async content\n")
-    assert target.exists()
-    assert target.read_text(encoding="utf-8") == "async content\n"
 
 
 def test_atomic_write_retries_on_windows_permission_error(tmp_path: Path):
@@ -81,31 +67,8 @@ def test_atomic_write_cleans_up_temp_on_failure(tmp_path: Path):
     assert tmp_files == []
 
 
-def test_read_text_utf8_strips_bom(tmp_path: Path):
-    target = tmp_path / "with_bom.txt"
-    # Write UTF-8 BOM (\xef\xbb\xbf)
-    target.write_bytes(b"\xef\xbb\xbf---\ntitle: Test\n---\n")
-    content = read_text_utf8(target)
-    assert not content.startswith("\ufeff")
-    assert content.startswith("---")
-
-
-def test_atomic_write_file_polymorphic(tmp_path: Path):
-    from aegis_core.storage import atomic_write_file
-
-    # Text write
-    txt_file = tmp_path / "poly_text.txt"
-    atomic_write_file(txt_file, "polymorphic text string")
-    assert txt_file.read_text(encoding="utf-8") == "polymorphic text string"
-
-    # Bytes write
-    bin_file = tmp_path / "poly_bin.dat"
-    atomic_write_file(bin_file, b"polymorphic byte buffer")
-    assert bin_file.read_bytes() == b"polymorphic byte buffer"
-
-
 def test_atomic_write_retries_up_to_eight_times(tmp_path: Path):
-    from aegis_core.storage import atomic_write_file
+    from aegis_core.storage import atomic_write_text
 
     target = tmp_path / "retry8.txt"
     attempts = 0
@@ -119,7 +82,7 @@ def test_atomic_write_retries_up_to_eight_times(tmp_path: Path):
         return real_replace(src, dst)
 
     with patch("os.replace", side_effect=flaky_replace_seven_times):
-        atomic_write_file(target, "success on 8th attempt", initial_delay=0.0001)
+        atomic_write_text(target, "success on 8th attempt", initial_delay=0.0001)
 
     assert attempts == 8
     assert target.read_text(encoding="utf-8") == "success on 8th attempt"

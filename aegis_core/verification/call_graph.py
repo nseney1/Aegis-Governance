@@ -21,7 +21,7 @@ from aegis_core.ast.drivers.python import read_python_source
 from aegis_core.ast.schema import NormalizedAST
 from . import ToolEvidence
 
-__all__ = ["check", "check_normalized", "find_definitions", "find_call_sites"]
+__all__ = ["check", "check_normalized"]
 
 
 @dataclass(frozen=True)
@@ -221,21 +221,6 @@ class ExternalModuleInspector(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def find_definitions(filepath: str) -> dict[str, int]:
-    """Extract all function/method definitions with line numbers.
-
-    Returns {function_name: line_number}
-    """
-    try:
-        tree = ast.parse(read_python_source(filepath))
-    except (OSError, SyntaxError, UnicodeError):
-        return {}
-
-    visitor = FunctionDefinitionVisitor()
-    visitor.visit(tree)
-    return {name: info.line_no for name, info in visitor.definitions.items()}
-
-
 def _get_target_module_stems(filepath: str, repo_root: str) -> set[str]:
     """Compute module name variations (stem and dotted path) for import resolution."""
     stem = os.path.splitext(os.path.basename(filepath))[0]
@@ -363,39 +348,6 @@ def _get_searchable_source_files(
                 if _is_safe_source_file(full_p):
                     matched.append(full_p)
     return matched
-
-
-def find_call_sites(func_name: str, repo_root: str, exclude_file: str = "") -> list[str]:
-    """Find all files in repo_root that call a function by name using AST."""
-    target_stems = _get_target_module_stems(exclude_file, repo_root) if exclude_file else {func_name}
-    target_funcs = {func_name}
-    call_sites: list[str] = []
-    exclude_abs = os.path.abspath(exclude_file) if exclude_file else ""
-
-    for fpath in _get_searchable_source_files(repo_root, {".py"}):
-        if exclude_abs and os.path.abspath(fpath) == exclude_abs:
-            continue
-
-        try:
-            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-        except (OSError, UnicodeDecodeError):
-            continue
-
-        if func_name not in content:
-            continue
-
-        try:
-            tree = ast.parse(content, filename=fpath)
-        except SyntaxError:
-            continue
-
-        inspector = ExternalModuleInspector(target_stems, target_funcs)
-        inspector.visit(tree)
-        if func_name in inspector.matched_calls:
-            call_sites.append(fpath)
-
-    return call_sites
 
 
 _COMMENTS_STRINGS_RE = re.compile(

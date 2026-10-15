@@ -35,19 +35,19 @@ class TestWorkspacePackageArchitecture:
         ws_aegis = Workspace.resolve(aegis_mock)
         assert ws_aegis.is_aegis_repo
 
-    def test_backward_compatibility_facades_work_unchanged(self, tmp_path):
-        from aegis_core.workspace import resolve_workspace, confine_workspace, confine_path
+    def test_resolve_and_confine_helpers(self, tmp_path):
+        from aegis_core.workspace import resolve_workspace, confine_path
+        from aegis_core.workspace.base import Workspace
 
         repo = tmp_path / "project"
         repo.mkdir()
         (repo / ".aegis" / "rules").mkdir(parents=True)
         (repo / "file.py").write_text("print('test')", encoding="utf-8")
 
-        # Facades
         resolved_str = resolve_workspace(repo)
         assert resolved_str == str(repo.resolve())
 
-        confined_str = confine_workspace(repo)
+        confined_str = str(Workspace.confine(repo).root)
         assert confined_str == str(repo.resolve())
 
         abs_p, rel_p = confine_path("file.py", repo)

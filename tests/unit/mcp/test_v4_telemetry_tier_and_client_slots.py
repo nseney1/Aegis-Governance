@@ -11,14 +11,6 @@ from pathlib import Path
 import pytest
 
 import aegis_mcp.server as server_module
-from aegis_core.integrity import generate_manifest, save_manifest
-from aegis_core.rule_inventory import (
-    RuleInventory,
-    RuleInventoryEntry,
-    RuleMatch,
-    find_matching_rules,
-    load_parsed_rules,
-)
 from aegis_mcp.server import handle_request
 from aegis_mcp.tools import execute_tool
 
@@ -123,27 +115,4 @@ def test_repo_root_aegis_scan_loads_cleanly_without_integrity_warnings(monkeypat
     assert "hash mismatch" not in stderr_output
     assert res["stats"]["total_rules"] >= 45
 
-
-def test_load_parsed_rules_and_rule_inventory_primary_definitions(tmp_path: Path) -> None:
-    rules = load_parsed_rules(REPO_ROOT)
-    assert len(rules) >= 45
-    sample = rules[0]
-    for key in ("_name", "_path", "_body", "_full", "_digest"):
-        assert key in sample
-
-    ws = _make_workspace_with_rule(tmp_path, "invariant-tdd")
-    matches = find_matching_rules(ws / ".aegis" / "rules", ["src/app.py"])
-    assert len(matches) == 1
-    m = matches[0]
-    assert isinstance(m, RuleMatch)
-    assert m.rule_id == "invariant-tdd"
-    assert m.rule_type == "invariant"
-    assert m.rule_path.endswith("invariant-tdd.md")
-    assert m.cell_id == m.rule_id
-
-    # Verify manifest dual keys (auto-sync was removed: review H1)
-    manifest = generate_manifest(ws / ".aegis" / "rules")
-    assert "rules" in manifest and "cells" in manifest
-    assert manifest["rule_count"] == 1 and manifest["cell_count"] == 1
-    save_manifest(ws, manifest)
 

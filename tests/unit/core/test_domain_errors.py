@@ -1,14 +1,8 @@
 """Tests for standardized typed AegisError hierarchy (aegis_core.errors)."""
 from __future__ import annotations
 
-import pytest
 
-from aegis_core.errors import (
-    AegisError,
-    AegisValidationError,
-    RuleCorruptError,
-    LockTimeoutError,
-)
+from aegis_core.errors import AegisError, AegisValidationError, LockTimeoutError
 
 
 class TestDomainErrors:
@@ -27,13 +21,6 @@ class TestDomainErrors:
         assert isinstance(err, AegisError)
         assert isinstance(err, ValueError)
         assert str(err) == "Invalid value"
-
-    def test_cell_corrupt_error(self):
-        """RuleCorruptError provides structured corruption metadata."""
-        err = RuleCorruptError("Malformed YAML", cell_id="bad_cell", code="CORRUPT_FRONTMATTER")
-        assert isinstance(err, AegisError)
-        assert err.cell_id == "bad_cell"
-        assert err.code == "CORRUPT_FRONTMATTER"
 
     def test_lock_timeout_error(self):
         """LockTimeoutError inherits from TimeoutError."""

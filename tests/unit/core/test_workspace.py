@@ -10,9 +10,7 @@ from aegis_core.errors import WorkspaceError
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import (
     confine_path,
-    confine_workspace,
     resolve_workspace,
-    resolve_workspace_path,
     validate_rule_names,
 )
 
@@ -44,7 +42,7 @@ class TestWorkspaceCore:
         resolved = resolve_workspace(start=sub)
         assert resolved == str(ws.resolve())
 
-        resolved_p = resolve_workspace_path(start=sub)
+        resolved_p = Workspace.resolve(start=sub).root
         assert resolved_p == ws.resolve()
         assert isinstance(resolved_p, Path)
 
@@ -58,10 +56,10 @@ class TestWorkspaceCore:
     def test_confine_workspace(self, tmp_path: Path):
         ws = tmp_path / "valid"
         (ws / ".aegis" / "rules").mkdir(parents=True)
-        assert confine_workspace(str(ws)) == str(ws.resolve())
+        assert str(Workspace.confine(str(ws)).root) == str(ws.resolve())
 
         with pytest.raises(ValueError, match="missing .aegis/rules"):
-            confine_workspace(str(tmp_path))
+            str(Workspace.confine(str(tmp_path)).root)
 
     def test_legacy_soma_workspace_raises_upgrade_sentinel(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
@@ -70,7 +68,7 @@ class TestWorkspaceCore:
         (legacy_ws / ".soma" / "cells").mkdir(parents=True)
 
         with pytest.raises(WorkspaceError, match="aegis migrate"):
-            confine_workspace(str(legacy_ws))
+            str(Workspace.confine(str(legacy_ws)).root)
 
         with pytest.raises(WorkspaceError, match="aegis migrate"):
             resolve_workspace(start=legacy_ws)

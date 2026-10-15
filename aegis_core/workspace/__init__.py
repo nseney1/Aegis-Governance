@@ -21,15 +21,6 @@ def resolve_workspace(
     return str(Workspace.resolve(start=start, caller_file=caller_file, strict_env=strict_env).root)
 
 
-def resolve_workspace_path(
-    start: str | Path | os.PathLike[str] | Workspace | None = None,
-    caller_file: str | Path | os.PathLike[str] | None = None,
-    strict_env: bool = False,
-) -> Path:
-    """Return workspace root as a resolved Path object."""
-    return Workspace.resolve(start=start, caller_file=caller_file, strict_env=strict_env).root
-
-
 def as_workspace(workspace: str | Path | os.PathLike[str] | Workspace | None = None) -> Workspace:
     """Coerce any workspace representation into a strongly-typed Workspace value object."""
     if isinstance(workspace, Workspace):
@@ -37,11 +28,6 @@ def as_workspace(workspace: str | Path | os.PathLike[str] | Workspace | None = N
     if workspace:
         return Workspace.resolve(start=workspace)
     return Workspace.resolve()
-
-
-def confine_workspace(untrusted_workspace: str | Path | os.PathLike[str] | Workspace) -> str:
-    """Validate and confine a workspace path."""
-    return str(Workspace.confine(untrusted_workspace).root)
 
 
 def confine_path(
@@ -69,8 +55,6 @@ def validate_rule_names(
 __all__ = [
     "as_workspace",
     "confine_path",
-    "confine_workspace",
     "resolve_workspace",
-    "resolve_workspace_path",
     "validate_rule_names",
 ]

@@ -58,26 +58,26 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _runtime_paths(repo: Path) -> list[str]:
-    """Runtime state the current layout writes, as repo-relative paths."""
+    """Runtime state the current and earlier layouts write, as repo-relative paths."""
     layout = WorkspaceLayout(repo)
     paths = [
         layout.signals_file,                         # evidence/ ledger
         layout.evidence_dir / ".signals.lock",
         layout.evidence_dir / "outcomes.jsonl",
-        layout.checkpoint_rollup_file,
+        layout.evidence_dir / "checkpoint_rollup.json",
         layout.aegis_dir / "telemetry" / "checkpoint_rollup.json",
         layout.lock_file("signals"),                 # locks/
         layout.manifest_key_file,                    # keys/
         layout.keys_dir / "receipt.key",
         layout.aegis_dir / "receipt_key",            # legacy HMAC key still read
-        layout.receipts_file,
+        layout.aegis_dir / "receipts.jsonl",
         layout.metrics_dir / "escaped_defects.jsonl",
-        layout.gate_events_file,                     # governance/
-        layout.quarantine_dir / "quarantine_log.jsonl",
-        layout.leases_file,                          # swarm/
-        layout.handoffs_dir / "t1_review.json",
+        layout.aegis_dir / "governance" / "gate_events.jsonl",
+        layout.aegis_dir / "quarantine" / "quarantine_log.jsonl",
+        layout.aegis_dir / "swarm" / "leases.json",
+        layout.aegis_dir / "swarm" / "handoffs" / "t1_review.json",
         layout.aegis_dir / "handoffs" / "t1_review.json",
-        layout.human_insights_file,
+        layout.aegis_dir / "human_insights.jsonl",
         layout.aegis_dir / "insight_cursor",
         layout.aegis_dir / ".insight_cursor.abc123.tmp",
         layout.aegis_dir / "jobs_state.json",

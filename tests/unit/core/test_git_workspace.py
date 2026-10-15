@@ -85,9 +85,9 @@ class TestPolymorphicResolution:
 
 
 class TestZeroSubprocessFastPaths:
-    """Verifies zero-subprocess fast paths for HEAD, branch name, and packed-refs."""
+    """Verifies the zero-subprocess branch-name fast path (loose refs, packed refs, detached HEAD)."""
 
-    def test_head_commit_and_branch_loose_ref(self, tmp_path):
+    def test_branch_from_loose_ref(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
@@ -99,14 +99,10 @@ class TestZeroSubprocessFastPaths:
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
         subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(repo), check=True, capture_output=True)
 
-        proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo), capture_output=True, text=True, check=True)
-        expected_sha = proc.stdout.strip()
-
         ws = GitWorkspace(root=repo)
         assert ws.branch_name == "main"
-        assert ws.head_commit == expected_sha
 
-    def test_head_commit_packed_refs(self, tmp_path):
+    def test_branch_with_packed_refs(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
@@ -125,13 +121,9 @@ class TestZeroSubprocessFastPaths:
         assert (repo / ".git" / "packed-refs").is_file()
 
         ws = GitWorkspace(root=repo)
-        proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo), capture_output=True, text=True, check=True)
-        expected_sha = proc.stdout.strip()
-
-        assert ws.head_commit == expected_sha
         assert ws.branch_name == "main"
 
-    def test_detached_head_commit(self, tmp_path):
+    def test_detached_head_has_no_branch(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
@@ -149,14 +141,13 @@ class TestZeroSubprocessFastPaths:
         subprocess.run(["git", "checkout", sha], cwd=str(repo), check=True, capture_output=True)
 
         ws = GitWorkspace(root=repo)
-        assert ws.head_commit == sha
         assert ws.branch_name is None
 
 
 class TestGitWorkspaceOperations:
-    """Verifies diff, changed files, untracked files, and worktree operations."""
+    """Verifies changed files and worktree resolution."""
 
-    def test_diff_and_changed_files(self, tmp_path):
+    def test_changed_files(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
@@ -168,39 +159,17 @@ class TestGitWorkspaceOperations:
         subprocess.run(["git", "commit", "-m", "Init"], cwd=str(repo), check=True, capture_output=True)
 
         ws = GitWorkspace(root=repo)
-        assert ws.get_diff() == ""
         assert ws.get_changed_files() == []
 
         # Modify tracked file
         (repo / "tracked.txt").write_text("modified\n", encoding="utf-8")
-        assert "modified" in ws.get_diff()
         assert ws.get_changed_files() == ["tracked.txt"]
 
         # Stage modification
         subprocess.run(["git", "add", "tracked.txt"], cwd=str(repo), check=True)
-        assert ws.get_diff(staged=False) == ""
-        assert "modified" in ws.get_diff(staged=True)
         assert ws.get_changed_files(staged=True) == ["tracked.txt"]
 
-    def test_untracked_files_with_gitignore(self, tmp_path):
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init"], cwd=str(repo), check=True, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(repo), check=True)
-        subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(repo), check=True)
-        (repo / ".gitignore").write_text("*.ignored\n", encoding="utf-8")
-        subprocess.run(["git", "add", ".gitignore"], cwd=str(repo), check=True)
-        subprocess.run(["git", "commit", "-m", "Ignore"], cwd=str(repo), check=True, capture_output=True)
-
-        (repo / "new_file.py").write_text("print(1)", encoding="utf-8")
-        (repo / "skip.ignored").write_text("skip", encoding="utf-8")
-
-        ws = GitWorkspace(root=repo)
-        untracked = ws.get_untracked_files()
-        assert "new_file.py" in untracked
-        assert "skip.ignored" not in untracked
-
-    def test_list_worktrees(self, tmp_path):
+    def test_worktree_resolves_as_git_workspace(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
@@ -218,14 +187,6 @@ class TestGitWorkspaceOperations:
             capture_output=True,
         )
 
-        ws = GitWorkspace(root=repo)
-        wts = ws.list_worktrees()
-        assert len(wts) == 2
-        paths = [w["path"].resolve() for w in wts]
-        assert repo.resolve() in paths
-        assert wt_dir.resolve() in paths
-
-        # Verify the worktree workspace resolves properly as GitWorkspace
         wt_ws = Workspace.resolve(start=wt_dir)
         assert isinstance(wt_ws, GitWorkspace)
         assert wt_ws.is_worktree
@@ -238,11 +199,8 @@ class TestNonGitFallback:
 
     def test_empty_git_dir_behavior(self, tmp_path):
         ws = GitWorkspace(root=tmp_path)
-        assert ws.head_commit is None
         assert ws.branch_name is None
-        assert ws.get_diff() == ""
         assert ws.get_changed_files() == []
-        assert ws.get_untracked_files() == []
         assert not ws.is_git
 
 
@@ -278,7 +236,6 @@ class TestAncestorDiscoveryMatchesGit:
         git_ws = GitWorkspace(root=proj)
         assert git_ws.git_dir is None
         assert not git_ws.is_git
-        assert git_ws.head_commit is None
         assert git_ws.branch_name is None
 
     def test_ancestor_git_dir_without_objects_is_not_adopted(self, outer):

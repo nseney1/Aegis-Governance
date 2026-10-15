@@ -13,7 +13,6 @@ import math
 import re
 import unicodedata
 from datetime import date, datetime
-from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from aegis_core.yaml_engine.parser import (
@@ -187,15 +186,8 @@ def dump_frontmatter(data: Mapping[str, Any] | Dict[str, Any], body: Optional[st
     return yaml_text
 
 
-def write_frontmatter(target_path: str | Path, metadata: Dict[str, Any], body: str) -> None:
-    """Write metadata and markdown body to target_path with frontmatter delimiters."""
-    content = dump_frontmatter(metadata, body=body)
-    Path(target_path).write_text(content, encoding="utf-8")
-
-
 __all__ = [
     "_dump_lines",
     "_format_scalar",
     "dump_frontmatter",
-    "write_frontmatter",
 ]

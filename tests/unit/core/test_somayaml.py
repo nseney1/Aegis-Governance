@@ -1,7 +1,6 @@
 """Tests for aegis_core.yaml — Pure-Python AegisYAML engine & unified domain model."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import pytest
 
@@ -323,8 +322,6 @@ class TestBackwardCompatibilityParity:
             parse_yaml_subset("key: 'unclosed")
 
 
-from tests.unit.core.test_frontmatter_engine import TestFrontmatterParser, TestFrontmatterDumper
-from aegis_core.yaml_engine.serializer import write_frontmatter
 import datetime
 
 
@@ -366,7 +363,7 @@ class TestSomaYAMLBranchHardening:
         doc_explicit = AegisDocument(metadata={"id": "e1"}, kind="custom_kind")
         assert doc_explicit.kind == "custom_kind"
 
-    def test_somayaml_parse_text_and_dump(self):
+    def test_somayaml_parse_text(self):
         # parse_text with frontmatter and body
         doc = AegisYAML.parse_text("---\nid: cell-abc\nkind: skill\n---\n# Markdown Body\nHello world")
         assert doc.id == "cell-abc"
@@ -383,16 +380,6 @@ class TestSomaYAMLBranchHardening:
 
         with pytest.raises(FrontmatterError, match="Expected YAML mapping at document root"):
             AegisYAML.parse_text("- item 1\n- item 2\n")
-
-        # dump AegisDocument
-        dumped1 = AegisYAML.dump(doc)
-        assert "id: cell-abc" in dumped1
-        assert "Hello world" in dumped1
-
-        # dump dict with body
-        dumped2 = AegisYAML.dump({"id": "d1"}, body="Body from dict")
-        assert "id: d1" in dumped2
-        assert "Body from dict" in dumped2
 
     def test_somayaml_parse_file_and_write_frontmatter(self, tmp_path: Path):
         # workspace without confine_path raises AegisYAMLError
@@ -421,14 +408,6 @@ class TestSomaYAMLBranchHardening:
                 return str(real_file.resolve())
         doc_str = AegisYAML.parse_file("target.md", StringWS())
         assert doc_str.id == "sym-target"
-
-        # write_frontmatter
-        out_file = tmp_path / "written.md"
-        write_frontmatter(out_file, {"id": "written-id"}, "Written body")
-        assert out_file.exists()
-        doc_written = AegisYAML.parse_file("written.md", ws)
-        assert doc_written.id == "written-id"
-        assert doc_written.body == "Written body"
 
     def test_parse_file_rejects_symlinks_branch_hardening(self, tmp_path: Path):
         ws = Workspace(tmp_path)

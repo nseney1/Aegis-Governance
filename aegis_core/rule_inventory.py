@@ -357,34 +357,6 @@ def find_matching_rules(
     return matches
 
 
-def load_parsed_rules(workspace: str | Path, include_expired: bool = False) -> list[dict]:
-    """Load and parse all rules from workspace using canonical inventory_rules + parse_frontmatter."""
-    from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
-
-    inventory = inventory_rules(str(workspace))
-    rules: list[dict] = []
-    for entry in inventory.entries:
-        if os.path.basename(entry.relative_path) == "README.md":
-            continue
-        try:
-            content = entry.content.decode("utf-8")
-            fm = parse_frontmatter(content)
-        except Exception:
-            continue
-        if not fm or not isinstance(fm, dict):
-            continue
-        if not include_expired and fm.get("expired_at"):
-            continue
-        parsed = dict(fm)
-        parsed["_name"] = os.path.splitext(os.path.basename(entry.absolute_path))[0]
-        parsed["_path"] = entry.relative_path
-        parsed["_body"] = _get_body(content)
-        parsed["_full"] = content
-        parsed["_digest"] = entry.digest
-        rules.append(parsed)
-    return rules
-
-
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 # Backward-compatible and canonical engineering aliases
@@ -411,7 +383,6 @@ __all__ = [
     "find_rules_dirs",
     "inventory_cells",
     "inventory_rules",
-    "load_parsed_rules",
     "parse_frontmatter",
 ]
 

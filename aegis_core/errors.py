@@ -25,23 +25,6 @@ class AegisValidationError(AegisError, ValueError):
         super().__init__(message, code=code, **kwargs)
 
 
-class RuleCorruptError(AegisError):
-    """Raised when a rule frontmatter or body is malformed or unparseable."""
-
-    def __init__(
-        self,
-        message: str = "",
-        cell_id: str | None = None,
-        rule_id: str | None = None,
-        code: str = "RULE_CORRUPT",
-        **kwargs: Any,
-    ) -> None:
-        actual_id = rule_id or cell_id
-        super().__init__(message, code=code, cell_id=actual_id, rule_id=actual_id, **kwargs)
-        self.cell_id = actual_id
-        self.rule_id = actual_id
-
-
 class RuleNotFoundError(AegisError):
     """Raised when a rule file does not exist."""
 
@@ -125,7 +108,6 @@ __all__ = [
     "LockTimeoutError",
     "NoTestRunnerFoundError",
     "PathTraversalError",
-    "RuleCorruptError",
     "WorkspaceBareRepoError",
     "WorkspaceError",
     "WorkspaceNotFoundError",

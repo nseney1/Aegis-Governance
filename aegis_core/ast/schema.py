@@ -613,14 +613,3 @@ class NormalizedAST:
     def from_json(cls, json_str: str) -> NormalizedAST:
         return cls.from_dict(json.loads(json_str))
 
-    def find_definition(self, name: str) -> Optional[DefinitionNode]:
-        for d in self.definitions:
-            if d.name == name:
-                return d
-        return None
-
-    def get_exported_definitions(self) -> List[DefinitionNode]:
-        return [d for d in self.definitions if d.is_exported]
-
-    def get_calls_in_scope(self, caller_scope: str) -> List[CallSiteNode]:
-        return [c for c in self.call_sites if c.caller_scope == caller_scope]

@@ -13,7 +13,8 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_core.workspace import confine_workspace, confine_path, validate_rule_names
+from aegis_core.workspace import confine_path, validate_rule_names
+from aegis_core.workspace.base import Workspace
 from aegis_core.integrity import (
     generate_manifest,
     verify_manifest,
@@ -38,28 +39,28 @@ def soma_workspace(tmp_path):
     return tmp_path
 
 
-# ── Path Confinement: confine_workspace ───────────────────────────────
+# ── Path Confinement: Workspace.confine ───────────────────────────────
 
 
 class TestConfineWorkspace:
     def test_rejects_empty(self):
         """Empty string is not a valid workspace."""
         with pytest.raises(ValueError, match="must not be empty"):
-            confine_workspace("")
+            str(Workspace.confine("").root)
 
     def test_rejects_nonexistent(self):
         """Nonexistent path is rejected."""
         with pytest.raises(ValueError, match="does not exist"):
-            confine_workspace("/nonexistent/path/abc123")
+            str(Workspace.confine("/nonexistent/path/abc123").root)
 
     def test_rejects_non_soma_dir(self, tmp_path):
         """A directory without .aegis/rules/ is not a valid workspace."""
         with pytest.raises(ValueError, match="not a valid Aegis workspace"):
-            confine_workspace(str(tmp_path))
+            str(Workspace.confine(str(tmp_path)).root)
 
     def test_accepts_valid_workspace(self, soma_workspace):
         """A directory with .aegis/rules/ is accepted."""
-        result = confine_workspace(str(soma_workspace))
+        result = str(Workspace.confine(str(soma_workspace)).root)
         assert os.path.isabs(result)
         assert os.path.isdir(os.path.join(result, ".aegis", "rules"))
 
@@ -346,7 +347,7 @@ class TestManifestSigning:
     def test_verify_signature_non_string_rejected(self, soma_workspace):
         """Non-string signature fails verification safely."""
         from aegis_core.integrity import (
-            generate_key, load_key, sign_manifest, verify_signature,
+            generate_key, load_key, verify_signature,
         )
 
         generate_key(str(soma_workspace))

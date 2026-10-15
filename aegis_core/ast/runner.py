@@ -197,10 +197,6 @@ class ASTDriverRegistry:
         clean_ext = extension if extension.startswith(".") else f".{extension}"
         self._drivers[clean_ext.lower()] = str(command).strip()
 
-    def get_registered_driver(self, extension: str) -> Optional[str]:
-        clean_ext = extension if extension.startswith(".") else f".{extension}"
-        return self._drivers.get(clean_ext.lower())
-
     def plan_driver(
         self,
         extension: str,

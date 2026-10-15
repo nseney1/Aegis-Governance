@@ -1,8 +1,6 @@
 """Unit tests for NormalizedAST schema, serialization, and Python native driver."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
 import pytest
 
 from aegis_core.ast.schema import (
@@ -51,10 +49,6 @@ def test_schema_roundtrip_dict_and_json():
     json_str = ast_obj.to_json()
     reconstructed = NormalizedAST.from_json(json_str)
     assert reconstructed == ast_obj
-    assert reconstructed.find_definition("login") == ast_obj.definitions[0]
-    assert reconstructed.find_definition("nonexistent") is None
-    assert len(reconstructed.get_exported_definitions()) == 1
-    assert len(reconstructed.get_calls_in_scope("login")) == 2
 
 
 def test_schema_validation_rejects_malformed_payload():

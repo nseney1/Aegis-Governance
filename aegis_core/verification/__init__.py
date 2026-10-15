@@ -117,12 +117,6 @@ class ArbitrationResult:
     predictions: list[Prediction]
     claims: list[Claim]
 
-    @property
-    def ship_blockers(self) -> list[Divergence]:
-        return [d for d in self.divergences
-                if d.prediction and d.prediction.severity == Severity.CRITICAL]
-
-
 # ── Structured Output Schemas (for agent prompts) ─────────────────────────
 
 PREDICTION_SCHEMA = {

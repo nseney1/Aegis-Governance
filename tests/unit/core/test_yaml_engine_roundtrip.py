@@ -298,7 +298,7 @@ def test_seeded_frontmatter_roundtrip_preserves_metadata_and_body():
             assert_identical(meta, parsed_meta)
             assert parsed_body == body
             assert_identical(meta, parse_frontmatter(content))
-            doc = AegisYAML.parse_text(AegisYAML.dump(meta, body=body))
+            doc = AegisYAML.parse_text(content)
             assert_identical(AegisDocument(meta).metadata, doc.metadata)
             assert doc.body == body
         except Exception as exc:

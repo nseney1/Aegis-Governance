@@ -1,5 +1,5 @@
 """Unit tests for v4.0.0 Wave 1 Lane B:
-- Cross-model SlotRegistry.for_platform() and resolve_text_for_platform()
+- Cross-model SlotRegistry.for_platform() and slot resolution
 - Multi-platform detect_platforms() and portable MCP configuration
 - Workspace SSOT rule seeding + manifest signing in aegis init
 """
@@ -9,20 +9,19 @@ import argparse
 import json
 from pathlib import Path
 
-from aegis_cli.init import generate_mcp_config, run_init, seed_workspace_rules
+from aegis_cli.init import generate_mcp_config, run_init
 from aegis_cli.platforms import McpAdapter, detect_platform, detect_platforms
 from aegis_core.rule_inventory import inventory_rules
 from aegis_core.skills.slots import (
     DEFAULT_SLOTS,
     PLATFORM_SLOT_PROFILES,
     SlotRegistry,
-    resolve_text_for_platform,
 )
 from aegis_mcp.rule_cache import RuleCache
 
 
 class TestCrossModelSlotRegistry:
-    """Verify SlotRegistry.for_platform and resolve_text_for_platform across AI platforms."""
+    """Verify SlotRegistry.for_platform and slot resolution across AI platforms."""
 
     def test_platform_slot_profiles_and_defaults(self):
         for platform in (
@@ -105,7 +104,7 @@ class TestCrossModelSlotRegistry:
         assert reg.get("TOOL_READ") == "Read"
 
         text = "Use ${SLOT.TOOL_READ} with ${SLOT.MODEL_FAST} via ${SLOT.TEST_RUNNER} and ${SLOT.UNKNOWN_KEEP}"
-        resolved = resolve_text_for_platform(text, "claude", workspace=tmp_path)
+        resolved = SlotRegistry.for_platform("claude", workspace=tmp_path).sanitized().resolve(text, strict=False)
         assert resolved == "Use Read with haiku via cargo test and ${SLOT.UNKNOWN_KEEP}"
 
 
