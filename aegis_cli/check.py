@@ -24,10 +24,11 @@ from aegis_cli.verify import (
     discover_test_evidence,
     verdict_to_exit_code,
     verify_release_gate,
+    format_sarif_report,
 )
 from aegis_cli.checkpoint import run_checkpoint
 
-__all__ = ["run_check", "CheckCommand"]
+__all__ = ["run_check", "CheckCommand", "format_sarif_report"]
 
 
 def run_check(args: argparse.Namespace) -> int:
@@ -184,6 +185,19 @@ class CheckCommand(AegisCommand):
             "--checkpoint-only",
             action="store_true",
             help="Run deterministic quality checkpoint only",
+        )
+        existing_fmt = parser._option_string_actions.pop("--format", None)
+        if existing_fmt is not None:
+            if existing_fmt in parser._actions:
+                parser._actions.remove(existing_fmt)
+            for group in getattr(parser, "_action_groups", ()):
+                if existing_fmt in group._group_actions:
+                    group._group_actions.remove(existing_fmt)
+        parser.add_argument(
+            "--format",
+            choices=["text", "json", "sarif"],
+            default="text",
+            help="Output format (text, json, sarif)",
         )
 
     def execute(self, args: argparse.Namespace) -> int:

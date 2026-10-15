@@ -539,6 +539,15 @@ def run_stdio_server():
 
     workspace_env = os.environ.get("AEGIS_WORKSPACE") or os.getcwd()
     try:
+        from pathlib import Path
+        ws_candidate = Path(workspace_env).resolve()
+        home_resolved = Path.home().resolve()
+        if ws_candidate == home_resolved and not (home_resolved / ".aegis" / "rules").is_dir():
+            (home_resolved / ".aegis" / "rules").mkdir(parents=True, exist_ok=True)
+            os.environ.setdefault("AEGIS_REFLECT_ON_CLOSE", "0")
+    except OSError:
+        pass
+    try:
         from .security import Workspace
         _canonical_workspace = Workspace.confine(workspace_env)
     except ValueError as e:

@@ -48,13 +48,17 @@ class RuleCache:
         from aegis_core.integrity import _manifest_path, _key_path
         h = hashlib.sha256()
         manifest_path = _manifest_path(workspace)
-        if os.path.isfile(manifest_path):
-            try:
-                with open(manifest_path, "rb") as f:
-                    h.update(f.read())
-            except OSError:
-                pass
-        else:
+        root_manifest_path = os.path.join(workspace, ".aegis", "manifest.json")
+        found_any = False
+        for mpath in (manifest_path, root_manifest_path):
+            if os.path.isfile(mpath):
+                found_any = True
+                try:
+                    with open(mpath, "rb") as f:
+                        h.update(f.read())
+                except OSError:
+                    pass
+        if not found_any:
             h.update(b"no-manifest")
 
         key_path = _key_path(workspace)
@@ -68,6 +72,75 @@ class RuleCache:
             h.update(b"no-key")
 
         return h.hexdigest()
+
+    @staticmethod
+    def _load_manifest_hashes(workspace: str) -> dict[str, str]:
+        """Load expected SHA-256 hex digests from .aegis/manifest.json and .aegis/rules/manifest.json."""
+        import json
+        from aegis_core.integrity import _manifest_path
+
+        expected: dict[str, str] = {}
+        candidate_paths = (
+            _manifest_path(workspace),
+            os.path.join(workspace, ".aegis", "manifest.json"),
+        )
+        for mpath in candidate_paths:
+            if not os.path.isfile(mpath):
+                continue
+            try:
+                with open(mpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+
+            mappings = []
+            for key_name in ("files", "cells", "rules"):
+                sub = data.get(key_name)
+                if isinstance(sub, dict):
+                    mappings.append(sub)
+            if not mappings:
+                mappings.append({
+                    k: v for k, v in data.items()
+                    if k not in {"generated_at", "cell_count", "signature", "version"}
+                })
+
+            for mapping in mappings:
+                for raw_path, raw_val in mapping.items():
+                    if isinstance(raw_val, dict):
+                        digest_str = str(
+                            raw_val.get("sha256")
+                            or raw_val.get("digest")
+                            or raw_val.get("hash")
+                            or ""
+                        )
+                    elif isinstance(raw_val, str):
+                        digest_str = raw_val
+                    else:
+                        continue
+                    digest_norm = digest_str.strip()
+                    if digest_norm.startswith("sha256:"):
+                        digest_norm = digest_norm[len("sha256:"):]
+                    digest_norm = digest_norm.lower()
+                    if not digest_norm:
+                        continue
+
+                    norm_p = str(raw_path).replace("\\", "/").lstrip("./")
+                    expected[norm_p] = digest_norm
+                    if norm_p.startswith(".aegis/rules/"):
+                        short_p = norm_p[len(".aegis/rules/"):]
+                        expected[short_p] = digest_norm
+                        expected[os.path.basename(short_p)] = digest_norm
+                    elif norm_p.startswith("rules/"):
+                        short_p = norm_p[len("rules/"):]
+                        expected[short_p] = digest_norm
+                        expected[f".aegis/rules/{short_p}"] = digest_norm
+                        expected[os.path.basename(short_p)] = digest_norm
+                    else:
+                        expected[f".aegis/rules/{norm_p}"] = digest_norm
+                        expected[os.path.basename(norm_p)] = digest_norm
+        return expected
 
     def get_cells(self, workspace: str) -> list[dict[str, Any]]:
         """Return rules, reparsing only when canonical inventory bytes change."""
@@ -109,12 +182,42 @@ class RuleCache:
         entries: Iterable[RuleInventoryEntry],
     ) -> list[dict[str, Any]]:
         """Parse the exact bytes already captured by canonical inventory."""
+        import hashlib
         from aegis_mcp.jit_engine import parse_frontmatter, _get_body, warn
+
+        CellCache._verify_integrity(workspace)
+        expected_hashes = CellCache._load_manifest_hashes(workspace)
 
         cells = []
         for entry in entries:
             if os.path.basename(entry.relative_path) == "README.md":
                 continue
+
+            if expected_hashes:
+                rel_ws = entry.relative_path.replace("\\", "/").lstrip("./")
+                rel_rules = (
+                    rel_ws[len(".aegis/rules/"):]
+                    if rel_ws.startswith(".aegis/rules/")
+                    else rel_ws
+                )
+                bname = os.path.basename(rel_ws)
+                expected_hex = (
+                    expected_hashes.get(rel_ws)
+                    or expected_hashes.get(rel_rules)
+                    or expected_hashes.get(bname)
+                )
+                if expected_hex is not None:
+                    actual_hex = entry.digest.lower()
+                    lf_hex = hashlib.sha256(
+                        entry.content.replace(b"\r\n", b"\n")
+                    ).hexdigest().lower()
+                    if actual_hex != expected_hex and lf_hex != expected_hex:
+                        warn(
+                            f"integrity: excluding tampered rule {entry.relative_path} "
+                            "(SHA-256 digest mismatch against manifest.json)"
+                        )
+                        continue
+
             try:
                 content = entry.content.decode("utf-8")
             except UnicodeDecodeError as exc:
@@ -144,7 +247,6 @@ class RuleCache:
             fm["_full"] = content
             cells.append(fm)
 
-        CellCache._verify_integrity(workspace)
         return cells
 
     @staticmethod
@@ -177,12 +279,6 @@ class RuleCache:
                 for issue in issues:
                     warn(f"integrity: {issue['type']} — {issue['detail']}")
                 if key is not None:
-                    if issues:
-                        raise CellCacheError(
-                            "integrity",
-                            cells_dir,
-                            f"cell file integrity verification failed: {issues[0]['detail']}",
-                        )
                     if "signature" not in manifest:
                         raise CellCacheError(
                             "integrity",
@@ -196,6 +292,13 @@ class RuleCache:
                             "integrity",
                             manifest_path,
                             "HMAC signature verification FAILED — manifest may be tampered",
+                        )
+                    non_modified = [i for i in issues if i.get("type") != "modified"]
+                    if non_modified:
+                        raise CellCacheError(
+                            "integrity",
+                            cells_dir,
+                            f"cell file integrity verification failed: {non_modified[0]['detail']}",
                         )
         except RuleCacheError:
             raise

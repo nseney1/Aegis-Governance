@@ -5,6 +5,30 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.3.0] — 2026-10-14 — "Cryptographic Provenance, Declarative AST Rules, Telemetry Compaction, SARIF 2.1.0 & Multi-Platform Claude Desktop Support"
+
+### Security & Cryptographic Provenance (Phase 3.3.1)
+- **Git Working-Tree Digest Binding (`aegis_core/receipts.py`)**:
+  - Updated `compute_file_digest()` so operations without explicit file arguments (`target_paths=[]`) inside a Git workspace bind the receipt state digest to `git rev-parse HEAD` + `git status --porcelain`, invalidating receipts if working-tree state changes between issuance and redemption.
+- **Inbound `HandoffTicket` Verification (`aegis_core/skills/handoff.py`, `aegis_cli/skills.py`)**:
+  - Added `HandoffRouter.consume_handoff()` and `aegis handoff consume <ticket_id> [--no-verify-tree] [--json]`, verifying the `ArtifactEnvelope` HMAC signature and optional `HEAD^{tree}` hash before returning the payload and marking the ticket `"consumed"`.
+- **Automatic `.aegis/manifest.json` Verification in `RuleCache` (`aegis_mcp/rule_cache.py`)**:
+  - Updated `RuleCache` to verify rule SHA-256 digests against `.aegis/manifest.json` on cache load/refresh, automatically excluding tampered rules and logging a diagnostic warning.
+- **Claude Desktop & Cross-Model Platform Parity (`aegis_cli/platforms/claude.py`, `aegis_mcp/server.py`)**:
+  - Updated `ClaudeAdapter.install()` / `uninstall()` to provision all 15 `skills/*/SKILL.md` into `.claude/skills/`, register `aegis` MCP in `~/.config/Claude/claude_desktop_config.json`, inject a cross-model tool/tier equivalence table into `CLAUDE.md`, and auto-scaffold `~/.aegis/rules` when `aegis-mcp` starts from `$HOME`.
+
+### Declarative Rule-Level AST Checks & Pre-Edit Symbol Scan (Phase 3.3.2)
+- **Declarative `forbid_ast` in Rule Frontmatter (`aegis_core/ast/match.py`, `aegis_core/verification/runner.py`)**:
+  - Added `evaluate_forbid_ast()` supporting `imports`, `calls`, and `decorators` in `invariant` and `gate` rule YAML frontmatter, evaluated deterministically by Layer 1 (`DeterministicVerifier`) across `NormalizedAST`.
+- **Pre-Edit Symbol Intent (`planned_symbols`) in `aegis_scan` (`aegis_mcp/registry.py`, `aegis_mcp/jit_engine.py`, `aegis_mcp/handlers/audit.py`)**:
+  - Added optional `planned_symbols: list[str]` to `aegis_scan` so agents can declare imports, calls, or decorators they plan to use before writing code, matching `ast_triggers` and `forbid_ast` rules proactively.
+
+### Segmented Telemetry Compaction & SARIF 2.1.0 Output (Phase 3.3.3)
+- **Segmented Telemetry Compaction (`aegis_core/telemetry.py`, `aegis_cli/system.py`)**:
+  - Added `compact_signals()` and `aegis system compact [--days 30] [--dry-run] [--json]`, rolling up expired signals into `.aegis/telemetry/checkpoint_rollup.json`, archiving raw records to `.aegis/telemetry/archive/signals-<YYYY-MM>.jsonl.gz`, and preserving Thompson Sampling priors across compactions.
+- **SARIF 2.1.0 Output (`aegis_cli/check.py`, `aegis_cli/verify.py`)**:
+  - Added `--format sarif` (`format_sarif_report()`) to `aegis check` and `aegis verify` for GitHub Code Scanning and IDE diagnostics integration.
+
 ## [3.2.0] — 2026-10-14 — "Fortress Perimeter Hardening, Horizontal Skill Graph Wiring, O(1) Telemetry Caching & Full Documentation Overhaul"
 
 ### Security & Perimeter Hardening (Fortress Adaptive Review)

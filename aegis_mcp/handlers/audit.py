@@ -100,4 +100,9 @@ def _handle_scan(args: dict, gov) -> dict:
             files = [str(workspace.confine_path(f)[1]) for f in files]
         except ValueError as exc:
             return {"error": str(exc), "status": _STATUS_FAIL}
-    return jit_express(workspace, changed_files=files)
+    planned_symbols = args.get("planned_symbols", None)
+    if planned_symbols is not None:
+        if not isinstance(planned_symbols, (list, tuple)) or not all(isinstance(s, str) for s in planned_symbols):
+            return {"error": "'planned_symbols' must be a list of strings", "status": _STATUS_FAIL}
+        planned_symbols = list(planned_symbols)
+    return jit_express(workspace, changed_files=files, planned_symbols=planned_symbols)

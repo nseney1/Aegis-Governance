@@ -48,6 +48,25 @@ def run_system(args: argparse.Namespace) -> int:
             args.skill_action = sub_act
         return run_skill(args)
 
+    elif action == "compact":
+        import json
+        from aegis_core.telemetry import compact_signals
+
+        ws = getattr(args, "workspace", None)
+        days = int(getattr(args, "days", 30))
+        dry_run = bool(getattr(args, "dry_run", False))
+        use_json = bool(getattr(args, "json", False) or getattr(args, "format", None) == "json")
+        result = compact_signals(workspace=ws, retention_days=days, dry_run=dry_run)
+        if use_json:
+            print(json.dumps(result, indent=2))
+        else:
+            mode_str = " (DRY RUN)" if dry_run else ""
+            print(
+                f"Telemetry compaction{mode_str}: {result['expired_count']} expired, "
+                f"{result['retained_count']} retained (retention={days}d)"
+            )
+        return 0
+
     print(f"Unknown system subcommand: {action}", file=sys.stderr)
     return 1
 
@@ -58,7 +77,7 @@ class SystemCommand(AegisCommand):
     name = "system"
     aliases = ("sys",)
     category = CommandCategory.SETUP
-    help = "Diagnostics, driver management, and platform integrations (doctor, hook, drivers, skills)"
+    help = "Diagnostics, driver management, and platform integrations (doctor, hook, drivers, skills, compact)"
 
     def configure_parser(self, parser: argparse.ArgumentParser, parents: Optional[List[argparse.ArgumentParser]] = None) -> None:
         sub = parser.add_subparsers(dest="system_action", metavar="ACTION")
@@ -106,6 +125,15 @@ class SystemCommand(AegisCommand):
         p_s_insp.add_argument("target_skill", help="ID of skill to inspect")
 
         p_s_slots = p_skl_sub.add_parser("slots", parents=p_parents, help="List active skill slots")
+
+        # compact
+        p_cmp = sub.add_parser("compact", parents=p_parents, help="Compact expired telemetry signals into compressed archives")
+        p_cmp.add_argument("--days", type=int, default=30, help="Retention window in days (default: 30)")
+        p_cmp.add_argument("--dry-run", action="store_true", help="Preview compaction without modifying files")
+        if not any(a.dest == "json" for a in p_cmp._actions):
+            p_cmp.add_argument("--json", action="store_true", help="Emit JSON output")
+        if not any(a.dest == "workspace" for a in p_cmp._actions):
+            p_cmp.add_argument("--workspace", default=None, help="Target workspace path")
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_system(args)

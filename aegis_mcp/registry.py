@@ -459,6 +459,11 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "files": {"type": "array", "items": {"type": "string"}, "description": "Files to scan for applicable rules."},
+                "planned_symbols": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of imports, function calls, or decorators the agent plans to use before editing files.",
+                },
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
