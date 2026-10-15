@@ -12,7 +12,7 @@
 
 ## 0. Lane protocol (every coding lane)
 
-1. Work in your own worktree at `<lanes-dir>/<lane>` (a sibling directory outside the repository), on branch `lane/<lane>` created from the base SHA given in the brief: `git -C /home/nseney/Documents/Aegis-Guardrails-v4 worktree add -b lane/<lane> /home/nseney/Documents/aegis-lanes/<lane> <base>`. Never edit `/home/nseney/Documents/Aegis-Guardrails-v4` or the main checkout.
+1. Work in your own worktree at `<lanes-dir>/<lane>` (a sibling directory outside the repository), on branch `lane/<lane>` created from the base SHA given in the brief: `git -C <repo> worktree add -b lane/<lane> <lanes-dir>/<lane> <base>`. Never edit `<repo>` or the main checkout.
 2. Touch only the files your brief owns. To change a file outside that list, stop and report it.
 3. Follow TDD (rules `tdd-protocol`, `core-change-protocol`): write tests first and watch them fail for the right reason, then implement, then go green. State the red and green evidence in the debrief.
 4. Run the tests:
