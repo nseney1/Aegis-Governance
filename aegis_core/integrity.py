@@ -280,25 +280,6 @@ def save_manifest(workspace: str | Path, manifest: dict) -> None:
     atomic_write_bytes(manifest_path, manifest_bytes)
 
 
-def sync_manifest_if_present(workspace: str | Path) -> dict | None:
-    """Regenerate and save .aegis/rules/manifest.json if it exists and has no HMAC key mismatch."""
-    ws_path = Path(workspace)
-    if ws_path.name == "rules" and ws_path.parent.name in (".aegis", ".soma"):
-        ws_path = ws_path.parent.parent
-    manifest_path = _manifest_path(ws_path)
-    if not os.path.isfile(manifest_path):
-        return None
-    existing = load_manifest(ws_path)
-    key = load_key(ws_path)
-    if key is not None and existing is not None:
-        if "signature" not in existing or not verify_signature(existing, key):
-            return None
-    rules_dir = os.path.dirname(manifest_path)
-    manifest = generate_manifest(rules_dir)
-    save_manifest(ws_path, manifest)
-    return manifest
-
-
 def _warn(message: str) -> None:
     """Emit a diagnostic on stderr (stdout is the JSON-RPC transport)."""
     try:
@@ -317,6 +298,5 @@ __all__ = [
     "verify_signature",
     "load_manifest",
     "save_manifest",
-    "sync_manifest_if_present",
 ]
 

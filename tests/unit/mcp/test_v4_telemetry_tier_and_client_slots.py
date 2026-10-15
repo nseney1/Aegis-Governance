@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 import aegis_mcp.server as server_module
-from aegis_core.integrity import generate_manifest, save_manifest, sync_manifest_if_present
+from aegis_core.integrity import generate_manifest, save_manifest
 from aegis_core.rule_inventory import (
     RuleInventory,
     RuleInventoryEntry,
@@ -197,14 +197,11 @@ def test_load_parsed_rules_and_rule_inventory_primary_definitions(tmp_path: Path
     assert m.rule_path.endswith("invariant-tdd.md")
     assert m.cell_id == m.rule_id
 
-    # Verify manifest dual keys and sync_manifest_if_present
+    # Verify manifest dual keys (auto-sync was removed: review H1)
     manifest = generate_manifest(ws / ".aegis" / "rules")
     assert "rules" in manifest and "cells" in manifest
     assert manifest["rule_count"] == 1 and manifest["cell_count"] == 1
     save_manifest(ws, manifest)
-    synced = sync_manifest_if_present(ws)
-    assert synced is not None
-    assert synced["rule_count"] == 1
 
     # Verify schema exposes rules_used and scaffold_rule
     report_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "aegis_report_outcome")
