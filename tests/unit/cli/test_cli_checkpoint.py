@@ -2,7 +2,7 @@
 
 v3's `aegis checkpoint` is gone (D5): its checks run on every `aegis check`.
 - Issues are warnings ([WARN], exit 0) unless --strict ([FAIL], exit 1).
-- A paper wall (a gate or invariant rule whose enforcement is not `gate`) always blocks,
+- A paper gate (a gate or invariant rule whose enforcement is not `gate`) always blocks,
   and so does a rule file that cannot be loaded (aegis scan refuses to serve the set).
 - Checks: test file per source file, hardcoded /home, /Users, /tmp paths,
   per-test assertions, unhealthy rule fitness from the ledger, rule conventions.
@@ -47,7 +47,7 @@ def _clean_workspace(root: Path) -> Path:
     return root
 
 
-def _paper_wall(root: Path) -> None:
+def _paper_gate(root: Path) -> None:
     invariants = root / ".aegis" / "rules" / "invariants"
     invariants.mkdir(parents=True, exist_ok=True)
     (invariants / "wall-bad.md").write_text(
@@ -70,23 +70,23 @@ class TestRunCheckpoint:
         assert blocking is False
         assert run_checkpoint(tmp_path, strict=True)[1] is True
 
-    def test_paper_wall_blocks_even_without_strict(self, tmp_path):
+    def test_paper_gate_blocks_even_without_strict(self, tmp_path):
         _clean_workspace(tmp_path)
-        _paper_wall(tmp_path)
+        _paper_gate(tmp_path)
         issues, blocking = run_checkpoint(tmp_path, strict=False)
         assert blocking is True
-        assert "paper_walls" in {i["check"] for i in issues}
+        assert "paper_gates" in {i["check"] for i in issues}
 
-    def test_an_unreadable_invariant_is_a_blocking_paper_wall(self, tmp_path):
+    def test_an_unreadable_invariant_is_a_blocking_paper_gate(self, tmp_path):
         """Its enforcement cannot be read, so it cannot be shown to be a gate (b1-verify review)."""
         _clean_workspace(tmp_path)
         invariants = tmp_path / ".aegis" / "rules" / "invariants"
         invariants.mkdir(parents=True)
         (invariants / "invariant-x.md").write_bytes(b"---\nid: invariant-x\nenforcement: gate\n---\n\xff\n")
         issues, blocking = run_checkpoint(tmp_path, strict=False)
-        walls = [i for i in issues if i["check"] == "paper_walls"]
-        assert [i["file"] for i in walls] == [".aegis/rules/invariants/invariant-x.md"]
-        assert walls[0]["message"].startswith(
+        paper = [i for i in issues if i["check"] == "paper_gates"]
+        assert [i["file"] for i in paper] == [".aegis/rules/invariants/invariant-x.md"]
+        assert paper[0]["message"].startswith(
             "Invariant rule 'invariant-x.md' cannot be read, so it cannot be shown to use 'gate': invalid UTF-8:"
         )
         assert blocking is True
@@ -156,9 +156,9 @@ class TestCheckpointThroughCheck:
         assert _exit_code(["check", "--workspace", str(tmp_path), "--strict"]) == 1
         assert "[FAIL] Missing test file for orphaned.py" in capsys.readouterr().out
 
-    def test_paper_wall_fails_check_and_hook_without_strict(self, tmp_path, capsys):
+    def test_paper_gate_fails_check_and_hook_without_strict(self, tmp_path, capsys):
         _clean_workspace(tmp_path)
-        _paper_wall(tmp_path)
+        _paper_gate(tmp_path)
         assert _exit_code(["check", "--workspace", str(tmp_path)]) == 1
         assert _exit_code(["check", "--workspace", str(tmp_path), "--hook"]) == 1
         out = capsys.readouterr().out

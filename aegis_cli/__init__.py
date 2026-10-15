@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from aegis_core._version import __version__
+from aegis_core._version import __version__ as __version__
 
 
 def resolve_root(args, default=None):

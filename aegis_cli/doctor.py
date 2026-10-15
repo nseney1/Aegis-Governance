@@ -138,7 +138,7 @@ def probe_mcp_launcher(path_env: str | None = None,
     """Resolve `python3` from PATH like an MCP host and classify it.
 
     Returns (status, detail); status is one of ok, missing, store_stub,
-    broken, no_soma_mcp.
+    broken, no_aegis_mcp.
     """
     path_env = os.environ.get("PATH", "") if path_env is None else path_env
     exe = shutil.which("python3", path=path_env)
@@ -173,7 +173,7 @@ def probe_mcp_launcher(path_env: str | None = None,
     except OSError as exc:
         return "broken", f"{exe} could not be started: {exc}"
     if imp.returncode != 0:
-        return "no_soma_mcp", exe
+        return "no_aegis_mcp", exe
     return "ok", exe
 
 
@@ -192,7 +192,7 @@ def _check_mcp_launcher(path_env: str | None = None) -> bool:
               "      Fix: Settings > Apps > Advanced app settings > App execution aliases:\n"
               "      turn off python.exe and python3.exe, then install Python from python.org\n"
               "      (or make sure the real python3 comes first on PATH).")
-    elif status == "no_soma_mcp":
+    elif status == "no_aegis_mcp":
         print(f"  ⚠️  MCP launcher: {detail} runs but cannot import aegis_mcp.\n"
               f"      Install it for that interpreter: {detail} -m pip install --user aegis-guardrails")
     else:

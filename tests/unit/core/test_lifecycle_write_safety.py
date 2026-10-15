@@ -39,9 +39,9 @@ from conftest import REPO_ROOT
 
 import aegis_core.lifecycle.promotion as promotion
 import aegis_core.lifecycle.selection as selection
-from aegis_core.lifecycle.creation import create_cell
-from aegis_core.lifecycle.promotion import demote_cell, evaluate_cell_tiers, evaluate_demotions, promote_cell
-from aegis_core.lifecycle.selection import evaluate_archives, run_cell_selection
+from aegis_core.lifecycle.creation import create_rule
+from aegis_core.lifecycle.promotion import demote_rule, evaluate_rule_tiers, evaluate_demotions, promote_rule
+from aegis_core.lifecycle.selection import evaluate_archives, run_rule_selection
 from aegis_core.telemetry_engine import ledger
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
@@ -96,13 +96,13 @@ def _rules(ws: Path) -> Path:
 
 def _scenario_create(tmp_path: Path):
     ws = _ws(tmp_path)
-    return ws, lambda: create_cell("trap", "Locked create", id_override="locked-create", workspace=ws)
+    return ws, lambda: create_rule("trap", "Locked create", id_override="locked-create", workspace=ws)
 
 
 def _scenario_archive(tmp_path: Path):
     ws = _ws(tmp_path)
     _misfiring(_rules(ws) / "traps" / "noisy.md", "noisy")
-    return ws, lambda: run_cell_selection(ws, execute=True)
+    return ws, lambda: run_rule_selection(ws, execute=True)
 
 
 def _scenario_tier_escalation(tmp_path: Path):
@@ -110,19 +110,19 @@ def _scenario_tier_escalation(tmp_path: Path):
     # 30 of 30 verdicts: Wilson bound 0.92 >= 0.85 over >= 20 verdicts, so advisory -> mechanical.
     _rule(_rules(ws) / "traps" / "proven.md", "proven", "trap")
     _evidence(ws, "proven", tp=30)
-    return ws, lambda: evaluate_cell_tiers(ws, execute=True)
+    return ws, lambda: evaluate_rule_tiers(ws, execute=True)
 
 
 def _scenario_promote(tmp_path: Path):
     ws = _ws(tmp_path)
     _rule(_rules(ws) / "traps" / "rising.md", "rising", "trap")
-    return ws, lambda: promote_cell(ws, "rising", force=True)
+    return ws, lambda: promote_rule(ws, "rising", force=True)
 
 
 def _scenario_demote(tmp_path: Path):
     ws = _ws(tmp_path)
     _rule(_rules(ws) / "invariants" / "falling.md", "falling", "invariant", "gate")
-    return ws, lambda: demote_cell(ws, "falling")
+    return ws, lambda: demote_rule(ws, "falling")
 
 
 _SCENARIOS = {
@@ -251,7 +251,7 @@ def test_archiving_logs_a_valid_utc_timestamp(tmp_path: Path) -> None:
     ws = _ws(tmp_path)
     _misfiring(_rules(ws) / "traps" / "noisy.md", "noisy")
 
-    assert run_cell_selection(ws, execute=True) == 0
+    assert run_rule_selection(ws, execute=True) == 0
 
     log_lines = (ws / ".aegis" / "state" / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
     entry = json.loads(log_lines[-1])
@@ -283,7 +283,7 @@ def _rival_on_first_lock(monkeypatch: pytest.MonkeyPatch, rival, module=promotio
 def _rival_rule(path: Path, marker: str) -> None:
     """A rule another writer (a second Aegis process, a git checkout) lands meanwhile.
 
-    create_cell refuses an id that is already active in any tier, so the rival
+    create_rule refuses an id that is already active in any tier, so the rival
     writes the file directly.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,7 +297,7 @@ def test_promote_never_overwrites_a_rule_created_in_the_target_tier_meanwhile(
     source = _rule(_rules(ws) / "traps" / "shared-id.md", "shared-id", "trap")
     _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "invariants" / "shared-id.md", "Rival invariant"))
 
-    res = promote_cell(ws, "shared-id", force=True)
+    res = promote_rule(ws, "shared-id", force=True)
 
     assert res["status"] == "target_exists"
     assert "Rival invariant" in (_rules(ws) / "invariants" / "shared-id.md").read_text(encoding="utf-8")
@@ -308,9 +308,9 @@ def test_concurrent_promotes_of_one_rule_promote_it_once(tmp_path: Path, monkeyp
     ws = _ws(tmp_path)
     _rule(_rules(ws) / "traps" / "once.md", "once", "trap")
     rival: list[dict] = []
-    _rival_on_first_lock(monkeypatch, lambda: rival.append(promote_cell(ws, "once", force=True)))
+    _rival_on_first_lock(monkeypatch, lambda: rival.append(promote_rule(ws, "once", force=True)))
 
-    res = promote_cell(ws, "once", force=True)
+    res = promote_rule(ws, "once", force=True)
 
     assert rival[0]["status"] == "promoted"
     assert res["status"] == "not_found"
@@ -323,7 +323,7 @@ def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkey
     source = _rule(_rules(ws) / "invariants" / "guarded.md", "guarded", "invariant", "gate")
     _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "traps" / "guarded.md", "Rival trap"))
 
-    res = demote_cell(ws, "guarded")
+    res = demote_rule(ws, "guarded")
 
     assert res["status"] == "target_exists"
     assert "Rival trap" in (_rules(ws) / "traps" / "guarded.md").read_text(encoding="utf-8")
@@ -334,9 +334,9 @@ def test_concurrent_demotes_of_one_rule_demote_it_once(tmp_path: Path, monkeypat
     ws = _ws(tmp_path)
     _rule(_rules(ws) / "invariants" / "guarded.md", "guarded", "invariant", "gate")
     rival: list[dict] = []
-    _rival_on_first_lock(monkeypatch, lambda: rival.append(demote_cell(ws, "guarded")))
+    _rival_on_first_lock(monkeypatch, lambda: rival.append(demote_rule(ws, "guarded")))
 
-    res = demote_cell(ws, "guarded")
+    res = demote_rule(ws, "guarded")
 
     assert rival[0]["status"] == "demoted"
     assert res["status"] == "not_found"
@@ -381,7 +381,7 @@ def test_tier_pass_does_not_rewrite_unchanged_rules(tmp_path: Path) -> None:
     rules = [_rule(_rules(ws) / "traps" / f"steady-{i}.md", f"steady-{i}", "trap") for i in range(3)]
     stamps = [(p.stat().st_ino, p.stat().st_mtime_ns) for p in rules]
 
-    res = evaluate_cell_tiers(ws, execute=True)
+    res = evaluate_rule_tiers(ws, execute=True)
 
     assert res == {"evaluated": 3, "changes": []}
     assert [(p.stat().st_ino, p.stat().st_mtime_ns) for p in rules] == stamps
@@ -393,7 +393,7 @@ def test_tier_pass_with_nothing_to_change_does_not_wait_for_the_rules_lock(tmp_p
     before = _snapshot(_rules(ws))
     with _lock_held_by_another_process(tmp_path, ws):
         # Needing the lock here would raise LockTimeoutError after 10 s.
-        res = evaluate_cell_tiers(ws, execute=True)
+        res = evaluate_rule_tiers(ws, execute=True)
 
     assert res == {"evaluated": 1, "changes": []}
     assert _snapshot(_rules(ws)) == before
@@ -448,7 +448,7 @@ def test_archive_pass_with_nothing_to_change_does_not_wait_for_the_rules_lock(tm
     before = _snapshot(_rules(ws))
     with _lock_held_by_another_process(tmp_path, ws):
         # Needing the lock here would raise LockTimeoutError after 10 s.
-        rc = run_cell_selection(ws, execute=True)
+        rc = run_rule_selection(ws, execute=True)
 
     assert rc == 0
     assert _snapshot(_rules(ws)) == before
@@ -478,7 +478,7 @@ def test_archive_pass_takes_the_rules_lock_once_per_changed_rule(tmp_path: Path,
 
     monkeypatch.setattr(selection, "locked", counting_lock)
 
-    assert run_cell_selection(ws, execute=True) == 0
+    assert run_rule_selection(ws, execute=True) == 0
 
     assert depth == [1, 1, 1]
     assert sorted(_log_actions(ws)) == [(f"quiet-{x}", "moved_to_archive") for x in "abc"]
@@ -493,7 +493,7 @@ def test_archiving_acts_on_the_evidence_as_it_is_under_the_lock(
     rule = _misfiring(_rules(ws) / "traps" / "revived.md", "revived")
     _rival_on_first_lock(monkeypatch, lambda: _evidence(ws, "revived", tp=10), module=selection)
 
-    assert run_cell_selection(ws, execute=True) == 0
+    assert run_rule_selection(ws, execute=True) == 0
 
     out = capsys.readouterr().out
     assert "[ARCHIVE] revived" in out
@@ -514,7 +514,7 @@ def test_archiving_skips_a_rule_moved_away_meanwhile(tmp_path: Path, monkeypatch
 
     _rival_on_first_lock(monkeypatch, move_away, module=selection)
 
-    assert run_cell_selection(ws, execute=True) == 0
+    assert run_rule_selection(ws, execute=True) == 0
 
     assert moved.is_file()
     assert not (_rules(ws) / ".archive" / "doomed.md").exists()
@@ -528,7 +528,7 @@ def test_a_misfiring_invariant_is_a_demotion_candidate_not_archived(tmp_path: Pa
     before = rule.read_bytes()
 
     assert evaluate_archives(ws) == []
-    assert run_cell_selection(ws, execute=True) == 0
+    assert run_rule_selection(ws, execute=True) == 0
 
     assert rule.read_bytes() == before
     assert [c["rule_id"] for c in evaluate_demotions(ws)] == ["noisy-inv"]
@@ -542,7 +542,7 @@ def test_archiving_never_revisits_a_legacy_last_gasp_queue(tmp_path: Path, capsy
     waiting = _misfiring(queue / "waiting.md", "waiting")
     queued = _snapshot(queue)
 
-    run_cell_selection(ws, execute=True)
+    run_rule_selection(ws, execute=True)
 
     assert _snapshot(queue) == queued
     assert waiting.is_file()
@@ -558,7 +558,7 @@ def test_archiving_never_overwrites_a_rule_already_archived_under_the_same_name(
     current = _misfiring(_rules(ws) / "traps" / "reused.md", "reused")
     current_text = current.read_text(encoding="utf-8")
 
-    run_cell_selection(ws, execute=True)
+    run_rule_selection(ws, execute=True)
 
     assert not current.exists()
     assert earlier.read_text(encoding="utf-8") == "---\nid: reused\ntype: trap\n---\nThe earlier rule.\n"
@@ -570,7 +570,7 @@ def test_archiving_runs_in_a_workspace_whose_path_contains_archive(tmp_path: Pat
     ws = _ws(tmp_path / "old.archive", "ws")
     rule = _misfiring(_rules(ws) / "traps" / "quiet.md", "quiet")
 
-    run_cell_selection(ws, execute=True)
+    run_rule_selection(ws, execute=True)
 
     assert not rule.exists()
     assert (_rules(ws) / ".archive" / "quiet.md").is_file()

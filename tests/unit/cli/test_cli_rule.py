@@ -120,7 +120,7 @@ def test_rule_list_text_never_prints_terminal_escapes_from_rule_names(tmp_path, 
 
 
 def test_rule_promote_and_force_promote(tmp_path, capsys):
-    with patch("aegis_cli.rule.promote_cell", return_value={"status": "already_terminal", "current_type": "invariant"}):
+    with patch("aegis_cli.rule.promote_rule", return_value={"status": "already_terminal", "current_type": "invariant"}):
         args = argparse.Namespace(
             rule_action="promote",
             rule_id="inv-test",
@@ -139,7 +139,7 @@ def test_rule_promote_and_force_promote(tmp_path, capsys):
 
 
 def test_rule_demote_and_force_demote(tmp_path, capsys):
-    with patch("aegis_cli.rule.demote_cell", return_value={"status": "already_base", "current_type": "trap"}):
+    with patch("aegis_cli.rule.demote_rule", return_value={"status": "already_base", "current_type": "trap"}):
         args = argparse.Namespace(
             rule_action="demote",
             rule_id="trap-test",
@@ -158,7 +158,7 @@ def test_rule_demote_and_force_demote(tmp_path, capsys):
 
 
 def test_rule_archive(tmp_path):
-    with patch("aegis_cli.rule.prune_cells", return_value=0) as mock_prune:
+    with patch("aegis_cli.rule.prune_rules", return_value=0) as mock_prune:
         args = argparse.Namespace(
             rule_action="archive",
             workspace=str(tmp_path),

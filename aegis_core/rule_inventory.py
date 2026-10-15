@@ -160,7 +160,7 @@ def inventory_rules(workspace: str) -> RuleInventory:
     workspace_abs = os.path.abspath(os.fspath(workspace))
     layout = WorkspaceLayout(Path(workspace_abs))
     parent_dir = str(layout.aegis_dir)
-    cells_dir = str(layout.rules_dir)
+    rules_root = str(layout.rules_dir)
 
     workspace_info = _optional_stat(workspace_abs)
     if workspace_info is None:
@@ -172,24 +172,24 @@ def inventory_rules(workspace: str) -> RuleInventory:
         return _empty_inventory()
     _require_directory(parent_dir, parent_info)
 
-    cells_info = _optional_stat(cells_dir)
-    if cells_info is None:
+    rules_info = _optional_stat(rules_root)
+    if rules_info is None:
         return _empty_inventory()
-    _require_directory(cells_dir, cells_info)
+    _require_directory(rules_root, rules_info)
 
     ancestor_identities = {
         workspace_abs: _identity_signature(workspace_info),
         parent_dir: _identity_signature(parent_info),
     }
     directory_signatures = {}  # type: dict[str, Tuple[int, int, int, int, int, int]]
-    cell_paths = []  # type: List[str]
+    rule_paths = []  # type: List[str]
 
     def walk_error(exc: OSError) -> None:
-        path = getattr(exc, "filename", None) or cells_dir
+        path = getattr(exc, "filename", None) or rules_root
         raise RuleInventoryError("list", path, str(exc), exc)
 
     try:
-        walker = os.walk(cells_dir, topdown=True, followlinks=False, onerror=walk_error)
+        walker = os.walk(rules_root, topdown=True, followlinks=False, onerror=walk_error)
         for dirpath, dirnames, filenames in walker:
             dir_info = _stat_path(dirpath)
             _require_directory(dirpath, dir_info)
@@ -210,15 +210,15 @@ def inventory_rules(workspace: str) -> RuleInventory:
                 # Any case of the extension: the loader reports a rule named x.MD instead
                 # of letting it go unseen.
                 if filename.lower().endswith(".md"):
-                    cell_paths.append(os.path.join(dirpath, filename))
+                    rule_paths.append(os.path.join(dirpath, filename))
     except RuleInventoryError:
         raise
     except OSError as exc:
-        path = getattr(exc, "filename", None) or cells_dir
+        path = getattr(exc, "filename", None) or rules_root
         raise RuleInventoryError("list", path, str(exc), exc) from exc
 
     entries = []  # type: List[RuleInventoryEntry]
-    for path in sorted(cell_paths):
+    for path in sorted(rule_paths):
         before = _stat_path(path)
         content = _read_stable_file(path, before)
         digest = hashlib.sha256(content).hexdigest()

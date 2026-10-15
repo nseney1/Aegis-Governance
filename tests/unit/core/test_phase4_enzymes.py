@@ -10,7 +10,7 @@ ENZYMES_DIR = Path(REPO_ROOT) / "enzymes"
 
 def test_cell_selection_evaluation(tmp_path):
     """Selection archives a trap the ledger says misfires; its frontmatter counters are ignored."""
-    from aegis_core.lifecycle.selection import run_cell_selection
+    from aegis_core.lifecycle.selection import run_rule_selection
     from aegis_core.telemetry_engine import ledger
 
     cells_dir = tmp_path / ".aegis" / "rules"
@@ -32,12 +32,12 @@ Test body
     ledger.append(tmp_path, [{"rule": "test-cell", "outcome": "fp", "source": "ci", "key": f"k{n}"} for n in range(3)])
 
     # Run check mode (dry run)
-    rc = run_cell_selection(workspace=tmp_path, execute=False)
+    rc = run_rule_selection(workspace=tmp_path, execute=False)
     assert rc == 0
     assert (traps_dir / "test-cell.md").exists()
 
     # Run execute mode
-    rc = run_cell_selection(workspace=tmp_path, execute=True)
+    rc = run_rule_selection(workspace=tmp_path, execute=True)
     assert rc == 0
     assert not (traps_dir / "test-cell.md").exists()
     assert (archive_dir / "test-cell.md").read_text(encoding="utf-8") == cell_content

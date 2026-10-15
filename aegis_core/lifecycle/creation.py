@@ -13,12 +13,12 @@ from aegis_core.workspace.base import Workspace
 from aegis_core.yaml_engine.serializer import dump_frontmatter
 from .parsers import (
     generate_slug,
-    validate_cell_id,
+    validate_rule_id,
 )
 
 __all__ = [
     "MAX_RULE_BODY_BYTES",
-    "create_cell",
+    "create_rule",
     "validate_rule_body",
 ]
 
@@ -34,8 +34,8 @@ def validate_rule_body(body: str) -> str:
     return body
 
 
-def create_cell(
-    cell_type: str,
+def create_rule(
+    rule_type: str,
     hypothesis: str,
     prediction: str = "",
     falsification: str = "",
@@ -56,14 +56,14 @@ def create_cell(
     ``body`` replaces the generated markdown body (everything after the
     frontmatter); the hypothesis still populates the frontmatter.
     """
-    validate_cell_id(id_override)
+    validate_rule_id(id_override)
     if body is not None:
         validate_rule_body(body)
 
-    type_lower = cell_type.lower()
+    type_lower = rule_type.lower()
     if type_lower not in RULE_TYPES:
         raise ValueError(
-            f"Invalid type '{cell_type}'. Must be one of: {', '.join(CANONICAL_RULE_TYPES)}."
+            f"Invalid type '{rule_type}'. Must be one of: {', '.join(CANONICAL_RULE_TYPES)}."
         )
     mandatory = RULE_TYPES[type_lower].mandatory
 

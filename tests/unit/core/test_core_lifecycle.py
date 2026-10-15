@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from aegis_core.fitness import Fitness
-from aegis_core.lifecycle.parsers import find_cell_file, rule_age_days
-from aegis_core.lifecycle.promotion import demote_cell, promote_cell, suggest
+from aegis_core.lifecycle.parsers import find_rule_file, rule_age_days
+from aegis_core.lifecycle.promotion import demote_rule, promote_rule, suggest
 from aegis_core.rules import load_rules
 from aegis_core.telemetry_engine import ledger
 
@@ -86,16 +86,16 @@ class TestSuggestions:
 class TestPromoteAndDemote:
     def test_find_cell_file(self, workspace: Path):
         trap = _rule(workspace, "traps", "test-v", "trap")
-        assert find_cell_file(workspace, "test-v") == (trap, "trap")
-        assert find_cell_file(workspace, "../etc/passwd") == (None, None)
+        assert find_rule_file(workspace, "test-v") == (trap, "trap")
+        assert find_rule_file(workspace, "../etc/passwd") == (None, None)
 
     def test_promotion_without_force_needs_ledger_evidence(self, workspace: Path):
         trap = _rule(workspace, "traps", "promote-me", "trap")
-        refused = promote_cell(workspace, "promote-me", force=False)
+        refused = promote_rule(workspace, "promote-me", force=False)
         assert refused["status"] == "ineligible" and trap.exists()
 
         _report(workspace, "promote-me", tp=25)
-        res = promote_cell(workspace, "promote-me", force=False)
+        res = promote_rule(workspace, "promote-me", force=False)
 
         assert (res["status"], res["from_type"], res["to_type"]) == ("promoted", "trap", "invariant")
         assert not trap.exists()
@@ -108,27 +108,27 @@ class TestPromoteAndDemote:
         trap = _rule(workspace, "traps", "claims", "trap")
         trap.write_text(trap.read_text(encoding="utf-8").replace(
             "---\n#", "fitness:\n  triggers: 99\n  true_positives: 99\n  score: 1.0\n---\n#"), encoding="utf-8")
-        assert promote_cell(workspace, "claims", force=False)["status"] == "ineligible"
+        assert promote_rule(workspace, "claims", force=False)["status"] == "ineligible"
 
     def test_an_invariant_promotes_to_a_gate_and_a_gate_is_terminal(self, workspace: Path):
         _rule(workspace, "invariants", "inv", "invariant")
-        assert promote_cell(workspace, "inv", force=True)["to_type"] == "gate"
+        assert promote_rule(workspace, "inv", force=True)["to_type"] == "gate"
         assert (workspace / ".aegis" / "rules" / "gates" / "inv.md").is_file()
-        assert promote_cell(workspace, "inv", force=True)["status"] == "already_terminal"
+        assert promote_rule(workspace, "inv", force=True)["status"] == "already_terminal"
 
     def test_demote_invariant_to_trap(self, workspace: Path):
         inv = _rule(workspace, "invariants", "demote-me", "invariant")
-        res = demote_cell(workspace, "demote-me")
+        res = demote_rule(workspace, "demote-me")
         assert (res["status"], res["from_type"], res["to_type"]) == ("demoted", "invariant", "trap")
         trap_path = workspace / ".aegis" / "rules" / "traps" / "demote-me.md"
         assert not inv.exists() and "type: trap" in trap_path.read_text(encoding="utf-8")
-        assert demote_cell(workspace, "demote-me")["status"] == "already_base"
+        assert demote_rule(workspace, "demote-me")["status"] == "already_base"
 
     def test_protected_rules_cannot_be_demoted_or_promoted(self, workspace: Path):
         _rule(workspace, "invariants", "providence", "invariant")
         with pytest.raises(ValueError, match="Cannot demote protected core rule"):
-            demote_cell(workspace, "providence")
-        res = promote_cell(workspace, "providence", force=True)
+            demote_rule(workspace, "providence")
+        res = promote_rule(workspace, "providence", force=True)
         assert res["status"] == "protected_rule_immutable"
         assert "protected core rule" in res["message"].lower()
 
@@ -149,11 +149,11 @@ def test_generate_slug_names_a_rule_from_its_hypothesis():
     ("12", ["- dash"], ['say "hi"/*.md']),
 ])
 def test_create_cell_writes_every_value_back_exactly_as_given(tmp_path, domain, tags, target_paths):
-    """create_cell serializes through the one frontmatter writer (defense #30): a value that
+    """create_rule serializes through the one frontmatter writer (defense #30): a value that
     looks like a comment, a boolean, a number or a list item is quoted, never reinterpreted."""
-    from aegis_core.lifecycle.creation import create_cell
+    from aegis_core.lifecycle.creation import create_rule
 
-    path = create_cell(
+    path = create_rule(
         "trap", 'He said: "keep # this"', domain=domain, tags=tags, target_paths=target_paths,
         workspace=tmp_path, id_override="exact",
     )

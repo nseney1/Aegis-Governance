@@ -25,13 +25,13 @@ from aegis_core.workspace.base import Workspace
 from aegis_core.workspace.discovery import _is_workspace_dir
 from aegis_core.workspace.layout import WorkspaceLayout
 from aegis_core.lifecycle.promotion import (
-    promote_cell,
-    demote_cell,
+    promote_rule,
+    demote_rule,
     evaluate_promotions,
     evaluate_demotions,
-    evaluate_cell_tiers,
+    evaluate_rule_tiers,
 )
-from aegis_core.lifecycle.selection import prune_cells
+from aegis_core.lifecycle.selection import prune_rules
 from aegis_core.workspace.layout import is_aegis_workspace
 
 __all__ = [
@@ -255,7 +255,7 @@ def _run_promote(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
 
     if getattr(args, "tier_check", False):
-        res = evaluate_cell_tiers(root, execute=not dry_run)
+        res = evaluate_rule_tiers(root, execute=not dry_run)
         if use_json:
             print(json.dumps(res, indent=2))
         else:
@@ -282,7 +282,7 @@ def _run_promote(args: argparse.Namespace) -> int:
             print()
         return 0
 
-    res = promote_cell(root, rule_id, force=True, dry_run=dry_run)
+    res = promote_rule(root, rule_id, force=True, dry_run=dry_run)
     status = res.get("status")
     if status == "not_found":
         msg = f"Rule '{rule_id}' not found in workspace"
@@ -324,7 +324,7 @@ def _run_demote(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        res = demote_cell(root, rule_id, dry_run=dry_run)
+        res = demote_rule(root, rule_id, dry_run=dry_run)
     except ValueError:
         msg = f"Cannot demote core rule: {rule_id}."
         return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
@@ -349,12 +349,12 @@ def _run_demote(args: argparse.Namespace) -> int:
     return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Demoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
-def _force_promote(project_root: Path, cell_id: str, dry_run: bool = False, use_json: bool = False) -> int:
-    return _run_promote(argparse.Namespace(_project_root=project_root, rule_id=cell_id, dry_run=dry_run, json=use_json, force=True))
+def _force_promote(project_root: Path, rule_id: str, dry_run: bool = False, use_json: bool = False) -> int:
+    return _run_promote(argparse.Namespace(_project_root=project_root, rule_id=rule_id, dry_run=dry_run, json=use_json, force=True))
 
 
-def _force_demote(project_root: Path, cell_id: str, dry_run: bool = False, use_json: bool = False) -> int:
-    return _run_demote(argparse.Namespace(_project_root=project_root, rule_id=cell_id, dry_run=dry_run, json=use_json, force=True))
+def _force_demote(project_root: Path, rule_id: str, dry_run: bool = False, use_json: bool = False) -> int:
+    return _run_demote(argparse.Namespace(_project_root=project_root, rule_id=rule_id, dry_run=dry_run, json=use_json, force=True))
 
 
 run_promote = _run_promote
@@ -365,7 +365,7 @@ def _run_archive(args: argparse.Namespace) -> int:
     """Archive extinct rules; --dry-run only reports what would move."""
     root = _resolve_workspace_root(args)
     execute = not getattr(args, "dry_run", False)
-    return prune_cells(workspace=root, execute=execute)
+    return prune_rules(workspace=root, execute=execute)
 
 
 def _split_csv_arg(raw: Any) -> list[str] | None:
@@ -407,8 +407,8 @@ def _read_body_file(raw: str) -> str:
 
 def _run_create(args: argparse.Namespace) -> int:
     """Create a new governance rule in the workspace."""
-    from aegis_core.lifecycle.creation import create_cell
-    cell_type = getattr(args, "type", None) or getattr(args, "cell_type", None) or "trap"
+    from aegis_core.lifecycle.creation import create_rule
+    rule_type = getattr(args, "type", None) or "trap"
     hypothesis = getattr(args, "hypothesis", "")
     if not hypothesis:
         print("Error: --hypothesis is required to create a rule.", file=sys.stderr)
@@ -421,11 +421,11 @@ def _run_create(args: argparse.Namespace) -> int:
             body = _read_body_file(body_file)
         except _BodyFileError as exc:
             return _emit_error(args, str(exc))
-    rule_id = getattr(args, "id", None) or getattr(args, "cell_id", None) or None
+    rule_id = getattr(args, "id", None) or None
     target_paths = _split_csv_arg(getattr(args, "target_paths", None))
     try:
-        created = create_cell(
-            cell_type=cell_type, hypothesis=hypothesis, prediction=getattr(args, "prediction", "") or "",
+        created = create_rule(
+            rule_type=rule_type, hypothesis=hypothesis, prediction=getattr(args, "prediction", "") or "",
             falsification=getattr(args, "falsification", "") or "",
             tags=_split_csv_arg(getattr(args, "tags", None)), id_override=rule_id,
             target_paths=target_paths, domain=getattr(args, "domain", "correctness") or "correctness",

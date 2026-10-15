@@ -134,14 +134,14 @@ def _first_h1(text: str) -> str | None:
     return None
 
 
-def _genome_heading_map(root: Path) -> dict[str, str]:
+def _package_rule_headings(root: Path) -> dict[str, str]:
     """Map each packaged rule's H1 to its id, so merged bodies (which lost
     their frontmatter) still match trigger counts."""
     mapping: dict[str, str] = {}
-    genome_dir = root / "rules"
-    if not genome_dir.is_dir():
-        genome_dir = root / "genome"
-    for d in (genome_dir, genome_dir / ".oracles"):
+    package_rules_dir = root / "rules"
+    if not package_rules_dir.is_dir():
+        package_rules_dir = root / "genome"
+    for d in (package_rules_dir, package_rules_dir / ".oracles"):
         if not d.is_dir():
             continue
         for p in sorted(d.glob("*.md")):
@@ -280,7 +280,7 @@ def run_status(args: argparse.Namespace) -> int:
                 claude_md = rules_dir / "CLAUDE.md"
                 if platform == "claude" and claude_md.is_file():
                     has_merged_soma, merged_rules = _merged_claude_rules(
-                        claude_md, _genome_heading_map(root))
+                        claude_md, _package_rule_headings(root))
         except (ImportError, ValueError):
             pass
 
@@ -306,12 +306,12 @@ def run_status(args: argparse.Namespace) -> int:
     # Fallback: scan genome/ from the resolved root — never when CLAUDE.md
     # holds Soma content, or a 1-rule install reports the genome count.
     if not core_files and not has_merged_soma:
-        genome_dir = (root / "rules") if (root / "rules").is_dir() else (root / "genome")
-        if genome_dir.is_dir():
-            for p in sorted(genome_dir.glob("*.md")):
+        package_rules_dir = (root / "rules") if (root / "rules").is_dir() else (root / "genome")
+        if package_rules_dir.is_dir():
+            for p in sorted(package_rules_dir.glob("*.md")):
                 if p.is_file() and p.name.lower() != "readme.md":
                     core_files.append(p)
-        oracles_dir = genome_dir / ".oracles"
+        oracles_dir = package_rules_dir / ".oracles"
         if oracles_dir.is_dir():
             for p in sorted(oracles_dir.glob("*.md")):
                 if p.is_file() and p.name.lower() != "readme.md":
