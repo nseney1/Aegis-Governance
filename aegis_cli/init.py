@@ -6,9 +6,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.resources
-import json
-import os
-import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -56,6 +53,7 @@ def _get_starter_rule_path(name: str) -> Path | None:
 # ── Detection & Platform Rules Directory (Delegated to aegis_cli.platforms) ──
 
 from aegis_cli.platforms import detect_platform, get_rules_dir
+from aegis_cli.platforms.base import McpConfigError, load_mcp_config, write_json_atomic
 
 
 def detect_project_type(project_root: Path) -> str:
@@ -277,66 +275,31 @@ def generate_mcp_config(
     """Create or merge .mcp.json for the governed project.
 
     Existing servers and unrelated keys are preserved. Invalid or structurally
-    incompatible JSON fails before the configuration is modified.
+    incompatible JSON, a read-only file, or a symlink leading outside the project
+    raises McpConfigError before the configuration is modified.
     """
     workspace = str(Path(project_root).resolve())
     mcp_file = Path(workspace) / ".mcp.json"
 
+    data = load_mcp_config(mcp_file, confine_to=workspace)
     if dry_run:
         print(f"  Would create/update: {mcp_file}")
         return
 
-    if mcp_file.exists():
-        data = json.loads(mcp_file.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError(f"{mcp_file} must contain a JSON object")
-    else:
-        data = {}
-
-    servers = data.get("mcpServers")
-    if servers is None:
-        servers = {}
-        data["mcpServers"] = servers
-    elif not isinstance(servers, dict):
-        raise ValueError(f"{mcp_file} field 'mcpServers' must be a JSON object")
-
     if portable:
-        servers["aegis"] = {
-            "command": "aegis-mcp",
-            "args": [],
-        }
+        entry = {"command": "aegis-mcp", "args": []}
     else:
-        soma_entry = {
+        entry = {
             "command": "python3",
             "args": ["-m", "aegis_mcp"],
             "cwd": workspace,
             "env": {"AEGIS_WORKSPACE": workspace},
         }
-        servers["aegis"] = dict(soma_entry)
-        servers["soma"] = soma_entry
-
-    mode = None
-    if mcp_file.exists():
-        try:
-            mode = os.stat(mcp_file).st_mode
-        except OSError:
-            pass
-
-    # Write beside the destination with unique pid temp name and replace only after
-    # serialization succeeds, preserving original file mode.
-    temp_file = mcp_file.with_name(f".{mcp_file.name}.{os.getpid()}.tmp")
-    try:
-        temp_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        if mode is not None:
-            try:
-                os.chmod(temp_file, mode)
-            except OSError:
-                pass
-        temp_file.replace(mcp_file)
-    finally:
-        if temp_file.exists():
-            temp_file.unlink()
-    print(f"  📡 MCP config written to {mcp_file}")
+    data.setdefault("mcpServers", {})["aegis"] = entry
+    write_json_atomic(mcp_file, data)
+    resolved = mcp_file.resolve()
+    via = f" (symlink to {resolved})" if resolved != mcp_file else ""
+    print(f"  📡 MCP config written to {mcp_file}{via}")
 
 
 # ── Main flow ───────────────────────────────────────────────────────────────
@@ -344,6 +307,7 @@ def generate_mcp_config(
 def run_init(args: argparse.Namespace) -> int:
     """Main init flow. Returns exit code."""
     from aegis_core.workspace import Workspace
+    from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
     # Allow test override of project root
     ws = getattr(args, "ws", None) or Workspace.for_init(
@@ -404,6 +368,15 @@ def run_init(args: argparse.Namespace) -> int:
         print(f"  ❌ {e}")
         return 1
 
+    # 4.5. Refuse up front, before anything is written, if --mcp would have to
+    # rewrite a .mcp.json we cannot parse (M3).
+    if getattr(args, "mcp", False):
+        try:
+            load_mcp_config(Path(project_root) / ".mcp.json", confine_to=project_root)
+        except McpConfigError as e:
+            print(f"  ❌ {e}", file=sys.stderr)
+            return 1
+
     # 5. Confirmation prompt (unless --yes or --dry-run)
     skip_confirm = getattr(args, "yes", False) or dry_run
     global_rules_exist = rules_dir.is_dir() and any(rules_dir.glob("*.md"))
@@ -434,6 +407,11 @@ def run_init(args: argparse.Namespace) -> int:
 
     pre_existing = {p.stem for p in rules_dir.glob("*.md")} if rules_dir.is_dir() else set()
     ws.scaffold(minimal=(preset == "minimal"), dry_run=dry_run)
+    gitignore_status = ensure_runtime_gitignore(ws.aegis_dir, dry_run=dry_run)
+    if gitignore_status == "symlink":
+        print("  ⚠️  .aegis/.gitignore is a symlink; not modified. Add Aegis runtime state to it yourself.")
+    elif gitignore_status in ("created", "updated"):
+        print(f"  🙈 .aegis/.gitignore {gitignore_status}: machine-local runtime state stays out of git")
     installed = install_rules(rules_dir, preset=preset, dry_run=dry_run, force=force)
     if not getattr(args, "mcp_only", False):
         seed_workspace_rules(project_root, preset=preset, force=force, dry_run=dry_run)
@@ -461,11 +439,15 @@ def run_init(args: argparse.Namespace) -> int:
 
     # 7. MCP config (if requested)
     if getattr(args, "mcp", False):
-        generate_mcp_config(
-            project_root,
-            dry_run=dry_run,
-            portable=bool(getattr(args, "portable", False)),
-        )
+        try:
+            generate_mcp_config(
+                project_root,
+                dry_run=dry_run,
+                portable=bool(getattr(args, "portable", False)),
+            )
+        except McpConfigError as e:
+            print(f"  ❌ {e}", file=sys.stderr)
+            return 1
 
     # 7.5. Install pre-commit hook
     no_hooks = getattr(args, "no_hooks", False) or not getattr(args, "hooks", True)

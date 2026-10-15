@@ -3,20 +3,140 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import errno
 import json
 import os
 from pathlib import Path
 import shutil
+import stat
+import tempfile
 from typing import Any, Optional
 
 
 __all__ = [
+    "McpConfigError",
     "PlatformAdapter",
     "PlatformInstallResult",
     "detect_platform",
     "detect_platforms",
     "get_rules_dir",
+    "load_mcp_config",
+    "write_json_atomic",
 ]
+
+
+class McpConfigError(ValueError):
+    """An existing MCP config file cannot be merged without losing the user's data."""
+
+
+def _is_read_only(path: Path) -> bool:
+    """True when ``path`` exists and its owner marked it read-only.
+
+    ``os.replace`` swaps a file out regardless of the file's own mode (a rename needs
+    only directory write access), so the read-only bit has to be honored explicitly.
+    The mode bits are checked as well because root passes every ``os.access`` test.
+    """
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return False
+    return not (mode & 0o222) or not os.access(path, os.W_OK)
+
+
+def load_mcp_config(path: Path | str, *, confine_to: Path | str | None = None) -> dict[str, Any]:
+    """Return the JSON object stored at ``path`` for merging, or ``{}`` when it holds none.
+
+    A missing, empty or whitespace-only file and ``"mcpServers": null`` hold nothing to
+    lose and are merged into. Lenient formats (JSONC comments, trailing commas, a UTF-8
+    BOM), other shapes and read-only files are refused, not repaired: re-serializing
+    would drop the user's comments, and falling back to ``{}`` would drop their other
+    servers (M3).
+
+    ``confine_to`` is set for project-scoped configs: a ``.mcp.json`` that a cloned repo
+    ships as a symlink must not make Aegis merge into a file outside that project.
+    """
+    path = Path(path)
+    if confine_to is not None:
+        root = Path(confine_to).resolve()
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError) as exc:  # RuntimeError: symlink loop on 3.9-3.12
+            raise McpConfigError(f"{path}: cannot be resolved ({exc}); refusing to modify it") from exc
+        if resolved != root and root not in resolved.parents:
+            raise McpConfigError(
+                f"{path}: is a symlink to {resolved}, outside the project {root}; "
+                "refusing to modify it. Replace the link with a regular file to register Aegis here."
+            )
+    if not path.exists():
+        return {}
+    if _is_read_only(path):
+        raise McpConfigError(
+            f"{path}: is read-only; refusing to modify it. Make it writable to register Aegis."
+        )
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except OSError as exc:
+        raise McpConfigError(f"{path}: cannot be read ({exc}); refusing to modify it") from exc
+    except UnicodeDecodeError as exc:
+        raise McpConfigError(f"{path}: not UTF-8 text ({exc.reason}); refusing to modify it") from exc
+    if not text.strip():
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise McpConfigError(
+            f"{path}: not valid JSON ({exc.msg} at line {exc.lineno} column {exc.colno}); "
+            "refusing to modify it. Comments, trailing commas and a UTF-8 BOM are not "
+            "supported: fix the file or move it aside, then re-run."
+        ) from exc
+    if not isinstance(data, dict):
+        raise McpConfigError(f"{path}: top-level value must be a JSON object; refusing to modify it")
+    if "mcpServers" in data and data["mcpServers"] is None:
+        data["mcpServers"] = {}
+    elif not isinstance(data.get("mcpServers", {}), dict):
+        raise McpConfigError(f"{path}: field 'mcpServers' must be a JSON object; refusing to modify it")
+    return data
+
+
+def _umask_mode(mode: int = 0o666) -> int:
+    # The CLI is single-threaded, so the brief umask(0) window cannot race a file creation.
+    current = os.umask(0)
+    os.umask(current)
+    return mode & ~current
+
+
+def write_json_atomic(path: Path | str, data: Any) -> None:
+    """Replace ``path`` with ``data`` serialized as JSON, in a single rename.
+
+    On any failure the previous file is left untouched and no temp file remains. A
+    symlink is written through to its target (dotfile managers link these configs;
+    project-scoped callers confine it first via ``load_mcp_config``), the existing
+    permission bits are kept, a new file gets the umask default, and a read-only
+    file raises PermissionError instead of being swapped out. Non-ASCII text in the
+    user's entries is written as-is, not as ``\\u`` escapes.
+    """
+    target = Path(path).resolve()
+    if _is_read_only(target):
+        raise PermissionError(errno.EACCES, "file is read-only; refusing to replace it", str(target))
+    payload = (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        mode = stat.S_IMODE(target.stat().st_mode)
+    except FileNotFoundError:
+        mode = _umask_mode()
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _detect_markers_in_dir(root: Path) -> list[str]:
@@ -219,7 +339,7 @@ class PlatformAdapter(ABC):
         """Render standard MCP server configuration."""
         return {
             "mcpServers": {
-                "soma": self.render_mcp_entry(local=local),
+                "aegis": self.render_mcp_entry(local=local),
             }
         }
 

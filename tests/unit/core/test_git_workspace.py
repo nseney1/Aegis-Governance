@@ -242,3 +242,70 @@ class TestNonGitFallback:
         assert ws.get_changed_files() == []
         assert ws.get_untracked_files() == []
         assert not ws.is_git
+
+
+def _inside_real_repo(path: Path) -> bool:
+    res = subprocess.run(["git", "-C", str(path), "rev-parse", "--git-dir"], capture_output=True, text=True)
+    return res.returncode == 0
+
+
+class TestAncestorDiscoveryMatchesGit:
+    """An ancestor `.git` only counts when git itself would accept it as a repository.
+
+    A stray empty `/tmp/.git` (seen on shared CI and dev machines) used to turn every
+    tmp directory into a GitWorkspace whose `is_git` was True.
+    """
+
+    @pytest.fixture
+    def outer(self, tmp_path):
+        if _inside_real_repo(tmp_path):
+            pytest.skip("tmp_path is inside a real git repository")
+        outer = tmp_path / "outer"
+        (outer / "proj").mkdir(parents=True)
+        return outer
+
+    def test_empty_ancestor_git_dir_is_not_adopted(self, outer):
+        (outer / ".git").mkdir()
+        proj = outer / "proj"
+        assert not _inside_real_repo(proj)  # git agrees: not a repository
+
+        ws = Workspace.resolve(start=proj)
+        assert not isinstance(ws, GitWorkspace)
+        assert not ws.is_git
+
+        git_ws = GitWorkspace(root=proj)
+        assert git_ws.git_dir is None
+        assert not git_ws.is_git
+        assert git_ws.head_commit is None
+        assert git_ws.branch_name is None
+
+    def test_ancestor_git_dir_without_objects_is_not_adopted(self, outer):
+        fake = outer / ".git"
+        (fake / "refs").mkdir(parents=True)
+        (fake / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+        assert not isinstance(Workspace.for_init(outer / "proj"), GitWorkspace)
+        assert not GitWorkspace(root=outer / "proj").is_git
+
+    def test_ancestor_gitfile_to_missing_gitdir_is_not_adopted(self, outer):
+        (outer / ".git").write_text(f"gitdir: {outer / 'gone' / '.git'}\n", encoding="utf-8")
+
+        assert not isinstance(Workspace.resolve(start=outer / "proj"), GitWorkspace)
+        assert GitWorkspace(root=outer / "proj").git_dir is None
+
+    def test_subdirectory_of_linked_worktree_is_adopted(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.email=t@example.com", "-c", "user.name=T",
+                        "commit", "--allow-empty", "-m", "init"], cwd=str(repo), check=True, capture_output=True)
+        wt = tmp_path / "wt"
+        subprocess.run(["git", "worktree", "add", "-b", "feature", str(wt)], cwd=str(repo), check=True, capture_output=True)
+        deep = wt / "pkg" / "deep"
+        deep.mkdir(parents=True)
+
+        ws = Workspace.resolve(start=deep)
+        assert isinstance(ws, GitWorkspace)
+        assert ws.is_git
+        assert ws.branch_name == "feature"
+        assert ws.git_common_dir == (repo / ".git").resolve()
