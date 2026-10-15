@@ -207,6 +207,7 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
     come only from ~/.aegis/config.json (D10).
     """
     import shlex
+    from aegis_core.errors import PathTraversalError
     from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
     from aegis_core.ast.detect import detect_project_languages, provision_ast_driver_slots
     from aegis_core.ast.runner import resolve_driver_executable
@@ -239,7 +240,11 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
     })
     if missing:
         if fix:
-            _slots, written = provision_ast_driver_slots(ws_root, detected_langs)
+            try:
+                _slots, written = provision_ast_driver_slots(ws_root, detected_langs)
+            except PathTraversalError as exc:
+                print(f"  ❌ AST drivers: {exc}")
+                return False
             if written:
                 print(f"  ✅ Fixed: enabled the packaged AST drivers in .aegis/config.json for {', '.join(missing)}")
                 ast_drivers = _configured()

@@ -385,3 +385,19 @@ def test_doctor_json_mode_and_warning_counts(tmp_path, monkeypatch, capsys):
         assert "warnings" in payload
         assert payload["failed"] == 0
 
+
+
+def test_doctor_fix_refuses_a_symlinked_config_without_crashing(tmp_path, capsys):
+    from conftest import symlink_or_skip
+    from aegis_cli.doctor import _check_ast_drivers
+
+    proj = tmp_path / "proj"
+    (proj / "src").mkdir(parents=True)
+    (proj / "src" / "main.rs").write_text("fn main() {}")
+    (proj / ".aegis").mkdir()
+    outside = tmp_path / "user-config.json"
+    symlink_or_skip(outside, proj / ".aegis" / "config.json")
+
+    assert _check_ast_drivers(proj, fix=True) is False
+    assert "is a symlink" in capsys.readouterr().out
+    assert not outside.exists()
