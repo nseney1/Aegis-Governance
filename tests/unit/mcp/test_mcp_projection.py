@@ -1,101 +1,103 @@
-"""Unit and behavioral tests for MCP response projection and SOMA-V01 security guards."""
+"""The opt-in ``view`` projection of tool responses: full, summary or ids.
+
+A rule's identity is the name ``aegis_report_outcome`` accepts in ``rules_used``: its
+file stem (``_name``) in aegis_list_rules and ``name`` in aegis_scan. A rule needs no
+``id`` field to be named, and an error is never projected away.
+"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
-from aegis_mcp.projection import DENYLIST, project_response
+
+import aegis_mcp.server as server
+from aegis_mcp.projection import project_response
+from aegis_mcp.tools import execute_tool
+
+BAD_WORKSPACE = "/invalid\0path"
 
 
-class TestResponseProjection:
-    """Test opt-in view and field projection."""
-
-    def test_full_view_backwards_compatibility(self):
-        payload = {
-            "id": "cell-1",
-            "body": "# Extensive guidance markdown\n" * 100,
-            "status": "active",
-        }
-        res = project_response(payload, view="full")
-        assert res == payload
-
-        res_none = project_response(payload, view=None)
-        assert res_none == payload
-
-    def test_ids_view_projection(self):
-        payload = {
-            "cells": [
-                {"id": "cell-1", "type": "wall", "body": "text"},
-                {"id": "cell-2", "type": "membrane", "body": "text"},
-            ],
-            "total": 2,
-        }
-        res = project_response(payload, view="ids")
-        assert res == {"cells": ["cell-1", "cell-2"]}
-
-    def test_summary_view_projection(self):
-        payload = {
-            "id": "run-42",
-            "status": "passed",
-            "score": 0.95,
-            "verbose_logs": "Detailed debug traces line 1\nline 2\n" * 50,
-            "cells": [
-                {"id": "c1", "status": "survive", "body": "lots of instructions"},
-            ],
-        }
-        res = project_response(payload, view="summary")
-        assert res["id"] == "run-42"
-        assert res["status"] == "passed"
-        assert res["score"] == 0.95
-        assert "verbose_logs" not in res
-        assert res["cells_count"] == 1
-        assert res["cells"][0]["id"] == "c1"
-        assert "body" not in res["cells"][0]
-
-    def test_soma_v01_security_scrubbing(self):
-        payload = {
-            "id": "audit-1",
-            "task_plan": "Sensitive reasoning and internal attack vectors",
-            "prompt": "Raw system prompt with instructions",
-            "raw_prompt": "Hidden prompt",
-            "__class__": "Introspection exploit",
-            "verdict": "valid",
-        }
-        # Even with view='full', denylisted fields must be scrubbed
-        res = project_response(payload, view="full")
-        assert "task_plan" not in res
-        assert "prompt" not in res
-        assert "raw_prompt" not in res
-        assert "__class__" not in res
-        assert res["verdict"] == "valid"
-
-    def test_execute_tool_with_projection(self, tmp_path, monkeypatch):
-        from aegis_mcp.tools import execute_tool
-
-        rules = tmp_path / ".aegis" / "rules" / "traps"
-        rules.mkdir(parents=True, exist_ok=True)
-        (rules / "t1.md").write_text("---\nid: t1\ntype: trap\nhypothesis: h\n---\nbody\n", encoding="utf-8")
-        res = execute_tool("aegis_list_rules", {"workspace": str(tmp_path), "view": "ids"})
-        assert res == ["t1"]
-
-    def test_ids_view_items_with_only_id_or_only_name(self):
-        res_id = project_response([{"id": "cell-id-only"}], view="ids")
-        assert res_id == ["cell-id-only"]
-        res_name = project_response([{"name": "cell-name-only"}], view="ids")
-        assert res_name == ["cell-name-only"]
-        res_neither = project_response([{"foo": "bar"}], view="ids")
-        assert res_neither == ["{'foo': 'bar'}"]
-
-    def test_projection_primitives_and_lists(self):
-        assert project_response("hello", view="ids") == "hello"
-        assert project_response(123, view="summary") == 123
-        assert project_response("unknown", view="nonexistent_view") == "unknown"
-
-        # list with non-dict items in summary
-        assert project_response(["string_item", {"id": "c1", "status": "ok"}], view="summary") == ["string_item", {"id": "c1", "status": "ok"}]
-
-        # mapping with single 'id' in ids view
-        assert project_response({"id": "only-id"}, view="ids") == {"id": "only-id"}
-
-        # mapping without id or containers in ids view
-        assert project_response({"other": 1, "value": 2}, view="ids") == {"keys": ["other", "value"]}
+def _rule(root: Path, stem: str, frontmatter: str) -> None:
+    rules = root / ".aegis" / "rules" / "traps"
+    rules.mkdir(parents=True, exist_ok=True)
+    (rules / f"{stem}.md").write_text(f"---\n{frontmatter}---\nbody\n", encoding="utf-8")
 
 
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    _rule(tmp_path, "trap-noid", "type: trap\nhypothesis: no id here\ntarget_paths: ['src/*.py']\n")
+    _rule(tmp_path, "trap-with-id", "id: trap-with-id\ntype: trap\nhypothesis: h\n")
+    return tmp_path
+
+
+def test_full_view_and_no_view_return_the_response_unchanged(workspace):
+    plain = execute_tool("aegis_list_rules", {"workspace": str(workspace)})
+    assert execute_tool("aegis_list_rules", {"workspace": str(workspace), "view": "full"}) == plain
+
+
+def test_list_rules_ids_view_names_each_rule_by_its_file_stem(workspace):
+    ids = execute_tool("aegis_list_rules", {"workspace": str(workspace), "view": "ids"})
+    assert ids == ["trap-noid", "trap-with-id"]
+
+
+def test_list_rules_summary_view_keeps_identity_type_and_fitness(workspace):
+    summary = execute_tool("aegis_list_rules", {"workspace": str(workspace), "view": "summary"})
+    assert summary[0] == {
+        "_name": "trap-noid",
+        "type": "trap",
+        "fitness": {"triggers": 0, "tp": 0, "fp": 0, "score": summary[0]["fitness"]["score"]},
+    }
+    assert summary[1]["_name"] == "trap-with-id"
+    assert "hypothesis" not in summary[1]
+
+
+def test_scan_ids_view_names_the_matched_rules(workspace):
+    ids = execute_tool("aegis_scan", {"workspace": str(workspace), "files": ["src/app.py"], "view": "ids"})
+    assert ids == {"relevant_rules": ["trap-noid"], "genome_guidance": [], "invariant_warnings": []}
+
+
+def test_scan_summary_view_counts_and_names_rules_without_the_rendered_guidance(workspace):
+    summary = execute_tool("aegis_scan", {"workspace": str(workspace), "files": ["src/app.py"], "view": "summary"})
+    assert summary["relevant_rules_count"] == 1
+    assert summary["relevant_rules"][0]["name"] == "trap-noid"
+    assert summary["rules_staged"] == 1
+    assert "guidance" not in summary
+
+
+def test_scan_ids_view_over_stdio_names_rules_and_is_not_an_error(workspace, monkeypatch):
+    monkeypatch.setattr(server, "_canonical_workspace", str(workspace))
+    monkeypatch.setattr(server, "_workspace_error", None)
+    server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                           "params": {"clientInfo": {"name": "pytest"}}})
+    response = server.handle_request({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "aegis_scan", "arguments": {"files": ["src/app.py"], "view": "ids"}},
+    })
+    assert response["result"]["isError"] is False
+    assert json.loads(response["result"]["content"][0]["text"])["relevant_rules"] == ["trap-noid"]
+
+
+@pytest.mark.parametrize("view", ["ids", "summary"])
+def test_an_error_is_returned_whole_whatever_the_view(view):
+    result = execute_tool("aegis_list_rules", {"workspace": BAD_WORKSPACE, "view": view})
+    assert result["status"] == "FAIL"
+    assert result["error"]
+
+
+def test_ids_view_skips_an_item_with_no_identity_instead_of_dumping_it():
+    assert project_response([{"hypothesis": "secret-ish body"}, {"name": "kept"}], view="ids") == ["kept"]
+
+
+def test_projection_keeps_scalars_and_plain_string_lists():
+    assert project_response("hello", view="ids") == "hello"
+    assert project_response(123, view="summary") == 123
+    payload = {"relevant_rules": [], "warnings": ["slot files could not be read"]}
+    assert project_response(payload, view="ids")["warnings"] == ["slot files could not be read"]
+    assert project_response(payload, view="summary")["warnings"] == ["slot files could not be read"]
+
+
+def test_frontmatter_keys_pass_through_the_full_view_unchanged(tmp_path):
+    _rule(tmp_path, "trap-prompt", "type: trap\nprompt: kept as written\n")
+    rules = execute_tool("aegis_list_rules", {"workspace": str(tmp_path), "view": "full"})
+    assert rules[0]["prompt"] == "kept as written"

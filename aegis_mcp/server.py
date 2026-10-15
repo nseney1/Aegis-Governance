@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from aegis_core.taxonomy import MCP_DEFAULT_RATE_LIMITS
 from aegis_core.workspace import Workspace
 
+from .projection import is_error_result
 from .registry import DEFAULT_CLIENT_PLATFORM, TOOL_DEFINITIONS
 from .tools import execute_tool, is_known_tool
 
@@ -93,11 +94,6 @@ def _server_version() -> str:
 def send_response(response: Dict[str, Any]):
     # stdout is the JSON-RPC transport: only framed responses may be written here.
     print(json.dumps(response), flush=True)
-
-
-def _is_error_result(result: Any) -> bool:
-    """A handler reports failure as {"status": "FAIL", "error": ...}."""
-    return isinstance(result, dict) and ("error" in result or result.get("status") == "FAIL")
 
 
 def _error(req_id: Any, code: int, message: str) -> Dict[str, Any]:
@@ -184,7 +180,7 @@ def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
         return _tool_result(req_id, f"Tool execution failed: {exc}", True)
-    return _tool_result(req_id, json.dumps(result), _is_error_result(result))
+    return _tool_result(req_id, json.dumps(result), is_error_result(result))
 
 
 def _resolve_workspace() -> tuple[Optional[Workspace], str]:
