@@ -1,129 +1,82 @@
-"""Lean Gateway Router: Normalization, dispatch, opt-in response projection, and re-exports (<150 LOC)."""
+"""Tool dispatch: argument check, one handler per tool, opt-in response projection."""
 from __future__ import annotations
 
-import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
-from aegis_mcp.handlers import (
-    _handle_audit_performance,
-    _handle_audit_security,
-    _handle_capture_insight,
-    _handle_checkpoint,
-    _handle_coverage,
-    _handle_create_cell,
-    _handle_create_rule,
-    _handle_fitness,
-    _handle_generate_manifest,
-    _handle_grade,
-    _handle_list_cells,
-    _handle_list_rules,
-    _handle_poll_verification,
-    _handle_propose_change,
-    _handle_report_outcome,
-    _handle_request_receipt,
-    _handle_rule_fitness,
-    _handle_scan,
-    _handle_soma_handoff,
-    _handle_verify_changes,
-)
+from aegis_mcp.handlers.core import handle_scan
+from aegis_mcp.handlers.governance import handle_create_rule, handle_list_rules
+from aegis_mcp.handlers.telemetry import handle_report_outcome
 from aegis_mcp.projection import project_response
-from aegis_mcp.registry import (
-    _HAS_SDK,
-    _STATUS_FAIL,
-    _STATUS_PASS,
-    _VALID_OUTCOMES,
-    DISABLED_BY_DEFAULT_TOOLS,
-    TOOL_DEFINITIONS,
-    _cell_diagnostic,
-    _classify_propose_result,
-    _get_workspace,
-    _list_cells_stdlib,
-    _matches_cell_type_filter,
-    build_cell_create_prompt,
-    get_governance,
-    inventory_cells,
-    normalize_tool_call,
-    resolve_workspace,
-)
-from aegis_mcp.security import (
-    Workspace,
-    confine_path,
-    confine_workspace,
-    validate_rule_names,
-)
-
-yaml = None  # Backward-compatible sentinel: zero-dependency runtime
+from aegis_mcp.registry import TOOL_ARGUMENTS, TOOL_DEFINITIONS
 
 _TOOL_HANDLERS = {
-    "aegis_create_rule": _handle_create_cell,
-    "aegis_list_rules": _handle_list_cells,
-    "aegis_propose_change": _handle_propose_change,
-    "aegis_audit_security": _handle_audit_security,
-    "aegis_audit_performance": _handle_audit_performance,
-    "aegis_verify_changes": _handle_verify_changes,
-    "aegis_poll_verification": _handle_poll_verification,
-    "aegis_checkpoint": _handle_checkpoint,
-    "aegis_scan": _handle_scan,
-    "aegis_report_outcome": _handle_report_outcome,
-    "aegis_capture_insight": _handle_capture_insight,
-    "aegis_generate_manifest": _handle_generate_manifest,
-    "aegis_grade": _handle_grade,
-    "aegis_coverage": _handle_coverage,
-    "aegis_rule_fitness": _handle_fitness,
-    "aegis_request_receipt": _handle_request_receipt,
-    "aegis_handoff": _handle_soma_handoff,
+    "aegis_scan": handle_scan,
+    "aegis_report_outcome": handle_report_outcome,
+    "aegis_create_rule": handle_create_rule,
+    "aegis_list_rules": handle_list_rules,
+}
+
+# Set by the server (or passed by an in-process caller), never part of a tool schema.
+_SERVER_INJECTED = frozenset({"workspace", "_host", "_session"})
+
+
+_PROPERTIES = {tool["name"]: tool["inputSchema"].get("properties", {}) for tool in TOOL_DEFINITIONS}
+# Scalar schema types and the Python values that satisfy them. bool is an int in Python,
+# so an integer argument rejects it explicitly.
+_SCALAR_TYPES = {
+    "string": ((str,), "a string"),
+    "integer": ((int,), "an integer"),
+    "boolean": ((bool,), "true or false"),
 }
 
 
-def execute_tool(name: str, args: dict):
-    """Normalize porcelain aliases, dispatch to execution plane, and project response."""
-    canonical_name, normalized_args = normalize_tool_call(name, args)
-    gov = get_governance(normalized_args)
-    handler = _TOOL_HANDLERS.get(canonical_name)
-    if not handler:
-        raise ValueError(f"Unknown tool: {canonical_name}")
-
-    raw_res = handler(normalized_args, gov)
-    view = normalized_args.get("view")
-    fields = normalized_args.get("fields")
-    if view or fields:
-        return project_response(raw_res, view=view, fields=fields)
-    return raw_res
+def is_known_tool(name: Any) -> bool:
+    return isinstance(name, str) and name in _TOOL_HANDLERS
 
 
-__all__ = [
-    "TOOL_DEFINITIONS",
-    "execute_tool",
-    "normalize_tool_call",
-    "get_governance",
-    "resolve_workspace",
-    "confine_workspace",
-    "_get_workspace",
-    "build_cell_create_prompt",
-    "_handle_create_cell",
-    "_handle_create_rule",
-    "_handle_list_cells",
-    "_handle_list_rules",
-    "_handle_propose_change",
-    "_handle_generate_manifest",
-    "_handle_soma_handoff",
-    "_handle_verify_changes",
-    "_handle_poll_verification",
-    "_handle_checkpoint",
-    "_handle_request_receipt",
-    "_handle_audit_security",
-    "_handle_audit_performance",
-    "_handle_scan",
-    "_handle_report_outcome",
-    "_handle_capture_insight",
-    "_handle_grade",
-    "_handle_coverage",
-    "_handle_fitness",
-    "_handle_rule_fitness",
-    "_TOOL_HANDLERS",
-    "_STATUS_PASS",
-    "_STATUS_FAIL",
-    "_VALID_OUTCOMES",
-    "DISABLED_BY_DEFAULT_TOOLS",
-]
+def _shown(value: Any) -> str:
+    text = repr(value)
+    return text if len(text) <= 60 else text[:57] + "..."
 
+
+def _invalid_scalar(name: str, args: dict) -> Optional[str]:
+    """The first scalar argument whose value breaks the tool's published inputSchema.
+
+    Checked before the handler runs, so a bad value can never fail a call after its
+    ledger row is written. A null is the same as an absent argument; list arguments
+    are checked by their handlers.
+    """
+    for key, spec in _PROPERTIES[name].items():
+        value = args.get(key)
+        if value is None or spec.get("type") not in _SCALAR_TYPES:
+            continue
+        python_types, expected = _SCALAR_TYPES[spec["type"]]
+        if not isinstance(value, python_types) or (spec["type"] == "integer" and isinstance(value, bool)):
+            return f"Invalid {key!r}: {_shown(value)}. Expected {expected}."
+        if "enum" in spec and value not in spec["enum"]:
+            return f"Invalid {key!r}: {_shown(value)}. Expected one of {spec['enum']}."
+        if "maxLength" in spec and len(value) > spec["maxLength"]:
+            return f"Invalid {key!r}: {len(value)} characters. Expected at most {spec['maxLength']}."
+    return None
+
+
+def execute_tool(name: str, args: dict) -> Any:
+    """Check the arguments against the schema, dispatch, and project the response if a view is asked for."""
+    handler = _TOOL_HANDLERS.get(name)
+    if handler is None:
+        raise ValueError(f"Unknown tool: {name}")
+    unknown = sorted(k for k in args if k not in TOOL_ARGUMENTS[name] and k not in _SERVER_INJECTED)
+    if unknown:
+        return {"status": "FAIL", "error": f"Unknown argument(s) for {name}: {unknown}"}
+    invalid = _invalid_scalar(name, args)
+    if invalid:
+        return {"status": "FAIL", "error": invalid}
+
+    result = handler(args)
+    view = args.get("view")
+    if view:
+        return project_response(result, view=view)
+    return result
+
+
+__all__ = ["TOOL_DEFINITIONS", "execute_tool", "is_known_tool"]

@@ -1,4 +1,4 @@
-"""Tests for JIT context token budget clamping (Issue #75) and Gate 4.5 workflow integration."""
+"""Tests for JIT context token budget clamping (Issue #75)."""
 import os
 import shutil
 import tempfile
@@ -121,18 +121,19 @@ class TestJITContextBudgetClamping(unittest.TestCase):
 
     def test_mandatory_cells_prioritized_under_tight_budget(self):
         """Mandatory wall/gate cells must be included first before advisory cells under a tight budget."""
-        # Set budget just enough for wall (~80 tokens) but not all cells (~450 tokens)
-        res = express(str(self.ws), changed_files=["main.py"], max_tokens=140)
-        relevant_names = [c["name"] for c in res["relevant_cells"]]
-        self.assertIn("wall-security", relevant_names)
-        self.assertTrue(res["stats"]["clamped"])
-        # Should not include all 3 cells
-        self.assertLess(len(res["relevant_cells"]), 3)
+        wall_only = express(str(self.ws), changed_files=["main.py"], budget=0, max_tokens=10_000)
+        self.assertEqual([c["name"] for c in wall_only["relevant_rules"]], ["wall-security"])
 
-    def test_release_workflow_contains_gate_4_5(self):
-        """RELEASE_WORKFLOW.md must document Gate 4.5 2-Layer verification."""
-        repo_root = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
-        workflow_doc = repo_root / "docs" / "project" / "RELEASE_WORKFLOW.md"
-        content = workflow_doc.read_text(encoding="utf-8")
-        self.assertIn("Gate 4.5", content)
-        self.assertIn("soma verify", content)
+        # Enough for the wall and the "2 more rules omitted" notice (~17 tokens as sent),
+        # far short of any advisory cell: every advisory cell is omitted, never swapped in.
+        res = express(str(self.ws), changed_files=["main.py"], max_tokens=wall_only["stats"]["estimated_tokens"] + 30)
+        relevant_names = [c["name"] for c in res["relevant_rules"]]
+        self.assertEqual(relevant_names, ["wall-security"])
+        self.assertTrue(res["stats"]["clamped"])
+        self.assertEqual(res["stats"]["omitted"], 2)
+
+    def test_a_gate_that_does_not_fit_is_never_displaced_by_an_advisory_cell(self):
+        """Under a budget too small for the wall, a smaller advisory cell is not staged in its place."""
+        res = express(str(self.ws), changed_files=["main.py"], max_tokens=140)
+        self.assertEqual(res["relevant_rules"], [])
+        self.assertEqual(res["stats"]["omitted"], 3)

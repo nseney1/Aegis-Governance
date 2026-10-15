@@ -50,7 +50,6 @@ def test_sdk_and_mcp_direct_list_reject_symlinked_directory(tmp_path, monkeypatc
     with pytest.raises(RuntimeError, match="cell inventory.*symlink"):
         Governance(project_root=workspace).list_cells()
 
-    monkeypatch.setattr(tools, "_HAS_SDK", False)
     monkeypatch.chdir(workspace)
     result = tools.execute_tool("aegis_list_rules", {})
     assert result["status"] == "FAIL"
@@ -59,12 +58,10 @@ def test_sdk_and_mcp_direct_list_reject_symlinked_directory(tmp_path, monkeypatc
 
 def test_mcp_transport_marks_inventory_failure_as_error(tmp_path, monkeypatch):
     import aegis_mcp.server as server
-    import aegis_mcp.tools as tools
 
     workspace = _symlinked_cell_directory(tmp_path)
-    monkeypatch.setattr(server, "_session_token", "inventory-test")
+    monkeypatch.setattr(server, "_session_id", "inventory-test")
     monkeypatch.setattr(server, "_canonical_workspace", str(workspace))
-    monkeypatch.setattr(tools, "_HAS_SDK", False)
 
     response = server.handle_request({
         "jsonrpc": "2.0",
@@ -87,7 +84,6 @@ def test_same_size_restored_mtime_edit_is_visible_to_sdk_and_mcp(tmp_path, monke
     governance = Governance(project_root=tmp_path)
     assert governance.list_cells()[0]["id"] == "alpha"
 
-    monkeypatch.setattr(tools, "_HAS_SDK", False)
     monkeypatch.chdir(tmp_path)
     assert tools.execute_tool("aegis_list_rules", {})[0]["id"] == "alpha"
 
@@ -116,7 +112,6 @@ def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypa
     assert sdk_records[0]["_path"] == ".aegis/rules/walls/bad.md"
     assert "UTF-8" in sdk_records[0]["_error"]
 
-    monkeypatch.setattr(tools, "_HAS_SDK", False)
     monkeypatch.chdir(tmp_path)
     mcp_records = tools.execute_tool("aegis_list_rules", {})
     assert len(mcp_records) == 1
@@ -126,18 +121,18 @@ def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypa
 
 
 def test_create_prompt_uses_inventory_bytes_without_reopen(tmp_path, monkeypatch):
-    from aegis_core.rule_inventory import inventory_cells
-    import aegis_mcp.tools as tools
+    from aegis_core.rule_inventory import inventory_rules
+    import aegis_mcp.registry as registry
 
     cell_path = _write_cell(tmp_path, "snapshot", "captured hypothesis")
-    snapshot = inventory_cells(str(tmp_path))
+    snapshot = inventory_rules(str(tmp_path))
     cell_path.write_text(
         CELL_TEMPLATE.format(cell_id="mutatedx", hypothesis="changed hypothesis"),
         encoding="utf-8",
     )
-    monkeypatch.setattr(tools, "inventory_cells", lambda workspace: snapshot)
+    monkeypatch.setattr(registry, "inventory_rules", lambda workspace: snapshot)
 
-    prompt = tools.build_cell_create_prompt(
+    prompt = registry.build_rule_create_prompt(
         "new concern", args={"workspace": str(tmp_path)}
     )
 
@@ -146,22 +141,18 @@ def test_create_prompt_uses_inventory_bytes_without_reopen(tmp_path, monkeypatch
 
 
 def test_create_prompt_rejects_outside_symlinked_example(tmp_path):
-    from aegis_core.rule_inventory import CellInventoryError
-    from aegis_mcp.tools import build_cell_create_prompt
+    from aegis_core.rule_inventory import RuleInventoryError
+    from aegis_mcp.registry import build_rule_create_prompt
 
     workspace = _symlinked_cell_directory(tmp_path)
-    with pytest.raises(CellInventoryError, match="symlink"):
-        build_cell_create_prompt("new concern", args={"workspace": str(workspace)})
+    with pytest.raises(RuleInventoryError, match="symlink"):
+        build_rule_create_prompt("new concern", args={"workspace": str(workspace)})
 
 
-def test_mcp_fallback_parses_inventory_when_yaml_is_absent(tmp_path, monkeypatch):
-    import aegis_mcp.jit_engine as jit_engine
+def test_mcp_list_parses_inventory_with_the_stdlib_parser(tmp_path, monkeypatch):
     import aegis_mcp.tools as tools
 
     _write_cell(tmp_path, "fallback", "stdlib parser")
-    monkeypatch.setattr(tools, "_HAS_SDK", False)
-    monkeypatch.setattr(tools, "yaml", None)
-    monkeypatch.setattr(jit_engine, "yaml", None)
     monkeypatch.chdir(tmp_path)
 
     cells = tools.execute_tool("aegis_list_rules", {})

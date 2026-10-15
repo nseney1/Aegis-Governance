@@ -22,8 +22,8 @@ from aegis_mcp.jit_engine import (
     match_cells_to_files,
     load_all_cells,
     parse_frontmatter,
-    parse_yaml_subset,
 )
+from aegis_core.yaml import parse_yaml_subset
 
 
 def _make_cell(workspace, cell_id, cell_type='vacuole', target_paths=None,
@@ -184,7 +184,7 @@ class TestExpress:
         ws = str(tmp_path)
         os.makedirs(os.path.join(ws, '.aegis', "rules"), exist_ok=True)
         result = express(ws)
-        assert 'relevant_cells' in result
+        assert 'relevant_rules' in result
         assert 'stats' in result
 
     def test_matching_cells_returned(self, tmp_path):
@@ -192,7 +192,7 @@ class TestExpress:
         _make_cell(ws, 'match-me', target_paths=['src/*.py'])
         result = express(ws, changed_files=['src/foo.py'])
         # Cell IDs may use 'id', '_name', or filename-based keys
-        cells = result['relevant_cells']
+        cells = result['relevant_rules']
         found = any(
             c.get('id') == 'match-me' or c.get('_name') == 'match-me'
             or 'match-me' in str(c.get('_path', ''))
@@ -206,7 +206,7 @@ class TestExpress:
                    target_paths=['anything/*.py'], enforcement='gate')
         _make_cell(ws, 'optional-vac', target_paths=['src/*.py'])
         result = express(ws, changed_files=['src/foo.py'], budget=1)
-        cells = result['relevant_cells']
+        cells = result['relevant_rules']
         found = any(
             c.get('id') == 'mandatory-wall' or c.get('_name') == 'mandatory-wall'
             or 'mandatory-wall' in str(c.get('_path', ''))
@@ -218,7 +218,7 @@ class TestExpress:
         ws = str(tmp_path)
         _make_cell(ws, 'expired-cell', expired=True, target_paths=['src/*.py'])
         result = express(ws, changed_files=['src/foo.py'])
-        cell_ids = [c.get('id', c.get('_name', '')) for c in result['relevant_cells']]
+        cell_ids = [c.get('name', '') for c in result['relevant_rules']]
         assert not any('expired-cell' in cid for cid in cell_ids)
 
     def test_stats_has_required_keys(self, tmp_path):
@@ -226,13 +226,14 @@ class TestExpress:
         os.makedirs(os.path.join(ws, '.aegis', "rules"), exist_ok=True)
         result = express(ws)
         stats = result['stats']
-        assert 'total_cells' in stats
+        assert 'total_rules' in stats
 
-    def test_context_is_string(self, tmp_path):
+    def test_guidance_is_string(self, tmp_path):
         ws = str(tmp_path)
         _make_cell(ws, 'ctx-cell', target_paths=['src/*.py'])
         result = express(ws, changed_files=['src/foo.py'])
-        assert isinstance(result['context'], str)
+        assert isinstance(result['guidance'], str)
+        assert 'ctx-cell' in result['guidance']
 
     def test_performance_100_cells_under_1s(self, tmp_path):
         ws = str(tmp_path)
@@ -243,14 +244,13 @@ class TestExpress:
         elapsed = time.time() - start
         assert elapsed < 1.0, f"express() took {elapsed:.2f}s for 100 cells"
 
-    def test_budget_env_var_respected(self, tmp_path, monkeypatch):
+    def test_rule_count_budget_caps_optional_rules(self, tmp_path):
         ws = str(tmp_path)
         for i in range(10):
             _make_cell(ws, f'budget-cell-{i}', target_paths=['src/*.py'])
-        monkeypatch.setenv('AEGIS_CONTEXT_BUDGET', '2')
-        result = express(ws, changed_files=['src/foo.py'])
-        # Mandatory cells can exceed budget, but non-mandatory should respect it
+        result = express(ws, changed_files=['src/foo.py'], budget=2)
         assert result['stats']['budget'] == 2
+        assert result['rules_staged'] == 2
 
 # ── Phase 4: C3 — Mandatory Cells Fitness Score ──────────────────────────
 
@@ -276,7 +276,7 @@ class TestMandatoryCellsFitnessScore:
         from aegis_mcp.jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=5)
 
-        for cell in result['relevant_cells']:
+        for cell in result['relevant_rules']:
             if cell.get('type') == 'wall':
                 fitness = cell.get('fitness', 0)
                 assert fitness > 0, \
@@ -287,7 +287,7 @@ class TestMandatoryCellsFitnessScore:
         from aegis_mcp.jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=5)
 
-        for cell in result['relevant_cells']:
+        for cell in result['relevant_rules']:
             assert 'fitness' in cell, \
                 f"Cell '{cell.get('name')}' missing fitness key"
             assert isinstance(cell['fitness'], (int, float)), \
@@ -327,9 +327,9 @@ class TestModernRuleTypeExecution:
         assert "Pre-Edit Invariants & Constraints" in res.get("guidance", "")
         assert "🧱 [INVARIANT] invariant-zero-deps" in res.get("guidance", "")
 
-    def test_format_rule_guidance_renders_modern_rule_type_labels_and_icons(self):
-        """format_rule_guidance must map invariant, trap, boundary, persona, and contract to their icons and labels."""
-        from aegis_mcp.jit_engine import format_rule_guidance
+    def test_format_cell_guidance_renders_modern_rule_type_labels_and_icons(self):
+        """format_cell_guidance must map invariant, trap, boundary, persona, and contract to their icons and labels."""
+        from aegis_mcp.jit_engine import format_cell_guidance
 
         expected_mappings = [
             ("invariant", "🧱", "INVARIANT (must not violate)"),
@@ -339,7 +339,7 @@ class TestModernRuleTypeExecution:
             ("contract", "🔗", "CONTRACT (cross-service agreement)"),
         ]
         for rule_type, emoji, label in expected_mappings:
-            fg = format_rule_guidance({
+            fg = format_cell_guidance({
                 "_name": f"rule-{rule_type}",
                 "type": rule_type,
                 "hypothesis": f"Hypothesis for {rule_type}",

@@ -12,11 +12,6 @@ from pathlib import Path
 import pytest
 import warnings
 
-from aegis_core.proposals import (
-    generate_checkpoint,
-    get_escalation_protocol,
-    soma_propose_change,
-)
 from aegis_core.defects import audit_expiry, load_registry
 from aegis_core.enforcement import (
     _match_cells,
@@ -150,29 +145,6 @@ class TestLifecycleWorkspaceInteroperability:
 
         demotions = evaluate_demotions(mock_soma_workspace)
         assert isinstance(demotions, list)
-
-
-class TestArbitrationWorkspaceInteroperability:
-    """Verify arbitration functions accept Workspace directly."""
-
-    def test_generate_checkpoint_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        report = generate_checkpoint(workspace=mock_soma_workspace)
-        assert report["workspace"] == str(mock_soma_workspace.root)
-        assert "total_cells" in report
-
-    def test_get_escalation_protocol_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        proto = get_escalation_protocol("soma_core/test.py", workspace=mock_soma_workspace)
-        assert proto in ("patrol", "sweep", "vanguard", "bulwark", "fortress", "citadel", "unknown")
-
-    def test_soma_propose_change_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        target = mock_soma_workspace.root / "example.txt"
-        target.write_text("initial content\n", encoding="utf-8")
-        verdict = soma_propose_change(
-            file_path="example.txt",
-            proposed_content="updated content\n",
-            workspace=mock_soma_workspace,
-        )
-        assert "APPROVED" in verdict or "ESCALATION_REQUIRED" in verdict
 
 
 class TestOutcomesAndSyncWorkspaceInteroperability:

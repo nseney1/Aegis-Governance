@@ -144,7 +144,7 @@ class TestV3ZeroBiologicalRuleTypes:
 
     def test_mcp_tools_registered_strictly_under_aegis_namespace(self) -> None:
         tool_names = [t["name"] for t in TOOL_DEFINITIONS]
-        assert len(tool_names) == 17
+        assert len(tool_names) == 4
         assert all(name.startswith("aegis_") for name in tool_names), tool_names
         assert set(_TOOL_HANDLERS.keys()) == set(tool_names)
 

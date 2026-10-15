@@ -42,20 +42,6 @@ class RuleCorruptError(AegisError):
         self.rule_id = actual_id
 
 
-class ReceiptExpiredError(AegisError, KeyError):
-    """Raised when a receipt is expired or not found."""
-
-    def __init__(
-        self,
-        message: str = "",
-        receipt_id: str | None = None,
-        code: str = "RECEIPT_EXPIRED",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, receipt_id=receipt_id, **kwargs)
-        self.receipt_id = receipt_id
-
-
 class LockTimeoutError(AegisError, TimeoutError):
     """Raised when a workspace lock cannot be acquired within the timeout period."""
 
@@ -125,39 +111,12 @@ class NoTestRunnerFoundError(AegisError, RuntimeError):
         super().__init__(message, code=code, **kwargs)
 
 
-class InvalidHandoffPayloadError(AegisValidationError):
-    """Raised when an artifact payload violates its typed schema."""
-
-    def __init__(
-        self,
-        message: str = "",
-        code: str = "ERR_INVALID_HANDOFF_PAYLOAD",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, **kwargs)
-
-
-class HandoffAuthorizationError(AegisError):
-    """Raised when a producer skill/tier lacks authorization to emit an artifact."""
-
-    def __init__(
-        self,
-        message: str = "",
-        code: str = "ERR_HANDOFF_UNAUTHORIZED",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, **kwargs)
-
-
 __all__ = [
     "AegisError",
     "AegisValidationError",
-    "HandoffAuthorizationError",
-    "InvalidHandoffPayloadError",
     "LockTimeoutError",
     "NoTestRunnerFoundError",
     "PathTraversalError",
-    "ReceiptExpiredError",
     "RuleCorruptError",
     "WorkspaceBareRepoError",
     "WorkspaceError",

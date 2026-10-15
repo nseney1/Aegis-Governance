@@ -62,7 +62,6 @@ def run_outcome_engine(workspace: Optional[Workspace | Path | str] = None, mod: 
     """Canonical ACE reflector loop."""
     from aegis_core.outcomes.fitness import append_fitness_log, compute_fitness_signals, update_cell_fitness
     from aegis_core.outcomes.harvest import capture_git_signals
-    from aegis_core.outcomes.insights import commit_insight_cursor, read_human_insight_signals
     from aegis_core.outcomes.telemetry import capture_mcp_outcomes
 
     m = mod if mod is not None else sys.modules[__name__]
@@ -81,8 +80,6 @@ def run_outcome_engine(workspace: Optional[Workspace | Path | str] = None, mod: 
 
     cap_git = getattr(m, "capture_git_signals", capture_git_signals)
     cap_mcp = getattr(m, "capture_mcp_outcomes", capture_mcp_outcomes)
-    read_insights = getattr(m, "read_human_insight_signals", read_human_insight_signals)
-    commit_cursor = getattr(m, "commit_insight_cursor", commit_insight_cursor)
     get_changed = getattr(m, "_get_changed_files", _get_changed_files)
     match_cells_fn = getattr(m, "match_cells_to_changes", match_cells_to_changes)
     comp_signals = getattr(m, "compute_fitness_signals", compute_fitness_signals)
@@ -90,35 +87,21 @@ def run_outcome_engine(workspace: Optional[Workspace | Path | str] = None, mod: 
     update_fitness = getattr(m, "update_cell_fitness", update_cell_fitness)
 
     # No test/build execution here (ADR 0005 AD-1): the engine never runs a project's
-    # own commands. Signals come from git history, explicit reports and human insights.
+    # own commands. Signals come from git history and explicit reports.
     outcomes: dict[str, Any] = {}
     outcomes["git"] = cap_git(ws)
     mcp = cap_mcp(ws)
     if mcp:
         outcomes["mcp"] = mcp
 
-    insight_signals, insight_offset = read_insights(ws)
-    blind_spots = [s for s in insight_signals if s.get("signal_type") == "blind_spot"]
-    cell_boosts = [s for s in insight_signals if s.get("_path") is not None]
-
-    if blind_spots:
-        print(f"    {len(blind_spots)} governance blind spot(s) detected from human insights")
-
     changed_files = get_changed(ws)
     triggered = match_cells_fn(ws, changed_files)
 
-    if not triggered and not cell_boosts:
+    if not triggered:
         print("    No cells matched changed files.")
-        commit_cursor(ws, insight_offset)
         return 0
 
-    signals = comp_signals(triggered, outcomes, changed_files=changed_files) if triggered else []
-
-    existing_paths = {s["_path"] for s in signals if "_path" in s}
-    for boost in cell_boosts:
-        if boost["_path"] not in existing_paths:
-            signals.append(boost)
-            existing_paths.add(boost["_path"])
+    signals = comp_signals(triggered, outcomes, changed_files=changed_files)
 
     if signals:
         run_idempotency_prefix = secrets.token_hex(16)
@@ -129,12 +112,9 @@ def run_outcome_engine(workspace: Optional[Workspace | Path | str] = None, mod: 
             expected_generation=generation,
             idempotency_prefix=run_idempotency_prefix,
         ):
-            commit_cursor(ws, insight_offset)
             update_fitness(ws, signals)
         else:
-            print("    ! evidence log incomplete; cells and insight cursor left unchanged (will retry)", file=sys.stderr)
-    else:
-        commit_cursor(ws, insight_offset)
+            print("    ! evidence log incomplete; cells left unchanged (will retry)", file=sys.stderr)
 
     verified_count = sum(1 for s in signals if s.get("verified"))
     print(f"    {len(signals)} cells evaluated ({verified_count} with verified outcomes)")

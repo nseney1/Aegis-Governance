@@ -13,7 +13,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_mcp.security import confine_workspace, confine_path, validate_rule_names
+from aegis_core.workspace import confine_workspace, confine_path, validate_rule_names
 from aegis_core.integrity import (
     generate_manifest,
     verify_manifest,
@@ -382,37 +382,6 @@ class TestManifestSigning:
 
 
 
-# ── Session Auth ──────────────────────────────────────────────────────
-
-
-class TestSessionAuth:
-    def test_read_tools_defined(self):
-        """Read-only tools are classified."""
-        from aegis_mcp.server import _READ_TOOLS
-
-        assert "aegis_scan" in _READ_TOOLS
-        assert "aegis_list_rules" in _READ_TOOLS
-
-    def test_write_and_execute_tools_defined(self):
-        """Write and execute tools are classified."""
-        from aegis_mcp.server import _WRITE_TOOLS, _EXECUTE_TOOLS
-
-        assert "aegis_report_outcome" in _WRITE_TOOLS
-        assert "aegis_propose_change" in _EXECUTE_TOOLS
-
-    def test_all_tool_definitions_classified(self):
-        """Every tool in TOOL_DEFINITIONS appears in exactly one tier."""
-        from aegis_mcp.server import _READ_TOOLS, _WRITE_TOOLS, _EXECUTE_TOOLS
-        from aegis_mcp.tools import TOOL_DEFINITIONS
-
-        all_tiers = _READ_TOOLS | _WRITE_TOOLS | _EXECUTE_TOOLS
-        for tool_def in TOOL_DEFINITIONS:
-            name = tool_def["name"]
-            assert name in all_tiers, (
-                f"Tool '{name}' is not classified in any permission tier"
-            )
-
-
 # ── Rate Limiting ─────────────────────────────────────────────────────
 
 
@@ -425,20 +394,19 @@ class TestRateLimiting:
 
     def test_allows_within_limit(self):
         """Calls within the window limit are allowed."""
-        from aegis_mcp.server import _check_rate_limit
+        from aegis_mcp.server import _RATE_LIMITS, _check_rate_limit
 
-        # soma_checkpoint has a limit of 3 per 60s
-        assert _check_rate_limit("aegis_checkpoint") is True
-        assert _check_rate_limit("aegis_checkpoint") is True
-        assert _check_rate_limit("aegis_checkpoint") is True
+        limit = _RATE_LIMITS["aegis_report_outcome"][0]
+        for _ in range(limit):
+            assert _check_rate_limit("aegis_report_outcome") is True
 
     def test_blocks_over_limit(self):
         """Calls exceeding the window limit are blocked."""
-        from aegis_mcp.server import _check_rate_limit
+        from aegis_mcp.server import _RATE_LIMITS, _check_rate_limit
 
-        for _ in range(3):
-            _check_rate_limit("aegis_checkpoint")
-        assert _check_rate_limit("aegis_checkpoint") is False
+        for _ in range(_RATE_LIMITS["aegis_report_outcome"][0]):
+            _check_rate_limit("aegis_report_outcome")
+        assert _check_rate_limit("aegis_report_outcome") is False
 
     def test_window_expires(self, monkeypatch):
         """Old entries are pruned when the window expires."""
@@ -447,13 +415,14 @@ class TestRateLimiting:
         mock_time = [100.0]
         monkeypatch.setattr(time, "monotonic", lambda: mock_time[0])
 
-        for _ in range(3):
-            server._check_rate_limit("aegis_checkpoint")
-        assert server._check_rate_limit("aegis_checkpoint") is False
+        max_calls, window = server._RATE_LIMITS["aegis_report_outcome"]
+        for _ in range(max_calls):
+            server._check_rate_limit("aegis_report_outcome")
+        assert server._check_rate_limit("aegis_report_outcome") is False
 
-        # Advance past the 60s window
-        mock_time[0] = 200.0
-        assert server._check_rate_limit("aegis_checkpoint") is True
+        # Advance past the window
+        mock_time[0] = 100.0 + window + 1
+        assert server._check_rate_limit("aegis_report_outcome") is True
 
     def test_unlimited_tools_always_pass(self):
         """Tools not in _RATE_LIMITS are never rate-limited."""

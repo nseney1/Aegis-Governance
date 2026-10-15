@@ -32,7 +32,8 @@ _CALLS = {
     3: _frame(3, "tools/call", {"name": "aegis_list_rules", "arguments": {}}),
     4: _frame(4, "tools/call", {"name": "aegis_scan", "arguments": {"files": ["a.py"]}}),
     5: _frame(5, "tools/call", {"name": "aegis_report_outcome",
-                                "arguments": {"rule_id": "x", "tests_passed": True}}),
+                                "arguments": {"outcome": "tp", "rules_used": ["x"],
+                                              "idempotency_key": "k"}}),
 }
 
 
@@ -44,8 +45,8 @@ def _tree(root: Path) -> list[str]:
 def server_state(monkeypatch):
     """run_stdio_server sets module globals; restore them after the test."""
     monkeypatch.setattr(server, "_canonical_workspace", None)
-    monkeypatch.setattr(server, "_execution_enabled", False)
-    monkeypatch.setattr(server, "_workspace_error", None, raising=False)
+    monkeypatch.setattr(server, "_session_id", None)
+    monkeypatch.setattr(server, "_workspace_error", None)
 
 
 def _serve(monkeypatch, capsys, lines: list[str]) -> tuple[int, dict]:

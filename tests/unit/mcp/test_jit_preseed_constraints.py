@@ -2,14 +2,14 @@
 
 Ensures soma_scan and jit_engine.express() extract target file constraints
 prior to code generation, formatting an early-warning constraint summary at
-the top of JIT prompt context and returning structured target_constraints.
+the top of JIT prompt context and returning structured invariant_warnings.
 """
 import os
 import tempfile
 import unittest
 
 from aegis_mcp import jit_engine
-from aegis_mcp.tools import _handle_scan
+from aegis_mcp.handlers.core import handle_scan
 
 
 class TestJitPreseedConstraints(unittest.TestCase):
@@ -58,14 +58,14 @@ class TestJitPreseedConstraints(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_express_returns_structured_target_constraints(self):
-        """express() should extract structured target_constraints for candidate files."""
+    def test_express_returns_structured_invariant_warnings(self):
+        """express() should extract structured invariant_warnings for candidate files."""
         result = jit_engine.express(
             self.workspace,
             changed_files=["soma_core/auth.py"],
         )
-        self.assertIn("target_constraints", result)
-        constraints = result["target_constraints"]
+        self.assertIn("invariant_warnings", result)
+        constraints = result["invariant_warnings"]
         self.assertIsInstance(constraints, list)
         self.assertGreaterEqual(len(constraints), 1)
 
@@ -77,19 +77,19 @@ class TestJitPreseedConstraints(unittest.TestCase):
         self.assertIn("hypothesis", wall)
         self.assertIn("Never store secrets", wall["hypothesis"])
 
-    def test_early_warning_summary_at_top_of_context(self):
-        """express() should format an early-warning constraint section at the top of context."""
+    def test_early_warning_summary_at_top_of_guidance(self):
+        """express() should format an early-warning constraint section at the top of guidance."""
         result = jit_engine.express(
             self.workspace,
             changed_files=["soma_core/auth.py"],
         )
-        context = result.get("context", "")
+        context = result.get("guidance", "")
         # Must contain an early-warning constraint header
         self.assertIn("## Pre-Edit Invariants & Constraints", context)
 
         # Early-warning section must appear before general active cells
         early_warning_pos = context.find("## Pre-Edit Invariants & Constraints")
-        active_cells_pos = context.find("## Active Governance Cells")
+        active_cells_pos = context.find("## Active Governance Rules")
         if active_cells_pos != -1:
             self.assertLess(
                 early_warning_pos,
@@ -100,17 +100,16 @@ class TestJitPreseedConstraints(unittest.TestCase):
         # The warning must cite the invariant
         self.assertIn("Never store secrets in plain-text", context)
 
-    def test_soma_scan_handler_exposes_target_constraints(self):
-        """MCP _handle_scan should return target_constraints in its result."""
+    def test_scan_handler_exposes_invariant_warnings(self):
+        """MCP handle_scan should return invariant_warnings in its result."""
         args = {
             "workspace": self.workspace,
             "files": ["soma_core/auth.py"],
         }
-        res = _handle_scan(args, None)
+        res = handle_scan(args)
         self.assertNotIn("error", res)
-        self.assertIn("target_constraints", res)
-        self.assertIn("context", res)
-        self.assertIn("## Pre-Edit Invariants & Constraints", res["context"])
+        self.assertEqual([w["name"] for w in res["invariant_warnings"]], ["auth-token-invariants"])
+        self.assertIn("## Pre-Edit Invariants & Constraints", res["guidance"])
 
     def test_preseed_inspection_with_unmodified_target_file(self):
         """Agent should be able to inspect constraints for a target file before editing it."""
@@ -119,6 +118,5 @@ class TestJitPreseedConstraints(unittest.TestCase):
             self.workspace,
             changed_files=["soma_core/new_handler.py"],
         )
-        self.assertIn("target_constraints", result)
-        self.assertGreaterEqual(len(result["target_constraints"]), 1)
-        self.assertIn("Never store secrets", result["context"])
+        self.assertGreaterEqual(len(result["invariant_warnings"]), 1)
+        self.assertIn("Never store secrets", result["guidance"])

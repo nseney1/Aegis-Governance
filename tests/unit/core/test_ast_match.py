@@ -6,7 +6,6 @@ Validates:
 3. AST visitor identifies decorator triggers (@dec, @mod.dec, @dec(args)).
 4. Fast diff token pre-filter skips unnecessary AST parsing.
 5. Non-Python files and unparseable syntax fall back gracefully with zero errors.
-6. JIT engine integration assigns match_type="ast_match" when AST triggers fire.
 """
 from __future__ import annotations
 
@@ -15,7 +14,6 @@ from pathlib import Path
 import pytest
 
 from aegis_core.ast.match import match_ast_triggers, prefilter_ast_tokens
-from aegis_mcp.jit_engine import match_cells_for_diff
 
 
 class TestASTTriggers:
@@ -84,28 +82,3 @@ class TestASTTriggers:
             file_path="broken.py",
         )
         assert not matched
-
-    def test_jit_matching_with_ast_triggers(self, tmp_path):
-        """Cells with ast_triggers match modified files exhibiting the pattern."""
-        py_file = tmp_path / "unsafe.py"
-        py_file.write_text("import subprocess\nsubprocess.run(['ls'])\n", encoding="utf-8")
-
-        cell = {
-            "id": "wall-subprocess-guard",
-            "type": "wall",
-            "target_paths": ["*.py"],
-            "ast_triggers": {"imports": ["subprocess"]},
-            "body": "Do not use raw subprocess without validation.",
-        }
-
-        diff = "+ import subprocess\n+ subprocess.run(['ls'])\n"
-        matched = match_cells_for_diff(
-            cells=[cell],
-            changed_files=["unsafe.py"],
-            diff_text=diff,
-            repo_root=str(tmp_path),
-        )
-
-        assert len(matched) == 1
-        assert matched[0]["cell"]["id"] == "wall-subprocess-guard"
-        assert matched[0].get("match_type") == "ast_match"
