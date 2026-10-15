@@ -11,6 +11,7 @@ documented bypass.
 Formerly tests/unit/core/test_precommit_hook_fallback.py (BUG-047), whose
 PATH/venv fallback chain is what made repo-resident code runnable.
 """
+import json
 import os
 import shlex
 import subprocess
@@ -75,7 +76,8 @@ def run_hook(project: Path, path_dirs, extra_env=None):
 
 
 def test_repo_resident_code_never_runs(tmp_path):
-    """A planted .venv python, a repo-local aegis_cli and PATH impostors are all ignored."""
+    """A planted .venv python, a repo-local aegis_cli, a stdlib-shadowing module
+    and PATH impostors are all ignored."""
     project = git_repo(tmp_path / "p")
     marker = tmp_path / "marker"
     marker_script(project / ".venv" / "bin" / "python", marker)
@@ -88,6 +90,13 @@ def test_repo_resident_code_never_runs(tmp_path):
             "def main(*a, **k):\n    return 0\n",
             encoding="utf-8",
         )
+    # The pinned AEGIS_PATH comes first on sys.path, so it already hides the
+    # planted aegis_cli. Only -I keeps the working tree from shadowing a stdlib
+    # module that aegis imports, which is what this file catches.
+    (project / "json.py").write_text(
+        f"open({str(marker)!r}, 'a').write('repo json.py imported\\n')\n",
+        encoding="utf-8",
+    )
     fakebin = tmp_path / "fakebin"
     marker_script(fakebin / "aegis", marker)
     marker_script(fakebin / "python3", marker)
@@ -245,3 +254,81 @@ def test_doctor_silent_without_hook(tmp_path):
     from aegis_cli.doctor import _check_precommit_hook
 
     assert _check_precommit_hook(bare_repo(tmp_path / "p")) is None
+
+
+# ── A pinned path must be absolute; a tracked hooks dir is called out ─────
+
+@pytest.mark.parametrize(
+    "python, import_root, message",
+    [
+        ("python3", "/opt/site", "hook interpreter must be an absolute path, got 'python3'"),
+        (".venv/bin/python", "/opt/site", "hook interpreter must be an absolute path, got '.venv/bin/python'"),
+        ("", "/opt/site", "hook interpreter must be an absolute path, got ''"),
+        ("/usr/bin/python3", "src", "aegis import root must be an absolute path, got 'src'"),
+    ],
+)
+def test_relative_interpreter_or_import_root_is_refused(python, import_root, message):
+    """A relative path would resolve against the repository the hook runs in."""
+    with pytest.raises(ValueError) as exc:
+        generate_hook_block(python, import_root=import_root)
+    assert str(exc.value) == message
+
+
+def test_install_with_a_relative_interpreter_writes_nothing(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    with pytest.raises(ValueError):
+        install_hook(project, python="python3")
+    assert list((project / ".git" / "hooks").iterdir()) == []
+
+
+def _work_tree_warning(hook_file: Path) -> str:
+    return (f"Warning: {hook_file} is inside the work tree (core.hooksPath) and pins this "
+            "machine's Python; do not commit it, or other clones fail closed until they run "
+            "aegis hook install.\n")
+
+
+def aegis_repo(path: Path, hooks_path=None) -> Path:
+    project = git_repo(path)
+    (project / ".aegis" / "rules").mkdir(parents=True)
+    if hooks_path is not None:
+        subprocess.run(["git", "config", "core.hooksPath", str(hooks_path)], cwd=str(project), check=True)
+    return project
+
+
+def test_install_warns_when_core_hooks_path_is_inside_the_work_tree(tmp_path, capsys):
+    from aegis_cli.cli import main
+
+    project = aegis_repo(tmp_path / "p", ".githooks")
+    rc = main(["hook", "install", "--workspace", str(project)])
+    hook = (project / ".githooks" / "pre-commit").resolve()
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert hook.is_file()
+    assert captured.err == _work_tree_warning(hook)
+
+
+def test_status_reports_a_hooks_dir_inside_the_work_tree(tmp_path, capsys):
+    from aegis_cli.cli import main
+
+    project = aegis_repo(tmp_path / "p", ".githooks")
+    install_hook(project, python=sys.executable)
+    hook = (project / ".githooks" / "pre-commit").resolve()
+
+    assert main(["hook", "status", "--json", "--workspace", str(project)]) == 0
+    assert json.loads(capsys.readouterr().out)["hooks_dir_in_work_tree"] is True
+    assert main(["hook", "status", "--workspace", str(project)]) == 0
+    assert capsys.readouterr().err == _work_tree_warning(hook)
+
+
+@pytest.mark.parametrize("where", ["git-dir", "outside"])
+def test_no_warning_when_the_hooks_dir_is_not_in_the_work_tree(tmp_path, capsys, where):
+    from aegis_cli.cli import main
+
+    shared = tmp_path / "shared-hooks"
+    project = aegis_repo(tmp_path / "p", shared if where == "outside" else None)
+    assert main(["hook", "install", "--workspace", str(project)]) == 0
+    assert capsys.readouterr().err == ""
+    assert main(["hook", "status", "--json", "--workspace", str(project)]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["hooks_dir_in_work_tree"] is False
+    assert captured.err == ""

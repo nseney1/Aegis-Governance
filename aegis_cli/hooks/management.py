@@ -41,8 +41,15 @@ def generate_hook_block(python: str | None = None, import_root: str | None = Non
     and the directory aegis_cli was imported from are baked in at install
     time. Nothing is looked up on PATH, in $VIRTUAL_ENV or in the repository.
     """
-    py = shlex.quote(_sh_path(python if python is not None else sys.executable))
-    root = shlex.quote(_sh_path(import_root if import_root is not None else _default_import_root()))
+    python = python if python is not None else sys.executable
+    import_root = import_root if import_root is not None else _default_import_root()
+    # A relative path would resolve against the repository the hook runs in.
+    if not os.path.isabs(python):
+        raise ValueError(f"hook interpreter must be an absolute path, got {python!r}")
+    if not os.path.isabs(import_root):
+        raise ValueError(f"aegis import root must be an absolute path, got {import_root!r}")
+    py = shlex.quote(_sh_path(python))
+    root = shlex.quote(_sh_path(import_root))
     runner = shlex.quote(_HOOK_RUNNER)
     return (
         f"{_AEGIS_HOOK_START}\n"
@@ -101,6 +108,7 @@ def install_hook(
     if not git_hooks_dir:
         return False
 
+    block = generate_hook_block(python, import_root=import_root)
     if dry_run:
         return True
 
@@ -136,8 +144,6 @@ def install_hook(
                 )
                 return False
             target_file = real_target
-
-    block = generate_hook_block(python, import_root=import_root)
 
     if target_file.exists():
         content = target_file.read_text(encoding="utf-8")
@@ -286,6 +292,26 @@ def uninstall_hook(
     return True
 
 
+def _hooks_dir_in_work_tree(root: Path, git_hooks_dir: Path) -> bool:
+    """True when core.hooksPath puts the hooks dir in the work tree, where it is
+    normally tracked, so the machine-specific pinned paths would be committed."""
+    hooks = git_hooks_dir.resolve()
+    start = Path(root).resolve()
+    for top in (start, *start.parents):
+        dot_git = top / ".git"
+        if dot_git.exists():
+            if dot_git.is_dir() and hooks.is_relative_to(dot_git.resolve()):
+                return False
+            return hooks.is_relative_to(top)
+    return False
+
+
+def _work_tree_warning(hook_file: str) -> str:
+    return (f"Warning: {hook_file} is inside the work tree (core.hooksPath) and pins this "
+            "machine's Python; do not commit it, or other clones fail closed until they run "
+            "aegis hook install.")
+
+
 def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
     """Inspect the aegis pre-commit hook in the target repository."""
     from aegis_core.workspace import Workspace, resolve_git_hooks_dir
@@ -353,6 +379,7 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
         "format_version": format_version,
         "current_format_version": CURRENT_HOOK_FORMAT_VERSION,
         "interpreter": interpreter,
+        "hooks_dir_in_work_tree": bool(git_hooks_dir) and _hooks_dir_in_work_tree(root, git_hooks_dir),
     }
 
 
@@ -363,14 +390,16 @@ def run_hook_install(args: Any) -> int:
     use_json = getattr(args, "json", False)
 
     ok = install_hook(ws, force=force, dry_run=dry_run)
+    st = hook_status(ws) if ok else {}
     if use_json:
         print(json.dumps({"status": "installed" if ok else "failed", "success": ok}))
     else:
         if ok:
-            st = hook_status(ws)
             print(f"✅ aegis pre-commit hook installed ({st.get('hook_file')})")
         else:
             print("❌ Failed to install the aegis pre-commit hook (no .git directory or symlink outside repo)", file=sys.stderr)
+    if st.get("hooks_dir_in_work_tree"):
+        print(_work_tree_warning(st["hook_file"]), file=sys.stderr)
     return 0 if ok else 1
 
 
@@ -396,6 +425,8 @@ def run_hook_status(args: Any) -> int:
     use_json = getattr(args, "json", False)
     st = hook_status(ws)
 
+    if st["hooks_dir_in_work_tree"]:
+        print(_work_tree_warning(st["hook_file"]), file=sys.stderr)
     if use_json:
         print(json.dumps(st, indent=2))
         return 0

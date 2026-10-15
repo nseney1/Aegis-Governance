@@ -13,7 +13,7 @@ def test_uninstall_removes_pre_commit_hook(tmp_path, capsys):
     git_dir.mkdir(parents=True)
     hook_file = git_dir / "pre-commit"
     user_script = "#!/bin/sh\n# custom user hook\necho 'hello'\n"
-    soma_block = generate_hook_block("python3")
+    soma_block = generate_hook_block("/usr/bin/python3")
     hook_file.write_text(user_script + "\n" + soma_block, encoding="utf-8")
 
     args = argparse.Namespace(
