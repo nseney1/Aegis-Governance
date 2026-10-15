@@ -102,8 +102,11 @@ def check_mcp(ws):
     tools = lines[1]["result"]["tools"]
     if len(tools) != 4:
         fail(f"MCP tools/list expected the 4 v4 tools, got {len(tools)}")
-    rules = json.loads(lines[2]["result"]["content"][0]["text"])
-    if "trap-smoke" not in {c.get("_name") for c in rules}:
+    payload = json.loads(lines[2]["result"]["content"][0]["text"])
+    rules = payload.get("rules") if isinstance(payload, dict) else None
+    if not isinstance(rules, list):
+        fail(f"MCP aegis_list_rules returned no rules list: {payload!r}")
+    if "trap-smoke" not in {c.get("_name") for c in rules if isinstance(c, dict)}:
         fail(f"MCP aegis_list_rules did not see the workspace rule: {rules!r}")
     print("ok  aegis_mcp initialize / tools/list (4 tools) / aegis_list_rules")
 
