@@ -43,8 +43,15 @@ def _matches_rule_patterns(rel_path: str, patterns: list[str]) -> bool:
     return False
 
 
-def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str]]]:
-    """Discover workspace rules in rules/ and .aegis/rules/ declaring forbid_ast."""
+def _discover_forbid_ast_rules(
+    repo_root: str,
+) -> tuple[list[tuple[str, dict, list[str]]], list[tuple[str, Exception]]]:
+    """Discover workspace rules in rules/ and .aegis/rules/ declaring forbid_ast.
+
+    Returns (rules, unreadable): a rule file that cannot be read or parsed might
+    declare forbid_ast, so it is returned as (relative path, error) for the caller
+    to fail closed on instead of being dropped.
+    """
     from pathlib import Path
     from aegis_core.yaml import AegisYAML
     from aegis_core.workspace import Workspace
@@ -58,6 +65,7 @@ def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str
 
     candidate_dirs = [root_path / "rules", root_path / ".aegis" / "rules"]
     discovered: list[tuple[str, dict, list[str]]] = []
+    unreadable: list[tuple[str, Exception]] = []
     seen_ids: set[str] = set()
 
     for rules_dir in candidate_dirs:
@@ -75,7 +83,15 @@ def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str
             except Exception:
                 try:
                     doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
-                except Exception:
+                except Exception as exc:
+                    # Only a file that names the key can declare it: plain notes under a
+                    # rules/ directory stay out of the gate, a damaged forbid_ast rule does not.
+                    try:
+                        may_declare = b"forbid_ast" in md_file.read_bytes()
+                    except OSError:
+                        may_declare = True
+                    if may_declare:
+                        unreadable.append((md_file.relative_to(root_path).as_posix(), exc))
                     continue
 
             if doc.get("expired_at"):
@@ -99,7 +115,7 @@ def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str
 
             discovered.append((rule_id, forbid_spec, patterns))
 
-    return discovered
+    return discovered, unreadable
 
 
 def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
@@ -359,15 +375,22 @@ def run_layer1(
     from aegis_core.ast.policy import ASTExtractionError
 
     try:
-        forbid_rules = _discover_forbid_ast_rules(repo_root_str)
+        forbid_rules, unreadable_rules = _discover_forbid_ast_rules(repo_root_str)
     except Exception as exc:
         # The rules are gate rules: if they cannot be read, nothing may pass unchecked.
-        forbid_rules = []
+        forbid_rules, unreadable_rules = [], []
         results.append(ToolEvidence(
             tool="forbid_ast",
             target=".aegis/rules",
             verdict=False,
             detail=f"forbid_ast: cannot load rules: {type(exc).__name__}: {exc}",
+        ))
+    for rule_path, exc in unreadable_rules:
+        results.append(ToolEvidence(
+            tool="forbid_ast",
+            target=rule_path,
+            verdict=False,
+            detail=f"forbid_ast: cannot load rule {rule_path}: {type(exc).__name__}: {exc}",
         ))
     if forbid_rules:
         ast_cache: dict[str, object] = {}

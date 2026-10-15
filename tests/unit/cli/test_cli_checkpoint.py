@@ -76,6 +76,30 @@ class TestRunCheckpoint:
         assert blocking is True
         assert "paper_walls" in {i["check"] for i in issues}
 
+    def test_an_unreadable_invariant_is_a_blocking_paper_wall(self, tmp_path):
+        """Its enforcement cannot be read, so it cannot be shown to be a gate (b1-verify review)."""
+        _clean_workspace(tmp_path)
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "invariant-x.md").write_bytes(b"---\nid: invariant-x\nenforcement: gate\n---\n\xff\n")
+        issues, blocking = run_checkpoint(tmp_path, strict=False)
+        walls = [i for i in issues if i["check"] == "paper_walls"]
+        assert [i["file"] for i in walls] == [".aegis/rules/invariants/invariant-x.md"]
+        assert walls[0]["message"].startswith(
+            "Wall cell 'invariant-x.md' cannot be read, so it cannot be shown to use 'gate': UnicodeDecodeError:"
+        )
+        assert blocking is True
+
+    def test_a_skip_only_test_is_flagged(self, tmp_path):
+        _clean_workspace(tmp_path)
+        (tmp_path / "tests" / "test_stub.py").write_text(
+            "import pytest\n\n\ndef test_unwritten():\n    pytest.skip('TODO')\n", encoding="utf-8"
+        )
+        issues, _ = run_checkpoint(tmp_path, strict=False)
+        assert [i["message"] for i in issues] == [
+            "Low assertion density in test_stub.py: tests lacking assertions: test_unwritten"
+        ]
+
     def test_hardcoded_path_is_flagged(self, tmp_path):
         _clean_workspace(tmp_path)
         (tmp_path / "src" / "cache.py").write_text('CACHE = "/home/alice/data/cache.bin"\n', encoding="utf-8")

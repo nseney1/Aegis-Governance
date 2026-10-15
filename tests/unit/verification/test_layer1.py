@@ -420,6 +420,54 @@ class TestLayer1FailsClosed:
             (".aegis/rules", False, "forbid_ast: cannot load rules: PermissionError: rules dir unreadable")
         ]
 
+    def test_an_unreadable_rule_file_fails_closed(self, tmp_path):
+        """One undecodable gate rule must not silently drop out of enforcement (b1-verify review)."""
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "no-subprocess.md").write_bytes(
+            b"---\nid: no-subprocess\ntype: invariant\nenforcement: gate\n"
+            b"forbid_ast:\n  calls: [subprocess.run]\n---\nNo shelling out \xff here.\n"
+        )
+        (invariants / "no-eval.md").write_text(
+            "---\nid: no-eval\ntype: invariant\nenforcement: gate\nforbid_ast:\n  calls: [eval]\n---\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "bad.py").write_text(
+            "import subprocess\n\n\ndef main():\n    return subprocess.run(['true'])\n", encoding="utf-8"
+        )
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        failed = [r for r in results if r.tool == "forbid_ast"]
+        assert [(r.target, r.verdict) for r in failed] == [(".aegis/rules/invariants/no-subprocess.md", False)]
+        assert failed[0].detail.startswith(
+            "forbid_ast: cannot load rule .aegis/rules/invariants/no-subprocess.md: UnicodeDecodeError:"
+        )
+        assert runner.gate_verdict(results) is False
+
+    def test_readable_rules_still_enforce_next_to_an_unreadable_one(self, tmp_path):
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "broken.md").write_bytes(b"---\nid: broken\nforbid_ast:\n  calls: [exec]\n---\n\xff\n")
+        (invariants / "no-eval.md").write_text(
+            "---\nid: no-eval\ntype: invariant\nenforcement: gate\nforbid_ast:\n  calls: [eval]\n---\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "bad.py").write_text("def main(x):\n    return eval(x)\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert {(r.tool, r.target) for r in results if not r.verdict} == {
+            ("forbid_ast", ".aegis/rules/invariants/broken.md"),
+            ("forbid_ast:no-eval", "bad.py"),
+        }
+
+    def test_unparseable_notes_that_never_name_forbid_ast_are_not_rules(self, tmp_path):
+        notes = tmp_path / "rules"
+        notes.mkdir()
+        (notes / "style-notes.md").write_text("# Style\n\n- prefer small functions\nsee: below\n", encoding="utf-8")
+        (notes / "latin1-notes.md").write_bytes(b"caf\xe9 notes\n")
+        (tmp_path / "mod.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert [r for r in results if r.tool.startswith("forbid_ast")] == []
+        assert runner.gate_verdict(results) is True
+
 
 class TestLayer1LegacyEncodings:
     """call_graph and import_guard decode .py sources the way CPython does (PEP 263, BOM)."""

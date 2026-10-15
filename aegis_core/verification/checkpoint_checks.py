@@ -628,8 +628,16 @@ def check_paper_walls(root: Path) -> list[dict]:
                     "file": _relative(root, wall_file),
                     "message": f"Wall cell '{wall_file.name}' enforcement is '{enforcement}', but all walls must use 'gate'.",
                 })
-        except Exception:
-            continue
+        except Exception as exc:
+            # An unreadable wall cannot be shown to be a gate: report it, never skip it.
+            issues.append({
+                "check": "paper_walls",
+                "file": _relative(root, wall_file),
+                "message": (
+                    f"Wall cell '{wall_file.name}' cannot be read, so it cannot be shown to use 'gate': "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            })
     return issues
 
 
