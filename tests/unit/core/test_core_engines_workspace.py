@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 import pytest
 
-from aegis_core.defects import audit_expiry, load_registry
 from aegis_core.lifecycle.creation import create_cell, transfer_cell
 from aegis_core.lifecycle.decay import compute_cells_fitness
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
@@ -149,17 +148,4 @@ class TestOutcomesAndSyncWorkspaceInteroperability:
     def test_run_outcome_engine_with_workspace_instance(self, mock_soma_workspace: Workspace):
         code = run_outcome_engine(workspace=mock_soma_workspace)
         assert code in (0, 1)
-
-    def test_defects_and_enforcement_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        # Create dummy bug registry
-        reg_dir = mock_soma_workspace.root / "docs" / "project"
-        reg_dir.mkdir(parents=True, exist_ok=True)
-        reg_file = reg_dir / "BUG_REGISTRY.json"
-        reg_file.write_text(json.dumps({"bugs": []}), encoding="utf-8")
-
-        reg = load_registry(mock_soma_workspace)
-        assert reg == {"bugs": []}
-
-        audit = audit_expiry(mock_soma_workspace)
-        assert isinstance(audit, list)
 

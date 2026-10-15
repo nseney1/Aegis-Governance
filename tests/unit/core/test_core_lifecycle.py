@@ -240,21 +240,6 @@ class TestCellPromoteAndDemote:
         status = calculate_fitness_status("vacuole", tp=1, fp=1, triggers=2, dec_score=0.15)
         assert status == STATUS_EXTINCT
 
-    def test_demote_wall_cleans_enforcement_artifacts(self, workspace: Path):
-        wall = _create_cell_file(
-            workspace / ".aegis" / "rules" / "invariants" / "guarded-cell.md",
-            "guarded-cell", "invariant"
-        )
-        # Create gate enforcement artifact
-        enf_dir = workspace / ".aegis" / "enforcement"
-        enf_dir.mkdir(parents=True)
-        gate_script = enf_dir / "gate-guarded-cell.sh"
-        gate_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-
-        res = demote_cell(workspace, "guarded-cell")
-        assert res["status"] == "demoted"
-        assert not gate_script.exists()
-
     def test_lifecycle_frontmatter_and_storage_consolidation(self):
         """Ensure lifecycle and telemetry delegate frontmatter and fsync/atomic storage to yaml.py and storage.py."""
         import inspect

@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import glob
-import json
 import os
 from pathlib import Path
 import sys
@@ -376,22 +375,7 @@ def demote_cell(
             return conflict
         content = cell_path.read_text(encoding="utf-8")
         new_content = _transform_frontmatter_type(content, next_type)
-        try:
-            _atomic_write_and_unlink(cell_path, target_path, new_content)
-        finally:
-            # Disk state, not the writer's return, decides whether the move
-            # happened: once the rule has left the gate tier its gate/check
-            # artifacts must go, even if the writer raised afterwards.
-            moved = target_path.is_file() and not cell_path.exists()
-            if moved and current_type in ("wall", "invariant") and next_type == "trap":
-                for pfx in ("check-", "gate-"):
-                    for sfx in (".sh", ".py"):
-                        art = ws.aegis_dir / "enforcement" / f"{pfx}{clean_id}{sfx}"
-                        if art.exists():
-                            try:
-                                art.unlink()
-                            except Exception:
-                                pass
+        _atomic_write_and_unlink(cell_path, target_path, new_content)
 
     return {
         "status": "demoted",
@@ -410,9 +394,7 @@ def _read_rule_text(file_path: str) -> Optional[str]:
         return None
 
 
-def _plan_tier_update(
-    content: str, cell_base: str, escaped_counts: Dict[str, int]
-) -> Optional[tuple[dict, str, str, str, str]]:
+def _plan_tier_update(content: str) -> Optional[tuple[dict, str, str, str, str]]:
     """Decay a rule's fitness and pick its enforcement tier.
 
     Returns ``(metadata, body, old_tier, new_tier, reason)`` with ``metadata``
@@ -430,12 +412,7 @@ def _plan_tier_update(
     fitness = metadata["fitness"]
 
     triggers = fitness.get("triggers", 0)
-    tp = fitness.get("true_positives", 0)
     fp = fitness.get("false_positives", 0)
-
-    escaped = escaped_counts.get(cell_base, 0)
-    total_cases = escaped + tp
-    defect_prevention_rate = tp / total_cases if total_cases > 0 else 1.0
 
     fp_rate = fp / triggers if triggers > 0 else 0.0
     trigger_rate = triggers / 30.0
@@ -444,54 +421,24 @@ def _plan_tier_update(
     reason = ""
 
     if enforcement == "advisory":
-        if defect_prevention_rate > 0.85 and triggers >= 20 and fp_rate < 0.15:
+        if triggers >= 20 and fp_rate < 0.15:
             new_tier = "mechanical"
-            reason = "defect_prevention_rate > 0.85, triggers >= 20, FP rate < 0.15"
+            reason = "triggers >= 20, FP rate < 0.15"
     elif enforcement == "mechanical":
-        if defect_prevention_rate > 0.95 and triggers >= 50 and fp_rate < 0.05:
+        if triggers >= 50 and fp_rate < 0.05:
             new_tier = "gate"
-            reason = "defect_prevention_rate > 0.95, triggers >= 50, FP rate < 0.05"
+            reason = "triggers >= 50, FP rate < 0.05"
         elif fp_rate > 0.50 or trigger_rate < (1 / 30.0):
             new_tier = "advisory"
             reason = "FP rate > 0.50 or low trigger rate"
     elif enforcement == "gate":
-        if fp_rate > 0.30 or escaped > 0:
+        if fp_rate > 0.30:
             new_tier = "mechanical"
-            reason = "FP rate > 0.30 or escaped defects spike"
+            reason = "FP rate > 0.30"
 
     if new_tier != enforcement:
         metadata["enforcement"] = new_tier
     return metadata, body, enforcement, new_tier, reason
-
-
-def _write_enforcement_artifact(
-    ws: Workspace, file_path: str, cell_base: str, metadata: dict, body: str, new_tier: str
-) -> None:
-    """Best effort, as before: generate the tier's artifact and record it on the rule.
-
-    The rule is re-written with the atomic writer, never in place, so a crash
-    here cannot leave a truncated rule (enforcement.update_cell_enforcement_artifact
-    rewrites with a plain open(..., "w")).
-    """
-    try:
-        from aegis_core.enforcement import generate_gate_assertion, generate_precommit_check
-        artifacts_dir = str(ws.aegis_dir / "enforcement")
-        os.makedirs(artifacts_dir, exist_ok=True)
-        if new_tier == "mechanical":
-            artifact_content = generate_precommit_check(dict(metadata), str(ws.root))
-            artifact_name = f"check-{cell_base}.sh"
-        else:
-            artifact_content = generate_gate_assertion(dict(metadata), str(ws.root))
-            artifact_name = f"gate-{cell_base}.py"
-        artifact_path = os.path.join(artifacts_dir, artifact_name)
-        with open(artifact_path, "w", encoding="utf-8") as af:
-            af.write(artifact_content)
-        os.chmod(artifact_path, 0o755)
-        if "enforcement_artifact" not in metadata:
-            metadata["enforcement_artifact"] = os.path.relpath(artifact_path, str(ws.root))
-            atomic_write_text(file_path, dump_frontmatter(metadata, body=body))
-    except Exception:
-        pass
 
 
 def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute: bool = False) -> Dict[str, Any]:
@@ -501,20 +448,6 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
     )
     cells_dir = ws.rules_dir
     cell_files = glob.glob(os.path.join(str(cells_dir), "**", "*.md"), recursive=True)
-    escaped_defects_log = str(ws.metrics_dir / "escaped_defects.jsonl")
-
-    escaped_counts: Dict[str, int] = {}
-    if os.path.exists(escaped_defects_log):
-        with open(escaped_defects_log, encoding="utf-8") as edf:
-            for line in edf:
-                try:
-                    entry = json.loads(line.strip())
-                    cname = entry.get("cell")
-                    if cname:
-                        escaped_counts[cname] = escaped_counts.get(cname, 0) + 1
-                except Exception:
-                    continue
-
     changes: list[dict[str, Any]] = []
     evaluated = 0
 
@@ -525,8 +458,7 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
         if content is None:
             continue
         cell_name = os.path.basename(file_path)
-        cell_base = os.path.splitext(cell_name)[0]
-        plan = _plan_tier_update(content, cell_base, escaped_counts)
+        plan = _plan_tier_update(content)
         if plan is None:
             continue
 
@@ -541,15 +473,13 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
                 if current is None:
                     continue
                 if current != content:
-                    plan = _plan_tier_update(current, cell_base, escaped_counts)
+                    plan = _plan_tier_update(current)
                     if plan is None:
                         continue
-                metadata, body, old_tier, new_tier, _reason = plan
+                metadata, body = plan[0], plan[1]
                 new_content = dump_frontmatter(metadata, body=body)
                 if new_content != current:
                     atomic_write_text(file_path, new_content)
-                if new_tier in ("mechanical", "gate") and new_tier != old_tier:
-                    _write_enforcement_artifact(ws, file_path, cell_base, metadata, body, new_tier)
 
         evaluated += 1
         _metadata, _body, old_tier, new_tier, reason = plan

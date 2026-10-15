@@ -58,8 +58,6 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "proposals": ("aegis_core.proposals", None),
     "rule_inventory": ("aegis_core.rule_inventory", None),
     "command_safety": ("aegis_core.command_safety", None),
-    "defects": ("aegis_core.defects", None),
-    "enforcement": ("aegis_core.enforcement", None),
     "errors": ("aegis_core.errors", None),
     "evidence": ("aegis_core.evidence", None),
     "inference_provider": ("aegis_core.inference_provider", None),

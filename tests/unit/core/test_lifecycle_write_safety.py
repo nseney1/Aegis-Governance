@@ -6,9 +6,7 @@ Invariants under test (docs/adr/0005-evidence-review.md M1):
 - every rule-file write is atomic: when the filesystem refuses the final
   write, the rules directory is byte-identical to before (no truncated rule,
   no stray temp file, no half-finished move);
-- once a demotion has moved the rule out of the gate tier, the old tier's
-  enforcement artifacts are removed even if the write step reports an error
-  afterwards;
+- a tier change is metadata only: no generated enforcement artifact;
 - persisted lifecycle timestamps are one valid UTC ISO-8601 form;
 - the existence checks that promote/demote/metamorphose run before taking the
   lock are repeated under it, so a rival create or move that lands in between
@@ -227,7 +225,11 @@ def test_rule_files_are_never_rewritten_in_place(
     assert in_place == []
 
 
-def test_tier_escalation_records_its_enforcement_artifact(tmp_path: Path) -> None:
+def test_tier_escalation_is_metadata_only(tmp_path: Path) -> None:
+    """The enforcement tier is rule metadata; forbid_ast is the gate mechanism (defense #21).
+
+    No generated check/gate script is written and none is recorded on the rule.
+    """
     ws, operation = _scenario_tier_escalation(tmp_path)
 
     res = operation()
@@ -235,60 +237,8 @@ def test_tier_escalation_records_its_enforcement_artifact(tmp_path: Path) -> Non
     assert [(c["cell"], c["old_tier"], c["new_tier"]) for c in res["changes"]] == [("proven.md", "advisory", "mechanical")]
     meta = parse_frontmatter((ws / ".aegis" / "rules" / "traps" / "proven.md").read_text(encoding="utf-8")) or {}
     assert meta["enforcement"] == "mechanical"
-    assert meta["enforcement_artifact"] == ".aegis/enforcement/check-proven.sh"
-    artifact = ws / ".aegis" / "enforcement" / "check-proven.sh"
-    assert artifact.is_file() and os.access(artifact, os.X_OK)
-
-
-# ── Demotion artifact cleanup across a post-move failure ────────────────
-
-def _invariant_with_artifacts(ws: Path) -> tuple[Path, list[Path]]:
-    source = _rule(ws / ".aegis" / "rules" / "invariants" / "guarded.md", "guarded", "invariant")
-    enf = ws / ".aegis" / "enforcement"
-    enf.mkdir(parents=True)
-    artifacts = [enf / "gate-guarded.py", enf / "check-guarded.sh"]
-    for art in artifacts:
-        art.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    return source, artifacts
-
-
-def test_demote_cleans_artifacts_when_writer_fails_after_the_move(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ws = _ws(tmp_path)
-    source, artifacts = _invariant_with_artifacts(ws)
-    real_writer = promotion._atomic_write_and_unlink
-
-    def move_then_fail(src, dst, content):
-        real_writer(src, dst, content)
-        raise RuntimeError("post-move failure")
-
-    monkeypatch.setattr(promotion, "_atomic_write_and_unlink", move_then_fail)
-    with pytest.raises(RuntimeError, match="post-move failure"):
-        demote_cell(ws, "guarded")
-
-    assert not source.exists()
-    assert (ws / ".aegis" / "rules" / "traps" / "guarded.md").is_file()
-    assert [a.name for a in artifacts if a.exists()] == []
-
-
-def test_demote_keeps_artifacts_when_writer_fails_before_the_move(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ws = _ws(tmp_path)
-    source, artifacts = _invariant_with_artifacts(ws)
-
-    def fail_before_move(src, dst, content):
-        raise RuntimeError("pre-move failure")
-
-    monkeypatch.setattr(promotion, "_atomic_write_and_unlink", fail_before_move)
-    with pytest.raises(RuntimeError, match="pre-move failure"):
-        demote_cell(ws, "guarded")
-
-    assert source.is_file()
-    assert not (ws / ".aegis" / "rules" / "traps" / "guarded.md").exists()
-    assert all(a.exists() for a in artifacts), "rule is still an invariant; its gate artifacts must stay"
-
+    assert "enforcement_artifact" not in meta
+    assert not (ws / ".aegis" / "enforcement").exists()
 
 # ── Timestamps ─────────────────────────────────────────────────────────
 
@@ -388,7 +338,7 @@ def test_concurrent_promotes_of_one_rule_promote_it_once(tmp_path: Path, monkeyp
 
 def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _ws(tmp_path)
-    source, artifacts = _invariant_with_artifacts(ws)
+    source = _rule(ws / ".aegis" / "rules" / "invariants" / "guarded.md", "guarded", "invariant")
     _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "traps" / "guarded.md", "Rival trap"))
 
     res = demote_cell(ws, "guarded")
@@ -396,12 +346,11 @@ def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkey
     assert res["status"] == "target_exists"
     assert "Rival trap" in (_rules(ws) / "traps" / "guarded.md").read_text(encoding="utf-8")
     assert source.is_file()
-    assert all(a.exists() for a in artifacts), "the invariant did not move; its gate artifacts must stay"
 
 
 def test_concurrent_demotes_of_one_rule_demote_it_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _ws(tmp_path)
-    _invariant_with_artifacts(ws)
+    _rule(ws / ".aegis" / "rules" / "invariants" / "guarded.md", "guarded", "invariant")
     rival: list[dict] = []
     _rival_on_first_lock(monkeypatch, lambda: rival.append(demote_cell(ws, "guarded")))
 
