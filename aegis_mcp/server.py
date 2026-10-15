@@ -553,22 +553,6 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
 
-def _on_session_close(workspace: Optional[str] = None) -> None:
-    """Trigger background ACE outcome reflection upon session termination."""
-    reflect_close = os.environ.get("AEGIS_REFLECT_ON_CLOSE", "1")
-    if reflect_close == "0":
-        return
-    ws = workspace or _canonical_workspace
-    if not ws:
-        return
-    try:
-        from aegis_core.outcomes import run_outcome_engine
-        with contextlib.redirect_stdout(sys.stderr):
-            run_outcome_engine(ws)
-    except Exception:
-        pass
-
-
 def run_stdio_server():
     global _canonical_workspace
     global _execution_enabled
@@ -580,7 +564,6 @@ def run_stdio_server():
         home_resolved = Path.home().resolve()
         if ws_candidate == home_resolved and not (home_resolved / ".aegis" / "rules").is_dir():
             (home_resolved / ".aegis" / "rules").mkdir(parents=True, exist_ok=True)
-            os.environ.setdefault("AEGIS_REFLECT_ON_CLOSE", "0")
     except OSError:
         pass
     try:
@@ -623,10 +606,9 @@ def run_stdio_server():
                     send_error(request["id"], -32603, "Internal error")
     except (BrokenPipeError, KeyboardInterrupt):
         pass
-    finally:
-        if _canonical_workspace:
-            _on_session_close(_canonical_workspace)
-                    
+
+    # Shutdown deliberately runs nothing (ADR 0005 AD-1): close-time reflection ran the
+    # project's test target and, with N servers per repo, recorded one change N times.
     return 0
 
 def main():
