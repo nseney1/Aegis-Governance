@@ -123,7 +123,7 @@ The binding is cached per (root, source). Server state (RuleCache) is keyed by r
 Every git subprocess goes through `aegis_core.gitsafe.run(args, cwd)`:
 
 - It uses `git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c protocol.allow=never -c core.sshCommand=false` (plus `-c credential.helper=` for safety).
-- It sets env `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0` and `GIT_OPTIONAL_LOCKS=0`, with a timeout and no shell.
+- It sets env `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_REPLACE_OBJECTS=1` and `LC_ALL=C`, with a timeout and no shell. It keeps the admin-owned system config (Git for Windows stores `core.autocrlf` there); only repository-controlled config (local and worktree scopes: fsmonitor, hooksPath, filter drivers, submodule status) is neutralised, and line-ending comparisons defer to git's own hashing.
 
 A repo-local `core.fsmonitor` would otherwise execute arbitrary code whenever Aegis runs `git status`.
 
