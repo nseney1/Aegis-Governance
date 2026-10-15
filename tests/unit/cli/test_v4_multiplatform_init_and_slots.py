@@ -97,7 +97,9 @@ class TestCrossModelSlotRegistry:
         assert SlotRegistry.for_platform("claude-code").get("TOOL_SUBAGENT") == "Task"
         assert SlotRegistry.for_platform("antigravity").get("TOOL_SUBAGENT") == "invoke_subagent"
 
-    def test_workspace_override_wins_and_resolve_text_for_platform(self, tmp_path: Path):
+    def test_workspace_overrides_repo_slots_but_not_platform_slots(self, tmp_path: Path):
+        # H5: repo-writable slots.yaml may set repo slots (TEST_RUNNER) but not the
+        # host's TOOL_*/MODEL_* capability slots.
         aegis_dir = tmp_path / ".aegis"
         aegis_dir.mkdir()
         (aegis_dir / "slots.yaml").write_text(
@@ -106,13 +108,13 @@ class TestCrossModelSlotRegistry:
         )
 
         reg = SlotRegistry.for_platform("claude", workspace=tmp_path)
-        assert reg.get("MODEL_FAST") == "custom-haiku-override"
+        assert reg.get("MODEL_FAST") == "haiku"
         assert reg.get("TEST_RUNNER") == "cargo test"
         assert reg.get("TOOL_READ") == "Read"
 
-        text = "Use ${SLOT.TOOL_READ} with ${SLOT.MODEL_FAST} and ${SLOT.UNKNOWN_KEEP}"
+        text = "Use ${SLOT.TOOL_READ} with ${SLOT.MODEL_FAST} via ${SLOT.TEST_RUNNER} and ${SLOT.UNKNOWN_KEEP}"
         resolved = resolve_text_for_platform(text, "claude", workspace=tmp_path)
-        assert resolved == "Use Read with custom-haiku-override and ${SLOT.UNKNOWN_KEEP}"
+        assert resolved == "Use Read with haiku via cargo test and ${SLOT.UNKNOWN_KEEP}"
 
 
 class TestMultiPlatformDetectionAndPortableMcp:

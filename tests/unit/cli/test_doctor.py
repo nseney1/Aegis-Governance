@@ -163,8 +163,10 @@ def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsy
     rules_dir.mkdir()
     (rules_dir / "example.md").write_text("# rule")
 
+    # H5: a repo slots.yaml can only opt in to a packaged driver (here ts_ast.js, which
+    # needs node); an arbitrary repo-defined driver command is dropped before doctor sees it.
     slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.write_text("slots:\n  ast_driver_xyz: nonexistent_ast_binary_12345\n")
+    slots_file.write_text("slots:\n  ast_driver_ts: node .aegis/drivers/ts_ast.js\n")
 
     monkeypatch.chdir(tmp_path)
     with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/aegis" if cmd in ("aegis", "soma") else None), \
@@ -173,7 +175,7 @@ def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsy
         result = run_doctor(args)
     assert result == 0
     captured = capsys.readouterr().out
-    assert "AST driver (.xyz): executable 'nonexistent_ast_binary_12345' not found on PATH" in captured
+    assert "AST driver (.ts): executable 'node' not found on PATH" in captured
 
 
 def test_check_ast_drivers_missing_driver_warns_and_fixes(tmp_path, capsys):

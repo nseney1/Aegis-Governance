@@ -89,16 +89,34 @@ def _handle_audit_performance(args: dict, gov) -> dict:
     }
 
 
+def _add_scan_warnings(res: dict, warnings: List[str]) -> None:
+    existing = res.get("warnings")
+    merged = list(existing) if isinstance(existing, list) else []
+    merged.extend(w for w in warnings if w not in merged)
+    if merged:
+        res["warnings"] = merged
+
+
 def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
-    """Resolve ${SLOT.*} placeholders in JIT scan results for the active MCP client platform."""
+    """Resolve ${SLOT.*} placeholders in JIT scan results for the active MCP client platform.
+
+    The agent reads this output, so slot values are sanitized before inlining and
+    ignored or unparseable slot files are reported in res["warnings"] (H5).
+    """
+    from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
+
     try:
-        from aegis_core.skills.slots import SlotRegistry
-        if hasattr(SlotRegistry, "for_platform"):
-            reg = SlotRegistry.for_platform(platform, workspace=str(workspace))
-        else:
-            reg = SlotRegistry.load(str(workspace))
-    except Exception:
+        loaded = SlotRegistry.for_platform(platform, workspace=str(workspace))
+    except (SlotResolutionError, OSError, RuntimeError):
+        # Slot loading must never cost the agent its guidance. The error can quote file
+        # content or paths, so report a fixed message instead.
+        _add_scan_warnings(res, [
+            "slot files (.aegis/slots.yaml or ~/.aegis/slots.yaml) could not be read or parsed; "
+            "${SLOT.*} placeholders were left unresolved"
+        ])
         return res
+    _add_scan_warnings(res, loaded.warnings)
+    reg = loaded.sanitized()
 
     for top_key in ("context", "guidance"):
         val = res.get(top_key)

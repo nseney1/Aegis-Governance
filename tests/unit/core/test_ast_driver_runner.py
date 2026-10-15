@@ -18,6 +18,14 @@ from aegis_core.ast.schema import NormalizedAST
 from aegis_core.skills.slots import SlotRegistry
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """parse_file consults ~/.aegis/slots.yaml; a developer's own driver config must not run here."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+
 def test_native_python_fast_path(tmp_path):
     py_file = tmp_path / "hello.py"
     py_file.write_text("def greet(): return 'hi'", encoding="utf-8")
@@ -103,7 +111,9 @@ def test_no_driver_configured_raises_expected_error(tmp_path):
         runner.parse_file(target_rs, workspace_root=tmp_path)
 
 
-def test_slot_registry_driver_resolution(tmp_path):
+def test_workspace_driver_slots_only_select_packaged_drivers(tmp_path):
+    """A repo slots.yaml cannot name driver commands (H5): a key for an extension with a
+    packaged driver opts in to that driver; any other driver key is dropped."""
     slots_file = tmp_path / ".aegis" / "slots.yaml"
     slots_file.parent.mkdir(parents=True)
     slots_file.write_text("""
@@ -113,8 +123,8 @@ slots:
 """, encoding="utf-8")
 
     slot_reg = SlotRegistry.load(tmp_path)
-    assert slot_reg.get_ast_driver(".go") == "go run ./ast_parser.go"
-    assert slot_reg.get_ast_driver(".rs") == "generic-driver"
+    assert slot_reg.get_ast_driver(".go") == "go run .aegis/drivers/go_ast.go"
+    assert slot_reg.get_ast_driver(".rs") is None
     assert slot_reg.get_ast_driver(".py") is None  # Python is native
 
 
