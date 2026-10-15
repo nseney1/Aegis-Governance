@@ -32,7 +32,6 @@ class TestWorkspaceCore:
 
     def test_resolve_workspace_walkup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
-        monkeypatch.delenv("AEGIS_ROOT", raising=False)
 
         ws = tmp_path / "root"
         (ws / ".aegis" / "rules").mkdir(parents=True)
@@ -62,7 +61,6 @@ class TestWorkspaceCore:
 
     def test_legacy_soma_workspace_raises_upgrade_sentinel(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
-        monkeypatch.delenv("AEGIS_ROOT", raising=False)
         legacy_ws = tmp_path / "legacy_project"
         (legacy_ws / ".soma" / "cells").mkdir(parents=True)
 

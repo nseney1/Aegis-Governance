@@ -47,7 +47,6 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
-    monkeypatch.delenv("AEGIS_ROOT", raising=False)
     return home
 
 
