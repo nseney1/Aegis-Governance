@@ -120,6 +120,19 @@ def test_workspace_rule_type_schema(p):
         assert fm.get("enforcement") == "gate", f"{rel(p)}: invariant must be gate"
 
 
+# A served rule without target_paths applies to no file: scan and check never serve it.
+# This one shipped invariant still has none; its rule file is outside lane b2b-rules,
+# so the gap is logged there for the rules owner. The set must shrink, never grow.
+KNOWN_UNTARGETED = {"invariant-test-canonical-colocality"}
+
+
+def test_every_served_workspace_rule_applies_to_some_file():
+    from aegis_core.rules import load_rules
+
+    untargeted = {r.id for r in load_rules(ROOT).served if not r.target_paths}
+    assert untargeted == KNOWN_UNTARGETED, "served rules without target_paths match no file; give them patterns"
+
+
 _PATHS = [(p, t) for p in WS for t in (_fm_or_empty(p).get("target_paths") or []) if isinstance(t, str)]
 
 

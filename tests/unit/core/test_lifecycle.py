@@ -99,3 +99,78 @@ class TestDemotionAndArchive:
         _invariant(tmp_path, "quiet", age=400)
         assert evaluate_demotions(tmp_path) == []
         assert evaluate_archives(tmp_path) == []
+
+
+class TestMisfireBoundary:
+    def test_a_misfire_bound_at_the_threshold_is_not_misfiring_and_just_above_is(self, tmp_path):
+        from aegis_core.fitness import Fitness
+        from aegis_core.lifecycle.constants import MISFIRE_THRESHOLD
+        from aegis_core.lifecycle.promotion import suggest
+        from aegis_core.rules import load_rules
+
+        _trap(_ws(tmp_path), "edge")
+        rule = load_rules(tmp_path).get("edge")
+
+        assert suggest(rule, Fitness("edge", misfire=MISFIRE_THRESHOLD)) is None
+        assert suggest(rule, Fitness("edge", misfire=MISFIRE_THRESHOLD + 0.0001)) == "archive"
+
+
+def _damage_ledger(ws):
+    """One complete line nobody can read: the ledger no longer holds all the evidence."""
+    with open(ws / ".aegis" / "state" / "ledger.jsonl", "ab") as fh:
+        fh.write(b'{"v": 2, "rule": "x", garbled\n')
+
+
+class TestIncompleteLedger:
+    """Moves that the ledger evidence must justify refuse while lines of it are unreadable."""
+
+    def test_archive_refuses(self, tmp_path):
+        from aegis_core.lifecycle.selection import archive_rule
+
+        _trap(_ws(tmp_path), "noisy-trap", fp=3)
+        _damage_ledger(tmp_path)
+
+        result = archive_rule(tmp_path, "noisy-trap")
+
+        assert result["status"] == "ineligible"
+        assert result["message"] == (
+            "Rule 'noisy-trap' was not archived: the ledger is incomplete (1 unreadable line(s))"
+        )
+        assert (tmp_path / ".aegis" / "rules" / "traps" / "noisy-trap.md").is_file()
+
+    def test_aegis_rule_archive_moves_nothing(self, tmp_path, capsys):
+        from aegis_core.lifecycle.selection import prune_cells
+
+        _trap(_ws(tmp_path), "noisy-trap", fp=3)
+        _damage_ledger(tmp_path)
+
+        assert prune_cells(tmp_path, execute=True) == 0
+
+        assert "not archived: Rule 'noisy-trap' was not archived: the ledger is incomplete" in capsys.readouterr().out
+        assert (tmp_path / ".aegis" / "rules" / "traps" / "noisy-trap.md").is_file()
+
+    def test_tier_changes_are_reported_but_not_written(self, tmp_path):
+        from aegis_core.lifecycle.promotion import evaluate_cell_tiers
+
+        _trap(_ws(tmp_path), "proven", tp=30)
+        _damage_ledger(tmp_path)
+        path = tmp_path / ".aegis" / "rules" / "traps" / "proven.md"
+        before = path.read_bytes()
+
+        result = evaluate_cell_tiers(tmp_path, execute=True)
+
+        assert [(c["rule"], c["old_tier"], c["new_tier"]) for c in result["changes"]] == [("proven", "advisory", "mechanical")]
+        assert result["refused"] == "not written: the ledger is incomplete (1 unreadable line(s))"
+        assert path.read_bytes() == before
+
+    def test_an_evidence_checked_promotion_is_ineligible(self, tmp_path):
+        from aegis_core.lifecycle.promotion import promote_cell
+
+        _trap(_ws(tmp_path), "proven", tp=25)
+        _damage_ledger(tmp_path)
+
+        result = promote_cell(tmp_path, "proven")
+
+        assert result["status"] == "ineligible"
+        assert "the ledger is incomplete (1 unreadable line(s))" in result["message"]
+        assert (tmp_path / ".aegis" / "rules" / "traps" / "proven.md").is_file()

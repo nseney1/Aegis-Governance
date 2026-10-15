@@ -8,9 +8,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
-from aegis_core.match import first_match, is_test_path
+from aegis_core.match import is_test_path
 from aegis_core.workspace.layout import RULES_RELDIR
-from typing import Optional
+from typing import Any, Optional
 
 from . import ToolEvidence
 from . import persistence_checker
@@ -46,7 +46,7 @@ def _forbid_ast_spec_error(spec: object) -> Optional[str]:
 
 def _discover_forbid_ast_rules(
     repo_root: str,
-) -> tuple[list[tuple[str, dict, list[str]]], list[tuple[str, str]]]:
+) -> tuple[list[tuple[Any, dict]], list[tuple[str, str]]]:
     """The workspace rules (aegis_core.rules, .aegis/rules/<type>/) that declare forbid_ast.
 
     Returns (rules, broken): a rule file that cannot be loaded and names forbid_ast, or
@@ -57,7 +57,7 @@ def _discover_forbid_ast_rules(
     from aegis_core.rules import load_rules, workspace_root
 
     ruleset = load_rules(workspace_root(repo_root))
-    discovered: list[tuple[str, dict, list[str]]] = []
+    discovered: list[tuple[Any, dict]] = []
     broken: list[tuple[str, str]] = []
     for rule in ruleset.rules:
         if not rule.ok:
@@ -72,7 +72,7 @@ def _discover_forbid_ast_rules(
         if spec_error:
             broken.append((rule.path, spec_error))
             continue
-        discovered.append((rule.id, spec, list(rule.target_paths)))
+        discovered.append((rule, spec))
     return discovered, broken
 
 
@@ -340,19 +340,12 @@ def run_layer1(
                 rel_path = os.path.relpath(full_path, repo_root_str).replace("\\", "/")
             except ValueError:
                 rel_path = filepath.replace("\\", "/")
-            test_file = is_test_path(rel_path)
-
-            for rule_id, forbid_spec, patterns in forbid_rules:
-                # Enforcement policy, applied after matching: a forbid_ast gate exempts
-                # test files unless its patterns name tests (tests use what gates forbid).
-                rule_targets_tests = any(
-                    "tests/" in p.replace("\\", "/") or "test_" in p
-                    for p in patterns
-                )
-                if test_file and not rule_targets_tests:
-                    continue
-                # Rule.target_paths: a forbid_ast rule without target_paths is "**".
-                if first_match(patterns, rel_path) is None:
+            for rule, forbid_spec in forbid_rules:
+                rule_id = rule.id
+                # Rule.applies_to: target_paths ("**" when a forbid_ast rule names none),
+                # and test files only when the patterns name tests. Scan, telemetry and
+                # coverage ask the same question.
+                if not rule.applies_to(rel_path):
                     continue
 
                 try:

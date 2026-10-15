@@ -115,6 +115,36 @@ class TestStatus:
         assert run_status(argparse.Namespace(_root=tmp_path)) == 0
         assert "1 rule(s) changed since the last aegis sync:" in capsys.readouterr().out
 
+    def test_status_names_an_incomplete_ledger_and_rules_that_apply_to_no_file(self, tmp_path, capsys):
+        """Fitness from a ledger with unreadable lines is partial, and a rule without
+        target_paths is never served: both are shown, never left for the reader to guess."""
+        from aegis_core.telemetry_engine import ledger
+
+        rules = tmp_path / ".aegis" / "rules" / "traps"
+        rules.mkdir(parents=True)
+        (rules / "scoped.md").write_text("---\nid: scoped\ntarget_paths: ['src/*.py']\n---\n")
+        (rules / "nowhere.md").write_text("---\nid: nowhere\n---\n")
+        ledger.append(tmp_path, [{"rule": "scoped", "outcome": "tp", "source": "ci", "key": f"k{i}"} for i in range(2)])
+        with ledger.ledger_path(tmp_path).open("ab") as fh:
+            fh.write(b"{garbled\n")
+        ledger.append(tmp_path, [{"rule": "scoped", "outcome": "fp", "source": "ci", "key": "k-fp"}])
+
+        assert run_status(argparse.Namespace(_root=tmp_path, json=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["ledger"] == {"skipped_lines": [3], "unusable_rows": 0, "error": None, "torn_tail": False}
+        assert payload["untargeted"] == [{"id": "nowhere", "path": ".aegis/rules/traps/nowhere.md"}]
+        assert {r["name"]: (r["triggers"]) for r in payload["rules"]} == {"scoped": 3, "nowhere": 0}
+
+        assert run_status(argparse.Namespace(_root=tmp_path)) == 0
+        out = capsys.readouterr().out
+        assert (
+            "⚠️  The ledger is incomplete (1 unreadable line(s)): fitness counts only the rows "
+            "that could be read, so moves that rely on it (sync --apply, rule archive, tier changes) "
+            "are refused" in out
+        )
+        assert "1 rule(s) apply to no file (no target_paths), so scan and check never serve them:" in out
+        assert "nowhere: .aegis/rules/traps/nowhere.md" in out
+
     def test_status_reads_trigger_counts(self, tmp_path, capsys):
         """Ledger rows win over contradictory legacy evidence."""
         genome = tmp_path / "genome"

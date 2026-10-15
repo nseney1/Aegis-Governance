@@ -17,18 +17,27 @@ POSIX paths:
   matches ``aegis_core/x.py``.
 - Matching is case-sensitive on every platform (``fnmatch.fnmatch`` is not on
   Windows), so the same rule set selects the same rules on every host.
+
+Patterns and file names both come from the repository, which may be hostile, so a
+match never backtracks: a regex with k unbounded wildcards can take n**k steps
+(``*a*a*a*a*a*a*a*b`` against a 60-character name took 8 s; eight stars or a chain of
+``**/a`` hung for minutes). Instead a pattern is cut at its wildcards into fixed-width
+pieces, placed left to right while keeping only the set of positions reachable so
+far: each piece costs at most one pass over the name.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import functools
 import os
 from pathlib import Path
 import posixpath
 import re
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Union
 
 __all__ = [
     "credit_weights",
+    "split_credit",
     "first_match",
     "is_test_path",
     "matches",
@@ -62,20 +71,24 @@ def _class(body: str) -> str:
     return "[" + body + "]"
 
 
-@functools.lru_cache(maxsize=4096)
-def _compile(pattern: str) -> "re.Pattern[str]":
+_STAR = "*"  # any run of characters, "/" included
+_DSTAR = "**/"  # nothing, or any run of characters that ends with "/"
+
+
+def _tokens(pattern: str) -> List[str]:
+    """The pattern as wildcards (_STAR, _DSTAR) and one-character regex atoms."""
     out: List[str] = []
     i, n = 0, len(pattern)
     while i < n:
         if pattern.startswith("**/", i):
-            out.append("(?:.*/)?")
+            out.append(_DSTAR)
             i += 3
             continue
         char = pattern[i]
         if char == "*":
             while i < n and pattern[i] == "*":
                 i += 1
-            out.append(".*")
+            out.append(_STAR)
             continue
         if char == "?":
             out.append(".")
@@ -105,7 +118,99 @@ def _compile(pattern: str) -> "re.Pattern[str]":
             continue
         out.append(re.escape(char))
         i += 1
-    return re.compile("(?s:" + "".join(out) + r")\Z")
+    return out
+
+
+@dataclass(frozen=True)
+class _Piece:
+    """The pattern between two wildcards: fixed width, one character per atom."""
+
+    regex: Optional["re.Pattern[str]"]  # None for the empty piece
+    width: int
+
+    def at(self, text: str, pos: int) -> bool:
+        return self.regex is None or self.regex.match(text, pos) is not None
+
+    def next_start(self, text: str, pos: int) -> Optional[int]:
+        """Where the piece next occurs at or after ``pos`` (fixed width: leftmost is exact)."""
+        if self.regex is None:
+            return pos if pos <= len(text) else None
+        found = self.regex.search(text, pos)
+        return found.start() if found is not None else None
+
+
+@dataclass(frozen=True)
+class _Glob:
+    head: _Piece
+    steps: Tuple[Tuple[str, _Piece], ...]  # (wildcard, the piece after it)
+
+
+def _piece(atoms: List[str]) -> _Piece:
+    if not atoms:
+        return _Piece(None, 0)
+    return _Piece(re.compile("(?s:" + "".join(atoms) + ")"), len(atoms))
+
+
+@functools.lru_cache(maxsize=4096)
+def _compile(pattern: str) -> _Glob:
+    pieces: List[List[str]] = [[]]
+    wildcards: List[str] = []
+    for token in _tokens(pattern):
+        if token not in (_STAR, _DSTAR):
+            pieces[-1].append(token)
+        elif wildcards and not pieces[-1]:
+            # Adjacent wildcards are one, and only "**/" can come first ("*" is read as a
+            # whole run of stars): "**/*" is "*" and "**/**/" is "**/".
+            wildcards[-1] = token
+        else:
+            wildcards.append(token)
+            pieces.append([])
+    return _Glob(_piece(pieces[0]), tuple(zip(wildcards, (_piece(p) for p in pieces[1:]))))
+
+
+def _ends(kind: str, piece: _Piece, text: str, reach: Set[int], lo: int, first_only: bool) -> List[int]:
+    """The positions, ascending, where ``piece`` can end after wildcard ``kind`` entered
+    at any of ``reach`` (whose least is ``lo``)."""
+    if kind == _STAR:  # "*" from lo reaches every position from lo on
+        ends: List[int] = []
+        start = piece.next_start(text, lo)
+        while start is not None:
+            ends.append(start + piece.width)
+            if first_only:
+                break
+            start = piece.next_start(text, start + 1)
+        return ends
+    # "**/" entered at r reaches r and every position just after a "/" at or beyond r.
+    starts = set(reach)
+    slash = text.find("/", lo)
+    while slash != -1:
+        starts.add(slash + 1)
+        slash = text.find("/", slash + 1)
+    ends = [start + piece.width for start in sorted(starts) if piece.at(text, start)]
+    return ends[:1] if first_only else ends
+
+
+def _glob_match(glob: _Glob, text: str) -> bool:
+    n = len(text)
+    if not glob.head.at(text, 0):
+        return False
+    if not glob.steps:
+        return glob.head.width == n
+    reach: Set[int] = {glob.head.width}
+    lo = glob.head.width
+    last = len(glob.steps) - 1
+    for index, (kind, piece) in enumerate(glob.steps):
+        if index == last:  # the last piece ends the name
+            start = n - piece.width
+            if start < lo or not piece.at(text, start):
+                return False
+            return kind == _STAR or start in reach or text[start - 1] == "/"
+        # Before a "*" only the least end matters: the "*" absorbs whatever follows it.
+        ends = _ends(kind, piece, text, reach, lo, first_only=glob.steps[index + 1][0] == _STAR)
+        if not ends:
+            return False
+        reach, lo = set(ends), ends[0]
+    return False
 
 
 def matches(pattern: str, path: str) -> bool:
@@ -115,10 +220,10 @@ def matches(pattern: str, path: str) -> bool:
     pat, rel = normalize_path(pattern), normalize_path(path)
     if not pat or not rel:
         return False
-    regex = _compile(pat)
-    if regex.match(rel):
+    glob = _compile(pat)
+    if _glob_match(glob, rel):
         return True
-    return "/" not in pat and regex.match(rel.rsplit("/", 1)[-1]) is not None
+    return "/" not in pat and _glob_match(glob, rel.rsplit("/", 1)[-1])
 
 
 def _as_list(patterns: Patterns) -> List[object]:
@@ -176,21 +281,30 @@ def matching_files(patterns: Patterns, files: Iterable[str]) -> List[str]:
     return [f for f in _unique(files) if first_match(pats, f) is not None]
 
 
-def credit_weights(rules: Mapping[str, Patterns], files: Iterable[str]) -> Dict[str, float]:
+def split_credit(applies: Mapping[str, Iterable[str]]) -> Dict[str, float]:
     """Split one outcome's credit over the rules, file by file.
 
-    ``rules`` maps a rule id to its target_paths. Each changed file is worth 1.0,
-    shared equally by the rules that match it; a rule's weight is the sum over the
-    files it matches (callers that record a ledger weight clamp it to 1). A rule
-    matching no changed file gets 0.0.
+    ``applies`` maps a rule id to the changed files it applies to. Each file is worth
+    1.0, shared equally by the rules that apply to it; a rule's weight is the sum over
+    its files (callers that record a ledger weight clamp it to 1). A rule applying to
+    no changed file gets 0.0.
     """
-    patterns = {rule: _as_list(pats) for rule, pats in rules.items()}
-    weights = {rule: 0.0 for rule in patterns}
-    for path in _unique(files):
-        hits = [rule for rule, pats in patterns.items() if first_match(pats, path) is not None]
-        for rule in hits:
-            weights[rule] += 1.0 / len(hits)
-    return weights
+    files = {rule: _unique(found) for rule, found in applies.items()}
+    sharers: Dict[str, int] = {}
+    for found in files.values():
+        for path in found:
+            sharers[path] = sharers.get(path, 0) + 1
+    return {rule: sum(1.0 / sharers[path] for path in found) for rule, found in files.items()}
+
+
+def credit_weights(rules: Mapping[str, Patterns], files: Iterable[str]) -> Dict[str, float]:
+    """``split_credit`` for rules given by their target_paths (``rules`` maps a rule id
+    to its patterns)."""
+    changed = _unique(files)
+    return split_credit({
+        rule: [path for path in changed if first_match(_as_list(pats), path) is not None]
+        for rule, pats in rules.items()
+    })
 
 
 def is_test_path(path: str) -> bool:

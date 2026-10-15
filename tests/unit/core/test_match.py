@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import fnmatch
 import random
+import re
+import time
 
 import pytest
 
@@ -60,6 +62,8 @@ def test_pattern_matches(pattern: str, path: str) -> None:
         ("src/[!a].py", "src/a.py"),
         ("", "a.py"),
         ("docs/*.md", "docs"),
+        ("a**/b.py", "src/ab.py"),  # a pattern with a slash never matches by basename
+        ("x[!/]y", "src/xay"),
     ],
 )
 def test_pattern_does_not_match(pattern: str, path: str) -> None:
@@ -146,6 +150,71 @@ def test_property_double_star_slash_also_matches_zero_directories() -> None:
         assert matches(f"**/{tail}", tail)
         assert matches(f"x/**/{tail}", f"x/{tail}")
         assert matches(f"x/**/{tail}", f"x/y/z/{tail}")
+
+
+def _reference(pattern: str, path: str) -> bool:
+    """The documented semantics as a plain backtracking regex: exponential in the worst
+    case, so only an oracle for the tiny inputs below."""
+    pat, rel = normalize_path(pattern), normalize_path(path)
+    if not pat or not rel:
+        return False
+    out, i = [], 0
+    while i < len(pat):
+        if pat.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pat[i] == "*":
+            while i < len(pat) and pat[i] == "*":
+                i += 1
+            out.append(".*")
+        elif pat[i] == "?":
+            out.append(".")
+            i += 1
+        elif pat[i] == "[":  # the generator only writes [ab] and [!a]
+            j = pat.index("]", i + 2)
+            body = pat[i + 1:j]
+            out.append("[^" + body[1:] + "]" if body.startswith("!") else "[" + body + "]")
+            i = j + 1
+        else:
+            out.append(re.escape(pat[i]))
+            i += 1
+    regex = re.compile("(?s:" + "".join(out) + r")\Z")
+    return bool(regex.match(rel)) or ("/" not in pat and bool(regex.match(rel.rsplit("/", 1)[-1])))
+
+
+def test_property_agrees_with_the_backtracking_reference() -> None:
+    """The linear matcher means exactly what the plain regex reading of a pattern means."""
+    rng = random.Random(26)
+    tokens = _ALPHABET + ["[!a]", "**", "*", "/"]
+    hits = 0
+    for _ in range(6000):
+        pattern = "".join(rng.choice(tokens) for _ in range(rng.randint(1, 9)))
+        path = _random_path(rng)
+        expected = _reference(pattern, path)
+        hits += expected
+        assert matches(pattern, path) is expected, (pattern, path)
+    assert hits > 500
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path"),
+    [
+        ("*a" * 7 + "*b", "a" * 60 + "/x.py"),  # backtracks ~n**7 as a plain regex
+        ("*a" * 12 + "*b", "a" * 300 + "/x.py"),
+        ("**/a" * 10 + "**/b", "a/" * 150 + "x"),
+        ("*a**/" * 8 + "b", "a/" * 150 + "x"),
+        ("?*" * 20 + "z", "y" * 400),
+    ],
+    ids=["7-stars", "12-stars", "dstar-chain", "star-dstar-chain", "qmark-star"],
+)
+def test_wildcard_heavy_patterns_match_in_linear_time(pattern: str, path: str) -> None:
+    """A rule's target_paths and a file name both come from the repository, which may be
+    hostile: no pattern may freeze the single-threaded MCP server or the commit hook."""
+    started = time.perf_counter()
+    found = matches(pattern, path)
+    elapsed = time.perf_counter() - started
+    assert found is fnmatch.fnmatchcase(path, pattern) is False
+    assert elapsed < 0.5, f"{elapsed:.2f}s"
 
 
 def test_property_a_literal_pattern_matches_only_itself_or_its_basename() -> None:

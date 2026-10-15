@@ -1,9 +1,10 @@
 """Archiving: parking a rule whose ledger evidence says it misfires.
 
 A rule is archived only by an explicit ``aegis rule archive`` or ``aegis sync --apply``
-(ADR 0005 D1), and only when ``promotion.suggest`` says ``archive``. Archived rules move
-to ``.aegis/rules/.archive/``, a hidden directory the loader never serves; each move is
-logged to ``.aegis/state/lifecycle.jsonl``.
+(ADR 0005 D1), and only when ``promotion.suggest`` says ``archive`` over a complete
+ledger (``ledger.incomplete``: unreadable lines may hide its true positives). Archived
+rules move to ``.aegis/rules/.archive/``, a hidden directory the loader never serves;
+each move is logged to ``.aegis/state/lifecycle.jsonl``.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from aegis_core.fitness import for_rules
 from aegis_core.rules import load_rules
 from aegis_core.storage import append_jsonl, locked
+from aegis_core.telemetry_engine import ledger
 from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
 from .parsers import find_cell_file, sanitize_cell_id
@@ -72,11 +74,11 @@ def _park(path: Path, dest_dir: Path) -> Path:
     return dest
 
 
-def _still_misfiring(ws: Workspace, rule_id: str) -> bool:
+def _still_misfiring(ws: Workspace, rule_id: str, view: Any) -> bool:
     from .promotion import suggest
 
     rule = load_rules(ws).get(rule_id)
-    return rule is not None and suggest(rule, for_rules(ws, [rule])[rule_id]) == "archive"
+    return rule is not None and suggest(rule, for_rules(ws, [rule], view=view)[rule_id]) == "archive"
 
 
 def archive_rule(workspace: Workspace | Path | str, rule_id: str, dry_run: bool = False) -> Dict[str, Any]:
@@ -99,7 +101,13 @@ def archive_rule(workspace: Workspace | Path | str, rule_id: str, dry_run: bool 
     with locked(ws.root):
         if not path.is_file():
             return {"status": "not_found", "message": f"Rule '{clean}' was moved or removed before the rules lock was acquired"}
-        if not _still_misfiring(ws, clean):
+        view = ledger.read(ws.root)
+        if view.incomplete:
+            return {
+                "status": "ineligible",
+                "message": f"Rule '{clean}' was not archived: the ledger is incomplete ({view.incomplete})",
+            }
+        if not _still_misfiring(ws, clean, view):
             return {"status": "ineligible", "message": f"Rule '{clean}' no longer has evidence that supports archiving it"}
         dest = _park(path, archive_dir)
         append_jsonl(ws.layout.lifecycle_log, [{

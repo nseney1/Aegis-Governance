@@ -132,3 +132,31 @@ def test_sync_text_never_prints_terminal_escapes_from_rule_files(ws, capsys):
     out = capsys.readouterr().out
     assert "\x1b]" not in out and "\x07" not in out
     assert "evil" in out and "broken.md" in out
+
+
+def test_an_incomplete_ledger_is_named_and_apply_is_refused(ws, capsys):
+    with ledger.ledger_path(ws).open("ab") as fh:
+        fh.write(b"{garbled\n")
+    before = _rule_files(ws)
+
+    rc = main(["sync", "--apply"])
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "The ledger is incomplete (1 unreadable line(s)): fitness counts only the rows that could be read" in out
+    assert "not applied: the ledger is incomplete (1 unreadable line(s))" in out
+    assert _rule_files(ws) == before
+
+    assert main(["sync", "--json"]) == 0  # rebuilding the view is fine; only moves are refused
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ledger"] == {"skipped_lines": [26], "unusable_rows": 0, "error": None, "torn_tail": False}
+
+
+def test_rules_that_apply_to_no_file_are_named(ws, capsys):
+    (ws / ".aegis" / "rules" / "traps" / "nowhere.md").write_text("---\nid: nowhere\nhypothesis: h\n---\nB\n", encoding="utf-8")
+
+    assert main(["sync"]) == 0
+    assert "⚠️  nowhere: applies to no file (no target_paths)" in capsys.readouterr().out
+
+    assert main(["sync", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["untargeted"] == [{"id": "nowhere", "path": ".aegis/rules/traps/nowhere.md"}]

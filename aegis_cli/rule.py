@@ -265,7 +265,9 @@ def _run_promote(args: argparse.Namespace) -> int:
                 print("  No tier changes required.")
             for c in changes:
                 print(f"    {c['rule']}: {c['old_tier']} → {c['new_tier']} ({c['reason']})")
-        return 0
+            if res.get("refused"):
+                print(f"  ❌ {res['refused']}")
+        return 1 if res.get("refused") else 0
 
     if not rule_id:
         candidates = evaluate_promotions(str(root))

@@ -6,7 +6,8 @@ rule into a system prompt, it returns only the rules for the changed files:
 1. Rules come from the one loader (aegis_core.rules) through a per-workspace cache. If
    any rule file cannot be loaded, the scan fails closed and names it: a partial rule
    set is never presented as the whole one.
-2. Rules match files through the one matcher (aegis_core.match).
+2. Rules match files as ``Rule.applies_to`` says (the one matcher, aegis_core.match,
+   plus the forbid_ast test-file policy aegis check enforces).
 3. Mandatory rules (gates and invariants, and rules declaring ``enforcement: gate``)
    come first but take at most MANDATORY_SLOT_CAP of the ``budget`` rule slots; the
    rest go to advisory rules by ledger fitness (aegis_core.fitness). Mandatory rules
@@ -25,7 +26,7 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from aegis_core.fitness import Fitness, for_rules
-from aegis_core.match import matching_files, normalize_path, workspace_files
+from aegis_core.match import normalize_path, workspace_files
 from aegis_core.rule_inventory import RuleInventoryError
 from aegis_core.rules import Rule, RuleCache, RuleSet, workspace_root
 from aegis_core.taxonomy import (
@@ -111,11 +112,10 @@ class _Match:
 
 
 def _match(rule: Rule, files: List[str], fitness: Fitness) -> Optional[_Match]:
-    patterns = rule.target_paths
-    matched = tuple(matching_files(patterns, files))
+    matched = tuple(rule.matching_files(files))
     if not matched:
         return None
-    exact = any(normalize_path(p) == normalize_path(f) for p in patterns for f in matched)
+    exact = any(normalize_path(p) == normalize_path(f) for p in rule.target_paths for f in matched)
     return _Match(rule, matched, exact, fitness)
 
 

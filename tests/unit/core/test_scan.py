@@ -81,6 +81,25 @@ def test_mandatory_rules_take_at_most_two_slots_and_the_rest_are_reported(tmp_pa
     assert "1 more mandatory rule applies to these files and was not shown: trap-gate-c" in result["guidance"]
 
 
+def test_a_budget_below_the_cap_is_never_exceeded_by_mandatory_rules(tmp_path: Path) -> None:
+    _rule(tmp_path, "gate-a", "gate")
+    _rule(tmp_path, "gate-b", "gate")
+
+    result = scan(tmp_path, ["src/a.py"], budget=1)
+
+    assert _names(result) == ["gate-a"]
+    assert result["omitted_mandatory"] == [{"name": "gate-b", "type": "gate", "reason": "slot_cap"}]
+
+
+def test_with_equal_fitness_a_rule_naming_the_file_exactly_ranks_first(tmp_path: Path) -> None:
+    _rule(tmp_path, "a-glob", targets=("src/*.py",))
+    _rule(tmp_path, "z-exact", targets=("src/a.py",))
+
+    result = scan(tmp_path, ["src/a.py"], budget=1)
+
+    assert _names(result) == ["z-exact"]
+
+
 def test_gates_outrank_invariants_outrank_self_declared_gates(tmp_path: Path) -> None:
     _rule(tmp_path, "a-declared", enforcement="gate")
     _rule(tmp_path, "b-invariant", "invariant")

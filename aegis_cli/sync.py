@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 from aegis_cli import sanitize_display
 from aegis_cli.base import AegisCommand, CommandCategory
 from aegis_core.errors import AegisError
+from aegis_core.telemetry_engine.ledger import incomplete as ledger_incomplete
 
 __all__ = ["SyncCommand", "run_sync"]
 
@@ -25,6 +26,10 @@ EXIT_OK = 0
 EXIT_PROBLEMS = 1
 EXIT_USAGE = 2
 _APPLIED_OK = frozenset({"promoted", "demoted", "archived"})
+LEDGER_WARNING = (
+    "⚠️  The ledger is incomplete ({}): fitness counts only the rows that could be read, "
+    "so moves that rely on it (sync --apply, rule archive, tier changes) are refused"
+)
 
 
 def _rows(derived: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -61,6 +66,11 @@ def _print_text(args: argparse.Namespace, result: Any, rel_path: str) -> None:
         print(f"  ❌ {sanitize_display(error['path'])}: {sanitize_display(error['error'], 300)}")
     for ignored in result.derived["ignored"]:
         print(f"  ⚠️  {sanitize_display(ignored['path'])}: {ignored['reason']}")
+    for rule in result.derived["untargeted"]:
+        print(f"  ⚠️  {sanitize_display(str(rule['id']))}: applies to no file (no target_paths)")
+    missing = ledger_incomplete(result.derived["ledger"])
+    if missing:
+        print(f"  {LEDGER_WARNING.format(sanitize_display(missing, 300))}")
     for action in result.applied:
         detail = f" ({action['from_type']} -> {action['to_type']})" if action.get("to_type") else ""
         print(f"  {action['action']} {sanitize_display(action['rule'])}: {action['status']}{detail}")
@@ -109,6 +119,8 @@ def run_sync(args: argparse.Namespace) -> int:
             "refused": result.refused,
             "errors": result.derived["errors"],
             "ignored": result.derived["ignored"],
+            "untargeted": result.derived["untargeted"],
+            "ledger": result.derived["ledger"],
         }, indent=2, default=str))
     else:
         _print_text(args, result, rel_path)

@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from aegis_core import gitsafe
-from aegis_core.match import first_match
 from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME
 
 
@@ -45,10 +44,7 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
     all_files = [f for f in all_files if not any(p in f for p in EXCLUDE_PATTERNS)]
 
     ruleset = _rules(workspace)
-    cell_patterns = [
-        {'name': rule.id, 'patterns': list(rule.target_paths), 'type': rule.type, 'enforcement': rule.enforcement}
-        for rule in ruleset.served
-    ]
+    served = ruleset.served
 
     covered_files = set()
     uncovered_files = set()
@@ -57,7 +53,8 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
     dir_tiers = {}
 
     for f in all_files:
-        is_covered = any(first_match(cell['patterns'], f) is not None for cell in cell_patterns)
+        applying = [rule for rule in served if rule.applies_to(f)]
+        is_covered = bool(applying)
 
         if is_covered:
             covered_files.add(f)
@@ -71,12 +68,10 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
         if is_covered:
             coverage_map[d]['covered'] += 1
 
-        for cell in cell_patterns:
-            if first_match(cell['patterns'], f) is not None:
-                current = dir_tiers.get(d, 'none')
-                cell_tier = cell.get('enforcement', 'advisory')
-                if tier_rank.get(cell_tier, 0) > tier_rank.get(current, -1):
-                    dir_tiers[d] = cell_tier
+        for rule in applying:
+            current = dir_tiers.get(d, 'none')
+            if tier_rank.get(rule.enforcement, 0) > tier_rank.get(current, -1):
+                dir_tiers[d] = rule.enforcement
 
         coverage_map[d]['tier'] = dir_tiers.get(d, 'none')
 
@@ -126,9 +121,8 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
     exclude = [f'{AEGIS_DIRNAME}/', f'{LEGACY_SOMA_DIRNAME}/', 'vendor/', '.git/', 'node_modules/']
     all_files = [f for f in all_files if not any(p in f for p in exclude)]
 
-    all_patterns = [p for rule in rules for p in rule.target_paths]
-
-    covered = sum(1 for f in all_files if first_match(all_patterns, f) is not None)
+    covered_files = {f for f in all_files if any(rule.applies_to(f) for rule in rules)}
+    covered = len(covered_files)
     coverage_pct = (covered / len(all_files) * 100) if all_files else 0
 
     # A rule with no verdict yet has no measured fitness: it is not averaged in as zero.
@@ -162,7 +156,7 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
 
     uncovered_dirs = {}
     for f in all_files:
-        if first_match(all_patterns, f) is None:
+        if f not in covered_files:
             d = os.path.dirname(f) or '.'
             uncovered_dirs[d] = uncovered_dirs.get(d, 0) + 1
     top_gap = max(uncovered_dirs.items(), key=lambda x: x[1]) if uncovered_dirs else ('none', 0)

@@ -7,6 +7,7 @@ since the last sync: it never excludes a rule.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -163,6 +164,146 @@ def test_an_unreadable_derived_file_counts_as_never_synced(tmp_path: Path) -> No
         (state / "derived.json").write_bytes(garbage)
         assert sync.read_derived(tmp_path) is None
         assert sync.stale_rules(load_rules(tmp_path), sync.read_derived(tmp_path)) == []
+
+
+def test_a_crlf_rule_is_recorded_by_its_lf_digest(tmp_path: Path) -> None:
+    """Recorded from a CRLF checkout, the rule is not stale once the line endings flip back."""
+    path = _rule(tmp_path, "trap", "eol", eol="\r\n")
+
+    doc = sync.sync(tmp_path).derived
+
+    assert doc["rules"]["eol"]["sha256"] == hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+    path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n"))
+    assert sync.stale_rules(load_rules(tmp_path), sync.read_derived(tmp_path)) == []
+
+
+def test_a_rule_moved_with_unchanged_bytes_is_reported_edited(tmp_path: Path) -> None:
+    text = b"---\nid: moved\nhypothesis: h\ntarget_paths:\n  - src/*.py\n---\nBody.\n"
+    old = tmp_path / ".aegis" / "rules" / "traps" / "moved.md"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(text)
+    sync.sync(tmp_path)
+    new = tmp_path / ".aegis" / "rules" / "invariants" / "moved.md"
+    new.parent.mkdir(parents=True)
+    old.replace(new)
+
+    assert sync.stale_rules(load_rules(tmp_path), sync.read_derived(tmp_path)) == [
+        {"id": "moved", "path": ".aegis/rules/invariants/moved.md", "change": "edited"},
+    ]
+
+
+def test_a_rule_that_stopped_loading_is_reported_unloadable_not_removed(ws: Path) -> None:
+    sync.sync(ws)
+    (ws / ".aegis" / "rules" / "traps" / "trap-good.md").write_text("---\nid: [unterminated\n---\nb\n", encoding="utf-8")
+
+    stale = sync.stale_rules(load_rules(ws), sync.read_derived(ws))
+
+    assert stale == [{
+        "id": "trap-good",
+        "path": ".aegis/rules/traps/trap-good.md",
+        "change": "unloadable",
+        "error": "malformed YAML frontmatter: unterminated flow sequence",
+    }]
+
+
+def test_rules_that_apply_to_no_file_are_recorded(ws: Path) -> None:
+    """A served rule without target_paths (or with a scope key v4 does not read) matches
+    nothing: sync says so instead of indexing it as if it applied somewhere."""
+    rules = ws / ".aegis" / "rules"
+    (rules / "traps" / "trap-unscoped.md").write_text("---\nid: trap-unscoped\nhypothesis: h\n---\nB\n", encoding="utf-8")
+    (rules / "invariants" / "inv-scope.md").write_text(
+        "---\nid: inv-scope\nenforcement: gate\nscope: src\nhypothesis: h\n---\nB\n", encoding="utf-8"
+    )
+
+    doc = sync.sync(ws).derived
+
+    assert doc["untargeted"] == [
+        {"id": "inv-scope", "path": ".aegis/rules/invariants/inv-scope.md"},
+        {"id": "trap-unscoped", "path": ".aegis/rules/traps/trap-unscoped.md"},
+    ]
+    assert {"trap-unscoped", "inv-scope"} <= set(doc["rules"])  # still indexed: never excluded
+
+
+# ── An incomplete ledger: fitness is shown, but nothing moves on partial evidence ──
+
+CLEAN_LEDGER = {"skipped_lines": [], "unusable_rows": 0, "error": None, "torn_tail": False}
+
+
+def _garble(ws: Path, rule_id: str, outcome: str) -> list:
+    """Overwrite the rule's ``outcome`` rows with unreadable lines; their line numbers."""
+    path = ledger.ledger_path(ws)
+    lines = path.read_bytes().split(b"\n")
+    hit = []
+    for index, line in enumerate(lines):
+        row = json.loads(line) if line else {}
+        if row.get("rule") == rule_id and row.get("outcome") == outcome:
+            lines[index] = b'{"v": 2, "rule": garbled'
+            hit.append(index + 1)
+    path.write_bytes(b"\n".join(lines))
+    return hit
+
+
+def test_the_ledger_read_is_recorded_with_the_derived_view(ws: Path) -> None:
+    assert sync.sync(ws).derived["ledger"] == CLEAN_LEDGER
+
+
+def test_apply_refuses_when_unreadable_ledger_lines_hide_evidence(tmp_path: Path) -> None:
+    """20 tp and 4 fp: no suggestion. With the tp lines unreadable the 4 fp alone say
+    archive; applying that would park a good rule on partial evidence."""
+    _rule(tmp_path, "trap", "good")
+    _report(tmp_path, "good", "tp", 20)
+    _report(tmp_path, "good", "fp", 4)
+    assert sync.sync(tmp_path).derived["rules"]["good"]["suggestion"] is None
+    garbled = _garble(tmp_path, "good", "tp")
+    assert len(garbled) == 20
+    before = _rule_bytes(tmp_path)
+
+    result = sync.sync(tmp_path, apply=True)
+
+    assert result.applied == []
+    assert result.refused == (
+        "not applied: the ledger is incomplete (20 unreadable line(s)); "
+        "fitness and suggestions are computed over partial evidence"
+    )
+    assert _rule_bytes(tmp_path) == before
+    assert result.derived["ledger"] == dict(CLEAN_LEDGER, skipped_lines=garbled)
+    assert json.loads((tmp_path / ".aegis" / "state" / "derived.json").read_text(encoding="utf-8"))["ledger"] == result.derived["ledger"]
+
+
+def _unusable_row(ws: Path) -> str:
+    with ledger.ledger_path(ws).open("ab") as fh:
+        fh.write(b'{"v": 2, "rule": "trap-good", "outcome": "tp", "weight": "lots"}\n')
+    return "1 unusable row(s)"
+
+
+def _unreadable_ledger(ws: Path) -> str:
+    path = ledger.ledger_path(ws)
+    path.unlink()
+    path.mkdir()
+    return "cannot read"
+
+
+@pytest.mark.parametrize("damage", [_unusable_row, _unreadable_ledger], ids=["unusable-row", "unreadable"])
+def test_apply_refuses_on_any_ledger_damage(ws: Path, damage) -> None:
+    reason = damage(ws)
+    before = _rule_bytes(ws)
+
+    result = sync.sync(ws, apply=True)
+
+    assert result.applied == [] and _rule_bytes(ws) == before
+    assert result.refused.startswith("not applied: the ledger is incomplete (") and reason in result.refused
+    assert result.derived["ledger"] != CLEAN_LEDGER
+
+
+def test_a_torn_last_line_is_a_write_in_progress_and_does_not_block_apply(ws: Path) -> None:
+    with ledger.ledger_path(ws).open("ab") as fh:
+        fh.write(b'{"v": 2, "rule": "trap-go')
+
+    result = sync.sync(ws, apply=True)
+
+    assert result.refused is None
+    assert {a["rule"] for a in result.applied} == {"trap-good", "inv-noisy", "trap-noisy"}
+    assert result.derived["ledger"] == dict(CLEAN_LEDGER, torn_tail=True)
 
 
 def test_a_young_rule_is_not_promoted_however_good_its_evidence(tmp_path: Path) -> None:

@@ -80,3 +80,17 @@ class TestTierCheck:
         assert _tier_check(soma_workspace) == 0  # mechanical -> gate needs 50 verdicts
 
         assert open(path, "rb").read() == first
+
+    def test_an_incomplete_ledger_is_named_and_nothing_is_rewritten(self, soma_workspace, capsys):
+        rules = soma_workspace / ".aegis" / "rules"
+        path = write_cell_with_fitness(rules, "proven", "advisory", 25, 25, 0)
+        with open(soma_workspace / ".aegis" / "state" / "ledger.jsonl", "ab") as fh:
+            fh.write(b"{garbled\n")
+        before = open(path, "rb").read()
+
+        assert _tier_check(soma_workspace) == 1
+
+        out = capsys.readouterr().out
+        assert "proven: advisory → mechanical" in out
+        assert "not written: the ledger is incomplete (1 unreadable line(s))" in out
+        assert open(path, "rb").read() == before

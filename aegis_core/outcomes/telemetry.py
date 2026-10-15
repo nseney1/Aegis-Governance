@@ -27,7 +27,7 @@ def record_verification_telemetry(
     if not ws.rules_dir.is_dir():
         return False
 
-    from aegis_core.match import credit_weights
+    from aegis_core.match import split_credit
     from aegis_core.outcomes.engine import matched_rules
 
     matched = matched_rules(ws, target_files)
@@ -39,11 +39,8 @@ def record_verification_telemetry(
     if run_id is None:
         run_id = secrets.token_hex(16)
 
-    # The patterns the matcher used (Rule.target_paths), over the files they matched.
-    weights = credit_weights(
-        {rule.id: rule.target_paths for rule, _files in matched},
-        [f for _rule, files in matched for f in files],
-    )
+    # Each file's credit is shared by the rules that apply to it (Rule.applies_to).
+    weights = split_credit({rule.id: files for rule, files in matched})
     verdict_text = str(verdict) if verdict is not None else ("PASS" if passed else "FAIL")
     events = []
     for rule, _files in matched:

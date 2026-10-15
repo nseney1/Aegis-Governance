@@ -329,16 +329,19 @@ def run_status(args: argparse.Namespace) -> int:
     except RuleInventoryError as exc:
         inventory_error = str(exc)
         ruleset = RuleSet(())
+    from aegis_core.telemetry_engine import ledger
+
+    # One ledger read for every number below; what it could not use is shown.
+    view = ledger.read(proj)
     loaded = [r for r in ruleset.rules if r.ok]
-    fits = for_rules(proj, loaded)
+    fits = for_rules(proj, loaded, view=view)
     derived = read_derived(proj)
     stale = stale_rules(ruleset, derived)
 
     # 3. Ledger totals of the host-installed rules (they have no rule file here)
     from aegis_core.fitness import compute
-    from aegis_core.telemetry_engine import ledger
 
-    totals = ledger.aggregate(proj)
+    totals = ledger.aggregate_rows(view.rows)
 
     def _core_fitness(*names: str) -> tuple[int, float | None]:
         entry = next((totals[n] for n in names if n in totals), {})
@@ -401,7 +404,10 @@ def run_status(args: argparse.Namespace) -> int:
         "ignored": [{"path": i.path, "reason": i.reason} for i in ruleset.ignored],
         "stale_rules": stale,
         "needs_migrate": [{"path": r.path, "keys": list(r.legacy_keys)} for r in ruleset.needs_migrate],
+        "untargeted": [{"id": r.id, "path": r.path} for r in sorted(ruleset.served, key=lambda r: r.id)
+                       if not r.target_paths],
     }
+    ledger_health = view.health()
     rc = 1 if (problems["rule_errors"] or inventory_error) else 0
 
     # Context load: total characters / 4
@@ -426,6 +432,7 @@ def run_status(args: argparse.Namespace) -> int:
             "rules": all_rules,
             "last_sync": derived.get("synced_at") if derived else None,
             "inventory_error": inventory_error,
+            "ledger": ledger_health,
             **problems,
         }
         print(json.dumps(payload, indent=2))
@@ -447,7 +454,7 @@ def run_status(args: argparse.Namespace) -> int:
     print(f"  {'Context load:':<16}~{estimated_tokens:,} tokens (pre-JIT max)")
     print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}")
     print(f"  {'Last sync:':<16}{derived.get('synced_at') if derived else 'never (run aegis sync)'}\n")
-    _print_problems(inventory_error, problems)
+    _print_problems(inventory_error, problems, view.incomplete)
 
     if not all_rules:
         print("  No rules found. Run 'aegis init' to set up governance rules.")
@@ -484,10 +491,14 @@ def run_status(args: argparse.Namespace) -> int:
     return rc
 
 
-def _print_problems(inventory_error: str | None, problems: dict) -> None:
+def _print_problems(inventory_error: str | None, problems: dict, ledger_missing: str | None = None) -> None:
     """What the scan would refuse, skip or flag, so nothing is excluded unseen."""
+    from aegis_cli.sync import LEDGER_WARNING
+
     if inventory_error:
         print(f"  ❌ The rules directory cannot be read safely: {sanitize_display(inventory_error)}")
+    if ledger_missing:
+        print(f"  {LEDGER_WARNING.format(sanitize_display(ledger_missing, 300))}")
     if problems["rule_errors"]:
         print(f"  ❌ {len(problems['rule_errors'])} rule file(s) cannot be loaded; aegis scan fails until they are fixed:")
         for item in problems["rule_errors"]:
@@ -505,7 +516,12 @@ def _print_problems(inventory_error: str | None, problems: dict) -> None:
         print(f"  ℹ️  {len(problems['ignored'])} file(s) under .aegis/rules are not rules:")
         for item in problems["ignored"]:
             print(f"     {sanitize_display(item['path'])}: {item['reason']}")
-    if any(problems.values()) or inventory_error:
+    if problems["untargeted"]:
+        print(f"  ⚠️  {len(problems['untargeted'])} rule(s) apply to no file (no target_paths), "
+              "so scan and check never serve them:")
+        for item in problems["untargeted"]:
+            print(f"     {sanitize_display(str(item['id']))}: {sanitize_display(item['path'])}")
+    if any(problems.values()) or inventory_error or ledger_missing:
         print()
 
 

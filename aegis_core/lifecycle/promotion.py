@@ -15,6 +15,7 @@ from aegis_core.fitness import Fitness, for_rules
 from aegis_core.rules import Rule, load_rules
 from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink, atomic_write_text, locked
 from aegis_core.taxonomy import RULE_TYPE_DIRS, RULE_TYPES
+from aegis_core.telemetry_engine import ledger
 from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
 from aegis_core.yaml_engine.frontmatter import parse_rule_frontmatter
@@ -189,8 +190,15 @@ def promote_cell(
         }
 
     if not force:
+        view = ledger.read(ws.root)
+        if view.incomplete:
+            return {
+                "status": "ineligible",
+                "current_type": current_type,
+                "message": f"Rule '{cell_id}' was not promoted: the ledger is incomplete ({view.incomplete})",
+            }
         rule = load_rules(ws).get(clean_id)
-        fit = for_rules(ws, [rule])[clean_id] if rule is not None else Fitness(clean_id)
+        fit = for_rules(ws, [rule], view=view)[clean_id] if rule is not None else Fitness(clean_id)
         if rule is None or suggest(rule, fit) != "promote":
             return {
                 "status": "ineligible",
@@ -269,11 +277,16 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
     """Evaluate the enforcement tier (advisory -> mechanical -> gate) of each rule from
     its ledger fitness; with ``execute``, rewrite only the ``enforcement`` key.
 
-    Gates and invariants are always ``gate`` and are not evaluated.
+    Gates and invariants are always ``gate`` and are not evaluated. While the ledger is
+    incomplete the changes are reported but not written (``refused`` says why).
     """
     ws = literal_workspace(workspace)
     rules = [r for r in load_rules(ws).served if not RULE_TYPES[r.type].mandatory]
-    fits = for_rules(ws, rules)
+    view = ledger.read(ws.root)
+    fits = for_rules(ws, rules, view=view)
+    refused = f"not written: the ledger is incomplete ({view.incomplete})" if execute and view.incomplete else None
+    if refused:
+        execute = False
     changes: List[Dict[str, Any]] = []
     for rule in rules:
         old = rule.enforcement
@@ -287,4 +300,7 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
                 if not _rewrite_enforcement(ws.root / rule.path, old, new):
                     continue
         changes.append({"rule": rule.id, "old_tier": old, "new_tier": new, "reason": reason})
-    return {"evaluated": len(rules), "changes": changes}
+    result: Dict[str, Any] = {"evaluated": len(rules), "changes": changes}
+    if refused:
+        result["refused"] = refused
+    return result

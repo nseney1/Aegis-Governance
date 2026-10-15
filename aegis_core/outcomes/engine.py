@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from aegis_core import gitsafe
-from aegis_core.match import matching_files, workspace_files
+from aegis_core.match import workspace_files
 from aegis_core.rules import Rule, RuleSet, load_rules
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import literal_workspace
@@ -28,9 +28,9 @@ def _get_changed_files(workspace: str) -> list[str]:
 def matched_rules(
     workspace: Workspace | Path | str, changed_files: List[str], ruleset: Optional[RuleSet] = None,
 ) -> List[Tuple[Rule, List[str]]]:
-    """Each served rule whose target_paths match ``changed_files``, with the files it
-    matches (workspace-relative, each once). One loader, one matcher (aegis_core.rules,
-    aegis_core.match), the same inputs aegis scan matches.
+    """Each served rule that applies to some of ``changed_files`` (``Rule.applies_to``),
+    with those files (workspace-relative, each once). One loader, one matcher
+    (aegis_core.rules, aegis_core.match), the same inputs aegis scan matches.
 
     Rules that cannot be loaded are not served, so they match nothing here; a caller
     that serves rules (the SDK scan) refuses ``ruleset.errors`` first.
@@ -40,7 +40,7 @@ def matched_rules(
     files = workspace_files(ws.root, changed_files)
     out = []
     for rule in rules.served:
-        matched = matching_files(rule.target_paths, files)
+        matched = rule.matching_files(files)
         if matched:
             out.append((rule, matched))
     return out

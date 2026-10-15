@@ -168,6 +168,10 @@ def test_descriptive_keys_are_not_enforcement_keys(tmp_path: Path) -> None:
         ("targetPaths: ['src/*.py']", "'targetPaths' (use target_paths)"),
         ("Target-Paths: ['src/*.py']", "'Target-Paths' (use target_paths)"),
         ("target_globs: ['src/*.py']", "'target_globs' (use target_paths)"),
+        ("patterns: ['src/*.py']", "'patterns' (use target_paths)"),
+        ("files: ['src/*.py']", "'files' (use target_paths)"),
+        ("include: ['src/*.py']", "'include' (use target_paths)"),
+        ("includes: 'src/*.py'", "'includes' (use target_paths)"),
         ("enforce: gate", "'enforce' (use enforcement)"),
         ("Enforcement: gate", "'Enforcement' (use enforcement)"),
         ("forbid-ast: {calls: [eval]}", "'forbid-ast' (use forbid_ast)"),
@@ -264,6 +268,34 @@ def test_a_forbid_ast_rule_without_target_paths_applies_to_every_file(tmp_path: 
     assert rs.get("no-eval").target_paths == ("**",)
     assert rs.get("no-exec").target_paths == ("**",)
     assert rs.get("scoped").target_paths == ()  # a rule without forbid_ast and without scope matches nothing
+
+
+def test_target_paths_may_be_one_pattern_string(tmp_path: Path) -> None:
+    _write(tmp_path, "traps/one.md", "---\nid: one\ntarget_paths: 'src/*.py'\n---\nb\n")
+    _write(tmp_path, "traps/blank.md", "---\nid: blank\ntarget_paths: '  '\n---\nb\n")
+
+    rs = load_rules(tmp_path)
+
+    assert rs.get("one").target_paths == ("src/*.py",)
+    assert rs.get("one").matching_files(["src/a.py", "lib/b.py"]) == ["src/a.py"]
+    assert rs.get("blank").target_paths == ()
+
+
+def test_a_forbid_ast_gate_skips_test_files_unless_its_patterns_name_tests(tmp_path: Path) -> None:
+    """Tests use what gates forbid (an eval in the test of the eval guard), so aegis check
+    has always exempted them; Rule.applies_to is that one policy for every surface."""
+    _write(tmp_path, "invariants/no-eval.md", "---\nid: no-eval\nforbid_ast:\n  calls: [eval]\n---\nb\n")
+    _write(tmp_path, "invariants/no-exec-tests.md",
+           "---\nid: no-exec-tests\ntarget_paths: ['tests/**/*.py']\nforbid_ast:\n  calls: [exec]\n---\nb\n")
+    _write(tmp_path, "traps/advice.md", "---\nid: advice\ntarget_paths: ['**/*.py']\n---\nb\n")
+    files = ["src/a.py", "tests/test_a.py", "src/test_b.py", "conftest.py"]
+
+    rs = load_rules(tmp_path)
+
+    assert rs.get("no-eval").matching_files(files) == ["src/a.py"]
+    assert not rs.get("no-eval").applies_to("tests/test_a.py") and rs.get("no-eval").applies_to("src/a.py")
+    assert rs.get("no-exec-tests").matching_files(files) == ["tests/test_a.py"]
+    assert rs.get("advice").matching_files(files) == files  # advisory guidance applies to tests too
 
 
 @pytest.mark.parametrize("name", ["readme.md", "README.md", "ReadMe.md", ".draft.md", "upper.MD", "mixed.Md"])

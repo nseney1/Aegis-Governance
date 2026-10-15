@@ -27,6 +27,8 @@ One policy, applied everywhere:
   ``meta`` and listed in ``legacy_keys`` (``aegis migrate`` strips them).
 - A rule with ``expired_at`` is loaded but not served (``Rule.expired``).
 - A ``forbid_ast`` rule without ``target_paths`` applies to every file (``**``).
+- Where a rule applies is ``Rule.applies_to``: its target_paths through the one matcher,
+  except that a ``forbid_ast`` gate skips test files unless its patterns name tests.
 """
 from __future__ import annotations
 
@@ -34,8 +36,9 @@ from dataclasses import dataclass, field
 import hashlib
 import os
 import threading
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
 
+from aegis_core.match import first_match, is_test_path, matching_files
 from aegis_core.rule_inventory import RuleInventory, RuleInventoryEntry, inventory_rules
 from aegis_core.taxonomy import DIR_RULE_TYPES, RULE_TYPES
 from aegis_core.workspace.layout import RULES_RELDIR
@@ -71,7 +74,8 @@ _ENFORCEMENT_ALIASES = {
     "target_paths": (
         "paths", "path", "glob", "globs", "applyto", "appliesto", "targets", "targetpath",
         "targetglob", "targetglobs", "targetfile", "targetfiles", "targetpattern",
-        "targetpatterns", "filepatterns", "pathpatterns",
+        "targetpatterns", "filepatterns", "pathpatterns", "patterns", "files", "include",
+        "includes",
     ),
     "enforcement": ("enforce", "enforced", "enforcementlevel", "enforcementtier", "enforcementmode"),
     "forbid_ast": ("forbid", "forbidden", "forbiddenast", "forbidasts", "astforbid"),
@@ -184,6 +188,26 @@ class Rule:
         if not patterns and "forbid_ast" in self.meta:
             return ("**",)
         return patterns
+
+    @property
+    def skips_tests(self) -> bool:
+        """A forbid_ast gate does not apply to test files unless its patterns name tests:
+        tests exercise what gates forbid (an ``eval`` in the test of an eval guard)."""
+        if "forbid_ast" not in self.meta:
+            return False
+        return not any("tests/" in p.replace("\\", "/") or "test_" in p for p in self.target_paths)
+
+    def applies_to(self, path: str) -> bool:
+        """Whether this rule applies to the workspace-relative ``path``: the one answer
+        aegis check, scan, telemetry, coverage and the grade all use."""
+        if self.skips_tests and is_test_path(path):
+            return False
+        return first_match(self.target_paths, path) is not None
+
+    def matching_files(self, files: Iterable[str]) -> List[str]:
+        """The ``files`` this rule applies to, normalized, in order, each once."""
+        found = matching_files(self.target_paths, files)
+        return [f for f in found if not is_test_path(f)] if self.skips_tests else found
 
     @property
     def enforcement(self) -> str:

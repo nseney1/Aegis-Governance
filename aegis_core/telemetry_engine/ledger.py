@@ -30,7 +30,7 @@ import math
 import os
 from pathlib import Path
 import threading
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from aegis_core.storage import append_jsonl, locked, read_jsonl
 from aegis_core.workspace.layout import WorkspaceLayout
@@ -46,6 +46,7 @@ __all__ = [
     "append",
     "append_epoch",
     "append_rows",
+    "incomplete",
     "ledger_path",
     "normalize_rows",
     "read",
@@ -186,6 +187,39 @@ class LedgerView:
     torn_tail: bool = False
     error: Optional[str] = None
     path: Optional[Path] = None
+
+    def health(self) -> Dict[str, Any]:
+        """What the read could not use, as derived.json and ``aegis status`` record it."""
+        return {
+            "skipped_lines": list(self.skipped_lines),
+            "unusable_rows": self.unusable_rows,
+            "error": self.error,
+            "torn_tail": self.torn_tail,
+        }
+
+    @property
+    def incomplete(self) -> Optional[str]:
+        """Why ``rows`` are known to miss recorded evidence, or None (see ``incomplete``)."""
+        return incomplete(self.health())
+
+
+def incomplete(health: Mapping[str, Any]) -> Optional[str]:
+    """Why a ledger read with this ``health`` misses recorded evidence, or None.
+
+    Unreadable lines, unusable rows and a ledger that cannot be read at all each hide
+    verdicts, so fitness from such a read is partial: it may still be shown, but nothing
+    that moves or rewrites a rule may act on it. A torn last line is not counted: a
+    reader racing the one locked append sees it until the write completes.
+    """
+    reasons = []
+    if health.get("error"):
+        reasons.append(str(health["error"]))
+    skipped = health.get("skipped_lines") or []
+    if skipped:
+        reasons.append(f"{len(skipped)} unreadable line(s)")
+    if health.get("unusable_rows"):
+        reasons.append(f"{health['unusable_rows']} unusable row(s)")
+    return ", ".join(reasons) or None
 
 
 def read(workspace: Any) -> LedgerView:

@@ -137,11 +137,16 @@ def compute(
     )
 
 
-def for_rules(workspace: Any, rules: Iterable[Any], now: Optional[datetime] = None) -> Dict[str, Fitness]:
-    """Fitness of each rule (records with ``id`` and ``type``) from ``workspace``'s ledger.
+def for_rules(
+    workspace: Any, rules: Iterable[Any], now: Optional[datetime] = None, view: Any = None,
+) -> Dict[str, Fitness]:
+    """Fitness of each rule (records with ``id`` and ``type``) from ``workspace``'s ledger,
+    or from ``view`` (a ``ledger.read`` result) when the caller already read it.
 
     The half-life of each rule is the repository's ``expiry`` for its type; an unusable
     config file falls back to the defaults (its problem is reported by ``aegis doctor``).
+    Fitness counts only the rows the read could use: callers that act on it check
+    ``view.incomplete`` first.
     """
     from aegis_core.config import ConfigError, RepoConfig
     from aegis_core.telemetry_engine import ledger
@@ -150,7 +155,7 @@ def for_rules(workspace: Any, rules: Iterable[Any], now: Optional[datetime] = No
         config = RepoConfig.load(workspace)
     except ConfigError:
         config = RepoConfig()
-    totals = ledger.aggregate(workspace)
+    totals = ledger.aggregate_rows((view if view is not None else ledger.read(workspace)).rows)
     return {
         rule.id: compute(totals.get(rule.id, {}), config.expiry_for(rule.type), now, rule.id)
         for rule in rules

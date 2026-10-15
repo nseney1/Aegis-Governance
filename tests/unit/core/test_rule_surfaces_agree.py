@@ -160,6 +160,28 @@ def test_every_surface_reads_one_file_the_same_however_it_is_spelled(ws: Path):
     assert {r["rule"]: r.get("weight", 1.0) for r in ledger.read(ws).rows[before:]} == {r: 0.5 for r in expected}
 
 
+def test_scan_reads_an_absolute_spelling_as_the_workspace_relative_file(ws: Path):
+    """Rules that match any path (``**``, a basename) would also match an absolute path
+    taken as relative: every surface first makes each file workspace-relative, once."""
+    from aegis_core.outcomes.engine import match_rules_to_changes
+    from aegis_core.scan import RULE_CACHE, scan
+
+    traps = ws / ".aegis" / "rules" / "traps"
+    for rule_id, pattern in (("trap-everything", "**"), ("trap-app-anywhere", "app.py")):
+        (traps / f"{rule_id}.md").write_text(
+            f"---\nid: {rule_id}\ntype: trap\nhypothesis: h\ntarget_paths: ['{pattern}']\n---\nB\n", encoding="utf-8"
+        )
+    RULE_CACHE.invalidate()
+    absolute = str(ws / "src" / "app.py")
+
+    for spellings in ([absolute], [absolute, "./src/app.py", "src/app.py"]):
+        core = scan(ws, spellings, budget=10, max_tokens=100000)
+        matched = {r["name"]: r["matched_files"] for r in core["relevant_rules"]}
+        assert matched["trap-everything"] == matched["trap-app-anywhere"] == ["src/app.py"], spellings
+        found = {r["_name"]: r["_matched_files"] for r in match_rules_to_changes(ws, spellings)}
+        assert found["trap-everything"] == found["trap-app-anywhere"] == ["src/app.py"], spellings
+
+
 def test_check_telemetry_records_each_rules_share_of_the_credit(ws: Path):
     """Each changed file is worth 1, split among the rules matching it; a rule's row
     weight is its summed share, clamped to 1."""
@@ -212,13 +234,15 @@ FORBID_RULES = {
     "forbid-eval-anywhere": None,  # no target_paths: aegis check has always enforced it on every file
     "forbid-exec-src": ["src/**/*.py"],
     "forbid-pickle-by-name": ["loader.py"],  # a slashless pattern: that basename anywhere
+    "forbid-exec-in-tests": ["tests/**/*.py"],  # names tests, so the test-file exemption does not apply
 }
 FORBID_SPECS = {
     "forbid-eval-anywhere": "calls: [eval]",
     "forbid-exec-src": "calls: [exec]",
     "forbid-pickle-by-name": "imports: [pickle]",
+    "forbid-exec-in-tests": "calls: [exec]",
 }
-FORBID_FILES = ["src/app.py", "src/pkg/loader.py", "lib/loader.py", "lib/util.py"]
+FORBID_FILES = ["src/app.py", "src/pkg/loader.py", "lib/loader.py", "lib/util.py", "tests/loader.py"]
 
 
 @pytest.fixture
@@ -239,11 +263,17 @@ def forbid_ws(tmp_path: Path) -> Path:
 
 
 def _forbid_expected(rel: str) -> set:
-    from aegis_core.match import first_match
+    """Where the patterns say, except that a gate whose patterns do not name tests skips
+    test files (tests use what gates forbid)."""
+    from aegis_core.match import first_match, is_test_path
+
+    def names_tests(patterns) -> bool:
+        return any("tests/" in p or "test_" in p for p in patterns or [])
 
     return {
         rule_id for rule_id, patterns in FORBID_RULES.items()
-        if patterns is None or first_match(patterns, rel) is not None
+        if (patterns is None or first_match(patterns, rel) is not None)
+        and (names_tests(patterns) or not is_test_path(rel))
     }
 
 
@@ -253,6 +283,9 @@ def test_the_forbid_ast_reference_is_what_the_patterns_say():
         "src/pkg/loader.py": {"forbid-eval-anywhere", "forbid-exec-src", "forbid-pickle-by-name"},
         "lib/loader.py": {"forbid-eval-anywhere", "forbid-pickle-by-name"},
         "lib/util.py": {"forbid-eval-anywhere"},
+        # a test file: only the rule whose patterns name tests applies, even though
+        # `**` and the basename pattern loader.py match it
+        "tests/loader.py": {"forbid-exec-in-tests"},
     }
 
 
