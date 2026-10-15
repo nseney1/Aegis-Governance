@@ -9,12 +9,11 @@ import os
 import sys
 from typing import Optional
 
-from . import ToolEvidence, ArbitrationResult
+from . import ToolEvidence
 from . import persistence_checker
 from . import call_graph
 from . import import_guard
 from . import mutation_tester
-from . import branch_coverage
 
 VerificationResult = ToolEvidence
 
@@ -265,7 +264,6 @@ def run_layer1(
     repo_root: str,
     persistence_targets: Optional[list[tuple[str, str]]] = None,
     mutation_targets: Optional[list[tuple[str, str, str]]] = None,
-    coverage_targets: Optional[list[tuple[str, str]]] = None,
     max_mutations: int = 5,
     fast_mode: bool = False,
     diff_base: Optional[str] = None,
@@ -278,8 +276,6 @@ def run_layer1(
         persistence_targets: List of (filepath, dict_name) tuples for
             persistence checking. If None, auto-detects from changed_files.
         mutation_targets: List of (source_file, func_name, test_file) tuples.
-            If None, auto-discovers from changed_files using convention.
-        coverage_targets: List of (source_file, test_file) tuples.
             If None, auto-discovers from changed_files using convention.
         max_mutations: Maximum mutations per function (default: 5).
 
@@ -440,93 +436,7 @@ def run_layer1(
                         target_lines=mod_lines,
                     ))
 
-    # ── Branch Coverage ───────────────────────────────────────────────
-    if not fast_mode:
-        if coverage_targets:
-            for source, test in coverage_targets:
-                src_path = os.path.join(repo_root_str, source)
-                tst_path = os.path.join(repo_root_str, test)
-                if os.path.exists(src_path) and os.path.exists(tst_path):
-                    results.append(branch_coverage.check(src_path, tst_path))
-        else:
-            # Auto-discover: pair changed files with test files by convention
-            for filepath in changed_files:
-                if not filepath.endswith('.py') or _is_test_or_support(filepath):
-                    continue
-                full_path = os.path.join(repo_root_str, filepath)
-                if not os.path.exists(full_path):
-                    continue
-                test_file = _find_test_file(filepath, repo_root_str)
-                if test_file is None:
-                    continue
-                mod_lines = _get_modified_lines(filepath, repo_root_str, diff_base=diff_base)
-                results.append(branch_coverage.check(full_path, test_file, target_lines=mod_lines))
-
     return results
-
-
-def __getattr__(name: str):
-    if name == "DeterministicVerifier":
-        from .pipeline import DeterministicVerifier
-        return DeterministicVerifier
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-# ── Layer 2: Adversarial Verification Orchestrator ────────────────────────
-
-
-def _strip_code_fence(text: str) -> str:
-    """Strip markdown code fences (```json ... ```) from LLM output."""
-    import re
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
-
-
-def run_layer2(
-    changed_files: list[str],
-    repo_root: str,
-    task_plan: str,
-    layer1_evidence: list[ToolEvidence],
-    llm_backend,
-    test_names: Optional[list[str]] = None,
-    test_results: Optional[str] = None,
-) -> 'ArbitrationResult':
-    """Run Layer 2 adversarial verification protocol.
-
-    Thin backward-compatibility adapter delegating to AdversarialVerifier and Arbiter.
-    """
-    if llm_backend is None:
-        raise TypeError("llm_backend must be a callable, got None")
-
-    import warnings
-    warnings.warn(
-        "aegis_core.verification.runner.run_layer2 is deprecated; use VerificationPipeline",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    from .pipeline import VerificationPipeline
-
-    pipeline = VerificationPipeline()
-    res = pipeline.run(
-        changed_files=changed_files,
-        workspace=repo_root,
-        task_plan=task_plan,
-        backend=llm_backend,
-        test_names=test_names,
-        test_results=test_results,
-        layer1_evidence=layer1_evidence,
-    )
-    return res.arbitration_result or ArbitrationResult(
-        divergences=[],
-        convergences=[],
-        verdict=res.verdict,
-        layer1_results=layer1_evidence or [],
-        predictions=[],
-        claims=[],
-    )
 
 
 def gate_verdict(results: list[ToolEvidence]) -> bool:

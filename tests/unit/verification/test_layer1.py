@@ -209,57 +209,6 @@ class TestRunnerMutationTesterIntegration:
         assert "mutation_tester" in tool_names
 
 
-class TestRunnerBranchCoverageIntegration:
-    """run_layer1() should wire branch_coverage with convention-based mapping."""
-
-    def test_coverage_targets_explicit(self, tmp_path):
-        """When coverage_targets is provided, runner calls branch_coverage."""
-        src = tmp_path / "widget.py"
-        src.write_text("def greet(name):\n    return f'hello {name}'\n")
-        test = tmp_path / "test_widget.py"
-        test.write_text(
-            "from widget import greet\n"
-            "def test_greet():\n    assert greet('x') == 'hello x'\n"
-        )
-
-        results = runner.run_layer1(
-            changed_files=["widget.py"],
-            repo_root=str(tmp_path),
-            coverage_targets=[("widget.py", "test_widget.py")],
-        )
-        coverage_results = [r for r in results if r.tool == "branch_coverage"]
-        assert len(coverage_results) >= 1
-        assert all(isinstance(r, ToolEvidence) for r in coverage_results)
-
-    def test_coverage_auto_pairs_by_convention(self, tmp_path):
-        """When coverage_targets is None, auto-pair foo.py -> tests/test_foo.py."""
-        (tmp_path / "helper.py").write_text("def x(): return 1\n")
-        tests_dir = tmp_path / "tests"
-        tests_dir.mkdir()
-        (tests_dir / "test_helper.py").write_text(
-            "from helper import x\ndef test_x():\n    assert x() == 1\n"
-        )
-
-        results = runner.run_layer1(
-            changed_files=["helper.py"],
-            repo_root=str(tmp_path),
-        )
-        tool_names = [r.tool for r in results]
-        assert "branch_coverage" in tool_names
-
-    def test_coverage_skipped_when_no_test_file(self, tmp_path):
-        """When no test file found for a source file, skip branch_coverage."""
-        (tmp_path / "orphan.py").write_text("def y(): return 2\n")
-
-        results = runner.run_layer1(
-            changed_files=["orphan.py"],
-            repo_root=str(tmp_path),
-        )
-        coverage_results = [r for r in results if r.tool == "branch_coverage"]
-        # Should not crash — either 0 results or a skip-evidence
-        assert all(isinstance(r, ToolEvidence) for r in coverage_results)
-
-
 class TestGetModifiedLines:
     """Test git diff modified line extraction helper."""
 
@@ -370,38 +319,6 @@ class TestRunnerCoverageEnhancements:
         assert _discover_functions(str(f), target_lines={5}) == ["func_b"]
         # No overlap
         assert _discover_functions(str(f), target_lines={100}) == []
-
-    def test_runner_run_layer2_forwarding(self, tmp_path):
-        """runner.run_layer2 emits DeprecationWarning and forwards to AdversarialVerifier + Arbiter."""
-        import warnings
-        from aegis_core.verification import runner, ToolEvidence, Verdict
-        f = tmp_path / "mod.py"
-        f.write_text("def work(): return 1\n")
-        mock_backend = lambda p: "[]"
-        with warnings.catch_warnings(record=True) as warns:
-            warnings.simplefilter("always")
-            res = runner.run_layer2(
-                changed_files=["mod.py"],
-                repo_root=str(tmp_path),
-                task_plan="Plan",
-                layer1_evidence=[ToolEvidence("call_graph", "mod.py", True, "ok")],
-                llm_backend=mock_backend,
-            )
-        assert res.verdict == Verdict.SHIP
-        assert any(issubclass(w.category, DeprecationWarning) for w in warns)
-
-    def test_runner_run_layer2_empty_files_fallback(self, tmp_path):
-        """runner.run_layer2 fallback ArbitrationResult when changed_files is empty."""
-        from aegis_core.verification import runner, Verdict, ArbitrationResult
-        res = runner.run_layer2(
-            changed_files=[],
-            repo_root=str(tmp_path),
-            task_plan="Empty run",
-            layer1_evidence=[],
-            llm_backend=lambda p: "[]",
-        )
-        assert isinstance(res, ArbitrationResult)
-        assert res.verdict == Verdict.SHIP
 
     def test_run_layer1_polyglot_call_graph(self, tmp_path):
         """run_layer1 invokes call_graph on polyglot files if a driver is resolved."""

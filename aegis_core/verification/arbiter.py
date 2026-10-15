@@ -51,7 +51,6 @@ def arbitrate(
     # Map Layer 1 tool names to risk categories they can adjudicate
     TOOL_TO_CATEGORY = {
         "persistence_checker": RiskCategory.PERSISTENCE_GAP,
-        "branch_coverage": RiskCategory.DEAD_CODE,
         "mutation_tester": RiskCategory.TAUTOLOGICAL_TEST,
         "call_graph": RiskCategory.MISSING_WIRE,
         "import_guard": RiskCategory.BOUNDARY_VIOLATION,

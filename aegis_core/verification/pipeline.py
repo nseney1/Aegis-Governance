@@ -12,6 +12,7 @@ The Layer 2 backend is any callable ``prompt -> reply`` or an object with
 from __future__ import annotations
 
 import json
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,8 +54,8 @@ class BaseVerifier(ABC):
 class DeterministicVerifier(BaseVerifier):
     """Layer 1 deterministic verification engine.
 
-    Orchestrates AST checkers, call graph, import guards, mutation testing,
-    and branch coverage against modified files.
+    Orchestrates the call graph, import guards, forbid_ast rules and (outside
+    fast mode) mutation testing against modified files.
     """
 
     def __init__(self, max_mutations: int = 5, fast_mode: bool = False):
@@ -67,7 +68,6 @@ class DeterministicVerifier(BaseVerifier):
         workspace: str | Path | Workspace | None = None,
         persistence_targets: list[tuple[str, str]] | None = None,
         mutation_targets: list[tuple[str, str, str]] | None = None,
-        coverage_targets: list[tuple[str, str]] | None = None,
         fast_mode: bool | None = None,
     ) -> list[ToolEvidence]:
         """Run Layer 1 checks.
@@ -91,13 +91,20 @@ class DeterministicVerifier(BaseVerifier):
             repo_root=repo_root,
             persistence_targets=persistence_targets,
             mutation_targets=mutation_targets,
-            coverage_targets=coverage_targets,
             max_mutations=self.max_mutations,
             fast_mode=is_fast,
         )
 
 
 # ── Layer 2 backend ───────────────────────────────────────────────────────
+
+
+def _strip_code_fence(text: str) -> str:
+    """Strip markdown code fences (```json ... ```) from LLM output."""
+    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 
 def _generate_fn(backend: Backend) -> Callable[[str], str]:
@@ -205,7 +212,7 @@ class AdversarialVerifier(BaseVerifier):
 
     @staticmethod
     def _parse_json(text: str) -> list[dict[str, Any]]:
-        raw = runner._strip_code_fence(text)
+        raw = _strip_code_fence(text)
         data = json.loads(raw)
         if not isinstance(data, list):
             raise ValueError(f"Expected JSON list from LLM response, got {type(data).__name__}")

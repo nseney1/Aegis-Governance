@@ -3,7 +3,7 @@
 Tests prove:
 1. build_code_prompt accepts spec_predictions and renders '## Predicted Risk Charges'
 2. Information partitioning invariant: task plan text is NEVER in code prompt even with charges
-3. run_layer2 orchestrates serial execution: Spec Agent charges are fed to Code Agent prompt
+3. VerificationPipeline runs the agents serially: Spec Agent charges are fed to the Code Agent prompt
 4. Rebuttal convergence: Code Agent defending predicted charges leads Arbiter to SHIP verdict
 5. Unaddressed risk / concession leads Arbiter to REVISE or BLOCK verdict
 """
@@ -23,7 +23,7 @@ from aegis_core.verification import (
     ToolEvidence,
     Verdict,
 )
-from aegis_core.verification import adversarial_verify, runner, arbiter
+from aegis_core.verification import VerificationPipeline, adversarial_verify, arbiter
 
 
 class TestAdversarialRebuttalPrompt:
@@ -76,10 +76,10 @@ class TestAdversarialRebuttalPrompt:
 
 
 class TestAdversarialRebuttalOrchestration:
-    """Verify run_layer2 passes Spec predictions into Code Agent prompt and arbitrates."""
+    """Verify the pipeline passes Spec predictions into the Code Agent prompt and arbitrates."""
 
-    def test_run_layer2_serial_rebuttal_flow(self, tmp_path):
-        """run_layer2 must pass Spec Agent predictions to the Code Agent prompt."""
+    def test_serial_rebuttal_flow(self, tmp_path):
+        """The pipeline must pass Spec Agent predictions to the Code Agent prompt."""
         # Create a mock source file
         src_file = tmp_path / "module.py"
         src_file.write_text("def run():\n    return 42\n")
@@ -114,13 +114,13 @@ class TestAdversarialRebuttalOrchestration:
                     }
                 ])
 
-        result = runner.run_layer2(
+        result = VerificationPipeline().run(
             changed_files=["module.py"],
-            repo_root=str(tmp_path),
+            workspace=tmp_path,
             task_plan="Implement run function",
             layer1_evidence=[ToolEvidence("call_graph", "module.py", True, "ok")],
-            llm_backend=mock_llm,
-        )
+            backend=mock_llm,
+        ).arbitration_result
 
         assert len(prompts_received) == 2
         # Both addressed missing_wire -> convergence -> SHIP!
@@ -154,13 +154,13 @@ class TestAdversarialRebuttalOrchestration:
                     }
                 ])
 
-        result = runner.run_layer2(
+        result = VerificationPipeline().run(
             changed_files=["module.py"],
-            repo_root=str(tmp_path),
+            workspace=tmp_path,
             task_plan="Implement run function returning dict",
             layer1_evidence=[ToolEvidence("call_graph", "module.py", True, "ok")],
-            llm_backend=mock_llm,
-        )
+            backend=mock_llm,
+        ).arbitration_result
 
         assert result.verdict == Verdict.REVISE
         assert any(d.category == RiskCategory.CONTRACT_DRIFT for d in result.divergences)

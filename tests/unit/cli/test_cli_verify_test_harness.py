@@ -2,7 +2,7 @@
 
 Tests prove:
 1. discover_test_evidence identifies test files, parses test names via AST, and runs tests.
-2. soma verify passes test_names and test_results to runner.run_layer2.
+2. aegis check passes test_names and test_results to the Layer 2 pipeline.
 3. Graceful degradation when no test files exist for target files.
 """
 import argparse
@@ -56,10 +56,10 @@ class TestVerifyTestHarnessDiscovery:
 
 
 class TestVerifyCLIWiringWithTestHarness:
-    """Verify run_verify wires test evidence into runner.run_layer2."""
+    """Verify run_verify wires test evidence into the Layer 2 pipeline."""
 
     def test_run_verify_passes_test_evidence_to_layer2(self, tmp_path, monkeypatch):
-        """run_verify must pass discovered test_names and test_results into run_layer2."""
+        """run_verify must pass discovered test_names and test_results into VerificationPipeline.run."""
         src_file = tmp_path / "service.py"
         src_file.write_text("def serve(): return True\n")
 
