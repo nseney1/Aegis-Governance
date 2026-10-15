@@ -41,3 +41,23 @@ def test_user_plane_of_the_running_user(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert UserLayout.current() == UserLayout(tmp_path)
+
+
+def test_this_repository_never_tracks_machine_local_state():
+    """D13 L1: the v3 outcome ledgers were wiped and untracked; the v4 state dir stays out of git."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    repo = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
+    if shutil.which("git") is None or not (repo / ".git").exists():
+        pytest.skip("needs a git checkout of the repository")
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+
+    for rel in (".aegis/state/ledger.jsonl", ".aegis/state/lock", ".aegis/evidence/outcomes.jsonl"):
+        assert git("check-ignore", "-q", "--no-index", rel).returncode == 0, f"{rel} is not git-ignored"
+    tracked = git("ls-files", "--", ".aegis/state", ".aegis/evidence")
+    assert tracked.returncode == 0 and tracked.stdout.strip() == ""
