@@ -259,6 +259,16 @@ def _get_modified_lines(filepath: str, repo_root: str, diff_base: Optional[str] 
 
 
 
+def _tool_failure(tool: str, target: str, exc: Exception) -> ToolEvidence:
+    """A Layer 1 tool that raised fails the gate; it must never abort the run or pass silently."""
+    return ToolEvidence(
+        tool=tool,
+        target=target,
+        verdict=False,
+        detail=f"{tool}: cannot verify {target}: {type(exc).__name__}: {exc}",
+    )
+
+
 def run_layer1(
     changed_files: list[str],
     repo_root: str,
@@ -316,19 +326,22 @@ def run_layer1(
         if _is_test_or_support(filepath):
             continue
         ext = os.path.splitext(filepath)[1].lower()
-        if ext == ".py":
-            results.append(call_graph.check(
-                full_path, repo_root_str,
-                exclude_names={'main', '_parse_args', 'parse_args'},
-                fast_mode=fast_mode,
-            ))
-        elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str):
-            results.append(call_graph.check(
-                full_path, repo_root_str,
-                exclude_names={'main', '_parse_args', 'parse_args'},
-                fast_mode=fast_mode,
-                ast_runner=ast_runner,
-            ))
+        try:
+            if ext == ".py":
+                results.append(call_graph.check(
+                    full_path, repo_root_str,
+                    exclude_names={'main', '_parse_args', 'parse_args'},
+                    fast_mode=fast_mode,
+                ))
+            elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str):
+                results.append(call_graph.check(
+                    full_path, repo_root_str,
+                    exclude_names={'main', '_parse_args', 'parse_args'},
+                    fast_mode=fast_mode,
+                    ast_runner=ast_runner,
+                ))
+        except Exception as exc:
+            results.append(_tool_failure("call_graph", filepath, exc))
 
     # ── Import Guards ─────────────────────────────────────────────────
     for filepath in changed_files:
@@ -336,13 +349,26 @@ def run_layer1(
         if os.path.exists(full_path) and filepath.endswith('.py'):
             if _is_test_or_support(filepath):
                 continue
-            results.append(import_guard.check(full_path, project_root=repo_root_str))
+            try:
+                results.append(import_guard.check(full_path, project_root=repo_root_str))
+            except Exception as exc:
+                results.append(_tool_failure("import_guard", filepath, exc))
 
     # ── Declarative Rule-Level forbid_ast ─────────────────────────────
     from aegis_core.ast.match import evaluate_forbid_ast, extract_normalized_ast
     from aegis_core.ast.policy import ASTExtractionError
 
-    forbid_rules = _discover_forbid_ast_rules(repo_root_str)
+    try:
+        forbid_rules = _discover_forbid_ast_rules(repo_root_str)
+    except Exception as exc:
+        # The rules are gate rules: if they cannot be read, nothing may pass unchecked.
+        forbid_rules = []
+        results.append(ToolEvidence(
+            tool="forbid_ast",
+            target=".aegis/rules",
+            verdict=False,
+            detail=f"forbid_ast: cannot load rules: {type(exc).__name__}: {exc}",
+        ))
     if forbid_rules:
         ast_cache: dict[str, object] = {}
         for filepath in changed_files:
@@ -369,22 +395,26 @@ def run_layer1(
                 if patterns and not _matches_rule_patterns(rel_path, patterns):
                     continue
 
-                if full_path not in ast_cache:
-                    try:
-                        ast_cache[full_path] = extract_normalized_ast(
-                            full_path, workspace_root=repo_root_str, ast_runner=ast_runner
-                        )
-                    except ASTExtractionError as exc:
-                        ast_cache[full_path] = exc
-                norm_ast = ast_cache[full_path]
-                if norm_ast is None:  # no AST driver for this file type: rule does not apply
+                try:
+                    if full_path not in ast_cache:
+                        try:
+                            ast_cache[full_path] = extract_normalized_ast(
+                                full_path, workspace_root=repo_root_str, ast_runner=ast_runner
+                            )
+                        except ASTExtractionError as exc:
+                            ast_cache[full_path] = exc
+                    norm_ast = ast_cache[full_path]
+                    if norm_ast is None:  # no AST driver for this file type: rule does not apply
+                        continue
+                    violations: list[str] = []
+                    if not isinstance(norm_ast, ASTExtractionError):
+                        try:
+                            violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                        except ASTExtractionError as exc:  # decorators had to be re-read from disk
+                            norm_ast = exc
+                except Exception as exc:
+                    results.append(_tool_failure(f"forbid_ast:{rule_id}", rel_path, exc))
                     continue
-                violations: list[str] = []
-                if not isinstance(norm_ast, ASTExtractionError):
-                    try:
-                        violations = evaluate_forbid_ast(norm_ast, forbid_spec)
-                    except ASTExtractionError as exc:  # decorators had to be re-read from disk
-                        norm_ast = exc
                 if isinstance(norm_ast, ASTExtractionError):
                     # Fail closed: a gate rule that cannot read the file must not pass it.
                     results.append(

@@ -334,8 +334,8 @@ class TestEncodingAwareParsing:
         ]
 
     def test_latin1_cookie_file_is_parsed_and_violation_reported(self, ws: Path):
-        # __init__.py: Layer 1's import_guard (outside this lane) still decodes strictly as
-        # UTF-8 and raises on latin-1 sources; it skips package initialisers, forbid_ast does not.
+        # __init__.py: call_graph and import_guard skip package initialisers, so this
+        # exercises forbid_ast alone (the full Layer 1 path is TestLayer1LegacyEncoding).
         (ws / "src" / "__init__.py").write_bytes(_LATIN1_SOURCE)
         _, results = _forbid_results(ws, "src/__init__.py")
         assert [(r.target, r.verdict, r.detail) for r in results] == [
@@ -707,16 +707,7 @@ class TestDynamicImportResolution:
 
 # ── Review round 3, finding 1 (out of lane scope): Layer 1 aborts on latin-1 ───
 
-class TestLayer1LegacyEncodingGap:
-    @pytest.mark.xfail(
-        strict=True,
-        raises=UnicodeDecodeError,
-        reason=(
-            "Layer 1's call_graph/import_guard read .py files as strict UTF-8 and raise before "
-            "the forbid_ast loop (runner.py, import_guard.py and hooks/runtime.py are outside "
-            "lane a1-forbid-ast). Remove this marker when the follow-up lane lands."
-        ),
-    )
+class TestLayer1LegacyEncoding:
     def test_latin1_module_reaches_forbid_ast_through_layer1(self, ws: Path):
         (ws / "src" / "legacy.py").write_bytes(_LATIN1_SOURCE + b"import subprocess\nsubprocess.run(['ls'])\n")
         _, results = _forbid_results(ws, "src/legacy.py")

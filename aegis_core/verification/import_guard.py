@@ -16,6 +16,8 @@ import re
 import sys
 from dataclasses import dataclass
 
+from aegis_core.ast.drivers.python import read_python_source
+
 from . import ToolEvidence
 
 # Build stdlib module set from the running interpreter
@@ -123,8 +125,7 @@ def extract_imports(filepath: str) -> list[ImportInfo]:
     Returns:
         List of ImportInfo with module name, line number, and guard status
     """
-    with open(filepath, 'r', encoding='utf-8') as f:
-        source = f.read()
+    source = read_python_source(filepath)
 
     results: list[ImportInfo] = []
 

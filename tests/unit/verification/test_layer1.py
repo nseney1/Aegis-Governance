@@ -368,3 +368,81 @@ class TestRunnerCoverageEnhancements:
             assert called_cmds[0] == ["git", "diff", "-U0", "origin/feat", "--", "foo.py"]
 
 
+_LATIN1 = "# -*- coding: latin-1 -*-\nGREETING = 'café'\n".encode("latin-1")
+
+
+class TestLayer1FailsClosed:
+    """A Layer 1 tool that raises yields a failing result naming the tool and file (wave A F1)."""
+
+    @pytest.fixture
+    def ws(self, tmp_path):
+        (tmp_path / "mod.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.parametrize("module, tool", [(call_graph, "call_graph"), (runner.import_guard, "import_guard")])
+    def test_tool_exception_becomes_a_failing_result(self, ws, monkeypatch, module, tool):
+        def boom(*_args, **_kwargs):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(module, "check", boom)
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(ws), fast_mode=True)
+        failed = [r for r in results if r.tool == tool]
+        assert [(r.target, r.verdict) for r in failed] == [("mod.py", False)]
+        assert failed[0].detail == f"{tool}: cannot verify mod.py: RecursionError: maximum recursion depth exceeded"
+        assert runner.gate_verdict(results) is False
+
+    def test_forbid_ast_exception_becomes_a_failing_result(self, ws, monkeypatch):
+        import aegis_core.ast.match as match
+
+        rules = ws / ".aegis" / "rules"
+        rules.mkdir(parents=True)
+        (rules / "no-eval.md").write_text(
+            "---\nid: no-eval\ntype: invariant\nenforcement: gate\nforbid_ast:\n  calls: [eval]\n---\n",
+            encoding="utf-8",
+        )
+
+        def boom(*_args, **_kwargs):
+            raise MemoryError("ast too large")
+
+        monkeypatch.setattr(match, "evaluate_forbid_ast", boom)
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(ws), fast_mode=True)
+        failed = [r for r in results if r.tool == "forbid_ast:no-eval"]
+        assert [(r.target, r.verdict, r.detail) for r in failed] == [
+            ("mod.py", False, "forbid_ast:no-eval: cannot verify mod.py: MemoryError: ast too large")
+        ]
+
+    def test_forbid_ast_rule_discovery_failure_fails_closed(self, ws, monkeypatch):
+        def boom(_root):
+            raise PermissionError("rules dir unreadable")
+
+        monkeypatch.setattr(runner, "_discover_forbid_ast_rules", boom)
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(ws), fast_mode=True)
+        failed = [r for r in results if r.tool == "forbid_ast"]
+        assert [(r.target, r.verdict, r.detail) for r in failed] == [
+            (".aegis/rules", False, "forbid_ast: cannot load rules: PermissionError: rules dir unreadable")
+        ]
+
+
+class TestLayer1LegacyEncodings:
+    """call_graph and import_guard decode .py sources the way CPython does (PEP 263, BOM)."""
+
+    def test_latin1_module_is_not_a_false_call_graph_failure(self, tmp_path):
+        (tmp_path / "legacy.py").write_bytes(_LATIN1 + b"def main():\n    return GREETING\n")
+        result = call_graph.check(str(tmp_path / "legacy.py"), str(tmp_path), exclude_names={"main"})
+        assert result.verdict is True, result.detail
+
+    def test_latin1_module_imports_are_extracted(self, tmp_path):
+        (tmp_path / "legacy.py").write_bytes(_LATIN1 + b"import json\nimport some_vendor_sdk\n")
+        modules = [i.module for i in runner.import_guard.extract_imports(str(tmp_path / "legacy.py"))]
+        assert modules == ["json", "some_vendor_sdk"]
+
+    def test_latin1_module_passes_layer1_end_to_end(self, tmp_path):
+        (tmp_path / "legacy.py").write_bytes(_LATIN1 + b"import json\n\ndef main():\n    return json.dumps(GREETING)\n")
+        results = runner.run_layer1(changed_files=["legacy.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert results and runner.gate_verdict(results) is True, [r.detail for r in results]
+
+    def test_undecodable_module_fails_closed(self, tmp_path):
+        (tmp_path / "bad.py").write_bytes(b"x = '\xff\xfe'\n")
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert runner.gate_verdict(results) is False
+        assert {r.tool for r in results if not r.verdict} >= {"import_guard"}

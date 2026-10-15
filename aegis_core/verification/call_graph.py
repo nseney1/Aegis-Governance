@@ -17,6 +17,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from aegis_core.ast.drivers.python import read_python_source
 from aegis_core.ast.schema import NormalizedAST
 from . import ToolEvidence
 
@@ -226,10 +227,8 @@ def find_definitions(filepath: str) -> dict[str, int]:
     Returns {function_name: line_number}
     """
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            source = f.read()
-        tree = ast.parse(source)
-    except (OSError, SyntaxError, UnicodeDecodeError):
+        tree = ast.parse(read_python_source(filepath))
+    except (OSError, SyntaxError, UnicodeError):
         return {}
 
     visitor = FunctionDefinitionVisitor()
@@ -557,10 +556,8 @@ def check(
             )
 
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            source = f.read()
-        tree = ast.parse(source, filename=filepath)
-    except (OSError, SyntaxError, UnicodeDecodeError) as e:
+        tree = ast.parse(read_python_source(filepath), filename=filepath)
+    except (OSError, SyntaxError, UnicodeError) as e:
         return ToolEvidence(
             tool="call_graph",
             target=os.path.basename(filepath),
