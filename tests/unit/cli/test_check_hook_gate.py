@@ -88,12 +88,6 @@ def _entries_naming(node, name):
             yield from _entries_naming(value, name)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=json.JSONDecodeError,
-    reason="check --hook --json prints two JSON documents (checkpoint, then Layer 1); "
-           "the one-document fix belongs to aegis_cli/check.py (lane b1-verify). Drop this mark with it.",
-)
 def test_json_mode_stdout_is_one_document_naming_the_blocking_check(repo, capsys):
     """The removed `hook pre-commit --json` printed one parseable document; `check --hook --json` must too."""
     _stage(repo, "aegis_core/bad_mod.py", "import google.genai\n\ndef run():\n    return 1\n")
