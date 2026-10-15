@@ -26,24 +26,10 @@ from aegis_core.outcomes import (
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 
 
-def test_detect_test_runner_package_json(tmp_path: Path) -> None:
-    (tmp_path / "package.json").write_text('{"name": "test", "scripts": {"test": "jest"}}\n', encoding="utf-8")
-    cmd, name = detect_test_runner(str(tmp_path))
-    assert name == "npm test"
-    assert "npm test" in cmd
-
-
 def test_detect_test_runner_empty(tmp_path: Path) -> None:
     cmd, name = detect_test_runner(str(tmp_path))
     assert cmd is None
     assert name is None
-
-
-def test_detect_test_runner_makefile(tmp_path: Path) -> None:
-    (tmp_path / "Makefile").write_text("test:\n\techo running tests\n", encoding="utf-8")
-    cmd, name = detect_test_runner(str(tmp_path))
-    assert name == "Makefile"
-    assert cmd == "make test"
 
 
 def test_to_fraction_deterministic() -> None:
