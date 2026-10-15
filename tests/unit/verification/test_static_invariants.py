@@ -28,12 +28,17 @@ BASH4_PATTERNS = {
 }
 
 
-def _shell_files():
-    files = list(iter_source_files(os.path.join(REPO_ROOT, "install"), (".sh",)))
-    hooks = os.path.join(REPO_ROOT, "install", "hooks")
-    if os.path.isdir(hooks):
-        files += [os.path.join(hooks, f) for f in os.listdir(hooks)]
-    return [f for f in files if os.path.isfile(f)]
+def _shell_sources():
+    """(name, text) of every shell script Aegis ships or writes: the repo-root
+    `aegis` wrapper and the git pre-commit block `aegis hook install` writes."""
+    from aegis_cli.hooks.management import generate_hook_block
+
+    sources = [
+        ("aegis", read(os.path.join(REPO_ROOT, "aegis"))),
+        ("pre-commit hook block", generate_hook_block("/usr/bin/python3", import_root="/opt/site")),
+    ]
+    assert all(text.strip() for _, text in sources)
+    return sources
 
 
 @pytest.mark.parametrize("label,pattern", sorted(BASH4_PATTERNS.items()))
@@ -41,13 +46,12 @@ def test_no_bash4_only_constructs(label, pattern):
     """SOMA-C03: macOS ships Bash 3.2; these constructs raise 'bad substitution'
     at expansion time, which `bash -n` cannot detect."""
     offenders = []
-    for path in _shell_files():
-        for lineno, line in enumerate(read(path).splitlines(), 1):
+    for name, text in _shell_sources():
+        for lineno, line in enumerate(text.splitlines(), 1):
             if line.lstrip().startswith("#"):
                 continue
             if pattern.search(line):
-                rel = os.path.relpath(path, REPO_ROOT)
-                offenders.append(f"{rel}:{lineno}: {line.strip()}")
+                offenders.append(f"{name}:{lineno}: {line.strip()}")
     assert not offenders, f"Bash 4+ construct ({label}) found:\n" + "\n".join(offenders)
 
 
@@ -57,13 +61,12 @@ def test_no_escaped_quotes_in_command_substitution():
     """SOMA-C02: `cd \\"$(dirname ...)\\"` passes literal quote characters, so the
     script dies at line 4 before sourcing anything. Killed the PreToolUse gate."""
     offenders = []
-    for path in _shell_files():
-        for lineno, line in enumerate(read(path).splitlines(), 1):
+    for name, text in _shell_sources():
+        for lineno, line in enumerate(text.splitlines(), 1):
             # Only flag the specific pattern that broke BASH_SOURCE resolution.
             # Legitimate uses like sed 's/"/\\"/g' inside $() are fine.
             if 'BASH_SOURCE' in line and '\\"' in line and "$(" in line:
-                rel = os.path.relpath(path, REPO_ROOT)
-                offenders.append(f"{rel}:{lineno}: {line.strip()}")
+                offenders.append(f"{name}:{lineno}: {line.strip()}")
     assert not offenders, (
         "Escaped quotes inside command substitution:\n" + "\n".join(offenders)
     )
@@ -100,33 +103,6 @@ def test_all_text_open_calls_specify_encoding():
     )
 
 
-# ── SOMA-H03: path renames must land in every call site ─────────────────
-
-def test_no_stale_gemini_config_paths():
-    """SOMA-H03: install.sh writes .gemini/config/{rules,skills}. Referring to
-    config/genome or config/organs means the fallback matches nothing."""
-    stale = re.compile(r'\.gemini/config/(genome|organs)\b')
-    targets = [
-        os.path.join(REPO_ROOT, "install", "install.sh"),
-        os.path.join(REPO_ROOT, "install", "uninstall.sh"),
-        os.path.join(REPO_ROOT, "Makefile"),
-    ]
-    offenders = []
-    for path in targets:
-        if not os.path.exists(path):
-            continue
-        for lineno, line in enumerate(read(path).splitlines(), 1):
-            if line.lstrip().startswith("#"):
-                continue
-            if stale.search(line):
-                rel = os.path.relpath(path, REPO_ROOT)
-                offenders.append(f"{rel}:{lineno}: {line.strip()}")
-    assert not offenders, "Stale gemini config path:\n" + "\n".join(offenders)
-
-
-
-
-
 def test_powershell_scripts_with_non_ascii_have_utf8_bom():
     """Windows PowerShell 5.1 decodes BOM-less scripts as ANSI (cp1252): the
     em-dash's trailing 0x94 byte becomes a closing quote and the installer
@@ -138,18 +114,6 @@ def test_powershell_scripts_with_non_ascii_have_utf8_bom():
         if not data.isascii() and not data.startswith(b"\xef\xbb\xbf"):
             offenders.append(os.path.relpath(path, REPO_ROOT))
     assert not offenders, f"non-ASCII PowerShell scripts missing UTF-8 BOM: {offenders}"
-
-
-def test_rule_basenames_are_unique_when_flattened():
-    """install.sh flattens genome/**/*.md into one directory, so a duplicate
-    basename would silently overwrite, last write winning."""
-    genome = os.path.join(REPO_ROOT, "genome")
-    seen = {}
-    for path in iter_source_files(genome, (".md",)):
-        name = os.path.basename(path)
-        seen.setdefault(name, []).append(os.path.relpath(path, REPO_ROOT))
-    dupes = {k: v for k, v in seen.items() if len(v) > 1}
-    assert not dupes, f"duplicate rule basenames would collide on install: {dupes}"
 
 
 # ── SOMA-M01: JSON must not contain Infinity ────────────────────────────
@@ -363,29 +327,6 @@ def test_cli_exits_nonzero_on_unknown_command():
     assert proc.returncode != 0, (
         f"CLI reported an unknown command but exited 0:\n{proc.stdout}{proc.stderr}"
     )
-
-
-# ── SOMA-H01: the verification gate must be able to fail ────────────────
-
-def test_make_validate_fails_on_broken_shell_script(tmp_path):
-    """SOMA-H01: `bash -n "$s" && echo ok || echo fail` swallowed the exit
-    status, so a syntax error anywhere kept CI green.
-
-    Verifies that bash -n actually returns non-zero on broken syntax,
-    which is the mechanism make validate relies on."""
-    broken = tmp_path / "zz_pytest_broken.sh"
-    broken.write_text("f() {\n")  # unterminated function body
-
-    # Verify bash -n catches the syntax error (this is what make validate uses)
-    proc = subprocess.run(
-        ["bash", "-n", str(broken)],
-        capture_output=True, text=True
-    )
-    assert proc.returncode != 0, (
-        "bash -n passed despite a syntax error — make validate would miss this"
-    )
-
-
 
 
 # ── Static Import & Documentation Integrity ─────────────────────────────

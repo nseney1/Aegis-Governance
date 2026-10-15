@@ -1,6 +1,6 @@
 """MCP config writers must never destroy a user's config (M3) and register only `aegis`.
 
-Covers `aegis init --mcp` (init.generate_mcp_config), `aegis install --platform mcp`
+Covers `aegis init --mcp` (init.generate_mcp_config), the MCP platform adapter
 (McpAdapter) and the Claude Desktop writer (ClaudeAdapter.install_desktop_mcp).
 """
 from __future__ import annotations
@@ -82,7 +82,7 @@ def home(tmp_path: Path) -> Path:
     return h
 
 
-# ── McpAdapter.install (aegis install --platform mcp) ────────────────────────
+# ── McpAdapter.install ───────────────────────────────────────────────────────
 
 
 class TestMcpAdapterRefusesUnmergeableConfig:

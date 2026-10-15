@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import os
 from pathlib import Path
 import re
 
@@ -158,20 +157,20 @@ class TestV3CLIOutputContextAndANSIHygiene:
         assert len(commands) >= 9
 
         for cmd in commands:
-            ns_plain = argparse.Namespace(plain=True, no_emoji=False, format=None, json=False, quiet=False, verbose=False)
+            ns_plain = argparse.Namespace(plain=True, json=False)
             ui_plain = cmd.get_ui(ns_plain)
             assert isinstance(ui_plain, OutputContext)
             assert ui_plain.color_enabled is False
             assert ui_plain.emoji_enabled is False
 
-            ns_json = argparse.Namespace(plain=False, no_emoji=False, format="json", json=True, quiet=False, verbose=False)
+            ns_json = argparse.Namespace(plain=False, json=True)
             ui_json = cmd.get_ui(ns_json)
             assert ui_json.json_mode is True
             assert ui_json.color_enabled is False
             assert ui_json.emoji_enabled is False
 
             monkeypatch.setenv("NO_COLOR", "1")
-            ns_env = argparse.Namespace(plain=False, no_emoji=False, format=None, json=False, quiet=False, verbose=False)
+            ns_env = argparse.Namespace(plain=False, json=False)
             ui_env = cmd.get_ui(ns_env)
             assert ui_env.color_enabled is False
             monkeypatch.delenv("NO_COLOR", raising=False)
@@ -183,7 +182,7 @@ class TestV3CLIOutputContextAndANSIHygiene:
             ["doctor", "--plain"],
             ["doctor", "--json"],
             ["rule", "list", "--plain"],
-            ["report", "--plain"],
+            ["hook", "status", "--plain"],
         ],
     )
     def test_cli_commands_emit_zero_ansi_when_plain_or_no_color(
@@ -195,5 +194,7 @@ class TestV3CLIOutputContextAndANSIHygiene:
         monkeypatch.setenv("NO_COLOR", "1")
         cli_main(argv)
         captured = capsys.readouterr()
+        # A removed command prints only a pointer, which would pass vacuously.
+        assert captured.out.strip(), f"{argv} printed nothing on stdout: {captured.err!r}"
         assert "\x1b[" not in captured.out, f"ANSI escape leaked to stdout for {argv}: {captured.out!r}"
         assert "\x1b[" not in captured.err, f"ANSI escape leaked to stderr for {argv}: {captured.err!r}"
