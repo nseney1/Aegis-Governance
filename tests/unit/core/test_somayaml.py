@@ -149,12 +149,15 @@ enforcement: gate
         with pytest.raises(AegisYAMLError, match="Duplicate key 'key' detected"):
             AegisYAML.parse_text(text)
 
-    def test_zero_width_sanitization(self):
-        # Hidden zero-width characters in key or value
-        text = "\ufeffid:\u200b cell-sanitized\n\u200ctier: \u200dmethod"
-        doc = AegisYAML.parse_text(text)
-        assert doc["id"] == "cell-sanitized"
-        assert doc["tier"] == "method"
+    def test_zero_width_handling(self):
+        # Review M5: stripping zero-width characters inside values silently changed data. Only a
+        # leading document BOM is stripped; values keep them; a raw invisible character in a key
+        # is rejected so it cannot spoof a visually identical key.
+        doc = AegisYAML.parse_text("\ufeffid: cell\u200b-x\ntier: \u200dmethod")
+        assert doc["id"] == "cell\u200b-x"
+        assert doc["tier"] == "\u200dmethod"
+        with pytest.raises(AegisYAMLError, match="invisible"):
+            AegisYAML.parse_text("id: cell\n\u200ctier: method")
 
     def test_control_character_rejection(self):
         text = "key: bad\x07bell"
