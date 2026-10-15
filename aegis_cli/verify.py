@@ -18,13 +18,11 @@ from aegis_cli.formatters import (
     format_in_band_charge_sheet,
     format_layer1_json_payload,
     format_layer2_summary,
-    format_sarif_report,
 )
 
 __all__ = [
     "run_verify",
     "VerifyCommand",
-    "format_sarif_report",
     "format_layer2_summary",
 ]
 
@@ -234,7 +232,6 @@ def run_verify(args: argparse.Namespace) -> int:
         return 1
 
     fmt = str(getattr(args, "format", None) or "text").lower()
-    use_sarif = fmt == "sarif"
     use_json = bool(getattr(args, "json", False) or fmt == "json")
 
     if getattr(args, "hook", False):
@@ -254,9 +251,6 @@ def run_verify(args: argparse.Namespace) -> int:
 
     if getattr(args, "dry_run", False):
         layer_mode = "Layer 1 only" if getattr(args, "layer1_only", False) else "Layer 1 + Layer 2"
-        if use_sarif:
-            print(json.dumps(format_sarif_report([], repo_root), indent=2))
-            return 0
         if use_json:
             print(json.dumps({"dry_run": True, "mode": layer_mode, "repo_root": repo_root, "files": target_files}, indent=2))
             return 0
@@ -266,9 +260,6 @@ def run_verify(args: argparse.Namespace) -> int:
         return 0
 
     if not target_files:
-        if use_sarif:
-            print(json.dumps(format_sarif_report([], repo_root), indent=2))
-            return 0
         if use_json:
             print(json.dumps({"passed": True, "files": [], "layer1": [], "summary": "Layer 1: 0 files changed (clean repository)"}, indent=2))
             return 0
@@ -285,7 +276,7 @@ def run_verify(args: argparse.Namespace) -> int:
 
     layer1_pass = runner.gate_verdict(results)
     summary = runner.format_summary(results)
-    if not use_json and not use_sarif:
+    if not use_json:
         if not layer1_pass:
             for r in results:
                 if not r.verdict:
@@ -308,9 +299,6 @@ def run_verify(args: argparse.Namespace) -> int:
 
     if getattr(args, "layer1_only", False):
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
-        if use_sarif:
-            print(json.dumps(format_sarif_report(results, repo_root), indent=2))
-            return 0 if layer1_pass else 1
         if use_json:
             print(json.dumps(format_layer1_json_payload(layer1_pass, target_files, results, summary), indent=2))
         return 0 if layer1_pass else 1
@@ -333,8 +321,6 @@ def run_verify(args: argparse.Namespace) -> int:
     provider = resolve_cli_provider(args, repo_root)
     if provider is None:
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
-        if use_sarif:
-            print(json.dumps(format_sarif_report(results, repo_root), indent=2))
         if not layer1_pass:
             return 1
         print("Notice: No inference provider configured. Layer 2 skipped (Layer 1 deterministic checks passed).", file=sys.stderr)
@@ -346,8 +332,6 @@ def run_verify(args: argparse.Namespace) -> int:
 
     if not task_plan:
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
-        if use_sarif:
-            print(json.dumps(format_sarif_report(results, repo_root), indent=2))
         if not layer1_pass:
             return 1
         print("Notice: No task plan provided (--plan or --plan-file). Layer 2 skipped (Layer 1 deterministic checks passed).", file=sys.stderr)
@@ -378,11 +362,8 @@ def run_verify(args: argparse.Namespace) -> int:
         _record_telemetry(False, "BLOCK")
         return 1
 
-    if not use_sarif and pipeline_res.arbitration_result:
+    if pipeline_res.arbitration_result:
         print(format_layer2_summary(pipeline_res.arbitration_result))
-
-    if use_sarif:
-        print(json.dumps(format_sarif_report(results, repo_root), indent=2))
 
     l2_exit = verdict_to_exit_code(pipeline_res.verdict)
     overall_passed = bool(layer1_pass and l2_exit == 0)
@@ -414,7 +395,7 @@ class VerifyCommand(AegisCommand):
             for group in getattr(parser, "_action_groups", ()):
                 if existing_fmt in group._group_actions:
                     group._group_actions.remove(existing_fmt)
-        parser.add_argument("--format", choices=["text", "json", "sarif"], default="text", help="Output format (text, json, sarif)")
+        parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format (text, json)")
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_verify(args)

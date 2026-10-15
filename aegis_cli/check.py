@@ -22,11 +22,10 @@ from aegis_cli.verify import (
     resolve_task_plan,
     discover_test_evidence,
     verdict_to_exit_code,
-    format_sarif_report,
 )
 from aegis_cli.checkpoint import run_checkpoint
 
-__all__ = ["run_check", "CheckCommand", "format_sarif_report"]
+__all__ = ["run_check", "CheckCommand"]
 
 
 def run_check(args: argparse.Namespace) -> int:
@@ -176,9 +175,9 @@ class CheckCommand(AegisCommand):
                     group._group_actions.remove(existing_fmt)
         parser.add_argument(
             "--format",
-            choices=["text", "json", "sarif"],
+            choices=["text", "json"],
             default="text",
-            help="Output format (text, json, sarif)",
+            help="Output format (text, json)",
         )
 
     def execute(self, args: argparse.Namespace) -> int:
