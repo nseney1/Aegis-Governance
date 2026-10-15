@@ -129,30 +129,46 @@ class CallSiteNode:
 
 @dataclass(frozen=True)
 class ImportNode:
-    """Represents an external or sibling module dependency."""
+    """Represents an external or sibling module dependency.
+
+    ``imported_symbols`` holds the names the import binds in the importing scope.
+    ``aliases`` holds one ``(bound_name, original_name)`` pair per ``as`` rebinding:
+    ``import os.path as osp`` -> ``("osp", "os.path")``; ``from os import path as p``
+    -> ``("p", "path")``. Policy checks use it to judge the aliased form exactly like
+    the plain form, so renaming an import cannot hide a forbidden API.
+    """
 
     source: str
     imported_symbols: Tuple[str, ...] = ()
     line: int = 1
     is_type_only: bool = False
+    aliases: Tuple[Tuple[str, str], ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        res: Dict[str, Any] = {
             "source": self.source,
             "imported_symbols": list(self.imported_symbols),
             "line": self.line,
             "is_type_only": self.is_type_only,
         }
+        # Omitted when empty so plain imports serialize exactly as before aliases existed.
+        if self.aliases:
+            res["aliases"] = [list(pair) for pair in self.aliases]
+        return res
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ImportNode:
         source_val = data.get("source") if "source" in data else data.get("module", "")
         symbols = data.get("imported_symbols") if "imported_symbols" in data else data.get("imported_names", ())
+        raw_aliases = data.get("aliases") or ()
+        if isinstance(raw_aliases, Mapping):
+            raw_aliases = raw_aliases.items()
         return cls(
             source=str(source_val),
             imported_symbols=tuple(str(s) for s in symbols),
             line=int(data.get("line", 1)),
             is_type_only=bool(data.get("is_type_only", False)),
+            aliases=tuple((str(bound), str(orig)) for bound, orig in raw_aliases),
         )
 
 

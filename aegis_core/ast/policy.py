@@ -25,7 +25,21 @@ __all__ = [
 ]
 
 
+def _import_aliases(imp: Any) -> dict[str, str]:
+    """Map each name an import binds via ``as`` to the name it aliases."""
+    raw = imp.get("aliases") if isinstance(imp, Mapping) else getattr(imp, "aliases", None)
+    pairs = raw.items() if isinstance(raw, Mapping) else (raw or ())
+    return {_normalize_ast_token(str(a)): _normalize_ast_token(str(o)) for a, o in pairs if a and o}
+
+
+def _dealias(target: str, aliases: Optional[Mapping[str, str]]) -> Optional[str]:
+    """Rewrite a reference through an alias to its plain form (``sp.run`` -> ``subprocess.run``)."""
+    head, dot, tail = target.partition(".")
+    return f"{aliases[head]}{dot}{tail}" if aliases and head in aliases else None
+
+
 def _extract_import_tuple(imp: Any) -> Tuple[str, Tuple[str, ...]]:
+    """(source, symbols) of an import in its plain form: aliased names map back to originals."""
     if isinstance(imp, tuple) and len(imp) == 2 and isinstance(imp[0], str):
         return imp[0], tuple(imp[1])
     if isinstance(imp, str):
@@ -33,12 +47,11 @@ def _extract_import_tuple(imp: Any) -> Tuple[str, Tuple[str, ...]]:
     if isinstance(imp, Mapping):
         src = _normalize_ast_token(str(imp.get("source") or imp.get("module") or ""))
         raw_syms = imp.get("imported_symbols") or imp.get("imported_names") or ()
-        syms = tuple(_normalize_ast_token(str(s)) for s in raw_syms if s)
-        return src, syms
-    src = _normalize_ast_token(str(getattr(imp, "source", "") or getattr(imp, "module", "") or ""))
-    raw_syms = getattr(imp, "imported_symbols", ()) or getattr(imp, "imported_names", ()) or ()
-    syms = tuple(_normalize_ast_token(str(s)) for s in raw_syms if s)
-    return src, syms
+    else:
+        src = _normalize_ast_token(str(getattr(imp, "source", "") or getattr(imp, "module", "") or ""))
+        raw_syms = getattr(imp, "imported_symbols", ()) or getattr(imp, "imported_names", ()) or ()
+    aliases = _import_aliases(imp)
+    return src, tuple(aliases.get(t, t) for t in (_normalize_ast_token(str(s)) for s in raw_syms if s))
 
 
 def _match_ImportNode_against_pattern(imp: Any, pattern: str) -> bool:
@@ -63,6 +76,7 @@ def _match_call_against_pattern(
     call_item: Any,
     pattern: str,
     imported_qual_map: Optional[Mapping[str, str]] = None,
+    aliases: Optional[Mapping[str, str]] = None,
 ) -> bool:
     """Return True if a CallSiteNode or call target matches a forbidden call pattern."""
     call = _normalize_ast_token(pattern)
@@ -77,14 +91,16 @@ def _match_call_against_pattern(
     if not target:
         return False
 
-    candidates = [target]
-    if imported_qual_map:
-        if target in imported_qual_map:
-            candidates.append(imported_qual_map[target])
-        elif "." in target:
-            head, tail = target.split(".", 1)
-            if head in imported_qual_map:
-                candidates.append(f"{imported_qual_map[head]}.{tail}")
+    candidates: list[str] = []
+    for ref in filter(None, (target, _dealias(target, aliases))):
+        candidates.append(ref)
+        if imported_qual_map:
+            if ref in imported_qual_map:
+                candidates.append(imported_qual_map[ref])
+            elif "." in ref:
+                head, tail = ref.split(".", 1)
+                if head in imported_qual_map:
+                    candidates.append(f"{imported_qual_map[head]}.{tail}")
 
     return any(cand == call or cand.endswith(f".{call}") for cand in candidates)
 
@@ -93,6 +109,7 @@ def _match_decorator_against_pattern(
     decorator_item: Any,
     pattern: str,
     imported_qual_map: Optional[Mapping[str, str]] = None,
+    aliases: Optional[Mapping[str, str]] = None,
 ) -> bool:
     """Return True if a decorator matches a forbidden decorator pattern."""
     dec = _normalize_ast_token(pattern).split("(", 1)[0].strip()
@@ -109,9 +126,11 @@ def _match_decorator_against_pattern(
     if not norm_d:
         return False
 
-    candidates = [norm_d]
-    if imported_qual_map and norm_d in imported_qual_map:
-        candidates.append(imported_qual_map[norm_d])
+    candidates: list[str] = []
+    for ref in filter(None, (norm_d, _dealias(norm_d, aliases))):
+        candidates.append(ref)
+        if imported_qual_map and ref in imported_qual_map:
+            candidates.append(imported_qual_map[ref])
 
     return any(cand == dec or cand.endswith(f".{dec}") for cand in candidates)
 
@@ -120,7 +139,11 @@ def evaluate_forbid_ast(
     normalized_ast: NormalizedAST,
     forbid_spec: dict[str, Any],
 ) -> list[str]:
-    """Evaluate a NormalizedAST against declarative forbid_ast constraints."""
+    """Evaluate a NormalizedAST against declarative forbid_ast constraints.
+
+    Aliased imports are judged as their plain form (``sp.run()`` after ``import subprocess as
+    sp`` as ``subprocess.run()``) plus the literal alias text.
+    """
     if normalized_ast is None or not forbid_spec or not isinstance(forbid_spec, dict):
         return []
 
@@ -129,9 +152,11 @@ def evaluate_forbid_ast(
     raw_ast_imports = getattr(normalized_ast, "imports", ()) or ()
     parsed_imports: list[tuple[str, tuple[str, ...]]] = []
     imported_qual_map: dict[str, str] = {}
+    aliases: dict[str, str] = {}
 
     for imp in raw_ast_imports:
         src, syms = _extract_import_tuple(imp)
+        aliases.update(_import_aliases(imp))
         parsed_imports.append((src, syms))
         if src:
             for sym in syms:
@@ -161,7 +186,7 @@ def evaluate_forbid_ast(
             call = _normalize_ast_token(raw_call)
             if not call:
                 continue
-            if any(_match_call_against_pattern(item, call, imported_qual_map) for item in all_call_items):
+            if any(_match_call_against_pattern(item, call, imported_qual_map, aliases) for item in all_call_items):
                 violations.append(f"Forbidden call '{call}' matched rule forbid_ast.calls")
 
     raw_decs_sources: list[Any] = []
@@ -193,7 +218,7 @@ def evaluate_forbid_ast(
             dec = _normalize_ast_token(raw_dec).split("(", 1)[0].strip()
             if not dec:
                 continue
-            if any(_match_decorator_against_pattern(d, dec, imported_qual_map) for d in raw_decs_sources):
+            if any(_match_decorator_against_pattern(d, dec, imported_qual_map, aliases) for d in raw_decs_sources):
                 violations.append(f"Forbidden decorator '{dec}' matched rule forbid_ast.decorators")
 
     return violations

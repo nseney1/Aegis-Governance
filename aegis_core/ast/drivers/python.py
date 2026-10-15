@@ -31,6 +31,11 @@ def _resolve_attribute_chain(node: ast.AST) -> Optional[str]:
     return None
 
 
+def _alias_pairs(names: List[ast.alias]) -> Tuple[Tuple[str, str], ...]:
+    """(bound_name, original_name) for every real ``as`` rebinding in an import."""
+    return tuple((a.asname, a.name) for a in names if a.asname and a.asname != a.name)
+
+
 class _PythonASTVisitor(ast.NodeVisitor):
     def __init__(self, file_path: str):
         self.file_path = file_path
@@ -62,6 +67,7 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     source=alias.name,
                     imported_symbols=imported,
                     line=node.lineno,
+                    aliases=_alias_pairs([alias]),
                 )
             )
         self.generic_visit(node)
@@ -74,6 +80,7 @@ class _PythonASTVisitor(ast.NodeVisitor):
                 source=source,
                 imported_symbols=symbols,
                 line=node.lineno,
+                aliases=_alias_pairs(node.names),
             )
         )
         self.generic_visit(node)

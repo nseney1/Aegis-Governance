@@ -147,3 +147,15 @@ def check_value(x):
     ops = [m.original_op for m in norm_ast.mutation_points]
     assert "==" in ops
     assert "+" in ops
+
+
+def test_python_driver_records_import_aliases():
+    code = "import os.path as osp\nfrom os import sep, path as p\nimport json\n"
+
+    imports = parse_python_ast(code, file_path="mod.py").imports
+
+    assert [(i.source, i.imported_symbols, i.aliases) for i in imports] == [
+        ("os.path", ("osp",), (("osp", "os.path"),)),
+        ("os", ("sep", "p"), (("p", "path"),)),
+        ("json", ("json",), ()),
+    ]
