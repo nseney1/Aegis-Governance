@@ -1,4 +1,4 @@
-"""soma status — Show active rules and stats."""
+"""aegis status — show active rules and stats."""
 from __future__ import annotations
 
 import argparse

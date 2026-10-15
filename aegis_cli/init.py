@@ -1,4 +1,4 @@
-"""soma init — Set up governance for this project.
+"""aegis init — set up governance for this project.
 
 Detects platform and project type, installs starter rules.
 """

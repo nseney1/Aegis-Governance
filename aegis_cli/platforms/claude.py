@@ -142,14 +142,14 @@ class ClaudeAdapter(PlatformAdapter):
                 "# Soma Governance Rules\n\n"
                 + platform_map
                 + "\n\n---\n\n".join(sections)
-                + "\n\nRun `soma doctor` to verify system health.\n"
+                + "\n\nRun `aegis doctor` to verify system health.\n"
             )
         else:
             body = (
                 "# Soma Governance Integration\n\n"
                 "This project is governed by Soma. Rules are checked adaptively.\n\n"
                 + platform_map
-                + "Run `soma doctor` to verify system health.\n"
+                + "Run `aegis doctor` to verify system health.\n"
             )
         return f"{SOMA_MARKER_START}\n{body}\n{SOMA_MARKER_END}\n"
 
