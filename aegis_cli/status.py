@@ -268,27 +268,6 @@ def _merged_claude_rules(claude_md: Path, heading_map: dict[str, str]) -> tuple[
     return has_soma, rules
 
 
-def format_status_summary(data: dict, plumbing: bool = False, plain: bool = False) -> str:
-    """Format status summary text."""
-    active = data.get("active_rules", data.get("active_cells", 0))
-    traps = data.get("trap_count", 0)
-    invariants = data.get("wall_count", data.get("invariant_count", 0))
-    archived = data.get("archived_count", data.get("apoptotic_count", 0))
-    lines = [
-        "📊 Aegis Governance Status",
-        f"  Active Rules:    {active} active",
-        f"  Invariants:      {invariants} enforced",
-        f"  Adaptive Traps:  {traps} active",
-        f"  Archived Rules:  {archived} archived",
-    ]
-
-    text = "\n".join(lines)
-    if plain:
-        from aegis_cli import format_plain
-        text = format_plain(text)
-    return text
-
-
 def run_status(args: argparse.Namespace) -> int:
     """Show active rules and stats."""
     root = _repo_root(args)
@@ -508,17 +487,11 @@ class StatusCommand(AegisCommand):
     """Command to show active rules, rule inventory, and health stats."""
 
     name = "status"
-    aliases = ("rules",)
     category = CommandCategory.WORKFLOW
     help = "Show active rules and stats"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--all",
-            action="store_true",
-            default=False,
-            help="Show all rules without truncation",
-        )
+        """status takes only the global flags."""
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_status(args)

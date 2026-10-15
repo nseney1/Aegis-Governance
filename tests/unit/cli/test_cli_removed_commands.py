@@ -1,0 +1,86 @@
+"""v4 hard-cuts commands and aliases (ADR 0005 D5, H1): no aliases, no shims.
+
+A removed name exits 2 and prints exactly one line on stderr pointing at the
+replacement, so scripts and agents that call the old name fail loudly with
+the next step instead of a generic argparse error.
+"""
+from __future__ import annotations
+
+import pytest
+
+from aegis_cli.cli import main
+
+REPORT_POINTER = (
+    "aegis report was removed in v4: aegis status shows rule trigger counts; "
+    "outcomes are recorded with the MCP tool aegis_report_outcome"
+)
+
+
+@pytest.mark.parametrize(
+    "argv, line",
+    [
+        (["install"], "aegis install was removed in v4: use aegis init --host"),
+        (["install", "--platform", "claude"], "aegis install was removed in v4: use aegis init --host"),
+        (["system"], "aegis system was removed in v4: use aegis doctor"),
+        (["sys"], "aegis sys was removed in v4: use aegis doctor"),
+        (["system", "doctor", "--json"], "aegis system doctor was removed in v4: use aegis doctor"),
+        (["system", "hook", "install"], "aegis system hook was removed in v4: use aegis hook"),
+        (["detect"], "aegis detect was removed in v4: use aegis doctor"),
+        (["languages"], "aegis languages was removed in v4: use aegis doctor"),
+        (["drivers"], "aegis drivers was removed in v4: use aegis doctor"),
+        (["audit"], "aegis audit was removed in v4: use aegis doctor"),
+        (["rules"], "aegis rules was removed in v4: use aegis status"),
+        (["agent", "scan", "a.py"], "aegis agent scan was removed in v4: use aegis scan"),
+        (["agent", "record", "--outcome", "tp"],
+         "aegis agent record was removed in v4: use aegis_report_outcome (MCP)"),
+        (["report"], REPORT_POINTER),
+        (["report", "--session", "0"], REPORT_POINTER),
+        (["completion", "bash"], "aegis completion was removed in v4: no replacement"),
+        (["skill", "list"], "aegis skill was removed in v4: no replacement"),
+        (["handoff", "consume", "t-1"], "aegis handoff was removed in v4: no replacement"),
+        (["--json", "report"], REPORT_POINTER),
+        (["--workspace", "/nonexistent", "install"], "aegis install was removed in v4: use aegis init --host"),
+    ],
+)
+def test_removed_name_exits_2_with_one_pointer_line(argv, line, capsys):
+    rc = main(argv)
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err == line + "\n"
+
+
+def test_agent_without_a_known_action_points_at_both_replacements(capsys):
+    assert main(["agent"]) == 2
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1
+    assert err.startswith("aegis agent was removed in v4: ")
+    assert "aegis scan" in err and "aegis_report_outcome" in err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--plumbing", "status"],
+        ["--internal", "status"],
+        ["-q", "status"],
+        ["-v", "status"],
+        ["--no-emoji", "status"],
+        ["--format", "json", "status"],
+        ["status", "--format", "mermaid"],
+        ["rule", "list", "--verbose"],
+        ["rule", "list", "--no-emoji"],
+    ],
+)
+def test_removed_global_flags_are_usage_errors(argv, capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(argv)
+    assert exc.value.code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["--json", "status"], ["--plain", "status"], ["status", "--json"]])
+def test_surviving_global_flags_still_parse(argv, tmp_path, monkeypatch):
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    assert main(argv) == 0

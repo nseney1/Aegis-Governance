@@ -447,11 +447,8 @@ class RuleCommand(AegisCommand):
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         common = argparse.ArgumentParser(add_help=False)
-        for flag in ("--plain", "--no-emoji", "--json"):
+        for flag in ("--plain", "--json"):
             common.add_argument(flag, action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("--format", choices=["text", "json", "mermaid"], default=argparse.SUPPRESS)
-        common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("-q", "--quiet", action="store_true", default=argparse.SUPPRESS)
         common.add_argument("--workspace", type=str, default=argparse.SUPPRESS, action=_WorkspaceArg)
         sub = parser.add_subparsers(dest="rule_action", metavar="ACTION")
 

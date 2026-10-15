@@ -7,7 +7,6 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from aegis_cli.cli import main as cli_main
 from aegis_cli.platforms.claude import ClaudeAdapter
 from aegis_core.receipts import ReceiptManager, compute_file_digest
 from aegis_core.skills.handoff import HandoffRouter, consume_handoff, soma_handoff
@@ -186,51 +185,6 @@ class TestInboundHandoffVerification:
         # With verify_tree=False, consumption succeeds despite tree drift
         consumed = consume_handoff(ws, issued.ticket_id, verify_tree=False)
         assert consumed.status == "consumed"
-
-    def test_cli_aegis_handoff_consume(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        ws = self._setup_workspace_with_skills(tmp_path)
-        issued = soma_handoff(
-            workspace=ws,
-            from_skill="sentry",
-            to_skill="fixer",
-            artifact_type="ChargeSheet",
-            payload={
-                "category": "security",
-                "risk": "CLI consume test",
-                "mechanism": "Subcommand verification",
-            },
-            cycle_id="cyc04",
-        )
-
-        rc = cli_main(
-            [
-                "--workspace",
-                str(tmp_path),
-                "handoff",
-                "consume",
-                issued.ticket_id,
-                "--json",
-            ],
-            prog="aegis",
-        )
-        assert rc == 0
-        out = json.loads(capsys.readouterr().out)
-        assert out["ticket_id"] == issued.ticket_id
-        assert out["status"] == "consumed"
-        assert out["payload"]["risk"] == "CLI consume test"
-
-        # Second consumption via CLI returns exit code 1
-        rc_fail = cli_main(
-            [
-                "--workspace",
-                str(tmp_path),
-                "handoff",
-                "consume",
-                issued.ticket_id,
-            ],
-            prog="aegis",
-        )
-        assert rc_fail == 1
 
 
 class TestRuleCacheManifestVerification:

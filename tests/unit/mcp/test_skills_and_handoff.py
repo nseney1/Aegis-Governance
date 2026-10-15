@@ -187,45 +187,6 @@ class TestSkillGraphAndHandoffRouter:
         assert "<!-- AEGIS_HANDOFF_TICKET -->" in block
         assert len(block.split()) < 50  # Well under 150 tokens!
 
-    def test_cli_skill_and_handoff_commands(self, tmp_path: Path, monkeypatch, capsys):
-        import argparse
-        from aegis_cli.skills import run_skill, run_handoff
-        monkeypatch.chdir(tmp_path)
-        ws = Workspace(tmp_path)
-        ws.scaffold()
-        skills_dir = tmp_path / ".aegis" / "skills"
-        skills_dir.mkdir(parents=True)
-        (skills_dir / "scout.md").write_text(
-            "---\nid: scout\ntier: guardrail\nproduces: [Finding]\nhandoff_targets: [fixer]\n---\n",
-            encoding="utf-8",
-        )
-        (skills_dir / "fixer.md").write_text(
-            "---\nid: fixer\ntier: lane\nconsumes: [Finding]\n---\n",
-            encoding="utf-8",
-        )
-
-        # Test skill list
-        args_skill = argparse.Namespace(skill_action="list", ws=ws, json=True)
-        rc = run_skill(args_skill)
-        assert rc == 0
-        out = capsys.readouterr().out
-        assert "scout" in out
-
-        # Test handoff
-        args_handoff = argparse.Namespace(
-            ws=ws,
-            from_skill="scout",
-            to_skill="fixer",
-            artifact="Finding",
-            payload='{"issue": "test"}',
-            cycle_id=None,
-            json=False,
-        )
-        rc = run_handoff(args_handoff)
-        assert rc == 0
-        out = capsys.readouterr().out
-        assert "AEGIS_HANDOFF_TICKET" in out
-
 
 class TestArtifactsAndSkillsBranchHardening:
     """Comprehensive branch and mutation hardening for artifacts, skills, handoff, and slots."""

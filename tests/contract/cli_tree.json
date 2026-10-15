@@ -1,26 +1,14 @@
 {
   "command_resolution": {
-    "agent": "agent",
-    "audit": "doctor",
     "check": "check",
     "checkpoint": "check",
-    "completion": "completion",
-    "detect": "detect",
     "doctor": "doctor",
-    "drivers": "detect",
-    "handoff": "handoff",
     "hook": "hook",
     "init": "init",
-    "install": "install",
-    "languages": "detect",
     "migrate": "migrate",
-    "report": "report",
     "rule": "rule",
-    "rules": "status",
-    "skill": "skill",
+    "scan": "scan",
     "status": "status",
-    "sys": "system",
-    "system": "system",
     "uninstall": "uninstall",
     "verify": "check"
   },
@@ -39,55 +27,6 @@
       },
       {
         "const": true,
-        "default": "==SUPPRESS==",
-        "dest": "plumbing",
-        "flags": [
-          "--plumbing",
-          "--internal"
-        ],
-        "kind": "store_true",
-        "nargs": 0,
-        "required": false
-      },
-      {
-        "const": true,
-        "default": "==SUPPRESS==",
-        "dest": "plain",
-        "flags": [
-          "--plain"
-        ],
-        "kind": "store_true",
-        "nargs": 0,
-        "required": false
-      },
-      {
-        "const": true,
-        "default": "==SUPPRESS==",
-        "dest": "no_emoji",
-        "flags": [
-          "--no-emoji"
-        ],
-        "kind": "store_true",
-        "nargs": 0,
-        "required": false
-      },
-      {
-        "choices": [
-          "text",
-          "json",
-          "mermaid"
-        ],
-        "default": "==SUPPRESS==",
-        "dest": "format",
-        "flags": [
-          "--format"
-        ],
-        "kind": "store",
-        "nargs": null,
-        "required": false
-      },
-      {
-        "const": true,
         "default": false,
         "dest": "json",
         "flags": [
@@ -100,22 +39,9 @@
       {
         "const": true,
         "default": "==SUPPRESS==",
-        "dest": "verbose",
+        "dest": "plain",
         "flags": [
-          "-v",
-          "--verbose"
-        ],
-        "kind": "store_true",
-        "nargs": 0,
-        "required": false
-      },
-      {
-        "const": true,
-        "default": "==SUPPRESS==",
-        "dest": "quiet",
-        "flags": [
-          "-q",
-          "--quiet"
+          "--plain"
         ],
         "kind": "store_true",
         "nargs": 0,
@@ -152,276 +78,6 @@
       }
     ],
     "commands": {
-      "agent": {
-        "aliases": [],
-        "arguments": [
-          {
-            "default": "==SUPPRESS==",
-            "dest": "help",
-            "flags": [
-              "-h",
-              "--help"
-            ],
-            "kind": "help",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "json",
-            "flags": [
-              "--json"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "default": "==SUPPRESS==",
-            "dest": "workspace",
-            "flags": [
-              "--workspace"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "default": null,
-            "dest": "agent_action",
-            "flags": [],
-            "kind": "parsers",
-            "nargs": "A...",
-            "required": false
-          }
-        ],
-        "commands": {
-          "grade": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              }
-            ]
-          },
-          "receipt": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "verify",
-                "dest": "operation",
-                "flags": [
-                  "--operation"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "default": "local-session",
-                "dest": "session_id",
-                "flags": [
-                  "--session-id"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              }
-            ]
-          },
-          "record": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "tp",
-                  "fp",
-                  "trigger",
-                  "pass",
-                  "fail"
-                ],
-                "default": "tp",
-                "dest": "outcome",
-                "flags": [
-                  "--outcome"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "default": "cli-record",
-                "dest": "key",
-                "flags": [
-                  "--key"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "default": null,
-                "dest": "rules",
-                "flags": [
-                  "--rules"
-                ],
-                "kind": "store",
-                "nargs": "*",
-                "required": false
-              },
-              {
-                "default": "",
-                "dest": "notes",
-                "flags": [
-                  "--notes"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              }
-            ]
-          },
-          "scan": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": null,
-                "dest": "target_files",
-                "flags": [],
-                "kind": "store",
-                "nargs": "*",
-                "required": true
-              },
-              {
-                "default": null,
-                "dest": "files",
-                "flags": [
-                  "--files"
-                ],
-                "kind": "store",
-                "nargs": "*",
-                "required": false
-              }
-            ]
-          }
-        }
-      },
       "check": {
         "aliases": [
           "verify",
@@ -441,40 +97,6 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
             "default": false,
             "dest": "json",
             "flags": [
@@ -487,22 +109,9 @@
           {
             "const": true,
             "default": "==SUPPRESS==",
-            "dest": "verbose",
+            "dest": "plain",
             "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
+              "--plain"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -718,7 +327,7 @@
           }
         ]
       },
-      "completion": {
+      "doctor": {
         "aliases": [],
         "arguments": [
           {
@@ -734,55 +343,6 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
             "default": false,
             "dest": "json",
             "flags": [
@@ -795,285 +355,9 @@
           {
             "const": true,
             "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "default": "==SUPPRESS==",
-            "dest": "workspace",
-            "flags": [
-              "--workspace"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "choices": [
-              "bash",
-              "zsh",
-              "fish"
-            ],
-            "default": null,
-            "dest": "shell",
-            "flags": [],
-            "kind": "store",
-            "nargs": null,
-            "required": true
-          }
-        ]
-      },
-      "detect": {
-        "aliases": [
-          "languages",
-          "drivers"
-        ],
-        "arguments": [
-          {
-            "default": "==SUPPRESS==",
-            "dest": "help",
-            "flags": [
-              "-h",
-              "--help"
-            ],
-            "kind": "help",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
             "dest": "plain",
             "flags": [
               "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "json",
-            "flags": [
-              "--json"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "default": "==SUPPRESS==",
-            "dest": "workspace",
-            "flags": [
-              "--workspace"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "fix",
-            "flags": [
-              "--fix",
-              "--provision"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "dry_run",
-            "flags": [
-              "--dry-run"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          }
-        ]
-      },
-      "doctor": {
-        "aliases": [
-          "audit"
-        ],
-        "arguments": [
-          {
-            "default": "==SUPPRESS==",
-            "dest": "help",
-            "flags": [
-              "-h",
-              "--help"
-            ],
-            "kind": "help",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "json",
-            "flags": [
-              "--json"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -1137,203 +421,6 @@
           }
         ]
       },
-      "handoff": {
-        "aliases": [],
-        "arguments": [
-          {
-            "default": "==SUPPRESS==",
-            "dest": "help",
-            "flags": [
-              "-h",
-              "--help"
-            ],
-            "kind": "help",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "json",
-            "flags": [
-              "--json"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "default": "==SUPPRESS==",
-            "dest": "workspace",
-            "flags": [
-              "--workspace"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "default": null,
-            "dest": "handoff_action",
-            "flags": [],
-            "kind": "store",
-            "nargs": "?",
-            "required": false
-          },
-          {
-            "default": null,
-            "dest": "ticket_id",
-            "flags": [],
-            "kind": "store",
-            "nargs": "?",
-            "required": false
-          },
-          {
-            "default": null,
-            "dest": "from_skill",
-            "flags": [
-              "--from",
-              "-f"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "default": null,
-            "dest": "to_skill",
-            "flags": [
-              "--to",
-              "-t"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "default": null,
-            "dest": "artifact",
-            "flags": [
-              "--artifact",
-              "-a"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "default": "{}",
-            "dest": "payload",
-            "flags": [
-              "--payload",
-              "-p"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "default": null,
-            "dest": "cycle_id",
-            "flags": [
-              "--cycle-id"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "no_verify_tree",
-            "flags": [
-              "--no-verify-tree"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          }
-        ]
-      },
       "hook": {
         "aliases": [],
         "arguments": [
@@ -1350,55 +437,6 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
             "default": false,
             "dest": "json",
             "flags": [
@@ -1411,22 +449,9 @@
           {
             "const": true,
             "default": "==SUPPRESS==",
-            "dest": "verbose",
+            "dest": "plain",
             "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
+              "--plain"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -1469,55 +494,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -1530,22 +506,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -1580,55 +543,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -1641,22 +555,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -1691,55 +592,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -1752,22 +604,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -1824,55 +663,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -1885,22 +675,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -1945,55 +722,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -2006,22 +734,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -2067,55 +782,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -2128,22 +794,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -2178,55 +831,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -2239,22 +843,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -2300,55 +891,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -2361,22 +903,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -2411,55 +940,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -2472,22 +952,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -2522,55 +989,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -2583,22 +1001,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -2633,55 +1038,6 @@
               },
               {
                 "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
                 "default": false,
                 "dest": "json",
                 "flags": [
@@ -2694,22 +1050,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "verbose",
+                "dest": "plain",
                 "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
+                  "--plain"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -2768,55 +1111,6 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
             "default": false,
             "dest": "json",
             "flags": [
@@ -2829,22 +1123,9 @@
           {
             "const": true,
             "default": "==SUPPRESS==",
-            "dest": "verbose",
+            "dest": "plain",
             "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
+              "--plain"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -2962,157 +1243,6 @@
           }
         ]
       },
-      "install": {
-        "aliases": [],
-        "arguments": [
-          {
-            "default": "==SUPPRESS==",
-            "dest": "help",
-            "flags": [
-              "-h",
-              "--help"
-            ],
-            "kind": "help",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "json",
-            "flags": [
-              "--json"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "default": "==SUPPRESS==",
-            "dest": "workspace",
-            "flags": [
-              "--workspace"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "choices": [
-              "gemini",
-              "kiro",
-              "copilot",
-              "claude",
-              "mcp"
-            ],
-            "default": null,
-            "dest": "platform",
-            "flags": [
-              "--platform",
-              "-p"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "local",
-            "flags": [
-              "--local"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "dry_run",
-            "flags": [
-              "--dry-run"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          }
-        ]
-      },
       "migrate": {
         "aliases": [],
         "arguments": [
@@ -3129,55 +1259,6 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
             "default": false,
             "dest": "json",
             "flags": [
@@ -3190,22 +1271,9 @@
           {
             "const": true,
             "default": "==SUPPRESS==",
-            "dest": "verbose",
+            "dest": "plain",
             "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
+              "--plain"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -3232,128 +1300,6 @@
             "kind": "store_true",
             "nargs": 0,
             "required": false
-          }
-        ]
-      },
-      "report": {
-        "aliases": [],
-        "arguments": [
-          {
-            "default": "==SUPPRESS==",
-            "dest": "help",
-            "flags": [
-              "-h",
-              "--help"
-            ],
-            "kind": "help",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "json",
-            "flags": [
-              "--json"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "default": "==SUPPRESS==",
-            "dest": "workspace",
-            "flags": [
-              "--workspace"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "default": -1,
-            "dest": "session",
-            "flags": [
-              "--session"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "int"
           }
         ]
       },
@@ -3373,55 +1319,6 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
             "default": false,
             "dest": "json",
             "flags": [
@@ -3434,22 +1331,9 @@
           {
             "const": true,
             "default": "==SUPPRESS==",
-            "dest": "verbose",
+            "dest": "plain",
             "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
+              "--plain"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -3504,59 +1388,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -3633,59 +1467,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -3754,59 +1538,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -4026,59 +1760,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -4175,59 +1859,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -4305,59 +1939,9 @@
               {
                 "const": true,
                 "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -4439,7 +2023,7 @@
           }
         }
       },
-      "skill": {
+      "scan": {
         "aliases": [],
         "arguments": [
           {
@@ -4455,55 +2039,6 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
             "default": false,
             "dest": "json",
             "flags": [
@@ -4516,22 +2051,9 @@
           {
             "const": true,
             "default": "==SUPPRESS==",
-            "dest": "verbose",
+            "dest": "plain",
             "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
+              "--plain"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -4550,486 +2072,16 @@
           },
           {
             "default": null,
-            "dest": "skill_action",
+            "dest": "files",
             "flags": [],
-            "kind": "parsers",
-            "nargs": "A...",
-            "required": false
-          }
-        ],
-        "commands": {
-          "inspect": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "default": null,
-                "dest": "target_skill",
-                "flags": [],
-                "kind": "store",
-                "nargs": null,
-                "required": true,
-                "type": "str"
-              }
-            ]
-          },
-          "list": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              }
-            ]
-          },
-          "slots": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              }
-            ]
-          }
-        }
-      },
-      "status": {
-        "aliases": [
-          "rules"
-        ],
-        "arguments": [
-          {
-            "default": "==SUPPRESS==",
-            "dest": "help",
-            "flags": [
-              "-h",
-              "--help"
-            ],
-            "kind": "help",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
             "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "json",
-            "flags": [
-              "--json"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "default": "==SUPPRESS==",
-            "dest": "workspace",
-            "flags": [
-              "--workspace"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false,
-            "type": "str"
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "all",
-            "flags": [
-              "--all"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
+            "nargs": "+",
+            "required": true
           }
         ]
       },
-      "system": {
-        "aliases": [
-          "sys"
-        ],
+      "status": {
+        "aliases": [],
         "arguments": [
           {
             "default": "==SUPPRESS==",
@@ -5044,11 +2096,10 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
+            "default": false,
+            "dest": "json",
             "flags": [
-              "--plumbing",
-              "--internal"
+              "--json"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -5066,67 +2117,6 @@
             "required": false
           },
           {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "json",
-            "flags": [
-              "--json"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "verbose",
-            "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
             "default": "==SUPPRESS==",
             "dest": "workspace",
             "flags": [
@@ -5136,1402 +2126,8 @@
             "nargs": null,
             "required": false,
             "type": "str"
-          },
-          {
-            "default": null,
-            "dest": "system_action",
-            "flags": [],
-            "kind": "parsers",
-            "nargs": "A...",
-            "required": false
           }
-        ],
-        "commands": {
-          "compact": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "default": 30,
-                "dest": "days",
-                "flags": [
-                  "--days"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "int"
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "dry_run",
-                "flags": [
-                  "--dry-run"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              }
-            ]
-          },
-          "doctor": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "fix_path",
-                "flags": [
-                  "--fix-path"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "fix",
-                "flags": [
-                  "--fix"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "drivers",
-                "flags": [
-                  "--drivers"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "yes",
-                "flags": [
-                  "--yes",
-                  "-y"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              }
-            ]
-          },
-          "drivers": {
-            "aliases": [
-              "detect"
-            ],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "fix",
-                "flags": [
-                  "--fix"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "dry_run",
-                "flags": [
-                  "--dry-run"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              }
-            ]
-          },
-          "hook": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "default": null,
-                "dest": "hook_subaction",
-                "flags": [],
-                "kind": "parsers",
-                "nargs": "A...",
-                "required": false
-              }
-            ],
-            "commands": {
-              "install": {
-                "aliases": [],
-                "arguments": [
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "help",
-                    "flags": [
-                      "-h",
-                      "--help"
-                    ],
-                    "kind": "help",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plumbing",
-                    "flags": [
-                      "--plumbing",
-                      "--internal"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plain",
-                    "flags": [
-                      "--plain"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "no_emoji",
-                    "flags": [
-                      "--no-emoji"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "choices": [
-                      "text",
-                      "json",
-                      "mermaid"
-                    ],
-                    "default": "==SUPPRESS==",
-                    "dest": "format",
-                    "flags": [
-                      "--format"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "json",
-                    "flags": [
-                      "--json"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "verbose",
-                    "flags": [
-                      "-v",
-                      "--verbose"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "quiet",
-                    "flags": [
-                      "-q",
-                      "--quiet"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "workspace",
-                    "flags": [
-                      "--workspace"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false,
-                    "type": "str"
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "force",
-                    "flags": [
-                      "--force"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "dry_run",
-                    "flags": [
-                      "--dry-run"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  }
-                ]
-              },
-              "status": {
-                "aliases": [],
-                "arguments": [
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "help",
-                    "flags": [
-                      "-h",
-                      "--help"
-                    ],
-                    "kind": "help",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plumbing",
-                    "flags": [
-                      "--plumbing",
-                      "--internal"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plain",
-                    "flags": [
-                      "--plain"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "no_emoji",
-                    "flags": [
-                      "--no-emoji"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "choices": [
-                      "text",
-                      "json",
-                      "mermaid"
-                    ],
-                    "default": "==SUPPRESS==",
-                    "dest": "format",
-                    "flags": [
-                      "--format"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "json",
-                    "flags": [
-                      "--json"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "verbose",
-                    "flags": [
-                      "-v",
-                      "--verbose"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "quiet",
-                    "flags": [
-                      "-q",
-                      "--quiet"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "workspace",
-                    "flags": [
-                      "--workspace"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false,
-                    "type": "str"
-                  }
-                ]
-              },
-              "uninstall": {
-                "aliases": [],
-                "arguments": [
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "help",
-                    "flags": [
-                      "-h",
-                      "--help"
-                    ],
-                    "kind": "help",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plumbing",
-                    "flags": [
-                      "--plumbing",
-                      "--internal"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plain",
-                    "flags": [
-                      "--plain"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "no_emoji",
-                    "flags": [
-                      "--no-emoji"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "choices": [
-                      "text",
-                      "json",
-                      "mermaid"
-                    ],
-                    "default": "==SUPPRESS==",
-                    "dest": "format",
-                    "flags": [
-                      "--format"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "json",
-                    "flags": [
-                      "--json"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "verbose",
-                    "flags": [
-                      "-v",
-                      "--verbose"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "quiet",
-                    "flags": [
-                      "-q",
-                      "--quiet"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "workspace",
-                    "flags": [
-                      "--workspace"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false,
-                    "type": "str"
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "force",
-                    "flags": [
-                      "--force"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "dry_run",
-                    "flags": [
-                      "--dry-run"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  }
-                ]
-              }
-            }
-          },
-          "skills": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plumbing",
-                "flags": [
-                  "--plumbing",
-                  "--internal"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "no_emoji",
-                "flags": [
-                  "--no-emoji"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "choices": [
-                  "text",
-                  "json",
-                  "mermaid"
-                ],
-                "default": "==SUPPRESS==",
-                "dest": "format",
-                "flags": [
-                  "--format"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "verbose",
-                "flags": [
-                  "-v",
-                  "--verbose"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "quiet",
-                "flags": [
-                  "-q",
-                  "--quiet"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "default": null,
-                "dest": "skill_subaction",
-                "flags": [],
-                "kind": "parsers",
-                "nargs": "A...",
-                "required": false
-              }
-            ],
-            "commands": {
-              "inspect": {
-                "aliases": [],
-                "arguments": [
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "help",
-                    "flags": [
-                      "-h",
-                      "--help"
-                    ],
-                    "kind": "help",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plumbing",
-                    "flags": [
-                      "--plumbing",
-                      "--internal"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plain",
-                    "flags": [
-                      "--plain"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "no_emoji",
-                    "flags": [
-                      "--no-emoji"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "choices": [
-                      "text",
-                      "json",
-                      "mermaid"
-                    ],
-                    "default": "==SUPPRESS==",
-                    "dest": "format",
-                    "flags": [
-                      "--format"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "json",
-                    "flags": [
-                      "--json"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "verbose",
-                    "flags": [
-                      "-v",
-                      "--verbose"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "quiet",
-                    "flags": [
-                      "-q",
-                      "--quiet"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "workspace",
-                    "flags": [
-                      "--workspace"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false,
-                    "type": "str"
-                  },
-                  {
-                    "default": null,
-                    "dest": "target_skill",
-                    "flags": [],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": true
-                  }
-                ]
-              },
-              "list": {
-                "aliases": [],
-                "arguments": [
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "help",
-                    "flags": [
-                      "-h",
-                      "--help"
-                    ],
-                    "kind": "help",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plumbing",
-                    "flags": [
-                      "--plumbing",
-                      "--internal"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plain",
-                    "flags": [
-                      "--plain"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "no_emoji",
-                    "flags": [
-                      "--no-emoji"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "choices": [
-                      "text",
-                      "json",
-                      "mermaid"
-                    ],
-                    "default": "==SUPPRESS==",
-                    "dest": "format",
-                    "flags": [
-                      "--format"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "json",
-                    "flags": [
-                      "--json"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "verbose",
-                    "flags": [
-                      "-v",
-                      "--verbose"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "quiet",
-                    "flags": [
-                      "-q",
-                      "--quiet"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "workspace",
-                    "flags": [
-                      "--workspace"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false,
-                    "type": "str"
-                  }
-                ]
-              },
-              "slots": {
-                "aliases": [],
-                "arguments": [
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "help",
-                    "flags": [
-                      "-h",
-                      "--help"
-                    ],
-                    "kind": "help",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plumbing",
-                    "flags": [
-                      "--plumbing",
-                      "--internal"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "plain",
-                    "flags": [
-                      "--plain"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "no_emoji",
-                    "flags": [
-                      "--no-emoji"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "choices": [
-                      "text",
-                      "json",
-                      "mermaid"
-                    ],
-                    "default": "==SUPPRESS==",
-                    "dest": "format",
-                    "flags": [
-                      "--format"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": false,
-                    "dest": "json",
-                    "flags": [
-                      "--json"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "verbose",
-                    "flags": [
-                      "-v",
-                      "--verbose"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "const": true,
-                    "default": "==SUPPRESS==",
-                    "dest": "quiet",
-                    "flags": [
-                      "-q",
-                      "--quiet"
-                    ],
-                    "kind": "store_true",
-                    "nargs": 0,
-                    "required": false
-                  },
-                  {
-                    "default": "==SUPPRESS==",
-                    "dest": "workspace",
-                    "flags": [
-                      "--workspace"
-                    ],
-                    "kind": "store",
-                    "nargs": null,
-                    "required": false,
-                    "type": "str"
-                  }
-                ]
-              }
-            }
-          }
-        }
+        ]
       },
       "uninstall": {
         "aliases": [],
@@ -6549,55 +2145,6 @@
           },
           {
             "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plumbing",
-            "flags": [
-              "--plumbing",
-              "--internal"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "plain",
-            "flags": [
-              "--plain"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "no_emoji",
-            "flags": [
-              "--no-emoji"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "text",
-              "json",
-              "mermaid"
-            ],
-            "default": "==SUPPRESS==",
-            "dest": "format",
-            "flags": [
-              "--format"
-            ],
-            "kind": "store",
-            "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
             "default": false,
             "dest": "json",
             "flags": [
@@ -6610,22 +2157,9 @@
           {
             "const": true,
             "default": "==SUPPRESS==",
-            "dest": "verbose",
+            "dest": "plain",
             "flags": [
-              "-v",
-              "--verbose"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": "==SUPPRESS==",
-            "dest": "quiet",
-            "flags": [
-              "-q",
-              "--quiet"
+              "--plain"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -6699,12 +2233,6 @@
   },
   "registry": [
     {
-      "aliases": [],
-      "category": "Plumbing & Swarm Protocol",
-      "help": "Headless machine-to-machine subcommands (scan, grade, receipt, record)",
-      "name": "agent"
-    },
-    {
       "aliases": [
         "verify",
         "checkpoint"
@@ -6715,36 +2243,13 @@
     },
     {
       "aliases": [],
-      "category": "Plumbing & Swarm Protocol",
-      "help": "Print a shell completion script",
-      "name": "completion"
-    },
-    {
-      "aliases": [
-        "languages",
-        "drivers"
-      ],
-      "category": "Setup & Environment",
-      "help": "Inspect project languages and AST driver configuration",
-      "name": "detect"
-    },
-    {
-      "aliases": [
-        "audit"
-      ],
       "category": "Setup & Environment",
       "help": "System health and governance audit",
       "name": "doctor"
     },
     {
       "aliases": [],
-      "category": "Plumbing & Swarm Protocol",
-      "help": "Execute file-buffered swarm handoff between skills",
-      "name": "handoff"
-    },
-    {
-      "aliases": [],
-      "category": "Plumbing & Swarm Protocol",
+      "category": "Plumbing",
       "help": "Manage and run cross-platform lifecycle hooks",
       "name": "hook"
     },
@@ -6757,20 +2262,8 @@
     {
       "aliases": [],
       "category": "Setup & Environment",
-      "help": "Install Soma governance rules and configuration",
-      "name": "install"
-    },
-    {
-      "aliases": [],
-      "category": "Setup & Environment",
       "help": "Verify .aegis workspace migration status",
       "name": "migrate"
-    },
-    {
-      "aliases": [],
-      "category": "Daily Workflow & Verification",
-      "help": "Session report card",
-      "name": "report"
     },
     {
       "aliases": [],
@@ -6780,31 +2273,43 @@
     },
     {
       "aliases": [],
-      "category": "Plumbing & Swarm Protocol",
-      "help": "Manage and inspect horizontal skills and slots",
-      "name": "skill"
+      "category": "Daily Workflow & Verification",
+      "help": "Show which rules apply to the given files (run before editing them)",
+      "name": "scan"
     },
     {
-      "aliases": [
-        "rules"
-      ],
+      "aliases": [],
       "category": "Daily Workflow & Verification",
       "help": "Show active rules and stats",
       "name": "status"
     },
     {
-      "aliases": [
-        "sys"
-      ],
-      "category": "Setup & Environment",
-      "help": "Diagnostics, driver management, and platform integrations (doctor, hook, drivers, skills, compact)",
-      "name": "system"
-    },
-    {
       "aliases": [],
       "category": "Setup & Environment",
-      "help": "Uninstall Soma governance rules and configuration",
+      "help": "Uninstall Aegis governance rules and configuration",
       "name": "uninstall"
     }
-  ]
+  ],
+  "removed_commands": {
+    "agent": "use aegis scan to see which rules apply; record outcomes with the MCP tool aegis_report_outcome",
+    "agent record": "use aegis_report_outcome (MCP)",
+    "agent scan": "use aegis scan",
+    "audit": "use aegis doctor",
+    "checkpoint": "use aegis check",
+    "completion": "no replacement",
+    "detect": "use aegis doctor",
+    "drivers": "use aegis doctor",
+    "handoff": "no replacement",
+    "install": "use aegis init --host",
+    "languages": "use aegis doctor",
+    "report": "aegis status shows rule trigger counts; outcomes are recorded with the MCP tool aegis_report_outcome",
+    "rules": "use aegis status",
+    "skill": "no replacement",
+    "sys": "use aegis doctor",
+    "system": "use aegis doctor",
+    "system doctor": "use aegis doctor",
+    "system drivers": "use aegis doctor",
+    "system hook": "use aegis hook",
+    "verify": "use aegis check"
+  }
 }

@@ -41,8 +41,6 @@ class OutputContext:
     color_enabled: bool = False
     emoji_enabled: bool = False
     json_mode: bool = False
-    quiet: bool = False
-    verbose: bool = False
     plain: bool = False
 
     @classmethod
@@ -56,11 +54,7 @@ class OutputContext:
         tty = isatty if isatty is not None else bool(getattr(sys.stdout, "isatty", lambda: False)())
 
         plain = bool(getattr(args, "plain", False))
-        no_emoji = bool(getattr(args, "no_emoji", False)) or plain
-        fmt = getattr(args, "format", "text")
-        json_mode = bool(getattr(args, "json", False)) or fmt == "json"
-        quiet = bool(getattr(args, "quiet", False))
-        verbose = bool(getattr(args, "verbose", False))
+        json_mode = bool(getattr(args, "json", False)) or getattr(args, "format", "text") == "json"
 
         no_color_env = bool(env.get("NO_COLOR", ""))
         term_dumb = env.get("TERM", "").lower() == "dumb"
@@ -73,14 +67,12 @@ class OutputContext:
         else:
             color_enabled = tty
 
-        emoji_enabled = bool(tty and not plain and not no_emoji and not json_mode and not term_dumb)
+        emoji_enabled = bool(tty and not plain and not json_mode and not term_dumb)
 
         return cls(
             color_enabled=color_enabled,
             emoji_enabled=emoji_enabled,
             json_mode=json_mode,
-            quiet=quiet,
-            verbose=verbose,
             plain=plain or not tty,
         )
 

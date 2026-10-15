@@ -28,7 +28,7 @@ def generate_hook_block(python: str | None = None) -> str:
     q = shlex.quote(py)
     return (
         f"{_AEGIS_HOOK_START}\n"
-        "# Installed by aegis system hook install\n"
+        "# Installed by aegis hook install\n"
         f"{AEGIS_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}\n"
         "if command -v aegis >/dev/null 2>&1; then\n"
         "  exec aegis check --hook\n"
@@ -53,7 +53,7 @@ def generate_hook_block(python: str | None = None) -> str:
         "else\n"
         '  echo "aegis pre-commit: cannot execute quality checks." >&2\n'
         '  echo "  Neither \'aegis\' nor a Python interpreter with \'aegis_cli\' installed was found on PATH." >&2\n'
-        '  echo "  Run \'aegis system hook status\' or \'aegis system doctor\' to diagnose environment resolution." >&2\n'
+        '  echo "  Run \'aegis hook status\' or \'aegis doctor\' to diagnose environment resolution." >&2\n'
         "  exit 1\n"
         "fi\n"
         f"{_AEGIS_HOOK_END}\n"

@@ -474,7 +474,7 @@ def run_init(args: argparse.Namespace) -> int:
         print(f"  Rules installed to: {rules_dir}")
 
     print()
-    print("  After a session, run: aegis report")
+    print("  After a session, run: aegis status")
     print()
 
 

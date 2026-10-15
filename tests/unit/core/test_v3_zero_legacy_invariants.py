@@ -155,7 +155,7 @@ class TestV3CLIOutputContextAndANSIHygiene:
     def test_every_registered_command_supports_output_context(self, monkeypatch: pytest.MonkeyPatch) -> None:
         registry = get_default_registry()
         commands = list(registry._commands.values())
-        assert len(commands) >= 12
+        assert len(commands) >= 9
 
         for cmd in commands:
             ns_plain = argparse.Namespace(plain=True, no_emoji=False, format=None, json=False, quiet=False, verbose=False)

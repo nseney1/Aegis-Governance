@@ -256,14 +256,3 @@ def test_corrupt_manifest_aborts_before_editing_rc(env_layout):
     assert do_fix(env_layout) != 0
     assert mpath.read_text(encoding="utf-8") == "{not json"
     assert not (env_layout["home"] / ".zshrc").exists()
-
-
-def test_cli_parser_accepts_fix_path_and_yes():
-    from aegis_cli.cli import _build_parser
-    args = _build_parser().parse_args(["system", "doctor", "--fix-path", "--yes"])
-    assert args.fix_path is True and args.yes is True
-    args = _build_parser().parse_args(["system", "doctor"])
-    assert args.fix_path is False
-
-
-

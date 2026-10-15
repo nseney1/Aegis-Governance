@@ -3,6 +3,7 @@ import argparse
 from pathlib import Path
 import pytest
 
+from aegis_cli.cli import main
 from aegis_cli.doctor import run_doctor, _check_ast_drivers
 from aegis_core.skills.slots import SlotRegistry
 
@@ -75,3 +76,16 @@ def test_doctor_fix_output_reports_provisioned_driver_status(tmp_path: Path, cap
     out = capsys.readouterr().out
     assert "AST driver (.rs)" in out
     assert "AST drivers: native Python stdlib (in-process)" not in out
+
+
+def test_doctor_drivers_flag_only_runs_ast_checks(tmp_path, capsys):
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+    code = main(["doctor", "--drivers", "--workspace", str(tmp_path)])
+    assert code == 0
+
+    out = capsys.readouterr().out
+    assert "AST driver health check" in out
+    assert "native Python stdlib" in out
+    # Full doctor checks (e.g. MCP launcher, rules, zero-dependencies) should not run
+    assert "MCP launcher" not in out
+    assert "zero-dependency runtime operational" not in out

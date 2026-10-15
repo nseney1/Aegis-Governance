@@ -331,7 +331,7 @@ def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
         return True
     print(f"  ❌ Pre-commit hook uses an old block ({hook}).\n"
           "      It aborts commits when the CLI is not on the\n"
-          "      hook's PATH (BUG-047). Re-run `aegis system hook install` to refresh it.")
+          "      hook's PATH (BUG-047). Re-run `aegis hook install` to refresh it.")
     return False
 
 
@@ -621,7 +621,6 @@ class DoctorCommand(AegisCommand):
     """Command for system health and governance audit."""
 
     name = "doctor"
-    aliases = ("audit",)
     category = CommandCategory.SETUP
     help = "System health and governance audit"
 

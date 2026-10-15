@@ -10,7 +10,7 @@ target_paths:
   - aegis_mcp/tools.py
   - aegis_cli/check.py
   - aegis_cli/verify.py
-  - aegis_cli/report.py
+  - aegis_cli/scan.py
   - aegis_core/telemetry.py
 expiry_sessions: 15
 expiry_days: 60
