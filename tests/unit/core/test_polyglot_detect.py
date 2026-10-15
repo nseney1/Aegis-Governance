@@ -1,4 +1,5 @@
 """Tests for polyglot language detection and zero-touch AST driver provisioning."""
+import json
 from pathlib import Path
 import pytest
 
@@ -84,46 +85,50 @@ def test_provision_ast_driver_slots(tmp_path: Path):
     (tmp_path / "package.json").write_text('{"name": "web"}', encoding="utf-8")
     (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
 
-    slots, created_files = provision_ast_driver_slots(tmp_path, copy_drivers=True)
-    assert "ast_driver_rs" in slots
-    assert "ast_driver_ts" in slots
+    slots, created_files = provision_ast_driver_slots(tmp_path)
+    assert {"ast_driver_rs", "ast_driver_ts", "ast_driver_js"} <= set(slots)
 
-    # Verify slots.yaml was created and readable by SlotRegistry
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    assert slots_file.exists()
+    # The opt-ins live in .aegis/config.json and SlotRegistry reads them back
+    config = tmp_path / ".aegis" / "config.json"
+    assert created_files == [str(config)]
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".rs") is not None
     assert registry.get_ast_driver(".ts") is not None
-
-    # Verify driver files were staged in .aegis/drivers/
-    drivers_dir = tmp_path / ".aegis" / "drivers"
-    assert drivers_dir.is_dir()
-    assert (drivers_dir / "ts_ast.js").exists()
-    assert (drivers_dir / "rust_ast.py").exists()
+    # Nothing is staged in the repository: the packaged templates are what runs
+    assert not (tmp_path / ".aegis" / "drivers").exists()
 
 
-def test_provision_preserves_existing_slot_values_with_quotes_and_backslashes(tmp_path: Path):
+def test_provision_keeps_existing_config_keys(tmp_path: Path):
     (tmp_path / "Cargo.toml").write_text("[package]\nname='foo'\n", encoding="utf-8")
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.parent.mkdir(parents=True)
-    original = 'ruff check --select "E,W" C:\\tools\\src'
-    slots_file.write_text("slots:\n  LINT_CMD: '" + original + "'\n", encoding="utf-8")
-    assert SlotRegistry.load(tmp_path).get("LINT_CMD") == original
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"v": 1, "hosts": ["codex-cli"], "jit": {"max_tokens": 900}}), encoding="utf-8")
 
-    provision_ast_driver_slots(tmp_path, copy_drivers=False)
+    provision_ast_driver_slots(tmp_path)
 
-    registry = SlotRegistry.load(tmp_path)
-    assert registry.get("LINT_CMD") == original
-    assert registry.get_ast_driver(".rs") == "{python} .aegis/drivers/rust_ast.py"
+    assert json.loads(config.read_text(encoding="utf-8")) == {
+        "v": 1, "hosts": ["codex-cli"], "jit": {"max_tokens": 900}, "ast": {"packaged_drivers": ["rs"]},
+    }
+    assert SlotRegistry.load(tmp_path).get_ast_driver(".rs") == "{python} .aegis/drivers/rust_ast.py"
 
 
-def test_provision_does_not_overwrite_unparseable_slots_file(tmp_path: Path):
+def test_provision_does_not_overwrite_unparseable_config(tmp_path: Path):
     (tmp_path / "Cargo.toml").write_text("[package]\nname='foo'\n", encoding="utf-8")
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.parent.mkdir(parents=True)
-    slots_file.write_text(": : hand-edited, not yet valid\n", encoding="utf-8")
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{hand-edited, not yet valid\n", encoding="utf-8")
 
-    _, created_files = provision_ast_driver_slots(tmp_path, copy_drivers=False)
+    _, created_files = provision_ast_driver_slots(tmp_path)
 
-    assert slots_file.read_text(encoding="utf-8") == ": : hand-edited, not yet valid\n"
-    assert str(slots_file) not in created_files
+    assert config.read_text(encoding="utf-8") == "{hand-edited, not yet valid\n"
+    assert created_files == []
+
+
+def test_provision_dry_run_writes_nothing(tmp_path: Path):
+    (tmp_path / "go.mod").write_text("module x\n", encoding="utf-8")
+
+    slots, created_files = provision_ast_driver_slots(tmp_path, dry_run=True)
+
+    assert slots == {"ast_driver_go": "go run .aegis/drivers/go_ast.go"}
+    assert created_files == []
+    assert not (tmp_path / ".aegis").exists()

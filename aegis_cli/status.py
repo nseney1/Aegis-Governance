@@ -424,13 +424,14 @@ def run_status(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    import os
     from aegis_cli.ui.table import Table
     from aegis_cli.ui.theme import OutputContext
 
     existing_ui = getattr(args, "ui", None)
     ui = existing_ui if isinstance(existing_ui, OutputContext) else OutputContext.from_env_and_args(args)
-    max_budget = int(os.environ.get("AEGIS_MAX_JIT_TOKENS", str(JIT_DEFAULT_MAX_TOKENS)))
+    from aegis_core.config import jit_max_tokens
+
+    max_budget = jit_max_tokens(proj, JIT_DEFAULT_MAX_TOKENS)
 
     header_title = "🛡️ Aegis Workspace Status" if ui.emoji_enabled else "Aegis Workspace Status"
     print(f"{ui.style(header_title, 'bold', 'cyan')}\n")

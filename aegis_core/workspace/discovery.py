@@ -1,6 +1,6 @@
 """Workspace discovery and compound fingerprinting for Soma (Layer 0 Core).
 
-Discovers project roots via environment variables, upward directory walks, and callers.
+Discovers project roots via the AEGIS_WORKSPACE pin, upward directory walks, and callers.
 Provides compound fingerprinting (is_soma_repo) to distinguish Soma's own repository
 from foreign repositories adopting Soma governance.
 Strictly zero-dependency: uses only Python standard library.
@@ -11,7 +11,9 @@ import os
 import re
 from pathlib import Path
 
+from aegis_core.config import env_workspace
 from aegis_core.errors import WorkspaceError, WorkspaceNotFoundError
+from aegis_core.workspace.layout import LEGACY_SOMA_DIRNAME, has_rules_dir, is_aegis_workspace
 
 LEGACY_SOMA_UPGRADE_MSG = (
     "Legacy .soma/ workspace detected at {path}. "
@@ -30,24 +32,22 @@ def _home_str() -> str:
 def check_legacy_soma_sentinel(d: str | Path | os.PathLike[str]) -> None:
     """Raise an actionable WorkspaceError if directory contains an unmigrated .soma/ workspace."""
     d_str = str(Path(d).resolve())
-    if os.path.isdir(os.path.join(d_str, ".aegis")):
+    if is_aegis_workspace(d_str):
         return
-    if (
-        os.path.isdir(os.path.join(d_str, ".soma", "cells"))
-        or os.path.isdir(os.path.join(d_str, ".soma", "rules"))
-    ):
+    soma = os.path.join(d_str, LEGACY_SOMA_DIRNAME)
+    if os.path.isdir(os.path.join(soma, "cells")) or os.path.isdir(os.path.join(soma, "rules")):
         raise WorkspaceError(LEGACY_SOMA_UPGRADE_MSG.format(path=d_str))
     if d_str not in ("/tmp", "/var/tmp", _home_str()):
-        if os.path.isdir(os.path.join(d_str, ".soma")):
+        if os.path.isdir(soma):
             raise WorkspaceError(LEGACY_SOMA_UPGRADE_MSG.format(path=d_str))
 
 
 def _is_workspace_dir(d: str) -> bool:
     """Check if directory contains a valid Aegis workspace marker (.aegis/rules or .aegis)."""
-    if os.path.isdir(os.path.join(d, ".aegis", "rules")):
+    if has_rules_dir(d):
         return True
     if d not in ("/tmp", "/var/tmp", _home_str()):
-        if os.path.isdir(os.path.join(d, ".aegis")):
+        if is_aegis_workspace(d):
             return True
     return False
 
@@ -85,12 +85,12 @@ def resolve_workspace_root(
     strict_env: bool = False,
 ) -> Path:
     """Find the project root containing .aegis/rules/ or .aegis/."""
-    # 1. AEGIS_WORKSPACE env var
-    aegis_ws = os.environ.get("AEGIS_WORKSPACE")
+    # 1. AEGIS_WORKSPACE, the operator's pin (D11)
+    aegis_ws = env_workspace()
     if aegis_ws:
         if os.path.isdir(aegis_ws):
             check_legacy_soma_sentinel(aegis_ws)
-        if os.path.isdir(os.path.join(aegis_ws, ".aegis", "rules")):
+        if has_rules_dir(aegis_ws):
             return Path(aegis_ws).resolve()
         elif strict_env:
             raise WorkspaceNotFoundError(
@@ -98,20 +98,6 @@ def resolve_workspace_root(
             )
         elif os.path.isdir(aegis_ws):
             return Path(aegis_ws).resolve()
-
-    # 2. AEGIS_ROOT env var
-    aegis_root = os.environ.get("AEGIS_ROOT")
-    if aegis_root:
-        if os.path.isdir(aegis_root):
-            check_legacy_soma_sentinel(aegis_root)
-        if os.path.isdir(os.path.join(aegis_root, ".aegis", "rules")):
-            return Path(aegis_root).resolve()
-        elif strict_env:
-            raise WorkspaceNotFoundError(
-                f"AEGIS_ROOT is set to {aegis_root} but no .aegis/rules found there (missing valid rules)."
-            )
-        elif os.path.isdir(aegis_root):
-            return Path(aegis_root).resolve()
 
     # 3. Explicit start path walk-up
     if start is not None:

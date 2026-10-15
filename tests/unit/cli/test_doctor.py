@@ -121,20 +121,25 @@ def test_check_ast_drivers_native_when_no_slots(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "native Python stdlib" in out
 
-    # slots.yaml exists, but no ast_driver slots
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.parent.mkdir(parents=True, exist_ok=True)
-    slots_file.write_text("slots:\n  other_slot: foo\n")
+    # config.json exists, but enables no packaged driver
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text('{"v": 1, "hosts": ["codex-cli"]}')
     assert _check_ast_drivers(tmp_path) is True
     out2 = capsys.readouterr().out
     assert "native Python stdlib" in out2
 
 
-def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys):
+def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys, monkeypatch):
     from aegis_cli.doctor import _check_ast_drivers
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.parent.mkdir(parents=True)
-    slots_file.write_text("slots:\n  ast_driver_ts: node runner.js\n  ast_driver: default_bin\n")
+    home = tmp_path / "home"
+    (home / ".aegis").mkdir(parents=True)
+    (home / ".aegis" / "config.json").write_text('{"v": 1, "drivers": {"ts": "node runner.js"}}')
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmp_path = ws
 
     # With both binaries resolvable
     with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd: f"/bin/{cmd}"):
@@ -148,9 +153,11 @@ def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "not found on PATH" in out
 
-    # Corrupt slots.yaml raising exception
-    with patch("aegis_core.skills.slots.SlotRegistry.load", side_effect=Exception("corrupt")):
-        assert _check_ast_drivers(tmp_path) is False
+    # An unreadable config is reported, not a crash
+    (tmp_path / ".aegis").mkdir()
+    (tmp_path / ".aegis" / "config.json").write_text("{corrupt")
+    assert _check_ast_drivers(tmp_path) is False
+    assert ".aegis/config.json is not valid JSON" in capsys.readouterr().out
 
 
 def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsys):
@@ -161,10 +168,10 @@ def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsy
     rules_dir.mkdir()
     (rules_dir / "example.md").write_text("# rule")
 
-    # H5: a repo slots.yaml can only opt in to a packaged driver (here ts_ast.js, which
+    # H5: a repo config can only opt in to a packaged driver (here ts_ast.js, which
     # needs node); an arbitrary repo-defined driver command is dropped before doctor sees it.
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.write_text("slots:\n  ast_driver_ts: node .aegis/drivers/ts_ast.js\n")
+    config = tmp_path / ".aegis" / "config.json"
+    config.write_text('{"v": 1, "ast": {"packaged_drivers": ["ts"]}, "drivers": {"ts": "evil"}}')
 
     monkeypatch.chdir(tmp_path)
     with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/aegis" if cmd in ("aegis", "soma") else None), \
@@ -184,14 +191,14 @@ def test_check_ast_drivers_missing_driver_warns_and_fixes(tmp_path, capsys):
     # Without fix flag: warns and returns False
     assert _check_ast_drivers(tmp_path, fix=False) is False
     out = capsys.readouterr().out
-    assert "unconfigured driver for detected source language" in out
+    assert "unconfigured driver for detected source extension(s): .ts" in out
     assert "Run 'aegis doctor --fix' to provision" in out
 
     # With fix flag: auto-provisions and returns True
     assert _check_ast_drivers(tmp_path, fix=True) is True
     out = capsys.readouterr().out
-    assert "Fixed: Auto-provisioned AST drivers" in out
-    assert (tmp_path / ".aegis" / "slots.yaml").is_file()
+    assert "Fixed: enabled the packaged AST drivers in .aegis/config.json for .ts" in out
+    assert (tmp_path / ".aegis" / "config.json").is_file()
 
 
 def test_check_ast_drivers_missing_extension_slot_warns_and_fixes(tmp_path, capsys):
@@ -199,10 +206,10 @@ def test_check_ast_drivers_missing_extension_slot_warns_and_fixes(tmp_path, caps
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.rs").write_text("fn main() {}")
 
-    # Write existing slots without rs slot
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.parent.mkdir(parents=True)
-    slots_file.write_text("slots:\n  ast_driver_ts: node runner.js\n")
+    # Existing config enables ts but not rs
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text('{"v": 1, "ast": {"packaged_drivers": ["ts"]}}')
 
     # Without fix: warns
     assert _check_ast_drivers(tmp_path, fix=False) is False
@@ -212,8 +219,8 @@ def test_check_ast_drivers_missing_extension_slot_warns_and_fixes(tmp_path, caps
     # With fix: provisions missing slot
     assert _check_ast_drivers(tmp_path, fix=True) is True
     out = capsys.readouterr().out
-    assert "Fixed: Auto-provisioned missing AST driver slots" in out
-    assert "ast_driver_rs" in slots_file.read_text()
+    assert "Fixed: enabled the packaged AST drivers in .aegis/config.json for .rs" in out
+    assert '"rs"' in config.read_text()
 
 
 def test_run_doctor_with_fix_flag(tmp_path, monkeypatch, capsys):
@@ -233,8 +240,8 @@ def test_run_doctor_with_fix_flag(tmp_path, monkeypatch, capsys):
         res = run_doctor(args)
     assert res == 0
     captured = capsys.readouterr().out
-    assert "Fixed: Auto-provisioned AST drivers" in captured
-    assert (tmp_path / ".aegis" / "slots.yaml").is_file()
+    assert "Fixed: enabled the packaged AST drivers" in captured
+    assert (tmp_path / ".aegis" / "config.json").is_file()
 
 
 def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, capsys):
@@ -252,7 +259,7 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
          patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace()
         run_doctor(args)
-    assert not (tmp_path / ".aegis" / "slots.yaml").exists()
+    assert not (tmp_path / ".aegis" / "config.json").exists()
     out = capsys.readouterr().out
     assert "Run 'aegis doctor --fix' to provision" in out
 
@@ -282,24 +289,29 @@ def test_doctor_rejects_cut_fix_path_flags(flag, capsys):
     assert f"unrecognized arguments: {flag}" in capsys.readouterr().err
 
 
-def _rust_project_with_python3_slot(tmp_path, monkeypatch):
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "main.rs").write_text("fn main() {}")
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.parent.mkdir(parents=True)
-    slots_file.write_text('slots:\n  ast_driver_rs: "python3 .aegis/drivers/rust_ast.py"\n')
+def _rust_project_with_python3_driver(tmp_path, monkeypatch):
+    """A rust project plus a user-scope driver named by its legacy 'python3' selector."""
+    proj = tmp_path / "proj"
+    (proj / "src").mkdir(parents=True)
+    (proj / "src" / "main.rs").write_text("fn main() {}")
+    home = tmp_path / "home"  # outside the workspace, so it is user scope
+    (home / ".aegis").mkdir(parents=True)
+    (home / ".aegis" / "config.json").write_text('{"v": 1, "drivers": {"rs": "python3 .aegis/drivers/rust_ast.py"}}')
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     empty_bin = tmp_path / "empty-bin"
     empty_bin.mkdir()
     monkeypatch.setenv("PATH", str(empty_bin))
+    return proj
 
 
 def test_check_ast_drivers_python3_slot_resolves_without_python3_on_path(tmp_path, monkeypatch, capsys):
-    """#144: python.org installs on Windows ship no python3.exe; the slot runs
-    on the interpreter running soma, so doctor must not report it broken."""
+    """#144: python.org installs on Windows ship no python3.exe; the driver runs
+    on the interpreter running aegis, so doctor must not report it broken."""
     from aegis_cli.doctor import _check_ast_drivers
-    _rust_project_with_python3_slot(tmp_path, monkeypatch)
+    proj = _rust_project_with_python3_driver(tmp_path, monkeypatch)
 
-    assert _check_ast_drivers(tmp_path) is True
+    assert _check_ast_drivers(proj) is True
     out = capsys.readouterr().out
     assert "AST driver (.rs): python3 resolvable" in out
     assert sys.executable in out
@@ -307,10 +319,10 @@ def test_check_ast_drivers_python3_slot_resolves_without_python3_on_path(tmp_pat
 
 def test_check_ast_drivers_python3_slot_unresolvable_without_any_interpreter(tmp_path, monkeypatch, capsys):
     from aegis_cli.doctor import _check_ast_drivers
-    _rust_project_with_python3_slot(tmp_path, monkeypatch)
+    proj = _rust_project_with_python3_driver(tmp_path, monkeypatch)
     monkeypatch.setattr(sys, "executable", "")
 
-    assert _check_ast_drivers(tmp_path) is False
+    assert _check_ast_drivers(proj) is False
     assert "executable 'python3' not found on PATH" in capsys.readouterr().out
 
 

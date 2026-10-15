@@ -245,7 +245,7 @@ def _resolve_searchable_extensions(
 ) -> set[str]:
     """Dynamically determine allowed source extensions for the workspace.
 
-    Discovers extensions from configured workspace slots (.soma/slots.yaml),
+    Discovers extensions from the configured AST drivers (aegis_core.config),
     active AST runner registry, the target file extension, and its language definition.
     Zero hardcoded extension lists.
     """

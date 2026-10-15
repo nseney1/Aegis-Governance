@@ -92,25 +92,19 @@ make_cell_dict = make_rule_dict
 
 @pytest.fixture
 def aegis_workspace(tmp_path):
-    """Create a minimal Aegis workspace with rules and metrics directories."""
+    """Create a minimal Aegis workspace with a rules directory."""
     workspace = tmp_path / "project"
     rules_dir = workspace / ".aegis" / "rules"
     rules_dir.mkdir(parents=True)
-    metrics_dir = workspace / ".aegis" / "metrics"
-    metrics_dir.mkdir(parents=True)
-    (workspace / "aegis.conf").write_text("TOTAL_SESSIONS=100\n")
     return workspace
 
 
 @pytest.fixture
 def soma_workspace(tmp_path):
-    """Create a minimal workspace with rules and metrics directories."""
+    """Create a minimal workspace with a rules directory."""
     workspace = tmp_path / "project"
     rules_dir = workspace / ".aegis" / "rules"
     rules_dir.mkdir(parents=True)
-    metrics_dir = workspace / ".aegis" / "metrics"
-    metrics_dir.mkdir(parents=True)
-    (workspace / "aegis.conf").write_text("TOTAL_SESSIONS=100\n")
     return workspace
 
 

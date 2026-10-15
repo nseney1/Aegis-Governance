@@ -109,15 +109,24 @@ class TestJITContextBudgetClamping(unittest.TestCase):
             self.assertTrue(stats.get("clamped"))
 
     def test_config_file_sets_token_budget(self):
-        """max_jit_tokens setting in aegis.conf should be respected."""
-        conf_path = self.ws / "aegis.conf"
-        conf_path.write_text("max_jit_tokens=180\n", encoding="utf-8")
+        """jit.max_tokens in .aegis/config.json sets the budget (D10)."""
+        conf_path = self.ws / ".aegis" / "config.json"
+        conf_path.parent.mkdir(parents=True, exist_ok=True)
+        conf_path.write_text('{"v": 1, "jit": {"max_tokens": 180}}', encoding="utf-8")
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AEGIS_MAX_JIT_TOKENS", None)
             res = express(str(self.ws), changed_files=["main.py"])
             stats = res["stats"]
             self.assertEqual(stats.get("max_tokens_budget"), 180)
             self.assertLessEqual(stats.get("estimated_tokens", 999), 180)
+
+    def test_legacy_aegis_conf_is_not_read(self):
+        """D10: aegis.conf is gone; `aegis migrate` converts it."""
+        (self.ws / "aegis.conf").write_text("max_jit_tokens=180\n", encoding="utf-8")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AEGIS_MAX_JIT_TOKENS", None)
+            res = express(str(self.ws), changed_files=["main.py"])
+            self.assertNotEqual(res["stats"].get("max_tokens_budget"), 180)
 
     def test_mandatory_cells_prioritized_under_tight_budget(self):
         """Mandatory wall/gate cells must be included first before advisory cells under a tight budget."""

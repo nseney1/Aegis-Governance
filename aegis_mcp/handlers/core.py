@@ -19,7 +19,7 @@ def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
     """Resolve ${SLOT.*} placeholders in JIT scan results for the active MCP client platform.
 
     The agent reads this output, so slot values are sanitized before inlining and
-    ignored or unparseable slot files are reported in res["warnings"] (H5).
+    ignored keys or unparseable config files are reported in res["warnings"] (H5).
     """
     from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
 
@@ -29,7 +29,7 @@ def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
         # Slot loading must never cost the agent its guidance. The error can quote file
         # content or paths, so report a fixed message instead.
         _add_scan_warnings(res, [
-            "slot files (.aegis/slots.yaml or ~/.aegis/slots.yaml) could not be read or parsed; "
+            "config files (.aegis/config.json or ~/.aegis/config.json) could not be read or parsed; "
             "${SLOT.*} placeholders were left unresolved"
         ])
         return res

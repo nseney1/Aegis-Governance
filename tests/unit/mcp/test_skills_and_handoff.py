@@ -25,14 +25,16 @@ class TestSlotRegistry:
         with pytest.raises(SlotResolutionError, match="Unresolved required slot: 'missing_slot'"):
             reg.resolve("Run: ${SLOT.missing_slot}", strict=True)
 
-    def test_slot_loading_from_workspace(self, tmp_path: Path):
-        soma_dir = tmp_path / ".aegis"
-        soma_dir.mkdir(parents=True)
-        (soma_dir / "slots.yaml").write_text(
-            "---\nslots:\n  test_command: 'cargo test'\n  build_command: 'cargo build'\n---\n",
+    def test_slot_loading_from_user_config(self, tmp_path: Path, monkeypatch):
+        home = tmp_path / "home"
+        (home / ".aegis").mkdir(parents=True)
+        (home / ".aegis" / "config.json").write_text(
+            '{"v": 1, "slots": {"test_command": "cargo test", "build_command": "cargo build"}}',
             encoding="utf-8",
         )
-        reg = SlotRegistry.load(tmp_path)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        reg = SlotRegistry.load_user(tmp_path / "ws")
         assert reg.get("test_command") == "cargo test"
         assert reg.get("build_command") == "cargo build"
         assert reg.get("missing") is None
@@ -45,16 +47,18 @@ class TestSlotRegistryBranches:
         reg = SlotRegistry.load(tmp_path)
         assert reg.to_dict() == {}
 
-        # Invalid yaml syntax raises SlotResolutionError
-        soma_dir = tmp_path / ".aegis"
-        soma_dir.mkdir(parents=True, exist_ok=True)
-        (soma_dir / "slots.yaml").write_text("a: [unclosed", encoding="utf-8")
-        with pytest.raises(SlotResolutionError, match="Failed to parse"):
+        # Invalid JSON raises SlotResolutionError
+        aegis_dir = tmp_path / ".aegis"
+        aegis_dir.mkdir(parents=True, exist_ok=True)
+        (aegis_dir / "config.json").write_text('{"a": [unclosed', encoding="utf-8")
+        with pytest.raises(SlotResolutionError, match="not valid JSON"):
             SlotRegistry.load(tmp_path)
 
-        # slots not a mapping
-        (soma_dir / "slots.yaml").write_text("---\nslots: 'not-a-map'\n---\n", encoding="utf-8")
-        assert SlotRegistry.load(tmp_path).to_dict() == {}
+        # packaged_drivers not a list: ignored with a warning
+        (aegis_dir / "config.json").write_text('{"ast": {"packaged_drivers": "rs"}}', encoding="utf-8")
+        loaded = SlotRegistry.load(tmp_path)
+        assert loaded.to_dict() == {}
+        assert loaded.warnings
 
         # resolve with strict=False returns token
         reg2 = SlotRegistry({"existing": "val"})

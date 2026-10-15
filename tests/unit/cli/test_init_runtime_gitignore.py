@@ -78,7 +78,7 @@ COMMITTABLE = [
 
     ".aegis/rules/manifest.json",
     ".aegis/rules/traps/evidence/notes.md",   # a dir named like runtime state, deeper down
-    ".aegis/slots.yaml",
+    ".aegis/legacy-notes.md",
     ".aegis/config.yaml",
     ".aegis/.gitignore",
 ]

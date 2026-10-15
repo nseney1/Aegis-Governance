@@ -79,38 +79,15 @@ def estimate_tokens(text: object | None) -> int:
 
 
 def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -> int:
-    """Resolve JIT context token budget with precedence: arg > env > config > default(2000)."""
+    """JIT context token budget: argument > AEGIS_MAX_JIT_TOKENS > .aegis/config.json jit.max_tokens > default."""
     if max_tokens is not None:
         try:
             return int(max_tokens)
         except (ValueError, TypeError):
             pass
+    from aegis_core.config import jit_max_tokens
 
-    env_val = os.environ.get("AEGIS_MAX_JIT_TOKENS")
-    if env_val:
-        try:
-            return int(env_val.strip())
-        except (ValueError, TypeError):
-            pass
-
-    if workspace:
-        conf_path = os.path.join(workspace, "aegis.conf")
-        if os.path.isfile(conf_path):
-            try:
-                with open(conf_path, encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith("#"):
-                            continue
-                        lowered = line.lower()
-                        if lowered.startswith("max_jit_tokens=") or lowered.startswith("max_jit_tokens:"):
-                            sep = "=" if "=" in line else ":"
-                            val = line.split(sep, 1)[1].strip().strip('"').strip("'")
-                            return int(val)
-            except Exception:
-                pass
-
-    return JIT_DEFAULT_MAX_TOKENS
+    return jit_max_tokens(workspace, JIT_DEFAULT_MAX_TOKENS)
 
 
 def get_git_diff_files(workspace: str) -> list[str]:
