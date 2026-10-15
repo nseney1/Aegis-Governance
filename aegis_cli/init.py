@@ -304,6 +304,7 @@ def generate_mcp_config(
 def run_init(args: argparse.Namespace) -> int:
     """Main init flow. Returns exit code."""
     from aegis_core.workspace import Workspace
+    from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
     # Allow test override of project root
     ws = getattr(args, "ws", None) or Workspace.for_init(
@@ -403,6 +404,11 @@ def run_init(args: argparse.Namespace) -> int:
 
     pre_existing = {p.stem for p in rules_dir.glob("*.md")} if rules_dir.is_dir() else set()
     ws.scaffold(minimal=(preset == "minimal"), dry_run=dry_run)
+    gitignore_status = ensure_runtime_gitignore(ws.aegis_dir, dry_run=dry_run)
+    if gitignore_status == "symlink":
+        print("  ⚠️  .aegis/.gitignore is a symlink; not modified. Add Aegis runtime state to it yourself.")
+    elif gitignore_status in ("created", "updated"):
+        print(f"  🙈 .aegis/.gitignore {gitignore_status}: machine-local runtime state stays out of git")
     installed = install_rules(rules_dir, preset=preset, dry_run=dry_run, force=force)
     if not getattr(args, "mcp_only", False):
         seed_workspace_rules(project_root, preset=preset, force=force, dry_run=dry_run)
