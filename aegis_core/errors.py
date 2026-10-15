@@ -111,35 +111,9 @@ class NoTestRunnerFoundError(AegisError, RuntimeError):
         super().__init__(message, code=code, **kwargs)
 
 
-class InvalidHandoffPayloadError(AegisValidationError):
-    """Raised when an artifact payload violates its typed schema."""
-
-    def __init__(
-        self,
-        message: str = "",
-        code: str = "ERR_INVALID_HANDOFF_PAYLOAD",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, **kwargs)
-
-
-class HandoffAuthorizationError(AegisError):
-    """Raised when a producer skill/tier lacks authorization to emit an artifact."""
-
-    def __init__(
-        self,
-        message: str = "",
-        code: str = "ERR_HANDOFF_UNAUTHORIZED",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, **kwargs)
-
-
 __all__ = [
     "AegisError",
     "AegisValidationError",
-    "HandoffAuthorizationError",
-    "InvalidHandoffPayloadError",
     "LockTimeoutError",
     "NoTestRunnerFoundError",
     "PathTraversalError",
