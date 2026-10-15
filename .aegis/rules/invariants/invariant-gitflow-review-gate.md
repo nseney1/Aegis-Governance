@@ -1,15 +1,26 @@
 ---
-id: gitflow-review-gate
+id: invariant-gitflow-review-gate
 domain: governance
-trigger: always_on
-description: Mandates independent subagent code review and structured audit output before PR creation or merge.
-activation: |
-  Any git merge, PR creation, or branch operation targeting
-  main or develop branches.
+type: invariant
 enforcement: gate
+hypothesis: "An agent that reviews its own diff shares the blind spots that produced it, so merges stay trustworthy only when an independent context reviews every PR and a human merges to main"
+prediction: "Every PR merged into develop carries an independent reviewer's APPROVED verdict, and no agent merges to main"
+falsification: "Over 20 PRs, self-reviewed merges escape no more defects than independently reviewed ones"
+expiry_sessions: 15
+expiry_days: 60
+created: "2026-10-15T16:18:02Z"
+impact_weight: 1.0
+tags: ["dogfood", "process", "review"]
+target_paths: [".github/**", "pyproject.toml", "VERSION", "README.md"]
+lineage:
+  parent_id: null
+  created_by: "manual"
+  generation: 0
+  siblings: []
 ---
-
 # Gitflow Review Gate
+
+**Activation**: Any git merge, PR creation, or branch operation targeting main or develop branches.
 
 > **Role**: Prevents self-reviewed merges by enforcing structural separation
 > between the agent that writes code and the agent that reviews it.

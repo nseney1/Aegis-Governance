@@ -162,18 +162,23 @@ class TestRulePresetStandard:
         assert len(installed) == 5, f"Default should match standard (5 rules), got {len(installed)}"
 
 
-class TestRulePresetFull:
-    """--rules full should discover and install all genome rules."""
+# Every shipped rule in rules/ and rules/.oracles/ except META.md (D16: the
+# dogfood rules live in this repo's .aegis/rules; desktop-automation is not shipped).
+FULL_PRESET = {
+    "cost-optimization.md", "destructive-ops.md", "providence.md", "subagent-delegation.md",
+    "architectural-tenets.md", "atomic-workstream-protocol.md", "documentation.md",
+    "feature-specs.md", "git-workflow.md", "polyglot-standards.md", "tdd-protocol.md", "testing.md",
+}
 
-    def test_init_full_discovers_genome_rules(self, tmp_path):
-        """--rules full should install more rules than standard."""
+
+class TestRulePresetFull:
+    """--rules full should discover and install every shipped rule."""
+
+    def test_init_full_installs_every_shipped_rule(self, tmp_path):
+        """--rules full installs exactly the shipped rules, flattened."""
         rc = _run_init_in(tmp_path, ["--rules", "full"])
         assert rc == 0
-        installed = _installed_rules(tmp_path)
-        # genome/ has 11 files + .oracles/ has 8 files minus META.md = 18
-        assert len(installed) > 5, (
-            f"Full preset should install >5 rules, got {len(installed)}: {installed}"
-        )
+        assert _installed_rules(tmp_path) == FULL_PRESET
 
     def test_init_full_skips_meta_md(self, tmp_path):
         """--rules full should skip META.md and README.md."""
@@ -281,9 +286,7 @@ class TestInitIntegration:
         rc = run_init(args)
         assert rc == 0
 
-        # Rules: more than standard
-        installed = _installed_rules(tmp_path)
-        assert len(installed) > 5, f"Full preset should install >5 rules, got {len(installed)}"
+        assert _installed_rules(tmp_path) == FULL_PRESET
 
         # MCP config exists
         mcp_file = tmp_path / ".mcp.json"

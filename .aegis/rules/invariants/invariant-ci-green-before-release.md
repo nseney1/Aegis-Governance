@@ -1,15 +1,26 @@
 ---
-id: ci-green-before-release
+id: invariant-ci-green-before-release
 domain: governance
-trigger: model_decision
-description: Blocks version tags and releases until CI workflows and verification checks pass on the target commit.
-activation: |
-  Any git tag creation, version bump (pyproject.toml, VERSION),
-  release branch creation, or merge to main.
+type: invariant
 enforcement: gate
+hypothesis: "Local test runs diverge from CI (Python versions, operating systems, system dependencies), so a tag, version bump or merge to main made on a local green ships unverified code"
+prediction: "No tag, version bump, release branch or merge to main happens while the latest CI run on the target is not success"
+falsification: "Over 10 releases, releases cut on a local green alone show no CI failure afterwards"
+expiry_sessions: 15
+expiry_days: 60
+created: "2026-10-15T16:18:02Z"
+impact_weight: 1.0
+tags: ["dogfood", "process", "release"]
+target_paths: ["VERSION", "pyproject.toml", ".github/workflows/**", ".github/scripts/**"]
+lineage:
+  parent_id: null
+  created_by: "manual"
+  generation: 0
+  siblings: []
 ---
-
 # CI Green Before Release
+
+**Activation**: Any git tag creation, version bump (pyproject.toml, VERSION), release branch creation, or merge to main.
 
 > **Role**: Blocks release operations when CI is failing on the target branch.
 
@@ -48,7 +59,7 @@ Before any release operation:
 ## 4. No Rationalization
 
 The agent may NOT rationalize CI failures as:
-- "Pre-existing" (see `no-pre-existing-excuse`)
+- "Pre-existing" (see `invariant-no-pre-existing-excuse`)
 - "Environment-specific"
 - "Flaky test"
 - "Not related to my changes"

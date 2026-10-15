@@ -31,6 +31,11 @@ WORKSPACE = {"traps": ("trap", ("hypothesis", "target_paths")),
              "boundaries": ("boundary", ("hypothesis",)),
              "personas": ("persona", ("hypothesis",)),
              "contracts": ("contract", ("hypothesis", "target_paths"))}
+# D16: the author's own process rules govern this repository, not adopters'.
+# shipped name -> workspace type (workspace ids carry the type prefix).
+DOGFOOD = {"gitflow-review-gate": "invariant", "ci-green-before-release": "invariant",
+           "core-change-protocol": "invariant", "no-pre-existing-excuse": "invariant",
+           "optional-import-guard": "trap"}
 
 
 def _md(base: Path, pattern: str) -> list[Path]:
@@ -118,6 +123,11 @@ def test_protected_rules_are_shipped_rules():
     assert PROTECTED_RULES <= {p.stem for p in CORE}
 
 
+def test_dogfood_rules_are_workspace_rules_not_shipped():
+    assert {f"{rtype}-{name}" for name, rtype in DOGFOOD.items()} <= {p.stem for p in WS}
+    assert not set(DOGFOOD) & {p.stem for p in CORE}
+
+
 def _table(text: str, header: str) -> set[str]:
     """Package names in the markdown table under ``## <header>`` ("`yaml` (pyyaml)" -> pyyaml)."""
     section = re.search(rf"^## {re.escape(header)}[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
@@ -127,7 +137,7 @@ def _table(text: str, header: str) -> set[str]:
 
 
 def test_optional_import_guard_tables_match_pyproject():
-    found = [p for p in ALL if p.stem == "optional-import-guard"]
+    found = [p for p in ALL if p.stem == "trap-optional-import-guard"]
     assert len(found) == 1, f"expected one optional-import-guard rule, found {found}"
     oracle = found[0].read_text(encoding="utf-8")
     with open(ROOT / "pyproject.toml", "rb") as f:

@@ -1,11 +1,23 @@
 ---
-id: optional-import-guard
+id: trap-optional-import-guard
 domain: correctness
-name: Optional Import Guard
-description: Enforces try/except guards on optional dependencies to prevent CI and runtime crashes.
-trigger: model_decision
+type: trap
+enforcement: advisory
+hypothesis: "An unguarded import of a package that is neither standard library nor a declared dependency crashes every importing module, and the whole test suite, wherever the package is absent"
+prediction: "Fires when a change adds a third-party or platform-only import to aegis_cli, aegis_core, aegis_mcp or aegis_sdk without a try/except ImportError guard"
+falsification: "0 findings in 15 sessions: prune"
+expiry_sessions: 15
+expiry_days: 60
+created: "2026-10-15T16:18:02Z"
+impact_weight: 1.0
+tags: ["dogfood", "imports", "portability"]
+target_paths: ["aegis_cli/**/*.py", "aegis_core/**/*.py", "aegis_mcp/**/*.py", "aegis_sdk/**/*.py"]
+lineage:
+  parent_id: null
+  created_by: "manual"
+  generation: 0
+  siblings: []
 ---
-
 # Optional Import Guard
 
 **Role**: Prevents bare imports of optional packages that crash the module when the dependency isn't installed.
@@ -23,7 +35,7 @@ except ImportError:
 
 ## Scope
 
-This applies to ALL files in `aegis_cli/`, `aegis_core/`, `aegis_mcp/`, `aegis_sdk/`, and `install/`.
+This applies to ALL files in `aegis_cli/`, `aegis_core/`, `aegis_mcp/` and `aegis_sdk/`.
 
 ## Required Dependencies (bare import OK)
 
@@ -31,12 +43,12 @@ This applies to ALL files in `aegis_cli/`, `aegis_core/`, `aegis_mcp/`, `aegis_s
 
 ## Known Optional Dependencies
 
-| Package | Used For | Fallback |
-|:--------|:---------|:---------|
-| `anthropic` | Anthropic API provider | Skip provider |
-| `google.generativeai` | Gemini API provider | Skip provider |
-| `keyring` | Credential storage | Fallback to aegis.conf / env |
-| `openai` | OpenAI API provider | Skip provider |
+*(None. v4.0 cut the vendor SDK providers and `keyring`: Layer 2 runs any model
+through `--llm-cmd` / `AEGIS_LLM_CMD`, so no third-party package is imported.)*
+
+Platform-only standard-library modules follow the same guard: `fcntl` and
+`msvcrt` are each imported inside `try/except ImportError` in
+`aegis_core/locking.py`, so the module loads on every OS.
 
 ## Why This Matters
 

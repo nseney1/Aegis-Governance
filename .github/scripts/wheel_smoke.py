@@ -20,6 +20,14 @@ import sysconfig
 import tempfile
 
 PACKAGES = ("aegis_cli", "aegis_sdk", "aegis_core", "aegis_mcp")
+# Shipped rule floors (D16): rules/ has 4 rules plus META.md and rules/.oracles/
+# has 8; the full preset installs all 12 rules (not META.md).
+FULL_PRESET_RULES = 12
+SOURCE_RULE_FILES = 13
+# The author's dogfood rules live in the repository's .aegis/rules (D16), and
+# desktop-automation is not shipped; none of them may reach the wheel.
+UNSHIPPED_RULES = ("gitflow-review-gate", "ci-green-before-release", "core-change-protocol",
+                   "no-pre-existing-excuse", "optional-import-guard", "desktop-automation")
 
 
 def _ensure_site_packages():
@@ -116,8 +124,11 @@ def check_full_rule_preset(ws):
     target = Path(ws) / "full-rules"
     installed = install_rules(target, preset="full")
     files = sorted(target.glob("*.md"))
-    if len(installed) < 10 or len(files) != len(installed):
+    if len(installed) < FULL_PRESET_RULES or len(files) != len(installed):
         fail(f"full rule preset is incomplete: installed={installed!r}, files={files!r}")
+    leaked = sorted(set(installed) & set(UNSHIPPED_RULES))
+    if leaked:
+        fail(f"full rule preset ships rules that must stay unshipped: {leaked!r}")
     print(f"ok  packaged full rule preset ({len(installed)} rules)")
 
 
@@ -132,7 +143,7 @@ def check_packaged_skills_and_platform_adapter(ws):
     adapter = GeminiPlatformAdapter(workspace=Path(ws), home=Path(ws))
     rules = adapter.get_source_rules()
     skills = adapter.get_source_skills()
-    if len(rules) < 15:
+    if len(rules) < SOURCE_RULE_FILES:
         fail(f"GeminiPlatformAdapter.get_source_rules() found only {len(rules)} rules in wheel: {rules!r}")
     if len(skills) < 15:
         fail(f"GeminiPlatformAdapter.get_source_skills() found only {len(skills)} skills in wheel: {skills!r}")
