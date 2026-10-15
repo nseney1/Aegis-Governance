@@ -278,6 +278,9 @@ def test_stripping_keeps_every_other_byte_and_hoists_impact_weight(tmp_path: Pat
     assert rule.read_bytes() == (
         "---\r\nid: trap-crlf\r\ntype: trap\r\nimpact_weight: 1.2\r\nhypothesis: keep me\r\n---\r\nBody\r\n"
     ).encode("utf-8")
+    # applying completes the D12 layout around the rules
+    assert json.loads((root / ".aegis" / "config.json").read_text(encoding="utf-8")) == {"v": 1}
+    assert (root / ".aegis" / ".gitignore").read_text(encoding="utf-8").splitlines()[-1] == "state/"
 
 
 def test_trigger_keyword_lists_are_rule_content_not_counters(tmp_path: Path):

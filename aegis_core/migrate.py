@@ -124,6 +124,11 @@ class MigrationPlan:
     left_in_place: List[str] = field(default_factory=list)
 
     @property
+    def creates_config(self) -> bool:
+        """Applying writes .aegis/config.json because the v4 layout has none yet."""
+        return not WorkspaceLayout(self.root).config_file.exists()
+
+    @property
     def pending(self) -> bool:
         return bool(self.ledger_sources or self.config_sources or self.moves or self.strips or self.removals)
 
@@ -135,7 +140,7 @@ class MigrationPlan:
             "status": "pending" if self.pending else "up_to_date",
             "root": str(self.root),
             "ledger": dict(self.ledger_stats, sources=self.ledger_sources) if self.ledger_sources else None,
-            "config": self.config if self.config_sources or self.moves else None,
+            "config": self.config if self.pending and (self.config_sources or self.creates_config) else None,
             "config_sources": self.config_sources,
             "user_config": self.user_config,
             "dropped": self.dropped,
@@ -525,7 +530,7 @@ def apply(migration: MigrationPlan) -> MigrationResult:
         result.backup = backup
 
         ensure_runtime_gitignore(layout.aegis_dir)
-        if migration.config is not None and (migration.config_sources or migration.moves):
+        if migration.config is not None and (migration.config_sources or migration.creates_config):
             config = migration.config  # planned from the file as it was, plus the legacy values
             update_repo_config(root, lambda data: data.update(config))
             result.written.append(layout.config_file.relative_to(root).as_posix())
