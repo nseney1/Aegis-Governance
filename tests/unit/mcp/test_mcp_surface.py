@@ -123,3 +123,29 @@ def test_rule_type_enums_list_only_the_six_canonical_types(initialized):
     for name in ("aegis_create_rule", "aegis_list_rules"):
         enum = tools[name]["inputSchema"]["properties"]["rule_type"]["enum"]
         assert enum == list(CANONICAL_RULE_TYPES) == ["invariant", "trap", "gate", "boundary", "persona", "contract"]
+
+
+def test_serving_every_tool_never_imports_the_sdk(tmp_path):
+    """aegis_mcp calls aegis_core directly; aegis_sdk is a facade for external callers only."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[3]
+    script = (
+        "import json, sys\n"
+        "from aegis_mcp.tools import execute_tool\n"
+        "ws = sys.argv[1]\n"
+        "execute_tool('aegis_scan', {'workspace': ws, 'files': ['a.py']})\n"
+        "execute_tool('aegis_list_rules', {'workspace': ws})\n"
+        "execute_tool('aegis_create_rule', {'workspace': ws, 'description': 'x'})\n"
+        "execute_tool('aegis_report_outcome', {'workspace': ws, 'outcome': 'tp', 'idempotency_key': 'k'})\n"
+        "print(json.dumps(sorted(m for m in sys.modules if m.split('.')[0] == 'aegis_sdk')))\n"
+    )
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+    proc = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        cwd=repo_root, capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout.strip().splitlines()[-1]) == []
