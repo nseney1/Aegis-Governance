@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Tuple, Union
 
+from aegis_core.errors import AegisError
 from aegis_core.ast.schema import (
     CallSiteNode,
     ImportNode,
@@ -16,6 +17,7 @@ from aegis_core.ast.schema import (
 )
 
 __all__ = [
+    "ASTExtractionError",
     "_match_ImportNode_against_pattern",
     "_match_call_against_pattern",
     "_match_decorator_against_pattern",
@@ -23,6 +25,13 @@ __all__ = [
     "extract_normalized_ast",
     "synthesize_planned_ast",
 ]
+
+
+class ASTExtractionError(AegisError):
+    """A source file could not be parsed, so a forbid_ast rule cannot verify it."""
+
+    def __init__(self, path: str, reason: str):
+        super().__init__(f"cannot verify {path}: {reason}", code="AST_UNVERIFIABLE", path=path, reason=reason)
 
 
 def _import_aliases(imp: Any) -> dict[str, str]:
@@ -142,7 +151,9 @@ def evaluate_forbid_ast(
     """Evaluate a NormalizedAST against declarative forbid_ast constraints.
 
     Aliased imports are judged as their plain form (``sp.run()`` after ``import subprocess as
-    sp`` as ``subprocess.run()``) plus the literal alias text.
+    sp`` as ``subprocess.run()``) plus the literal alias text. Syntactic only, so out of scope:
+    computed module names (a literal ``__import__("x")``/``importlib.import_module("x")`` does
+    count), ``getattr``/``globals`` access, ``f = subprocess.run`` rebinding, ``from x import *``.
     """
     if normalized_ast is None or not forbid_spec or not isinstance(forbid_spec, dict):
         return []
@@ -189,12 +200,7 @@ def evaluate_forbid_ast(
             if any(_match_call_against_pattern(item, call, imported_qual_map, aliases) for item in all_call_items):
                 violations.append(f"Forbidden call '{call}' matched rule forbid_ast.calls")
 
-    raw_decs_sources: list[Any] = []
-    if hasattr(normalized_ast, "decorators"):
-        try:
-            raw_decs_sources.extend(getattr(normalized_ast, "decorators") or ())
-        except Exception:
-            pass
+    raw_decs_sources: list[Any] = list(getattr(normalized_ast, "decorators", None) or ())
     meta = getattr(normalized_ast, "metadata", None)
     if isinstance(meta, dict) and isinstance(meta.get("decorators"), (list, tuple, set)):
         raw_decs_sources.extend(meta["decorators"])
@@ -260,32 +266,34 @@ def extract_normalized_ast(
     code: Optional[str] = None,
     ast_runner: Any = None,
 ) -> Optional[NormalizedAST]:
-    """Extract a NormalizedAST (including Python decorators) from a source file or code string."""
-    from aegis_core.ast.drivers.python import parse_python_ast
+    """Extract a NormalizedAST (including Python decorators) from a source file or code string.
+
+    Returns None only when no AST driver handles the file type (forbid_ast does not apply);
+    any read, decode, parse or driver failure raises ASTExtractionError so callers fail closed.
+    """
+    from aegis_core.ast.drivers.python import parse_python_ast, read_python_source
 
     path_str = str(file_path)
     ext = os.path.splitext(path_str)[1].lower()
 
-    if code is not None or ext == ".py":
-        try:
-            source_text = code if code is not None else Path(path_str).read_text(encoding="utf-8")
-            norm_ast = parse_python_ast(source_text, file_path=path_str)
+    try:
+        if code is not None or ext == ".py":
+            source_text = code if code is not None else read_python_source(path_str)
+            # Parse here first so a syntax error surfaces as itself, not the driver's wrapper.
             tree = ast.parse(source_text, filename=path_str)
+            norm_ast = parse_python_ast(source_text, file_path=path_str)
             decs = _extract_python_decorators_from_tree(tree)
             if decs:
                 meta = dict(norm_ast.metadata)
                 meta["decorators"] = list(decs)
                 object.__setattr__(norm_ast, "metadata", meta)
             return norm_ast
-        except Exception:
-            return None
 
-    try:
         if ast_runner is None:
             from aegis_core.ast.runner import ASTDriverRunner
             ast_runner = ASTDriverRunner()
-        if ast_runner.registry.resolve_driver(ext, workspace_root=workspace_root):
-            return ast_runner.parse_file(path_str, workspace_root=workspace_root)
-    except Exception:
-        return None
-    return None
+        if not ast_runner.registry.resolve_driver(ext, workspace_root=workspace_root):
+            return None
+        return ast_runner.parse_file(path_str, workspace_root=workspace_root)
+    except Exception as exc:
+        raise ASTExtractionError(path_str, f"{type(exc).__name__}: {exc}") from exc

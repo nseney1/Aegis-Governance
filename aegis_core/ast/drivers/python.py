@@ -6,7 +6,9 @@ ast module. Operates purely in-process with zero external dependencies.
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
+import tokenize
 from typing import Any, List, Optional, Set, Tuple, Union
 
 from aegis_core.ast.schema import (
@@ -16,6 +18,22 @@ from aegis_core.ast.schema import (
     MutationPoint,
     NormalizedAST,
 )
+
+
+# Calls whose literal first argument names the module they import.
+_DYNAMIC_IMPORTERS = frozenset({"__import__", "importlib.import_module"})
+
+
+def read_python_source(path: Union[str, Path]) -> str:
+    """Read a Python source file the way CPython decodes it.
+
+    Honours a UTF-8 BOM and a PEP 263 coding cookie (e.g. latin-1). Raises
+    SyntaxError for an unknown or conflicting declaration and UnicodeDecodeError
+    for bytes the declared encoding cannot decode; both mean CPython would refuse
+    the file too.
+    """
+    with tokenize.open(str(path)) as handle:
+        return handle.read()
 
 
 def _resolve_attribute_chain(node: ast.AST) -> Optional[str]:
@@ -144,6 +162,11 @@ class _PythonASTVisitor(ast.NodeVisitor):
         elif isinstance(node.func, ast.Attribute):
             target = _resolve_attribute_chain(node.func)
 
+        if target in _DYNAMIC_IMPORTERS and node.args:
+            first = node.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str) and first.value:
+                self.imports.append(ImportNode(source=first.value, line=node.lineno))
+
         if target:
             caller_scope = self.scope_stack[-1] if self.scope_stack else None
             self.call_sites.append(
@@ -208,10 +231,16 @@ def parse_python_ast(
 ) -> NormalizedAST:
     """Parse Python source code or file into a NormalizedAST instance."""
     resolved_path = str(file_path or source_or_path)
+    # With an explicit file_path a str is always source text: a one-line source that names
+    # an existing file must not be swapped for that file. os.path.isfile, not Path.is_file,
+    # because the latter raises OSError (ENAMETOOLONG) on a long one-line source.
     if isinstance(source_or_path, Path) or (
-        isinstance(source_or_path, str) and not "\n" in source_or_path and Path(source_or_path).is_file()
+        file_path is None
+        and isinstance(source_or_path, str)
+        and "\n" not in source_or_path
+        and os.path.isfile(source_or_path)
     ):
-        content = Path(source_or_path).read_text(encoding="utf-8")
+        content = read_python_source(source_or_path)
         resolved_path = str(source_or_path)
     else:
         content = str(source_or_path)

@@ -149,6 +149,24 @@ def check_value(x):
     assert "+" in ops
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"\xef\xbb\xbfimport os\nos.getcwd()\n",
+        "# -*- coding: latin-1 -*-\nimport os\nNAME = 'café'\nos.getcwd()\n".encode("latin-1"),
+    ],
+    ids=["utf8-bom", "latin1-cookie"],
+)
+def test_python_driver_decodes_files_like_cpython(tmp_path, raw):
+    py_file = tmp_path / "encoded.py"
+    py_file.write_bytes(raw)
+
+    norm_ast = parse_python_ast(py_file)
+
+    assert [imp.source for imp in norm_ast.imports] == ["os"]
+    assert [c.target for c in norm_ast.call_sites] == ["os.getcwd"]
+
+
 def test_python_driver_records_import_aliases():
     code = "import os.path as osp\nfrom os import sep, path as p\nimport json\n"
 

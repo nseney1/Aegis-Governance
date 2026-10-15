@@ -344,6 +344,7 @@ def run_layer1(
 
     # ── Declarative Rule-Level forbid_ast ─────────────────────────────
     from aegis_core.ast.match import evaluate_forbid_ast, extract_normalized_ast
+    from aegis_core.ast.policy import ASTExtractionError
 
     forbid_rules = _discover_forbid_ast_rules(repo_root_str)
     if forbid_rules:
@@ -373,11 +374,25 @@ def run_layer1(
                     continue
 
                 if full_path not in ast_cache:
-                    ast_cache[full_path] = extract_normalized_ast(
-                        full_path, workspace_root=repo_root_str, ast_runner=ast_runner
-                    )
+                    try:
+                        ast_cache[full_path] = extract_normalized_ast(
+                            full_path, workspace_root=repo_root_str, ast_runner=ast_runner
+                        )
+                    except ASTExtractionError as exc:
+                        ast_cache[full_path] = exc
                 norm_ast = ast_cache[full_path]
-                if norm_ast is None:
+                if norm_ast is None:  # no AST driver for this file type: rule does not apply
+                    continue
+                if isinstance(norm_ast, ASTExtractionError):
+                    # Fail closed: a gate rule that cannot read the file must not pass it.
+                    results.append(
+                        VerificationResult(
+                            tool=f"forbid_ast:{rule_id}",
+                            target=rel_path,
+                            verdict=False,
+                            detail=f"forbid_ast: cannot verify {rel_path}: {norm_ast.reason}",
+                        )
+                    )
                     continue
                 violations = evaluate_forbid_ast(norm_ast, forbid_spec)
                 if violations:
