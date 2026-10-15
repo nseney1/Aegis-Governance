@@ -181,7 +181,8 @@ class TestHookStatusPorcelain:
         assert st["status"] == "installed"
         assert st["managed_by_aegis"] is True
         assert st["format_version"] == CURRENT_HOOK_FORMAT_VERSION
-        assert st["interpreter"]["path"] == sys.executable
+        # The hook pins a shell path, so on Windows it is written with forward slashes.
+        assert Path(st["interpreter"]["path"]) == Path(sys.executable)
 
     def test_status_reports_outdated_format(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)

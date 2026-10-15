@@ -98,7 +98,8 @@ def test_a_symlink_at_the_target_is_refused_and_left_alone(ws: Path, tmp_path: P
         create_cell("trap", "Through a link", id_override="linked", workspace=ws)
 
     assert str(exc.value) == f"rule 'linked' already exists: {link}"
-    assert link.is_symlink() and os.readlink(link) == str(outside)
+    # Not os.readlink: on Windows it returns the target as an extended \\?\ path.
+    assert link.is_symlink() and link.resolve() == outside.resolve()
     assert outside.read_text(encoding="utf-8") == "outside the rules tree\n"
 
 

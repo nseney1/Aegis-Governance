@@ -77,7 +77,18 @@ def _parse(path: Path, ws: Path) -> Tuple[Optional[Any], Optional[Exception]]:
 
 
 def _write_executable(path: Path, body: str) -> Path:
+    """A Python program that PATH lookup finds as ``path.name``.
+
+    Windows finds and runs only PATHEXT types, not shebang scripts, so there the
+    program is a .cmd launcher (returned in place of ``path``) beside the script.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        script = path.with_name(path.name + "-script.py")
+        script.write_text(body, encoding="utf-8")
+        launcher = path.with_name(path.name + ".cmd")
+        launcher.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+        return launcher
     path.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return path
@@ -233,6 +244,11 @@ def test_packaged_ts_driver_does_not_load_repo_node_modules(ws: Path, tmp_path: 
     assert "run" in {d.name for d in result.definitions}
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the stub 'go build' emits a Python script as the driver binary, and Windows runs only "
+    "real executables; test_packaged_go_driver_parses_real_go_source covers Windows with a go toolchain",
+)
 def test_packaged_go_driver_is_built_from_the_package_template(ws: Path, tmp_path: Path, monkeypatch):
     """Mocked at the process boundary: a stub 'go' records argv/cwd and emits a fake driver binary."""
     log = tmp_path / "go-calls.jsonl"
@@ -355,7 +371,10 @@ def _install_aegis_inside(ws: Path) -> Path:
 
 def _parse_with_installed_package(site: Path, target: Path, ws: Path, path_env: str, home: Path, cwd: Path) -> dict:
     """Run parse_file in a fresh interpreter that imports aegis_core from ``site``."""
-    env = {"PATH": path_env, "HOME": str(home), "PYTHONPATH": str(site)}
+    env = {"PATH": path_env, "HOME": str(home), "USERPROFILE": str(home), "PYTHONPATH": str(site)}
+    if os.name == "nt":
+        # Python 3.9 on Windows cannot even start without SYSTEMROOT (random seed).
+        env.update({k: os.environ[k] for k in ("SYSTEMROOT", "COMSPEC", "TEMP", "TMP") if k in os.environ})
     proc = subprocess.run(
         [sys.executable, "-s", "-c", _PARSE_WITH_INSTALLED_PACKAGE, str(target), str(ws)],
         cwd=str(cwd), env=env, capture_output=True, text=True, timeout=120,
@@ -675,6 +694,7 @@ def test_provision_refuses_driver_copy_symlinked_to_a_user_file(ws: Path, isolat
     victim = isolated_home / ".zshrc"
     victim.write_text("export PATH=/usr/bin\n", encoding="utf-8")
     victim.chmod(0o600)
+    mode = stat.S_IMODE(victim.stat().st_mode)  # 0o600; Windows keeps only the read-only bit
     _ts_project(ws)
     drivers = ws / ".aegis" / "drivers"
     drivers.mkdir()
@@ -684,7 +704,7 @@ def test_provision_refuses_driver_copy_symlinked_to_a_user_file(ws: Path, isolat
         provision_ast_driver_slots(ws, copy_drivers=True)
 
     assert victim.read_text(encoding="utf-8") == "export PATH=/usr/bin\n"
-    assert stat.S_IMODE(victim.stat().st_mode) == 0o600
+    assert stat.S_IMODE(victim.stat().st_mode) == mode
     assert not (ws / ".aegis" / "slots.yaml").exists()
 
 
@@ -995,12 +1015,17 @@ def test_user_scope_driver_via_relative_path_entry_is_refused_even_outside_the_w
 
 
 def _load_slots_in_child(ws: Path, home: Path) -> str:
-    """SlotRegistry.load(ws) in a child capped at 1 GiB and 30 s, so a regression cannot hang or OOM the suite."""
+    """SlotRegistry.load(ws) in a child capped at 30 s and, where enforceable, 1 GiB, so a regression cannot hang or OOM the suite."""
     resource = pytest.importorskip("resource")
     code = textwrap.dedent(
         """
         import resource, sys
-        resource.setrlimit(resource.RLIMIT_AS, (1 << 30, 1 << 30))
+        _, hard = resource.getrlimit(resource.RLIMIT_AS)
+        cap = 1 << 30 if hard == resource.RLIM_INFINITY else min(1 << 30, hard)
+        try:
+            resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
+        except (ValueError, OSError):
+            pass  # macOS cannot lower RLIMIT_AS; the timeout below still bounds the child
         from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
         try:
             reg = SlotRegistry.load(sys.argv[1])

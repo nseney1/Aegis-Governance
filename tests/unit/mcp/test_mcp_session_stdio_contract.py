@@ -64,6 +64,7 @@ def home(tmp_path: Path, monkeypatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
     return home
 
