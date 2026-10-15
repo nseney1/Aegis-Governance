@@ -1,8 +1,9 @@
 """Parser safety tests for aegis_core.yaml_engine (review finding M5, parser half).
 
-Covers: backslash-zero text is data (only a real NUL is rejected), zero-width characters inside
-values survive (only a leading document BOM is stripped), mappings nested under list items parse
-with their full structure or raise, and out-of-range unicode escapes raise the engine error type.
+Covers: backslash-zero text is data (U+0000 itself is rejected, raw or in any escape spelling),
+zero-width characters inside values survive (only a leading document BOM is stripped), list items
+keep their structure (compact "- key: v" maps with any key shape, "- - x" nested sequences, block
+scalars) or raise, and out-of-range unicode escapes raise the engine error type.
 """
 from __future__ import annotations
 
@@ -31,6 +32,26 @@ class TestParserBackslashZero:
             parse_yaml_subset("p: a\x00b")
         with pytest.raises(AegisYAMLError, match="Escape sequence"):
             parse_yaml_subset('p: "a\\0b"')
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            'p: "a\\u0000b"',
+            'p: "\\U00000000"',
+            'p: ["\\u0000"]',
+            'p: {"k\\u0000": 1}',
+            '"\\u0000": 1',
+            'p:\n  - "x\\u0000"',
+        ],
+    )
+    def test_escaped_nul_is_rejected_in_every_spelling(self, text):
+        # Review M5 follow-up: a decoded NUL is rejected however it is spelled, matching the raw-NUL
+        # and \0 rejections, so no parsed value or key can carry U+0000.
+        with pytest.raises(AegisYAMLError, match="NUL"):
+            parse_yaml_subset(text)
+
+    def test_backslash_u_zero_text_in_single_quotes_is_data(self):
+        assert parse_yaml_subset("p: 'a\\u0000b'") == {"p": "a\\u0000b"}
 
 
 class TestParserInvisibleCharacters:
@@ -110,6 +131,103 @@ class TestParserListItemMappings:
     def test_misindented_list_item_content_raises(self, text, message):
         with pytest.raises(AegisYAMLError, match=message):
             parse_yaml_subset(text)
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ('l:\n  - "k": "v"\n', [{"k": "v"}]),
+            ("l:\n  - 'k': 'v'\n", [{"k": "v"}]),
+            ("l:\n  - my key: v\n", [{"my key": "v"}]),
+            ("l:\n  - a/b: c\n", [{"a/b": "c"}]),
+            ("l:\n  - 2024: x\n", [{"2024": "x"}]),
+            ("l:\n  - k : v\n", [{"k": "v"}]),
+            ("l:\n  - k:\tv\n", [{"k": "v"}]),
+            ('l:\n  - "a: b": c\n', [{"a: b": "c"}]),
+            ("l:\n  - 'it''s': x\n", [{"it's": "x"}]),
+            ('l:\n  - "a #b": c # trailing\n', [{"a #b": "c"}]),
+            ('l:\n  - "my key": 1\n    "other key": [a]\n  - x\n', [{"my key": 1, "other key": ["a"]}, "x"]),
+            ("l:\n  - my key:\n      n: 1\n", [{"my key": {"n": 1}}]),
+            ("l:\n  - my key: |\n      line # kept\n    next: 2\n", [{"my key": "line # kept\n", "next": 2}]),
+        ],
+    )
+    def test_compact_map_with_any_key_shape_under_list_item(self, text, expected):
+        assert parse_yaml_subset(text) == {"l": expected}
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("l:\n  - - a\n", [["a"]]),
+            ("l:\n  - - a: 1\n", [[{"a": 1}]]),
+            ("l:\n  - - a\n    - b\n  - c\n", [["a", "b"], "c"]),
+            ("l:\n  - - a: 1\n      b: 2\n", [[{"a": 1, "b": 2}]]),
+            ("l:\n  - - - x\n", [[["x"]]]),
+            ("l:\n  - -\n", [[None]]),
+            ("l:\n- - a\n", [["a"]]),
+            ('l:\n  - - "q: r"\n', [["q: r"]]),
+        ],
+    )
+    def test_compact_nested_sequence_under_list_item(self, text, expected):
+        assert parse_yaml_subset(text) == {"l": expected}
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("l:\n  - C:\\0\n", ["C:\\0"]),
+            ("l:\n  - http://x.y/z\n", ["http://x.y/z"]),
+            ("l:\n  - a:b\n", ["a:b"]),
+            ("l:\n  - 'a: b'\n", ["a: b"]),
+            ('l:\n  - "a: b"\n', ["a: b"]),
+            ("l:\n  - {a: 1}\n", [{"a": 1}]),
+            ("l:\n  - -1\n", [-1]),
+            ("l:\n  - -x\n", ["-x"]),
+        ],
+    )
+    def test_scalar_and_flow_items_stay_scalars(self, text, expected):
+        assert parse_yaml_subset(text) == {"l": expected}
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("l:\n  - |\n    a\n    b\n  - x\n", ["a\nb\n", "x"]),
+            ("l:\n  - >-\n    a\n    b\n", ["a b"]),
+            ("l:\n  - |\n", [""]),
+            ("l:\n  - - |\n      x # kept\n", [["x # kept\n"]]),
+        ],
+    )
+    def test_block_scalar_as_list_item(self, text, expected):
+        assert parse_yaml_subset(text) == {"l": expected}
+
+    @pytest.mark.parametrize(
+        "text, message",
+        [
+            ("l:\n  - a:b: c\n", "ambiguous sequence item"),
+            ("l:\n  - http://x: y\n", "ambiguous sequence item"),
+            ("l:\n  - a:b:\n", "ambiguous sequence item"),
+            ("l:\n  - : v\n", "missing key"),
+            ('l:\n  - "k" x: v\n', "unterminated quoted scalar"),
+        ],
+    )
+    def test_list_item_that_cannot_be_read_unambiguously_raises(self, text, message):
+        with pytest.raises(AegisYAMLError, match=message):
+            parse_yaml_subset(text)
+
+    def test_compact_nesting_beyond_depth_cap_raises_without_quadratic_work(self):
+        with pytest.raises(AegisYAMLError, match="nesting depth"):
+            parse_yaml_subset("l:\n  " + "- " * 100_000 + "x\n")
+
+    @pytest.mark.parametrize(
+        "sibling, expected",
+        [
+            ("    name: x # c\n", {"name": "x"}),
+            ("    # a comment line\n    name: x\n", {"name": "x"}),
+            ("    name: 'a # b' # c\n", {"name": "a # b"}),
+        ],
+    )
+    def test_sibling_after_block_scalar_in_compact_item_is_parsed_as_a_key(self, sibling, expected):
+        # The block scalar is anchored at the key column, not the dash column: a sibling key at the
+        # key column ends it and gets normal comment and quote handling (review low finding 2).
+        text = "items:\n  - run: |\n      echo\n" + sibling
+        assert parse_yaml_subset(text) == {"items": [{"run": "echo\n", **expected}]}
 
 
 class TestParserUnicodeEscapes:

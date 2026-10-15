@@ -20,6 +20,7 @@ _NULL_VALUES = frozenset(("", "~", "null"))
 _INT_RE = re.compile(r"^[-+]?[0-9]+$")
 _FLOAT_RE = re.compile(r"^[-+]?(?:[0-9]+\.[0-9]*(?:[eE][-+][0-9]+)?|\.[0-9]+(?:[eE][-+][0-9]+)?)$")
 _SEQ_MAPPING_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.\-]*:(?:\s|$)")
+_MAPPING_COLON_RE = re.compile(r":(?:[ \t]|$)")
 _UNSUPPORTED_PREFIXES = ("&", "*", "!", "%", "@", "`")
 _ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/", "'": "'", " ": " "}
 _CLOSING_DELIM_RE = re.compile(r"(?m)^---[ \t]*\r?$")
@@ -40,8 +41,11 @@ def _unescape_double(body: str) -> str:
                 span = 6 if nxt == "u" else 10
                 digits = body[i + 2 : i + span]
                 if not _HEX_RE.fullmatch(digits): out.append(nxt); i += 2; continue
-                if int(digits, 16) > 0x10FFFF: raise AegisYAMLError(f"Escape sequence \\{nxt}{digits} is outside the Unicode range (max U+10FFFF)")
-                out.append(chr(int(digits, 16))); i += span
+                cp = int(digits, 16)
+                if cp > 0x10FFFF: raise AegisYAMLError(f"Escape sequence \\{nxt}{digits} is outside the Unicode range (max U+10FFFF)")
+                # NUL is refused raw (_prepare_lines) and as \0; refusing every spelling keeps U+0000 out of all parsed text.
+                if cp == 0: raise AegisYAMLError(f"Escape sequence \\{nxt}{digits} decodes to NUL, which is not permitted")
+                out.append(chr(cp)); i += span
             else: out.append(nxt); i += 2
         else: out.append(ch); i += 1
     return "".join(out)
@@ -130,6 +134,14 @@ def _parse_key(raw_key: str, lineno: int) -> str:
         if unicodedata.category(ch) == "Cf": raise AegisYAMLError(f"line {lineno}: invisible format character U+{ord(ch):04X} in key; write it as a \\u escape in a double-quoted key")
     return str(_parse_scalar(raw_key, lineno=lineno))
 
+def _is_compact_mapping(item: str) -> bool:
+    # A list item is a "key: value" entry when its first unquoted ':' (whatever the key's shape) is
+    # followed by whitespace or ends the item; "C:\0" and URLs stay scalars, flow items are values.
+    if item[:1] in ("[", "{"): return False
+    try: _, idx = _read_token(item, 0, ":")
+    except AegisYAMLError: return False
+    return idx < len(item) and item[idx + 1 : idx + 2] in ("", " ", "\t")
+
 def _split_entry(content: str) -> Optional[Tuple[str, str]]:
     try: raw_key, idx = _read_token(content, 0, ":")
     except AegisYAMLError: return None
@@ -198,18 +210,23 @@ def _prepare_lines(text: str) -> List[Tuple[int, str, int]]:
         line = _strip_comment(raw)
         if not line.strip(): continue
         line_indent, line_content = len(line) - len(line.lstrip(" ")), line.strip()
-        col, entry = line_indent, line_content
-        if line_content == "-" or line_content.startswith("- "):
-            item = line_content[1:].lstrip(" ")
-            if not _SEQ_MAPPING_RE.match(item):
-                prepared.append((line_indent, line_content, lineno))
-                if item[:1] in ('"', "'") and _find_unclosed_quote(item) is not None: in_quote = item[0]
-                continue
-            # "- key: v" opens a mapping anchored at the key's column (YAML compact form); emitting it
-            # as "-" plus the entry lets _parse_block_map parse nested maps, lists and block scalars.
-            prepared.append((line_indent, "-", lineno))
-            col, entry = line_indent + len(line_content) - len(item), item
+        col, entry, levels = line_indent, line_content, 0
+        while entry == "-" or entry.startswith("- "):
+            item = entry[1:].lstrip(" ")
+            if not (item == "-" or item.startswith("- ") or _is_compact_mapping(item)): break
+            # "- key: v" and "- - x" open a mapping / sequence anchored at the item's column (YAML compact
+            # form); emitting a bare "-" plus the item lets the block parsers handle the nesting.
+            levels += 1
+            if levels > MAX_DEPTH: raise AegisYAMLError("Maximum YAML nesting depth exceeded")
+            prepared.append((col, "-", lineno))
+            col, entry = col + len(entry) - len(item), item
         prepared.append((col, entry, lineno))
+        if entry == "-" or entry.startswith("- "):
+            item = entry[1:].lstrip(" ")
+            # Anchored at the dash column, so a sibling item at that column ends the block scalar.
+            if item in _BLOCK_INDICATORS: in_block_scalar, scalar_indent = True, col
+            elif item[:1] in ('"', "'") and _find_unclosed_quote(item) is not None: in_quote = item[0]
+            continue
         split = _split_entry(entry)
         if split is None: continue
         rest = split[1]
@@ -286,9 +303,15 @@ def _parse_block_seq(lines: List[Tuple[int, str, int]], start: int, indent: int,
             if i + 1 < len(lines) and lines[i + 1][0] > indent:
                 value, i = _parse_collection(lines, i + 1, lines[i + 1][0], depth=depth + 1); items.append(value)
             else: items.append(None); i += 1
+        elif body in _BLOCK_INDICATORS:
+            value, i = _parse_block_scalar(lines, i + 1, indent, body); items.append(value)
         elif body[:1] in ('"', "'"):
             accum, i = _consume_multiline_quote(lines, i, indent, body, "item")
             items.append(_parse_scalar(accum, lineno=lineno))
+        elif body[:1] not in ("[", "{") and _MAPPING_COLON_RE.search(body):
+            # _prepare_lines already turned "key: v" items into mappings; a ': ' left here follows a key
+            # that itself contains ':' ("a:b: c"), which this subset cannot read without guessing.
+            raise AegisYAMLError(f"line {lineno}: ambiguous sequence item {body[:40]!r}: quote the key or the whole item")
         else: items.append(_parse_scalar(body, lineno=lineno)); i += 1
     return items, i
 

@@ -3,8 +3,8 @@
 Contract under test: for any mapping with str keys and str / int / finite float / bool / None /
 list / dict values, ``parse_yaml_subset(dump_frontmatter(d))`` is identical to ``d`` (same types,
 same key order), and the frontmatter entry points preserve both metadata and body. Input the parser
-cannot represent makes the serializer raise AegisYAMLError (a ValueError) instead of writing a file
-that cannot be read back.
+cannot represent (U+0000 in any text, keys that collide after str(), values over the DoS caps) makes
+the serializer raise AegisYAMLError (a ValueError) instead of writing a file that cannot be read back.
 """
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def roundtrip(data):
 
 LINE_BREAKS_AND_CONTROLS = [
     "\r", "a\rb", "a\r\nb", "\n", "a\nb", "\u2028", "x\u2029y", "\u0085", "a\x0bb", "a\x0cb",
-    "\x1c\x1d\x1e", "\x00", "nul\x00byte", "\x01", "\x08", "\x1b[31m", "\x1f", "\x7f", "\x80", "\x9f",
+    "\x1c\x1d\x1e", "\x01", "\x08", "\x1b[31m", "\x1f", "\x7f", "\x80", "\x9f",
     "\t", "a\tb", " \t",
 ]
 INVISIBLE = ["\ufeff", "\ufeffbom", "a\u200bb", "\u200c", "\u200d", "\u2060", "\u202eevil", "\u00ad", "\U000e0041"]
@@ -76,7 +76,8 @@ SYNTAX = [
     "|", ">-", "&anchor", "*alias", "!tag", "%dir", "@at", "`tick`", "'single'", '"double"', "it's",
     "back\\slash", "\\", "\\n", "---", "...", "true", "False", "YES", "on", "off", "no", "null", "NULL", "~",
     "0", "-1", "+7", "007", "1.5", ".5", "1.", "1.0e+5", "1e5", "inf", "nan", "C:\\0", "\\0", "\\u0041",
-    "\\UFFFFFFFF", "a: 1\nb: 2", "\u00a0nbsp", "ideo\u3000", "emoji \U0001f600", "\u4e2d\u6587", "\u00e9",
+    "\\UFFFFFFFF", "\\u0000", "a: 1\nb: 2", "- - x", "-\tx", "-x", "a:b: c", "my key", "k : v", "2024",
+    "\u00a0nbsp", "ideo\u3000", "emoji \U0001f600", "\u4e2d\u6587", "\u00e9",
 ]
 ALL_HOSTILE = LINE_BREAKS_AND_CONTROLS + INVISIBLE + SURROGATES + SYNTAX
 
@@ -92,8 +93,8 @@ class TestSerializerValues:
         assert_identical(data, roundtrip(data))
 
     def test_line_breaks_and_invisible_characters_are_never_written_raw(self):
-        dumped = dump_frontmatter({"k": "a\rb\u2028c\x85d\x00e\ufefff\u200bg\u202eh"})
-        for raw in ("\r", "\u2028", "\x85", "\x00", "\ufeff", "\u200b", "\u202e"):
+        dumped = dump_frontmatter({"k": "a\rb\u2028c\x85d\x01e\ufefff\u200bg\u202eh"})
+        for raw in ("\r", "\u2028", "\x85", "\x01", "\ufeff", "\u200b", "\u202e"):
             assert raw not in dumped
 
 
@@ -166,6 +167,52 @@ class TestSerializerRefusesWhatTheParserRejects:
         with pytest.raises(AegisYAMLError, match="non-finite"):
             dump_frontmatter({"score": value})
 
+    @pytest.mark.parametrize("value", [10**5000, -(10**5000), 10**4200], ids=["1e5000", "-1e5000", "1e4200"])
+    def test_int_with_more_digits_than_scalar_cap_raises_engine_error(self, value):
+        # 10**5000 exceeds CPython's int->str digit limit (bare ValueError); 10**4200 converts but is
+        # over MAX_SCALAR_CHARS. Both must surface as the engine's error with the parser limit named.
+        with pytest.raises(AegisYAMLError, match="MAX_SCALAR_CHARS"):
+            dump_frontmatter({"n": value})
+        with pytest.raises(AegisYAMLError, match="MAX_SCALAR_CHARS"):
+            dump_frontmatter({"l": [value]})
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {1: "a", "1": "b"},
+            {True: 1, "True": 2},
+            {"o": {None: 1, "None": 2}},
+            {"l": [{2.5: "x", "2.5": "y"}]},
+        ],
+    )
+    def test_keys_that_collide_after_str_raise_at_dump(self, data):
+        with pytest.raises(AegisYAMLError, match="both serialize as"):
+            dump_frontmatter(data)
+
+    def test_non_str_keys_that_do_not_collide_read_back_as_str(self):
+        assert parse_yaml_subset(dump_frontmatter({1: "a", False: "b", None: "c", 2.5: "d"})) == {
+            "1": "a",
+            "False": "b",
+            "None": "c",
+            "2.5": "d",
+        }
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"k": "\x00"},
+            {"k": "nul\x00byte"},
+            {"\x00": 1},
+            {"o": {"a\x00": 1}},
+            {"l": ["ok", "x\x00"]},
+            {"l": [{"k": "\x00"}]},
+        ],
+    )
+    def test_nul_raises_at_dump(self, data):
+        # The parser rejects U+0000 raw and in every escape spelling, so it cannot be written.
+        with pytest.raises(AegisYAMLError, match="NUL"):
+            dump_frontmatter(data)
+
 
 class TestSerializerContainersAndNumbers:
     @pytest.mark.parametrize("value", [1e-05, -1e20, 5e-324, 1.7976931348623157e308, -0.0, 0.1, 3.0, 12345678.9])
@@ -189,7 +236,7 @@ class TestSerializerContainersAndNumbers:
 # --- property tests ---------------------------------------------------------------------------
 
 _ALPHABET = list(string.ascii_letters + string.digits + " :#-_.,'\"\\/[]{}|>&*!%@`?~=+") + [
-    "\n", "\r", "\t", "\x00", "\x01", "\x0b", "\x0c", "\x1b", "\x1c", "\x1f", "\x7f", "\x80", "\x85",
+    "\n", "\r", "\t", "\x01", "\x0b", "\x0c", "\x1b", "\x1c", "\x1f", "\x7f", "\x80", "\x85",
     "\x9f", "\xa0", "\xad", "\u2028", "\u2029", "\u200b", "\u200c", "\u200d", "\u2060", "\ufeff",
     "\u202e", "\u3000", "\ud800", "\udfff", "\U0001f600", "\U000e0041", "\u00e9", "\u4e2d",
 ]
@@ -269,9 +316,11 @@ def _depth(value):
 
 
 if given is not None:
-    _keys = st.text(max_size=20)
+    # U+0000 is excluded: the serializer refuses it (see TestSerializerRefusesWhatTheParserRejects).
+    _text = st.characters(blacklist_characters="\x00")
+    _keys = st.text(alphabet=_text, max_size=20)
     _scalars = st.one_of(
-        st.text(max_size=30),
+        st.text(alphabet=_text, max_size=30),
         st.integers(min_value=-(10**18), max_value=10**18),
         st.floats(allow_nan=False, allow_infinity=False),
         st.booleans(),
