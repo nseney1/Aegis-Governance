@@ -6,9 +6,11 @@ the next step instead of a generic argparse error.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
-from aegis_cli.cli import main
+from aegis_cli.cli import REMOVED_COMMANDS, _build_parser, main
 
 REPORT_POINTER = (
     "aegis report was removed in v4: aegis status shows rule trigger counts; "
@@ -109,3 +111,45 @@ def test_surviving_global_flags_still_parse(argv, tmp_path, monkeypatch):
     (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
     assert main(argv) == 0
+
+
+# Every `aegis <command> [--flag]` a pointer sends people to, as an argv that
+# must parse, so a pointer can never name a command or flag that does not exist.
+_REPLACEMENT_ARGV = {
+    "aegis check": ["check"],
+    "aegis check --hook": ["check", "--hook"],
+    "aegis doctor": ["doctor"],
+    "aegis hook": ["hook", "status"],
+    "aegis init --host": ["init", "--host", "claude-code"],
+    "aegis scan": ["scan", "a.py"],
+    "aegis status": ["status"],
+}
+_NAMED = re.compile(r"\baegis ([a-z][a-z-]*)(?: (--[a-z][a-z-]*))?")
+
+
+def test_the_replacement_table_covers_every_named_replacement():
+    named = set()
+    for text in REMOVED_COMMANDS.values():
+        for command, flag in _NAMED.findall(text):
+            named.add(" ".join(part for part in ("aegis", command, flag) if part))
+    assert named == set(_REPLACEMENT_ARGV)
+
+
+@pytest.mark.parametrize(
+    "named",
+    [
+        pytest.param(
+            name,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="init --host lands with the host table in wave C (v4.0-c); drop this mark then",
+            ),
+        ) if name == "aegis init --host" else name
+        for name in sorted(_REPLACEMENT_ARGV)
+    ],
+)
+def test_every_named_replacement_parses(named):
+    try:
+        _build_parser().parse_args(_REPLACEMENT_ARGV[named])
+    except SystemExit as exc:
+        pytest.fail(f"{named!r} does not parse (exit {exc.code})")
