@@ -287,8 +287,8 @@ class VerificationPipeline:
             else:
                 files = []
 
-        run_layer2 = bool(files) and not layer1_only
-        if run_layer2:
+        wants_layer2 = bool(files) and not layer1_only
+        if wants_layer2:
             # Validate Layer 2's inputs before spending any Layer 1 work on them.
             if not task_plan:
                 raise ValueError("Layer 2 needs a task plan")
@@ -305,7 +305,7 @@ class VerificationPipeline:
         l1_passed = runner.gate_verdict(l1_evidence)
         l1_summary = runner.format_summary(l1_evidence)
 
-        if not run_layer2:
+        if not wants_layer2:
             verdict = Verdict.SHIP if l1_passed else Verdict.BLOCK
             return VerificationPipelineResult(
                 target_files=list(files),
