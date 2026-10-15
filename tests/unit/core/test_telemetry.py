@@ -301,13 +301,23 @@ class TestEvidenceLockIgnoredByGit:
         assert _repo_ignores(rel), f'{rel} is not git-ignored'
 
     @pytest.mark.parametrize('rel', [
-        '.aegis/evidence/outcomes.jsonl',
         '.aegis/evidence/README.md',
         '.aegis/evidence/arbitration_cycle_2.json',
         '.aegis/evidence/.fitness.lock',
     ])
     def test_tracked_evidence_is_not_ignored(self, rel):
         assert not _repo_ignores(rel), f'{rel} must stay committable'
+
+    def test_legacy_outcomes_ledger_is_ignored_and_untracked(self):
+        # ADR 0005 D13 (L1): the 170 legacy cell_id rows are wiped and the
+        # machine-local outcomes ledger never returns to the index.
+        import subprocess
+        rel = '.aegis/evidence/outcomes.jsonl'
+        assert _repo_ignores(rel), f'{rel} is not git-ignored'
+        repo = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
+        tracked = subprocess.run(['git', '-C', repo, 'ls-files', '--', rel], capture_output=True, text=True)
+        assert tracked.returncode == 0, tracked.stderr
+        assert tracked.stdout.strip() == '', f'{rel} is still tracked'
 
 
 class TestGenerationFence:
