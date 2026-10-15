@@ -19,7 +19,7 @@ import pytest
 from aegis_cli.init import install_rules
 from aegis_core.lifecycle.constants import PROTECTED_RULES
 from aegis_core.yaml_engine.frontmatter import parse_rule_frontmatter
-from aegis_mcp.jit_engine import match_cells_to_files
+from aegis_core.match import matching_files
 
 try:
     import tomllib
@@ -134,12 +134,12 @@ def _repo_files() -> tuple[str, ...]:
 
 @pytest.mark.parametrize("p,target", _PATHS, ids=[f"{p.name}:{t}" for p, t in _PATHS])
 def test_target_paths_resolve(p, target):
-    """Resolve with the matcher aegis_scan uses, not glob: under fnmatch `X/**/*.py`
-    needs a subdirectory, so a glob-only check passed patterns that skip X/*.py."""
+    """Resolve with the one matcher every rule site uses (aegis_core.match), not glob:
+    a pattern that matches no file is dead, and one that relied on the removed
+    substring glob (a bare `src`) matches nothing now."""
     files = _repo_files()
-    hits = match_cells_to_files([{"target_paths": [target]}], list(files))
-    matched = set(hits[0]["_matched_files"]) if hits else set()
-    assert matched, f"{rel(p)}: {target!r} matches no file through the scan matcher"
+    matched = set(matching_files([target], files))
+    assert matched, f"{rel(p)}: {target!r} matches no file through aegis_core.match"
     named = {Path(x).relative_to(ROOT).as_posix() for x in glob.glob(str(ROOT / target), recursive=True)}
     missed = sorted((named & set(files)) - matched)
     assert not missed, f"{rel(p)}: {target!r} reads as a glob for {missed[:5]} but the scan matcher skips them"

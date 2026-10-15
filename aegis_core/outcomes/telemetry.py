@@ -28,8 +28,8 @@ def record_verification_telemetry(
     if not cells_dir.is_dir():
         return False
 
+    from aegis_core.match import credit_weights
     from aegis_core.outcomes.engine import match_cells_to_changes
-    from aegis_core.outcomes.fitness import compute_credit_weights
 
     matched = match_cells_to_changes(ws, target_files)
     if not matched:
@@ -40,14 +40,17 @@ def record_verification_telemetry(
     if run_id is None:
         run_id = secrets.token_hex(16)
 
-    credit_weights = compute_credit_weights(matched, target_files)
+    weights = credit_weights(
+        {(c.get("_name") or c.get("id")): c.get("target_paths") for c in matched if c.get("_name") or c.get("id")},
+        target_files,
+    )
     verdict_text = str(verdict) if verdict is not None else ("PASS" if passed else "FAIL")
     events = []
     for cell in matched:
         cell_id = cell.get("_name") or cell.get("id")
         if not cell_id:
             continue
-        weight = max(0.0, min(1.0, float(credit_weights.get(cell_id, 1.0))))
+        weight = max(0.0, min(1.0, float(weights.get(cell_id, 0.0))))
         # One row per rule and run: a v2 outcome row is also the rule's trigger (#15).
         events.append({
             "rule": cell_id,

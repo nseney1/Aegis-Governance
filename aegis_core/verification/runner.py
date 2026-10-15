@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
+from aegis_core.match import first_match, is_test_path
 from aegis_core.workspace.layout import RULES_RELDIR, WorkspaceLayout
 from typing import Optional
 
@@ -18,31 +19,6 @@ from . import import_guard
 from . import mutation_tester
 
 VerificationResult = ToolEvidence
-
-
-def _matches_rule_patterns(rel_path: str, patterns: list[str]) -> bool:
-    """Check if rel_path matches any rule glob pattern (including **/ globs)."""
-    import fnmatch
-
-    if not patterns:
-        return True
-    norm_rel = rel_path.replace("\\", "/").lstrip("/")
-    base = os.path.basename(norm_rel)
-    for raw_pat in patterns:
-        pat = str(raw_pat).replace("\\", "/").strip()
-        if not pat:
-            continue
-        if norm_rel == pat or fnmatch.fnmatch(norm_rel, pat) or fnmatch.fnmatch(base, pat):
-            return True
-        if pat.startswith("**/"):
-            stripped = pat[3:]
-            if fnmatch.fnmatch(norm_rel, stripped) or fnmatch.fnmatch(base, stripped):
-                return True
-        if "/**/" in pat:
-            collapsed = pat.replace("/**/", "/")
-            if fnmatch.fnmatch(norm_rel, collapsed):
-                return True
-    return False
 
 
 _FORBID_AST_KEYS = ("imports", "calls", "decorators")
@@ -331,17 +307,7 @@ def run_layer1(
     repo_root_str = str(getattr(repo_root, "root", repo_root))
 
     def _is_test_or_support(fpath: str) -> bool:
-        norm = fpath.replace('\\', '/')
-        bname = os.path.basename(fpath)
-        if norm.startswith(('soma_core/', 'soma_cli/', 'soma_sdk/', 'soma_mcp/')) and os.path.isdir(os.path.join(repo_root_str, 'aegis_core')):
-            return True
-        return (
-            norm.startswith('tests/')
-            or '/tests/' in norm
-            or bname.startswith('test_')
-            or bname.endswith(('_test.go', '_test.py', '.test.ts', '.spec.ts', '.test.js', '.spec.js'))
-            or bname in ('__init__.py', 'conftest.py', 'harness.py', 'helpers_cell.py')
-        )
+        return is_test_path(fpath) or os.path.basename(fpath) == '__init__.py'
 
     # ── Persistence Completeness ──────────────────────────────────────
     if persistence_targets:
@@ -420,20 +386,18 @@ def run_layer1(
                 rel_path = os.path.relpath(full_path, repo_root_str).replace("\\", "/")
             except ValueError:
                 rel_path = filepath.replace("\\", "/")
-            is_test_path = (
-                rel_path.startswith("tests/")
-                or "/tests/" in f"/{rel_path}"
-                or os.path.basename(rel_path).startswith("test_")
-            )
+            test_file = is_test_path(rel_path)
 
             for rule_id, forbid_spec, patterns in forbid_rules:
+                # Enforcement policy, applied after matching: a forbid_ast gate exempts
+                # test files unless its patterns name tests (tests use what gates forbid).
                 rule_targets_tests = any(
                     "tests/" in p.replace("\\", "/") or "test_" in p
                     for p in patterns
                 )
-                if is_test_path and not rule_targets_tests:
+                if test_file and not rule_targets_tests:
                     continue
-                if patterns and not _matches_rule_patterns(rel_path, patterns):
+                if patterns and first_match(patterns, rel_path) is None:
                     continue
 
                 try:

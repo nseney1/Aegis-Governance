@@ -26,7 +26,7 @@ def _get_changed_files(workspace: str) -> list[str]:
 def match_cells_to_changes(workspace: Workspace | Path | str, changed_files: list[str]) -> list[dict]:
     ws = as_workspace(workspace)
     cells_dir = ws.rules_dir
-    matches = find_matching_cells(str(cells_dir), changed_files, allow_basename_match=True)
+    matches = find_matching_cells(str(cells_dir), changed_files)
     triggered = []
     for m in matches:
         cell_dict = dict(m.frontmatter)

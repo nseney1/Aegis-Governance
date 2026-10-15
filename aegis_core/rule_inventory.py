@@ -1,11 +1,11 @@
 """Canonical, race-detecting inventory of governance cell files."""
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import os
 from pathlib import Path
 import stat
+from aegis_core.match import first_match
 from aegis_core.workspace.layout import WorkspaceLayout
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Tuple
@@ -287,7 +287,6 @@ def find_matching_rules(
     cells_dir: str | Path,
     changed_files: Iterable[str],
     repo_root: str = "",
-    allow_basename_match: bool = True,
 ) -> List[RuleMatch]:
     """Find all rules in cells_dir whose target_paths match changed_files."""
     from aegis_core.yaml_engine.frontmatter import parse_frontmatter
@@ -333,17 +332,10 @@ def find_matching_rules(
         first_target: Optional[str] = None
 
         for rel_file in rel_modified:
-            file_matched = False
-            for target in raw_targets:
-                pat_norm = str(target).replace("\\", "/")
-                if fnmatch.fnmatch(rel_file, pat_norm) or (
-                    allow_basename_match and fnmatch.fnmatch(os.path.basename(rel_file), pat_norm)
-                ):
-                    file_matched = True
-                    if first_target is None:
-                        first_target = target
-                    break
-            if file_matched:
+            target = first_match(raw_targets, rel_file)
+            if target is not None:
+                if first_target is None:
+                    first_target = target
                 matched_for_cell.append(rel_file)
 
         if matched_for_cell:

@@ -11,6 +11,7 @@ falsification: All escalated reviews are over-kill for 10 sessions → prune
 target_paths:
   - "rules/*.md"
   - "rules/**"
+  - ".aegis/rules/**"
 expiry_sessions: 10
 expiry_days: 45
 created: 2026-09-28

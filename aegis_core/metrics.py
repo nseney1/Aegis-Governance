@@ -1,7 +1,6 @@
 """Rule coverage of the workspace's files and the governance report card (SDK grade/coverage_report)."""
 from __future__ import annotations
 
-import fnmatch
 import glob
 import math
 import os
@@ -10,6 +9,7 @@ import sys
 from typing import List, Optional, Union
 
 from aegis_core import gitsafe
+from aegis_core.match import first_match
 from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, WorkspaceLayout
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
@@ -72,14 +72,7 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
     dir_tiers = {}
 
     for f in all_files:
-        is_covered = False
-        for cell in cell_patterns:
-            for pattern in cell['patterns']:
-                if fnmatch.fnmatch(f, pattern):
-                    is_covered = True
-                    break
-            if is_covered:
-                break
+        is_covered = any(first_match(cell['patterns'], f) is not None for cell in cell_patterns)
 
         if is_covered:
             covered_files.add(f)
@@ -94,13 +87,11 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
             coverage_map[d]['covered'] += 1
 
         for cell in cell_patterns:
-            for pattern in cell['patterns']:
-                if fnmatch.fnmatch(f, pattern):
-                    current = dir_tiers.get(d, 'none')
-                    cell_tier = cell.get('enforcement', 'advisory')
-                    if tier_rank.get(cell_tier, 0) > tier_rank.get(current, -1):
-                        dir_tiers[d] = cell_tier
-                    break
+            if first_match(cell['patterns'], f) is not None:
+                current = dir_tiers.get(d, 'none')
+                cell_tier = cell.get('enforcement', 'advisory')
+                if tier_rank.get(cell_tier, 0) > tier_rank.get(current, -1):
+                    dir_tiers[d] = cell_tier
 
         coverage_map[d]['tier'] = dir_tiers.get(d, 'none')
 
@@ -163,7 +154,7 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
     for c in cells:
         all_patterns.extend(c.get('target_paths', []))
 
-    covered = sum(1 for f in all_files if any(fnmatch.fnmatch(f, p) for p in all_patterns))
+    covered = sum(1 for f in all_files if first_match(all_patterns, f) is not None)
     coverage_pct = (covered / len(all_files) * 100) if all_files else 0
 
     scores = [(c.get('fitness') or {}).get('score') for c in cells if (c.get('fitness') or {}).get('score') is not None]
@@ -198,7 +189,7 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
 
     uncovered_dirs = {}
     for f in all_files:
-        if not any(fnmatch.fnmatch(f, p) for p in all_patterns):
+        if first_match(all_patterns, f) is None:
             d = os.path.dirname(f) or '.'
             uncovered_dirs[d] = uncovered_dirs.get(d, 0) + 1
     top_gap = max(uncovered_dirs.items(), key=lambda x: x[1]) if uncovered_dirs else ('none', 0)

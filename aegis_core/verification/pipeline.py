@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from aegis_core import gitsafe
 from aegis_core.inference_provider import MISSING_BACKEND
+from aegis_core.match import is_test_path
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import as_workspace
 
@@ -142,8 +143,7 @@ class AdversarialVerifier(BaseVerifier):
             full_path = Path(repo_root) / filepath
             if not full_path.exists() or not filepath.endswith(".py"):
                 continue
-            basename = full_path.name
-            if basename.startswith("test_") or basename in ("__init__.py", "conftest.py"):
+            if is_test_path(filepath) or full_path.name == "__init__.py":
                 continue
             try:
                 sigs = adversarial_verify.extract_signatures(str(full_path))

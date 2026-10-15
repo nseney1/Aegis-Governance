@@ -5,7 +5,7 @@ Instead of loading every rule into the system prompt, aegis_scan returns only th
 rules for the files about to change:
 
 1. Read the changed files (the caller's list, or the git diff).
-2. Match rules by target_paths (fnmatch on the path and the basename).
+2. Match rules by target_paths (aegis_core.match).
 3. Gates and invariants always load; other rules are ranked by salience and
    fitness, kept type-diverse, and capped by a rule count.
 4. The whole response is clamped to the token budget (AEGIS_MAX_JIT_TOKENS):
@@ -15,7 +15,6 @@ aegis_mcp imports only the standard library and aegis_core.
 """
 from __future__ import annotations
 
-import fnmatch
 import glob
 import json
 import os
@@ -23,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from aegis_core.match import first_match, matching_files, normalize_path
 from aegis_core.scoring import compute_cell_fitness, compute_salience
 from aegis_core.taxonomy import (
     JIT_DEFAULT_MAX_TOKENS,
@@ -130,17 +130,10 @@ def load_all_cells(workspace: str) -> list[dict[str, object]]:
 
 
 def _path_match_type(target_paths: list[str], changed: str) -> str | None:
-    base = os.path.basename(changed)
-    for pattern in target_paths:
-        if changed == pattern:
-            return "exact_path"
-        if (
-            fnmatch.fnmatch(changed, pattern)
-            or fnmatch.fnmatch(base, pattern)
-            or (pattern.startswith("**/") and (fnmatch.fnmatch(changed, pattern[3:]) or fnmatch.fnmatch(base, pattern[3:])))
-        ):
-            return "glob_match"
-    return None
+    rel = normalize_path(changed)
+    if any(isinstance(p, str) and normalize_path(p) == rel for p in target_paths):
+        return "exact_path"
+    return "glob_match" if first_match(target_paths, changed) is not None else None
 
 
 def match_cells_to_files(
@@ -322,9 +315,7 @@ def load_genome_rules(workspace: str, changed_files: list[str]) -> list[dict[str
             target_paths = fm.get('target_paths', [])
             if isinstance(target_paths, str):
                 target_paths = [target_paths]
-            if not target_paths or any(
-                fnmatch.fnmatch(changed, pattern) for changed in changed_files for pattern in target_paths
-            ):
+            if not target_paths or matching_files(target_paths, changed_files):
                 body = _get_body(content)
                 relevant.append({
                     'name': os.path.splitext(os.path.basename(rule_file))[0],
