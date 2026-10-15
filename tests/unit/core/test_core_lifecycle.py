@@ -142,3 +142,24 @@ def test_generate_slug_names_a_rule_from_its_hypothesis():
     with pytest.raises(ValueError, match="path traversal"):
         generate_slug("x", id_override="../escape")
 
+
+@pytest.mark.parametrize("domain, tags, target_paths", [
+    ("security #high", ["a: b"], ["src/*.py"]),
+    ("true", ["null", "#tag"], ["it's/*.py", "**"]),
+    ("12", ["- dash"], ['say "hi"/*.md']),
+])
+def test_create_cell_writes_every_value_back_exactly_as_given(tmp_path, domain, tags, target_paths):
+    """create_cell serializes through the one frontmatter writer (defense #30): a value that
+    looks like a comment, a boolean, a number or a list item is quoted, never reinterpreted."""
+    from aegis_core.lifecycle.creation import create_cell
+
+    path = create_cell(
+        "trap", 'He said: "keep # this"', domain=domain, tags=tags, target_paths=target_paths,
+        workspace=tmp_path, id_override="exact",
+    )
+
+    rule = load_rules(tmp_path).get("exact")
+    assert rule is not None and rule.path == ".aegis/rules/traps/exact.md"
+    assert (rule.meta["domain"], rule.meta["tags"], rule.meta["target_paths"]) == (domain, tags, target_paths)
+    assert rule.meta["hypothesis"] == 'He said: "keep # this"'
+    assert path.read_text(encoding="utf-8").startswith("---\nid: exact\ndomain: ")

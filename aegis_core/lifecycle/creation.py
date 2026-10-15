@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from aegis_core.storage import atomic_write_text, locked
 from aegis_core.taxonomy import CANONICAL_RULE_TYPES, RULE_TYPE_DIRS, RULE_TYPES, normalize_review_mode
 from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 from .parsers import (
     generate_slug,
     validate_cell_id,
@@ -114,39 +114,27 @@ def create_cell(
     type_title = type_lower.capitalize()
     truncated_hypo = hypothesis[:60] + ("..." if len(hypothesis) > 60 else "")
 
-    def escape_yaml_string(val: str) -> str:
-        s = val.replace("\\", "\\\\").replace('"', '\\"')
-        return " ".join(s.splitlines())
+    # One writer for rule frontmatter (defense #30): dump_frontmatter quotes any value a
+    # YAML reader could take for a comment, a boolean, a number or a list item.
+    meta = {
+        "id": slug,
+        "domain": domain,
+        "type": type_lower,
+        "enforcement": enforcement,
+        "hypothesis": " ".join(hypothesis.splitlines()),
+        "prediction": " ".join(prediction.splitlines()),
+        "falsification": " ".join(falsification.splitlines()),
+        "expiry_sessions": expiry_sessions,
+        "expiry_days": expiry_days,
+        "created": date_str,
+        "impact_weight": weight,
+        "tags": list(tags or []),
+        "target_paths": list(target_paths or []),
+        "lineage": {"parent_id": None, "created_by": "manual", "generation": 0, "siblings": []},
+    }
+    if minimum_mode:
+        meta["minimum_mode"] = minimum_mode
 
-    tags_list = tags or []
-    paths_list = target_paths or []
-
-    optional_block = f"\nminimum_mode: {minimum_mode}" if minimum_mode else ""
-
-    expiry_sess_str = "null" if expiry_sessions is None else str(expiry_sessions)
-    expiry_days_str = "null" if expiry_days is None else str(expiry_days)
-
-    frontmatter = f"""---
-id: {slug}
-domain: {domain}
-type: {type_lower}
-enforcement: {enforcement}
-hypothesis: "{escape_yaml_string(hypothesis)}"
-prediction: "{escape_yaml_string(prediction)}"
-falsification: "{escape_yaml_string(falsification)}"
-expiry_sessions: {expiry_sess_str}
-expiry_days: {expiry_days_str}
-created: "{date_str}"
-impact_weight: {weight}
-tags: {json.dumps(tags_list)}
-target_paths: {json.dumps(paths_list)}
-lineage:
-  parent_id: null
-  created_by: "manual"
-  generation: 0
-  siblings: []{optional_block}
----
-"""
     if body is None:
         body = f"""## {type_title}: {truncated_hypo}
 
@@ -160,7 +148,7 @@ lineage:
 """
     elif not body.endswith("\n"):
         body += "\n"
-    content = frontmatter + body
+    content = dump_frontmatter(meta, body=body)
 
     # Validate in memory so a malformed rule never reaches disk.
     from aegis_core.yaml_engine.frontmatter import AegisYAML
