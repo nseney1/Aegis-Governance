@@ -25,11 +25,24 @@ from .parsers import (
 )
 
 __all__ = [
+    "MAX_RULE_BODY_BYTES",
     "create_cell",
     "create_cell_from_description",
     "cli_cell_create",
     "transfer_cell",
+    "validate_rule_body",
 ]
+
+MAX_RULE_BODY_BYTES = 64 * 1024
+
+
+def validate_rule_body(body: str) -> str:
+    """Return ``body`` if it is a usable rule body, else raise ValueError."""
+    if not body.strip():
+        raise ValueError("rule body is empty")
+    if len(body.encode("utf-8")) > MAX_RULE_BODY_BYTES:
+        raise ValueError(f"rule body exceeds 64 KiB ({MAX_RULE_BODY_BYTES} bytes)")
+    return body
 
 
 def create_cell(
@@ -49,9 +62,16 @@ def create_cell(
     domain: str = "correctness",
     workspace: Workspace | Path | str | None = None,
     enforcement: str | None = None,
+    body: str | None = None,
 ) -> Path:
-    """Create a new Aegis rule file with validated frontmatter and body."""
+    """Create a new Aegis rule file with validated frontmatter and body.
+
+    ``body`` replaces the generated markdown body (everything after the
+    frontmatter); the hypothesis still populates the frontmatter.
+    """
     validate_cell_id(id_override)
+    if body is not None:
+        validate_rule_body(body)
 
     type_lower = cell_type.lower()
     if type_lower not in VALID_TYPES:
@@ -78,6 +98,12 @@ def create_cell(
 
     if minimum_mode:
         minimum_mode = normalize_review_mode(minimum_mode, default=minimum_mode.strip().lower())
+
+    # These two values are interpolated into the frontmatter unquoted; a line
+    # break would let the caller inject arbitrary keys (e.g. `activation`).
+    for label, value in (("domain", domain), ("minimum_mode", minimum_mode)):
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"Invalid {label} {value!r}: must be a single line.")
 
     response_type = ""
     activation = ""
@@ -165,7 +191,8 @@ lineage:
   siblings: []{optional_block}
 ---
 """
-    body = f"""## {type_title}: {truncated_hypo}
+    if body is None:
+        body = f"""## {type_title}: {truncated_hypo}
 
 {hypothesis}
 
@@ -175,6 +202,8 @@ lineage:
 ### Falsification Criteria
 {falsification}
 """
+    elif not body.endswith("\n"):
+        body += "\n"
     content = frontmatter + body
 
     # Validate in memory so a malformed rule never reaches disk.
@@ -275,7 +304,6 @@ def cli_cell_create(argv: list[str] | None = None) -> int:
     parser.add_argument("--effector", action="store_true", default=False)
     parser.add_argument("--memory", action="store_true", default=False)
     parser.add_argument("--target-paths", dest="target_paths", default="")
-    parser.add_argument("--from-description", dest="description", default="")
     parser.add_argument("-d", "--domain", dest="domain", default="correctness")
     parser.add_argument("-e", "--enforcement", dest="enforcement", default=None)
 
@@ -290,21 +318,6 @@ def cli_cell_create(argv: list[str] | None = None) -> int:
             validate_cell_id(args.cell_id)
         except ValueError:
             print("Error: Invalid ID_OVERRIDE contains path traversal characters.", file=sys.stderr)
-            return 1
-
-    if args.description:
-        try:
-            created = create_cell(
-                cell_type=args.cell_type or "trap",
-                hypothesis=args.description,
-                id_override=args.cell_id or None,
-                domain=args.domain,
-                enforcement=args.enforcement,
-            )
-            print(f"Created: {created}")
-            return 0
-        except Exception as exc:
-            print(f"Error generating cell from description: {exc}", file=sys.stderr)
             return 1
 
     if not args.cell_type or not args.hypothesis:

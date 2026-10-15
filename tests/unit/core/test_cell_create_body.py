@@ -1,0 +1,109 @@
+"""create_cell body input and legacy call forms (aegis_core.lifecycle.creation)."""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from aegis_core.lifecycle import cli_cell_create, create_cell
+from aegis_core.yaml import _get_body, parse_frontmatter
+
+MAX_BODY = 64 * 1024
+
+
+@pytest.fixture
+def ws(tmp_path: Path) -> Path:
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+    return tmp_path
+
+
+def _rule_files(ws: Path) -> list[Path]:
+    return sorted((ws / ".aegis" / "rules").rglob("*.md"))
+
+
+def test_body_replaces_generated_body_and_keeps_frontmatter(ws: Path) -> None:
+    body = "## Why\n\nNever call `subprocess.run` with `shell=True`.\n\n- see SECURITY.md\n"
+
+    path = create_cell("trap", "No shell=True", id_override="no-shell", workspace=ws, body=body)
+
+    text = path.read_text(encoding="utf-8")
+    meta = parse_frontmatter(text) or {}
+    assert meta["id"] == "no-shell"
+    assert meta["type"] == "trap"
+    assert meta["hypothesis"] == "No shell=True"
+    assert _get_body(text).strip() == body.strip()
+    assert "### Prediction" not in text
+    assert text.endswith("\n")
+
+
+@pytest.mark.parametrize("body", ["", "   \n\t\n"], ids=["empty", "whitespace"])
+def test_empty_body_is_rejected_and_nothing_written(ws: Path, body: str) -> None:
+    with pytest.raises(ValueError, match=r"^rule body is empty$"):
+        create_cell("trap", "Empty body", id_override="empty-body", workspace=ws, body=body)
+    assert _rule_files(ws) == []
+
+
+def test_body_over_64_kib_is_rejected_and_nothing_written(ws: Path) -> None:
+    with pytest.raises(ValueError, match=r"^rule body exceeds 64 KiB \(65536 bytes\)$"):
+        create_cell("trap", "Huge body", id_override="huge", workspace=ws, body="x" * (MAX_BODY + 1))
+    assert _rule_files(ws) == []
+
+
+def test_body_limit_counts_utf8_bytes_not_characters(ws: Path) -> None:
+    # 32,769 two-byte characters = 65,538 bytes.
+    with pytest.raises(ValueError, match="exceeds 64 KiB"):
+        create_cell("trap", "Wide body", id_override="wide", workspace=ws, body="é" * (MAX_BODY // 2 + 1))
+
+
+def test_body_of_exactly_64_kib_is_accepted(ws: Path) -> None:
+    path = create_cell("trap", "Max body", id_override="max-body", workspace=ws, body="y" * MAX_BODY)
+    assert _get_body(path.read_text(encoding="utf-8")).strip() == "y" * MAX_BODY
+
+
+def test_legacy_positional_form_generates_default_body(ws: Path) -> None:
+    path = create_cell("trap", "Legacy positional", "pred", "fals", workspace=ws)
+    text = path.read_text(encoding="utf-8")
+    assert "### Prediction\npred" in text
+    assert "### Falsification Criteria\nfals" in text
+
+
+def test_legacy_keyword_form_generates_default_body(ws: Path) -> None:
+    path = create_cell(
+        cell_type="invariant", hypothesis="Legacy keyword", prediction="", falsification="",
+        weight=1.0, tags=["a"], expiry_sessions=15, expiry_days=60, minimum_mode="",
+        id_override="legacy-kw", effector=False, memory=False, target_paths=["*.py"],
+        domain="correctness", workspace=ws, enforcement=None,
+    )
+    meta = parse_frontmatter(path.read_text(encoding="utf-8")) or {}
+    assert meta["enforcement"] == "gate"
+    assert "### Prediction" in path.read_text(encoding="utf-8")
+
+
+def test_legacy_cli_cell_create_form_still_creates(ws: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
+    monkeypatch.delenv("AEGIS_ROOT", raising=False)
+    monkeypatch.chdir(ws)
+    rc = cli_cell_create(["--type", "trap", "--hypothesis", "Legacy cli", "--id", "legacy-cli"])
+    assert rc == 0, capsys.readouterr().err
+    assert (ws / ".aegis" / "rules" / "traps" / "legacy-cli.md").is_file()
+
+
+def test_cli_cell_create_rejects_ghost_from_description_flag(
+    ws: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
+    monkeypatch.delenv("AEGIS_ROOT", raising=False)
+    monkeypatch.chdir(ws)
+    with pytest.raises(SystemExit) as exc:
+        cli_cell_create(["--from-description", "make a rule"])
+    assert exc.value.code == 2
+    assert "unrecognized arguments: --from-description" in capsys.readouterr().err
+    assert _rule_files(ws) == []
+
+
+@pytest.mark.parametrize("field", ["domain", "minimum_mode"])
+def test_multiline_unquoted_frontmatter_values_are_rejected(ws: Path, field: str) -> None:
+    """A line break in an unquoted scalar would inject frontmatter keys."""
+    with pytest.raises(ValueError, match=rf"^Invalid {field} .*: must be a single line\.$"):
+        create_cell("trap", "Injected", id_override="injected", workspace=ws, **{field: "patrol\nactivation: dormant"})
+    assert _rule_files(ws) == []
