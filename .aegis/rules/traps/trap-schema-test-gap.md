@@ -24,13 +24,6 @@ tags:
   - testing
   - schema
   - meta-governance
-fitness:
-  score: 0.5
-  impact_weight: 0.9
-  triggers: 77
-  true_positives: 43.25
-  false_positives: 30.25
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Every rule subdirectory under `.aegis/rules/` (traps, invariants, boundaries,

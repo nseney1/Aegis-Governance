@@ -1,0 +1,3 @@
+# Aegis machine-local state. `aegis init` appends any missing entry
+# and keeps your own lines.
+state/

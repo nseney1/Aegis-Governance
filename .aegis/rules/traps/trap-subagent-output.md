@@ -25,13 +25,6 @@ tags:
   - subagent
   - hallucination
   - verification
-fitness:
-  score: 0.5
-  impact_weight: 0.9
-  triggers: 80
-  true_positives: 44.5833
-  false_positives: 30.75
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Subagent-generated content (documentation, rules, configs) must be verified

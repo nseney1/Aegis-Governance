@@ -25,13 +25,6 @@ tags:
   - dogfooding
   - process
   - meta
-fitness:
-  score: 0.6
-  impact_weight: 1.0
-  triggers: 85
-  true_positives: 44.198
-  false_positives: 31.8419
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 When performing lifecycle operations on Aegis's own rules (create, promote,

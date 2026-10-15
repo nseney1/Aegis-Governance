@@ -20,12 +20,6 @@ tags:
   - review-gate
   - human-in-the-loop
 created: 2026-10-07
-fitness:
-  triggers: 55
-  true_positives: 6.1804
-  false_positives: 5.6804
-  score: 1.0
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Invariant: Human Review Gate Enforcement

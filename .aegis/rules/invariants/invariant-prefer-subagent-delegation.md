@@ -26,13 +26,6 @@ tags:
   - architecture
   - efficiency
   - concurrency
-fitness:
-  score: null
-  impact_weight: 1.0
-  triggers: 33
-  true_positives: 11.0464
-  false_positives: 6.7256
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Invariant: Prefer Subagent Delegation Protocol

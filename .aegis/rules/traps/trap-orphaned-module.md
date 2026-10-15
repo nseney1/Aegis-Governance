@@ -23,13 +23,6 @@ tags:
   - integration
   - dead-module
   - coverage-gap
-fitness:
-  score: 0.3333
-  impact_weight: 1.0
-  triggers: 78
-  true_positives: 22.4353
-  false_positives: 17.423
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Citadel C4 incident: `quality_gate.py` had 30 passing unit tests and proper

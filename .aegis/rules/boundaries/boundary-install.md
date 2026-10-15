@@ -19,12 +19,6 @@ tags:
   - deployment
   - review-escalation
 created: 2026-09-28
-fitness:
-  triggers: 16
-  true_positives: 4.7
-  false_positives: 3.6
-  score: 1.0
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Boundary: Install Escalation

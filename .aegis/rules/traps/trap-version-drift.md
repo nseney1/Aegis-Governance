@@ -19,13 +19,6 @@ tags:
   - versioning
   - consistency
   - release
-fitness:
-  score: 0.7273
-  impact_weight: 1.0
-  triggers: 47
-  true_positives: 29.3
-  false_positives: 9.6
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Version consistency is enforced across 3 sources:

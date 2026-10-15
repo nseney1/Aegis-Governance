@@ -21,13 +21,6 @@ tags:
   - testing
   - coverage
   - flashlight-effect
-fitness:
-  score: 0.3333
-  impact_weight: 1.0
-  triggers: 71
-  true_positives: 24.7637
-  false_positives: 19.434
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Citadel doc-drift incident: `test_review_intensity.py` verified README ↔ SKILL.md

@@ -25,13 +25,6 @@ tags:
   - verification
   - fail-open
   - critical
-fitness:
-  score: 0.8333
-  impact_weight: 1.0
-  triggers: 65
-  true_positives: 12.0823
-  false_positives: 6.2468
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Verification tools MUST fail-closed: any execution error must produce a

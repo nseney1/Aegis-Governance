@@ -28,12 +28,6 @@ tags:
   - persona
 domain: correctness
 minimum_mode: patrol
-fitness:
-  triggers: 58
-  true_positives: 7.8327
-  false_positives: 5.1289
-  score: 0.75
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 When reviewing changes to shell scripts or installers, adopt the persona of a

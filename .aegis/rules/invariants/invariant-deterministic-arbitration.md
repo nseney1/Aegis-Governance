@@ -24,13 +24,6 @@ tags:
   - arbitration
   - deterministic
   - process
-fitness:
-  score: 0.75
-  impact_weight: 1.0
-  triggers: 74
-  true_positives: 16.5732
-  false_positives: 8.989
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Review finding arbitration MUST go through the deterministic arbiter, not
