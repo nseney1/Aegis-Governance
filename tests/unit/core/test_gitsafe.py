@@ -19,10 +19,12 @@ ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml"
 
 
 def _git(repo: Path, *args: str) -> str:
-    env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1")
+    # The same config gitsafe reads (system config included), so a commit made here
+    # stores what a user's git would store: Git for Windows' system core.autocrlf=true
+    # turns the CRLF that write_text writes there into LF blobs.
     return subprocess.run(
         ["git", "-c", "user.email=t@example.com", "-c", "user.name=T", *args],
-        cwd=str(repo), check=True, capture_output=True, text=True, env=env,
+        cwd=str(repo), check=True, capture_output=True, text=True,
     ).stdout
 
 
@@ -58,6 +60,7 @@ def test_every_call_is_hardened(monkeypatch, tmp_path: Path):
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
     monkeypatch.setattr(gitsafe.subprocess, "run", fake_run)
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
     gitsafe.run(["rev-parse", "HEAD"], tmp_path)
 
     argv, kwargs = seen["argv"], seen["kwargs"]
@@ -72,11 +75,12 @@ def test_every_call_is_hardened(monkeypatch, tmp_path: Path):
     assert argv[11:] == ["rev-parse", "HEAD"]
     assert "shell" not in kwargs and kwargs["timeout"] == gitsafe.GIT_TIMEOUT_SECONDS
     env = kwargs["env"]
-    assert {k: env[k] for k in ("GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT", "GIT_OPTIONAL_LOCKS",
-                                "GIT_NO_REPLACE_OBJECTS", "LC_ALL")} == {
-        "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_NO_REPLACE_OBJECTS": "1", "LC_ALL": "C",
+    assert {k: env[k] for k in ("GIT_TERMINAL_PROMPT", "GIT_OPTIONAL_LOCKS", "GIT_NO_REPLACE_OBJECTS", "LC_ALL")} == {
+        "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_REPLACE_OBJECTS": "1", "LC_ALL": "C",
     }
+    # The administrator's system config is read (Git for Windows keeps core.autocrlf
+    # there); what the repository's config could do is overridden by the -c options.
+    assert "GIT_CONFIG_NOSYSTEM" not in env
 
 
 def test_timeout_and_missing_git_raise_git_error(monkeypatch, tmp_path: Path):
@@ -163,6 +167,94 @@ def test_aegis_commands_never_run_a_repo_fsmonitor(fsmonitor_repo, monkeypatch, 
     assert not marker.exists(), "an aegis command ran the repository's core.fsmonitor"
 
 
+# ── Clean filters a repository's config names ───────────────────────────────
+
+def _select_filter(repo: Path, driver: str = "evil") -> None:
+    """Commit a .gitattributes that selects ``driver`` for ``*.py`` (no driver exists yet, so nothing runs)."""
+    (repo / ".gitattributes").write_text(f"*.py filter={driver}\n", encoding="utf-8")
+    _commit(repo, "attributes")
+
+
+def _plant_clean_filter(repo: Path, marker: Path, driver: str = "evil") -> None:
+    """The repository's own config defines ``driver``: a marker-writing clean filter."""
+    if os.name == "nt":
+        pytest.skip("the marker filter is a POSIX shell script")
+    script = repo.parent / f"clean-filter-{repo.name}"
+    script.write_text(f'#!/bin/sh\necho ran >> "{marker}"\ncat\n', encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    _git(repo, "config", f"filter.{driver}.clean", str(script))
+    _git(repo, "config", f"filter.{driver}.required", "true")
+
+
+def _make_racily_clean(repo: Path) -> None:
+    """Every index entry stat-matches its file but is not older than the index, so git
+    must hash the file's content (through the clean filter) to know it is unchanged."""
+    index = repo / _git(repo, "rev-parse", "--git-path", "index").strip()
+    oldest = min((repo / name).stat().st_mtime for name in ("a.py", "b.py", "gone.py"))
+    os.utime(index, (oldest, oldest))
+
+
+def _porcelain_runs_the_filter_or_skip(repo: Path, marker: Path) -> None:
+    # Positive control without rewriting the index (that would clear what is under test).
+    subprocess.run(["git", "status", "--porcelain"], cwd=str(repo), capture_output=True,
+                   env=dict(os.environ, GIT_OPTIONAL_LOCKS="0"))
+    if not marker.exists():
+        pytest.skip("this git does not run the clean filter from git status")
+    marker.unlink()
+
+
+def test_no_changed_files_call_runs_a_clean_filter_from_the_repository_config(repo: Path, tmp_path: Path):
+    marker = tmp_path / "FILTER_RAN"
+    _select_filter(repo)
+    _plant_clean_filter(repo, marker)
+    past = time.time() + 5
+    os.utime(repo / "b.py", (past, past))                     # stat-dirty, same bytes
+    (repo / "gone.py").write_text("gone = 2\n", encoding="utf-8")  # a real change
+    _make_racily_clean(repo)                                  # a.py: racily clean
+    _porcelain_runs_the_filter_or_skip(repo, marker)
+
+    assert gitsafe.changed_files(repo, "working") == ["gone.py"]
+    assert gitsafe.changed_files(repo, "working", untracked=True) == ["gone.py"]
+
+    assert not marker.exists(), "a gitsafe call ran a clean filter from the repository's config"
+
+
+def test_a_filter_driver_name_that_cannot_be_switched_off_leaves_changes_unknown(repo: Path, tmp_path: Path):
+    marker = tmp_path / "FILTER_RAN"
+    _select_filter(repo, driver="a=b")
+    _plant_clean_filter(repo, marker, driver="a=b")  # `-c filter.a=b.clean=` cannot name it
+    _make_racily_clean(repo)
+
+    assert gitsafe.changed_files(repo, "working") is None
+    assert gitsafe.changed_files(repo, "staged") == []  # index against HEAD reads no working-tree file
+    assert not marker.exists()
+
+
+def test_no_changed_files_call_runs_a_clean_filter_from_a_submodule_config(repo: Path, tmp_path: Path):
+    marker = tmp_path / "FILTER_RAN"
+    sub_origin = _repo(tmp_path / "sub-origin")
+    (sub_origin / "a.py").write_text("s = 1\n", encoding="utf-8")
+    (sub_origin / "b.py").write_text("s = 1\n", encoding="utf-8")
+    (sub_origin / "gone.py").write_text("s = 1\n", encoding="utf-8")
+    _commit(sub_origin, "sub")
+    _select_filter(sub_origin)
+    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub_origin), "sub")
+    _commit(repo, "add sub")
+    sub = repo / "sub"
+    _plant_clean_filter(sub, marker)
+    _make_racily_clean(sub)
+    (sub / "gone.py").write_text("s = 2\n", encoding="utf-8")  # the submodule's work tree is dirty
+    _porcelain_runs_the_filter_or_skip(sub, marker)
+
+    assert gitsafe.changed_files(repo, "working") == []  # a dirty submodule is not a changed file
+    assert not marker.exists(), "a gitsafe call ran a clean filter from a submodule's config"
+
+    _git(sub, "reset", "-q", "--soft", "HEAD~1")  # moves the submodule's HEAD, reads no file
+    assert not marker.exists()
+    assert gitsafe.changed_files(repo, "working") == ["sub"]  # a moved submodule still is
+    assert not marker.exists(), "a gitsafe call ran a clean filter from a submodule's config"
+
+
 # ── changed_files semantics ──────────────────────────────────────────────────
 
 def test_working_mode_is_head_against_worktree_and_index(repo: Path):
@@ -178,6 +270,138 @@ def test_working_mode_is_head_against_worktree_and_index(repo: Path):
     assert sorted(gitsafe.changed_files(repo, "working")) == ["a.py", "staged.py"]
     assert sorted(gitsafe.changed_files(repo, "working", untracked=True)) == ["a.py", "staged.py", "untracked.py"]
     assert gitsafe.changed_files(repo, "staged") == ["staged.py"]
+
+
+# Line endings: git's own normalization decides what changed, on every OS. The system
+# and global config files are this test's own, for its git and gitsafe alike, so the
+# runner's config cannot decide the outcome (git 2.32+ reads GIT_CONFIG_SYSTEM/GLOBAL).
+
+_AUTOCRLF = "[core]\n\tautocrlf = true\n"  # what Git for Windows' system config holds
+
+
+@pytest.fixture
+def git_config(tmp_path: Path, monkeypatch):
+    def configure(system: str = "", global_: str = "") -> None:
+        system_file, global_file = tmp_path / "gitconfig-system", tmp_path / "gitconfig-global"
+        system_file.write_text(system, encoding="utf-8")
+        global_file.write_text(global_, encoding="utf-8")
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_file))
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_file))
+        probe = subprocess.run(["git", "config", "--system", "--get", "core.autocrlf"],
+                               capture_output=True, text=True, cwd=str(tmp_path))
+        if ("autocrlf" in system) != (probe.stdout.strip() == "true"):
+            pytest.skip("this git does not read GIT_CONFIG_SYSTEM")
+    return configure
+
+
+def test_a_crlf_work_tree_of_normalized_blobs_is_unchanged(tmp_path: Path, git_config):
+    """A clone on Windows: LF blobs, CRLF files, every index entry racily clean."""
+    git_config(system=_AUTOCRLF)
+    origin = _repo(tmp_path / "origin")
+    (origin / "a.py").write_bytes(b"a = 1\r\n")
+    _commit(origin, "crlf in, lf stored")
+    assert gitsafe.read_blob(origin, "HEAD", "a.py") == b"a = 1\n"
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "-q", str(origin), str(clone))
+    assert (clone / "a.py").read_bytes() == b"a = 1\r\n"
+    assert _git(clone, "status", "--porcelain") == ""
+
+    assert gitsafe.changed_files(clone, "working") == []
+    assert gitsafe.changed_files(origin, "working") == []
+
+    (clone / "a.py").write_bytes(b"a = 2\r\n")
+    assert gitsafe.changed_files(clone, "working") == ["a.py"]
+
+
+@pytest.mark.parametrize("system, attributes, git_lists_it", [
+    (_AUTOCRLF, None, False),     # Git for Windows: CRLF in the work tree is LF in the repository
+    ("", "*.py text\n", False),   # .gitattributes asks for the same normalization
+    ("", None, True),             # no normalization: the CRLF bytes would be committed
+])
+def test_a_file_rewritten_with_crlf_is_a_change_only_where_git_says_so(
+    tmp_path: Path, git_config, system: str, attributes, git_lists_it: bool,
+):
+    git_config(system=system)
+    repo = _repo(tmp_path / "repo")
+    if attributes:
+        (repo / ".gitattributes").write_text(attributes, encoding="utf-8")
+    (repo / "a.py").write_bytes(b"a = 1\n")
+    _commit(repo, "lf")
+    (repo / "a.py").write_bytes(b"a = 1\r\n")  # an editor or a checkout rewrote the line endings
+    past = time.time() + 5
+    os.utime(repo / "a.py", (past, past))
+    expected = ["a.py"] if git_lists_it else []
+    assert _git(repo, "diff", "--name-only", "HEAD").split() == expected  # the oracle: git itself
+
+    assert gitsafe.changed_files(repo, "working") == expected
+
+
+@pytest.mark.parametrize("name", [
+    "café menu.py",
+    pytest.param('"quoted\\back\tslash\nnewline\r.py', marks=pytest.mark.skipif(os.name == "nt", reason="not a Windows file name")),
+])
+def test_any_file_name_gets_git_line_ending_normalization(tmp_path: Path, git_config, name: str):
+    git_config(system=_AUTOCRLF)
+    repo = _repo(tmp_path / "repo")
+    (repo / name).write_bytes(b"x = 1\n")
+    _commit(repo, "lf")
+    (repo / name).write_bytes(b"x = 1\r\n")
+
+    assert gitsafe.changed_files(repo, "working") == []
+
+    (repo / name).write_bytes(b"x = 2\r\n")
+    assert gitsafe.changed_files(repo, "working") == [name]
+
+
+_STRIP_TRAILING_SPACES = "[filter \"strip\"]\n\tclean = sed -e 's/ *$//'\n"
+
+
+@pytest.mark.parametrize("defined_in, listed", [
+    ("global", []),        # the user's own driver (git-lfs lives in ~/.gitconfig) runs, as in their git
+    ("repo", ["a.py"]),    # the repository's driver is switched off, so the raw bytes count
+])
+def test_only_filter_drivers_outside_the_repository_config_clean_content(
+    tmp_path: Path, git_config, defined_in: str, listed: list,
+):
+    if os.name == "nt":
+        pytest.skip("the filter is a POSIX sed command")
+    git_config(global_=_STRIP_TRAILING_SPACES if defined_in == "global" else "")
+    repo = _repo(tmp_path / "repo")
+    if defined_in == "repo":
+        (repo / ".git" / "config").write_text(
+            (repo / ".git" / "config").read_text(encoding="utf-8") + _STRIP_TRAILING_SPACES, encoding="utf-8")
+    (repo / ".gitattributes").write_text("*.py filter=strip\n", encoding="utf-8")
+    (repo / "a.py").write_bytes(b"a = 1\n")
+    _commit(repo, "clean")
+    (repo / "a.py").write_bytes(b"a = 1   \n")
+    assert _git(repo, "diff", "--name-only", "HEAD").split() == []  # git cleans it either way
+
+    assert gitsafe.changed_files(repo, "working") == listed
+
+    (repo / "a.py").write_bytes(b"a = 2   \n")
+    assert gitsafe.changed_files(repo, "working") == ["a.py"]
+
+
+def test_a_symlink_whose_stat_changed_but_target_did_not_is_unchanged(repo: Path):
+    link = repo / "link.py"
+    try:
+        link.symlink_to("a.py")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    _commit(repo, "link")
+    if _git(repo, "ls-files", "-s", "link.py").split()[0] != "120000":
+        pytest.skip("this checkout stores symlinks as plain files (core.symlinks=false)")
+    if os.utime not in os.supports_follow_symlinks:
+        pytest.skip("cannot touch a symlink itself here")
+    past = time.time() + 5
+    os.utime(link, (past, past), follow_symlinks=False)
+
+    assert gitsafe.changed_files(repo, "working") == []  # the link's own content is its target
+
+    link.unlink()
+    link.symlink_to("b.py")
+    assert gitsafe.changed_files(repo, "working") == ["link.py"]
 
 
 def test_staged_then_reverted_file_is_still_a_working_change(repo: Path):

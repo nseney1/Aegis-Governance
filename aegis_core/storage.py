@@ -150,10 +150,29 @@ def _timeout_error(path: Path, timeout: float) -> LockTimeoutError:
     )
 
 
+_EXTENDED_UNC, _EXTENDED = "\\\\?\\UNC\\", "\\\\?\\"
+
+
+def _real(path: Path | str) -> str:
+    """``path`` with every link resolved, in one spelling per location.
+
+    realpath, not Path.resolve(): it never raises (3.9 resolve raises RuntimeError on
+    loops) and it resolves Windows junctions, which is_symlink() misses before 3.12.
+    Windows realpath answers in the extended-length form (``\\\\?\\C:\\...``) when the
+    path appears or disappears while it resolves it (another process creating
+    ``.aegis/state``); that prefix is dropped, and normcase folds the case Windows
+    ignores, so two spellings of one location compare equal.
+    """
+    real = os.path.realpath(path)
+    if real.startswith(_EXTENDED_UNC):
+        real = "\\\\" + real[len(_EXTENDED_UNC):]
+    elif real.startswith(_EXTENDED):
+        real = real[len(_EXTENDED):]
+    return os.path.normcase(real)
+
+
 def _within(path: Path, root: Path) -> bool:
-    # realpath, not Path.resolve(): it never raises (3.9 resolve raises RuntimeError on
-    # loops) and it resolves Windows junctions, which is_symlink() misses before 3.12.
-    real, base = os.path.realpath(path), os.path.realpath(root)
+    real, base = _real(path), _real(root)
     return real == base or real.startswith(base.rstrip(os.sep) + os.sep)
 
 
@@ -246,8 +265,9 @@ def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Pa
     state = state_dir(layout.root)
     lock_path = layout.lock_file
     # state_dir() confined the directory; the lock file itself is opened by its own
-    # name, never through what a link named "lock" points at.
-    key = os.path.join(os.path.realpath(state), lock_path.name)
+    # name, never through what a link named "lock" points at. One spelling per location:
+    # two keys for one lock file would make a nested locked() wait on itself.
+    key = os.path.join(_real(state), lock_path.name)
     held = _held()
     depth, fd = held.get(key, (0, None))
     if depth:

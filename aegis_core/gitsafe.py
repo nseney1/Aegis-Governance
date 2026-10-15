@@ -1,19 +1,29 @@
 """Every git subprocess Aegis runs (D20, host-matrix §3.7, v4.3 spec §10.1).
 
 A repository's own config is attacker-controlled: ``core.fsmonitor`` names a program
-that ``git status``/``git diff`` run, hooks run on many commands, and remotes can
-prompt for credentials. So every call here:
+that ``git status``/``git diff`` run, hooks run on many commands, a clean filter
+(``filter.<driver>.clean``) runs whenever git hashes a working-tree file that
+``.gitattributes`` assigns to that driver, and remotes can prompt for credentials. So
+every call here:
 
 - runs ``git`` as an argv list (no shell) with a timeout;
 - passes ``-c core.fsmonitor=false -c core.hooksPath=<devnull> -c protocol.allow=never
   -c core.sshCommand=false -c credential.helper=`` (command-line config beats repo config);
-- sets ``GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0
-  GIT_NO_REPLACE_OBJECTS=1 LC_ALL=C``;
+- sets ``GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 GIT_NO_REPLACE_OBJECTS=1 LC_ALL=C``.
+  The system config is read, as git reads it: the machine's administrator writes it,
+  and Git for Windows keeps ``core.autocrlf=true`` there, without which every file of a
+  Windows checkout (CRLF in the work tree, LF in the repository) looks modified;
 - uses plumbing: ``rev-parse``, ``merge-base``, ``diff-tree``, ``diff-index``,
-  ``ls-tree``, ``ls-files``, ``cat-file --batch`` and ``hash-object``. ``diff-index``
-  without ``--cached`` and ``ls-files --others`` stat the working tree, which is where
-  an fsmonitor would run; they are needed (no plumbing lists changed or untracked
-  files otherwise), and the forced ``core.fsmonitor=false`` keeps them inert.
+  ``ls-tree``, ``ls-files``, ``cat-file --batch``, ``hash-object`` and ``config``
+  (reads only). ``diff-index`` without ``--cached``, ``ls-files --others`` and
+  ``hash-object --stdin-paths`` read the working tree, which is where an fsmonitor or
+  a clean filter would run; they are needed (no plumbing lists changed or untracked
+  files otherwise, and only git knows its line-ending conversion). The forced
+  ``core.fsmonitor=false`` keeps them inert, every filter driver the repository's own
+  config defines is switched off for them (a driver from the user's or the system's
+  config, git-lfs say, still runs, as in any git command the user types), and
+  ``diff-index`` does not look inside a dirty submodule, where it would run ``git
+  status`` under the submodule's own config.
 
 Blob content read through ``cat-file`` is checked against the object id it was asked
 for, so a replaced or corrupted object is an error rather than silent input.
@@ -25,8 +35,9 @@ import hashlib
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
-from typing import Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from aegis_core.errors import AegisError
 
@@ -57,7 +68,6 @@ _HARDENING_KEEP_HOOKS_PATH = (
 )
 _HARDENING = ("-c", f"core.hooksPath={os.devnull}", *_HARDENING_KEEP_HOOKS_PATH)
 _ENV = {
-    "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
     "GIT_NO_REPLACE_OBJECTS": "1",
@@ -108,13 +118,18 @@ def run(
         raise GitError(f"cannot run git: {exc}") from exc
 
 
-def _out(args: Sequence[str], cwd: Path | str, **kwargs) -> Optional[bytes]:
-    """stdout of a successful call, or None (git failed, is missing or timed out)."""
+def _completed(args: Sequence[str], cwd: Path | str, **kwargs) -> Optional[subprocess.CompletedProcess]:
+    """The completed call, or None (git is missing or timed out)."""
     try:
-        res = run(args, cwd, **kwargs)
+        return run(args, cwd, **kwargs)
     except GitError:
         return None
-    return res.stdout if res.returncode == 0 else None
+
+
+def _out(args: Sequence[str], cwd: Path | str, **kwargs) -> Optional[bytes]:
+    """stdout of a successful call, or None (git failed, is missing or timed out)."""
+    res = _completed(args, cwd, **kwargs)
+    return res.stdout if res is not None and res.returncode == 0 else None
 
 
 def _text(args: Sequence[str], cwd: Path | str, **kwargs) -> Optional[str]:
@@ -205,33 +220,128 @@ def _blob_id(data: bytes, oid_length: int) -> str:
     return digest(header + data).hexdigest()
 
 
+# Config scopes the user or the machine's administrator wrote. A filter driver defined in
+# any other scope (the repository's .git/config or config.worktree, or a file either
+# includes) is switched off before git reads working-tree files.
+_TRUSTED_SCOPES = frozenset({"system", "global", "command"})
+_FILTER_COMMANDS = ("clean", "smudge", "process")
+_REGULAR_MODES = frozenset({"100644", "100755"})
+_LINK_MODE = "120000"
+
+
+def _filter_overrides(cwd: Path | str) -> Optional[Tuple[str, ...]]:
+    """``-c`` options that switch off every filter driver the repository's config
+    defines, or None when git cannot list them or a driver's name cannot be given to
+    ``-c`` (it splits at the first ``=``)."""
+    listing = ["config", "--null", "--name-only", "--get-regexp", r"^filter\."]
+    res = _completed([listing[0], "--show-scope", *listing[1:]], cwd)
+    if res is None:
+        return None
+    if res.returncode == 1:  # no filter driver is configured anywhere
+        return ()
+    if res.returncode == 0:
+        fields = res.stdout.split(b"\0")
+        keys = [key for scope, key in zip(fields[0::2], fields[1::2])
+                if key and scope.decode("ascii", "replace") not in _TRUSTED_SCOPES]
+    else:  # git before 2.26 has no --show-scope: switch off every driver
+        res = _completed(listing, cwd)
+        if res is None or res.returncode not in (0, 1):
+            return None
+        keys = [key for key in res.stdout.split(b"\0") if key]
+    overrides: List[str] = []
+    for driver in dict.fromkeys(os.fsdecode(key)[len("filter."):].rpartition(".")[0] for key in keys):
+        if not driver:
+            continue  # "filter.<key>" without a driver name configures nothing
+        if "=" in driver:
+            return None
+        for command in _FILTER_COMMANDS:
+            overrides += ["-c", f"filter.{driver}.{command}="]
+        overrides += ["-c", f"filter.{driver}.required=false"]
+    return tuple(overrides)
+
+
+def _work_tree_bytes(path: Path, mode: str) -> Tuple[Optional[bytes], bool]:
+    """What git hashes for the work-tree entry at ``path`` (None if there is nothing it
+    could), and whether that entry is a regular file.
+
+    A symlink entry is its target, which is what git stores for one; a regular file is
+    its content (also where core.symlinks=false checked a symlink out as a file).
+    Nothing is read through a link and nothing but a regular file is opened.
+    """
+    try:
+        st = os.lstat(path)
+        if stat.S_ISLNK(st.st_mode):
+            return (os.fsencode(os.readlink(path)) if mode == _LINK_MODE else None), False
+        if stat.S_ISREG(st.st_mode):
+            return path.read_bytes(), True
+    except OSError:
+        pass
+    return None, False
+
+
+def _c_quoted(path: str) -> bytes:
+    """``path`` as one C-quoted line, which ``hash-object --stdin-paths`` unquotes."""
+    quoted = bytearray(b'"')
+    for byte in os.fsencode(path):
+        if byte in b'"\\':
+            quoted += b"\\" + bytes([byte])
+        elif byte < 0x20 or byte == 0x7F:
+            quoted += b"\\%03o" % byte
+        else:
+            quoted.append(byte)
+    return bytes(quoted + b'"')
+
+
+def _clean_blob_ids(root: Path, paths: Sequence[str], hardening: Sequence[str]) -> Optional[List[str]]:
+    """The blob ids ``git add`` would store for these work-tree files, after git's clean
+    conversion (core.autocrlf and core.eol, the text, eol, ident and
+    working-tree-encoding attributes); None when git cannot say. Writes nothing."""
+    stdin = b"".join(_c_quoted(path) + b"\n" for path in paths)
+    out = _out(["hash-object", "--stdin-paths"], root, stdin=stdin, _hardening=hardening)
+    ids = None if out is None else out.decode("ascii", "replace").split()
+    return ids if ids is not None and len(ids) == len(paths) else None
+
+
 def _working_changes(cwd: Path | str, tree: str) -> Optional[List[str]]:
     """Files whose working-tree content differs from ``tree`` (added, copied, modified).
 
-    diff-index reports every file whose stat data is stale, so a reported file is kept
-    only if its bytes really differ from the tree's blob (a ``touch`` is not a change).
+    diff-index lists every file whose stat data is stale, so a listed file is kept only
+    if git would store something else for it: a ``touch`` is not a change, and neither
+    is a line-ending difference git's clean conversion removes (a CRLF checkout of LF
+    blobs under core.autocrlf or ``text``). Its own bytes are compared first; only a
+    regular file that differs is hashed by git.
     """
-    out = _out(["diff-index", "-z", "--raw", "--no-renames", _ACMR, tree], cwd)
+    overrides = _filter_overrides(cwd)
+    if overrides is None:
+        return None
+    hardening = (*_HARDENING, *overrides)
+    out = _out(["diff-index", "-z", "--raw", "--no-renames", "--ignore-submodules=dirty", _ACMR, tree],
+               cwd, _hardening=hardening)
     if out is None:
         return None
     fields = out.split(b"\0")
     root = toplevel(cwd) or Path(cwd)  # diff-index names paths from the top of the work tree
-    changed: List[str] = []
+    listed: List[str] = []
+    to_convert: Dict[str, str] = {}  # regular files whose bytes differ: path -> the tree's blob id
     for meta, raw_path in zip(fields[0::2], fields[1::2]):
         parts = meta.split()
         if len(parts) < 5 or not raw_path:
             continue
-        old_oid = parts[2].decode("ascii")
+        old_mode, old_oid = parts[0].lstrip(b":").decode("ascii"), parts[2].decode("ascii")
         path = os.fsdecode(raw_path)
-        if set(old_oid) != {"0"}:
-            try:
-                data = (root / path).read_bytes()
-            except OSError:
-                data = None
+        if set(old_oid) != {"0"}:  # all zeros: not in the tree, so added
+            data, is_file = _work_tree_bytes(root / path, old_mode)
             if data is not None and _blob_id(data, len(old_oid)) == old_oid:
                 continue
-        changed.append(path)
-    return changed
+            if is_file and old_mode in _REGULAR_MODES:
+                to_convert[path] = old_oid
+        listed.append(path)
+    if to_convert:
+        ids = _clean_blob_ids(root, list(to_convert), hardening)
+        if ids is not None:  # otherwise every one of them stays listed
+            unchanged = {path for (path, old), new in zip(to_convert.items(), ids) if new == old}
+            listed = [path for path in listed if path not in unchanged]
+    return listed
 
 
 def changed_files(

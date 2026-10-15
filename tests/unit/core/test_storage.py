@@ -328,3 +328,63 @@ def test_read_jsonl_can_decode_like_the_v3_writer(tmp_path: Path):
     legacy = read_jsonl(path, errors="surrogatepass")
     assert legacy.rows == [row]
     assert legacy.skipped_lines == []
+
+
+# ── One location, however the OS spells it (Windows CI, wave B2a) ────────────
+# Windows' realpath can answer for a directory another process is creating in its
+# extended-length form (\\?\C:\...): three processes appending to one new ledger saw
+# .aegis/state "resolve outside the workspace". realpath is the OS boundary faked here.
+
+def _extended_spelling(monkeypatch, target=None):
+    """os.path.realpath answers for any path named ``state`` as ``\\\\?\\`` + where it
+    resolves (or + ``target``, a directory elsewhere)."""
+    real = os.path.realpath
+
+    def realpath(path, *args, **kwargs):
+        resolved = real(path, *args, **kwargs)
+        if os.path.basename(resolved) == "state":
+            return "\\\\?\\" + (str(target) if target is not None else resolved)
+        return resolved
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+
+
+def test_the_state_dir_is_inside_the_workspace_in_its_extended_length_spelling(tmp_path: Path, monkeypatch):
+    from aegis_core.storage import state_dir
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    _extended_spelling(monkeypatch)
+
+    assert state_dir(ws) == Path(os.path.realpath(ws)) / ".aegis" / "state"
+    assert (ws / ".aegis" / "state" / ".gitignore").is_file()
+
+
+def test_the_lock_and_appends_work_in_the_extended_length_spelling(tmp_path: Path, monkeypatch):
+    from aegis_core.storage import locked
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    _extended_spelling(monkeypatch)
+
+    with locked(ws):
+        with locked(str(ws), timeout=0.5):  # re-entrant: one location, one lock
+            append_jsonl(ws / ".aegis" / "state" / "ledger.jsonl", [{"a": 1}])
+
+    assert read_jsonl(ws / ".aegis" / "state" / "ledger.jsonl").rows == [{"a": 1}]
+
+
+def test_a_state_dir_resolving_elsewhere_is_still_refused_in_the_extended_length_spelling(tmp_path: Path, monkeypatch):
+    """What a Windows junction looks like: not a symlink, but it resolves outside."""
+    from aegis_core.errors import PathTraversalError
+    from aegis_core.storage import state_dir
+
+    ws = tmp_path / "ws"
+    (ws / ".aegis" / "state").mkdir(parents=True)
+    outside = tmp_path / "outside" / "state"
+    outside.mkdir(parents=True)
+    _extended_spelling(monkeypatch, target=outside)
+
+    with pytest.raises(PathTraversalError, match="resolves outside the workspace"):
+        state_dir(ws)
+    assert list(outside.iterdir()) == []
