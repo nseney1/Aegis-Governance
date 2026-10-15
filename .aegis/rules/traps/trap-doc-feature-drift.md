@@ -29,10 +29,10 @@ tags:
 fitness:
   score: 0.6364
   impact_weight: 1.0
-  triggers: 89
-  true_positives: 38.3315
+  triggers: 90
+  true_positives: 38.6648
   false_positives: 24.0407
-  last_trigger_date: "2026-10-14T22:29:45Z"
+  last_trigger_date: "2026-10-15T12:22:49Z"
 ---
 
 Citadel doc-drift incident: Citadel intensity added to README and SKILL.md but

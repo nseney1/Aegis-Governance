@@ -243,6 +243,13 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
   - A human merges to `main`.
   - Release notes are generated from CI outputs, not a pre-filled template ("ALL RESOLVED", "13 CI jobs").
   - A "Let It Cook" freeze is evidence-based: it ends when the metrics stabilize, not on a date.
+- **Amendment (author, 2026-10-15):** "finish and release all the way up to 4.2.0", and "you can merge into main without human gate like normal... but still follow the rules. review the PR, make sure CICD is green and arbiter and two layers pass".
+  - For v4.0.0, v4.1.0 and v4.2.0 the multi-session soak is replaced by these per-release gates:
+    1. an independent PR review;
+    2. CI green on the exact SHA;
+    3. `aegis check` Layer 1 and Layer 2 (cross-vendor `--llm-cmd` arbiter) passing.
+  - The agent may then merge to `main`, tag, and create the GitHub Release (which publishes to PyPI).
+  - The soak's metrics are still collected after release.
 
 ## 4. What is NOT changing (stability list)
 
