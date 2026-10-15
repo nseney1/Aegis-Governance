@@ -58,7 +58,9 @@ def _emit_error(args: argparse.Namespace, msg: str) -> int:
     return 1
 
 
-_REGENERATE = "regenerate it with the aegis_generate_manifest MCP tool."
+# init re-seeds and re-signs the manifest from the rules on disk: an explicit
+# operator step, unlike the lifecycle writes. `aegis sync` replaces it (D3, B2b).
+_REGENERATE = "re-run aegis init to regenerate it."
 
 
 def _warn_if_manifest_stale(root: Path) -> None:

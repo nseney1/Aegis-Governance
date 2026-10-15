@@ -22,7 +22,7 @@ from aegis_core.integrity import generate_key, generate_manifest, save_manifest
 def _stale(n: int, signed: bool) -> str:
     msg = (
         f"Warning: .aegis/rules/manifest.json is out of date ({n} rule file(s) changed); "
-        "regenerate it with the aegis_generate_manifest MCP tool."
+        "re-run aegis init to regenerate it."
     )
     if signed:
         msg += " With an HMAC key configured, the MCP server will not load rules until then."
@@ -116,6 +116,19 @@ def test_tier_check_rewrites_warn_without_the_signed_suffix(repo, capsys) -> Non
     assert _manifest_bytes(repo) == manifest
 
 
+def test_rerunning_init_regenerates_the_manifest_as_the_warning_says(repo, capsys) -> None:
+    """The remedy the warning names must work: after it, only newer changes count."""
+    _sign(repo, key=True)
+    assert main(["rule", "create", "--hypothesis", "First", "--id", "first"]) == 0
+    assert capsys.readouterr().err == _stale(1, signed=True)
+
+    assert main(["init", "--platform", "claude", "--yes", "--no-hooks"]) == 0
+    capsys.readouterr()
+
+    assert main(["rule", "create", "--hypothesis", "Second", "--id", "second"]) == 0
+    assert capsys.readouterr().err == _stale(1, signed=True)
+
+
 def test_no_manifest_means_no_warning(repo, capsys) -> None:
     rc = main(["rule", "create", "--hypothesis", "New rule", "--id", "new-rule"])
 
@@ -186,6 +199,6 @@ def test_a_manifest_that_is_not_an_object_is_reported_not_raised(repo, capsys) -
     assert rc == 0
     assert captured.err == (
         "Warning: .aegis/rules/manifest.json is not a valid manifest; "
-        "regenerate it with the aegis_generate_manifest MCP tool.\n"
+        "re-run aegis init to regenerate it.\n"
     )
     assert (repo / ".aegis" / "rules" / "traps" / "new-rule.md").is_file()
