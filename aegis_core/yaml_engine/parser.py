@@ -1,6 +1,7 @@
 """Zero-dependency AegisYAML parser with DoS and security limits."""
 from __future__ import annotations
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
 MAX_DOC_BYTES: int = 512 * 1024
@@ -22,6 +23,8 @@ _SEQ_MAPPING_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.\-]*:(?:\s|$)")
 _UNSUPPORTED_PREFIXES = ("&", "*", "!", "%", "@", "`")
 _ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/", "'": "'", " ": " "}
 _CLOSING_DELIM_RE = re.compile(r"(?m)^---[ \t]*\r?$")
+_HEX_RE = re.compile(r"[0-9A-Fa-f]+")
+_BLOCK_INDICATORS = ("|", "|-", "|+", ">", ">-", ">+")
 
 def _unescape_double(body: str) -> str:
     out, i = [], 0
@@ -35,8 +38,10 @@ def _unescape_double(body: str) -> str:
             elif nxt in _ESCAPES: out.append(_ESCAPES[nxt]); i += 2
             elif nxt in ("u", "U") and i + (5 if nxt == "u" else 9) < len(body):
                 span = 6 if nxt == "u" else 10
-                try: out.append(chr(int(body[i + 2 : i + span], 16))); i += span
-                except ValueError: out.append(nxt); i += 2
+                digits = body[i + 2 : i + span]
+                if not _HEX_RE.fullmatch(digits): out.append(nxt); i += 2; continue
+                if int(digits, 16) > 0x10FFFF: raise AegisYAMLError(f"Escape sequence \\{nxt}{digits} is outside the Unicode range (max U+10FFFF)")
+                out.append(chr(int(digits, 16))); i += span
             else: out.append(nxt); i += 2
         else: out.append(ch); i += 1
     return "".join(out)
@@ -100,7 +105,6 @@ def _is_quote_closed(text: str, quote_char: str) -> bool:
 
 def _parse_scalar(raw: str, lineno: int = 1) -> Any:
     text = raw.strip()
-    if "\\0" in raw: raise AegisYAMLError("Escape sequence \\0 is not permitted")
     if len(text) > MAX_SCALAR_CHARS: raise AegisYAMLError(f"Scalar length ({len(text)}) exceeds maximum limit ({MAX_SCALAR_CHARS}) at line {lineno}")
     if text[:1] in ('"', "'"):
         if len(text) < 2 or text[-1] != text[0]: raise FrontmatterError(f"unterminated quoted scalar: {text[:24]!r}")
@@ -118,6 +122,18 @@ def _parse_scalar(raw: str, lineno: int = 1) -> Any:
     if _FLOAT_RE.match(text): return float(text)
     if text[:1] in _UNSUPPORTED_PREFIXES: raise FrontmatterError(f"unsupported YAML construct: {text[:24]!r}")
     return text
+
+def _parse_key(raw_key: str, lineno: int) -> str:
+    # Values keep invisible format characters (M5), but a raw one in a key would make two visually
+    # identical keys distinct; require the explicit \\u escape inside a double-quoted key instead.
+    for ch in raw_key:
+        if unicodedata.category(ch) == "Cf": raise AegisYAMLError(f"line {lineno}: invisible format character U+{ord(ch):04X} in key; write it as a \\u escape in a double-quoted key")
+    return str(_parse_scalar(raw_key, lineno=lineno))
+
+def _split_entry(content: str) -> Optional[Tuple[str, str]]:
+    try: raw_key, idx = _read_token(content, 0, ":")
+    except AegisYAMLError: return None
+    return (raw_key, content[idx + 1 :].strip()) if idx < len(content) else None
 
 def _parse_flow(text: str, i: int, lineno: int = 1, depth: int = 0) -> Tuple[Any, int]:
     if depth > MAX_DEPTH: raise AegisYAMLError("Maximum YAML nesting depth exceeded")
@@ -150,7 +166,7 @@ def _parse_flow_map(text: str, i: int, lineno: int = 1, depth: int = 0) -> Tuple
         raw_key, i = _read_token(text, i, ":")
         if i >= len(text) or text[i] != ":": raise FrontmatterError("expected ':' in flow mapping")
         if not raw_key.strip(): raise FrontmatterError("empty key in flow mapping")
-        key = str(_parse_scalar(raw_key, lineno=lineno))
+        key = _parse_key(raw_key, lineno)
         if key in mapping: raise AegisYAMLError(f"Duplicate key '{key}' detected at line {lineno}")
         value, i = _parse_flow(text, _skip_ws(text, i + 1), lineno=lineno, depth=depth)
         mapping[key], i = value, _skip_ws(text, i)
@@ -182,15 +198,23 @@ def _prepare_lines(text: str) -> List[Tuple[int, str, int]]:
         line = _strip_comment(raw)
         if not line.strip(): continue
         line_indent, line_content = len(line) - len(line.lstrip(" ")), line.strip()
-        prepared.append((line_indent, line_content, lineno))
-        idx = line_content.find(":")
-        if idx != -1:
-            rest = line_content[idx + 1 :].strip()
-            if rest in ("|", "|-", "|+", ">", ">-", ">+"): in_block_scalar, scalar_indent = True, line_indent
-            elif rest[:1] in ('"', "'") and _find_unclosed_quote(rest) is not None: in_quote = rest[0]
-        elif line_content.startswith("- "):
-            rest = line_content[2:].strip()
-            if rest[:1] in ('"', "'") and _find_unclosed_quote(rest) is not None: in_quote = rest[0]
+        col, entry = line_indent, line_content
+        if line_content == "-" or line_content.startswith("- "):
+            item = line_content[1:].lstrip(" ")
+            if not _SEQ_MAPPING_RE.match(item):
+                prepared.append((line_indent, line_content, lineno))
+                if item[:1] in ('"', "'") and _find_unclosed_quote(item) is not None: in_quote = item[0]
+                continue
+            # "- key: v" opens a mapping anchored at the key's column (YAML compact form); emitting it
+            # as "-" plus the entry lets _parse_block_map parse nested maps, lists and block scalars.
+            prepared.append((line_indent, "-", lineno))
+            col, entry = line_indent + len(line_content) - len(item), item
+        prepared.append((col, entry, lineno))
+        split = _split_entry(entry)
+        if split is None: continue
+        rest = split[1]
+        if rest in _BLOCK_INDICATORS: in_block_scalar, scalar_indent = True, col
+        elif rest[:1] in ('"', "'") and _find_unclosed_quote(rest) is not None: in_quote = rest[0]
     return prepared
 
 def _parse_collection(lines: List[Tuple[int, str, int]], start: int, indent: int, depth: int = 0) -> Tuple[Any, int]:
@@ -229,10 +253,10 @@ def _parse_block_map(lines: List[Tuple[int, str, int]], start: int, indent: int,
         raw_key, idx = _read_token(content, 0, ":")
         if idx >= len(content) or content[idx] != ":": raise FrontmatterError(f"line {lineno}: expected 'key: value'")
         if not raw_key.strip(): raise FrontmatterError(f"line {lineno}: missing key")
-        key = str(_parse_scalar(raw_key, lineno=lineno))
+        key = _parse_key(raw_key, lineno)
         if key in mapping: raise AegisYAMLError(f"Duplicate key '{key}' detected at line {lineno}")
         rest = content[idx + 1 :].strip()
-        if rest in ("|", "|-", "|+", ">", ">-", ">+"): mapping[key], i = _parse_block_scalar(lines, i + 1, indent, rest)
+        if rest in _BLOCK_INDICATORS: mapping[key], i = _parse_block_scalar(lines, i + 1, indent, rest)
         elif rest:
             if rest[:1] in ('"', "'"):
                 accum, i = _consume_multiline_quote(lines, i, indent, rest, "key")
@@ -262,19 +286,6 @@ def _parse_block_seq(lines: List[Tuple[int, str, int]], start: int, indent: int,
             if i + 1 < len(lines) and lines[i + 1][0] > indent:
                 value, i = _parse_collection(lines, i + 1, lines[i + 1][0], depth=depth + 1); items.append(value)
             else: items.append(None); i += 1
-        elif _SEQ_MAPPING_RE.match(body):
-            k, idx = _read_token(body, 0, ":"); v = body[idx + 1 :].strip()
-            item_map: Dict[str, Any] = {str(_parse_scalar(k, lineno=lineno)): _parse_scalar(v, lineno=lineno) if v else None}
-            j = i + 1
-            while j < len(lines) and lines[j][0] > indent and not (lines[j][1].startswith("- ") or lines[j][1] == "-"):
-                ni, nc, nl = lines[j]
-                if ":" in nc:
-                    nk, nidx = _read_token(nc, 0, ":"); nv = nc[nidx + 1 :].strip()
-                    nkey = str(_parse_scalar(nk, lineno=nl))
-                    if nkey in item_map: raise AegisYAMLError(f"Duplicate key '{nkey}' detected at line {nl}")
-                    item_map[nkey] = _parse_scalar(nv, lineno=nl) if nv else None
-                j += 1
-            items.append(item_map); i = j
         elif body[:1] in ('"', "'"):
             accum, i = _consume_multiline_quote(lines, i, indent, body, "item")
             items.append(_parse_scalar(accum, lineno=lineno))
@@ -282,11 +293,10 @@ def _parse_block_seq(lines: List[Tuple[int, str, int]], start: int, indent: int,
     return items, i
 
 def parse_yaml_subset(text: str) -> Dict[str, Any]:
-    raw_bytes = text.encode("utf-8")
+    try: raw_bytes = text.encode("utf-8")
+    except UnicodeEncodeError as exc: raise AegisYAMLError(f"Document contains a lone surrogate U+{ord(text[exc.start]):04X} at offset {exc.start}; it cannot be encoded as UTF-8") from None
     if len(raw_bytes) > MAX_DOC_BYTES: raise AegisYAMLError(f"Document size ({len(raw_bytes)} bytes) exceeds maximum allowed size ({MAX_DOC_BYTES} bytes)")
-    working_text = text
-    for zw in ZERO_WIDTH_CHARS: working_text = working_text.replace(zw, "")
-    lines = _prepare_lines(working_text)
+    lines = _prepare_lines(text[1:] if text.startswith("\ufeff") else text)
     if not lines: return {}
     value, idx = _parse_collection(lines, 0, lines[0][0], depth=0)
     if idx != len(lines): raise FrontmatterError(f"line {lines[idx][2]}: unparsed content")

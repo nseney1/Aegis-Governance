@@ -97,9 +97,12 @@ class AegisYAML:
     @staticmethod
     def parse_text(content: str) -> AegisDocument:
         """Parse pure in-memory markdown or yaml string into an AegisDocument. Never touches disk."""
+        # Same leading-only strip as the other entry points: removing these characters anywhere in the
+        # document silently altered metadata values and the body (review M5).
         working_content = content
         for zw in ZERO_WIDTH_CHARS:
-            working_content = working_content.replace(zw, "")
+            if working_content.startswith(zw):
+                working_content = working_content[len(zw):]
 
         if working_content.startswith("---"):
             nl = working_content.find("\n")
