@@ -9,21 +9,13 @@ Tests prove:
 """
 import inspect
 import json
-import os
-import sys
-import pytest
 
 from aegis_core.verification import (
-    ArbitrationResult,
-    Claim,
-    Divergence,
-    Prediction,
     RiskCategory,
-    Severity,
     ToolEvidence,
     Verdict,
 )
-from aegis_core.verification import VerificationPipeline, adversarial_verify, arbiter
+from aegis_core.verification import VerificationPipeline, adversarial_verify
 
 
 class TestAdversarialRebuttalPrompt:

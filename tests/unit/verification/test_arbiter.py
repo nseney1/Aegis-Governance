@@ -10,16 +10,14 @@ Uses v0.30 bugs as ground truth:
 Each test constructs the exact predictions/claims/evidence that
 our agents would have produced, then verifies the Arbiter catches it.
 """
-import os
 import sys
 
-import pytest
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
 from aegis_core.verification import (
-    ArbitrationResult, Claim, Prediction, RiskCategory,
+    Claim, Prediction, RiskCategory,
     Severity, ToolEvidence, Verdict,
 )
 from aegis_core.verification.arbiter import arbitrate, format_report

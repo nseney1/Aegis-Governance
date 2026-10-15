@@ -1,18 +1,11 @@
 """Test suite for soma_core/verification/pipeline.py conforming to strict checkpoint conventions."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
-import pytest
 
 from aegis_core.verification import (
-    ArbitrationResult,
-    Claim,
-    RiskCategory,
     Verdict,
 )
 from aegis_core.verification.pipeline import VerificationPipeline
-from aegis_core.workspace import Workspace
 
 
 class FakeUnparseableBackend:

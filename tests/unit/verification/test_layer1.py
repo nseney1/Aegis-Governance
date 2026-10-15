@@ -4,10 +4,8 @@ from pathlib import Path
 Validates against the actual Soma codebase (post-fix) and against
 synthetic pre-fix scenarios.
 """
-import os
 import sys
 import textwrap
-import tempfile
 
 import pytest
 
@@ -19,7 +17,7 @@ from aegis_core.verification import ToolEvidence
 from aegis_core.verification import persistence_checker
 from aegis_core.verification import call_graph
 from aegis_core.verification import runner
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestPersistenceChecker:

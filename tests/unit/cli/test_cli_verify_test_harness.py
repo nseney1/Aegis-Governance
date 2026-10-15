@@ -6,10 +6,7 @@ Tests prove:
 3. Graceful degradation when no test files exist for target files.
 """
 import argparse
-import os
-import sys
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 from aegis_cli import verify
 from aegis_core.verification import ToolEvidence, Verdict
