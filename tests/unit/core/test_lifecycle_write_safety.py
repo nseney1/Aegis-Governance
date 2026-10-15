@@ -8,15 +8,19 @@ Invariants under test (docs/adr/0005-evidence-review.md M1):
   no stray temp file, no half-finished move);
 - once a demotion has moved the rule out of the gate tier, the old tier's
   enforcement artifacts are removed even if the write step reports an error
-  afterwards.
+  afterwards;
+- persisted lifecycle timestamps are one valid UTC ISO-8601 form.
 """
 from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import os
+import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -33,6 +37,10 @@ from aegis_core.lifecycle import (
     run_cell_selection,
     transfer_cell,
 )
+from aegis_core.yaml import parse_frontmatter
+
+_UTC_TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
 
 def _rule(path: Path, rule_id: str, rule_type: str, triggers: int = 0, tp: int = 0, fp: int = 0) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -222,3 +230,36 @@ def test_demote_keeps_artifacts_when_writer_fails_before_the_move(
     assert source.is_file()
     assert not (ws / ".aegis" / "rules" / "traps" / "guarded.md").exists()
     assert all(a.exists() for a in artifacts), "rule is still an invariant; its gate artifacts must stay"
+
+
+# ── Timestamps ─────────────────────────────────────────────────────────
+
+def _assert_utc(ts: object) -> None:
+    assert isinstance(ts, str) and _UTC_TS.match(ts), f"malformed UTC timestamp: {ts!r}"
+    datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_selection_writes_valid_utc_timestamps(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    rule = _rule(ws / ".aegis" / "rules" / "traps" / "quiet.md", "quiet", "trap")
+
+    assert run_cell_selection(ws, execute=True) == 0
+
+    meta = parse_frontmatter(rule.read_text(encoding="utf-8")) or {}
+    _assert_utc(meta.get("dormant_since"))
+    log_lines = (ws / ".aegis" / "evidence" / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    entry = json.loads(log_lines[-1])
+    assert entry["action"] == "marked_dormant"
+    _assert_utc(entry["timestamp"])
+
+
+def test_metamorphose_writes_valid_utc_timestamp(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    _rule(ws / ".aegis" / "rules" / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
+
+    res = metamorphose_cell(ws, "mature")
+
+    assert res["status"] == "metamorphosed"
+    moved = ws / ".aegis" / "rules" / "invariants" / "mature.md"
+    meta = parse_frontmatter(moved.read_text(encoding="utf-8")) or {}
+    _assert_utc(meta.get("metamorphosis_date"))

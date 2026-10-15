@@ -58,6 +58,10 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
     return 0
 
 
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _select(cells_dir: Path, archive_dir: Path, fitness_log: Path, execute: bool) -> None:
     for root_str, _dirs, files in os.walk(cells_dir):
         if ".archive" in root_str:
@@ -121,8 +125,7 @@ def _select(cells_dir: Path, archive_dir: Path, fitness_log: Path, execute: bool
                         shutil.move(str(fpath), str(dest))
                         action = "moved_to_archive"
                 elif category == "DORMANT" and not dormant:
-                    timestamp = datetime.now(timezone.utc).isoformat() + "Z"
-                    meta["dormant_since"] = timestamp
+                    meta["dormant_since"] = _utc_timestamp()
                     body = _get_body(content).lstrip()
                     atomic_write_text(fpath, dump_frontmatter(meta, body=body))
                     action = "marked_dormant"
@@ -130,7 +133,7 @@ def _select(cells_dir: Path, archive_dir: Path, fitness_log: Path, execute: bool
                 if action:
                     with open(fitness_log, "a", encoding="utf-8") as log:
                         log.write(json.dumps({
-                            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                            "timestamp": _utc_timestamp(),
                             "cell": f,
                             "action": action,
                         }) + "\n")

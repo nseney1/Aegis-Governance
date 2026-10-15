@@ -560,7 +560,7 @@ def _metamorphose_locked(ws: Workspace, cells_dir: Path, cell_path: Path) -> dic
     new_type = best_path["target"]
     meta["type"] = new_type
     meta["metamorphosed_from"] = current_type
-    meta["metamorphosis_date"] = datetime.now(timezone.utc).isoformat() + "Z"
+    meta["metamorphosis_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     if new_type == "rule":
         if ws.is_aegis_repo:
