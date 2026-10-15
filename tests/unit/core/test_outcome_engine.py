@@ -89,31 +89,32 @@ class TestMatchCellsToChanges:
 class TestOutcomeEngineExecution:
     """Direct tests for aegis_core.outcomes.engine functions."""
 
-    def test_get_changed_files(self, monkeypatch, tmp_path):
-        from aegis_core.outcomes.engine import _get_changed_files
+    def test_get_changed_files(self, tmp_path):
         import subprocess
+        from aegis_core.outcomes.engine import _get_changed_files
 
-        # 1. git diff success
-        def mock_check_output(cmd, **kwargs):
-            if "diff" in cmd:
-                return "src/app.py\nsrc/util.py\n"
-            return ""
-        monkeypatch.setattr(subprocess, "check_output", mock_check_output)
-        files = _get_changed_files(str(tmp_path))
-        assert files == ["src/app.py", "src/util.py"]
+        def git(*args):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                           cwd=str(tmp_path), check=True, capture_output=True)
 
-        # 2. git status fallback
-        def mock_status(cmd, **kwargs):
-            if "diff" in cmd:
-                raise OSError("diff failed")
-            return " M src/status.py\n?? untracked.py\n"
-        monkeypatch.setattr(subprocess, "check_output", mock_status)
-        files = _get_changed_files(str(tmp_path))
-        assert "src/status.py" in files or "untracked.py" in files
+        # 1. not a repository: nothing is known
+        if subprocess.run(["git", "-C", str(tmp_path), "rev-parse"], capture_output=True).returncode != 0:
+            assert _get_changed_files(str(tmp_path)) == []
 
-        # 3. both fail
-        def mock_fail(cmd, **kwargs):
-            raise OSError("git error")
-        monkeypatch.setattr(subprocess, "check_output", mock_fail)
-        assert _get_changed_files(str(tmp_path)) == []
+        # 2. one commit: the uncommitted and untracked files
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        git("init", "-q")
+        git("add", "-A")
+        git("commit", "-q", "-m", "init")
+        (tmp_path / "src" / "app.py").write_text("x = 2\n", encoding="utf-8")
+        (tmp_path / "untracked.py").write_text("u\n", encoding="utf-8")
+        assert _get_changed_files(str(tmp_path)) == ["src/app.py", "untracked.py"]
+
+        # 3. later commits: the last commit's files plus uncommitted edits
+        git("add", "src/app.py")
+        git("commit", "-q", "-m", "two")
+        (tmp_path / "src" / "util.py").write_text("y\n", encoding="utf-8")
+        git("add", "src/util.py")
+        assert _get_changed_files(str(tmp_path)) == ["src/app.py", "src/util.py"]
 

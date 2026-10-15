@@ -225,135 +225,117 @@ class TestVerifyLayer2Execution:
         assert telemetry_calls[-1]["verdict"] == Verdict.SHIP
 
 class TestResolveTargetFilesFallbacks:
-    """resolve_target_files falls back from the working tree to branch diffs."""
+    """resolve_target_files falls back from the working tree to branch diffs (real git, via gitsafe)."""
+
+    @staticmethod
+    def _git(repo, *args):
+        import subprocess
+
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                       cwd=str(repo), check=True, capture_output=True)
+
+    def _repo(self, tmp_path, base="main"):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-q", "-b", base)
+        (repo / "base.py").write_text("x = 1\n", encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "base")
+        return repo
+
+    def _branch_commit(self, repo, name, path):
+        self._git(repo, "checkout", "-q", "-b", name)
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("y = 1\n", encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", name)
 
     def test_resolve_target_files_github_base_ref(self, tmp_path, monkeypatch):
-        """resolve_target_files falls back to GITHUB_BASE_REF when repo diff is empty."""
+        """A clean tree on a PR branch checks what the branch adds to GITHUB_BASE_REF."""
         from aegis_cli.verify import resolve_target_files
-        import subprocess
 
+        repo = self._repo(tmp_path)
+        self._branch_commit(repo, "topic", "aegis_core/mod.py")
         monkeypatch.setenv("GITHUB_BASE_REF", "main")
-        def mock_run(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "diff":
-                if "origin/main...HEAD" in cmd:
-                    assert kwargs.get("timeout") == 10
-                    assert kwargs.get("capture_output") is True
-                    assert kwargs.get("text") is True
-                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/mod.py\n", stderr="")
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
 
-        args = argparse.Namespace(files=None, workspace=str(tmp_path))
-        files = resolve_target_files(args)
-        assert files == ["aegis_core/mod.py"]
+        args = argparse.Namespace(files=None, workspace=str(repo))
+        assert resolve_target_files(args) == ["aegis_core/mod.py"]
+        assert args._diff_base == "main...HEAD"
 
     def test_resolve_target_files_preserves_existing_files_when_github_base_ref_set(self, tmp_path, monkeypatch):
-        """resolve_target_files does not query GITHUB_BASE_REF if files were already discovered."""
+        """Uncommitted changes win: the branch diff is not consulted."""
         from aegis_cli.verify import resolve_target_files
-        import subprocess
 
+        repo = self._repo(tmp_path)
+        self._branch_commit(repo, "topic", "ci_file.py")
+        (repo / "staged_file.py").write_text("s = 1\n", encoding="utf-8")
+        self._git(repo, "add", "staged_file.py")
         monkeypatch.setenv("GITHUB_BASE_REF", "main")
-        def mock_run(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "diff":
-                if "--cached" in cmd:
-                    return subprocess.CompletedProcess(cmd, 0, stdout="staged_file.py\n", stderr="")
-                if "origin/main...HEAD" in cmd:
-                    return subprocess.CompletedProcess(cmd, 0, stdout="ci_file.py\n", stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
 
-        args = argparse.Namespace(files=None, workspace=str(tmp_path))
-        files = resolve_target_files(args)
-        assert files == ["staged_file.py"]
+        args = argparse.Namespace(files=None, workspace=str(repo))
+        assert resolve_target_files(args) == ["staged_file.py"]
+        assert not hasattr(args, "_diff_base")
 
-    def test_resolve_target_files_github_base_ref_subprocess_error(self, tmp_path, monkeypatch):
-        """resolve_target_files handles SubprocessError when querying GITHUB_BASE_REF."""
+    def test_resolve_target_files_without_git(self, tmp_path, monkeypatch):
+        """git missing: nothing is known and no base was diffed, so a clean tree is not assumed."""
         from aegis_cli.verify import resolve_target_files
-        import subprocess
+        from aegis_core import gitsafe
 
-        monkeypatch.setenv("GITHUB_BASE_REF", "main")
-        def mock_run(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "diff":
-                if any("HEAD" in c for c in cmd):
-                    raise subprocess.SubprocessError("git diff error")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
-
+        monkeypatch.setattr(gitsafe.shutil, "which", lambda name: None)
         args = argparse.Namespace(files=None, workspace=str(tmp_path))
-        files = resolve_target_files(args)
-        assert files == []
+        assert resolve_target_files(args) == []
+        assert args._no_diff_base is True
 
     def test_resolve_target_files_clean_tree_branch_diff_fallback(self, tmp_path, monkeypatch):
-        """resolve_target_files queries origin/main...HEAD when working tree is clean."""
+        """Without GITHUB_BASE_REF the base is origin/main, main, origin/develop or develop."""
         from aegis_cli.verify import resolve_target_files
-        import subprocess
 
         monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
-        def mock_run(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "diff":
-                if "origin/main...HEAD" in cmd:
-                    return subprocess.CompletedProcess(cmd, 0, stdout="core/branch_file.py\n", stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        repo = self._repo(tmp_path)
+        self._branch_commit(repo, "feature", "core/branch_file.py")
+        self._git(repo, "update-ref", "refs/remotes/origin/main", "main")
 
-        args = argparse.Namespace(files=None, workspace=str(tmp_path))
-        files = resolve_target_files(args)
-        assert files == ["core/branch_file.py"]
-        assert getattr(args, "_diff_base", None) == "origin/main...HEAD"
+        args = argparse.Namespace(files=None, workspace=str(repo))
+        assert resolve_target_files(args) == ["core/branch_file.py"]
+        assert args._diff_base == "origin/main...HEAD"
 
     def test_resolve_target_files_head_parent_fallback(self, tmp_path, monkeypatch):
-        """resolve_target_files falls back to HEAD~1 when branch diffs are unavailable."""
+        """On the base branch itself (empty branch diff) the last commit is checked."""
         from aegis_cli.verify import resolve_target_files
-        import subprocess
 
         monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
-        def mock_run(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "diff":
-                if "HEAD~1" in cmd:
-                    return subprocess.CompletedProcess(cmd, 0, stdout="core/last_commit_file.py\n", stderr="")
-                if any("HEAD" in c for c in cmd):
-                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="branch error")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        repo = self._repo(tmp_path)
+        (repo / "core").mkdir()
+        (repo / "core" / "last_commit_file.py").write_text("z\n", encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "second")
 
-        args = argparse.Namespace(files=None, workspace=str(tmp_path))
-        files = resolve_target_files(args)
-        assert files == ["core/last_commit_file.py"]
-        assert getattr(args, "_diff_base", None) == "HEAD~1"
+        args = argparse.Namespace(files=None, workspace=str(repo))
+        assert resolve_target_files(args) == ["core/last_commit_file.py"]
+        assert args._diff_base == "HEAD~1"
 
-    def test_resolve_target_files_custom_github_base_ref(self, tmp_path, monkeypatch):
-        """resolve_target_files honors GITHUB_BASE_REF when present in environment."""
+    def test_resolve_target_files_single_commit_clean_tree_has_no_diff_base(self, tmp_path, monkeypatch):
         from aegis_cli.verify import resolve_target_files
-        import subprocess
 
+        monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
+        repo = self._repo(tmp_path, base="trunk")
+        args = argparse.Namespace(files=None, workspace=str(repo))
+        assert resolve_target_files(args) == []
+        assert args._no_diff_base is True
+
+    def test_resolve_target_files_custom_github_base_ref_prefers_origin(self, tmp_path, monkeypatch):
+        """GITHUB_BASE_REF names the base; its origin/ remote-tracking ref is preferred."""
+        from aegis_cli.verify import resolve_target_files
+
+        repo = self._repo(tmp_path)
+        self._git(repo, "branch", "release-1.0")
+        self._git(repo, "update-ref", "refs/remotes/origin/release-1.0", "release-1.0")
+        self._branch_commit(repo, "pr", "core/pr_feature.py")
+        self._git(repo, "branch", "-f", "release-1.0", "pr")  # the local branch moved on; origin did not
         monkeypatch.setenv("GITHUB_BASE_REF", "release-1.0")
-        def mock_run(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "diff":
-                if "origin/release-1.0...HEAD" in cmd:
-                    return subprocess.CompletedProcess(cmd, 0, stdout="core/pr_feature.py\n", stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
 
-        args = argparse.Namespace(files=None, workspace=str(tmp_path))
-        files = resolve_target_files(args)
-        assert files == ["core/pr_feature.py"]
-
-    def test_resolve_target_files_github_base_ref_local_branch_fallback(self, tmp_path, monkeypatch):
-        """resolve_target_files falls back to local ref when origin/ref returns empty."""
-        from aegis_cli.verify import resolve_target_files
-        import subprocess
-
-        monkeypatch.setenv("GITHUB_BASE_REF", "main")
-        def mock_run(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "diff":
-                if "main...HEAD" in cmd and "origin/main...HEAD" not in cmd:
-                    return subprocess.CompletedProcess(cmd, 0, stdout="aegis_core/local.py\n", stderr="")
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
-
-        args = argparse.Namespace(files=None, workspace=str(tmp_path))
-        files = resolve_target_files(args)
-        assert files == ["aegis_core/local.py"]
+        args = argparse.Namespace(files=None, workspace=str(repo))
+        assert resolve_target_files(args) == ["core/pr_feature.py"]
+        assert args._diff_base == "origin/release-1.0...HEAD"
 

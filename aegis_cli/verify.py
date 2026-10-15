@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any
 
@@ -54,18 +53,13 @@ def _resolve_git_cwd(args: argparse.Namespace) -> str:
 
 def _files_under(directory: str, git_cwd: str) -> list[str] | None:
     """Tracked and untracked, not ignored, files under *directory*; None outside a git work tree."""
-    try:
-        res = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", directory],
-            capture_output=True, timeout=30, cwd=git_cwd,
-        )
-    except (subprocess.SubprocessError, OSError):
+    from aegis_core import gitsafe
+
+    listed = gitsafe.list_files(git_cwd, [directory])
+    if listed is None:
         return None
-    if res.returncode != 0:
-        return None
-    listed = (os.fsdecode(raw) for raw in res.stdout.split(b"\0") if raw)
     # A tracked file deleted from the working tree is listed too; there is nothing to check.
-    return [f for f in dict.fromkeys(listed) if os.path.isfile(os.path.join(git_cwd, f))]
+    return [f for f in listed if os.path.isfile(os.path.join(git_cwd, f))]
 
 
 def resolve_target_files(args: argparse.Namespace) -> list[str]:
@@ -112,40 +106,26 @@ def resolve_target_files(args: argparse.Namespace) -> list[str]:
                   file=sys.stderr)
         return list(dict.fromkeys(safe_files))
 
-    files: list[str] = []
-    for cmd in (
-        ["git", "diff", "--name-only", "--diff-filter=ACMR", "HEAD"],
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
-    ):
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10, cwd=git_cwd)
-            found = [f.strip() for f in res.stdout.splitlines() if f.strip()]
-            files = list(dict.fromkeys(files + found))
-        except (subprocess.SubprocessError, FileNotFoundError):
-            pass
+    from aegis_core import gitsafe
 
+    # `git diff HEAD` plus `git diff --cached`: what a commit of the working tree would add.
+    files = gitsafe.changed_files(git_cwd, "working") or []
     if not files:
-        base_candidates = []
-        if os.environ.get("GITHUB_BASE_REF"):
-            base_ref = os.environ["GITHUB_BASE_REF"]
-            base_candidates.extend([f"origin/{base_ref}...HEAD", f"{base_ref}...HEAD"])
-        base_candidates.extend(["origin/main...HEAD", "main...HEAD", "origin/develop...HEAD", "develop...HEAD", "HEAD~1"])
+        # Nothing uncommitted: check what this branch adds to its base, else the last commit.
         diffed = False
-        for ref in base_candidates:
-            try:
-                res = subprocess.run(
-                    ["git", "diff", "--name-only", "--diff-filter=ACMR", ref],
-                    capture_output=True, text=True, timeout=10, cwd=git_cwd,
-                )
-                if res.returncode == 0:
-                    diffed = True
-                    cand_files = [f.strip() for f in res.stdout.splitlines() if f.strip()]
-                    if cand_files:
-                        files = cand_files
-                        setattr(args, "_diff_base", ref)
-                        break
-            except (subprocess.SubprocessError, FileNotFoundError):
-                pass
+        base = gitsafe.resolve_base_ref(git_cwd)
+        candidates = [("range", base)] if base else []
+        if gitsafe.resolve_commit(git_cwd, "HEAD~1"):  # a root commit has no parent to diff against
+            candidates.append(("head", "HEAD~1"))
+        for mode, ref in candidates:
+            found = gitsafe.changed_files(git_cwd, mode, base=ref if mode == "range" else None)
+            if found is None:
+                continue
+            diffed = True
+            if found:
+                files = found
+                setattr(args, "_diff_base", f"{ref}...HEAD" if mode == "range" else ref)
+                break
         if not diffed:
             setattr(args, "_no_diff_base", True)
     return files

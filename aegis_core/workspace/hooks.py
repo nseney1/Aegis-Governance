@@ -7,7 +7,6 @@ Strictly zero-dependency: uses only Python standard library.
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 
@@ -74,7 +73,7 @@ def resolve_git_hooks_dir(project_root: str | Path | os.PathLike[str] | None = N
     1. Standard repository (.git is a directory -> .git/hooks)
     2. Git worktree (.git is a file containing 'gitdir: <path>')
        Resolves common_dir or parent .git/hooks.
-    3. Git rev-parse --git-path hooks fallback when git CLI is available.
+    3. ``git rev-parse --git-path hooks`` (via aegis_core.gitsafe) when git is available.
 
     Returns Path to hooks directory, or None if not inside a git repository.
     """
@@ -84,25 +83,12 @@ def resolve_git_hooks_dir(project_root: str | Path | os.PathLike[str] | None = N
     if not dot_git.exists():
         return None
 
-    # 1. Try git CLI if available (handles core.hooksPath and custom setups)
-    try:
-        res = subprocess.run(
-            ["git", "rev-parse", "--git-path", "hooks"],
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        if res.returncode == 0:
-            p = res.stdout.strip()
-            if p:
-                hooks_path = Path(p)
-                if not hooks_path.is_absolute():
-                    hooks_path = (root / hooks_path).resolve()
-                return hooks_path
-    except (subprocess.SubprocessError, FileNotFoundError, PermissionError, UnicodeDecodeError, OSError):
-        pass
+    # 1. Ask git (honours core.hooksPath and worktrees), through the hardened runner
+    from aegis_core import gitsafe
+
+    hooks_path = gitsafe.git_path(root, "hooks")
+    if hooks_path is not None:
+        return hooks_path
 
     # 2. Pure Python fallback (zero external CLI dependencies)
     _git_dir, common_dir = _find_git_dirs(root)

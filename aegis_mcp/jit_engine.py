@@ -19,7 +19,6 @@ import fnmatch
 import glob
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,7 +27,6 @@ from aegis_core.scoring import compute_cell_fitness, compute_salience
 from aegis_core.taxonomy import (
     JIT_DEFAULT_MAX_TOKENS,
     JIT_DEFAULT_RULE_COUNT_BUDGET,
-    SUBPROCESS_DEFAULT_TIMEOUT_SECONDS,
     WORDS_TO_TOKENS_FACTOR,
 )
 from aegis_core.workspace.layout import WorkspaceLayout
@@ -91,20 +89,10 @@ def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -
 
 
 def get_git_diff_files(workspace: str) -> list[str]:
-    """Get files changed in the current working tree + staged."""
-    files = set()
-    for cmd in [['git', 'diff', '--name-only'],
-                ['git', 'diff', '--name-only', '--cached']]:
-        try:
-            output = subprocess.check_output(
-                cmd, cwd=workspace, text=True, stderr=subprocess.DEVNULL,
-                timeout=SUBPROCESS_DEFAULT_TIMEOUT_SECONDS,
-            ).strip()
-            if output:
-                files.update(f for f in output.splitlines() if f)
-        except Exception:
-            pass
-    return list(files)
+    """Files changed in the working tree or the index (``git diff`` plus ``git diff --cached``)."""
+    from aegis_core import gitsafe
+
+    return gitsafe.changed_files(workspace, "working") or []
 
 
 def load_all_cells(workspace: str) -> list[dict[str, object]]:

@@ -208,58 +208,68 @@ class TestRunnerMutationTesterIntegration:
 
 
 class TestGetModifiedLines:
-    """Test git diff modified line extraction helper."""
+    """The changed lines of a file against its base, read through gitsafe (no git diff)."""
 
-    def test_get_modified_lines_parses_hunks(self, monkeypatch):
-        from aegis_core.verification.runner import _get_modified_lines
+    @staticmethod
+    def _git(repo, *args):
         import subprocess
 
-        fake_diff = "@@ -10,0 +15,5 @@\n+line1\n+line2\n"
-        def mock_run(cmd, *args, **kwargs):
-            return subprocess.CompletedProcess(cmd, 0, stdout=fake_diff, stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                       cwd=str(repo), check=True, capture_output=True)
 
-        lines = _get_modified_lines("app.py", "/repo")
-        assert lines == {15, 16, 17, 18, 19}
+    def _repo(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-q", "-b", "main")
+        (repo / "app.py").write_text("".join(f"line{i}\n" for i in range(1, 21)), encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "init")
+        return repo
 
-    def test_get_modified_lines_empty_when_no_hunks(self, monkeypatch):
+    def test_get_modified_lines_against_head(self, tmp_path):
         from aegis_core.verification.runner import _get_modified_lines
-        import subprocess
 
-        def mock_run(cmd, *args, **kwargs):
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        repo = self._repo(tmp_path)
+        lines = (repo / "app.py").read_text(encoding="utf-8").splitlines()
+        lines[2] = "changed3"
+        lines[14:14] = ["new15", "new16"]
+        (repo / "app.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        assert _get_modified_lines("app.py", "/repo") is None
+        assert _get_modified_lines("app.py", str(repo)) == {3, 15, 16}
 
-    def test_get_modified_lines_with_github_base_ref(self, monkeypatch):
+    def test_get_modified_lines_none_when_nothing_changed(self, tmp_path):
         from aegis_core.verification.runner import _get_modified_lines
-        import subprocess
 
+        repo = self._repo(tmp_path)
+        assert _get_modified_lines("app.py", str(repo)) is None
+
+    def test_get_modified_lines_uses_the_pull_request_base(self, tmp_path, monkeypatch):
+        from aegis_core.verification.runner import _get_modified_lines
+
+        repo = self._repo(tmp_path)
+        self._git(repo, "checkout", "-q", "-b", "topic")
+        self._git(repo, "branch", "develop", "main")
+        with open(repo / "app.py", "a", encoding="utf-8") as fh:
+            fh.write("line21\nline22\n")
+        self._git(repo, "commit", "-q", "-am", "topic")
         monkeypatch.setenv("GITHUB_BASE_REF", "develop")
-        observed_cmds = []
 
-        fake_diff = "@@ -20,0 +25,2 @@\n+line1\n+line2\n"
-        def mock_run(cmd, *args, **kwargs):
-            observed_cmds.append(cmd)
-            if "origin/develop...HEAD" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout=fake_diff, stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        # clean tree: HEAD shows nothing, the merge base with develop shows the commit
+        assert _get_modified_lines("app.py", str(repo)) == {21, 22}
+        assert _get_modified_lines("app.py", str(repo), diff_base="develop...HEAD") == {21, 22}
 
-        monkeypatch.setattr(subprocess, "run", mock_run)
-        lines = _get_modified_lines("app.py", "/repo")
-        assert lines == {25, 26}
-        assert any("origin/develop...HEAD" in c for c in observed_cmds)
-
-    def test_get_modified_lines_exception_handled(self, monkeypatch):
+    def test_get_modified_lines_new_file_is_all_new(self, tmp_path):
         from aegis_core.verification.runner import _get_modified_lines
-        import subprocess
 
-        def mock_run(cmd, *args, **kwargs):
-            raise OSError("git error")
-        monkeypatch.setattr(subprocess, "run", mock_run)
+        repo = self._repo(tmp_path)
+        (repo / "fresh.py").write_text("a\nb\n", encoding="utf-8")
+        assert _get_modified_lines("fresh.py", str(repo)) == {1, 2}
 
-        assert _get_modified_lines("app.py", "/repo") is None
+    def test_get_modified_lines_outside_git_is_none(self, tmp_path):
+        from aegis_core.verification.runner import _get_modified_lines
+
+        (tmp_path / "app.py").write_text("x\n", encoding="utf-8")
+        assert _get_modified_lines("missing.py", str(tmp_path)) is None
 
 
 class TestRunnerCoverageEnhancements:
@@ -327,34 +337,29 @@ class TestRunnerCoverageEnhancements:
             assert any(r.target == str(ts_file) for r in results)
 
     def test_get_modified_lines_uses_diff_base_and_head_fallback(self, tmp_path):
-        """_get_modified_lines prioritizes explicit diff_base and falls back to HEAD~1."""
-        from aegis_core.verification import runner
+        """An explicit diff_base wins; a clean tree falls back to HEAD~1."""
         import subprocess
+        from aegis_core.verification import runner
 
-        called_cmds = []
-        def fake_run(cmd, *args, **kwargs):
-            called_cmds.append(cmd)
-            # Return hunk when HEAD~1 is queried
-            if "HEAD~1" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout="@@ -10,0 +11,5 @@\n", stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        def git(*args):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                           cwd=str(tmp_path), check=True, capture_output=True)
 
-        with patch("subprocess.run", side_effect=fake_run):
-            lines = runner._get_modified_lines("foo.py", str(tmp_path))
-            assert lines == {11, 12, 13, 14, 15}
-            assert any("HEAD~1" in c for c in called_cmds)
+        (tmp_path / "foo.py").write_text("".join(f"l{i}\n" for i in range(1, 11)), encoding="utf-8")
+        git("init", "-q", "-b", "trunk")
+        git("add", "-A")
+        git("commit", "-q", "-m", "one")
+        git("branch", "feat")
+        with open(tmp_path / "foo.py", "a", encoding="utf-8") as fh:
+            fh.write("".join(f"l{i}\n" for i in range(11, 16)))
+        git("commit", "-q", "-am", "two")
 
-        called_cmds.clear()
-        def fake_run_diff_base(cmd, *args, **kwargs):
-            called_cmds.append(cmd)
-            if "origin/feat...HEAD" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout="@@ -5,0 +6,2 @@\n", stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        # clean tree: HEAD shows nothing, HEAD~1 shows the last commit's lines
+        assert runner._get_modified_lines("foo.py", str(tmp_path)) == {11, 12, 13, 14, 15}
 
-        with patch("subprocess.run", side_effect=fake_run_diff_base):
-            lines = runner._get_modified_lines("foo.py", str(tmp_path), diff_base="origin/feat")
-            assert lines == {6, 7}
-            assert called_cmds[0] == ["git", "diff", "-U0", "origin/feat", "--", "foo.py"]
+        (tmp_path / "foo.py").write_text("x\n" + (tmp_path / "foo.py").read_text(encoding="utf-8"), encoding="utf-8")
+        # an explicit base is compared first: against feat, line 1 and the five appended lines are new
+        assert runner._get_modified_lines("foo.py", str(tmp_path), diff_base="feat") == {1, 12, 13, 14, 15, 16}
 
 
 _LATIN1 = "# -*- coding: latin-1 -*-\nGREETING = 'café'\n".encode("latin-1")
