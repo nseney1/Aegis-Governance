@@ -1,28 +1,28 @@
-# Soma Governance — Roadmap
+# Aegis Guardrails — Roadmap
 
-> Features listed here are planned or in-progress. They are NOT yet shipped in the current release.
-> A feature moves from this roadmap to the README only when:
+> Features listed under **Research** are planned or experimental. Shipped milestones document verified capabilities backed by behavioral tests and `docs/project/CLAIM_REGISTRY.json`.
+> A feature moves to the README only when:
 > 1. Its behavioral test suite is written
 > 2. All tests pass
 > 3. It has a Claim Registry entry with status `unlocked`
 
 ## Shipped Features
 
-### Layer 2 Verification
-**Status**: ✅ SHIPPED (v0.60)  
-AST-based verification tools with information-partitioned evaluation.
+### Layer 2 Verification (`VerificationPipeline` & `Arbiter`)
+**Status**: ✅ SHIPPED (v0.60; unified in v3.2.0)  
+AST-based Layer 1 verification tools (`DeterministicVerifier`) paired with information-partitioned Layer 2 evaluation (`AdversarialVerifier`) and deterministic `Arbiter` adjudication.
 
 ### Transcript Verifier
 **Status**: ✅ SHIPPED (v0.60)  
-Verify agent conversation transcripts against governance rules.
+Verify agent conversation transcripts against governance rules (`aegis_core/verification/transcript_verifier.py`).
 
 ### Genesis
-**Status**: ✅ SHIPPED (v0.70)  
-Automated codebase scanning and governance cell candidate generation.
+**Status**: ✅ SHIPPED (v0.70; 4-stage `Perimeter` → `Policy` in v3.1.0)  
+Automated codebase reconnaissance and `.aegis/rules/` governance rule candidate generation.
 
-### Review Intensity Levels (Breeze → Supercell)
-**Status**: ✅ SHIPPED (v0.60)  
-Dynamic review depth escalation based on diff risk assessment.
+### Review Intensity Levels (Patrol → Citadel, formerly Breeze → Supercell)
+**Status**: ✅ SHIPPED (v0.60; canonical Aegis taxonomy in v3.1.0)  
+Dynamic review depth escalation (`Patrol`, `Sweep`, `Vanguard`, `Bulwark`, `Fortress`, `Citadel`) based on diff risk assessment.
 
 ### Phase 1 — Stop the Bleeding
 **Status**: ✅ SHIPPED (v0.73)  
@@ -336,39 +336,57 @@ Unifies all verification surfaces onto `VerificationPipeline` as the single cano
 
 ## Phase 25 — v0.122.0 ✅ Shipped
 
-### Zero-Dependency SomaYAML, Horizontal Skill Graph, Response Projection & Lean Gateway
+### Zero-Dependency AegisYAML, Horizontal Skill Graph, Response Projection & Lean Gateway
 **Status**: ✅ Shipped (v0.122.0)  
-Pure standard library recursive-descent YAML frontmatter parser (`soma_core/somayaml.py`). Skill graph, fail-closed slot resolution, typed envelopes (<150 tokens), and file-buffered handoff tickets (`soma_core/skills/`). Dual-Plane MCP Gateway decomposition (`soma_mcp/`) into Control Plane (`registry.py`), Execution Plane (`handlers/`), and lean router (`tools.py`). Response projection and secret scrubbing (`soma_mcp/projection.py`).
+Pure standard library recursive-descent YAML frontmatter parser (`aegis_core/yaml.py`, `AegisYAML`). Skill graph, fail-closed slot resolution, typed envelopes (<150 tokens), and file-buffered handoff tickets (`aegis_core/skills/`). Dual-Plane MCP Gateway decomposition (`aegis_mcp/`) into Control Plane (`registry.py`), Execution Plane (`handlers/`), and lean router (`tools.py`). Response projection and secret scrubbing (`aegis_mcp/projection.py`).
 
 ## Phase 25.5 — v0.123.0 ✅ Shipped
 
 ### Test Suite Consolidation & Hard Cleanse
 **Status**: ✅ Shipped (v0.123.0)  
-Relocated 191 test files into domain hierarchy: `tests/unit/core/`, `tests/unit/verification/`, `tests/unit/cli/`, `tests/unit/mcp/`, `tests/unit/sdk/`, and `tests/integration/`. Atomic synchronization of all 83 entries in `BUG_REGISTRY.json` and 23 entries in `CLAIM_REGISTRY.json`. Hermetic isolation fixtures in single canonical `tests/conftest.py`.
+Relocated 191 test files into domain hierarchy: `tests/unit/core/`, `tests/unit/verification/`, `tests/unit/cli/`, `tests/unit/mcp/`, `tests/unit/sdk/`, and `tests/integration/`. Atomic synchronization of all entries in `BUG_REGISTRY.json` and `CLAIM_REGISTRY.json`. Hermetic isolation fixtures in single canonical `tests/conftest.py`.
 
 ## Phase 26 — v1.0.0 ✅ Shipped
 
 ### Production GA, Documentation Portal & SemVer 2.0 Compatibility Guarantee
 **Status**: ✅ Shipped (v1.0.0)  
-Restructures root `README.md` into a lean documentation portal (< 200 lines) with interactive closed-loop diagram, 30-second quickstart, and comprehensive production guides (`docs/guides/mcp_gateway.md`, `docs/guides/verification_pipeline.md`, `docs/guides/cell_lifecycle.md`, `docs/guides/skill_graph.md`). Formal SemVer 2.0 Backwards Compatibility Guarantee published in `docs/project/COMPATIBILITY.md`.
+Restructures root `README.md` into a lean documentation portal (< 200 lines) with interactive closed-loop diagram, 30-second quickstart, and comprehensive production guides (`docs/guides/mcp_gateway.md`, `docs/guides/verification_pipeline.md`, `docs/guides/rule_lifecycle.md`, `docs/guides/skill_graph.md`). Formal SemVer 2.0 Backwards Compatibility Guarantee published in `docs/project/COMPATIBILITY.md`.
 
 ## Phase 27 — v1.1.0 ✅ Shipped
 
 ### Language-Agnostic AST Verification via Normalized AST Drivers
 **Status**: ✅ Shipped (v1.1.0)  
-Language-agnostic Normalized AST Driver (NAD) protocol (`soma_core/ast/`). NormalizedAST intermediate representation, in-process Python driver, subprocess driver runner with timeout and sandbox constraints. Polyglot Layer 1 call graph reachability, orphan deadwood detection, and mutation testing (`soma_core/verification/`). Reference driver recipes for TypeScript/JavaScript (`install/drivers/ts_ast.js`) and Go (`install/drivers/go_ast.go`).
+Language-agnostic Normalized AST Driver (NAD) protocol (`aegis_core/ast/`). NormalizedAST intermediate representation, in-process Python driver, subprocess driver runner with timeout and sandbox constraints. Polyglot Layer 1 call graph reachability, orphan deadwood detection, and mutation testing (`aegis_core/verification/`). Reference driver recipes for TypeScript/JavaScript (`install/drivers/ts_ast.js`) and Go (`install/drivers/go_ast.go`).
 
 ## Phase 28 — v1.2.0 ✅ Shipped
 
-### Zero-Touch Genesis Polyglot Provisioning & Rust AST Driver
+### Zero-Touch Polyglot Provisioning & Rust AST Driver
 **Status**: ✅ Shipped (v1.2.0)  
-Zero-touch polyglot language detection and driver slot provisioning in `soma init`, `soma genesis`, and `soma doctor --fix` (`soma_core/ast/detect.py`). Pure Python stdlib reference Rust AST driver (`rust_ast.py`) producing NormalizedAST JSON without external dependencies. Bundled driver templates (`soma_core/ast/drivers/templates/`). CI/CD release verification alignment (`diff_base` propagation and `HEAD~1` fallback in `soma_core/verification/runner.py`).
+Zero-touch polyglot language detection and driver slot provisioning in `aegis init`, `aegis detect`, and `aegis doctor --fix` (`aegis_core/ast/detect.py`). Pure Python stdlib reference Rust AST driver (`rust_ast.py`) producing NormalizedAST JSON without external dependencies. Bundled driver templates (`aegis_core/ast/drivers/templates/`). CI/CD release verification alignment (`diff_base` propagation and `HEAD~1` fallback in `aegis_core/verification/runner.py`).
+
+## Phase 29 — v1.3.0 ✅ Shipped
+
+### Pre-Commit Verification & Release Gate 4.5 Hardening
+**Status**: ✅ Shipped (v1.3.0)  
+Fast pre-commit git hook verification (`aegis verify --fast`) and pre-tag release verification (`aegis check --release`, Gate 4.5) ensuring zero unverified tags reach `main`.
+
+## Phase 30 — v2.0.0 – v3.0.0 ✅ Shipped
+
+### Aegis Guardrails Nomenclature & Multi-Platform IDE Integration
+**Status**: ✅ Shipped (v3.0.0)  
+Transition from biological metaphors (`soma`, `cell`, `Spores`–`Mulch`, `Breeze`–`Supercell`) to clear engineering vocabulary (**Aegis Guardrails**, `aegis_core`, `aegis_cli`, `aegis_mcp`, `aegis_sdk`, `rule`, `Sentry`–`Debrief`, `Patrol`–`Citadel`). Multi-platform configuration compilation (`aegis_core/compiler.py`) for Gemini/Antigravity, Claude Code, Cursor, GitHub Copilot, and Kiro, plus workspace migration via `aegis migrate`.
+
+## Phase 31 — v3.1.0 – v3.2.0 ✅ Shipped
+
+### GitFlow Review Gate, Structural Separation & Documentation Alignment
+**Status**: ✅ Shipped (v3.2.0)  
+Enforces structural separation between authoring and reviewing contexts via `rules/gitflow-review-gate.md` and `rules/ci-green-before-release.md`. Consolidates the 17-tool MCP gateway (`aegis_*`), pure-Python in-process governance hooks (`aegis_cli/hooks/`), and comprehensive architecture, ADR, and project documentation.
 
 ## Research
 
 ### Antifragile Scaling
 **Status**: Research  
-Cells that perform better under stress receive fitness bonuses.
+Rules that perform better under stress receive fitness bonuses.
 
 ### External Validation Benchmarks
 **Status**: Research  
@@ -376,7 +394,7 @@ Standardized benchmarks for comparing governance effectiveness across projects.
 
 ### Natural Language Rule Creation
 **Status**: Experimental  
-Create cells from natural language descriptions via `cell_create.sh --from-description`.
+Create rules from natural language descriptions via `aegis_core/lifecycle/creation.py` (`aegis rule`).
 
 ### Team Topology (Multi-Repo Sync)
 **Status**: Experimental  
@@ -385,4 +403,5 @@ Synchronize governance rules across multiple repositories.
 ### Counterfactual ROI
 **Status**: Research  
 Causal inference for measuring governance impact.
+
 

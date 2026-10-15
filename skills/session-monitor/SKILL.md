@@ -1,6 +1,12 @@
 ---
+id: session-monitor
 name: Session Monitor
 description: Real-time session monitoring tracking waste trajectory, dispatching periodic probes, and alerting on regressions.
+kind: skill
+tier: sentinel
+consumes: [InspectionReceipt, TestVerdict]
+produces: [InspectionReceipt, ChargeSheet]
+handoff_targets: [adaptive-reviewer, post-mortem]
 trigger: user_request
 ---
 

@@ -1,113 +1,117 @@
 # Formal Framework: Mechanism Design Mapping
 
-> **Purpose**: This document maps Soma's biological naming to formal mechanism design
-> concepts. Agents working in the codebase should reference this to understand
-> the theoretical intent behind each component, not just its implementation.
+> **Purpose**: This document maps **Aegis Guardrails** (v3.2.0) governance, verification, and rule lifecycle concepts—along with their historical Soma aliases—to formal mechanism design concepts. Agents working in the codebase should reference this to understand the theoretical intent behind each component, not just its implementation.
 
 ---
 
 ## Term Mapping
 
-### Directory Structure
+### Directory & Package Structure
 
-| Codebase (Biology) | Formal Concept (Mechanism Design) | What It Actually Does |
+| Codebase (`aegis-guardrails` v3.2.0) | Formal Concept (Mechanism Design) | What It Actually Does |
 |:---|:---|:---|
-| `genome/` | **Constitutional rules** | Immutable foundational governance — rarely amended, high legitimacy cost to change |
-| `enzymes/` | **Institutional procedures** | Automated enforcement and measurement scripts — the bureaucracy that makes governance operational |
-| `organs/` | **Institutional capabilities** | Complex multi-step competencies (audit, review, onboarding) — what the governance system *can do* |
-| `immune_system/` | **Oversight institution** | Independent verification body — structurally separated from the governed entity |
-| `.soma/cells/` | **Adaptive policy layer** | Per-repository regulatory instruments — generated, tested, evolved, or sunset |
-| `.soma/` | **Regulatory state** | Persistent governance artifacts for a specific jurisdiction (repository) |
+| `rules/` *(legacy `genome/`)* | **Constitutional rules** | Immutable foundational governance — rarely amended, high legitimacy cost to change |
+| `aegis_core/` & `aegis_cli/` *(legacy `enzymes/`)* | **Institutional procedures** | Pure-Python enforcement, scoring, and measurement modules — the operational machinery of governance |
+| `skills/` *(legacy `organs/`)* | **Institutional capabilities** | Complex multi-step competencies (audit, staff review, onboarding reconnaissance) — what the governance system *can do* |
+| `aegis_core/verification/` *(legacy `immune_system/`)* | **Oversight institution** | Independent verification body (`VerificationPipeline`, `Arbiter`, `DeterministicVerifier`, `AdversarialVerifier`) — structurally separated from the governed entity |
+| `aegis_core/receipts.py` (`ReceiptManager`) | **Cryptographic commitment / authorization** | State-bound, burn-before-compare HMAC-SHA256 receipts binding `aegis_scan` governance inspection to file and rule digests before write/execute tool execution |
+| `.aegis/rules/` *(legacy `.soma/cells/`)* | **Adaptive policy layer** | Per-repository regulatory instruments (`invariants/`, `traps/`, `gates/`, `boundaries/`, `personas/`, `contracts/`) — generated, tested, evolved, or sunset |
+| `.aegis/` *(legacy `.soma/`)* | **Regulatory state** | Persistent governance artifacts, evidence ledgers (`.aegis/evidence/signals.jsonl`), and cryptographic locks for a specific jurisdiction (repository) |
 
-### Adaptive Rule Types
+### Adaptive Rule Types (`aegis_core/taxonomy.py`)
 
-| Codebase (Biology) | Formal Concept | Mechanism Design Role |
+| Codebase Rule Type | Formal Concept | Mechanism Design Role |
 |:---|:---|:---|
-| **Vacuole** | **Precedent / trap rule** | Encodes a known failure mode as a falsifiable hypothesis. Analogous to case law — "this specific thing went wrong, don't repeat it." |
-| **Chloroplast** | **Best-practice norm** | Encodes an observed success pattern. Analogous to professional standards — "this approach worked, propagate it." |
-| **Cell Wall** | **Hard constraint / invariant** | Non-negotiable safety boundary. Analogous to constitutional amendment — highest enforcement tier, cannot be overridden by lower rules. |
-| **Membrane** | **Escalation trigger** | Sensitivity classifier that activates elevated review when specific areas change. Analogous to mandatory regulatory review for sensitive industries. |
-| **Plasmodesmata** | **Interface contract** | Cross-service data shape and API agreement. Analogous to treaty — governs interactions between independent jurisdictions. |
+| **Trap** (`trap`, *legacy Vacuole*) | **Precedent / trap rule** | Encodes a known failure mode as a falsifiable hypothesis. Analogous to case law — "this specific thing went wrong, don't repeat it." |
+| **Persona / Method** (`persona`, *legacy Chloroplast*) | **Best-practice norm** | Encodes an observed success pattern or domain specialist lens. Analogous to professional standards — "this method worked, propagate it." |
+| **Invariant** (`invariant`, *legacy Cell Wall*) | **Hard constraint / invariant** | Non-negotiable safety boundary. Analogous to constitutional amendment — highest policy tier, prioritized first in JIT context budgets. |
+| **Boundary** (`boundary`, *legacy Membrane*) | **Escalation trigger** | Sensitivity classifier that activates elevated review modes when specific paths change. Analogous to mandatory regulatory review for sensitive sectors. |
+| **Contract** (`contract`, *legacy Plasmodesmata*) | **Interface contract** | Cross-service data shape and API agreement. Analogous to treaty — governs interactions between independent jurisdictions. |
+| **Gate** (`gate`) | **Mechanical compliance gate** | Deterministic AST or invariant DSL check enforced at pre-commit and CI (`aegis check`). |
 
-### Evolutionary Operators
+### Evolutionary & Lifecycle Operators (`aegis_core/lifecycle/`)
 
-| Codebase (Biology) | Formal Concept | What It Addresses |
+| Codebase Operator | Formal Concept | What It Addresses |
 |:---|:---|:---|
-| **Fitness scoring** | **Performance evaluation** | Measures rule effectiveness via precision × impact. The social choice function's proxy metric. |
-| **Confidence decay / telomeres** | **Sunset clause** | Rules expire unless actively reinforced. Prevents bureaucratic ossification — the accumulation of rules nobody enforces. |
-| **Selection / tournament** | **Competitive evaluation** | Diversity-preserving selection among candidate rules. Prevents monoculture in the policy landscape. *(Phase 3 — shipped v0.75)* |
-| **Crossover** | **Policy synthesis** | Merges high-performing rules from different contexts. Analogous to synthesizing regulations from multiple jurisdictions. *(Phase 3 — shipped v0.75)* |
-| **Metamorphosis** | **Regulatory promotion** | A rule earns a higher enforcement tier through demonstrated effectiveness. Advisory → mechanical → gate. |
-| **Horizontal transfer** | **Policy import** | Importing rules from external repositories with probation period. Analogous to adopting foreign regulatory frameworks with adaptation. |
-| **Pruning / extinction** | **Regulatory repeal** | Removing rules that fail to demonstrate effectiveness. The enforcement of sunset clauses. |
-| **Cytogenesis** | **Rule generation** | Scanning a codebase to generate jurisdiction-specific governance. Analogous to a regulatory agency surveying an industry and drafting targeted regulations. |
-| **Gate enforcement** | **Mechanical compliance** | Auto-generated pre-commit hooks and runtime assertions for rules reaching enforcement tiers. *(Phase 4 — planned: runtime assertion classes)* |
+| **Fitness scoring (`aegis_core/scoring.py`)** | **Performance evaluation** | Measures rule effectiveness via Wilson score lower-bound confidence intervals and signal-to-noise ratio (SNR). |
+| **Confidence decay (`aegis_core/lifecycle/decay.py`)** | **Sunset clause** | Rules expire (`RULE_EXPIRY_DAYS = 90`) or decay unless actively reinforced by empirical triggers. Prevents bureaucratic ossification. |
+| **Selection / tournament (`aegis_core/lifecycle/selection.py`)** | **Competitive evaluation** | Diversity-preserving selection among candidate rules. Prevents monoculture in the policy landscape. |
+| **Crossover (`aegis_core/lifecycle/selection.py`)** | **Policy synthesis** | Merges high-performing rules from complementary contexts. Analogous to synthesizing regulations across jurisdictions. |
+| **Tiered promotion (`aegis rule promote`)** | **Regulatory promotion** | A rule earns a higher enforcement tier (`advisory` → `invariant` → `gate`) through demonstrated empirical effectiveness (`aegis_core/lifecycle/promotion.py`). |
+| **Rule transfer (`aegis_core/lifecycle/creation.py`)** | **Policy import** | Importing rules from external repositories with a probation period (`.aegis/metrics/transfers.jsonl`). Analogous to adopting foreign regulatory frameworks with local adaptation. |
+| **Pruning / archive (`aegis rule archive` / `clean`)** | **Regulatory repeal** | Archiving or removing rules that fail to demonstrate effectiveness. The enforcement of sunset clauses. |
+| **Genesis Policy generation (`skills/genesis/`)** | **Rule generation** | Scanning a codebase across 4 stages (`Perimeter`, `Chronology`, `Blueprint`, `Policy`) to generate repository-specific governance rules in `.aegis/rules/`. |
+| **Gate enforcement (`aegis_core/enforcement.py`)** | **Mechanical compliance** | Pre-commit hooks (`install/hooks/pre-commit`) and `aegis check` invariant DSL checks for rules reaching gate enforcement tiers. |
 
-### Verification Architecture
+### Verification Architecture (`aegis_core/verification/`)
 
-| Codebase (Biology) | Formal Concept | Mechanism Design Property |
+| Codebase Component | Formal Concept | Mechanism Design Property |
 |:---|:---|:---|
-| **Layer 1: Deterministic tools** | **Objective audit** | Produces observable evidence. Analogous to financial audit with fixed accounting rules — the auditor cannot exercise judgment on what counts. |
-| **Layer 2: Adversarial agents** | **Adversarial proceeding** | Information-partitioned reviewers who cannot collude. Directly implements **information asymmetry exploitation** — each reviewer sees different inputs, so agreement is meaningful. |
-| **Arbiter (verification)** | **Mechanical adjudication** | Deterministic verdict from reviewer outputs. Removes judicial discretion — the "judge" applies fixed rules to structured inputs. |
-| **Transcript verifier** | **Post-hoc audit** | Independently verifies self-reported claims against execution logs. Implements a **revelation mechanism** — agents cannot benefit from misreporting because reports are checked against the tape. |
-| **Escaped defect tracking** | **External ground truth** | CI/CD exit codes provide signals outside the governance system's control. Breaks the **self-evaluation loop** — the system cannot grade itself on criteria it defines. |
+| **Layer 1: `DeterministicVerifier`** | **Objective audit** | Produces observable `ToolEvidence` (AST call graph, branch coverage, mutation testing, persistence, import guards). The auditor cannot exercise subjective discretion on what counts. |
+| **Layer 2: `AdversarialVerifier`** | **Adversarial proceeding** | Information-partitioned Spec Agent (prosecutor) vs. Code Agent (defender) who cannot collude. Directly implements **information asymmetry exploitation** — agreement between partitioned agents is meaningful evidence. |
+| **`Arbiter` (`aegis_core/verification/arbiter.py`)** | **Mechanical adjudication** | Deterministic verdict (`SHIP`, `REVISE`, `BLOCK`) from Layer 1 and Layer 2 outputs via `VerificationPipeline`. Removes judicial discretion — the adjudicator applies fixed set-algebra rules to structured inputs. |
+| **`ReceiptManager` (`aegis_core/receipts.py`)** | **State-bound commitment** | Burn-before-compare single-use cryptographic receipts ensure agents cannot mutate governed files without first scanning active rules for the exact target file digest. |
+| **`transcript_verifier.py`** | **Post-hoc audit** | Independently verifies self-reported claims against execution JSONL logs. Implements a **revelation mechanism** — agents cannot benefit from misreporting because claims are checked against the tape. |
+| **Escaped defect tracking (`aegis_core/defects.py`)** | **External ground truth** | CI/CD exit codes and bug registry records provide signals outside the governance system's control. Breaks the **self-evaluation loop**. |
 
-### Review Intensity
+### Review Intensity (`aegis_core/taxonomy.py::ReviewMode`)
 
-| Codebase (Biology) | Formal Concept | When Applied |
+| Canonical Mode *(Legacy Alias)* | Formal Concept | When Applied |
 |:---|:---|:---|
-| **Breeze** | Expedited review | Low-risk, known-pattern changes |
-| **Gale** | Standard review | Routine changes |
-| **Trident** | Enhanced review | Features, refactors |
-| **Maelstrom** | Intensive review | Architecture, security |
-| **Tempest** | Maximum assurance | Catastrophic-risk changes, human gate required |
-| **Supercell** | Apex assurance | Adversarial Prosecutor/Defender pairs per prong, zero deferrals, mandatory re-validation |
+| **Patrol** *(Breeze)* | Expedited review | Low-risk, known-pattern changes |
+| **Sweep** *(Gale)* | Standard review | Routine changes |
+| **Vanguard** *(Trident)* | Enhanced review | Features, multi-file refactors |
+| **Bulwark** *(Maelstrom)* | Intensive review | Architecture, security-sensitive paths |
+| **Fortress** *(Tempest)* | Maximum assurance | High-risk infrastructure/auth changes, human gate required |
+| **Citadel** *(Supercell)* | Apex assurance | Adversarial Prosecutor/Defender pairs per prong, zero deferrals, mandatory re-validation |
 
-### Review Prongs
+### Review Prongs (`aegis_core/taxonomy.py::ReviewProng`)
 
-| Codebase (Biology) | Formal Concept |
+| Canonical Prong *(Legacy Alias)* | Formal Concept |
 |:---|:---|
-| **Spores** | Preliminary survey — width-first problem identification |
-| **Mycelium** | Impact analysis — blast radius mapping |
-| **Roots** | Root-cause investigation — depth-first analysis |
-| **Thorns** | Adversarial falsification — red team |
-| **Bedrock** | Final gate — binary ship/block decision |
-| **Mulch** | Learning extraction — post-decision knowledge capture |
+| **Sentry** *(Spores)* | Preliminary survey — width-first problem identification |
+| **Trace** *(Mycelium)* | Impact analysis — 2-hop blast radius mapping |
+| **Probe** *(Roots)* | Root-cause investigation — depth-first analysis and concrete fix specs |
+| **Gauntlet** *(Thorns)* | Adversarial falsification — red-team refutation |
+| **Bastion** *(Bedrock)* | Final gate — binary `SHIP` / `BLOCK` decision |
+| **Debrief** *(Mulch)* | Learning extraction — post-decision knowledge capture to `governance/debrief_queue.jsonl` |
 
 ---
 
-## Mechanism Design Analysis: What Soma Implements
+## Mechanism Design Analysis: What Aegis Guardrails Implements
 
-### Properties Soma HAS:
+### Properties Aegis Guardrails HAS:
 
-1. **Information asymmetry exploitation** (Layer 2 verification)
-   - Two reviewers see different inputs → agreement is evidence, not collusion
-   - This is an independent multi-agent elicitation protocol with deterministic arbitration
+1. **Information asymmetry exploitation** (Layer 2 `AdversarialVerifier`)
+   - Two reviewers see different inputs (Spec Agent sees plan/requirements; Code Agent sees diff/tests) → agreement is evidence, not collusion.
+   - Orchestrated by `VerificationPipeline` with deterministic `Arbiter` adjudication.
 
-2. **Post-hoc revelation mechanism** (Transcript verifier)
-   - Agents cannot benefit from false self-reports because claims are verified against logs
-   - Partial strategy-proofness: lying about execution is detectable
+2. **State-bound pre-execution commitment** (`ReceiptManager`)
+   - MCP write/execute tools require a single-use HMAC-SHA256 receipt issued by `aegis_scan` and bound to the workspace, target file digest, and active rule inventory fingerprint.
+   - Burn-before-compare verification prevents replay attacks even when digest comparisons fail.
 
-3. **Sunset provisions** (Confidence decay)
-   - Rules that aren't reinforced by evidence expire automatically
-   - Prevents institutional accumulation of dead regulations
+3. **Post-hoc revelation mechanism** (`transcript_verifier.py`)
+   - Agents cannot benefit from false self-reports because claims are verified against execution transcripts.
+   - Partial strategy-proofness: lying about test execution or file edits is mechanically detectable.
 
-4. **Graduated enforcement** (Tiered promotion: advisory → mechanical → gate)
-   - Rules earn enforcement power through demonstrated effectiveness
-   - Low-confidence rules suggest; high-confidence rules block
+4. **Sunset provisions** (Confidence decay & `RULE_EXPIRY_DAYS`)
+   - Rules in `.aegis/rules/` that aren't reinforced by empirical evidence decay and expire automatically.
+   - Prevents institutional accumulation of dead regulations.
 
-5. **External ground truth** (Escaped defect tracking)
-   - CI/CD exit codes provide signals the governance system cannot manufacture
-   - Partially breaks the self-grading loop
+5. **Graduated enforcement** (Tiered promotion: `trap` → `invariant` → `gate`)
+   - Rules earn enforcement power through demonstrated Wilson-bounded precision.
+   - Low-confidence rules advise; high-confidence rules mechanically block commits (`aegis check`).
 
-6. **Budget balance** (Token economics / ROI)
-   - Governance overhead (~3,800 tokens/turn) is measurably less than prevented waste
-   - The mechanism sustains itself without external subsidy
+6. **External ground truth** (Escaped defect tracking & `aegis report`)
+   - CI/CD exit codes and git revert detection provide signals the governance system cannot manufacture.
+   - Breaks the self-grading loop via closed-loop attribution (`aegis_core/attribution.py`).
+
+7. **Budget balance** (Token economics / JIT Context Budget)
+   - JIT context clamping (`JIT_DEFAULT_MAX_TOKENS = 2000`) and conditional rule loading keep governance overhead measurably smaller than prevented rework waste.
 
 ---
 
-## Mechanism Design Analysis: What Soma is MISSING
+## Mechanism Design Analysis: What Aegis Guardrails is MISSING
 
 > [!IMPORTANT]
 > These are structural gaps visible only through the mechanism design lens.
@@ -115,53 +119,35 @@
 > LLM happens to comply" and "governance that works because compliance is
 > provably optimal."
 
-### 1. No Incentive Compatibility
+### 1. Incomplete Incentive Compatibility
 
-**The gap**: Soma tells agents what to do but doesn't make compliance instrumentally rational. An LLM follows rules because they're in the context window, not because following them produces better outcomes *for the agent*. The moment prompt pressure exceeds governance pressure, compliance evaporates.
+**The gap**: While `ReceiptManager` makes calling `aegis_scan` mandatory for MCP mutations, in-context rule compliance still relies on attention in the context window rather than intrinsic utility maximization for the model. When prompt pressure exceeds governance pressure outside MCP-confined tools, compliance can degrade.
 
-**What this means**: Governance is imposed, not incentive-aligned. The system is fragile to prompt injection, high-pressure user requests, and context window overflow (where governance tokens get evicted first).
+**What mechanism design would prescribe**: Make compliance the dominant strategy by coupling every rule to fast deterministic feedback (`aegis check`) and pre-seeded target constraints so following the rule is always the shortest path to task completion.
 
-**What mechanism design would prescribe**: Design a mechanism where the agent demonstrably achieves its task faster/better when it follows the rules. Provide the agent with evidence of this: "agents that follow read-before-write complete tasks in 36 steps; agents that don't take 547 steps." Make compliance the dominant strategy, not just the mandated one.
+### 2. Proxy Social Welfare Function
 
-### 2. No Formal Social Welfare Function
+**The gap**: Aegis Guardrails optimizes for low waste rate, high First-Pass Success Rate (FPSR), and high rule Wilson lower bounds, which are proxy metrics for the true objective: task completion, code correctness, and user satisfaction.
 
-**The gap**: Soma optimizes for "low waste rate" and "high FPSR," but these are proxy metrics. The true objective — code quality, user satisfaction, task completion — is never formally defined. Without a formal objective, you can't prove the mechanism is optimal.
+**What mechanism design would prescribe**: Define the social welfare function explicitly: `W = task_completion × code_quality × (1 / cost)`, ensuring efficiency metrics are always evaluated conditionally on verified task completion (`VerificationPipeline` `SHIP` verdict).
 
-**What this means**: Soma could achieve 0% waste and 100% FPSR by having the agent do nothing (no steps = no waste). The metrics don't encode "the task must be completed." They assume the agent is trying and just measure efficiency.
+### 3. Strategic Minimalism Risk
 
-**What mechanism design would prescribe**: Define the social welfare function explicitly: `W = task_completion × code_quality × (1 / cost)`. Then design governance to maximize W, not just minimize waste.
+**The gap**: The transcript verifier catches *lies about execution*, and Layer 2 catches *spec-to-code divergences*, but an agent could still attempt to produce minimal, overly conservative changes to avoid triggering rules.
 
-### 3. No Strategy-Proofness Guarantee
+**What mechanism design would prescribe**: Couple rule fitness and verification to complete specification satisfaction (enforced by the Spec Agent in `AdversarialVerifier`), ensuring under-delivery is penalized equally with rule violation.
 
-**The gap**: Can an agent benefit from strategic behavior? The transcript verifier catches *lies about execution*, but what about *strategic execution*? An agent could learn to produce minimal, low-risk changes that always pass review — technically compliant but not maximally useful.
+### 4. Limited Agent-Tier Discrimination
 
-**What this means**: An agent could satisfy every Soma rule while still underperforming. Compliance ≠ quality. This is the regulatory capture risk — the agent learns to satisfy the measurement rather than the intent.
+**The gap**: While `cost-optimization.md` and `subagent-delegation.md` partition tasks by model capability tier (`flash` vs. `inherit` vs. orchestrator), `.aegis/rules/` JIT expression does not yet dynamically scale rule verbosity or token budgets based on the calling model's prior defect rate.
 
-**What mechanism design would prescribe**: Design rules where the agent cannot game the metric without also achieving the actual goal. This requires the metrics to be tightly coupled to real outcomes — which is what escaped defect tracking partially provides.
+**What mechanism design would prescribe**: Bayesian type-conditional governance — adjust JIT rule budget, enforcement strictness, and initial `ReviewMode` intensity based on empirical per-model-tier reliability profiles.
 
-### 4. No Repeated-Game Dynamics
+### 5. Bilateral Contract Formalization
 
-**The gap**: Each session is independent. The agent has no memory of past sessions, no reputation to protect, no consequences for past defection. In mechanism design, repeated interactions enable cooperation through reputation and punishment.
+**The gap**: Governance primarily constrains the agent, whereas vague or contradictory user prompts also generate rework loops.
 
-**What this means**: Every session starts from zero trust. The governance system can't learn "this agent type tends to hallucinate APIs" and adapt preemptively. Cross-session learning is entirely rule-based (cells), not agent-based.
-
-**What mechanism design would prescribe**: Reputation scores per agent-type (Flash, Pro, etc.) that influence initial review intensity. An agent-type that historically produces more escaped defects gets stricter governance by default.
-
-### 5. No Agent-Type Discrimination
-
-**The gap**: Soma treats all agents identically regardless of capability tier. A Flash model gets the same rules as a Pro model, even though their failure modes differ systematically. Flash hallucinates more; Pro over-engineers more.
-
-**What this means**: Governance is one-size-fits-all. In mechanism design with heterogeneous agents, the mechanism should adapt to agent type (Bayesian mechanism design).
-
-**What mechanism design would prescribe**: Type-conditional governance — detect or declare the agent's capability tier and adjust rule strictness, review intensity, and delegation limits accordingly.
-
-### 6. No Contract / Commitment Device
-
-**The gap**: There's no formal specification of mutual obligations. The user doesn't commit to "I will provide clear task specifications" and the agent doesn't commit to "I will follow read-before-write." The governance is unilateral — imposed on the agent, with no obligations on the user.
-
-**What this means**: Poor user specifications (vague prompts, contradictory requirements) cause waste that governance can't prevent. The system optimizes agent behavior but not user behavior.
-
-**What mechanism design would prescribe**: Bilateral contracts — governance rules for the agent AND input quality requirements for the user. E.g., "if the task specification is ambiguous, the agent MUST clarify before acting" (Soma has this in providence §1, but it's not formalized as a contract).
+**What mechanism design would prescribe**: Bilateral commitment devices — formalizing `providence.md §1` ("Fail Loudly" / assumption surfacing) as a pre-execution specification completeness check before multi-file implementation begins.
 
 ---
 
@@ -169,10 +155,8 @@
 
 When working in this codebase, understand that:
 
-1. **"Fitness" is a proxy metric, not a welfare function.** Don't optimize fitness without checking that the underlying goal (code quality, task completion) is still being served.
+1. **"Fitness" is a proxy metric, not a welfare function.** Don't optimize rule fitness in `aegis_core/scoring.py` without checking that code quality and task completion are served.
+2. **Mechanical gates beat prose.** Whenever a `trap` or `invariant` rule can be expressed deterministically in `aegis_core/enforcement.py` or `aegis_core/verification/`, promote it to a mechanical check rather than relying solely on prompt attention.
+3. **`VerificationPipeline` + `Arbiter` + `ReceiptManager` form the core mechanism design pillar.** Information partitioning, deterministic arbitration, and state-bound cryptographic receipts are Aegis Guardrails' strongest formal guarantees—protect their structural independence.
+4. **The remaining frontier** (type-conditional JIT budgets, formal welfare functions, repeated-game model reputation) represents research opportunities bridging empirical agent governance and provable mechanism design.
 
-2. **Rule compliance is imposed, not incentive-compatible.** Rules work because the LLM context window forces attention on them. If you're designing a new rule, ask: "would a rational agent follow this even without being told to?"
-
-3. **The verification architecture is the strongest mechanism design component.** Information partitioning + deterministic arbitration + transcript verification is a genuine mechanism design contribution. Protect its independence.
-
-4. **The gaps (incentive compatibility, strategy-proofness, repeated games) are research opportunities**, not bugs. They represent the frontier between "governance that works empirically" and "governance that works provably."

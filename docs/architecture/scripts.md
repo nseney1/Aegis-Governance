@@ -1,6 +1,6 @@
 # Scripts Reference
 
-This document catalogs 78 executable scripts, command modules, SDK modules, and MCP/core modules in the Aegis governance framework.
+This document catalogs 78 executable scripts, command modules, SDK modules, and MCP/core modules in the Aegis Guardrails (v3.2.0) governance framework.
 
 ## Counting Method
 
@@ -21,7 +21,7 @@ Counts are generated from the source tree with mutually exclusive categories: pa
 
 ## Lifecycle Scripts (Hooks) — bash
 
-This bash script is invoked automatically by git triggers. Following the v0.97.0 sunset phase, all runtime lifecycle hooks are driven directly by pure Python in `aegis_cli/hooks/` and `aegis_core/sync.py`.
+This bash script is invoked automatically by git triggers. In Aegis Guardrails v3.2.0, all runtime lifecycle hooks are driven directly by pure Python in `aegis_cli/hooks/` and `aegis_core/sync.py`.
 
 | Script | Location | Purpose |
 |:-------|:---------|:--------|

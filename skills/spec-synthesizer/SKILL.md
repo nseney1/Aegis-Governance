@@ -1,6 +1,12 @@
 ---
+id: spec-synthesizer
 name: Spec Synthesizer
 description: Synthesizes multiple review reports and analyses into a single prioritized, actionable implementation plan.
+kind: skill
+tier: method
+consumes: [ChargeSheet, InspectionReceipt, ArbitrationEvidence]
+produces: [DiffProposal]
+handoff_targets: [refactoring-pilot, readme-writer]
 trigger: user_request
 ---
 

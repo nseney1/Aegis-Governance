@@ -5,6 +5,36 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.2.0] — 2026-10-14 — "Fortress Perimeter Hardening, Horizontal Skill Graph Wiring, O(1) Telemetry Caching & Full Documentation Overhaul"
+
+### Security & Perimeter Hardening (Fortress Adaptive Review)
+- **Workspace Confinement in Core I/O (`aegis_core/operations.py`)**:
+  - Hardened `Operations.resolve_path()` to enforce `confine_path_internal()` across all `Operations` file/JSONL reads and writes while allowing workspace root tokens (`""` / `"."`).
+- **Ephemeral Receipt Authentication Before Burn (`aegis_core/receipts.py`)**:
+  - Fixed `ReceiptManager.verify()` in ephemeral mode so `self._store.get()` is used during Step 1 (TTL + HMAC verification) and `self._store.pop()` only executes in Step 2 (`BURN BEFORE COMPARE`), preventing unauthenticated probes from evicting valid in-memory nonces.
+- **MCP Privileged Tool Schemas, Projection & AST Workspace Threading (`aegis_mcp/`)**:
+  - Threaded `workspace` from `jit_engine.express()` through `match_cells_to_files()` and `match_cells_for_diff()` so syntactic AST triggers resolve relative to the workspace root rather than process `CWD`.
+  - Added optional `receipt` property to `TOOL_DEFINITIONS` schemas for all 6 privileged write/execute tools (`aegis_propose_change`, `aegis_checkpoint`, `aegis_report_outcome`, `aegis_capture_insight`, `aegis_generate_manifest`, `aegis_handoff`).
+  - Exposed `rule_prompt` in `_handle_create_cell()` and `SUMMARY_FIELDS` (`aegis_mcp/projection.py`) so `aegis_create_rule` returns the generated prompt without colliding with the `"prompt"` denylist filter.
+
+### CLI Dispatch, Platform Adapters & Closed-Loop Rules
+- **CLI Dispatch & `migrate` Unblocking (`aegis_cli/cli.py`, `aegis_cli/registry.py`, `aegis_cli/rule.py`, `aegis_cli/check.py`, `aegis_cli/init.py`)**:
+  - Unblocked `aegis migrate` on legacy `.soma` workspaces by walking upward to locate `.soma` or `.aegis` before `Workspace.resolve()` runs `check_legacy_soma_sentinel()`.
+  - Unified `install` and `uninstall` into `COMMANDS` and registered `DetectCommand` (`aegis detect`), `SkillCommand` (`aegis skill`), and `HandoffCommand` (`aegis handoff`) in `CommandRegistry`.
+  - Added `aegis rule create` subcommand (`aegis_cli/rule.py`), `--no-hooks` flag on `aegis init`, and fixed `aegis check --in-band` so it proceeds to Layer 2 ChargeSheet generation.
+  - Updated `GeminiAdapter` hook commands (`aegis hook ...`), `PlatformAdapter.render_mcp_entry()` (`command="aegis-mcp"`), and `install/hooks/pre-commit` (Format 4 `#!/bin/sh` runner).
+
+### `AegisYAML`, JSONL Efficiency & Horizontal Skills as Slots
+- **Stat-Fingerprinted `_SIGNALS_CACHE` & `AegisYAML` Validation (`aegis_core/telemetry.py`, `aegis_core/yaml.py`, `aegis_core/lifecycle/creation.py`, `aegis_core/insights.py`)**:
+  - Added an in-memory `(st_ino, st_mtime_ns, st_size)` cache (`_SIGNALS_CACHE`) to `_read_existing_events()` and `append_signals()`, eliminating $O(N)$ historical JSONL re-parsing on repeated signal appends.
+  - Added round-trip `AegisYAML.parse_text()` validation to `create_cell()` and added `scaffold_invariant` / `invariant_id` support to `capture_insight()`.
+- **Horizontal Skill Graph & Slot Interpolation (`aegis_core/skills/`, `aegis_cli/skills.py`, `skills/*/SKILL.md`)**:
+  - Enriched all 15 shipped `skills/*/SKILL.md` manifests with `id`, `kind: skill`, `tier`, `consumes`, `produces`, and `handoff_targets`.
+  - Updated `SkillGraph.discover()`, `SkillGraph.default_search_paths()`, and `SkillNode.from_doc()` to discover all 15 skills by directory slug out of the box and interpolate `${SLOT.*}` bindings from `.aegis/slots.yaml` in `SkillNode.load_instructions()`.
+
+### Full-Repository Documentation Overhaul
+- Overhauled 22 documentation files across root (`CONTRIBUTING.md`, `QUICKSTART.md`, `PRIVACY.md`, `SECURITY.md`), guides (`docs/guides/rule_lifecycle.md`, `mcp_gateway.md`, `polyglot_ast.md`, `skill_graph.md`, `verification_pipeline.md`, `docs/index.md`), architecture (`mechanism_design.md`, `phylogeny.md`, `scripts.md`, `ADR-012..016`), and project governance (`COMPATIBILITY.md`, `CONTRIBUTING.md`, `RELEASE_WORKFLOW.md`, `ROADMAP.md`, `METRICS.md`), and removed obsolete `docs/organelles.md`.
+
 ## [3.1.0] — 2026-10-14 — "Architecture Hardening, Cryptographic Receipt Burn-Before-Compare & Canonical Aegis Taxonomy"
 
 ### Packaging & Standalone Wheel Parity

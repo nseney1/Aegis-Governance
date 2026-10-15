@@ -1,6 +1,12 @@
 ---
+id: refactoring-pilot
 name: refactoring-pilot
 description: Guides safe multi-file refactoring using the Mikado Method to eliminate cascading breakage.
+kind: skill
+tier: implementer
+consumes: [DiffProposal, ChargeSheet]
+produces: [DiffProposal, TestVerdict]
+handoff_targets: [staff-review, adaptive-reviewer]
 ---
 
 # Senior Refactoring Specialist

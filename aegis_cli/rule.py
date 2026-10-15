@@ -52,6 +52,8 @@ def run_rule(args: argparse.Namespace) -> int:
 
     if action == "list":
         return _run_list(args)
+    elif action == "create":
+        return _run_create(args)
     elif action == "promote":
         return _run_promote(args)
     elif action == "demote":
@@ -526,13 +528,74 @@ def _run_clean(args: argparse.Namespace) -> int:
 run_clean_rules = _run_clean
 
 
+def _run_create(args: argparse.Namespace) -> int:
+    """Create a new governance rule in the workspace."""
+    from aegis_core.lifecycle.creation import create_cell
+
+    root = _resolve_workspace_root(args)
+    cell_type = getattr(args, "type", None) or getattr(args, "cell_type", None) or "trap"
+    hypothesis = getattr(args, "hypothesis", "") or getattr(args, "description", "")
+    if not hypothesis:
+        print("Error: --hypothesis is required to create a rule.", file=sys.stderr)
+        return 1
+
+    raw_tags = getattr(args, "tags", None)
+    if isinstance(raw_tags, list):
+        tags = raw_tags
+    elif isinstance(raw_tags, str) and raw_tags.strip():
+        tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+    else:
+        tags = None
+
+    raw_paths = getattr(args, "target_paths", None)
+    if isinstance(raw_paths, list):
+        target_paths = raw_paths
+    elif isinstance(raw_paths, str) and raw_paths.strip():
+        target_paths = [p.strip() for p in raw_paths.split(",") if p.strip()]
+    else:
+        target_paths = None
+
+    rule_id = getattr(args, "id", None) or getattr(args, "cell_id", None) or None
+    try:
+        created = create_cell(
+            cell_type=cell_type,
+            hypothesis=hypothesis,
+            prediction=getattr(args, "prediction", "") or "",
+            falsification=getattr(args, "falsification", "") or "",
+            weight=float(getattr(args, "weight", 1.0) or 1.0),
+            tags=tags,
+            expiry_sessions=getattr(args, "expiry_sessions", 15),
+            expiry_days=getattr(args, "expiry_days", 60),
+            minimum_mode=getattr(args, "minimum_mode", "") or "",
+            id_override=rule_id,
+            effector=bool(getattr(args, "effector", False)),
+            memory=bool(getattr(args, "memory", False)),
+            target_paths=target_paths,
+            domain=getattr(args, "domain", "correctness") or "correctness",
+            workspace=root,
+            enforcement=getattr(args, "enforcement", None),
+        )
+    except Exception as exc:
+        if getattr(args, "json", False):
+            print(json.dumps({"error": str(exc), "status": "error"}))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps({"status": "created", "path": str(created), "id": created.stem}, indent=2))
+    else:
+        print(f"Created rule: {created}")
+    return 0
+
+
 class RuleCommand(AegisCommand):
     """Unified rule lifecycle management."""
 
     name = "rule"
     aliases = ()
     category = CommandCategory.LIFECYCLE
-    help = "Manage rule lifecycle (list, promote, demote, archive, clean)"
+    help = "Manage rule lifecycle (list, create, promote, demote, archive, clean)"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         common = argparse.ArgumentParser(add_help=False)
@@ -550,6 +613,25 @@ class RuleCommand(AegisCommand):
         p_list = sub.add_parser("list", parents=[common], help="List active rules and fitness metrics")
         p_list.add_argument("--type", choices=list(RULE_TYPE_DIRS.keys()), help="Filter by rule type")
         p_list.add_argument("--min-fitness", type=float, help="Filter by minimum fitness score")
+
+        # create
+        p_create = sub.add_parser("create", parents=[common], help="Create a new governance rule")
+        p_create.add_argument("-t", "--type", dest="type", default="trap", help="Rule type (trap, invariant, boundary, persona, contract)")
+        p_create.add_argument("--hypothesis", default="", help="Testable rule hypothesis")
+        p_create.add_argument("-p", "--prediction", default="", help="Expected outcome when hypothesis holds")
+        p_create.add_argument("-f", "--falsification", default="", help="Criteria that falsify the rule")
+        p_create.add_argument("-d", "--domain", default="correctness", help="Governance domain")
+        p_create.add_argument("-e", "--enforcement", default=None, help="Enforcement tier (gate, advisory)")
+        p_create.add_argument("-n", "--name", "--id", dest="id", default=None, help="Explicit rule ID stem")
+        p_create.add_argument("--target-paths", dest="target_paths", default="", help="Comma-separated target path globs")
+        p_create.add_argument("--tags", default="", help="Comma-separated tags")
+        p_create.add_argument("-w", "--weight", type=float, default=1.0, help="Impact weight")
+        p_create.add_argument("--expiry-sessions", dest="expiry_sessions", type=int, default=15, help="Session expiry")
+        p_create.add_argument("--expiry-days", dest="expiry_days", type=int, default=60, help="Day expiry")
+        p_create.add_argument("--minimum-mode", dest="minimum_mode", default="", help="Minimum review mode")
+        p_create.add_argument("--effector", action="store_true", default=False, help="Create as effector cell")
+        p_create.add_argument("--memory", action="store_true", default=False, help="Create as memory cell")
+        p_create.add_argument("--from-description", dest="description", default="", help="Create from description")
 
         # promote
         p_prom = sub.add_parser("promote", parents=[common], help="Promote a rule up lifecycle tiers")

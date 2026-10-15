@@ -1,6 +1,12 @@
 ---
+id: readme-writer
 name: readme-writer
 description: Generates polished developer READMEs featuring quick-start guides, architecture overviews, and visual hierarchy.
+kind: skill
+tier: method
+consumes: [InspectionReceipt, DiffProposal]
+produces: [DiffProposal]
+handoff_targets: [staff-review]
 ---
 
 # Technical Writer — README Specialist

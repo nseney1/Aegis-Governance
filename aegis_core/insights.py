@@ -56,8 +56,10 @@ def capture_insight(
     category: Optional[str] = None,
     scaffold_wall: bool = False,
     wall_id: Optional[str] = None,
+    scaffold_invariant: bool = False,
+    invariant_id: Optional[str] = None,
 ) -> dict:
-    """Capture a human insight and persist it to JSONL, optionally scaffolding a Wall cell."""
+    """Capture a human insight and persist it to JSONL, optionally scaffolding a Wall or Invariant cell."""
     if not isinstance(context_files, list):
         raise ValueError("context_files must be a list, not " + type(context_files).__name__)
     if not context_files:
@@ -115,6 +117,32 @@ def capture_insight(
             wf.write(content)
         record["wall_file"] = wall_path
         record["wall_id"] = stem
+
+    if scaffold_invariant or invariant_id:
+        inv_dir = str(layout.rules_dir / "invariants")
+        os.makedirs(inv_dir, exist_ok=True)
+        if invariant_id:
+            clean_stem = invariant_id.strip().lower()
+            stem = clean_stem if clean_stem.startswith("invariant-") else f"invariant-{clean_stem}"
+        else:
+            h = hashlib.sha256(insight.strip().encode("utf-8")).hexdigest()[:8]
+            stem = f"invariant-insight-{h}"
+
+        inv_path = os.path.join(inv_dir, f"{stem}.md")
+        meta = {
+            "id": stem,
+            "type": "invariant",
+            "enforcement": "gate",
+            "domain": category or "security",
+            "description": insight.strip(),
+            "context_files": list(context_files),
+        }
+        body = f"# {stem}\n\n## Summary\n{insight.strip()}\n\n## Invariants\n- All changes touching context files must satisfy deterministic verification.\n"
+        content = dump_frontmatter(meta, body)
+        with open(inv_path, "w", encoding="utf-8") as wf:
+            wf.write(content)
+        record["invariant_file"] = inv_path
+        record["invariant_id"] = stem
 
     jsonl_path = str(layout.human_insights_file)
     os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)

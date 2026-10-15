@@ -275,7 +275,7 @@ class ReceiptManager:
 
         with self._lock:
             self.prune_expired(now)
-            stored = self._store.pop(receipt_id, None) if consume else self._store.get(receipt_id)
+            stored = self._store.get(receipt_id)
 
             if storage is not None:
                 with workspace_lock(storage.layout.root, LockResource.RECEIPTS):
@@ -300,6 +300,7 @@ class ReceiptManager:
 
                     # Step 2: BURN BEFORE COMPARE — persist consumed nonce immediately
                     if consume:
+                        self._store.pop(receipt_id, None)
                         burn_record = {
                             "receipt_id": receipt_id,
                             "nonce": receipt_id,
@@ -318,6 +319,8 @@ class ReceiptManager:
                 expected_hmac = self._compute_hmac(key, stored)
                 if not _safe_compare(stored.get("hmac", ""), expected_hmac):
                     return False
+                if consume:
+                    self._store.pop(receipt_id, None)
 
             # Step 3: Compare bound parameters only AFTER the receipt has been burned
             if (

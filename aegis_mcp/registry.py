@@ -332,6 +332,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "file_path": {"type": "string", "description": "Path to the file being modified."},
                 "proposed_content": {"type": "string", "description": "The proposed content of the file."},
+                "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
@@ -438,6 +439,7 @@ TOOL_DEFINITIONS = [
         "inputSchema": {
             "type": "object",
             "properties": {
+                "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
@@ -481,6 +483,7 @@ TOOL_DEFINITIONS = [
                 "tests_passed": {"type": "boolean"},
                 "rework_count": {"type": "integer", "default": 0},
                 "notes": {"type": "string"},
+                "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
@@ -506,6 +509,7 @@ TOOL_DEFINITIONS = [
                 "category": {"type": "string"},
                 "scaffold_wall": {"type": "boolean", "default": False},
                 "wall_id": {"type": "string"},
+                "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
@@ -526,6 +530,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "generate_key": {"type": "boolean", "default": False},
+                "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
@@ -604,6 +609,7 @@ TOOL_DEFINITIONS = [
                 "artifact_type": {"type": "string", "description": "Artifact type (e.g. ChargeSheet, DiffProposal, InspectionReceipt, TestVerdict)"},
                 "payload": {"type": "object", "description": "Structured artifact payload conforming to schema"},
                 "cycle_id": {"type": "string", "description": "Optional arbitration cycle ID"},
+                "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt."},
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },

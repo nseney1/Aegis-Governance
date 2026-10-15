@@ -1,6 +1,12 @@
 ---
+id: session-preflight
 name: Session Pre-flight Probe
 description: Probes environment health at session start, catching venv drift, git status, and broken tests.
+kind: skill
+tier: sentinel
+consumes: []
+produces: [InspectionReceipt, TestVerdict]
+handoff_targets: [incident-debug, session-monitor]
 ---
 # Session Pre-flight Probe
 

@@ -152,9 +152,19 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     from aegis_cli.migrate import run_migrate
     return run_migrate(args)
 
+def cmd_install(args: argparse.Namespace) -> int:
+    from aegis_cli.install import run_install
+    return run_install(args)
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    from aegis_cli.install import run_uninstall
+    return run_uninstall(args)
+
 
 COMMANDS = {
     "init": cmd_init,
+    "install": cmd_install,
+    "uninstall": cmd_uninstall,
     "migrate": cmd_migrate,
     "status": cmd_status,
     "rules": cmd_status,
@@ -183,16 +193,6 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
                 prog = "soma"
         else:
             prog = "soma"
-    args_list = sys.argv[1:] if argv is None else list(argv)
-    if args_list and args_list[0] in ("install", "uninstall"):
-        from aegis_cli.install import InstallCommand, UninstallCommand
-        cmd_cls = InstallCommand if args_list[0] == "install" else UninstallCommand
-        cmd = cmd_cls()
-        p = argparse.ArgumentParser(prog=f"{prog} {args_list[0]}", description=cmd.help)
-        cmd.configure_parser(p)
-        cmd_args = p.parse_args(args_list[1:])
-        cmd_args._project_root = getattr(cmd_args, "workspace", None) or Path.cwd()
-        return cmd.execute(cmd_args)
 
     parser = _build_parser(prog=prog)
     args = parser.parse_args(argv)
@@ -228,9 +228,31 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
             args._allow_home_fallback = True
             raw_ws = getattr(args, "workspace", None) or Path.cwd()
             args.ws = Workspace.for_init(raw_ws)
+        elif args.command == "migrate":
+            args.ws = None
+            raw_ws = getattr(args, "workspace", None)
+            start_dir = Path(raw_ws).resolve() if raw_ws else Path.cwd().resolve()
+            curr = start_dir
+            target_root = start_dir
+            while curr != curr.parent:
+                if (curr / ".aegis").is_dir() or (curr / ".soma").is_dir():
+                    target_root = curr
+                    break
+                curr = curr.parent
+            args._project_root = target_root
+            args.workspace = str(target_root)
         else:
             raw_ws = getattr(args, "workspace", None)
-            args.ws = Workspace.resolve(raw_ws)
+            try:
+                args.ws = Workspace.resolve(raw_ws)
+            except Exception:
+                if args.command in ("install", "uninstall"):
+                    args.ws = None
+                    p = Path(raw_ws).resolve() if raw_ws else Path.cwd().resolve()
+                    args._project_root = p
+                    args.workspace = str(p)
+                else:
+                    raise
 
         if args.ws is not None:
             args._project_root = args.ws.root

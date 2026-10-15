@@ -58,7 +58,7 @@ def run_detect(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(f"soma detect — Language & AST Driver Inspection ({ws_root}):\n")
+    print(f"aegis detect — Language & AST Driver Inspection ({ws_root}):\n")
 
     if not detected:
         print("  ℹ️  No known programming language manifests or source files detected.")
@@ -82,7 +82,7 @@ def run_detect(args: argparse.Namespace) -> int:
         elif slot_val:
             status_str = f"✅ configured: {slot_val}"
         else:
-            status_str = "⚠️  unconfigured (run 'soma detect --fix' to provision)"
+            status_str = "⚠️  unconfigured (run 'aegis detect --fix' to provision)"
 
         meta_parts = [p for p in (f"{fcount} files" if fcount else "", m_str, tc_str.lstrip(", ")) if p]
         meta_desc = f" ({'; '.join(meta_parts)})" if meta_parts else ""
@@ -107,7 +107,7 @@ def run_detect(args: argparse.Namespace) -> int:
             )
         ]
         if unconfigured:
-            print(f"\n  💡 Run 'soma detect --fix' to auto-provision AST driver slots for {', '.join(u.title() for u in unconfigured)}")
+            print(f"\n  💡 Run 'aegis detect --fix' to auto-provision AST driver slots for {', '.join(u.title() for u in unconfigured)}")
 
     return 0
 

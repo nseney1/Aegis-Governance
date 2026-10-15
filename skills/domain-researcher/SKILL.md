@@ -1,6 +1,12 @@
 ---
+id: domain-researcher
 name: Domain Researcher
 description: Compiles verified external facts, API documentation, and technical literature grounded in the active project.
+kind: skill
+tier: scout
+consumes: [InspectionReceipt]
+produces: [InspectionReceipt]
+handoff_targets: [spec-synthesizer, staff-review]
 trigger: user_request
 ---
 

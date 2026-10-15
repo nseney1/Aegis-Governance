@@ -135,6 +135,7 @@ def create_default_registry() -> CommandRegistry:
     reg = CommandRegistry()
 
     # Category 1: Setup & Environment
+    from aegis_cli.detect import DetectCommand
     from aegis_cli.doctor import DoctorCommand
     from aegis_cli.init import InitCommand
     from aegis_cli.install import InstallCommand, UninstallCommand
@@ -153,12 +154,14 @@ def create_default_registry() -> CommandRegistry:
     from aegis_cli.agent import AgentCommand
     from aegis_cli.completion import CompletionCommand
     from aegis_cli.hooks import HookCommand
+    from aegis_cli.skills import HandoffCommand, SkillCommand
 
     for cmd_cls in (
         InitCommand,
         InstallCommand,
         UninstallCommand,
         MigrateCommand,
+        DetectCommand,
         DoctorCommand,
         SystemCommand,
         CheckCommand,
@@ -166,6 +169,8 @@ def create_default_registry() -> CommandRegistry:
         ReportCommand,
         RuleCommand,
         AgentCommand,
+        SkillCommand,
+        HandoffCommand,
         CompletionCommand,
         HookCommand,
     ):
