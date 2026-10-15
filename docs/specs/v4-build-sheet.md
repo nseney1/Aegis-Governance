@@ -12,12 +12,12 @@
 
 ## 0. Lane protocol (every coding lane)
 
-1. Work in your own worktree at `/home/nseney/Documents/aegis-lanes/<lane>`, on branch `lane/<lane>` created from the base SHA given in the brief: `git -C /home/nseney/Documents/Aegis-Guardrails-v4 worktree add -b lane/<lane> /home/nseney/Documents/aegis-lanes/<lane> <base>`. Never edit `/home/nseney/Documents/Aegis-Guardrails-v4` or the main checkout.
+1. Work in your own worktree at `<lanes-dir>/<lane>` (a sibling directory outside the repository), on branch `lane/<lane>` created from the base SHA given in the brief: `git -C /home/nseney/Documents/Aegis-Guardrails-v4 worktree add -b lane/<lane> /home/nseney/Documents/aegis-lanes/<lane> <base>`. Never edit `/home/nseney/Documents/Aegis-Guardrails-v4` or the main checkout.
 2. Touch only the files your brief owns. To change a file outside that list, stop and report it.
 3. Follow TDD (rules `tdd-protocol`, `core-change-protocol`): write tests first and watch them fail for the right reason, then implement, then go green. State the red and green evidence in the debrief.
 4. Run the tests:
    ```
-   H=$(mktemp -d); HOME=$H XDG_CONFIG_HOME=$H/.config PYTHONUSERBASE=/home/nseney/.local python3 -m pytest <paths> -q -p no:cacheprovider
+   H=$(mktemp -d); HOME=$H XDG_CONFIG_HOME=$H/.config PYTHONUSERBASE=<your-user-site-base> python3 -m pytest <paths> -q -p no:cacheprovider
    ```
    Always use `python3 -m pytest` from the lane root (`pythonpath=["."]` makes it import the lane's code). The full suite takes about 7 minutes serially. Run it once at the end of the lane.
 5. Commit on `lane/<lane>` with Conventional Commits and the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Do not push, merge or rebase other branches.
