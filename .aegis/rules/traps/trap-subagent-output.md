@@ -10,9 +10,9 @@ prediction: Will flag subagent deliverables that introduce machine-specific or u
 falsification: 0 findings in 10 sessions → prune
 target_paths:
   - "rules/*.md"
-  - "docs/**/*.md"
+  - "docs/*.md"
   - "skills/**/*.md"
-  - ".aegis/rules/**/*.md"
+  - ".aegis/rules/*.md"
 triggers:
   - subagent_deliverable
   - documentation_update

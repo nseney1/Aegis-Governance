@@ -11,7 +11,7 @@ expiry_days: 60
 created: "2026-10-15T16:18:02Z"
 impact_weight: 1.0
 tags: ["dogfood", "imports", "portability"]
-target_paths: ["aegis_cli/**/*.py", "aegis_core/**/*.py", "aegis_mcp/**/*.py", "aegis_sdk/**/*.py"]
+target_paths: ["aegis_cli/*.py", "aegis_core/*.py", "aegis_mcp/*.py", "aegis_sdk/*.py"]
 lineage:
   parent_id: null
   created_by: "manual"

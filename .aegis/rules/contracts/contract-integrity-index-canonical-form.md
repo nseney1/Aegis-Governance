@@ -21,8 +21,8 @@ lineage:
 # Contract: one canonical form for the rule integrity index
 
 **Rule**: The rule integrity index (`.aegis/rules/manifest.json`; in v4.0 the
-sha256 index that `aegis sync` writes, D3) is generated and verified by one
-canonical function: LF-normalized content, relative POSIX path keys, a digest
+sha256 index that the planned `aegis sync` writes, wave B2, D3) is generated
+and verified by one canonical function: LF-normalized content, relative POSIX path keys, a digest
 covering exactly the mapping the consumer reads, and no volatile fields. It is
 updated incrementally for only the touched entry under the RULES lock, refuses
 to re-attest when verify reports other drift, and has roundtrip tests covering

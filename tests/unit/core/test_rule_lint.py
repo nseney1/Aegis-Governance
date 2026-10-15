@@ -7,14 +7,19 @@ rule loaders, so they carry the host contract; workspace rules
 """
 from __future__ import annotations
 
+import ast
+import functools
 import glob
+import os
 import re
 from pathlib import Path
 
 import pytest
 
+from aegis_cli.init import install_rules
 from aegis_core.lifecycle.constants import PROTECTED_RULES
 from aegis_core.yaml_engine.frontmatter import parse_rule_frontmatter
+from aegis_mcp.jit_engine import match_cells_to_files
 
 try:
     import tomllib
@@ -36,6 +41,10 @@ WORKSPACE = {"traps": ("trap", ("hypothesis", "target_paths")),
 DOGFOOD = {"gitflow-review-gate": "invariant", "ci-green-before-release": "invariant",
            "core-change-protocol": "invariant", "no-pre-existing-excuse": "invariant",
            "optional-import-guard": "trap"}
+# Ids that no installed rule may name: the dogfood rules plus desktop-automation,
+# which is no longer shipped at all (D16).
+UNSHIPPED = set(DOGFOOD) | {"desktop-automation"}
+WALK_PRUNE = {".git", "__pycache__", ".venv", "venv", "node_modules", ".tox", ".pytest_cache", "build", "dist"}
 
 
 def _md(base: Path, pattern: str) -> list[Path]:
@@ -114,9 +123,43 @@ def test_workspace_rule_type_schema(p):
 _PATHS = [(p, t) for p in WS for t in (_fm_or_empty(p).get("target_paths") or []) if isinstance(t, str)]
 
 
+@functools.lru_cache(maxsize=None)
+def _repo_files() -> tuple[str, ...]:
+    found = []
+    for d, dirs, files in os.walk(ROOT):
+        dirs[:] = [x for x in dirs if x not in WALK_PRUNE and not x.endswith(".egg-info")]
+        found.extend(Path(d, f).relative_to(ROOT).as_posix() for f in files)
+    return tuple(found)
+
+
 @pytest.mark.parametrize("p,target", _PATHS, ids=[f"{p.name}:{t}" for p, t in _PATHS])
 def test_target_paths_resolve(p, target):
-    assert glob.glob(str(ROOT / target), recursive=True), f"{rel(p)}: {target!r} matches no file"
+    """Resolve with the matcher aegis_scan uses, not glob: under fnmatch `X/**/*.py`
+    needs a subdirectory, so a glob-only check passed patterns that skip X/*.py."""
+    files = _repo_files()
+    hits = match_cells_to_files([{"target_paths": [target]}], list(files))
+    matched = set(hits[0]["_matched_files"]) if hits else set()
+    assert matched, f"{rel(p)}: {target!r} matches no file through the scan matcher"
+    named = {Path(x).relative_to(ROOT).as_posix() for x in glob.glob(str(ROOT / target), recursive=True)}
+    missed = sorted((named & set(files)) - matched)
+    assert not missed, f"{rel(p)}: {target!r} reads as a glob for {missed[:5]} but the scan matcher skips them"
+
+
+@pytest.mark.parametrize("preset", ["minimal", "standard", "full"])
+def test_installed_rules_name_no_unshipped_rule(preset, tmp_path):
+    installed = install_rules(tmp_path, preset=preset)
+    assert installed and not set(installed) & UNSHIPPED
+    texts = {p.name: p.read_text(encoding="utf-8") for p in tmp_path.glob("*.md")}
+    texts["META.md"] = META.read_text(encoding="utf-8")  # host loaders read META from the package
+    hits = sorted(f"{name}: {rid}" for name, text in texts.items() for rid in UNSHIPPED if rid in text)
+    assert hits == [], f"{preset} preset installs text naming rules it does not ship"
+
+
+def test_unshipped_ids_agree_with_wheel_smoke():
+    tree = ast.parse((ROOT / ".github" / "scripts" / "wheel_smoke.py").read_text(encoding="utf-8"))
+    node = next(n for n in tree.body if isinstance(n, ast.Assign)
+                and any(getattr(t, "id", None) == "UNSHIPPED_RULES" for t in n.targets))
+    assert set(ast.literal_eval(node.value)) == UNSHIPPED
 
 
 def test_protected_rules_are_shipped_rules():

@@ -9,7 +9,7 @@ hypothesis: New rule types or core rule categories committed without correspondi
 prediction: Will flag when a new rule subdirectory or rule type exists but has no row in the WORKSPACE schema table of test_rule_lint.py
 falsification: 0 findings in 10 sessions → prune
 target_paths:
-  - ".aegis/rules/**/*.md"
+  - ".aegis/rules/*.md"
   - "rules/*.md"
   - tests/unit/core/test_rule_lint.py
 triggers:

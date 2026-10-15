@@ -10,7 +10,7 @@ prediction: Will catch field name mismatches between module files that read/writ
 falsification: 0 findings in 10 sessions → prune
 target_paths:
   - "aegis_core/*.py"
-  - "aegis_core/**/*.py"
+  - "aegis_core/*.py"
   - "aegis_mcp/*.py"
   - "aegis_cli/*.py"
 triggers:
