@@ -97,9 +97,4 @@ for f in glob.glob('aegis_cli/**/*.py', recursive=True) + \
 "
 ```
 
-Also check shell scripts with embedded Python:
-```bash
-grep -n 'import.*toml' install/hooks/*.sh | grep -v 'try:'
-```
-
 Any match is a violation.

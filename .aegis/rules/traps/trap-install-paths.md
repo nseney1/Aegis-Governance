@@ -27,6 +27,6 @@ fitness:
 
 # Trap: Install Paths Divergence
 
-Target: `install/install.sh` vs `Makefile`
+Target: `aegis_cli/platforms/*.py` vs `Makefile`
 
 Description: Install targets diverge (`~/.gemini/config/rules/` vs `~/.gemini/config/rules/`). These need to be unified or clearly documented if intentionally separated.

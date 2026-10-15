@@ -50,4 +50,4 @@ Fix pattern: ALL human-readable output in hooks MUST use `>&2`:
   echo "Status message" >&2    # CORRECT
   echo "Status message"        # WRONG — corrupts JSON protocol
 
-Detection: `grep -n 'echo ' install/hooks/*.sh | grep -v '>&2' | grep -v 'echo.*{' | grep -v '^#'`
+Detection: `grep -n 'print(' aegis_cli/hooks/*.py aegis_core/sync.py | grep -v 'file=sys.stderr' | grep -v 'json.dumps'`

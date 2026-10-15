@@ -26,6 +26,6 @@ fitness:
 
 # Invariant: Safety Gate
 
-Target: `install/hooks/safety_gate.sh`
+Target: `aegis_cli/hooks/safety.py`
 
 Description: Security boundary for the safety gate. It has a hardcoded log path `~/.gemini/antigravity/scratch/ai-conversation-logs/governance/gate_events.jsonl` which needs careful management.
