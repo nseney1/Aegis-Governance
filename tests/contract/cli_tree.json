@@ -1,0 +1,6810 @@
+{
+  "command_resolution": {
+    "agent": "agent",
+    "audit": "doctor",
+    "check": "check",
+    "checkpoint": "check",
+    "completion": "completion",
+    "detect": "detect",
+    "doctor": "doctor",
+    "drivers": "detect",
+    "handoff": "handoff",
+    "hook": "hook",
+    "init": "init",
+    "install": "install",
+    "languages": "detect",
+    "migrate": "migrate",
+    "report": "report",
+    "rule": "rule",
+    "rules": "status",
+    "skill": "skill",
+    "status": "status",
+    "sys": "system",
+    "system": "system",
+    "uninstall": "uninstall",
+    "verify": "check"
+  },
+  "parser": {
+    "arguments": [
+      {
+        "default": "==SUPPRESS==",
+        "dest": "help",
+        "flags": [
+          "-h",
+          "--help"
+        ],
+        "kind": "help",
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "const": true,
+        "default": "==SUPPRESS==",
+        "dest": "plumbing",
+        "flags": [
+          "--plumbing",
+          "--internal"
+        ],
+        "kind": "store_true",
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "const": true,
+        "default": "==SUPPRESS==",
+        "dest": "plain",
+        "flags": [
+          "--plain"
+        ],
+        "kind": "store_true",
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "const": true,
+        "default": "==SUPPRESS==",
+        "dest": "no_emoji",
+        "flags": [
+          "--no-emoji"
+        ],
+        "kind": "store_true",
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "choices": [
+          "text",
+          "json",
+          "mermaid"
+        ],
+        "default": "==SUPPRESS==",
+        "dest": "format",
+        "flags": [
+          "--format"
+        ],
+        "kind": "store",
+        "nargs": null,
+        "required": false
+      },
+      {
+        "const": true,
+        "default": false,
+        "dest": "json",
+        "flags": [
+          "--json"
+        ],
+        "kind": "store_true",
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "const": true,
+        "default": "==SUPPRESS==",
+        "dest": "verbose",
+        "flags": [
+          "-v",
+          "--verbose"
+        ],
+        "kind": "store_true",
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "const": true,
+        "default": "==SUPPRESS==",
+        "dest": "quiet",
+        "flags": [
+          "-q",
+          "--quiet"
+        ],
+        "kind": "store_true",
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "default": "==SUPPRESS==",
+        "dest": "workspace",
+        "flags": [
+          "--workspace"
+        ],
+        "kind": "store",
+        "nargs": null,
+        "required": false,
+        "type": "str"
+      },
+      {
+        "default": "==SUPPRESS==",
+        "dest": "version",
+        "flags": [
+          "--version"
+        ],
+        "kind": "version",
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "default": null,
+        "dest": "command",
+        "flags": [],
+        "kind": "parsers",
+        "nargs": "A...",
+        "required": false
+      }
+    ],
+    "commands": {
+      "agent": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "agent_action",
+            "flags": [],
+            "kind": "parsers",
+            "nargs": "A...",
+            "required": false
+          }
+        ],
+        "commands": {
+          "grade": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "receipt": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "verify",
+                "dest": "operation",
+                "flags": [
+                  "--operation"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "local-session",
+                "dest": "session_id",
+                "flags": [
+                  "--session-id"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              }
+            ]
+          },
+          "record": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "tp",
+                  "fp",
+                  "trigger",
+                  "pass",
+                  "fail"
+                ],
+                "default": "tp",
+                "dest": "outcome",
+                "flags": [
+                  "--outcome"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "cli-record",
+                "dest": "key",
+                "flags": [
+                  "--key"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "rules",
+                "flags": [
+                  "--rules"
+                ],
+                "kind": "store",
+                "nargs": "*",
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "notes",
+                "flags": [
+                  "--notes"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              }
+            ]
+          },
+          "scan": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "target_files",
+                "flags": [],
+                "kind": "store",
+                "nargs": "*",
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "files",
+                "flags": [
+                  "--files"
+                ],
+                "kind": "store",
+                "nargs": "*",
+                "required": false
+              }
+            ]
+          }
+        }
+      },
+      "check": {
+        "aliases": [
+          "verify",
+          "checkpoint"
+        ],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "target_files",
+            "flags": [],
+            "kind": "store",
+            "nargs": "*",
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "files",
+            "flags": [
+              "--files"
+            ],
+            "kind": "store",
+            "nargs": "*",
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "hook",
+            "flags": [
+              "--hook"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "pre_commit",
+            "flags": [
+              "--pre-commit"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "all_files",
+            "flags": [
+              "--all"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "require_arbitration",
+            "flags": [
+              "--require-arbitration"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "full",
+            "flags": [
+              "--full",
+              "--deep"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "release_gate",
+            "flags": [
+              "--release",
+              "--release-gate"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "layer1_only",
+            "flags": [
+              "--layer1-only"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "no_layer2",
+            "flags": [
+              "--no-layer2"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "strict",
+            "flags": [
+              "--strict"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "plan",
+            "flags": [
+              "--plan"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "plan_file",
+            "flags": [
+              "--plan-file"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "provider",
+            "flags": [
+              "--provider"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "in_band",
+            "flags": [
+              "--in-band"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "checkpoint_only",
+            "flags": [
+              "--checkpoint-only"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "sarif"
+            ],
+            "default": "text",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          }
+        ]
+      },
+      "completion": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "choices": [
+              "bash",
+              "zsh",
+              "fish"
+            ],
+            "default": null,
+            "dest": "shell",
+            "flags": [],
+            "kind": "store",
+            "nargs": null,
+            "required": true
+          }
+        ]
+      },
+      "detect": {
+        "aliases": [
+          "languages",
+          "drivers"
+        ],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "fix",
+            "flags": [
+              "--fix",
+              "--provision"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      },
+      "doctor": {
+        "aliases": [
+          "audit"
+        ],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "fix",
+            "flags": [
+              "--fix"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "drivers",
+            "flags": [
+              "--drivers"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "fix_path",
+            "flags": [
+              "--fix-path"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "yes",
+            "flags": [
+              "--yes",
+              "-y"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      },
+      "handoff": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "handoff_action",
+            "flags": [],
+            "kind": "store",
+            "nargs": "?",
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "ticket_id",
+            "flags": [],
+            "kind": "store",
+            "nargs": "?",
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "from_skill",
+            "flags": [
+              "--from",
+              "-f"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "to_skill",
+            "flags": [
+              "--to",
+              "-t"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "artifact",
+            "flags": [
+              "--artifact",
+              "-a"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": "{}",
+            "dest": "payload",
+            "flags": [
+              "--payload",
+              "-p"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "cycle_id",
+            "flags": [
+              "--cycle-id"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "no_verify_tree",
+            "flags": [
+              "--no-verify-tree"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      },
+      "hook": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "hook_action",
+            "flags": [],
+            "kind": "parsers",
+            "nargs": "A...",
+            "required": false
+          }
+        ],
+        "commands": {
+          "governance-monitor": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          },
+          "immune-init": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          },
+          "install": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "post-session": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "transcript",
+                "flags": [
+                  "--transcript"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              }
+            ]
+          },
+          "pre-commit": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "strict",
+                "flags": [
+                  "--strict"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "pre-invocation": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          },
+          "safety-gate": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "cmd",
+                "flags": [
+                  "--cmd"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          },
+          "session-close": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          },
+          "status": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          },
+          "stop": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          },
+          "uninstall": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          }
+        }
+      },
+      "init": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "gemini",
+              "claude",
+              "cursor",
+              "copilot",
+              "kiro"
+            ],
+            "default": null,
+            "dest": "platform",
+            "flags": [
+              "--platform"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "minimal",
+              "standard",
+              "full"
+            ],
+            "default": "standard",
+            "dest": "rules",
+            "flags": [
+              "--rules"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "mcp",
+            "flags": [
+              "--mcp"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "yes",
+            "flags": [
+              "--yes",
+              "-y"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "force",
+            "flags": [
+              "--force"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "no_hooks",
+            "flags": [
+              "--no-hooks"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      },
+      "install": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "choices": [
+              "gemini",
+              "kiro",
+              "copilot",
+              "claude",
+              "mcp"
+            ],
+            "default": null,
+            "dest": "platform",
+            "flags": [
+              "--platform",
+              "-p"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      },
+      "migrate": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      },
+      "report": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": -1,
+            "dest": "session",
+            "flags": [
+              "--session"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "int"
+          }
+        ]
+      },
+      "rule": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "rule_action",
+            "flags": [],
+            "kind": "parsers",
+            "nargs": "A...",
+            "required": false
+          }
+        ],
+        "commands": {
+          "archive": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "_WorkspaceArg",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "rule_id",
+                "flags": [],
+                "kind": "store",
+                "nargs": "?",
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": true,
+                "dest": "apply",
+                "flags": [
+                  "--apply"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "clean": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "_WorkspaceArg",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "apply",
+                "flags": [
+                  "--apply"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "create": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "_WorkspaceArg",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": "trap",
+                "dest": "type",
+                "flags": [
+                  "-t",
+                  "--type"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "hypothesis",
+                "flags": [
+                  "--hypothesis"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "prediction",
+                "flags": [
+                  "-p",
+                  "--prediction"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "falsification",
+                "flags": [
+                  "-f",
+                  "--falsification"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "correctness",
+                "dest": "domain",
+                "flags": [
+                  "-d",
+                  "--domain"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "enforcement",
+                "flags": [
+                  "-e",
+                  "--enforcement"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "id",
+                "flags": [
+                  "-n",
+                  "--name",
+                  "--id"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "target_paths",
+                "flags": [
+                  "--target-paths"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "tags",
+                "flags": [
+                  "--tags"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": 1.0,
+                "dest": "weight",
+                "flags": [
+                  "-w",
+                  "--weight"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "float"
+              },
+              {
+                "default": 15,
+                "dest": "expiry_sessions",
+                "flags": [
+                  "--expiry-sessions"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "int"
+              },
+              {
+                "default": 60,
+                "dest": "expiry_days",
+                "flags": [
+                  "--expiry-days"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "int"
+              },
+              {
+                "default": "",
+                "dest": "minimum_mode",
+                "flags": [
+                  "--minimum-mode"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "effector",
+                "flags": [
+                  "--effector"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "memory",
+                "flags": [
+                  "--memory"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "body_file",
+                "flags": [
+                  "--body-file"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              }
+            ]
+          },
+          "demote": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "_WorkspaceArg",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "rule_id",
+                "flags": [],
+                "kind": "store",
+                "nargs": "?",
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "rule",
+                "flags": [
+                  "--rule"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "reason",
+                "flags": [
+                  "--reason"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "list": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "_WorkspaceArg",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "choices": [
+                  "trap",
+                  "invariant",
+                  "gate",
+                  "boundary",
+                  "persona",
+                  "contract",
+                  "wall",
+                  "membrane"
+                ],
+                "default": null,
+                "dest": "type",
+                "flags": [
+                  "--type"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "min_fitness",
+                "flags": [
+                  "--min-fitness"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "float"
+              }
+            ]
+          },
+          "promote": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "_WorkspaceArg",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "rule_id",
+                "flags": [],
+                "kind": "store",
+                "nargs": "?",
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "rule",
+                "flags": [
+                  "--rule"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "reason",
+                "flags": [
+                  "--reason"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "tier_check",
+                "flags": [
+                  "--tier-check"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          }
+        }
+      },
+      "skill": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "skill_action",
+            "flags": [],
+            "kind": "parsers",
+            "nargs": "A...",
+            "required": false
+          }
+        ],
+        "commands": {
+          "inspect": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "target_skill",
+                "flags": [],
+                "kind": "store",
+                "nargs": null,
+                "required": true,
+                "type": "str"
+              }
+            ]
+          },
+          "list": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          },
+          "slots": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ]
+          }
+        }
+      },
+      "status": {
+        "aliases": [
+          "rules"
+        ],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "all",
+            "flags": [
+              "--all"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      },
+      "system": {
+        "aliases": [
+          "sys"
+        ],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "system_action",
+            "flags": [],
+            "kind": "parsers",
+            "nargs": "A...",
+            "required": false
+          }
+        ],
+        "commands": {
+          "compact": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": 30,
+                "dest": "days",
+                "flags": [
+                  "--days"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "int"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "doctor": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "fix_path",
+                "flags": [
+                  "--fix-path"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "fix",
+                "flags": [
+                  "--fix"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "drivers",
+                "flags": [
+                  "--drivers"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "yes",
+                "flags": [
+                  "--yes",
+                  "-y"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "drivers": {
+            "aliases": [
+              "detect"
+            ],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "fix",
+                "flags": [
+                  "--fix"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              }
+            ]
+          },
+          "hook": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "hook_subaction",
+                "flags": [],
+                "kind": "parsers",
+                "nargs": "A...",
+                "required": false
+              }
+            ],
+            "commands": {
+              "install": {
+                "aliases": [],
+                "arguments": [
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "help",
+                    "flags": [
+                      "-h",
+                      "--help"
+                    ],
+                    "kind": "help",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plumbing",
+                    "flags": [
+                      "--plumbing",
+                      "--internal"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plain",
+                    "flags": [
+                      "--plain"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "no_emoji",
+                    "flags": [
+                      "--no-emoji"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "choices": [
+                      "text",
+                      "json",
+                      "mermaid"
+                    ],
+                    "default": "==SUPPRESS==",
+                    "dest": "format",
+                    "flags": [
+                      "--format"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "json",
+                    "flags": [
+                      "--json"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "verbose",
+                    "flags": [
+                      "-v",
+                      "--verbose"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "quiet",
+                    "flags": [
+                      "-q",
+                      "--quiet"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "workspace",
+                    "flags": [
+                      "--workspace"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false,
+                    "type": "str"
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "force",
+                    "flags": [
+                      "--force"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "dry_run",
+                    "flags": [
+                      "--dry-run"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  }
+                ]
+              },
+              "status": {
+                "aliases": [],
+                "arguments": [
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "help",
+                    "flags": [
+                      "-h",
+                      "--help"
+                    ],
+                    "kind": "help",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plumbing",
+                    "flags": [
+                      "--plumbing",
+                      "--internal"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plain",
+                    "flags": [
+                      "--plain"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "no_emoji",
+                    "flags": [
+                      "--no-emoji"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "choices": [
+                      "text",
+                      "json",
+                      "mermaid"
+                    ],
+                    "default": "==SUPPRESS==",
+                    "dest": "format",
+                    "flags": [
+                      "--format"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "json",
+                    "flags": [
+                      "--json"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "verbose",
+                    "flags": [
+                      "-v",
+                      "--verbose"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "quiet",
+                    "flags": [
+                      "-q",
+                      "--quiet"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "workspace",
+                    "flags": [
+                      "--workspace"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false,
+                    "type": "str"
+                  }
+                ]
+              },
+              "uninstall": {
+                "aliases": [],
+                "arguments": [
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "help",
+                    "flags": [
+                      "-h",
+                      "--help"
+                    ],
+                    "kind": "help",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plumbing",
+                    "flags": [
+                      "--plumbing",
+                      "--internal"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plain",
+                    "flags": [
+                      "--plain"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "no_emoji",
+                    "flags": [
+                      "--no-emoji"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "choices": [
+                      "text",
+                      "json",
+                      "mermaid"
+                    ],
+                    "default": "==SUPPRESS==",
+                    "dest": "format",
+                    "flags": [
+                      "--format"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "json",
+                    "flags": [
+                      "--json"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "verbose",
+                    "flags": [
+                      "-v",
+                      "--verbose"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "quiet",
+                    "flags": [
+                      "-q",
+                      "--quiet"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "workspace",
+                    "flags": [
+                      "--workspace"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false,
+                    "type": "str"
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "force",
+                    "flags": [
+                      "--force"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "dry_run",
+                    "flags": [
+                      "--dry-run"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  }
+                ]
+              }
+            }
+          },
+          "skills": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "kind": "help",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plumbing",
+                "flags": [
+                  "--plumbing",
+                  "--internal"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "no_emoji",
+                "flags": [
+                  "--no-emoji"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "choices": [
+                  "text",
+                  "json",
+                  "mermaid"
+                ],
+                "default": "==SUPPRESS==",
+                "dest": "format",
+                "flags": [
+                  "--format"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "verbose",
+                "flags": [
+                  "-v",
+                  "--verbose"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "quiet",
+                "flags": [
+                  "-q",
+                  "--quiet"
+                ],
+                "kind": "store_true",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "kind": "store",
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "skill_subaction",
+                "flags": [],
+                "kind": "parsers",
+                "nargs": "A...",
+                "required": false
+              }
+            ],
+            "commands": {
+              "inspect": {
+                "aliases": [],
+                "arguments": [
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "help",
+                    "flags": [
+                      "-h",
+                      "--help"
+                    ],
+                    "kind": "help",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plumbing",
+                    "flags": [
+                      "--plumbing",
+                      "--internal"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plain",
+                    "flags": [
+                      "--plain"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "no_emoji",
+                    "flags": [
+                      "--no-emoji"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "choices": [
+                      "text",
+                      "json",
+                      "mermaid"
+                    ],
+                    "default": "==SUPPRESS==",
+                    "dest": "format",
+                    "flags": [
+                      "--format"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "json",
+                    "flags": [
+                      "--json"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "verbose",
+                    "flags": [
+                      "-v",
+                      "--verbose"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "quiet",
+                    "flags": [
+                      "-q",
+                      "--quiet"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "workspace",
+                    "flags": [
+                      "--workspace"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false,
+                    "type": "str"
+                  },
+                  {
+                    "default": null,
+                    "dest": "target_skill",
+                    "flags": [],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": true
+                  }
+                ]
+              },
+              "list": {
+                "aliases": [],
+                "arguments": [
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "help",
+                    "flags": [
+                      "-h",
+                      "--help"
+                    ],
+                    "kind": "help",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plumbing",
+                    "flags": [
+                      "--plumbing",
+                      "--internal"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plain",
+                    "flags": [
+                      "--plain"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "no_emoji",
+                    "flags": [
+                      "--no-emoji"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "choices": [
+                      "text",
+                      "json",
+                      "mermaid"
+                    ],
+                    "default": "==SUPPRESS==",
+                    "dest": "format",
+                    "flags": [
+                      "--format"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "json",
+                    "flags": [
+                      "--json"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "verbose",
+                    "flags": [
+                      "-v",
+                      "--verbose"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "quiet",
+                    "flags": [
+                      "-q",
+                      "--quiet"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "workspace",
+                    "flags": [
+                      "--workspace"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false,
+                    "type": "str"
+                  }
+                ]
+              },
+              "slots": {
+                "aliases": [],
+                "arguments": [
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "help",
+                    "flags": [
+                      "-h",
+                      "--help"
+                    ],
+                    "kind": "help",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plumbing",
+                    "flags": [
+                      "--plumbing",
+                      "--internal"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "plain",
+                    "flags": [
+                      "--plain"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "no_emoji",
+                    "flags": [
+                      "--no-emoji"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "choices": [
+                      "text",
+                      "json",
+                      "mermaid"
+                    ],
+                    "default": "==SUPPRESS==",
+                    "dest": "format",
+                    "flags": [
+                      "--format"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": false,
+                    "dest": "json",
+                    "flags": [
+                      "--json"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "verbose",
+                    "flags": [
+                      "-v",
+                      "--verbose"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "const": true,
+                    "default": "==SUPPRESS==",
+                    "dest": "quiet",
+                    "flags": [
+                      "-q",
+                      "--quiet"
+                    ],
+                    "kind": "store_true",
+                    "nargs": 0,
+                    "required": false
+                  },
+                  {
+                    "default": "==SUPPRESS==",
+                    "dest": "workspace",
+                    "flags": [
+                      "--workspace"
+                    ],
+                    "kind": "store",
+                    "nargs": null,
+                    "required": false,
+                    "type": "str"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "uninstall": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plumbing",
+            "flags": [
+              "--plumbing",
+              "--internal"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "no_emoji",
+            "flags": [
+              "--no-emoji"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json",
+              "mermaid"
+            ],
+            "default": "==SUPPRESS==",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "verbose",
+            "flags": [
+              "-v",
+              "--verbose"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "quiet",
+            "flags": [
+              "-q",
+              "--quiet"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "choices": [
+              "gemini",
+              "kiro",
+              "copilot",
+              "claude",
+              "mcp"
+            ],
+            "default": null,
+            "dest": "platform",
+            "flags": [
+              "--platform",
+              "-p"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "purge",
+            "flags": [
+              "--purge"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      }
+    }
+  },
+  "registry": [
+    {
+      "aliases": [],
+      "category": "Plumbing & Swarm Protocol",
+      "help": "Headless machine-to-machine subcommands (scan, grade, receipt, record)",
+      "name": "agent"
+    },
+    {
+      "aliases": [
+        "verify",
+        "checkpoint"
+      ],
+      "category": "Daily Workflow & Verification",
+      "help": "Unified verification gate (checks invariants, rules, and outcomes)",
+      "name": "check"
+    },
+    {
+      "aliases": [],
+      "category": "Plumbing & Swarm Protocol",
+      "help": "Print a shell completion script",
+      "name": "completion"
+    },
+    {
+      "aliases": [
+        "languages",
+        "drivers"
+      ],
+      "category": "Setup & Environment",
+      "help": "Inspect project languages and AST driver configuration",
+      "name": "detect"
+    },
+    {
+      "aliases": [
+        "audit"
+      ],
+      "category": "Setup & Environment",
+      "help": "System health and governance audit",
+      "name": "doctor"
+    },
+    {
+      "aliases": [],
+      "category": "Plumbing & Swarm Protocol",
+      "help": "Execute file-buffered swarm handoff between skills",
+      "name": "handoff"
+    },
+    {
+      "aliases": [],
+      "category": "Plumbing & Swarm Protocol",
+      "help": "Manage and run cross-platform lifecycle hooks",
+      "name": "hook"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Set up governance for this project",
+      "name": "init"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Install Soma governance rules and configuration",
+      "name": "install"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Verify .aegis workspace migration status",
+      "name": "migrate"
+    },
+    {
+      "aliases": [],
+      "category": "Daily Workflow & Verification",
+      "help": "Session report card",
+      "name": "report"
+    },
+    {
+      "aliases": [],
+      "category": "Rule Evolution & Intelligence",
+      "help": "Manage rule lifecycle (list, create, promote, demote, archive, clean)",
+      "name": "rule"
+    },
+    {
+      "aliases": [],
+      "category": "Plumbing & Swarm Protocol",
+      "help": "Manage and inspect horizontal skills and slots",
+      "name": "skill"
+    },
+    {
+      "aliases": [
+        "rules"
+      ],
+      "category": "Daily Workflow & Verification",
+      "help": "Show active rules and stats",
+      "name": "status"
+    },
+    {
+      "aliases": [
+        "sys"
+      ],
+      "category": "Setup & Environment",
+      "help": "Diagnostics, driver management, and platform integrations (doctor, hook, drivers, skills, compact)",
+      "name": "system"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Uninstall Soma governance rules and configuration",
+      "name": "uninstall"
+    }
+  ]
+}
