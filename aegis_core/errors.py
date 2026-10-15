@@ -42,20 +42,6 @@ class RuleCorruptError(AegisError):
         self.rule_id = actual_id
 
 
-class ReceiptExpiredError(AegisError, KeyError):
-    """Raised when a receipt is expired or not found."""
-
-    def __init__(
-        self,
-        message: str = "",
-        receipt_id: str | None = None,
-        code: str = "RECEIPT_EXPIRED",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, receipt_id=receipt_id, **kwargs)
-        self.receipt_id = receipt_id
-
-
 class LockTimeoutError(AegisError, TimeoutError):
     """Raised when a workspace lock cannot be acquired within the timeout period."""
 
@@ -157,7 +143,6 @@ __all__ = [
     "LockTimeoutError",
     "NoTestRunnerFoundError",
     "PathTraversalError",
-    "ReceiptExpiredError",
     "RuleCorruptError",
     "WorkspaceBareRepoError",
     "WorkspaceError",

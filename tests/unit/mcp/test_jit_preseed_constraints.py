@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from aegis_mcp import jit_engine
-from aegis_mcp.tools import _handle_scan
+from aegis_mcp.handlers.core import handle_scan
 
 
 class TestJitPreseedConstraints(unittest.TestCase):
@@ -101,12 +101,12 @@ class TestJitPreseedConstraints(unittest.TestCase):
         self.assertIn("Never store secrets in plain-text", context)
 
     def test_soma_scan_handler_exposes_target_constraints(self):
-        """MCP _handle_scan should return target_constraints in its result."""
+        """MCP handle_scan should return target_constraints in its result."""
         args = {
             "workspace": self.workspace,
             "files": ["soma_core/auth.py"],
         }
-        res = _handle_scan(args, None)
+        res = handle_scan(args)
         self.assertNotIn("error", res)
         self.assertIn("target_constraints", res)
         self.assertIn("context", res)

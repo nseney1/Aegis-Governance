@@ -7,7 +7,6 @@ from aegis_core.errors import (
     AegisError,
     AegisValidationError,
     RuleCorruptError,
-    ReceiptExpiredError,
     LockTimeoutError,
 )
 
@@ -35,13 +34,6 @@ class TestDomainErrors:
         assert isinstance(err, AegisError)
         assert err.cell_id == "bad_cell"
         assert err.code == "CORRUPT_FRONTMATTER"
-
-    def test_receipt_expired_error(self):
-        """ReceiptExpiredError inherits from KeyError for dict lookup compatibility."""
-        err = ReceiptExpiredError("Receipt expired", receipt_id="rcpt_123")
-        assert isinstance(err, AegisError)
-        assert isinstance(err, KeyError)
-        assert err.receipt_id == "rcpt_123"
 
     def test_lock_timeout_error(self):
         """LockTimeoutError inherits from TimeoutError."""

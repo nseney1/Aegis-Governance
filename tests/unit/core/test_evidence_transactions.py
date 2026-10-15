@@ -67,7 +67,7 @@ def test_report_outcome_batch_failure_then_same_key_retries_once(tmp_path, monke
         return real_validate(event)
 
     monkeypatch.setattr(telemetry, "_validate_event", fail_on_second)
-    args = {"outcome": "success", "cells_used": ["cell-a", "cell-b"],
+    args = {"outcome": "success", "rules_used": ["cell-a", "cell-b"],
             "idempotency_key": "caller-operation-1"}
     result = execute_tool("aegis_report_outcome", args)
     ledger = tmp_path / ".aegis" / "evidence" / "signals.jsonl"

@@ -38,8 +38,8 @@ def _tree(root: Path) -> dict[str, bytes]:
 def server_state(monkeypatch):
     """run_stdio_server sets module globals; restore them after the test."""
     monkeypatch.setattr(server, "_canonical_workspace", None)
-    monkeypatch.setattr(server, "_execution_enabled", False)
-    monkeypatch.setattr(server, "_workspace_error", None, raising=False)
+    monkeypatch.setattr(server, "_session_id", None)
+    monkeypatch.setattr(server, "_workspace_error", None)
 
 
 @pytest.fixture

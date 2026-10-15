@@ -8,7 +8,6 @@ from aegis_core.schemas.artifacts import (
     validate_artifact_production,
 )
 from aegis_core.schemas.lifecycle import TransitionResult
-from aegis_core.schemas.receipts import Receipt
 from aegis_core.schemas.rules import CellMetadata, RuleMetadata
 from aegis_core.schemas.telemetry import SignalEvent
 
@@ -19,7 +18,6 @@ __all__ = [
     "ChargeSheet",
     "DiffProposal",
     "InspectionReceipt",
-    "Receipt",
     "RuleMetadata",
     "SignalEvent",
     "TestVerdict",

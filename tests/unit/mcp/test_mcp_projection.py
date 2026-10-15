@@ -50,29 +50,6 @@ class TestResponseProjection:
         assert res["cells"][0]["id"] == "c1"
         assert "body" not in res["cells"][0]
 
-    def test_custom_fields_projection(self):
-        payload = {
-            "cell": {
-                "id": "cell-123",
-                "meta": {
-                    "tier": "guardrail",
-                    "secret": "hide_me",
-                },
-                "instructions": "large markdown body",
-            },
-            "status": "ok",
-        }
-        res = project_response(payload, fields=["cell.id", "cell.meta.tier", "status"])
-        assert res == {
-            "cell": {
-                "id": "cell-123",
-                "meta": {
-                    "tier": "guardrail",
-                },
-            },
-            "status": "ok",
-        }
-
     def test_soma_v01_security_scrubbing(self):
         payload = {
             "id": "audit-1",
@@ -90,44 +67,14 @@ class TestResponseProjection:
         assert "__class__" not in res
         assert res["verdict"] == "valid"
 
-    def test_soma_v01_denied_field_request_rejected(self):
-        payload = {
-            "id": "audit-1",
-            "task_plan": "Sensitive reasoning",
-            "status": "ok",
-        }
-        res = project_response(payload, fields=["id", "task_plan"])
-        assert "task_plan" not in res
-        assert res == {"id": "audit-1"}
-
     def test_execute_tool_with_projection(self, tmp_path, monkeypatch):
         from aegis_mcp.tools import execute_tool
 
-        (tmp_path / ".aegis" / "rules").mkdir(parents=True, exist_ok=True)
-        monkeypatch.chdir(tmp_path)
-        # Test audit tool with fields projection
-        res = execute_tool(
-            "aegis_audit_security",
-            {
-                "proposed_content": "x = 1\n",
-                "file_path": "test.py",
-                "fields": ["status"],
-            },
-        )
-        assert res == {"status": "PASS"}
-
-    def test_projection_empty_and_all_denied_fields(self):
-        res = project_response({"a": 1}, fields=["", "  "])
-        assert res == {}
-        res2 = project_response({"a": 1}, fields=["task_plan", "prompt"])
-        assert res2 == {}
-        # Payload with empty string key - empty string in fields must NOT project the empty key
-        res3 = project_response({"": "secret_empty", "valid": 123}, fields=["", "valid"])
-        assert res3 == {"valid": 123}
-        assert "" not in res3
-        # Missing dict key covers line 59
-        res4 = project_response({"a": 1}, fields=["missing_key", "a.missing_sub"])
-        assert res4 == {}
+        rules = tmp_path / ".aegis" / "rules" / "traps"
+        rules.mkdir(parents=True, exist_ok=True)
+        (rules / "t1.md").write_text("---\nid: t1\ntype: trap\nhypothesis: h\n---\nbody\n", encoding="utf-8")
+        res = execute_tool("aegis_list_rules", {"workspace": str(tmp_path), "view": "ids"})
+        assert res == ["t1"]
 
     def test_ids_view_items_with_only_id_or_only_name(self):
         res_id = project_response([{"id": "cell-id-only"}], view="ids")
@@ -137,21 +84,13 @@ class TestResponseProjection:
         res_neither = project_response([{"foo": "bar"}], view="ids")
         assert res_neither == ["{'foo': 'bar'}"]
 
-    def test_nested_lookup_lists_and_primitives(self):
-        payload = {"items": [{"name": "first"}, {"name": "second"}]}
-        res = project_response(payload, fields=["items.0.name", "items.5.name", "items.bad.name", "items.0.name.extra"])
-        assert res == {"items": {"0": {"name": "first"}}}
-
     def test_projection_primitives_and_lists(self):
         assert project_response("hello", view="ids") == "hello"
-        assert project_response(123, fields=["a"]) == 123
+        assert project_response(123, view="summary") == 123
         assert project_response("unknown", view="nonexistent_view") == "unknown"
 
         # list with non-dict items in summary
         assert project_response(["string_item", {"id": "c1", "status": "ok"}], view="summary") == ["string_item", {"id": "c1", "status": "ok"}]
-
-        # list with non-dict items in custom fields
-        assert project_response(["string_item", {"id": "c1"}], fields=["id"]) == ["string_item", {"id": "c1"}]
 
         # mapping with single 'id' in ids view
         assert project_response({"id": "only-id"}, view="ids") == {"id": "only-id"}

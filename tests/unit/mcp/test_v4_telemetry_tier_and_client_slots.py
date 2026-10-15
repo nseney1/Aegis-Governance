@@ -1,8 +1,5 @@
-"""Unit tests for v4.0.0 Wave 1 Lane C:
-- 1-step receiptless telemetry reporting (aegis_report_outcome / aegis_capture_insight)
-- Optional receipt validation (rejecting invalid/stale receipts when provided)
-- Dynamic MCP client platform detection and ${SLOT.*} interpolation in aegis_scan
-- Unified RuleInventory / load_parsed_rules and synced .aegis/rules/manifest.json
+"""MCP client platform detection, ${SLOT.*} interpolation in aegis_scan, and the
+unified RuleInventory / load_parsed_rules used by the server.
 """
 from __future__ import annotations
 
@@ -23,7 +20,7 @@ from aegis_core.rule_inventory import (
     load_parsed_rules,
 )
 from aegis_mcp.server import handle_request
-from aegis_mcp.tools import TOOL_DEFINITIONS, execute_tool
+from aegis_mcp.tools import execute_tool
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -52,80 +49,11 @@ def _make_workspace_with_rule(tmp_path: Path, rule_id: str = "invariant-tdd", bo
     return tmp_path
 
 
-def test_one_step_report_outcome_with_rules_used_succeeds_without_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    ws = _make_workspace_with_rule(tmp_path, "invariant-tdd")
-    monkeypatch.setattr(server_module, "_canonical_workspace", str(ws))
-    monkeypatch.setenv("AEGIS_WORKSPACE", str(ws))
-    handle_request({"jsonrpc": "2.0", "id": 0, "method": "initialize"})
-
-    # 1-step call WITHOUT calling aegis_request_receipt first
-    resp = handle_request({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {
-            "name": "aegis_report_outcome",
-            "arguments": {
-                "outcome": "success",
-                "rules_used": ["invariant-tdd"],
-                "idempotency_key": "k1",
-                "tests_passed": True,
-            },
-        },
-    })
-    assert "result" in resp, resp
-    assert resp["result"]["isError"] is False
-    payload = json.loads(resp["result"]["content"][0]["text"])
-    assert payload["status"] == "recorded"
-    assert len(payload["records"]) == 1
-    assert payload["records"][0]["cell"] == "invariant-tdd"
-
-    # Also test 1-step call when idempotency_key is omitted (auto-defaults to UUID)
-    resp_no_key = handle_request({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/call",
-        "params": {
-            "name": "aegis_report_outcome",
-            "arguments": {
-                "outcome": "pass",
-                "rules_used": ["invariant-tdd"],
-            },
-        },
-    })
-    assert "result" in resp_no_key, resp_no_key
-    assert resp_no_key["result"]["isError"] is False
-    payload_no_key = json.loads(resp_no_key["result"]["content"][0]["text"])
-    assert payload_no_key["status"] == "recorded"
-
-
-def test_report_outcome_with_invalid_receipt_still_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    ws = _make_workspace_with_rule(tmp_path, "invariant-tdd")
-    monkeypatch.setattr(server_module, "_canonical_workspace", str(ws))
-    handle_request({"jsonrpc": "2.0", "id": 0, "method": "initialize"})
-
-    resp = handle_request({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "tools/call",
-        "params": {
-            "name": "aegis_report_outcome",
-            "arguments": {
-                "outcome": "success",
-                "rules_used": ["invariant-tdd"],
-                "idempotency_key": "k-bad",
-                "receipt": "bad-receipt",
-            },
-        },
-    })
-    assert "error" in resp
-    assert resp["error"]["code"] == -32600
-    assert "Invalid, expired, or mismatched receipt." in resp["error"]["message"]
-
-
 def test_initialize_detects_client_platform_and_interpolates_slots_in_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _make_workspace_with_rule(tmp_path, "invariant-tdd")
     monkeypatch.setattr(server_module, "_canonical_workspace", str(ws))
+    monkeypatch.setattr(server_module, "_session_id", None)
+    monkeypatch.setattr(server_module, "_client_platform", server_module._client_platform)
     monkeypatch.setenv("AEGIS_WORKSPACE", str(ws))
 
     # Initialize as claude-code
@@ -203,9 +131,3 @@ def test_load_parsed_rules_and_rule_inventory_primary_definitions(tmp_path: Path
     assert manifest["rule_count"] == 1 and manifest["cell_count"] == 1
     save_manifest(ws, manifest)
 
-    # Verify schema exposes rules_used and scaffold_rule
-    report_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "aegis_report_outcome")
-    assert "rules_used" in report_def["inputSchema"]["properties"]
-    insight_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "aegis_capture_insight")
-    assert "scaffold_rule" in insight_def["inputSchema"]["properties"]
-    assert "rule_id" in insight_def["inputSchema"]["properties"]

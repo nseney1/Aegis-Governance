@@ -1,4 +1,4 @@
-"""Unit tests for aegis_core.defects and aegis_core.insights."""
+"""Unit tests for aegis_core.defects."""
 import os
 import json
 import tempfile
@@ -17,11 +17,6 @@ from aegis_core.defects import (
     compute_enhanced_fitness,
     audit_expiry,
     prune_expired,
-)
-from aegis_core.insights import (
-    capture_insight,
-    cluster_insights,
-    generate_cell_candidates,
 )
 
 
@@ -49,27 +44,3 @@ def test_defects_match_glob():
     assert not match_glob("a/b/c/d.txt", "**/*.py")
 
 
-def test_insights_capture_and_clustering(tmp_path):
-    ws = str(tmp_path)
-    os.makedirs(os.path.join(ws, ".aegis", "rules"), exist_ok=True)
-
-    rec = capture_insight(
-        workspace=ws,
-        insight="Cache invalidation defect",
-        context_files=["cache.py"],
-        category="cache",
-    )
-    assert rec["insight"] == "Cache invalidation defect"
-    assert rec["category"] == "cache"
-
-    # Add 2 more to reach cluster threshold of 3
-    capture_insight(workspace=ws, insight="Cache TTL expired early", context_files=["cache.py"], category="cache")
-    capture_insight(workspace=ws, insight="Cache key collision", context_files=["cache.py"], category="cache")
-
-    clusters = cluster_insights(ws, min_cluster_size=3)
-    assert len(clusters) == 1
-    assert clusters[0]["common_category"] == "cache"
-
-    candidates = generate_cell_candidates(clusters, ws)
-    assert len(candidates) == 1
-    assert "cache" in candidates[0]["hypothesis"]

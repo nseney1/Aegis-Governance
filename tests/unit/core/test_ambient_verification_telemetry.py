@@ -128,22 +128,3 @@ def test_cli_verify_emits_telemetry_ambiently(test_workspace: Path, monkeypatch)
     assert signals_file.is_file()
     records = [json.loads(l) for l in signals_file.read_text(encoding="utf-8").splitlines() if l.strip()]
     assert any(r["cell"] == "cell-core" and r["signal"] == "trigger" for r in records)
-
-
-def test_mcp_verify_changes_emits_telemetry_ambiently(test_workspace: Path):
-    """MCP soma_verify_changes must emit ambient telemetry without explicit report_outcome."""
-    from aegis_mcp.tools import _handle_verify_changes
-
-    _create_cell(test_workspace, "cell-api", ["api.py"])
-    (test_workspace / "api.py").write_text('__all__ = ["ping"]\n\ndef ping(): pass\n', encoding="utf-8")
-
-    result = _handle_verify_changes(
-        {"workspace": str(test_workspace), "files": ["api.py"], "layer1_only": True},
-        gov=None,
-    )
-    assert result.get("status") == "PASS"
-
-    signals_file = test_workspace / ".aegis" / "evidence" / "signals.jsonl"
-    assert signals_file.is_file()
-    records = [json.loads(l) for l in signals_file.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert any(r["cell"] == "cell-api" for r in records)
