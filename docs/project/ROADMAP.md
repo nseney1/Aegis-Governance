@@ -1,5 +1,7 @@
 # Aegis Guardrails — Roadmap
 
+> **Superseded in v4: not maintained.** This is the v3 roadmap. It stays in the tree only until the v4 docs wave deletes it, together with the rule that lists it as a target path ([ADR 0005](../adr/0005-v4-plan-of-record.md) §5). Its statuses are no longer updated. Current plans are in [ADR 0005](../adr/0005-v4-plan-of-record.md) and the [v4.1 and v4.2 spec](../specs/v4.1-v4.2.md). Paths named below may no longer exist.
+
 > Features listed under **Research** are planned or experimental. Shipped milestones document verified capabilities backed by behavioral tests and `docs/project/CLAIM_REGISTRY.json`.
 > A feature moves to the README only when:
 > 1. Its behavioral test suite is written

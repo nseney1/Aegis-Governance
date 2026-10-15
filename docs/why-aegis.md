@@ -7,7 +7,7 @@ This page explains where Aegis's rules came from, what the project measured, wha
 **How to read the numbers.** Every number here is one of two kinds:
 
 - **Re-derived**: computed by a command run at commit `895bbf5`; every such command is listed under [Sources](#sources).
-- **Quoted**: taken from a document, with its source and a caveat. Several sources were deleted from the tree in v4; git keeps them. Read one with, for example, `git show 895bbf5:docs/project/METRICS.md`.
+- **Quoted**: taken from a document, with its source and a caveat. Several sources were deleted from the tree in v4; git keeps them. Read one from the v3.3.0 release tag, for example `git show v3.3.0:docs/project/METRICS.md`.
 
 ## 1. The problem: a rules file is a gentleman's agreement
 
@@ -43,7 +43,7 @@ The core rules were not written from best-practice lists. They were extracted fr
 
 The itemized rows sum to 473 steps (63% of the waste). The other 276 steps happened before step-level tracking existed and were never itemized; 473 + 276 = 749, which matches the quoted total (both re-derived).
 
-*Source*: the evolution log, `docs/architecture/phylogeny.md` "Phase 2", and `docs/project/METRICS.md` "Aggregate Stats" (both at `895bbf5`). *Caveat*: one session, one developer, classified by the project's own analysis with no second rater.
+*Source*: the evolution log, `docs/architecture/phylogeny.md` "Phase 2", and `docs/project/METRICS.md` "Aggregate Stats" (both at `v3.3.0`). *Caveat*: one session, one developer, classified by the project's own analysis with no second rater.
 
 **Cross-session patterns.** Comparing sessions across projects showed the failures were systemic. The worst session ran 1,579 steps with 8 architectural pivots, 2 safety incidents and zero subagent delegation, and produced zero working autonomous runs. It added rules on premature abstraction, pivot discipline (the Two-Pivot Halt), delegation floors and real-time loop budgets, which now live in [architectural-tenets](../rules/.oracles/architectural-tenets.md) and [subagent-delegation](../rules/subagent-delegation.md). It also added a desktop-automation safety rule, which v4 no longer ships ([build sheet](specs/v4-build-sheet.md) D16). *Source*: the evolution log, "Phase 3". *Caveat*: the author's own projects only.
 
@@ -61,7 +61,7 @@ Principles C1–C6 emerged from that work and are listed in the evolution log ("
 | C6 | Hypothesis-driven governance | Every rule and feature states what it predicts, how to measure it, and when to prune it. |
 | C7 | Ledger, not frontmatter, for fitness | Outcomes go to an append-only ledger; rule files are never rewritten by the tool that scores them ([ADR 0005](adr/0005-v4-plan-of-record.md) H6, AD-1). |
 
-Three ideas survive from the project's earlier mechanism-design notes (`docs/architecture/mechanism_design.md` at `895bbf5`):
+Three ideas survive from the project's earlier mechanism-design notes (`docs/architecture/mechanism_design.md` at `v3.3.0`):
 
 - **External ground truth**: credit should come from signals the agent cannot manufacture, such as CI exit codes and reverts.
 - **Graduated enforcement**: a rule earns blocking power (trap, then invariant, then gate) only after evidence.
@@ -71,16 +71,16 @@ In v3 the first one was claimed but not delivered: an MCP caller could write tru
 
 ## 4. What we measured, and how to read it
 
-| Measurement | Number | Source (at `895bbf5`) | Kind |
+| Measurement | Number | Source (at `v3.3.0`) | Kind |
 |---|---|---|---|
 | Waste in the post-mortem session | 749 / 1,339 steps (55.9%) | evolution log, Phase 2 | one session |
 | Waste across 17 governed sessions | 1,317 / 7,015 steps (18.8%) | `METRICS.md` "Aggregate Stats" | observational, one developer |
-| Same project, weak rules vs full rules | 27.6% of 547 steps vs 1.1% of 1,325 steps | `METRICS.md` "Live A/B Validation" | two sessions, one project |
+| Same project, weak rules vs "full governance" | 27.6% of 547 steps vs 1.1% of 1,325 steps | `METRICS.md` "Live A/B Validation" | two sessions, one project |
 | 66 masked production sessions, ~7 weeks | rules deployed without skills (an installer gap), so the review steps the rules named could not run | `METRICS.md` "Expanded Dataset Analysis" | observational, different model family |
 
 Percentages are re-derived from the quoted counts. Everything else in the table is quoted.
 
-**Limitations** (the first four are paraphrased from the project's research abstract, `docs/research/abstract.md` at `895bbf5`):
+**Limitations** (the first four are paraphrased from the project's research abstract, `docs/research/abstract.md` at `v3.3.0`):
 
 - Differences between the evaluation baselines prevent causal claims.
 - Waste classification lacked multi-rater reliability.
@@ -90,11 +90,11 @@ Percentages are re-derived from the quoted counts. Everything else in the table 
 - Outcome signals in v3 could be written by the agent being measured (review H4), so any fitness number from that period is self-graded.
 - Token figures in the old metrics were estimated with a word-count ratio calibrated for one model family, not measured with a tokenizer. This page quotes none of them.
 
-**What the numbers do not show.** They do not show that Aegis's v3 machinery (fitness scores, automatic promotion, receipts) caused the improvement. The rules that coincided with lower waste were plain prose that the agent read. v4 keeps the prose rules and the deterministic checks, and removes machinery whose effect was never measured.
+**What the numbers do not show.** They do not show what caused the improvement. `METRICS.md` labels the 1.1% figure "Phase 22", and the evolution log puts Phases 17–21 (rule lineage, promotion and demotion, the evidence pipeline, transcript verification) before Phase 22, so parts of the v3 machinery may already have been in place during the governed session. The data cannot separate the effect of the prose rules from the effect of that machinery, and none of the measurements above isolates either one. v4 keeps the prose rules and the deterministic checks, and removes machinery whose effect was never measured.
 
 ## 5. What we got wrong, and what v4 does instead
 
-An independent multi-lens review graded the code at `9e4d976` (v3.3 plus the first v4 wave) 4/10 on product value and design soundness: "a real problem, a prototype-grade solution, over-built roughly 5-10x". It scored code health, end-to-end behavior and test health 6/10 each, and found the deterministic Layer-1 checks and the zero-dependency, local-first claims genuinely true. (This is the adaptive review listed under ADR 0005 "Evidence"; its report is not in the repository.) The specific mistakes:
+A multi-lens review graded the code at `9e4d976` (v3.3 plus the first v4 wave) 4/10 on product value and design soundness: "a real problem, a prototype-grade solution, over-built roughly 5-10x". It scored code health, end-to-end behavior and test health 6/10 each, and found the deterministic Layer-1 checks and the zero-dependency, local-first claims genuinely true. The reviewers were AI agents working in separate contexts with the project's own review skills ([adaptive-reviewer](../skills/adaptive-reviewer/SKILL.md), escalated to the Citadel mode of [staff-review](../skills/staff-review/SKILL.md)), not a person or an outside auditor, so the grades are one model-assisted opinion, not an external audit. (This is the adaptive review listed under ADR 0005 "Evidence"; its report is not in the repository.) The specific mistakes:
 
 ### 5.1 Self-minted SHIP receipts
 
@@ -163,18 +163,18 @@ Why this is not in v4.0: the review behind the spec found that nothing on the de
 
 ## 7. Predictions you can check
 
-Each v4 decision carries a falsifiable prediction (principle C6). A failed prediction is a result to act on, not something to explain away; where a decision has a prune condition, the table says what gets removed.
+Each v4 decision carries a falsifiable prediction (principle C6). A failed prediction is a result to act on, not something to explain away; where a decision has a prune condition, the table says what gets removed. The last column says whether the check can be run in the tree today (2026-10-15, wave B2 in progress). Where it cannot, the wave that adds it is named; the exact command is added to this table when that wave ships.
 
-| Decision | Prediction | How to check |
-|---|---|---|
-| AD-1 ledger only | Zero "tampered rule" exclusions and zero lost increments in a 3-process test | The suite's multi-process ledger test (v4.0-b); after real sessions, `git status .aegis/rules` shows no changes made by Aegis |
-| AD-2 CI attestation | No release tag without a green CI run on the same SHA | For each tag: `python3 .github/scripts/ci_green.py "$(git rev-list -n1 <tag>)"` exits 0 |
-| AD-3 layered core | Duplicate implementations go to 0 and the import-boundary test stays green | Run the import-boundary test (added in v4.0-b) with the suite |
-| AD-4 workspace binding | In 3 real sessions per host, every scan resolves to the intended repository and none to `$HOME` | Per session: confirm the scans served the rules of the repository you were in, never `$HOME` |
-| AD-5 versioned formats | The next major version ships without a clean-slate purge | Its CHANGELOG entry and `aegis migrate` |
-| AD-6 small contract | The contract changes in under 10% of PRs; ghost CLI flags drop to 0 | `git log --oneline -- tests/contract/` against merged PRs |
-| AD-7 git-native team | In 20 multi-lane sessions, no cross-lane write conflict reaches a merge | Merge history; prune leases if none is denied in 30 days |
-| AD-9 bootstrap and JIT | Scan-before-edit rate of at least 80% on each Phase-1 host after 3 sessions | The per-host compliance rate the server records |
+| Decision | Prediction | How to check | Runnable today? |
+|---|---|---|---|
+| AD-1 ledger only | Zero "tampered rule" exclusions and zero lost increments in a 3-process test | After real sessions, `git status --porcelain .aegis/rules` lists no change made by Aegis; `python3 -m pytest tests/integration/test_no_rule_writes.py` passes; the 3-process ledger test passes | Partly. The no-rule-writes test exists; the 3-process ledger test lands with v4.0-b (wave B2) and is not in the tree yet |
+| AD-2 CI attestation | No release tag without a green CI run on the same SHA | For each tag: `python3 .github/scripts/ci_green.py "$(git rev-list -n1 <tag>)"` exits 0 (needs the `gh` CLI) | Yes |
+| AD-3 layered core | Duplicate implementations go to 0, and the import-boundary test stays green | Run the import-boundary test with the suite | No. The boundary test lands with v4.0-b (wave B2) and is not in the tree yet |
+| AD-4 workspace binding | In 3 real sessions per host, every scan resolves to the intended repository and none to `$HOME` | For each scan, compare the workspace root the resolver reports with the repository you were in | No. The resolver lands with v4.0-c (wave C) and is not in the tree yet |
+| AD-5 versioned formats | The next major version ships without a clean-slate purge | Its CHANGELOG entry gives an `aegis migrate` path, not a purge, for every on-disk format it changes | Partly. `aegis migrate` exists today only as a diagnostic for legacy `.soma/` workspaces; format versions land with v4.0-b (wave B2) |
+| AD-6 small contract | The contract changes in under 10% of PRs; ghost CLI flags drop to 0 | `git log --oneline -- tests/contract/` against merged PRs (`python3 -m pytest tests/contract` fails on any CLI or MCP surface change until the snapshot is regenerated in the same PR) | Partly. The snapshot tests exist; no test counts ghost flags (options the code reads but the parser never registers) across the CLI yet |
+| AD-7 git-native team | In 20 multi-lane sessions, no cross-lane write conflict reaches a merge | Merge history; prune leases if none is denied in 30 days | No. `aegis team` and leases are v4.1 (wave D) |
+| AD-9 bootstrap and JIT | Scan-before-edit rate of at least 80% on each Phase-1 host after 3 sessions | The per-host scan-before-edit rate the server records | No. The metric lands with v4.0-c (wave C) and is not in the tree yet |
 
 New v4.1 and v4.2 features get a prune box before they merge ([build sheet](specs/v4-build-sheet.md) §3). Examples: lane leases are pruned after 0 denials in 30 days of multi-lane use; the test-integrity gate after 0 human-confirmed catches in 60 days; the benchmark after it catches no regression in 3 releases; an experimental host row after it stays unverified for 2 minor releases.
 
@@ -200,7 +200,7 @@ The trade Aegis does not make: it does not claim enforcement it lacks. CI on eve
 
 **Decision records**: [ADR 0005](adr/0005-v4-plan-of-record.md) (plan of record), its [evidence review](adr/0005-evidence-review.md), [ADR 0003](adr/0003-v3-clean-slate-and-cli-ux.md), [ADR 0012](adr/0012-zero-dependency-frontmatter-engine.md)–[0016](adr/0016-zero-touch-polyglot-genesis.md), and the [v4 build sheet](specs/v4-build-sheet.md).
 
-**Deleted documents quoted here**, readable with `git show 895bbf5:<path>`:
+**Deleted documents quoted here**, readable from the v3.3.0 release tag with `git show v3.3.0:<path>` (all four are byte-identical at `895bbf5`; `git diff --stat v3.3.0 895bbf5 -- <the four paths>` prints nothing):
 
 - `docs/architecture/phylogeny.md` (the evolution log): post-mortem, cross-session patterns, design principles;
 - `docs/project/METRICS.md`: session telemetry, the A/B comparison, the 66-session dataset;
