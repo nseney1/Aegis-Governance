@@ -78,11 +78,7 @@ class TestVerifyCLIWiringWithTestHarness:
             res.arbitration_result.convergences = []
             return res
 
-        mock_provider = MagicMock()
-        mock_provider.generate = MagicMock(return_value="[]")
-
         monkeypatch.setattr("aegis_core.verification.pipeline.VerificationPipeline.run", mock_pipeline_run)
-        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda a, r: mock_provider)
         monkeypatch.setattr("aegis_core.verification.runner.run_layer1", lambda *a, **kw: [
             ToolEvidence("call_graph", "service.py", True, "ok")
         ])
@@ -92,6 +88,7 @@ class TestVerifyCLIWiringWithTestHarness:
             repo_root=str(tmp_path),
             workspace=str(tmp_path),
             plan="Implement serve function",
+            llm_cmd="unused-llm --never-run",
             layer1_only=False,
             dry_run=False,
             plain=False,

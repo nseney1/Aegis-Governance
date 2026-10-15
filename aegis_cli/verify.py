@@ -15,8 +15,8 @@ from typing import Any
 
 from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_cli.formatters import (
-    format_in_band_charge_sheet,
     format_layer1_json_payload,
+    format_layer2_json,
     format_layer2_summary,
 )
 
@@ -176,49 +176,32 @@ def resolve_task_plan(args: argparse.Namespace, repo_root: str) -> str | None:
     return None
 
 
-def is_usable_provider(provider) -> bool:
-    """Return True if provider can perform programmatic generation."""
-    if provider is None:
-        return False
-    try:
-        from aegis_core.inference_provider import PromptOnlyProvider
-        if isinstance(provider, PromptOnlyProvider):
-            return False
-    except ImportError:
-        pass
-    return hasattr(provider, "generate") or callable(provider)
-
-
-def resolve_cli_provider(args: argparse.Namespace, repo_root: str):
-    """Resolve configured inference provider or return None if none available."""
-    try:
-        from aegis_core.inference_provider import resolve_key, resolve_provider
-    except ImportError:
-        return None
-
-    explicit_provider = getattr(args, "provider", None) or resolve_key(repo_root, ["AEGIS_INFERENCE_PROVIDER"])
-    if not explicit_provider:
-        has_key = any(
-            resolve_key(repo_root, [k])
-            for k in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
-        )
-        if not has_key:
-            return None
-
-    try:
-        provider = resolve_provider(workspace=repo_root, provider_name=explicit_provider)
-        if not is_usable_provider(provider) and explicit_provider not in ("prompt-only", "prompt"):
-            return None
-        return provider
-    except Exception as e:
-        print(f"Warning: could not initialize inference provider: {e}", file=sys.stderr)
-        return None
+def _usage_error(message: str) -> int:
+    print(f"Error: {message}", file=sys.stderr)
+    return 2
 
 
 def run_verify(args: argparse.Namespace) -> int:
-    """Run verification on target files. Returns 0 for SHIP, 1 for BLOCK/REVISE or errors."""
+    """Run verification on target files.
+
+    Returns 0 for SHIP, 1 for BLOCK/REVISE or a failed run, 2 for a usage error.
+    """
     runner, Verdict = _get_verification()
+    from aegis_core.inference_provider import MISSING_BACKEND, LLMCommandError, resolve_backend
     from aegis_core.workspace import Workspace
+
+    layer2 = bool(
+        getattr(args, "full", False) or getattr(args, "plan", None) or getattr(args, "plan_file", None)
+    ) and not getattr(args, "layer1_only", False)
+    backend = None
+    if layer2:
+        # Fail before any work: a Layer 2 run without a model must never pass as Layer 1 only.
+        try:
+            backend = resolve_backend(getattr(args, "llm_cmd", None))
+        except LLMCommandError as exc:
+            return _usage_error(str(exc))
+        if backend is None:
+            return _usage_error(MISSING_BACKEND)
 
     ws_obj = getattr(args, "ws", None) or Workspace.resolve(
         getattr(args, "workspace", None)
@@ -230,6 +213,14 @@ def run_verify(args: argparse.Namespace) -> int:
     if not os.path.isdir(repo_root):
         print(f"Error: repo root does not exist: {repo_root}", file=sys.stderr)
         return 1
+
+    task_plan = None
+    if backend is not None:
+        task_plan = resolve_task_plan(args, repo_root)
+        if getattr(args, "plan_file", None) and task_plan is None:
+            return 1
+        if not task_plan:
+            return _usage_error("Layer 2 needs a task plan: pass --plan or --plan-file (or add docs/plan.md)")
 
     fmt = str(getattr(args, "format", None) or "text").lower()
     use_json = bool(getattr(args, "json", False) or fmt == "json")
@@ -250,7 +241,7 @@ def run_verify(args: argparse.Namespace) -> int:
             return 1
 
     if getattr(args, "dry_run", False):
-        layer_mode = "Layer 1 only" if getattr(args, "layer1_only", False) else "Layer 1 + Layer 2"
+        layer_mode = "Layer 1 + Layer 2" if layer2 else "Layer 1 only"
         if use_json:
             print(json.dumps({"dry_run": True, "mode": layer_mode, "repo_root": repo_root, "files": target_files}, indent=2))
             return 0
@@ -297,47 +288,12 @@ def run_verify(args: argparse.Namespace) -> int:
         except Exception:
             pass
 
-    if getattr(args, "layer1_only", False):
+    if not layer2:
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
         if use_json:
             print(json.dumps(format_layer1_json_payload(layer1_pass, target_files, results, summary), indent=2))
         return 0 if layer1_pass else 1
 
-    if getattr(args, "in_band", False):
-        from aegis_core.verification import VerificationPipeline
-        pipeline = VerificationPipeline()
-        pipeline_res = pipeline.run(
-            changed_files=target_files,
-            workspace=ws_obj,
-            task_plan=resolve_task_plan(args, repo_root) or "Interactive in-band verification",
-            in_band=True,
-            rebuttal=None,
-        )
-        if pipeline_res.charge_sheet:
-            print(format_in_band_charge_sheet(pipeline_res.charge_sheet))
-            _record_telemetry(False, "REVISE")
-            return 1
-
-    provider = resolve_cli_provider(args, repo_root)
-    if provider is None:
-        _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
-        if not layer1_pass:
-            return 1
-        print("Notice: No inference provider configured. Layer 2 skipped (Layer 1 deterministic checks passed).", file=sys.stderr)
-        return 0
-
-    task_plan = resolve_task_plan(args, repo_root)
-    if getattr(args, "plan_file", None) and task_plan is None:
-        return 1
-
-    if not task_plan:
-        _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
-        if not layer1_pass:
-            return 1
-        print("Notice: No task plan provided (--plan or --plan-file). Layer 2 skipped (Layer 1 deterministic checks passed).", file=sys.stderr)
-        return 0
-
-    llm_backend = provider.generate if hasattr(provider, "generate") else provider
     try:
         test_names, test_results = discover_test_evidence(target_files, repo_root)
     except Exception as e:
@@ -352,17 +308,22 @@ def run_verify(args: argparse.Namespace) -> int:
             changed_files=target_files,
             workspace=ws_obj,
             task_plan=task_plan,
-            backend=llm_backend,
+            backend=backend,
             test_names=test_names,
             test_results=test_results,
             layer1_evidence=results,
         )
     except Exception as e:
-        print(f"Error: Layer 2 verification failed: {e}", file=sys.stderr)
+        print(f"Error: Layer 2 failed: {e}", file=sys.stderr)
         _record_telemetry(False, "BLOCK")
         return 1
 
-    if pipeline_res.arbitration_result:
+    if use_json:
+        payload = format_layer1_json_payload(layer1_pass, target_files, results, summary)
+        payload["layer2"] = format_layer2_json(pipeline_res.arbitration_result, pipeline_res.verdict)
+        payload["passed"] = bool(pipeline_res.passed)
+        print(json.dumps(payload, indent=2))
+    elif pipeline_res.arbitration_result:
         print(format_layer2_summary(pipeline_res.arbitration_result))
 
     l2_exit = verdict_to_exit_code(pipeline_res.verdict)
@@ -386,8 +347,6 @@ class VerifyCommand(AegisCommand):
         parser.add_argument("--dry-run", action="store_true", help="Show what would be checked without running")
         parser.add_argument("--plan", default=None, help="Task plan or prompt context for Layer 2 adversarial verification")
         parser.add_argument("--plan-file", default=None, help="Path to file containing task plan or prompt context")
-        parser.add_argument("--provider", default=None, help="Inference provider to use (gemini, anthropic, openai, keyring, prompt)")
-        parser.add_argument("--in-band", action="store_true", help="Generate an in-band charge sheet for conversational rebuttal (zero external API keys)")
         existing_fmt = parser._option_string_actions.pop("--format", None)
         if existing_fmt is not None:
             if existing_fmt in parser._actions:

@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from aegis_core.verification import (
-    AgentBackend,
     ArbitrationResult,
     Claim,
     RiskCategory,
@@ -16,7 +15,7 @@ from aegis_core.verification.pipeline import VerificationPipeline
 from aegis_core.workspace import Workspace
 
 
-class FakeUnparseableBackend(AgentBackend):
+class FakeUnparseableBackend:
     """Backend returning malformed or error string instead of JSON list."""
 
     def __init__(self, response: str):
@@ -26,28 +25,34 @@ class FakeUnparseableBackend(AgentBackend):
         return self.response
 
 
-class TestPipelineEvidencePersistenceAndFailClosed:
-    """Verifies evidence persistence and fail-closed parser handling."""
+class TestPipelineFailClosed:
+    """Verifies the pipeline writes no evidence, calls the backend only when needed and fails closed."""
 
-    def test_pipeline_no_evidence_without_workspace(self):
-        pipeline = VerificationPipeline()
-        res = pipeline.run(
+    def test_no_changed_files_never_calls_the_backend(self, tmp_path):
+        calls = []
+        res = VerificationPipeline().run(
             changed_files=[],
-            workspace=None,
+            workspace=tmp_path,
             task_plan="Clean run",
-            in_band=True,
+            backend=lambda prompt: calls.append(prompt) or "[]",
         )
         assert res.verdict == Verdict.SHIP
+        assert res.arbitration_result is None
+        assert calls == []
 
-    def test_pipeline_no_evidence_when_arbitration_none(self, tmp_path):
-        pipeline = VerificationPipeline()
-        res = pipeline.run(
-            changed_files=["nonexistent.py"],
+    def test_layer1_only_never_calls_the_backend_or_writes_evidence(self, tmp_path):
+        (tmp_path / "mod.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        calls = []
+        res = VerificationPipeline().run(
+            changed_files=["mod.py"],
             workspace=tmp_path,
             task_plan="None",
             layer1_only=True,
+            backend=lambda prompt: calls.append(prompt) or "[]",
         )
-        assert not (tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json").exists()
+        assert res.arbitration_result is None
+        assert calls == []
+        assert not (tmp_path / ".aegis").exists()
 
     def test_spec_agent_unparseable_json_fails_closed_to_block(self, tmp_path):
         """When Spec Agent returns malformed JSON or error text, pipeline must FAIL-CLOSED with BLOCK."""

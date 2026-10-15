@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "format_layer2_json",
     "format_layer2_summary",
-    "format_in_band_charge_sheet",
     "format_layer1_json_payload",
 ]
 
@@ -36,21 +36,16 @@ def format_layer2_summary(result: Any) -> str:
     return "\n".join(lines)
 
 
-def format_in_band_charge_sheet(charge_sheet: Any) -> str:
-    """Format an in-band prosecution charge sheet for CLI display."""
-    lines = [
-        "\n📋 AEGIS VERIFICATION REPORT — IN-BAND CHARGE SHEET (AEGIS-V01)",
-        f"Target files ({len(charge_sheet.target_files)}): {', '.join(charge_sheet.target_files)}",
-        f"Prosecution charges ({len(charge_sheet.predictions)}):",
-    ]
-    for idx, p in enumerate(charge_sheet.predictions, 1):
-        sev = p.severity.value if hasattr(p.severity, "value") else str(p.severity)
-        cat = p.category.value if hasattr(p.category, "value") else str(p.category)
-        lines.append(f"  {idx}. [{sev.upper()}] {cat} in '{p.affected_function}': {p.risk}")
-        lines.append(f"     Mechanism: {p.mechanism}")
-    lines.append("\nRebuttal instructions:")
-    lines.append("  Submit defense claims citing evidence_file, evidence_line, and tests covering the fix.")
-    return "\n".join(lines)
+def format_layer2_json(result: Any, verdict: Any) -> dict[str, Any]:
+    """JSON summary of a Layer 2 arbitration for `aegis check --format json`."""
+    return {
+        "verdict": verdict.value if hasattr(verdict, "value") else str(verdict),
+        "divergences": [
+            {"type": d.divergence_type, "category": d.category.value, "resolution": d.resolution}
+            for d in (result.divergences if result else [])
+        ],
+        "convergences": [c.value for c in (result.convergences if result else [])],
+    }
 
 
 def format_layer1_json_payload(

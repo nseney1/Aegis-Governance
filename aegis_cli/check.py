@@ -62,7 +62,6 @@ def run_check(args: argparse.Namespace) -> int:
     # Mode 5: Default (Fast Layer 1 verification)
     if (
         not getattr(args, "full", False)
-        and not getattr(args, "in_band", False)
         and not getattr(args, "plan", None)
         and not getattr(args, "plan_file", None)
     ):
@@ -152,14 +151,10 @@ class CheckCommand(AegisCommand):
             help="Path to file containing task plan or prompt context",
         )
         parser.add_argument(
-            "--provider",
+            "--llm-cmd",
             default=None,
-            help="Inference provider to use (gemini, anthropic, openai, keyring, prompt)",
-        )
-        parser.add_argument(
-            "--in-band",
-            action="store_true",
-            help="Generate an in-band charge sheet for conversational rebuttal (zero external API keys)",
+            metavar="CMD",
+            help="Layer 2 model command: gets the prompt on stdin, prints the reply (default: $AEGIS_LLM_CMD)",
         )
         parser.add_argument(
             "--checkpoint-only",

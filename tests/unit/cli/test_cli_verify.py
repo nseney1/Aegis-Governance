@@ -497,7 +497,7 @@ class TestVerifyRepoRoot:
 
 
 class TestVerifyPlanParsing:
-    """Test CLI parsing for --plan, --plan-file, and --provider arguments."""
+    """Test CLI parsing for --plan and --plan-file."""
 
     def test_verify_accepts_plan_flag(self):
         """--plan flag accepts a natural language plan string."""
@@ -510,12 +510,6 @@ class TestVerifyPlanParsing:
         parser = _build_parser()
         args = parser.parse_args(["verify", "--plan-file", "docs/plan.md"])
         assert args.plan_file == "docs/plan.md"
-
-    def test_verify_accepts_provider_flag(self):
-        """--provider flag accepts an explicit inference provider name."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify", "--provider", "gemini"])
-        assert args.provider == "gemini"
 
 class TestVerifyPlanResolution:
     """Test plan resolution logic in aegis_cli.verify."""
@@ -547,85 +541,7 @@ class TestVerifyPlanResolution:
 
 
 class TestVerifyLayer2Execution:
-    """Test Layer 2 adversarial verification execution and graceful fallback."""
-
-    def test_layer2_graceful_fallback_when_no_api_key(self, tmp_path, capsys, monkeypatch):
-        """When no API key is configured, verify runs Layer 1 with an informative notice and exits cleanly."""
-        for key in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]:
-            monkeypatch.delenv(key, raising=False)
-
-        clean_file = tmp_path / "service.py"
-        clean_file.write_text(textwrap.dedent("""\
-            def process():
-                return 42
-
-            def main():
-                return process()
-        """))
-
-        exit_code = main([
-            "verify",
-            "--workspace", str(tmp_path),
-            "--files", "service.py",
-            "--plan", "Create process service",
-        ])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        # Should NOT output the old placeholder
-        assert "not yet configured" not in captured.err
-        # Should inform the user about missing key or Layer 1 fallback
-        assert "layer 1" in (captured.err + captured.out).lower()
-
-    def test_layer2_execution_with_mock_llm_ship(self, tmp_path, capsys, monkeypatch):
-        """When a mock LLM backend is available, Layer 2 executes and formats Arbiter verdict."""
-        import json
-
-        class MockProvider:
-            def generate(self, prompt: str, model: str = None) -> str:
-                if "Spec Agent" in prompt:
-                    return json.dumps([
-                        {
-                            "category": "missing_coverage",
-                            "severity": "low",
-                            "risk": "edge case unexercised",
-                            "mechanism": "untested branch",
-                            "affected_function": "compute",
-                        }
-                    ])
-                else:  # Code Agent
-                    return json.dumps([
-                        {
-                            "category": "missing_coverage",
-                            "claim": "compute is fully exercised",
-                            "evidence_file": "worker.py",
-                            "evidence_line": 1,
-                            "tests_covering": ["test_compute"],
-                        }
-                    ])
-
-        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda args, root: MockProvider())
-
-        target = tmp_path / "worker.py"
-        target.write_text(textwrap.dedent("""\
-            def compute(x: int) -> int:
-                \"\"\"Compute square.\"\"\"
-                return x * x
-
-            def main():
-                return compute(5)
-        """))
-
-        exit_code = main([
-            "verify",
-            "--workspace", str(tmp_path),
-            "--files", "worker.py",
-            "--plan", "Implement compute worker",
-        ])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Layer 2" in captured.out
-        assert "SHIP" in captured.out
-        assert not (tmp_path / ".aegis" / "evidence").exists(), "Layer 2 must not write arbitration evidence"
+    """Layer 2 telemetry; the CLI Layer 2 behavior is tested in test_cli_check.py."""
 
     def test_run_verify_records_telemetry_on_layer2(self, tmp_path, monkeypatch):
         """run_verify records telemetry on Layer 2 completion."""
@@ -636,11 +552,8 @@ class TestVerifyLayer2Execution:
             telemetry_calls.append(kwargs)
         monkeypatch.setattr("aegis_core.outcomes.record_verification_telemetry", mock_record)
 
-        class MockProvider:
-            def generate(self, prompt: str, model: str = None) -> str:
-                return "[]"
-
-        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda a, r: MockProvider())
+        fake_llm = tmp_path / "fake_llm.py"
+        fake_llm.write_text("import sys\nsys.stdin.read()\nprint('[]')\n", encoding="utf-8")
 
         target = tmp_path / "worker.py"
         target.write_text("def compute(x: int) -> int:\n    return x\n\ndef main():\n    return compute(1)\n")
@@ -650,6 +563,7 @@ class TestVerifyLayer2Execution:
             repo_root=str(tmp_path),
             workspace=str(tmp_path),
             plan="Implement worker",
+            llm_cmd=f"{sys.executable} {fake_llm}",
             layer1_only=False,
             dry_run=False,
             plain=False,
@@ -662,49 +576,6 @@ class TestVerifyLayer2Execution:
         assert len(telemetry_calls) >= 1
         assert telemetry_calls[-1]["passed"] is True
         assert telemetry_calls[-1]["verdict"] == Verdict.SHIP
-
-    def test_layer2_execution_with_mock_llm_block_returns_exit_one(self, tmp_path, capsys, monkeypatch):
-        """When Layer 2 Arbiter yields BLOCK, verify exits with status 1."""
-        import json
-
-        class MockBlockingProvider:
-            def generate(self, prompt: str, model: str = None) -> str:
-                if "Spec Agent" in prompt:
-                    # Critical unaddressed risk leads to BLOCK
-                    return json.dumps([
-                        {
-                            "category": "code_injection",
-                            "severity": "critical",
-                            "risk": "eval with untrusted input",
-                            "mechanism": "code execution",
-                            "affected_function": "run_eval",
-                        }
-                    ])
-                else:
-                    return json.dumps([])  # Code agent provides no contradictory claim
-
-        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda args, root: MockBlockingProvider())
-
-        target = tmp_path / "insecure.py"
-        target.write_text(textwrap.dedent("""\
-            def run_eval(payload: str):
-                \"\"\"Dangerous eval function.\"\"\"
-                return payload
-
-            def main():
-                return run_eval("test")
-        """))
-
-        exit_code = main([
-            "verify",
-            "--workspace", str(tmp_path),
-            "--files", "insecure.py",
-            "--plan", "Add eval runner",
-        ])
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "BLOCK" in captured.out or "BLOCK" in captured.err
-
 
 class TestVerifyCleanRepository:
     """Test verify behavior when repository has no changed files."""
@@ -866,16 +737,13 @@ def test_verify_command_contract():
     cmd.configure_parser(parser)
     parsed = parser.parse_args([
         "--files", "foo.py", "--layer1-only", "--dry-run",
-        "--plan", "task", "--plan-file", "p.md", "--provider", "gemini",
-        "--in-band",
+        "--plan", "task", "--plan-file", "p.md",
     ])
     assert parsed.files == ["foo.py"]
     assert parsed.layer1_only is True
     assert parsed.dry_run is True
     assert parsed.plan == "task"
     assert parsed.plan_file == "p.md"
-    assert parsed.provider == "gemini"
-    assert parsed.in_band is True
 
     with patch("aegis_cli.verify.run_verify", return_value=0) as mock_run:
         assert cmd.execute(parsed) == 0

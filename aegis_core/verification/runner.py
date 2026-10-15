@@ -515,7 +515,6 @@ def run_layer2(
         workspace=repo_root,
         task_plan=task_plan,
         backend=llm_backend,
-        in_band=False,
         test_names=test_names,
         test_results=test_results,
         layer1_evidence=layer1_evidence,
