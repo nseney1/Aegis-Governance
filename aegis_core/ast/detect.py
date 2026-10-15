@@ -122,27 +122,16 @@ def _write_no_follow(path: Path, data: bytes) -> None:
 
 
 def _find_driver_template(filename: str) -> Optional[Path]:
-    """Locate bundled driver recipe source from repo install/drivers/ or package resources."""
-    # 1. Check repo install/drivers/
-    repo_install_dir = Path(__file__).resolve().parents[2] / "install" / "drivers" / filename
-    if repo_install_dir.is_file():
-        return repo_install_dir
+    """Locate a driver recipe shipped in the aegis_core.ast.drivers.templates package.
 
-    # 2. Check aegis_core/ast/drivers/templates/
-    pkg_template = Path(__file__).resolve().parent / "drivers" / "templates" / filename
-    if pkg_template.is_file():
-        return pkg_template
-
-    # 3. Check importlib.resources
+    Only packaged templates are used: a recipe never comes from the repository
+    being governed (H5).
+    """
     try:
-        ref = importlib.resources.files("aegis_core.ast.drivers.templates") / filename
-        path = Path(str(ref))
-        if path.is_file():
-            return path
-    except Exception:
-        pass
-
-    return None
+        path = Path(str(importlib.resources.files("aegis_core.ast.drivers.templates") / filename))
+    except (ModuleNotFoundError, TypeError):
+        return None
+    return path if path.is_file() else None
 
 
 def detect_project_languages(project_root: Path | str) -> Dict[str, Dict[str, Any]]:

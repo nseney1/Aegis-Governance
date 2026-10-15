@@ -9,7 +9,6 @@ falsification: 0 findings in 10 sessions → prune
 target_paths:
   - "aegis_cli/hooks/**"
   - aegis_core/sync.py
-  - install/hooks/pre-commit
   - aegis
 triggers:
   - cli_modification

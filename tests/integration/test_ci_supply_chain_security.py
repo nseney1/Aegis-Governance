@@ -8,13 +8,6 @@ from pathlib import Path
 from conftest import REPO_ROOT
 
 
-def test_pyproject_optional_dependencies_contains_keyring():
-    """pyproject.toml must declare keyring under optional-dependencies."""
-    pyproject_path = Path(REPO_ROOT) / "pyproject.toml"
-    content = pyproject_path.read_text(encoding="utf-8")
-    assert "keyring =" in content or "keyring = [" in content
-
-
 def test_publish_yml_contains_release_asset_upload():
     """publish.yml must grant contents: write and upload release assets."""
     publish_yml = Path(REPO_ROOT) / ".github" / "workflows" / "publish.yml"

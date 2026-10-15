@@ -8,7 +8,7 @@ prediction: "Will catch platform-specific assumptions (GNU vs BSD tools, path se
 falsification: 0 unique findings in 10 sessions → prune
 target_paths:
   - "aegis_cli/platforms/*.py"
-  - "install/hooks/*"
+  - aegis_cli/hooks/management.py
   - Makefile
 expiry_sessions: 15
 expiry_days: 60

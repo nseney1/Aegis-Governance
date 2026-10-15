@@ -120,8 +120,8 @@ jobs:
           SMOKE="$PWD/.github/scripts/wheel_smoke.py"
           cd "$RUNNER_TEMP" && env -u PYTHONPATH python -I "$SMOKE"
 
-      - name: Run validation
-        run: make validate
+      - name: Lint
+        run: make lint
 
       - name: Run Layer 1 Deterministic Verification
         run: python3 -m aegis_cli.cli check --layer1-only

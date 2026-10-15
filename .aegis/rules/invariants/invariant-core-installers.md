@@ -11,8 +11,7 @@ falsification: 0 findings in 15 sessions → prune
 target_paths:
   - "aegis_cli/platforms/*.py"
   - aegis_cli/cli.py
-  - "install/hooks/*"
-  - install/aegis.conf.example
+  - aegis_cli/hooks/management.py
   - Makefile
 expiry_sessions: 15
 expiry_days: 60

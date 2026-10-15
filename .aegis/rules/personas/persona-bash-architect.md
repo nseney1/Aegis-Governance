@@ -7,7 +7,7 @@ hypothesis: A persona specialized in bash scripting improves the quality of shel
 prediction: Deploying this persona will increase the robustness of install and safety scripts.
 falsification: Shell scripts are deprecated and no longer used.
 target_paths:
-  - "install/hooks/*"
+  - aegis_cli/hooks/management.py
   - Makefile
 expiry_sessions: 60
 impact_weight: 0.8

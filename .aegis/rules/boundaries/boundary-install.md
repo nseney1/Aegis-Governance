@@ -7,7 +7,10 @@ hypothesis: Install scripts represent high-risk operations requiring elevated go
 prediction: Enforcing bulwark mode for install operations prevents unsafe system changes.
 falsification: Install scripts operate in a fully sandboxed environment with no persistent effects.
 target_paths:
-  - "install/**"
+  - aegis_cli/init.py
+  - aegis_cli/uninstall.py
+  - aegis_cli/hooks/management.py
+  - "aegis_cli/platforms/*.py"
 expiry_sessions: 80
 impact_weight: 1.0
 minimum_mode: bulwark
@@ -26,7 +29,7 @@ fitness:
 
 # Boundary: Install Escalation
 
-Target: `install/`
+Target: the code that writes outside the repository on install and uninstall (`aegis init`, `aegis uninstall`, `aegis hook install`, platform adapters)
 Minimum Mode: bulwark
 
 Description: Escalation boundary for install and uninstall scripts, requiring Bulwark+ review protocols.
