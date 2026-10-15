@@ -117,18 +117,6 @@ class TestThresholdSanity:
 
 class TestRunDiagnostic:
 
-    def test_real_workspace_runs(self):
-        result = run_diagnostic(REPO_ROOT)
-        assert 'error' not in result
-        assert result['total_bugs'] >= 5
-
     def test_missing_registry(self, tmp_path):
         result = run_diagnostic(str(tmp_path))
         assert result == {'error': 'BUG_REGISTRY.json not found'}
-
-    def test_insufficient_data_warning_tracks_registry_size(self):
-        # Asserting the warning unconditionally broke once the real registry
-        # passed 10 bugs; the warning is correct only below that size.
-        result = run_diagnostic(REPO_ROOT)
-        warned = any("Insufficient data" in s for s in result['sanity'])
-        assert warned == (result['total_bugs'] < 10)

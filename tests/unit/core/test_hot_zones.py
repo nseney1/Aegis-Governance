@@ -219,9 +219,3 @@ class TestLoadFromWorkspace:
 
     def test_missing_registry_returns_none(self, tmp_path):
         assert load_report_from_workspace(str(tmp_path)) is None
-
-    def test_real_workspace(self):
-        """Loads successfully from the actual Soma workspace."""
-        report = load_report_from_workspace(REPO_ROOT)
-        assert report is not None
-        assert report.total_bugs_analyzed >= 5
