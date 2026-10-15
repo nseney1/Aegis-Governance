@@ -45,6 +45,11 @@ _canonical_workspace: Workspace | None = None
 _execution_enabled = False
 _client_platform: str = "gemini"
 
+NOT_GOVERNED_MESSAGE = 'not an Aegis workspace: run "aegis init" in your repository'
+# Set by run_stdio_server when no governed workspace resolves; every tools/call
+# then answers with it. In-process callers of handle_request leave it None.
+_workspace_error: Optional[str] = None
+
 
 _READ_TOOLS = frozenset({
     "aegis_scan", "aegis_grade", "aegis_coverage",
@@ -330,7 +335,17 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
                     "message": "Server not initialized"
                 }
             }
-            
+
+        if _workspace_error:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": _workspace_error}],
+                    "isError": True,
+                },
+            }
+
         name = params.get("name")
         args = params.get("arguments", {})
 
@@ -553,26 +568,34 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
 
+def _resolve_workspace() -> tuple[Optional[Workspace], str]:
+    """Bind the operator pin (AEGIS_WORKSPACE) or the cwd, without creating anything.
+
+    Returns (workspace, "") or (None, reason). $HOME is never a workspace (H8): v3.3
+    created ~/.aegis/rules there, so that directory existing proves nothing.
+    """
+    try:
+        candidate = os.environ.get("AEGIS_WORKSPACE") or os.getcwd()
+        from pathlib import Path
+        if Path(candidate).resolve() == Path.home().resolve():
+            return None, f"{candidate} is the home directory"
+        return Workspace.confine(candidate), ""
+    except (ValueError, OSError, RuntimeError) as exc:
+        return None, str(exc) or type(exc).__name__
+
+
 def run_stdio_server():
     global _canonical_workspace
     global _execution_enabled
+    global _workspace_error
 
-    workspace_env = os.environ.get("AEGIS_WORKSPACE") or os.getcwd()
-    try:
-        from pathlib import Path
-        ws_candidate = Path(workspace_env).resolve()
-        home_resolved = Path.home().resolve()
-        if ws_candidate == home_resolved and not (home_resolved / ".aegis" / "rules").is_dir():
-            (home_resolved / ".aegis" / "rules").mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
-    try:
-        from .security import Workspace
-        _canonical_workspace = Workspace.confine(workspace_env)
-    except ValueError as e:
-        print(f"Error: Invalid canonical workspace: {e}", file=sys.stderr)
-        return 1
-        
+    _canonical_workspace, reason = _resolve_workspace()
+    _workspace_error = None
+    if _canonical_workspace is None:
+        # Stay up so the host does not mark the server failed; tools/call explains why.
+        _workspace_error = NOT_GOVERNED_MESSAGE
+        print(f"aegis-mcp: {NOT_GOVERNED_MESSAGE} ({reason})", file=sys.stderr)
+
     _execution_enabled = os.environ.get("AEGIS_EXECUTION_ENABLED") == "1"
     requests_processed = 0
 
