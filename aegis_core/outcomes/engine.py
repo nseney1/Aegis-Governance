@@ -33,9 +33,13 @@ def _get_changed_files(workspace: str) -> list[str]:
         )
         files = []
         for line in out.splitlines():
-            line = line.strip()
-            if len(line) > 3:
-                files.append(line[3:].strip())
+            # "XY path": the status is exactly 2 columns plus a space, and X is a
+            # space for unstaged edits, so the line must not be stripped first.
+            path = line[3:].strip()
+            if " -> " in path:
+                path = path.split(" -> ", 1)[1]
+            if path:
+                files.append(path)
         return files
     except Exception:
         return []
@@ -59,11 +63,7 @@ def run_outcome_engine(workspace: Optional[Workspace | Path | str] = None, mod: 
     from aegis_core.outcomes.fitness import append_fitness_log, compute_fitness_signals, update_cell_fitness
     from aegis_core.outcomes.harvest import capture_git_signals
     from aegis_core.outcomes.insights import commit_insight_cursor, read_human_insight_signals
-    from aegis_core.outcomes.telemetry import (
-        capture_build_outcome,
-        capture_mcp_outcomes,
-        capture_test_outcome,
-    )
+    from aegis_core.outcomes.telemetry import capture_mcp_outcomes
 
     m = mod if mod is not None else sys.modules[__name__]
     resolve_ws = getattr(m, "resolve_workspace", resolve_workspace)
@@ -79,8 +79,6 @@ def run_outcome_engine(workspace: Optional[Workspace | Path | str] = None, mod: 
     read_gen = getattr(m, "read_generation", read_generation)
     generation = read_gen(ws)
 
-    cap_test = getattr(m, "capture_test_outcome", capture_test_outcome)
-    cap_build = getattr(m, "capture_build_outcome", capture_build_outcome)
     cap_git = getattr(m, "capture_git_signals", capture_git_signals)
     cap_mcp = getattr(m, "capture_mcp_outcomes", capture_mcp_outcomes)
     read_insights = getattr(m, "read_human_insight_signals", read_human_insight_signals)
@@ -91,17 +89,9 @@ def run_outcome_engine(workspace: Optional[Workspace | Path | str] = None, mod: 
     append_log = getattr(m, "append_fitness_log", append_fitness_log)
     update_fitness = getattr(m, "update_cell_fitness", update_cell_fitness)
 
-    outcomes = {}
-    print("    Detecting test runner...", end=" ")
-    outcomes["tests"] = cap_test(ws)
-    test_result = outcomes["tests"]
-    if test_result.get("verified"):
-        status = "✅ PASSED" if test_result["passed"] else "❌ FAILED"
-        print(f"{test_result.get('framework', '?')} → {status}")
-    else:
-        print(f"skipped ({test_result.get('reason', 'unknown')})")
-
-    outcomes["build"] = cap_build(ws)
+    # No test/build execution here (ADR 0005 AD-1): the engine never runs a project's
+    # own commands. Signals come from git history, explicit reports and human insights.
+    outcomes: dict[str, Any] = {}
     outcomes["git"] = cap_git(ws)
     mcp = cap_mcp(ws)
     if mcp:

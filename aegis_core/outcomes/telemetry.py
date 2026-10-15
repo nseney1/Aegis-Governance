@@ -1,13 +1,10 @@
-"""Verifiable outcome reflection: test/build runner execution, MCP outcomes, and ambient telemetry."""
+"""Outcome telemetry: MCP-reported outcomes and ambient verification evidence."""
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-import re
 import secrets
-import shutil
-import subprocess
 import sys
 from typing import Any, Optional
 
@@ -22,111 +19,33 @@ __all__ = [
     "record_verification_telemetry",
 ]
 
-VERIFY_TIMEOUT = int(os.environ.get("AEGIS_VERIFY_TIMEOUT", "60"))
+# Aegis no longer executes a project's own test or build commands (ADR 0005 AD-1, D1).
+# The outcome engine ran on every MCP shutdown and session-close hook, so these helpers
+# ran the repo's Makefile/npm/cargo/go targets through a shell once per server and
+# credited the exit codes to rules. Outcomes now come only from explicit reports and CI.
+# The five names below survive only because the aegis_core.outcomes and
+# aegis_core.telemetry facades re-export them; they go with those facades (D7).
+IMPLICIT_EXECUTION_REMOVED = "implicit test/build execution was removed (ADR 0005 AD-1)"
+VERIFY_TIMEOUT = 60
 
 
 def _run_verify(cmd: str, cwd: str, timeout: Optional[int] = None) -> Optional[dict]:
-    """Run a verification command, return (exit_code, stdout_snippet)."""
-    if timeout is None:
-        timeout = VERIFY_TIMEOUT
-    try:
-        result = subprocess.run(
-            cmd, cwd=cwd, shell=True, timeout=timeout,
-            capture_output=True, text=True
-        )
-        stdout_tail = "\n".join(result.stdout.strip().split("\n")[-10:])
-        stderr_tail = "\n".join(result.stderr.strip().split("\n")[-5:])
-        if result.returncode == 127:
-            return {
-                "exit_code": 127,
-                "passed": None,
-                "error": f"command not found: {cmd}",
-                "stdout_tail": stdout_tail[:500],
-                "stderr_tail": stderr_tail[:300],
-            }
-        return {
-            "exit_code": result.returncode,
-            "passed": result.returncode == 0,
-            "stdout_tail": stdout_tail[:500],
-            "stderr_tail": stderr_tail[:300],
-        }
-    except subprocess.TimeoutExpired:
-        return {"exit_code": -1, "passed": None, "error": "timeout"}
-    except FileNotFoundError:
-        return None
-    except Exception as e:
-        return {"exit_code": -1, "passed": None, "error": str(e)[:200]}
+    raise RuntimeError(f"{IMPLICIT_EXECUTION_REMOVED}; refusing to run {cmd!r}")
 
 
 def detect_test_runner(workspace: str) -> tuple[Optional[str], Optional[str]]:
-    """Detect which test framework this project uses. Returns (command, framework_name)."""
-    checks = [
-        ("pyproject.toml", "pytest", "python3 -m pytest --tb=short -q --no-header 2>&1", 'python3 -c "import pytest" 2>/dev/null'),
-        ("setup.cfg", "pytest", "python3 -m pytest --tb=short -q --no-header 2>&1", 'python3 -c "import pytest" 2>/dev/null'),
-        ("pytest.ini", "pytest", "python3 -m pytest --tb=short -q --no-header 2>&1", 'python3 -c "import pytest" 2>/dev/null'),
-        ("jest.config.js", "jest", "npx jest --silent --no-coverage 2>&1", "npx jest --version 2>/dev/null"),
-        ("jest.config.ts", "jest", "npx jest --silent --no-coverage 2>&1", "npx jest --version 2>/dev/null"),
-        ("vitest.config.ts", "vitest", "npx vitest run --reporter=dot 2>&1", "npx vitest --version 2>/dev/null"),
-        ("package.json", "npm test", "npm test 2>&1", None),
-        ("go.mod", "go test", "go test ./... -count=1 -short 2>&1", "go version 2>/dev/null"),
-        ("Cargo.toml", "cargo test", "cargo test --quiet 2>&1", "cargo --version 2>/dev/null"),
-    ]
-
-    for config_file, name, test_cmd, check_cmd in checks:
-        if os.path.exists(os.path.join(workspace, config_file)):
-            if check_cmd is None or subprocess.run(check_cmd, shell=True, cwd=workspace, capture_output=True).returncode == 0:
-                return test_cmd, name
-
-    # Fallback to Makefile test target (only if make binary is installed)
-    makefile = os.path.join(workspace, "Makefile")
-    if os.path.exists(makefile) and shutil.which("make") is not None:
-        try:
-            with open(makefile, "r", encoding="utf-8") as f:
-                if re.search(r"^test\s*:", f.read(), re.MULTILINE):
-                    return "make test", "Makefile"
-        except Exception:
-            pass
-
+    """Never proposes a command: nothing in Aegis runs a project's test suite."""
     return None, None
 
 
 def capture_test_outcome(workspace: str) -> dict:
-    """Ground truth: run tests and capture exit code."""
-    test_cmd, framework = detect_test_runner(workspace)
-    if not test_cmd:
-        return {"verified": False, "reason": "no test runner detected", "passed": None}
-
-    outcome = _run_verify(test_cmd, cwd=workspace)
-    if not outcome or outcome.get("passed") is None:
-        return {"verified": False, "reason": outcome.get("error", "test execution failed") if outcome else "failed to run", "passed": None, "framework": framework}
-
-    return {
-        "verified": True,
-        "passed": outcome["passed"],
-        "exit_code": outcome["exit_code"],
-        "framework": framework,
-        "snippet": outcome["stdout_tail"] if not outcome["passed"] else "",
-    }
+    """Always unverified: test results reach the ledger only through explicit reports or CI."""
+    return {"verified": False, "reason": IMPLICIT_EXECUTION_REMOVED, "passed": None}
 
 
 def capture_build_outcome(workspace: str) -> dict:
-    """Strong signal: did the build succeed?"""
-    build_checks = [
-        ("Cargo.toml", "cargo check --quiet 2>&1"),
-        ("package.json", "npm run build --if-present 2>&1"),
-        ("go.mod", "go vet ./... 2>&1"),
-    ]
-    for config_file, cmd in build_checks:
-        if os.path.exists(os.path.join(workspace, config_file)):
-            outcome = _run_verify(cmd, cwd=workspace)
-            if outcome and outcome.get("passed") is not None:
-                return {
-                    "verified": True,
-                    "passed": outcome["passed"],
-                    "exit_code": outcome["exit_code"],
-                    "command": cmd.split()[0],
-                }
-    return {"verified": False, "reason": "no build system detected", "passed": None}
+    """Always unverified: build results reach the ledger only through explicit reports or CI."""
+    return {"verified": False, "reason": IMPLICIT_EXECUTION_REMOVED, "passed": None}
 
 
 def capture_mcp_outcomes(workspace: Workspace | Path | str) -> list[dict]:
