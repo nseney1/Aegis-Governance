@@ -147,7 +147,7 @@ def _read_slots_file(path: Path, label: str) -> Dict[str, str]:
 
 def _filter_workspace_slots(raw: Mapping[str, str]) -> Tuple[Dict[str, str], List[str]]:
     """Drop keys a repo file may not set; keep ast_driver_<ext> only as a packaged-driver opt-in."""
-    from aegis_core.ast.detect import packaged_driver_for_extension
+    from aegis_core.ast.detect import names_packaged_driver, packaged_driver_for_extension
 
     kept: Dict[str, str] = {}
     warnings: List[str] = []
@@ -170,7 +170,7 @@ def _filter_workspace_slots(raw: Mapping[str, str]) -> Tuple[Dict[str, str], Lis
                 "define AST driver commands; set it in ~/.aegis/slots.yaml"
             )
             continue
-        if _names_packaged_driver(value, config):
+        if names_packaged_driver(value, config):
             kept[key] = value
             continue
         warnings.append(
@@ -179,19 +179,6 @@ def _filter_workspace_slots(raw: Mapping[str, str]) -> Tuple[Dict[str, str], Lis
         )
         kept[key] = config["default_command"]
     return kept, warnings
-
-
-def _names_packaged_driver(value: str, config: Mapping[str, Any]) -> bool:
-    """True for a selector `aegis init` provisioned, including legacy forms like 'python3 .soma/drivers/rust_ast.py'."""
-    parts = value.split()
-    canonical = str(config["default_command"]).split()
-    if len(parts) != len(canonical):
-        return False
-    if parts[-1] not in (f".aegis/drivers/{config['driver_filename']}", f".soma/drivers/{config['driver_filename']}"):
-        return False
-    if canonical[0] == "{python}" and parts[0] in ("python3", "python"):
-        return True
-    return parts[:-1] == canonical[:-1]
 
 
 def _normalize_platform_name(platform: str) -> str:

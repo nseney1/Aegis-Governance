@@ -3,10 +3,12 @@
 Driver argv never comes from repository content (H5). It comes from drivers
 registered in code, from the user-scope ~/.aegis/slots.yaml, or from the packaged
 templates in aegis_core/ast/drivers/templates, which a repo slot can only opt in to.
+A driver that is configured but cannot run safely here is "unavailable": parse_file
+raises with the reason, so verification fails closed instead of skipping the file.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
@@ -70,23 +72,30 @@ def _command_plan(command: str, ext: str) -> _DriverPlan:
     """Plan for a trusted command string (registered in code or from user scope)."""
     if ext == ".rs" and "rust_ast.py" in command:
         return _DriverPlan(label=command, in_process_rust=True)
-    parts = _split_command(command)
+    try:
+        parts = _split_command(command)
+    except ValueError as exc:  # unbalanced quotes
+        return _DriverPlan(label=command, unavailable=f"the driver command cannot be parsed: {exc}")
     if parts and _is_python_name(parts[0]):
         parts[0] = resolve_driver_executable(parts[0]) or parts[0]
     return _DriverPlan(label=command, argv=tuple(parts))
 
 
+def _inside_workspace(path: Union[Path, str], ws_root: Path) -> bool:
+    """True if ``path``, as written or with symlinks resolved, lies inside the workspace."""
+    roots = (Path(os.path.abspath(ws_root)), ws_root.resolve())
+    for candidate in (Path(os.path.abspath(path)), Path(path).resolve()):
+        for root in roots:
+            if candidate == root or root in candidate.parents:
+                return True
+    return False
+
+
 def _trusted_interpreter(name: str, ws_root: Path) -> Optional[str]:
     """Resolve an interpreter on PATH, refusing relative PATH hits and binaries inside the workspace."""
     found = shutil.which(name)
-    if not found or not os.path.isabs(found):
+    if not found or not os.path.isabs(found) or _inside_workspace(found, ws_root):
         return None
-    for candidate in (Path(found), Path(found).resolve()):
-        try:
-            candidate.relative_to(ws_root.resolve())
-            return None
-        except ValueError:
-            continue
     return found
 
 
@@ -103,6 +112,17 @@ def _packaged_plan(ext: str, ws_root: Path) -> Optional[_DriverPlan]:
     interpreter = _PACKAGED_INTERPRETERS.get(filename)
     if interpreter is None:
         return None
+    if _inside_workspace(_TEMPLATES_DIR, ws_root):
+        # node resolves require('typescript') by walking up from the script's real path, and
+        # go reads go.mod/go.work (and their toolchain lines) upward from the template dir:
+        # from a project-local venv both walks reach the repo's own node_modules or go.mod.
+        return _DriverPlan(
+            label=label,
+            unavailable=(
+                f"the packaged {filename} driver is installed inside the workspace ({_TEMPLATES_DIR}), "
+                f"where {interpreter} would load modules from the repository; install aegis outside it"
+            ),
+        )
     exe = _trusted_interpreter(interpreter, ws_root)
     if exe is None:
         return _DriverPlan(
@@ -115,6 +135,48 @@ def _packaged_plan(ext: str, ws_root: Path) -> Optional[_DriverPlan]:
     if filename == "go_ast.go":
         return _DriverPlan(label=label, argv=(exe,), cwd=str(_TEMPLATES_DIR), go_template=template)
     return _DriverPlan(label=label, argv=(exe, template), cwd=str(_TEMPLATES_DIR))
+
+
+def _user_command_plan(command: str, ext: str, ws_root: Path) -> Optional[_DriverPlan]:
+    """Plan for a command from ~/.aegis/slots.yaml.
+
+    The text is trusted but the process runs with cwd = workspace, so an executable or
+    path argument that lands inside the repo would let repo content pick the code that
+    runs. A provisioned selector such as 'node .aegis/drivers/ts_ast.js' means the
+    packaged driver, never the repo's copy.
+    """
+    from aegis_core.ast.detect import names_packaged_driver, packaged_driver_for_extension
+
+    config = packaged_driver_for_extension(ext)
+    if config is not None and names_packaged_driver(command, config):
+        return _packaged_plan(ext, ws_root)
+
+    plan = _command_plan(command, ext)
+    if plan.in_process_rust or plan.unavailable or not plan.argv:
+        return plan
+    where = f"the ~/.aegis/slots.yaml driver for '{ext}'"
+    argv = list(plan.argv)
+    first = _split_command(command)[0]
+    if not _is_python_name(first):  # python names already resolved to sys.executable, which runs aegis itself
+        if os.path.isabs(first) or os.sep in first or (os.altsep and os.altsep in first):
+            if _inside_workspace(ws_root / first, ws_root):
+                return replace(plan, unavailable=f"{where} runs {first}, which is inside the workspace")
+        else:
+            found = shutil.which(first)
+            if not found:
+                # Never let the child search PATH: with cwd = workspace, relative entries resolve into the repo.
+                return replace(plan, unavailable=f"{where} needs '{first}', which was not found on PATH")
+            trusted = _trusted_interpreter(first, ws_root)
+            if trusted is None:
+                return replace(
+                    plan,
+                    unavailable=f"{where} needs '{first}', which resolves to {found} inside the workspace or via a relative PATH entry",
+                )
+            argv[0] = trusted
+    for arg in argv[1:]:
+        if arg and not arg.startswith("-") and os.path.lexists(ws_root / arg) and _inside_workspace(ws_root / arg, ws_root):
+            return replace(plan, unavailable=f"{where} passes {arg}, which is inside the workspace")
+    return replace(plan, argv=tuple(argv))
 
 
 class ASTDriverRegistry:
@@ -153,7 +215,7 @@ class ASTDriverRegistry:
         ws_root = Path(as_workspace(workspace_root).root)
         user_cmd = SlotRegistry.load_user(ws_root).get_ast_driver(clean_ext)
         if user_cmd:
-            return _command_plan(user_cmd, clean_ext)
+            return _user_command_plan(user_cmd, clean_ext, ws_root)
         # A repo slot only opts in; its value is never run (see SlotRegistry.load).
         if SlotRegistry.load(ws_root).get_ast_driver(clean_ext):
             return _packaged_plan(clean_ext, ws_root)
@@ -164,11 +226,13 @@ class ASTDriverRegistry:
         extension: str,
         workspace_root: Optional[Union[Path, str, Workspace]] = None,
     ) -> Optional[str]:
-        """Describe the driver that would run for an extension, or None if none is configured and runnable."""
+        """Describe the driver configured for an extension, or None if none is configured.
+
+        A driver that is configured but cannot run here still returns its label, so callers
+        go on to parse_file, which raises with the reason (verification fails closed).
+        """
         plan = self.plan_driver(extension, workspace_root=workspace_root)
-        if plan is None or plan.unavailable:
-            return None
-        return plan.label
+        return plan.label if plan is not None else None
 
     def get_configured_extensions(
         self,
