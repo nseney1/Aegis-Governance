@@ -33,9 +33,13 @@ def _get_changed_files(workspace: str) -> list[str]:
         )
         files = []
         for line in out.splitlines():
-            line = line.strip()
-            if len(line) > 3:
-                files.append(line[3:].strip())
+            # "XY path": the status is exactly 2 columns plus a space, and X is a
+            # space for unstaged edits, so the line must not be stripped first.
+            path = line[3:].strip()
+            if " -> " in path:
+                path = path.split(" -> ", 1)[1]
+            if path:
+                files.append(path)
         return files
     except Exception:
         return []
