@@ -35,7 +35,6 @@ Explore deep-dive guides for production architecture, workflows, and specificati
 | [**Verification Pipeline**](docs/guides/verification_pipeline.md) | Two-Layer Verification Engine | Layer 1 AST checks, Layer 2 Adversarial Rebuttal, Gate 4.5 |
 | [**Rule Lifecycle**](docs/guides/rule_lifecycle.md) | Evolutionary Rule Management | 4 rule types, Wilson scoring, promotion/demotion, zero-touch decay |
 | [**Skill Graph**](docs/guides/skill_graph.md) | Horizontal Agent Collaboration | 15 skills, typed envelopes (<150 tokens), file-buffered handoffs |
-| [**Compatibility**](docs/project/COMPATIBILITY.md) | SemVer 2.0 Guarantee | Formal backwards compatibility contracts starting at v1.0.0 |
 | [**Security Policy**](SECURITY.md) | Vulnerability Reporting & Scopes | Security tiering, isolation, and responsible disclosure |
 
 ---
@@ -104,13 +103,13 @@ The system's foundational rules — 18 inherited behavioral defaults:
 | [documentation](rules/.oracles/documentation.md) | model_decision | ADRs, actionable READMEs, Mermaid diagrams |
 | [destructive-ops](rules/destructive-ops.md) | model_decision | Dry-run mandates for IaC, database mutations, bulk git |
 | [git-workflow](rules/.oracles/git-workflow.md) | model_decision | Conventional commits, .gitignore verification |
-| [desktop-automation](rules/desktop-automation.md) | model_decision | PyAutoGUI/xdotool safety, focus verification |
-| [core-change-protocol](rules/core-change-protocol.md) | model_decision | Approval gates for core modifications |
+| desktop-automation | model_decision | PyAutoGUI/xdotool safety, focus verification |
+| [core-change-protocol](.aegis/rules/invariants/invariant-core-change-protocol.md) | model_decision | Approval gates for core modifications |
 | [tdd-protocol](rules/.oracles/tdd-protocol.md) | model_decision | Test-driven development with sequential phase gates |
-| [optional-import-guard](rules/.oracles/optional-import-guard.md) | model_decision | try/except guards on optional dependencies |
-| [ci-green-before-release](rules/ci-green-before-release.md) | model_decision | Requires green CI before release or deployment |
-| [gitflow-review-gate](rules/gitflow-review-gate.md) | model_decision | Enforces reviewed Gitflow branch transitions |
-| [no-pre-existing-excuse](rules/no-pre-existing-excuse.md) | model_decision | Requires fixing relevant pre-existing failures instead of dismissing them |
+| [optional-import-guard](.aegis/rules/traps/trap-optional-import-guard.md) | model_decision | try/except guards on optional dependencies |
+| [ci-green-before-release](.aegis/rules/invariants/invariant-ci-green-before-release.md) | model_decision | Requires green CI before release or deployment |
+| [gitflow-review-gate](.aegis/rules/invariants/invariant-gitflow-review-gate.md) | model_decision | Enforces reviewed Gitflow branch transitions |
+| [no-pre-existing-excuse](.aegis/rules/invariants/invariant-no-pre-existing-excuse.md) | model_decision | Requires fixing relevant pre-existing failures instead of dismissing them |
 
 ---
 
@@ -143,7 +142,6 @@ All changes are gated by `aegis check`:
 - **Zero Runtime Dependencies**: Pure Python standard library (`dependencies = []`).
 - **Scale-to-Zero**: Zero daemons, zero background threads, zero persistent idle consumption.
 - **Local Privacy**: Telemetry and evidence remain strictly local in `.aegis/evidence/`.
-- Complete script, tool, and module reference catalog is available in [SCRIPTS.md](docs/architecture/scripts.md).
 
 ---
 

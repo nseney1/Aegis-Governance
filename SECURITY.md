@@ -27,17 +27,17 @@ Include, where you can: the affected version (`VERSION` or `pip show aegis-guard
 - Confirm or reject it, with reasoning, within 30 days.
 - Coordinate a fix and a GitHub Security Advisory with you before public disclosure, and credit you unless you prefer otherwise.
 
-Fixed vulnerabilities are recorded in [`docs/project/CHANGELOG.md`](docs/project/CHANGELOG.md) and the [Bug Registry](docs/project/BUG_REGISTRY.json). No bug bounty is offered.
+Fixed vulnerabilities are recorded in [`docs/project/CHANGELOG.md`](docs/project/CHANGELOG.md) and the Bug Registry. No bug bounty is offered.
 
 ## Scope
 
 In scope: defects that break one of the security guarantees below.
 
-- **Workspace Path Confinement** ([`aegis_core/workspace/confinement.py`](aegis_core/workspace/confinement.py), [`aegis_mcp/security.py`](aegis_mcp/security.py)): any tool or CLI operation reading or writing outside the canonical `AEGIS_WORKSPACE` via `confine_path_internal` / `confine_path`, including via client-supplied `workspace` arguments, `..` traversal segments, symlink escapes, null bytes, Windows extended device namespaces (`\\?\`), alternate data streams (`:`), or reserved device names (`CON`, `NUL`, `COM1`, etc.).
-- **Cryptographic Single-Use Execution Receipts** ([`aegis_core/receipts.py`](aegis_core/receipts.py), [`aegis_mcp/server.py`](aegis_mcp/server.py)): invoking a Write or Execute tier MCP tool without a valid receipt from `aegis_request_receipt`; redeeming a receipt twice (bypassing `ReceiptManager` burn-before-compare semantics); redeeming after the 300s TTL expiry, across sessions, for altered arguments, or after target files (`file_path`, `files`, `context_files`) or `.aegis/rules/` digests have changed; or running an Execute tier tool when `AEGIS_EXECUTION_ENABLED` is not `1`.
+- **Workspace Path Confinement** ([`aegis_core/workspace/confinement.py`](aegis_core/workspace/confinement.py), `aegis_mcp/security.py`): any tool or CLI operation reading or writing outside the canonical `AEGIS_WORKSPACE` via `confine_path_internal` / `confine_path`, including via client-supplied `workspace` arguments, `..` traversal segments, symlink escapes, null bytes, Windows extended device namespaces (`\\?\`), alternate data streams (`:`), or reserved device names (`CON`, `NUL`, `COM1`, etc.).
+- **Cryptographic Single-Use Execution Receipts** (`aegis_core/receipts.py`, [`aegis_mcp/server.py`](aegis_mcp/server.py)): invoking a Write or Execute tier MCP tool without a valid receipt from `aegis_request_receipt`; redeeming a receipt twice (bypassing `ReceiptManager` burn-before-compare semantics); redeeming after the 300s TTL expiry, across sessions, for altered arguments, or after target files (`file_path`, `files`, `context_files`) or `.aegis/rules/` digests have changed; or running an Execute tier tool when `AEGIS_EXECUTION_ENABLED` is not `1`.
 - **Rule Integrity & Manifest Signing** ([`aegis_core/integrity.py`](aegis_core/integrity.py)): a tampered rule file or `.aegis/rules/manifest.json` passing `aegis_generate_manifest` / `verify_manifest` cryptographic verification (HMAC-SHA256 / Ed25519 envelope verification via `hmac.compare_digest`), or a key file in `.aegis/keys/manifest.key` created with permissions wider than `0600`.
 - **MCP Projection Denylist & Information Partitioning** ([`aegis_mcp/projection.py`](aegis_mcp/projection.py)): `project_response` leaking denylisted keys (`task_plan`, `prompt`, `raw_prompt`, `__globals__`, `__builtins__`, `__subclasses__`, `__dict__`, `__mro__`, `__class__`) or allowing arbitrary code execution during field projection.
-- **Evidence Ledger Integrity** (`.aegis/evidence/signals.jsonl`, [`aegis_core/telemetry.py`](aegis_core/telemetry.py), [`aegis_sdk/telemetry.py`](aegis_sdk/telemetry.py)): a replayed or mutated telemetry event bypassing `EventConflictError` or `StaleGenerationError`, lost records under concurrent writers (`.aegis/evidence/.signals.lock`), or epoch cutover corruption.
+- **Evidence Ledger Integrity** (`.aegis/evidence/signals.jsonl`, `aegis_core/telemetry.py`, `aegis_sdk/telemetry.py`): a replayed or mutated telemetry event bypassing `EventConflictError` or `StaleGenerationError`, lost records under concurrent writers (`.aegis/evidence/.signals.lock`), or epoch cutover corruption.
 - **Supply Chain**: the release pipeline ([`.github/workflows/publish.yml`](.github/workflows/publish.yml)) publishing artifacts that differ from the verified build, or risks around the `aegis-guardrails` PyPI distribution.
 - Secrets that leak into the repository, the wheel, or the sdist.
 
@@ -45,7 +45,7 @@ In scope: defects that break one of the security guarantees below.
 
 - **A malicious or compromised agent with direct shell access.** Receipts authorize a specific, state-bound MCP operation; they do not sandbox an OS user or shell process that can modify files on disk directly.
 - **Any MCP client sharing the same stdio server pipe.** Every client connected to the same stdio process can call `aegis_request_receipt`. Process isolation is the responsibility of the host launching `python3 -m aegis_mcp`.
-- Open bugs already listed in the [Bug Registry](docs/project/BUG_REGISTRY.json) and [Known Issues — Windows](docs/KNOWN_ISSUES_WINDOWS.md), unless you demonstrate a security impact not described there.
+- Open bugs already listed in the Bug Registry and Known Issues — Windows, unless you demonstrate a security impact not described there.
 - Vulnerabilities in third-party AI agents, MCP hosts, Python itself, or the host OS.
 - Denial of service against the local stdio server by its own connected client.
 - Releases older than the supported lines.

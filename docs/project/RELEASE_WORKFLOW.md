@@ -1,7 +1,7 @@
 # Aegis Guardrails Release Workflow (GitFlow)
 
 > Codified release procedure for **Aegis Guardrails** (`v3.2.0`) governed releases.
-> Enforces [`rules/gitflow-review-gate.md`](../../rules/gitflow-review-gate.md) and [`rules/ci-green-before-release.md`](../../rules/ci-green-before-release.md).
+> Enforces [`invariant-gitflow-review-gate`](../../.aegis/rules/invariants/invariant-gitflow-review-gate.md) and [`invariant-ci-green-before-release`](../../.aegis/rules/invariants/invariant-ci-green-before-release.md).
 
 ## Two-Stage GitFlow Pipeline
 
