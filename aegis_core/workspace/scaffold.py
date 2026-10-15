@@ -64,15 +64,18 @@ def ensure_runtime_gitignore(aegis_dir: Path, dry_run: bool = False) -> str:
     """Make ``.aegis/.gitignore`` list every runtime-state entry; return what happened.
 
     Returns ``"created"``, ``"updated"``, ``"unchanged"``, ``"symlink"`` (left alone:
-    appending would edit whatever file it points at) or ``"dry-run"``. Existing lines
-    are never rewritten; an entry already present, or negated by the user, is not
+    appending would edit whatever file it points at) or ``"dry-run"``. Existing bytes
+    are never rewritten, line endings included, and the appended block uses CRLF when
+    the file already does; an entry already present, or negated by the user, is not
     added again, so repeated runs are byte-identical.
     """
     path = Path(aegis_dir) / ".gitignore"
     if path.is_symlink():
         return "symlink"
-    # surrogateescape: a user line in another encoding is written back byte-for-byte.
-    existing = path.read_text(encoding="utf-8", errors="surrogateescape") if path.is_file() else None
+    # Decode bytes, not text mode: universal newlines would turn CRLF into LF on the
+    # way back out. surrogateescape round-trips a line in another encoding untouched.
+    existing = path.read_bytes().decode("utf-8", "surrogateescape") if path.is_file() else None
+    eol = "\r\n" if existing and "\r\n" in existing else "\n"
     present = {line.strip().lstrip("!") for line in (existing or "").splitlines()}
     missing = [entry for entry in RUNTIME_STATE_IGNORES if entry not in present]
     if existing is not None and not missing:
@@ -80,12 +83,12 @@ def ensure_runtime_gitignore(aegis_dir: Path, dry_run: bool = False) -> str:
     if dry_run:
         return "dry-run"
 
-    block = "".join(f"{entry}\n" for entry in missing)
+    block = "".join(f"{entry}{eol}" for entry in missing)
     if existing is None:
         content = _GITIGNORE_HEADER + block
     else:
-        sep = "" if existing == "" or existing.endswith("\n") else "\n"
-        header = "" if _GITIGNORE_HEADER.splitlines()[0] in existing else _GITIGNORE_HEADER
+        sep = "" if existing == "" or existing.endswith("\n") else eol
+        header = "" if _GITIGNORE_HEADER.splitlines()[0] in existing else _GITIGNORE_HEADER.replace("\n", eol)
         content = existing + sep + header + block
 
     path.parent.mkdir(parents=True, exist_ok=True)

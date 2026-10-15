@@ -153,3 +153,56 @@ class TestInitWritesRuntimeGitignore:
 
         assert shared.read_text(encoding="utf-8") == "shared-rule\n"
         assert ".aegis/.gitignore is a symlink" in capsys.readouterr().out
+
+
+class TestLineEndingsAreKept:
+    """Appending must not rewrite the user's bytes; the block follows their line ending."""
+
+    def _seed(self, repo: Path, raw: bytes) -> Path:
+        gi = repo / ".aegis" / ".gitignore"
+        gi.parent.mkdir()
+        gi.write_bytes(raw)
+        return gi
+
+    def test_crlf_file_keeps_bytes_and_block_uses_crlf(self, repo: Path, home: Path):
+        original = b"keep-me\r\nother\r\n"
+        gi = self._seed(repo, original)
+
+        assert run_init(_init_args(repo, home)) == 0
+
+        out = gi.read_bytes()
+        assert out.startswith(original)
+        appended = out[len(original):]
+        assert appended and appended.endswith(b"\r\n")
+        assert appended.count(b"\n") == appended.count(b"\r\n")
+        assert _ignored(repo, ".aegis/receipts.jsonl")
+        assert _ignored(repo, ".aegis/keep-me")
+
+    def test_crlf_file_without_final_newline(self, repo: Path, home: Path):
+        original = b"keep-me\r\nother"
+        gi = self._seed(repo, original)
+
+        assert run_init(_init_args(repo, home)) == 0
+
+        out = gi.read_bytes()
+        assert out.startswith(original + b"\r\n")
+        assert out.count(b"\n") == out.count(b"\r\n")
+        assert _ignored(repo, ".aegis/other")
+
+    def test_crlf_rerun_is_byte_identical(self, repo: Path, home: Path):
+        gi = self._seed(repo, b"keep-me\r\n")
+        assert run_init(_init_args(repo, home)) == 0
+        first = gi.read_bytes()
+
+        assert run_init(_init_args(repo, home)) == 0
+
+        assert gi.read_bytes() == first
+
+    def test_lone_cr_file_keeps_bytes(self, repo: Path, home: Path):
+        original = b"keep-me\rother\r"
+        gi = self._seed(repo, original)
+
+        assert run_init(_init_args(repo, home)) == 0
+
+        assert gi.read_bytes().startswith(original)
+        assert _ignored(repo, ".aegis/receipts.jsonl")
