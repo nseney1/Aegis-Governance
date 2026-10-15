@@ -36,6 +36,10 @@ def run_scan(args: argparse.Namespace) -> int:
     from aegis_core.workspace import Workspace
 
     raw_ws = getattr(args, "workspace", None)
+    # Discovery walks up from a missing path, so its error would name a parent.
+    if raw_ws and not os.path.exists(raw_ws):
+        print(f"Error: workspace path does not exist: {raw_ws}", file=sys.stderr)
+        return EXIT_USAGE
     try:
         root = Workspace.resolve(raw_ws).root.resolve()
     except WorkspaceError as exc:

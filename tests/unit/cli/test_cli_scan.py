@@ -94,6 +94,15 @@ def test_explicit_workspace_without_aegis_exits_2(tmp_path, capsys):
     assert "not an Aegis workspace" in captured.err
 
 
+def test_explicit_workspace_that_does_not_exist_is_named(tmp_path, capsys):
+    missing = tmp_path / "no-such-dir"
+    rc = main(["scan", "--workspace", str(missing), "app.py"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err == f"Error: workspace path does not exist: {missing}\n"
+
+
 def test_missing_file_argument_is_a_usage_error(ws, capsys):
     with pytest.raises(SystemExit) as exc:
         main(["scan"])
