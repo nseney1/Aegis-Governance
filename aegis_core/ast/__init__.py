@@ -7,6 +7,7 @@ from .schema import (
     ImportNode,
     MutationPoint,
     NormalizedAST,
+    SymbolDef,
 )
 from .drivers.python import parse_python_ast
 from .runner import (
@@ -16,18 +17,22 @@ from .runner import (
     ASTDriverTimeoutError,
     NoDriverConfiguredError,
 )
-
 from .detect import (
     LANGUAGE_DEFINITIONS,
     detect_project_languages,
     provision_ast_driver_slots,
     resolve_recommended_drivers,
 )
-from . import match
+from . import match, policy
 from .match import (
     ASTTriggerVisitor,
     match_ast_triggers,
     prefilter_ast_tokens,
+)
+from .policy import (
+    evaluate_forbid_ast,
+    extract_normalized_ast,
+    synthesize_planned_ast,
 )
 
 triggers = match
@@ -45,12 +50,17 @@ __all__ = [
     "MutationPoint",
     "NoDriverConfiguredError",
     "NormalizedAST",
+    "SymbolDef",
     "detect_project_languages",
+    "evaluate_forbid_ast",
+    "extract_normalized_ast",
     "match",
     "match_ast_triggers",
     "parse_python_ast",
+    "policy",
     "prefilter_ast_tokens",
     "provision_ast_driver_slots",
     "resolve_recommended_drivers",
+    "synthesize_planned_ast",
     "triggers",
 ]

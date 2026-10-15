@@ -1,17 +1,15 @@
-"""Normalized AST data contracts and serialization schemas.
-
-Defines the language-agnostic Intermediate Representation (IR) for Layer 1 static
-analysis, decoupling checkers (call graph, import guard, mutation testing) from
-Python-specific AST traversal.
-"""
+"""Normalized AST data contracts and serialization schemas."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
+import ast
 import json
+import os
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 __all__ = [
     "DefinitionNode",
+    "SymbolDef",
     "CallSiteNode",
     "ImportNode",
     "MutationPoint",
@@ -19,54 +17,106 @@ __all__ = [
 ]
 
 
+def _normalize_ast_token(token: str) -> str:
+    """Normalize trigger/symbol identifier by stripping leading '@', trailing '()', and whitespace."""
+    t = token.strip()
+    if t.startswith("@"):
+        t = t[1:].strip()
+    if t.endswith("()"):
+        t = t[:-2].strip()
+    return t
+
+
+def _extract_python_decorators_from_tree(tree: ast.AST) -> Tuple[str, ...]:
+    """Extract normalized decorator names from a parsed Python AST."""
+    decorators: List[str] = []
+
+    def _resolve_name(node: ast.AST) -> Optional[str]:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            parent = _resolve_name(node.value)
+            return f"{parent}.{node.attr}" if parent else node.attr
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            for dec in node.decorator_list:
+                target = dec.func if isinstance(dec, ast.Call) else dec
+                dec_name = _resolve_name(target)
+                if dec_name:
+                    norm = _normalize_ast_token(dec_name)
+                    if norm and norm not in decorators:
+                        decorators.append(norm)
+    return tuple(decorators)
+
+
+def _extract_python_decorators_from_file(file_path: str) -> Tuple[str, ...]:
+    """Extract decorator names from a Python file on disk if readable and valid."""
+    if not file_path or not file_path.endswith(".py") or not os.path.isfile(file_path):
+        return ()
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            source = f.read()
+        if not source.strip():
+            return ()
+        return _extract_python_decorators_from_tree(ast.parse(source, filename=file_path))
+    except Exception:
+        return ()
+
+
 @dataclass(frozen=True)
 class DefinitionNode:
     """Represents a declared symbol (function, method, class, or constant)."""
 
     name: str
-    kind: str = "function"  # "function", "method", "class", "constant"
+    kind: str = "function"
     line: int = 1
     is_exported: bool = False
     class_name: Optional[str] = None
+    decorators: Tuple[str, ...] = ()
 
     @property
     def is_method(self) -> bool:
         return self.kind == "method" or bool(self.class_name)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        res: Dict[str, Any] = {
             "name": self.name,
             "kind": self.kind,
             "line": self.line,
             "is_exported": self.is_exported,
             "class_name": self.class_name,
         }
+        if self.decorators:
+            res["decorators"] = list(self.decorators)
+        return res
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> DefinitionNode:
+        raw_decs = data.get("decorators") or ()
         return cls(
             name=str(data["name"]),
             kind=str(data.get("kind", "function")),
             line=int(data.get("line", 1)),
             is_exported=bool(data.get("is_exported", False)),
             class_name=str(data["class_name"]) if data.get("class_name") else None,
+            decorators=tuple(str(d) for d in raw_decs),
         )
+
+
+SymbolDef = DefinitionNode
 
 
 @dataclass(frozen=True)
 class CallSiteNode:
     """Represents an invocation of a target identifier or member expression."""
-
     target: str
     line: int = 1
     caller_scope: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "target": self.target,
-            "line": self.line,
-            "caller_scope": self.caller_scope,
-        }
+        return {"target": self.target, "line": self.line, "caller_scope": self.caller_scope}
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> CallSiteNode:
@@ -140,12 +190,12 @@ class MutationPoint:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class NormalizedAST:
     """Language-agnostic Normalized AST representation."""
 
-    file_path: str
-    language: str
+    file_path: str = "<unknown>"
+    language: str = "python"
     definitions: Tuple[DefinitionNode, ...] = ()
     call_sites: Tuple[CallSiteNode, ...] = ()
     imports: Tuple[ImportNode, ...] = ()
@@ -153,11 +203,104 @@ class NormalizedAST:
     version: str = "1.0"
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
-        if not self.file_path:
+    def __init__(
+        self,
+        file_path: str = "<unknown>",
+        language: str = "python",
+        definitions: Sequence[Any] = (),
+        call_sites: Sequence[Any] = (),
+        imports: Sequence[Any] = (),
+        mutation_points: Sequence[Any] = (),
+        version: str = "1.0",
+        metadata: Optional[Mapping[str, Any]] = None,
+        *,
+        symbols: Optional[Sequence[Any]] = None,
+        calls: Optional[Sequence[Any]] = None,
+        decorators: Optional[Sequence[Any]] = None,
+    ) -> None:
+        if not file_path:
             raise ValueError("file_path cannot be empty")
-        if not self.language:
+        if not language:
             raise ValueError("language cannot be empty")
+
+        raw_defs = symbols if (symbols is not None and not definitions) else definitions
+        coerced_defs: List[DefinitionNode] = []
+        for d in raw_defs or ():
+            if isinstance(d, DefinitionNode):
+                coerced_defs.append(d)
+            elif isinstance(d, Mapping):
+                coerced_defs.append(DefinitionNode.from_dict(d))
+            elif isinstance(d, str):
+                coerced_defs.append(DefinitionNode(name=_normalize_ast_token(d)))
+            else:
+                coerced_defs.append(d)
+
+        raw_calls = calls if (calls is not None and not call_sites) else call_sites
+        coerced_calls: List[CallSiteNode] = []
+        for c in raw_calls or ():
+            if isinstance(c, CallSiteNode):
+                coerced_calls.append(c)
+            elif isinstance(c, str):
+                coerced_calls.append(CallSiteNode(target=_normalize_ast_token(c)))
+            elif isinstance(c, Mapping):
+                coerced_calls.append(CallSiteNode.from_dict(c))
+            else:
+                coerced_calls.append(c)
+
+        coerced_imports: List[ImportNode] = []
+        for imp in imports or ():
+            if isinstance(imp, ImportNode):
+                coerced_imports.append(imp)
+            elif isinstance(imp, str):
+                norm = _normalize_ast_token(imp)
+                coerced_imports.append(ImportNode(source=norm, imported_symbols=(norm.split(".")[-1],) if norm else ()))
+            elif isinstance(imp, Mapping):
+                coerced_imports.append(ImportNode.from_dict(imp))
+            else:
+                coerced_imports.append(imp)
+
+        coerced_mutations: List[MutationPoint] = []
+        for m in mutation_points or ():
+            if isinstance(m, MutationPoint):
+                coerced_mutations.append(m)
+            elif isinstance(m, Mapping):
+                coerced_mutations.append(MutationPoint.from_dict(m))
+            else:
+                coerced_mutations.append(m)
+
+        meta_dict: Dict[str, Any] = dict(metadata) if metadata else {}
+        if decorators is not None:
+            meta_dict["decorators"] = [_normalize_ast_token(d) if isinstance(d, str) else str(d) for d in decorators]
+
+        object.__setattr__(self, "file_path", file_path)
+        object.__setattr__(self, "language", language)
+        object.__setattr__(self, "definitions", tuple(coerced_defs))
+        object.__setattr__(self, "call_sites", tuple(coerced_calls))
+        object.__setattr__(self, "imports", tuple(coerced_imports))
+        object.__setattr__(self, "mutation_points", tuple(coerced_mutations))
+        object.__setattr__(self, "version", version)
+        object.__setattr__(self, "metadata", meta_dict)
+
+    @property
+    def symbols(self) -> Tuple[DefinitionNode, ...]:
+        return self.definitions
+
+    @property
+    def calls(self) -> Tuple[str, ...]:
+        return tuple(c.target if hasattr(c, "target") else str(c) for c in self.call_sites)
+
+    @property
+    def decorators(self) -> Tuple[str, ...]:
+        meta_decs = self.metadata.get("decorators") if isinstance(self.metadata, dict) else None
+        if meta_decs is not None:
+            return tuple(_normalize_ast_token(str(d)) for d in meta_decs if d)
+        def_decs: List[str] = []
+        for d in self.definitions:
+            for dec in getattr(d, "decorators", ()) or ():
+                norm = _normalize_ast_token(str(dec))
+                if norm and norm not in def_decs:
+                    def_decs.append(norm)
+        return tuple(def_decs) if def_decs else _extract_python_decorators_from_file(self.file_path)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

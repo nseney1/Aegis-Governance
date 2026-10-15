@@ -43,7 +43,7 @@ def warn(message: str) -> None:
     stdout is the JSON-RPC transport — never write diagnostics there.
     """
     try:
-        print(f"[soma-mcp] {message}", file=sys.stderr, flush=True)
+        print(f"[aegis-mcp] {message}", file=sys.stderr, flush=True)
     except Exception:
         pass
 

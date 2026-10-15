@@ -10,28 +10,71 @@ import shutil
 from typing import Any, Optional
 
 
-__all__ = ["PlatformAdapter", "PlatformInstallResult", "detect_platform", "get_rules_dir"]
+__all__ = [
+    "PlatformAdapter",
+    "PlatformInstallResult",
+    "detect_platform",
+    "detect_platforms",
+    "get_rules_dir",
+]
+
+
+def _detect_markers_in_dir(root: Path) -> list[str]:
+    """Return all platforms whose markers exist directly under ``root``."""
+    found: list[str] = []
+    if (root / ".gemini").is_dir():
+        found.append("gemini")
+    if (root / ".claude").is_dir() or (root / "CLAUDE.md").is_file():
+        found.append("claude")
+    if (root / ".cursor").is_dir() or (root / ".cursorrules").is_file():
+        found.append("cursor")
+    if (
+        (root / ".github" / "copilot").is_dir()
+        or (root / ".github" / "copilot-instructions.md").is_file()
+    ):
+        found.append("copilot")
+    if (root / ".kiro").is_dir():
+        found.append("kiro")
+    return found
+
+
+def detect_platforms(
+    project_root: Path | str | None = None,
+    home: Path | str | None = None,
+) -> list[str]:
+    """Detect all AI platforms from project and home directory markers in deterministic order.
+
+    Order: ['gemini', 'claude', 'cursor', 'copilot', 'kiro'].
+    Defaults to ['gemini'] if no markers match.
+    """
+    ordered = ["gemini", "claude", "cursor", "copilot", "kiro"]
+    detected_set: set[str] = set()
+
+    if project_root is not None:
+        detected_set.update(_detect_markers_in_dir(Path(project_root)))
+    else:
+        detected_set.update(_detect_markers_in_dir(Path.cwd()))
+
+    if home is not None:
+        detected_set.update(_detect_markers_in_dir(Path(home)))
+    elif project_root is None:
+        default_home = Path(os.environ.get("HOME") or Path.home())
+        detected_set.update(_detect_markers_in_dir(default_home))
+
+    result = [p for p in ordered if p in detected_set]
+    return result if result else ["gemini"]
 
 
 def detect_platform(project_root: Path | str) -> str:
-    """Detect the AI platform from directory markers.
+    """Detect the primary AI platform from directory markers.
 
     Returns: 'gemini' | 'claude' | 'cursor' | 'copilot' | 'kiro' | 'unknown'
     """
-    project_root = Path(project_root)
+    root = Path(project_root)
+    if not _detect_markers_in_dir(root):
+        return "unknown"
+    return detect_platforms(root)[0]
 
-    if (project_root / ".gemini").is_dir():
-        return "gemini"
-    if (project_root / ".claude").is_dir():
-        return "claude"
-    if (project_root / ".cursor").is_dir() or (project_root / ".cursorrules").is_file():
-        return "cursor"
-    if (project_root / ".github" / "copilot").is_dir() or (project_root / ".github" / "copilot-instructions.md").is_file():
-        return "copilot"
-    if (project_root / ".kiro").is_dir():
-        return "kiro"
-
-    return "unknown"
 
 
 def get_rules_dir(

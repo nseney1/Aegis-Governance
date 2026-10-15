@@ -95,8 +95,20 @@ def get_governance(args=None):
 
 
 def normalize_tool_call(tool_name: str, arguments: dict) -> Tuple[str, dict]:
-    """Identity pass-through for tool calls in Aegis v2.0."""
-    return tool_name, dict(arguments or {})
+    """Normalize tool calls and canonicalize v4 rule aliases."""
+    norm = dict(arguments or {})
+    if tool_name == "aegis_report_outcome":
+        if "cells_used" not in norm:
+            if "rules_used" in norm:
+                norm["cells_used"] = norm["rules_used"]
+            elif "rules" in norm:
+                norm["cells_used"] = norm["rules"]
+    elif tool_name == "aegis_capture_insight":
+        if "scaffold_rule" in norm and "scaffold_wall" not in norm and "scaffold_invariant" not in norm:
+            norm["scaffold_wall"] = bool(norm.get("scaffold_rule"))
+        if "rule_id" in norm and "wall_id" not in norm and "invariant_id" not in norm:
+            norm["wall_id"] = norm.get("rule_id")
+    return tool_name, norm
 
 
 def _cell_diagnostic(relative_path: str, message: str) -> dict:
@@ -484,6 +496,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "outcome": {"type": "string", "enum": ["success", "partial", "failure", "tp", "fp", "pass", "fail"], "description": "Verification outcome."},
                 "idempotency_key": {"type": "string", "description": "Unique key to prevent duplicate reporting."},
+                "rules_used": {"type": "array", "items": {"type": "string"}, "description": "Rule IDs used in verification."},
                 "cells_used": {"type": "array", "items": {"type": "string"}, "description": "Rule names used in verification."},
                 "tests_passed": {"type": "boolean"},
                 "rework_count": {"type": "integer", "default": 0},
@@ -492,7 +505,7 @@ TOOL_DEFINITIONS = [
                 "view": {"type": "string", "enum": ["full", "summary", "ids"]},
                 "fields": {"type": "array", "items": {"type": "string"}},
             },
-            "required": ["outcome", "idempotency_key"],
+            "required": ["outcome"],
         },
     },
     {
@@ -512,6 +525,8 @@ TOOL_DEFINITIONS = [
                 "context_files": {"type": "array", "items": {"type": "string"}, "description": "Context file paths."},
                 "source_conversation": {"type": "string"},
                 "category": {"type": "string"},
+                "scaffold_rule": {"type": "boolean", "default": False},
+                "rule_id": {"type": "string"},
                 "scaffold_wall": {"type": "boolean", "default": False},
                 "wall_id": {"type": "string"},
                 "receipt": {"type": "string", "description": "Execution receipt ID obtained from aegis_request_receipt."},

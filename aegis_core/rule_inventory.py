@@ -11,8 +11,8 @@ from typing import Iterable, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
-class CellInventoryEntry:
-    """One immutable cell snapshot captured during inventory."""
+class RuleInventoryEntry:
+    """One immutable rule snapshot captured during inventory."""
 
     relative_path: str
     absolute_path: str
@@ -22,15 +22,15 @@ class CellInventoryEntry:
 
 
 @dataclass(frozen=True)
-class CellInventory:
+class RuleInventory:
     """Stable entries and their aggregate content fingerprint."""
 
-    entries: Tuple[CellInventoryEntry, ...]
+    entries: Tuple[RuleInventoryEntry, ...]
     fingerprint: str
 
 
-class CellInventoryError(RuntimeError):
-    """The cell tree could not be inventoried safely and consistently."""
+class RuleInventoryError(RuntimeError):
+    """The rule tree could not be inventoried safely and consistently."""
 
     def __init__(
         self,
@@ -43,6 +43,11 @@ class CellInventoryError(RuntimeError):
         self.path = os.path.abspath(path)
         self.cause = cause
         super().__init__(f"cell inventory {operation} failed for {self.path}: {message}")
+
+
+CellInventoryEntry = RuleInventoryEntry
+CellInventory = RuleInventory
+CellInventoryError = RuleInventoryError
 
 
 # On Windows os.stat() reports st_ctime as the creation time while os.fstat()
@@ -242,7 +247,7 @@ def inventory_rules(workspace: str) -> CellInventory:
         aggregate.update(entry.relative_path.encode("utf-8") + b"\0")
         aggregate.update(bytes.fromhex(entry.digest))
         aggregate.update(b"\0")
-    return CellInventory(entries=tuple(entries), fingerprint=aggregate.hexdigest())
+    return RuleInventory(entries=tuple(entries), fingerprint=aggregate.hexdigest())
 
 
 def find_rules_dirs(workspace: str | Path) -> List[Path]:
@@ -253,8 +258,8 @@ def find_rules_dirs(workspace: str | Path) -> List[Path]:
 
 
 @dataclass(frozen=True)
-class CellMatch:
-    """Represents a cell whose target_paths matched changed files."""
+class RuleMatch:
+    """Represents a rule whose target_paths matched changed files."""
 
     cell_id: str
     cell_type: str
@@ -263,14 +268,26 @@ class CellMatch:
     matched_files: Tuple[str, ...]
     first_matching_target: Optional[str] = None
 
+    @property
+    def rule_id(self) -> str:
+        return self.cell_id
 
-def find_matching_cells(
+    @property
+    def rule_type(self) -> str:
+        return self.cell_type
+
+    @property
+    def rule_path(self) -> str:
+        return self.cell_path
+
+
+def find_matching_rules(
     cells_dir: str | Path,
     changed_files: Iterable[str],
     repo_root: str = "",
     allow_basename_match: bool = True,
-) -> List[CellMatch]:
-    """Find all cells in cells_dir whose target_paths match changed_files."""
+) -> List[RuleMatch]:
+    """Find all rules in cells_dir whose target_paths match changed_files."""
     from aegis_core.yaml import parse_frontmatter
 
     cells_path = Path(cells_dir)
@@ -291,7 +308,7 @@ def find_matching_cells(
             rel = norm_f.lstrip("/")
         rel_modified.append(rel)
 
-    matches: List[CellMatch] = []
+    matches: List[RuleMatch] = []
     for md_file in sorted(cells_path.rglob("*.md")):
         if md_file.name == "README.md":
             continue
@@ -328,7 +345,7 @@ def find_matching_cells(
                 matched_for_cell.append(rel_file)
 
         if matched_for_cell:
-            matches.append(CellMatch(
+            matches.append(RuleMatch(
                 cell_id=cell_id,
                 cell_type=cell_type,
                 cell_path=str(md_file.resolve()),
@@ -340,16 +357,44 @@ def find_matching_cells(
     return matches
 
 
+def load_parsed_rules(workspace: str | Path, include_expired: bool = False) -> list[dict]:
+    """Load and parse all rules from workspace using canonical inventory_rules + parse_frontmatter."""
+    from aegis_core.yaml import _get_body, parse_frontmatter
+
+    inventory = inventory_rules(str(workspace))
+    rules: list[dict] = []
+    for entry in inventory.entries:
+        if os.path.basename(entry.relative_path) == "README.md":
+            continue
+        try:
+            content = entry.content.decode("utf-8")
+            fm = parse_frontmatter(content)
+        except Exception:
+            continue
+        if not fm or not isinstance(fm, dict):
+            continue
+        if not include_expired and fm.get("expired_at"):
+            continue
+        parsed = dict(fm)
+        parsed["_name"] = os.path.splitext(os.path.basename(entry.absolute_path))[0]
+        parsed["_path"] = entry.relative_path
+        parsed["_body"] = _get_body(content)
+        parsed["_full"] = content
+        parsed["_digest"] = entry.digest
+        rules.append(parsed)
+    return rules
+
+
 from aegis_core.yaml import parse_frontmatter
 
 # Backward-compatible and canonical engineering aliases
-RuleInventory = CellInventory
-RuleInventoryEntry = CellInventoryEntry
-RuleInventoryError = CellInventoryError
-RuleMatch = CellMatch
+CellInventory = RuleInventory
+CellInventoryEntry = RuleInventoryEntry
+CellInventoryError = RuleInventoryError
+CellMatch = RuleMatch
 inventory_cells = inventory_rules
 find_cells_dirs = find_rules_dirs
-find_matching_rules = find_matching_cells
+find_matching_cells = find_matching_rules
 
 __all__ = [
     "CellInventory",
@@ -366,6 +411,7 @@ __all__ = [
     "find_rules_dirs",
     "inventory_cells",
     "inventory_rules",
+    "load_parsed_rules",
     "parse_frontmatter",
 ]
 

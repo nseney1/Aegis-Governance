@@ -12,6 +12,8 @@ class LockResource:
     FITNESS = "fitness"
     RECEIPTS = "receipts"
     MIGRATION = "migration"
+    SWARM = "swarm"
+    PACKS = "packs"
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,10 @@ class WorkspaceLayout:
     @property
     def evidence_dir(self) -> Path:
         return self.aegis_dir / "evidence"
+
+    @property
+    def evidence_archive_dir(self) -> Path:
+        return self.evidence_dir / "archive"
 
     @property
     def locks_dir(self) -> Path:
@@ -58,10 +64,26 @@ class WorkspaceLayout:
     def skills_dir(self) -> Path:
         return self.aegis_dir / "skills"
 
+    @property
+    def swarm_dir(self) -> Path:
+        return self.aegis_dir / "swarm"
+
+    @property
+    def handoffs_dir(self) -> Path:
+        return self.swarm_dir / "handoffs"
+
     # Canonical files
     @property
     def signals_file(self) -> Path:
         return self.evidence_dir / "signals.jsonl"
+
+    @property
+    def checkpoint_rollup_file(self) -> Path:
+        return self.evidence_dir / "checkpoint_rollup.json"
+
+    @property
+    def evidence_outcomes_file(self) -> Path:
+        return self.evidence_dir / "outcomes.jsonl"
 
     @property
     def outcomes_file(self) -> Path:
@@ -70,6 +92,10 @@ class WorkspaceLayout:
     @property
     def receipts_file(self) -> Path:
         return self.aegis_dir / "receipts.jsonl"
+
+    @property
+    def leases_file(self) -> Path:
+        return self.swarm_dir / "leases.json"
 
     @property
     def gate_events_file(self) -> Path:

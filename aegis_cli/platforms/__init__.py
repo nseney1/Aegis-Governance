@@ -7,6 +7,7 @@ from aegis_cli.platforms.base import (
     PlatformAdapter,
     PlatformInstallResult,
     detect_platform,
+    detect_platforms,
     get_rules_dir,
 )
 from aegis_cli.platforms.claude import ClaudeAdapter
@@ -50,6 +51,7 @@ __all__ = [
     "get_adapter",
     "register_adapter",
     "detect_platform",
+    "detect_platforms",
     "get_rules_dir",
 ]
 

@@ -103,7 +103,7 @@ class RuleCache:
             if not mappings:
                 mappings.append({
                     k: v for k, v in data.items()
-                    if k not in {"generated_at", "cell_count", "signature", "version"}
+                    if k not in {"generated_at", "cell_count", "rule_count", "signature", "version"}
                 })
 
             for mapping in mappings:

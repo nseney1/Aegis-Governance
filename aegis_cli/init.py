@@ -15,7 +15,7 @@ from pathlib import Path
 
 from aegis_cli.base import CommandCategory, AegisCommand
 
-__all__ = ["run_init", "InitCommand"]
+__all__ = ["run_init", "InitCommand", "seed_workspace_rules", "generate_mcp_config"]
 
 # ── Starter Pack ────────────────────────────────────────────────────────────
 # The 5 rules that deliver immediate value on any project, any language.
@@ -250,9 +250,30 @@ def install_starter_rules(
     return _install_named_rules(rules_dir, STARTER_RULES, force=force, dry_run=dry_run)
 
 
+def seed_workspace_rules(
+    project_root: Path | str,
+    preset: str = "standard",
+    force: bool = False,
+    dry_run: bool = False,
+) -> list[str]:
+    """Seed <project_root>/.aegis/rules/ with preset rules and generate manifest.json."""
+    root = Path(project_root).resolve()
+    ws_rules_dir = root / ".aegis" / "rules"
+    seeded = install_rules(ws_rules_dir, preset=preset, dry_run=dry_run, force=force)
+    if not dry_run and ws_rules_dir.is_dir():
+        from aegis_core.integrity import generate_manifest, save_manifest
+        manifest = generate_manifest(ws_rules_dir)
+        save_manifest(root, manifest)
+    return seeded
+
+
 # ── MCP Config ──────────────────────────────────────────────────────────────
 
-def generate_mcp_config(project_root: Path, dry_run: bool = False) -> None:
+def generate_mcp_config(
+    project_root: Path,
+    dry_run: bool = False,
+    portable: bool = False,
+) -> None:
     """Create or merge .mcp.json for the governed project.
 
     Existing servers and unrelated keys are preserved. Invalid or structurally
@@ -260,13 +281,6 @@ def generate_mcp_config(project_root: Path, dry_run: bool = False) -> None:
     """
     workspace = str(Path(project_root).resolve())
     mcp_file = Path(workspace) / ".mcp.json"
-
-    soma_entry = {
-        "command": "python3",
-        "args": ["-m", "aegis_mcp"],
-        "cwd": workspace,
-        "env": {"AEGIS_WORKSPACE": workspace},
-    }
 
     if dry_run:
         print(f"  Would create/update: {mcp_file}")
@@ -285,7 +299,21 @@ def generate_mcp_config(project_root: Path, dry_run: bool = False) -> None:
         data["mcpServers"] = servers
     elif not isinstance(servers, dict):
         raise ValueError(f"{mcp_file} field 'mcpServers' must be a JSON object")
-    servers["soma"] = soma_entry
+
+    if portable:
+        servers["aegis"] = {
+            "command": "aegis-mcp",
+            "args": [],
+        }
+    else:
+        soma_entry = {
+            "command": "python3",
+            "args": ["-m", "aegis_mcp"],
+            "cwd": workspace,
+            "env": {"AEGIS_WORKSPACE": workspace},
+        }
+        servers["aegis"] = dict(soma_entry)
+        servers["soma"] = soma_entry
 
     mode = None
     if mcp_file.exists():
@@ -407,6 +435,8 @@ def run_init(args: argparse.Namespace) -> int:
     pre_existing = {p.stem for p in rules_dir.glob("*.md")} if rules_dir.is_dir() else set()
     ws.scaffold(minimal=(preset == "minimal"), dry_run=dry_run)
     installed = install_rules(rules_dir, preset=preset, dry_run=dry_run, force=force)
+    if not getattr(args, "mcp_only", False):
+        seed_workspace_rules(project_root, preset=preset, force=force, dry_run=dry_run)
 
     for name in installed:
         if dry_run:
@@ -431,7 +461,11 @@ def run_init(args: argparse.Namespace) -> int:
 
     # 7. MCP config (if requested)
     if getattr(args, "mcp", False):
-        generate_mcp_config(project_root, dry_run=dry_run)
+        generate_mcp_config(
+            project_root,
+            dry_run=dry_run,
+            portable=bool(getattr(args, "portable", False)),
+        )
 
     # 7.5. Install pre-commit hook
     no_hooks = getattr(args, "no_hooks", False) or not getattr(args, "hooks", True)

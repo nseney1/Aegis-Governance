@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+import sys
+from typing import Any, Dict, List, Optional
 
 from aegis_mcp.jit_engine import express as jit_express
 from aegis_mcp.registry import _STATUS_FAIL, _STATUS_PASS, _get_workspace
@@ -10,6 +11,7 @@ from aegis_mcp.registry import _STATUS_FAIL, _STATUS_PASS, _get_workspace
 __all__ = [
     "_handle_audit_security",
     "_handle_audit_performance",
+    "handle_scan",
     "_handle_scan",
 ]
 
@@ -87,12 +89,49 @@ def _handle_audit_performance(args: dict, gov) -> dict:
     }
 
 
-def _handle_scan(args: dict, gov) -> dict:
+def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
+    """Resolve ${SLOT.*} placeholders in JIT scan results for the active MCP client platform."""
+    try:
+        from aegis_core.skills.slots import SlotRegistry
+        if hasattr(SlotRegistry, "for_platform"):
+            reg = SlotRegistry.for_platform(platform, workspace=str(workspace))
+        else:
+            reg = SlotRegistry.load(str(workspace))
+    except Exception:
+        return res
+
+    for top_key in ("context", "guidance"):
+        val = res.get(top_key)
+        if isinstance(val, str) and "${SLOT." in val:
+            res[top_key] = reg.resolve(val, strict=False)
+
+    seen_ids = set()
+    for list_key in ("relevant_rules", "relevant_cells", "genome_guidance", "target_constraints", "wall_warnings", "invariant_warnings"):
+        items = res.get(list_key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict) or id(item) in seen_ids:
+                continue
+            seen_ids.add(id(item))
+            for field in ("content", "body", "guidance", "summary", "hypothesis", "prediction"):
+                val = item.get(field)
+                if isinstance(val, str) and "${SLOT." in val:
+                    item[field] = reg.resolve(val, strict=False)
+    return res
+
+
+def handle_scan(
+    args: dict,
+    gov: Any = None,
+    planned_symbols: Optional[List[str]] = None,
+) -> dict:
+    """Execute JIT rule scan for target files and optional pre-edit planned_symbols."""
     try:
         workspace = _get_workspace(args)
     except ValueError as exc:
         return {"error": str(exc), "status": _STATUS_FAIL}
-    files = args.get("files", None)
+    files = args.get("files", None) if isinstance(args, dict) else None
     if files is not None:
         if not isinstance(files, (list, tuple)) or not all(isinstance(f, str) for f in files):
             return {"error": "'files' must be a list of file paths", "status": _STATUS_FAIL}
@@ -100,9 +139,26 @@ def _handle_scan(args: dict, gov) -> dict:
             files = [str(workspace.confine_path(f)[1]) for f in files]
         except ValueError as exc:
             return {"error": str(exc), "status": _STATUS_FAIL}
-    planned_symbols = args.get("planned_symbols", None)
-    if planned_symbols is not None:
-        if not isinstance(planned_symbols, (list, tuple)) or not all(isinstance(s, str) for s in planned_symbols):
-            return {"error": "'planned_symbols' must be a list of strings", "status": _STATUS_FAIL}
-        planned_symbols = list(planned_symbols)
-    return jit_express(workspace, changed_files=files, planned_symbols=planned_symbols)
+    symbols = planned_symbols
+    if symbols is None and isinstance(args, dict):
+        raw_symbols = args.get("planned_symbols")
+        if raw_symbols is not None:
+            if not isinstance(raw_symbols, (list, tuple)) or not all(isinstance(s, str) for s in raw_symbols):
+                return {"error": "'planned_symbols' must be a list of strings", "status": _STATUS_FAIL}
+            symbols = list(raw_symbols)
+
+    res = jit_express(workspace, changed_files=files, planned_symbols=symbols)
+    if not isinstance(res, dict):
+        return res
+
+    client_platform = None
+    if isinstance(args, dict):
+        client_platform = args.get("_client_platform") or args.get("platform")
+    if not client_platform:
+        server_mod = sys.modules.get("aegis_mcp.server")
+        client_platform = getattr(server_mod, "_client_platform", "gemini") if server_mod else "gemini"
+
+    return _interpolate_scan_slots(res, str(client_platform), workspace)
+
+
+_handle_scan = handle_scan

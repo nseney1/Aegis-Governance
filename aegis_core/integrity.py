@@ -42,8 +42,10 @@ def generate_manifest(rules_dir: str | Path) -> dict:
 
         {
             "cells": {"relative/path.md": "sha256:abc123...", ...},
+            "rules": {"relative/path.md": "sha256:abc123...", ...},
             "generated_at": "2026-10-01T19:00:00Z",
             "cell_count": 42,
+            "rule_count": 42,
         }
     """
     rules_dir_str = str(rules_dir)
@@ -51,8 +53,10 @@ def generate_manifest(rules_dir: str | Path) -> dict:
     if not os.path.isdir(rules_dir_str):
         return {
             "cells": cells,
+            "rules": dict(cells),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "cell_count": 0,
+            "rule_count": 0,
         }
 
     for dirpath, _dirnames, filenames in os.walk(rules_dir_str):
@@ -67,8 +71,10 @@ def generate_manifest(rules_dir: str | Path) -> dict:
 
     return {
         "cells": cells,
+        "rules": dict(cells),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "cell_count": len(cells),
+        "rule_count": len(cells),
     }
 
 
@@ -92,7 +98,9 @@ def verify_manifest(rules_dir: str | Path, manifest: dict) -> list:
     if not isinstance(manifest, dict):
         raise ValueError(f"Manifest must be a JSON object, got {type(manifest).__name__}")
     issues = []
-    raw_known = manifest.get("cells", {})
+    raw_known = manifest.get("cells") if "cells" in manifest else manifest.get("rules", {})
+    if not isinstance(raw_known, dict):
+        raw_known = {}
     known_cells = {str(k).replace("\\", "/"): v for k, v in raw_known.items()}
     rules_dir_str = str(rules_dir)
 
@@ -207,7 +215,8 @@ def rotate_key(workspace: str | Path) -> str:
 
 def _canonical_cells_json(manifest: dict) -> bytes:
     """Produce a deterministic JSON encoding of the cells dict for signing."""
-    return json.dumps(manifest.get("cells", {}), sort_keys=True).encode("utf-8")
+    mapping = manifest.get("cells") if "cells" in manifest else manifest.get("rules", {})
+    return json.dumps(mapping if isinstance(mapping, dict) else {}, sort_keys=True).encode("utf-8")
 
 
 def sign_manifest(manifest: dict, key: bytes) -> str:
@@ -271,6 +280,22 @@ def save_manifest(workspace: str | Path, manifest: dict) -> None:
     atomic_write_bytes(manifest_path, manifest_bytes)
 
 
+def sync_manifest_if_present(workspace: str | Path) -> dict | None:
+    """Regenerate and save .aegis/rules/manifest.json if it exists and has no HMAC key mismatch."""
+    manifest_path = _manifest_path(workspace)
+    if not os.path.isfile(manifest_path):
+        return None
+    existing = load_manifest(workspace)
+    key = load_key(workspace)
+    if key is not None and existing is not None:
+        if "signature" not in existing or not verify_signature(existing, key):
+            return None
+    rules_dir = os.path.dirname(manifest_path)
+    manifest = generate_manifest(rules_dir)
+    save_manifest(workspace, manifest)
+    return manifest
+
+
 def _warn(message: str) -> None:
     """Emit a diagnostic on stderr (stdout is the JSON-RPC transport)."""
     try:
@@ -289,5 +314,6 @@ __all__ = [
     "verify_signature",
     "load_manifest",
     "save_manifest",
+    "sync_manifest_if_present",
 ]
 

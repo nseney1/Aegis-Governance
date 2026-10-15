@@ -43,12 +43,16 @@ _session_tokens: set[str] = set()
 _session_token = None
 _canonical_workspace: Workspace | None = None
 _execution_enabled = False
+_client_platform: str = "gemini"
 
 
 _READ_TOOLS = frozenset({
     "aegis_scan", "aegis_grade", "aegis_coverage",
     "aegis_request_receipt", "aegis_audit_security", "aegis_audit_performance",
     "aegis_poll_verification", "aegis_list_rules", "aegis_rule_fitness",
+})
+_TELEMETRY_TOOLS = frozenset({
+    "aegis_report_outcome", "aegis_capture_insight",
 })
 _WRITE_TOOLS = frozenset({
     "aegis_report_outcome", "aegis_capture_insight", "aegis_create_rule",
@@ -238,16 +242,47 @@ def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
         _mcp_last_lease.set(None)
 
 
+def _allow_receiptless_telemetry(name: str, args: Dict[str, Any]) -> bool:
+    """Allow 1-step receiptless execution for telemetry tools when workspace is configured."""
+    if name not in _TELEMETRY_TOOLS or not _canonical_workspace:
+        return False
+    if name == "aegis_report_outcome":
+        telemetry_keys = (
+            "idempotency_key", "rules_used", "cells_used",
+            "rules", "rule_id", "cell_id", "tests_passed", "notes",
+        )
+        return any(k in args for k in telemetry_keys) or os.path.isdir(str(_canonical_workspace))
+    if name == "aegis_capture_insight":
+        if args.get("scaffold_wall") or args.get("scaffold_invariant") or args.get("scaffold_rule"):
+            return False
+        return bool(args.get("insight") and args.get("context_files"))
+    return False
+
+
 def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
     method = request.get("method")
     params = request.get("params", {})
     req_id = request.get("id")
 
     if method == "initialize":
-        global _session_token
+        global _session_token, _client_platform
         new_token = secrets.token_hex(32)
         _session_token = new_token
         _session_tokens.add(new_token)
+
+        client_info = params.get("clientInfo", {}) if isinstance(params, dict) else {}
+        client_name = str(client_info.get("name", "")).lower() if isinstance(client_info, dict) else ""
+        if "claude" in client_name:
+            _client_platform = "claude"
+        elif "cursor" in client_name:
+            _client_platform = "cursor"
+        elif "copilot" in client_name:
+            _client_platform = "copilot"
+        elif "kiro" in client_name:
+            _client_platform = "kiro"
+        else:
+            _client_platform = "gemini"
+
         return {
             "jsonrpc": "2.0",
             "id": req_id,
@@ -407,7 +442,7 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
                 _rollback_rate_limit(name, session_id=active_session_id)
                 return _error(req_id, -32602, f"Verification job '{job_id}' not found or expired.")
 
-        # Both EXECUTE and WRITE tools require a valid receipt
+        # Both EXECUTE and WRITE tools require a valid receipt (except 1-step telemetry in configured workspace)
         if name in _EXECUTE_TOOLS or name in _WRITE_TOOLS:
             if name in _EXECUTE_TOOLS and not _execution_enabled:
                 _rollback_rate_limit(name, session_id=active_session_id)
@@ -415,44 +450,43 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
             if not _canonical_workspace:
                 _rollback_rate_limit(name, session_id=active_session_id)
                 return _error(req_id, -32600, "Server workspace is not configured.")
-            if not receipt or not isinstance(receipt, str):
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32600, f"Tool '{name}' requires a valid 'receipt'.")
+            if receipt is not None or not _allow_receiptless_telemetry(name, args):
+                if not receipt or not isinstance(receipt, str):
+                    _rollback_rate_limit(name, session_id=active_session_id)
+                    return _error(req_id, -32600, f"Tool '{name}' requires a valid 'receipt'.")
 
-            # Recompute the state digests now; a target file or rule edited
-            # since issuance no longer matches and the receipt is consumed.
-            try:
-                file_digest, rule_digest = _state_digests(args)
-            except ValueError as exc:
-                _verify_receipt_compat(
+                # Recompute the state digests now; a target file or rule edited
+                # since issuance no longer matches and the receipt is consumed.
+                try:
+                    file_digest, rule_digest = _state_digests(args)
+                except ValueError as exc:
+                    _verify_receipt_compat(
+                        receipt_id=receipt,
+                        session_id=active_session_id,
+                        workspace=_canonical_workspace,
+                        operation=name,
+                        args=args,
+                        file_digest="",
+                        rule_digest="",
+                        consume=True,
+                    )
+                    _rollback_rate_limit(name, session_id=active_session_id)
+                    return _error(req_id, -32602, str(exc))
+                except (RuntimeError, OSError) as exc:
+                    _rollback_rate_limit(name, session_id=active_session_id)
+                    return _error(req_id, -32602, str(exc))
+                if not _verify_receipt_compat(
                     receipt_id=receipt,
                     session_id=active_session_id,
                     workspace=_canonical_workspace,
                     operation=name,
                     args=args,
-                    file_digest="",
-                    rule_digest="",
-                    consume=True,
-                )
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32602, str(exc))
-            except (RuntimeError, OSError) as exc:
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32602, str(exc))
-            if not _verify_receipt_compat(
-                receipt_id=receipt,
-                session_id=active_session_id,
-                workspace=_canonical_workspace,
-                operation=name,
-                args=args,
-                file_digest=file_digest,
-                rule_digest=rule_digest,
-                consume=True
-            ):
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32600, "Invalid, expired, or mismatched receipt.")
-
-
+                    file_digest=file_digest,
+                    rule_digest=rule_digest,
+                    consume=True
+                ):
+                    _rollback_rate_limit(name, session_id=active_session_id)
+                    return _error(req_id, -32600, "Invalid, expired, or mismatched receipt.")
 
         # Inject the operator-configured workspace only after verification, so
         # the hashed arguments match issuance and dispatch cannot be redirected.
@@ -460,6 +494,8 @@ def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
             args["workspace"] = _canonical_workspace
         if receipt is not None:
             args["receipt"] = receipt
+        if name == "aegis_scan":
+            args.setdefault("_client_platform", _client_platform)
 
         try:
             # Tool implementations (and the enzymes they call) may print progress
