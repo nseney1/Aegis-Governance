@@ -143,3 +143,59 @@ def test_a_budget_too_small_for_any_rule_stages_none_and_says_so(tmp_path):
     assert res["relevant_rules"] == [] and res["invariant_warnings"] == []
     assert res["stats"]["omitted"] == 1
     assert "1 more rule omitted (raise AEGIS_MAX_JIT_TOKENS)" in res["guidance"]
+
+
+# The server sends a scan as json.dumps(result) (aegis_mcp/server.py), so that string is
+# what the budget bounds: an estimated token never stands for more than 4 of its characters.
+CHARS_PER_TOKEN = 4
+# A CJK sentence: no spaces, so a word count sees one word however long it is.
+CJK = "此规则禁止在没有经过审查的例外情况下发布该模式"
+
+
+def _wire(res: dict) -> str:
+    return json.dumps(res)
+
+
+@pytest.mark.parametrize("text, at_least", [
+    (CJK * 31, 680),                # no spaces, about one token per character
+    ("Zm9v" * 750, 750),            # one 3000-character token (base64, minified code)
+    (json.dumps(CJK * 5), 165),     # the same text as the server escapes it
+], ids=["cjk", "long-token", "escaped-cjk"])
+def test_estimate_does_not_undercount_text_without_spaces(text, at_least):
+    assert estimate_tokens(text) >= at_least
+
+
+@pytest.mark.parametrize("length", [60, 680])
+def test_budget_bounds_gate_rules_written_without_spaces(tmp_path, monkeypatch, length):
+    monkeypatch.delenv("AEGIS_MAX_JIT_TOKENS", raising=False)
+    text = (CJK * 40)[:length]
+    for i in range(40):
+        _rule(tmp_path, f"gate-{i:02d}", rule_type="invariant", enforcement="gate", body=text, hypothesis=text)
+
+    res = execute_tool("aegis_scan", {"workspace": str(tmp_path), "files": ["src/app.py"]})
+
+    stats = res["stats"]
+    assert stats["max_tokens_budget"] == 2000
+    assert len(_wire(res)) <= CHARS_PER_TOKEN * 2000
+    assert stats["estimated_tokens"] <= 2000
+    assert stats["clamped"] is True
+    assert stats["omitted"] == 40 - res["rules_staged"] > 0
+    assert f"{stats['omitted']} more rules omitted (raise AEGIS_MAX_JIT_TOKENS)" in res["guidance"]
+    if length == 60:
+        assert res["rules_staged"] > 0
+        assert all(text in w["hypothesis"] for w in res["invariant_warnings"])
+
+
+def test_one_unbroken_token_is_counted_by_its_length(tmp_path):
+    token = "Zm9v" * 750
+    _rule(tmp_path, "inv-token", rule_type="invariant", enforcement="gate", hypothesis=token)
+
+    fits = express(str(tmp_path), changed_files=["src/app.py"], max_tokens=10_000)
+    assert fits["rules_staged"] == 1
+    # The reported estimate is the size of what is sent, not a word count of it.
+    assert fits["stats"]["estimated_tokens"] * CHARS_PER_TOKEN >= len(_wire(fits)) - 8
+
+    res = express(str(tmp_path), changed_files=["src/app.py"], max_tokens=1000)
+    assert res["rules_staged"] == 0
+    assert res["stats"]["omitted"] == 1
+    assert len(_wire(res)) <= CHARS_PER_TOKEN * 1000

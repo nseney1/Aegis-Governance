@@ -124,8 +124,9 @@ class TestJITContextBudgetClamping(unittest.TestCase):
         wall_only = express(str(self.ws), changed_files=["main.py"], budget=0, max_tokens=10_000)
         self.assertEqual([c["name"] for c in wall_only["relevant_rules"]], ["wall-security"])
 
-        # Exactly enough for the wall: every advisory cell is omitted, never swapped in.
-        res = express(str(self.ws), changed_files=["main.py"], max_tokens=wall_only["stats"]["estimated_tokens"] + 10)
+        # Enough for the wall and the "2 more rules omitted" notice (~17 tokens as sent),
+        # far short of any advisory cell: every advisory cell is omitted, never swapped in.
+        res = express(str(self.ws), changed_files=["main.py"], max_tokens=wall_only["stats"]["estimated_tokens"] + 30)
         relevant_names = [c["name"] for c in res["relevant_rules"]]
         self.assertEqual(relevant_names, ["wall-security"])
         self.assertTrue(res["stats"]["clamped"])

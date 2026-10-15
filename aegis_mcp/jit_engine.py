@@ -38,6 +38,10 @@ from aegis_mcp.rule_cache import CellCache
 # Module-level singleton — persists across MCP tool invocations
 _cell_cache = CellCache()
 
+# The server sends a scan as json.dumps(result), which is ASCII, so a response the
+# budget admits is at most 4 bytes per budgeted token.
+ASCII_CHARS_PER_TOKEN = 4
+
 NO_CHANGES_TEXT = "No changed files detected. Governance guidance will be provided when files are modified."
 NO_MATCH_TEXT = "No governance rules match your current changes."
 
@@ -54,8 +58,11 @@ def warn(message: str) -> None:
 
 
 def estimate_tokens(text: object | None) -> int:
-    """Estimate token count using fast stdlib heuristic (~1.35 tokens per word).
+    """Estimate a token count: the larger of ~1.35 per word and one per 4 ASCII characters
+    plus one per non-ASCII character.
 
+    A word count alone sees text without spaces (CJK, base64, a minified line) as a
+    single word, so the character floor is what lets the budget bound the bytes sent.
     Handles strings, non-string objects, and None safely without raising AttributeError.
     """
     if text is None:
@@ -65,8 +72,10 @@ def estimate_tokens(text: object | None) -> int:
             text = str(text)
         except Exception:
             return 0
-    words = len(text.split())
-    return int(words * WORDS_TO_TOKENS_FACTOR)
+    ascii_chars = len(text.encode("ascii", "ignore"))
+    by_chars = -(-ascii_chars // ASCII_CHARS_PER_TOKEN) + (len(text) - ascii_chars)
+    by_words = int(len(text.split()) * WORDS_TO_TOKENS_FACTOR)
+    return max(by_words, by_chars)
 
 
 def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -> int:
@@ -405,20 +414,27 @@ def _omitted_note(omitted: int) -> str:
     return f"⚠️ {omitted} more {noun} omitted (raise AEGIS_MAX_JIT_TOKENS)"
 
 
+def _invariant_line(constraint: dict[str, Any]) -> str:
+    return f"- 🧱 [INVARIANT] {constraint['name']}: {constraint['hypothesis']}\n"
+
+
+def _genome_section(rule: dict[str, Any]) -> str:
+    return f"### {rule['name']}\n{rule['body']}\n"
+
+
 def _render_guidance(staged: list[dict[str, Any]], genome: list[dict[str, Any]], omitted: int) -> str:
     parts = []
     invariants = [s for s in staged if _is_invariant(s['constraint'])]
     if invariants:
         parts.append("## Pre-Edit Invariants & Constraints\n")
         parts.append("CRITICAL: You must adhere to the following invariants when modifying target files:\n")
-        for s in invariants:
-            parts.append(f"- 🧱 [INVARIANT] {s['constraint']['name']}: {s['constraint']['hypothesis']}\n")
+        parts.extend(_invariant_line(s['constraint']) for s in invariants)
     if staged:
         parts.append("## Active Governance Rules\n")
         parts.extend(s['text'] for s in staged)
     if genome:
         parts.append("\n## Project-Specific Rules\n")
-        parts.extend(f"### {rule['name']}\n{rule['body']}\n" for rule in genome)
+        parts.extend(_genome_section(rule) for rule in genome)
     if omitted:
         parts.append(f"\n{_omitted_note(omitted)}\n")
     return '\n'.join(parts) if parts else NO_MATCH_TEXT
@@ -435,7 +451,8 @@ def _payload(staged, genome, omitted, guidance, stats) -> dict[str, Any]:
     }
 
 
-def _payload_tokens(payload: dict[str, Any]) -> int:
+def _payload_tokens(payload: object) -> int:
+    """Tokens of a value as the server serializes it (json.dumps, ASCII-escaped)."""
     return estimate_tokens(json.dumps(payload))
 
 
@@ -496,16 +513,16 @@ def express(
     used = _payload_tokens(_payload([], [], 0, _render_guidance([], [], 1), stats))
     staged, genome, omitted = [], [], 0
     for entry in entries:
-        cost = _payload_tokens(entry['item']) + estimate_tokens(entry['text'])
+        cost = _payload_tokens(entry['item']) + _payload_tokens(entry['text'])
         if _is_invariant(entry['constraint']):
-            cost += _payload_tokens(entry['constraint']) + estimate_tokens(entry['constraint']['hypothesis']) + 4
+            cost += _payload_tokens(entry['constraint']) + _payload_tokens(_invariant_line(entry['constraint']))
         if omitted or used + cost > token_budget:
             omitted += 1
             continue
         staged.append(entry)
         used += cost
     for rule in genome_rules:
-        cost = _payload_tokens(rule) + estimate_tokens(rule['body'])
+        cost = _payload_tokens(rule) + _payload_tokens(_genome_section(rule))
         if omitted or used + cost > token_budget:
             omitted += 1
             continue
@@ -514,6 +531,8 @@ def express(
 
     while True:
         payload = _payload(staged, genome, omitted, _render_guidance(staged, genome, omitted), stats)
+        # Measure with the widest count that can pass, so writing the real one cannot overflow.
+        payload['stats']['estimated_tokens'] = token_budget
         tokens = _payload_tokens(payload)
         if tokens <= token_budget or not (staged or genome):
             break
