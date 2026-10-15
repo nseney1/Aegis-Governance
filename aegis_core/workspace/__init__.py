@@ -38,6 +38,23 @@ def as_workspace(workspace: str | Path | os.PathLike[str] | Workspace | None = N
     return Workspace.resolve()
 
 
+def literal_workspace(workspace: str | Path | os.PathLike[str] | Workspace | None = None) -> Workspace:
+    """The workspace an explicit argument names, taken literally (defense #26 step a).
+
+    A Workspace is returned as is. A path names exactly that directory (resolved, so a
+    symlink is accepted): no AEGIS_WORKSPACE override, no walk-up to an enclosing
+    workspace, no legacy .soma refusal. Only a missing argument falls back to
+    discovery (``Workspace.resolve()``).
+    """
+    from aegis_core.workspace.base import Workspace
+
+    if isinstance(workspace, Workspace):
+        return workspace
+    if workspace:
+        return Workspace(root=Path(os.fspath(workspace)).resolve())
+    return Workspace.resolve()
+
+
 def confine_path(
     untrusted_path: str | Path | os.PathLike[str],
     workspace: str | Path | os.PathLike[str] | Workspace,
@@ -67,6 +84,7 @@ def validate_rule_names(
 __all__ = [
     "as_workspace",
     "confine_path",
+    "literal_workspace",
     "resolve_workspace",
     "validate_rule_names",
 ]

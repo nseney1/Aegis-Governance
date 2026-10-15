@@ -1,12 +1,11 @@
 """Ambient verification evidence: `aegis check` records rule triggers and outcomes in the ledger."""
 from __future__ import annotations
 
-from pathlib import Path
 import secrets
 import sys
 from typing import Any, Optional
 
-from aegis_core.workspace.base import Workspace
+from aegis_core.workspace import literal_workspace
 
 __all__ = ["record_verification_telemetry"]
 
@@ -24,9 +23,7 @@ def record_verification_telemetry(
     if not workspace or not target_files:
         return False
 
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     cells_dir = ws.rules_dir
     if not cells_dir.is_dir():
         return False

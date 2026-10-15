@@ -11,6 +11,7 @@ from typing import Any, Optional
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.scoring import bayesian_posterior, bayesian_score, calculate_snr
 from aegis_core.taxonomy import RULE_EXPIRY_DAYS
+from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
 from .constants import (
     CELL_TELOMERE_DAYS,
@@ -120,9 +121,7 @@ def compute_cells_fitness(
     promote: bool = False,
 ) -> list[dict]:
     """Compute fitness of immune cells in workspace."""
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
 
     total_sessions = 30
     from aegis_core.config import ConfigError, RepoConfig

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from aegis_core.storage import atomic_write_text, locked
 from aegis_core.taxonomy import normalize_review_mode
+from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
 from .constants import (
     VALID_ENFORCEMENT,
@@ -106,9 +107,7 @@ def create_cell(
     if not falsification:
         falsification = f"Behavior violates hypothesis: {hypothesis}"
 
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     type_plural = VALID_TYPES[type_lower]
     target_dir = ws.rules_dir / type_plural
 

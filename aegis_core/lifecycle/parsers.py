@@ -10,6 +10,7 @@ from typing import Any, Optional, Tuple
 
 from aegis_core.yaml_engine.serializer import dump_frontmatter
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter, parse_rule_frontmatter
+from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
 from .constants import (
     TYPE_TO_DIR,
@@ -58,9 +59,7 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
     if not clean_id:
         return None, None
 
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     candidate_dirs = [
         ws.rules_dir,
     ]
@@ -101,9 +100,7 @@ def _naive_utc(timestamp: Any) -> Optional[datetime]:
 def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any]]:
     """Load lifecycle dimensions from the outcome ledger."""
     from aegis_core.telemetry_engine import ledger
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     return {
         rule: {
             "triggers": totals["triggers"],
@@ -122,9 +119,7 @@ def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
     Returns:
         List of cell metadata dicts with at minimum: id, type, created, source_path.
     """
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     cells = []
     scan_roots = [str(ws.rules_dir)]
     if ws.is_aegis_repo:

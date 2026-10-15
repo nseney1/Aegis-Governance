@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from aegis_core.yaml_engine.serializer import dump_frontmatter
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink, atomic_write_text, locked
+from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
 from .constants import (
     DORMANT_DAYS_THRESHOLD,
@@ -64,9 +65,7 @@ def evaluate_promotions(workspace: Workspace | Path | str) -> list[dict]:
         List of promotion candidate dicts:
         [{cell_id, from_type, to_type, triggers, tp_rate, age_days}]
     """
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     promotion_path = _effective_promotion_path(ws)
     evidence = _load_evidence(ws)
     cells = _load_cells(ws)
@@ -115,9 +114,7 @@ def evaluate_demotions(workspace: Workspace | Path | str) -> list[dict]:
         List of demotion candidate dicts:
         [{cell_id, from_type, to_type, reason, fp_rate, triggers}]
     """
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     demotion_path = _effective_demotion_path(ws)
     evidence = _load_evidence(ws)
     cells = _load_cells(ws)
@@ -210,9 +207,7 @@ def promote_cell(
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     """Execute structural promotion for a rule (trap -> invariant -> genome)."""
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     cell_path, current_type = find_cell_file(ws, cell_id)
     if cell_path is None or current_type is None:
         return {
@@ -318,9 +313,7 @@ def demote_cell(
     if clean_id in PROTECTED_RULES or rule_base in PROTECTED_RULES:
         raise ValueError(f"Cannot demote protected core rule: '{cell_id}'")
 
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     cell_path, current_type = find_cell_file(ws, clean_id)
     if cell_path is None or current_type is None:
         return {
@@ -429,9 +422,7 @@ def _plan_tier_update(content: str) -> Optional[tuple[dict, str, str, str, str]]
 
 def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute: bool = False) -> Dict[str, Any]:
     """Evaluate and update cell enforcement tiers (advisory/mechanical/gate) with exponential decay."""
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     cells_dir = ws.rules_dir
     cell_files = glob.glob(os.path.join(str(cells_dir), "**", "*.md"), recursive=True)
     changes: list[dict[str, Any]] = []
