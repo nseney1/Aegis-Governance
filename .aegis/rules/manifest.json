@@ -38,7 +38,7 @@
     "traps/trap-pytest-exit-code.md": "sha256:0d78e550acb5bd3ab63621dc42cbe00e0167207a15d9a4b5c44c23ee3e143dcc",
     "traps/trap-roadmap-status-drift.md": "sha256:ede14fad027867dc207272b572e76b1567a99dd4e79bf274f7b15d6c222155c1",
     "traps/trap-schema-contract-drift.md": "sha256:1c3331a6b5b324262080afba7bbc9972812ecd689d5fd0d55075362060431c2a",
-    "traps/trap-schema-test-gap.md": "sha256:eeaab53a428b76a160092c671d8d93d8c0d9994bde72eefa646c3b01cd01d61a",
+    "traps/trap-schema-test-gap.md": "sha256:4b6a7118da9e75dbf7b0d351c4ffed64f2a50d9856c17f62252093e60b959569",
     "traps/trap-shell-true-portability.md": "sha256:9473d0e2251f92e6487f5f19d585243fad269e4563b70d663e914a798f916e2d",
     "traps/trap-stale-rename-refs.md": "sha256:f9d2145ea384dace9651d031837379334ae9ae05f4d889d1c35d18ba5b88d244",
     "traps/trap-stdout-protocol-corruption.md": "sha256:e38e87fee9aa339311f6dc60405b2635b5332c9708e80134dd19ec5a255f870d",
@@ -49,7 +49,7 @@
     "traps/trap-unverified-delegation.md": "sha256:3941c48d8bab8c1f1007dcfafd654197e9a2a804771ea8aac1c68bc984be88d5",
     "traps/trap-version-drift.md": "sha256:f901543038683be2545ed78def26f92613dfc184fce4ae03076f067aef8513b9"
   },
-  "generated_at": "2026-10-15T16:14:27.529534+00:00",
+  "generated_at": "2026-10-15T16:15:00.264688+00:00",
   "rule_count": 47,
   "rules": {
     "boundaries/boundary-enzymes.md": "sha256:2711893b3ad5669d5e6bb2f61fed3e64be9d9d6257f2e5af3b6d43240e6f0144",
@@ -89,7 +89,7 @@
     "traps/trap-pytest-exit-code.md": "sha256:0d78e550acb5bd3ab63621dc42cbe00e0167207a15d9a4b5c44c23ee3e143dcc",
     "traps/trap-roadmap-status-drift.md": "sha256:ede14fad027867dc207272b572e76b1567a99dd4e79bf274f7b15d6c222155c1",
     "traps/trap-schema-contract-drift.md": "sha256:1c3331a6b5b324262080afba7bbc9972812ecd689d5fd0d55075362060431c2a",
-    "traps/trap-schema-test-gap.md": "sha256:eeaab53a428b76a160092c671d8d93d8c0d9994bde72eefa646c3b01cd01d61a",
+    "traps/trap-schema-test-gap.md": "sha256:4b6a7118da9e75dbf7b0d351c4ffed64f2a50d9856c17f62252093e60b959569",
     "traps/trap-shell-true-portability.md": "sha256:9473d0e2251f92e6487f5f19d585243fad269e4563b70d663e914a798f916e2d",
     "traps/trap-stale-rename-refs.md": "sha256:f9d2145ea384dace9651d031837379334ae9ae05f4d889d1c35d18ba5b88d244",
     "traps/trap-stdout-protocol-corruption.md": "sha256:e38e87fee9aa339311f6dc60405b2635b5332c9708e80134dd19ec5a255f870d",
