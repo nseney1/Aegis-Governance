@@ -60,13 +60,17 @@ def load_mcp_config(path: Path | str, *, confine_to: Path | str | None = None) -
         root = Path(confine_to).resolve()
         try:
             resolved = path.resolve()
+            # Path.resolve() on Windows before Python 3.10 stops at a dangling symlink
+            # instead of following it; os.path.realpath follows it there.
+            followed = Path(os.path.realpath(path))
         except (OSError, RuntimeError) as exc:  # RuntimeError: symlink loop on 3.9-3.12
             raise McpConfigError(f"{path}: cannot be resolved ({exc}); refusing to modify it") from exc
-        if resolved != root and root not in resolved.parents:
-            raise McpConfigError(
-                f"{path}: is a symlink to {resolved}, outside the project {root}; "
-                "refusing to modify it. Replace the link with a regular file to register Aegis here."
-            )
+        for target in (resolved, followed):
+            if target != root and root not in target.parents:
+                raise McpConfigError(
+                    f"{path}: is a symlink to {target}, outside the project {root}; "
+                    "refusing to modify it. Replace the link with a regular file to register Aegis here."
+                )
     if not path.exists():
         return {}
     if _is_read_only(path):
