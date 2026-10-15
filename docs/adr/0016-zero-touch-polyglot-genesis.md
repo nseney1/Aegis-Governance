@@ -1,10 +1,12 @@
-# ADR-016: Zero-Touch Genesis Polyglot Provisioning & Rust Driver
+# ADR 0016: Zero-Touch Genesis Polyglot Provisioning & Rust Driver
 
 ## Status
 **Accepted** (v1.2.0 — 2026-10-08; updated for Aegis Guardrails v3.2.0)
 
+**v4 status (2026-10-15): partly superseded by [ADR 0005](0005-v4-plan-of-record.md) §5.** Zero-touch provisioning of `.aegis/slots.yaml` is withdrawn: a repository-writable file that names commands executes code ([review](0005-evidence-review.md) H5). `aegis detect` and the `install/drivers/` copies are cut. The Rust driver and the diff-base fix in `aegis_core/verification/runner.py` stay.
+
 ## Context
-Following ADR-015 (Normalized AST Driver Protocol), Aegis Guardrails introduced language-agnostic verification capabilities for non-Python source code (TypeScript, JavaScript, Go). However, adoption in real-world polyglot repositories faced friction:
+Following ADR 0015 (Normalized AST Driver Protocol), Aegis Guardrails introduced language-agnostic verification capabilities for non-Python source code (TypeScript, JavaScript, Go). However, adoption in real-world polyglot repositories faced friction:
 1. **Manual Provisioning Barrier**: Developers onboarding polyglot repositories had to manually create or edit `.aegis/slots.yaml` with language driver slots (`ast_driver_ts`, `ast_driver_go`) and copy template drivers.
 2. **Missing Rust Support**: Rust source files (`.rs`) lacked an AST driver recipe, leaving Rust definitions, imports, calls, and mutation points unverifiable by Layer 1.
 3. **CI/Release Verification Drift**: On clean release tags or merge commits without PR base branches, Layer 1 deterministic verification suffered fallback disconnects when `HEAD~1` was queried without passing the resolved diff base into `aegis_core/verification/runner.py::_get_modified_lines`.

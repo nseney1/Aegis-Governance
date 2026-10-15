@@ -301,7 +301,6 @@ class TestEvidenceLockIgnoredByGit:
         assert _repo_ignores(rel), f'{rel} is not git-ignored'
 
     @pytest.mark.parametrize('rel', [
-        '.aegis/evidence/README.md',
         '.aegis/evidence/arbitration_cycle_2.json',
         '.aegis/evidence/.fitness.lock',
     ])

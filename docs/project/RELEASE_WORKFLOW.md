@@ -1,7 +1,9 @@
 # Aegis Guardrails Release Workflow (GitFlow)
 
+> **Superseded in v4: do not follow.** This is the v3 release procedure. It stays in the tree only until the v4 docs wave deletes it, together with the rule that lists it as a target path. Release Gate 4.5, its receipts and `check --release` are cut; a v4 release needs CI green on the exact commit (`.github/scripts/ci_green.py <sha>`) and a reviewed merge ([ADR 0005](../adr/0005-v4-plan-of-record.md) AD-2, AD-10, §5). Paths and commands below may no longer exist.
+
 > Codified release procedure for **Aegis Guardrails** (`v3.2.0`) governed releases.
-> Enforces [`rules/gitflow-review-gate.md`](../../rules/gitflow-review-gate.md) and [`rules/ci-green-before-release.md`](../../rules/ci-green-before-release.md).
+> Enforces [`invariant-gitflow-review-gate`](../../.aegis/rules/invariants/invariant-gitflow-review-gate.md) and [`invariant-ci-green-before-release`](../../.aegis/rules/invariants/invariant-ci-green-before-release.md).
 
 ## Two-Stage GitFlow Pipeline
 
@@ -40,7 +42,6 @@ feat/* (or fix/*) ──→ PR to develop (Independent Subagent Review Gate)
    - `VERSION` → `3.2.0`
    - `README.md` → version badge (`version-3.2.0-blue`)
    - `aegis_sdk/__init__.py` → `__version__ = "3.2.0"`
-   - `docs/KNOWN_ISSUES_WINDOWS.md` → `# Known Issues — Windows (v3.2.0)`
    - Run `python3 -m pytest tests/unit/core/test_static_invariants.py tests/unit/core/test_documentation_accuracy.py -q`.
 3. **Execute Gate 4.5 (Mandatory Two-Layer Verification Gate)**:
    - Run `aegis check --plan "<Release plan summary>"` (or `aegis verify --plan ...` / legacy `soma verify --plan ...`) to obtain an `Arbiter` `SHIP` verdict bound to the current git tree hash.
@@ -88,7 +89,7 @@ Before creating a release PR, verify:
 - [ ] **Gate 4.5** passed: `aegis check --release` (and `aegis check --plan ...` / `aegis verify --plan ...`) executed with Arbiter verdict `SHIP` (exit 0)
 - [ ] `python3 -m pytest -q` passes with 0 failures
 - [ ] Static import integrity passes (`ruff check --select F821`)
-- [ ] Version is synchronized across `pyproject.toml`, `VERSION`, `README.md` badge, `aegis_sdk/__init__.py`, and `docs/KNOWN_ISSUES_WINDOWS.md`
+- [ ] Version is synchronized across `pyproject.toml`, `VERSION`, `README.md` badge, and `aegis_sdk/__init__.py`
 - [ ] Validation creates exactly one wheel and one sdist plus `SHA256SUMS`
 - [ ] Source-hidden smoke tests (`.github/scripts/wheel_smoke.py`) pass for both wheel and sdist, verifying bundled `rules` and `skills`
 - [ ] Publish downloads and digest-verifies the validated artifact; it does not rebuild
@@ -116,12 +117,7 @@ Audit every documentation file for accuracy and verify `python3 -m pytest tests/
 - [ ] `docs/index.md` — all local markdown links resolve cleanly
 - [ ] `docs/project/CHANGELOG.md` — contains the current release entry
 - [ ] `docs/project/ROADMAP.md` — shipped statuses match the release
-- [ ] `docs/architecture/scripts.md` — module counts (78 total) match `_script_groups()` on disk
-- [ ] `docs/project/METRICS.md` — quantitative claims remain supported
-- [ ] `docs/architecture/mechanism_design.md` — architecture matches current `aegis_*` code
 - [ ] `docs/project/CLAIM_REGISTRY.json` — unlocked claims have passing tests
-- [ ] `docs/project/CONTRIBUTING.md` — setup, packages, and GitFlow rules remain current
-- [ ] `docs/project/COMPATIBILITY.md` — SemVer 2.0, platforms, and `aegis migrate` remain current
 - [ ] `docs/project/RELEASE_WORKFLOW.md` — procedure and lessons remain current
 
 ### Post-Release Cleanup (after back-merge)

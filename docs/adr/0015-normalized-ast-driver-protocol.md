@@ -1,7 +1,9 @@
-# ADR-015: Language-Agnostic AST Analysis via Normalized AST Drivers (NAD)
+# ADR 0015: Language-Agnostic AST Analysis via Normalized AST Drivers (NAD)
 
 ## Status
 **Accepted** (v1.1.0 — 2026-10-08; updated for Aegis Guardrails v3.2.0)
+
+**v4 status (2026-10-15): in force, with one change.** The protocol and the TypeScript, Go and Rust drivers stay ([ADR 0005](0005-v4-plan-of-record.md) §5). A repository can no longer name driver commands (§5 "Config", review H5), so the `.aegis/slots.yaml` route below is withdrawn; the `install/drivers/` copies and `aegis detect` are cut.
 
 ## Context
 Aegis Guardrails' Layer 1 verification subsystem (`aegis_core/verification/`) enforces deterministic, evidence-based code quality checks before any AI-generated change can be arbitrated or committed. Among these tools, the Call Graph Completeness Checker (`aegis_core/verification/call_graph.py`) and Mutation Tester (`aegis_core/verification/mutation_tester.py`) rely fundamentally on Abstract Syntax Tree (AST) analysis to:

@@ -1,7 +1,9 @@
-# ADR-012: Zero-Dependency Pure-Stdlib Frontmatter Engine
+# ADR 0012: Zero-Dependency Pure-Stdlib Frontmatter Engine
 
 ## Status
 **Accepted** (v0.96.1 — 2026-10-06; updated for Aegis Guardrails v3.2.0)
+
+**v4 status (2026-10-15): in force.** [ADR 0005](0005-v4-plan-of-record.md) §4 keeps zero runtime dependencies. The engine has since moved from `aegis_core/yaml.py` to the `aegis_core/yaml_engine/` package; the text below keeps the v3 paths.
 
 ## Context
 Aegis Guardrails' primary architectural value proposition is an adaptive, resilient governance layer for AI coding assistants. Because Aegis is installed into developer workspaces, virtual environments, CI/CD pipelines, and agent sandbox containers, its runtime dependency footprint directly affects its reliability and security.

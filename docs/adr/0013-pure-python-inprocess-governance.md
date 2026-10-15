@@ -1,7 +1,9 @@
-# ADR-013: Pure-Python In-Process Governance Engine & Facade Unification
+# ADR 0013: Pure-Python In-Process Governance Engine & Facade Unification
 
 ## Status
 **Accepted** (v0.97.0 — 2026-10-06; updated for Aegis Guardrails v3.2.0)
+
+**v4 status (2026-10-15): partly superseded by [ADR 0005](0005-v4-plan-of-record.md) §5.** The rule stands: Aegis never runs repository or package scripts as subprocesses. Most components named below are cut: the MCP tools beyond the four kept ones, the `Governance` SDK methods other than the six the thin facade keeps, the session-close hooks, and `aegis_core/enforcement.py`.
 
 ## Context
 When the legacy `enzymes/` directory containing standalone bash and python scripts was deprecated and purged to consolidate core logic into `aegis_core/`, the public SDK facade (`aegis_sdk/governance.py`), build system (`Makefile`), lifecycle hooks (`aegis_cli/hooks/`), and gate generators (`aegis_core/enforcement.py`) needed to eliminate subprocess script invocations:
