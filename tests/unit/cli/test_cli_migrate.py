@@ -58,7 +58,8 @@ def test_json_report_and_idempotent_second_apply(tmp_path: Path, capsys):
     assert first["status"] == "applied"
     assert first["rules"] == [{"from": ".soma/cells/walls/wall-a.md", "to": ".aegis/rules/invariants/wall-a.md",
                                "type": "invariant"}]
-    assert first["backup"].endswith(first["backup"].split("/")[-1]) and "migrate-backup-" in first["backup"]
+    assert "migrate-backup-" in first["backup"]
+    assert first["config"] == {"v": 1}  # the report describes what the apply wrote
 
     assert main(["--json", "migrate", "--workspace", str(root), "--apply"]) == 0
     second = json.loads(capsys.readouterr().out)

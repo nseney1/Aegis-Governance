@@ -65,10 +65,10 @@ def run_migrate(args: argparse.Namespace) -> int:
         return 2
     plan = migrate.plan(root)
     apply_it = bool(getattr(args, "apply", False))
+    report = plan.to_dict()  # before applying: the report describes what was planned
     backup = None
     if apply_it:
         backup = migrate.apply(plan).backup
-    report = plan.to_dict()
     if apply_it and report["status"] == "pending":
         report["status"] = "applied"
     report["backup"] = str(backup) if backup else None
