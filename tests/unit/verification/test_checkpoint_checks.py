@@ -78,7 +78,7 @@ def test_fixtures_named_like_tests_are_not_tests(tmp_path):
     assert _messages(tmp_path) == []
 
 
-def test_assertion_helpers_and_declared_outcomes_count(tmp_path):
+def test_assertion_helpers_and_explicit_failures_count(tmp_path):
     _test_file(tmp_path, "test_helpers.py", """\
         import unittest
         import pytest
@@ -100,9 +100,6 @@ def test_assertion_helpers_and_declared_outcomes_count(tmp_path):
             with pytest.warns(UserWarning):
                 warn()
 
-        def test_skip_only():
-            pytest.skip("optional dependency missing")
-
         def test_explicit_fail():
             pytest.fail("unreachable")
 
@@ -110,10 +107,30 @@ def test_assertion_helpers_and_declared_outcomes_count(tmp_path):
             def test_unittest_assert(self):
                 self.assertEqual(1, 1)
 
+            def test_unittest_fail(self):
+                self.fail("unreachable")
+    """)
+    assert _messages(tmp_path) == []
+
+
+def test_a_skip_or_xfail_alone_is_not_an_assertion(tmp_path):
+    _test_file(tmp_path, "test_skips.py", """\
+        import unittest
+        import pytest
+
+        def test_skip_only():
+            pytest.skip("optional dependency missing")
+
+        def test_xfail_only():
+            pytest.xfail("later")
+
+        class TestCase(unittest.TestCase):
             def test_skip(self):
                 self.skipTest("platform")
     """)
-    assert _messages(tmp_path) == []
+    assert _messages(tmp_path) == [
+        "Low assertion density in test_skips.py: tests lacking assertions: test_skip_only, test_xfail_only, test_skip",
+    ]
 
 
 def test_only_test_modules_are_inspected(tmp_path):

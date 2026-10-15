@@ -335,3 +335,113 @@ class TestFixturesAreNotTests:
         test_file.write_text("def test_env():\n    pass\n")
         result = check_no_bare_pass(str(test_file))
         assert (result.verdict, result.detail) == (False, "Bare pass/ellipsis stubs: test_env")
+
+
+class TestSkipIsNotAnAssertion:
+    """A skip or xfail declares that a test did not run; it asserts nothing (b1-verify review).
+
+    pytest.fail / self.fail still count: they fail the test on the path they guard.
+    """
+
+    def _density(self, tmp_path, source: str):
+        test_file = tmp_path / "test_skips.py"
+        test_file.write_text(textwrap.dedent(source))
+        return check_assertion_density(str(test_file))
+
+    def test_skip_only_stubs_lack_assertions(self, tmp_path):
+        result = self._density(tmp_path, """\
+            import pytest
+            import unittest
+
+            def test_unwritten():
+                pytest.skip("TODO")
+
+            def test_later():
+                pytest.xfail("later")
+
+            class TestCase(unittest.TestCase):
+                def test_pending(self):
+                    self.skipTest("pending")
+        """)
+        assert (result.verdict, result.detail) == (
+            False, "Tests lacking assertions: test_unwritten, test_later, test_pending"
+        )
+
+    def test_a_conditional_skip_does_not_stand_in_for_an_assertion(self, tmp_path):
+        result = self._density(tmp_path, """\
+            import pytest
+
+            def test_guarded_stub():
+                if True:
+                    pytest.skip("TODO")
+                value = 1 + 1
+        """)
+        assert (result.verdict, result.detail) == (False, "Tests lacking assertions: test_guarded_stub")
+
+    def test_a_skip_guard_before_a_real_assertion_passes(self, tmp_path):
+        result = self._density(tmp_path, """\
+            import shutil
+            import pytest
+
+            def test_needs_git():
+                if shutil.which("git") is None:
+                    pytest.skip("git not installed")
+                assert shutil.which("git")
+        """)
+        assert result.verdict is True, result.detail
+
+    def test_unittest_self_fail_is_an_assertion(self, tmp_path):
+        result = self._density(tmp_path, """\
+            import unittest
+
+            class TestCase(unittest.TestCase):
+                def test_guard(self):
+                    if 1 + 1 != 2:
+                        self.fail("arithmetic broke")
+        """)
+        assert result.verdict is True, result.detail
+
+    def test_an_environment_placeholder_for_a_real_test_passes(self, tmp_path):
+        """`if HAVE_X: def test_a(): <real> else: def test_a(): pytest.skip(...)` judges only the real one."""
+        result = self._density(tmp_path, """\
+            import pytest
+
+            try:
+                import hypothesis
+            except ImportError:
+                hypothesis = None
+
+            if hypothesis is not None:
+                def test_property():
+                    assert hypothesis
+            else:
+                def test_property():
+                    pytest.skip("hypothesis is not installed")
+        """)
+        assert result.verdict is True, result.detail
+
+    def test_the_real_branch_of_a_placeholder_pair_is_still_judged(self, tmp_path):
+        result = self._density(tmp_path, """\
+            import pytest
+
+            if False:
+                def test_property():
+                    x = 1
+            else:
+                def test_property():
+                    pytest.skip("not here")
+        """)
+        assert (result.verdict, result.lines) == (False, [4])
+
+    def test_a_skip_only_test_without_a_same_name_twin_is_a_stub(self, tmp_path):
+        result = self._density(tmp_path, """\
+            import pytest
+
+            if False:
+                def test_other():
+                    assert True
+            else:
+                def test_property():
+                    pytest.skip("no twin")
+        """)
+        assert (result.verdict, result.detail) == (False, "Tests lacking assertions: test_property")

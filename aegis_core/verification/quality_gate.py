@@ -15,11 +15,13 @@ from aegis_core.ast.drivers.python import read_python_source
 from . import ToolEvidence
 
 _FuncDef = Union[ast.FunctionDef, ast.AsyncFunctionDef]
+_FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
-# Calls that end a test with a declared outcome instead of an assertion.
-_PYTEST_OUTCOMES = {"fail", "skip", "xfail"}
+# pytest.fail / self.fail fail the test on the path they guard: an assertion.
+# A skip or xfail only declares that the test did not run, so it asserts nothing.
+_FAIL_CALLS = {("pytest", "fail"), ("self", "fail")}
+_SKIP_CALLS = {("pytest", "skip"), ("pytest", "xfail"), ("self", "skipTest")}
 _PYTEST_CONTEXT_ASSERTIONS = {"raises", "warns", "deprecated_call"}
-_UNITTEST_OUTCOMES = {"fail", "skipTest"}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -67,19 +69,42 @@ def _receiver(call: ast.Call) -> str:
 
 
 def _is_assertion_call(call: ast.Call) -> bool:
-    """An assertion helper or a declared test outcome.
+    """An assertion helper or an explicit failure.
 
     Recognized: any call whose name starts with ``assert``/``_assert`` (``self.assertEqual``,
     ``mock.assert_called_once_with``, ``np.testing.assert_equal``, a project helper such as
-    ``assert_identical``), ``pytest.fail/skip/xfail`` and ``self.fail/skipTest``.
+    ``assert_identical``), ``pytest.fail`` and ``self.fail``.
     """
     name = _callee_name(call)
     if name.startswith(("assert", "_assert")):
         return True
-    receiver = _receiver(call)
-    if receiver == "pytest" and name in _PYTEST_OUTCOMES:
-        return True
-    return receiver == "self" and name in _UNITTEST_OUTCOMES
+    return (_receiver(call), name) in _FAIL_CALLS
+
+
+def _skips(func: _FuncDef) -> bool:
+    return any(
+        isinstance(node, ast.Call) and (_receiver(node), _callee_name(node)) in _SKIP_CALLS
+        for node in ast.walk(func)
+    )
+
+
+def _environment_placeholders(tree: ast.Module) -> set[int]:
+    """ids of skipping tests that stand in for a same-name test in the other ``if`` branch.
+
+    ``if HAVE_X: def test_a(): <real> else: def test_a(): pytest.skip(...)`` defines one
+    test either way; the real branch is judged on its own, so the placeholder is exempt.
+    """
+    exempt: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        branches = (node.body, node.orelse)
+        names = [{f.name for f in branch if isinstance(f, _FUNC_TYPES)} for branch in branches]
+        for branch, other in zip(branches, reversed(names)):
+            for func in branch:
+                if isinstance(func, _FUNC_TYPES) and func.name in other and _skips(func):
+                    exempt.add(id(func))
+    return exempt
 
 
 def _has_assert(func: _FuncDef) -> bool:
@@ -148,7 +173,13 @@ def _evidence(tool: str, test_file: str, offenders: List[Tuple[str, int]], fail:
 
 def check_assertion_density(test_file: str) -> ToolEvidence:
     """Check that every ``test_*`` function in *test_file* has ≥1 assertion."""
-    missing = [(f.name, f.lineno) for f in _collect_test_functions(_parse(test_file)) if not _has_assert(f)]
+    tree = _parse(test_file)
+    placeholders = _environment_placeholders(tree)
+    missing = [
+        (f.name, f.lineno)
+        for f in _collect_test_functions(tree)
+        if id(f) not in placeholders and not _has_assert(f)
+    ]
     return _evidence("assertion_density", test_file, missing, "Tests lacking assertions", "All tests have assertions")
 
 
