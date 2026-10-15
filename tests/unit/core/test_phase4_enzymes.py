@@ -2,12 +2,8 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
-import pytest
 from conftest import REPO_ROOT
 
 ENZYMES_DIR = Path(REPO_ROOT) / "enzymes"
@@ -63,64 +59,6 @@ def test_log_finding(tmp_path):
     assert lines[0]["rule"] == "providence.md"
     assert lines[0]["severity"] == "warning"
     assert lines[0]["change"] == "Refactored parser"
-
-
-def test_liveness_sentinel_scan():
-    from aegis_core.sync import check_liveness
-
-    payload = json.dumps({
-        "agents": [
-            {
-                "name": "scout",
-                "dispatched": "2026-10-05T10:00:00Z",
-                "timeout_seconds": 3600,
-            }
-        ]
-    })
-    rc = check_liveness(payload)
-    assert rc == 0
-
-
-def test_post_session_hook_execution(tmp_path):
-    from aegis_core.sync import run_post_session_hook
-
-    transcript = tmp_path / "transcript.jsonl"
-    step1 = {
-        "step_index": 1,
-        "type": "PLANNER_RESPONSE",
-        "tool_calls": [
-            {
-                "name": "view_file",
-                "args": {"AbsolutePath": str(tmp_path / "src" / "main.py")},
-            },
-            {
-                "name": "replace_file_content",
-                "args": {"TargetFile": str(tmp_path / "src" / "main.py")},
-            },
-        ],
-    }
-    transcript.write_text(json.dumps(step1) + "\n", encoding="utf-8")
-
-    cells_dir = tmp_path / ".aegis" / "rules"
-    walls_dir = cells_dir / "walls"
-    walls_dir.mkdir(parents=True)
-    cell_file = walls_dir / "main-guard.md"
-    cell_file.write_text(
-        "---\nid: main-guard\ntype: wall\ntarget_paths:\n  - 'src/**'\n---\nBody\n",
-        encoding="utf-8",
-    )
-
-    evidence_dir = tmp_path / ".aegis" / "evidence"
-
-    rc = run_post_session_hook(
-        transcript_path=transcript,
-        cells_dir=cells_dir,
-        evidence_dir=evidence_dir,
-        repo_root=tmp_path,
-    )
-    assert rc == 0
-    assert (evidence_dir / "signals.jsonl").exists()
-    assert (evidence_dir / "compliance.jsonl").exists()
 
 
 def test_match_cells_windows_backslash_paths(tmp_path):

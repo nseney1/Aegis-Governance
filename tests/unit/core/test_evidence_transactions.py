@@ -1,8 +1,5 @@
 """Transaction regressions for canonical evidence production and sync."""
-import argparse
 import json
-import os
-import time
 
 import pytest
 from aegis_core.yaml import dump_frontmatter
@@ -96,52 +93,3 @@ def test_fitness_updater_retry_completes_every_cell_once(tmp_path):
     assert len(rows) == 2
 
 
-def test_sync_outcome_only_preserves_trigger_dimension(tmp_path):
-    from aegis_cli.sync import aggregate_evidence, sync_frontmatter
-    from aegis_sdk.rules import parse_rule_file
-
-    path = _cell(tmp_path, "cell-a", triggers=7, tp=1, fp=1, score=1 / 7)
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text(
-        json.dumps({"cell": "cell-a", "signal": "tp", "metadata": {"credit_weight": 0.25}}) + "\n",
-        encoding="utf-8")
-    changes = sync_frontmatter(str(path.parent.parent), aggregate_evidence(str(evidence)))
-    fm, _ = parse_rule_file(str(path))
-    assert len(changes) == 1
-    assert fm["fitness"]["triggers"] == 7
-    assert fm["fitness"]["true_positives"] == 0.25
-    assert fm["fitness"]["false_positives"] == 0
-    assert fm["fitness"]["score"] == round(0.25 / 7, 4)
-
-
-def test_sync_fractional_credit_uses_decimal_sum(tmp_path):
-    from aegis_cli.sync import aggregate_evidence
-
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    rows = [{"cell": "cell-a", "signal": "tp", "metadata": {"credit_weight": 0.1}},
-            {"cell": "cell-a", "signal": "tp", "metadata": {"credit_weight": 0.2}}]
-    (evidence / "signals.jsonl").write_text(
-        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
-    assert aggregate_evidence(str(evidence))["cell-a"]["tp"] == 0.3
-
-
-def test_sync_replace_failure_returns_nonzero_without_claimed_change(tmp_path, monkeypatch, capsys):
-    import aegis_cli.sync as sync_mod
-
-    _cell(tmp_path, "cell-a")
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text(
-        json.dumps({"cell": "cell-a", "signal": "trigger", "timestamp": "2026-01-01T00:00:00Z"}) + "\n",
-        encoding="utf-8")
-    monkeypatch.setattr(sync_mod, "resolve_root", lambda args: tmp_path)
-    monkeypatch.setattr(sync_mod.os, "replace", lambda source, target: (_ for _ in ()).throw(OSError("disk")))
-
-    rc = sync_mod.run_sync(argparse.Namespace(dry_run=False, json=True))
-    payload = json.loads(capsys.readouterr().out)
-    assert rc != 0
-    assert payload["status"] == "error"
-    assert payload["changes"] == []
-    assert payload["errors"]

@@ -7,10 +7,8 @@ legacy standalone getters emit DeprecationWarning while preserving backward comp
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import pytest
-import warnings
 
 from aegis_core.defects import audit_expiry, load_registry
 from aegis_core.lifecycle.creation import create_cell, transfer_cell
@@ -19,7 +17,6 @@ from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evid
 from aegis_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
 from aegis_core.lifecycle.selection import run_cell_selection
 from aegis_core.outcomes import harvest_git_history, run_outcome_engine
-from aegis_core.sync import load_soma_config, run_post_session_hook
 from aegis_core.workspace import Workspace
 
 
@@ -166,17 +163,3 @@ class TestOutcomesAndSyncWorkspaceInteroperability:
         audit = audit_expiry(mock_soma_workspace)
         assert isinstance(audit, list)
 
-    def test_sync_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        # Create a dummy aegis.conf
-        conf_file = mock_soma_workspace.root / "aegis.conf"
-        conf_file.write_text("TEAM_REPO=/tmp/team\n", encoding="utf-8")
-        cfg = load_soma_config(repo_dir=mock_soma_workspace)
-        assert cfg.get("TEAM_REPO") == "/tmp/team"
-
-        dummy_transcript = mock_soma_workspace.root / "transcript.jsonl"
-        dummy_transcript.write_text("{}\n", encoding="utf-8")
-        res = run_post_session_hook(
-            transcript_path=dummy_transcript,
-            repo_root=mock_soma_workspace,
-        )
-        assert res in (0, 1)

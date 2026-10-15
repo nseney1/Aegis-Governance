@@ -127,11 +127,25 @@ def _collect_target_paths_from_rules():
 
 _literal_paths = _collect_target_paths_from_rules()
 
+# Wave B1b deleted aegis_core/sync.py (D7); the dogfood rule that still names it
+# lives in .aegis/rules, which the b1b-core lane does not own. Strict, so the
+# rule edit (drop the line) must also drop this entry.
+_DANGLING_PENDING_RULE_EDIT = {
+    ("trap-stdout-protocol-corruption.md", "aegis_core/sync.py"):
+        "aegis_core/sync.py was deleted in wave B1b; the .aegis/rules edit is deferred to the rules owner",
+}
 
-@pytest.mark.parametrize(
-    "rule_name,target_path", _literal_paths,
-    ids=[f"{r}:{p}" for r, p in _literal_paths]
-) if _literal_paths else lambda f: f
+
+def _target_path_params():
+    params = []
+    for rule_name, target_path in _literal_paths:
+        reason = _DANGLING_PENDING_RULE_EDIT.get((rule_name, target_path))
+        marks = [pytest.mark.xfail(strict=True, reason=reason)] if reason else []
+        params.append(pytest.param(rule_name, target_path, marks=marks, id=f"{rule_name}:{target_path}"))
+    return params
+
+
+@pytest.mark.parametrize("rule_name,target_path", _target_path_params()) if _literal_paths else lambda f: f
 def test_literal_target_paths_exist(rule_name, target_path):
     """Literal (non-glob) target_paths referenced by cells should exist."""
     full = REPO_ROOT / target_path

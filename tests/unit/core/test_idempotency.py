@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
-import pytest
 
 from aegis_core.lifecycle import (
     apply_exponential_decay,
     is_promotable,
     is_extinct,
 )
-from aegis_core.quarantine import safe_parse_cell_file
 
 
 class TestIdempotencyContracts:
@@ -45,14 +42,3 @@ class TestIdempotencyContracts:
             e2 = is_extinct(tp, triggers)
             assert e1 == e2
 
-    def test_safe_parse_cell_idempotency_on_healthy_file(self, tmp_path: Path):
-        """safe_parse_cell_file is pure and idempotent when reading a healthy file."""
-        cell = tmp_path / "cell.md"
-        cell.write_text("---\nid: test\ntype: wall\n---\nBody\n", encoding="utf-8")
-
-        m1, b1, s1 = safe_parse_cell_file(cell, workspace=tmp_path)
-        m2, b2, s2 = safe_parse_cell_file(cell, workspace=tmp_path)
-
-        assert m1 == m2
-        assert b1 == b2
-        assert s1 == s2 == "ok"

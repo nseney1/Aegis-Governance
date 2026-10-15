@@ -10,7 +10,6 @@ from typing import Any
 __version__ = "3.1.0"
 
 _LEGACY_MODULE_REDIRECTS: dict[str, str] = {
-    "aegis_core.homeostasis": "aegis_core.resilience",
     "aegis_core.verification.immune_verify": "aegis_core.verification.adversarial_verify",
     "aegis_core.ast.triggers": "aegis_core.ast.match",
     "aegis_core.ast_match": "aegis_core.ast.match",
@@ -63,9 +62,6 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "enforcement": ("aegis_core.enforcement", None),
     "errors": ("aegis_core.errors", None),
     "evidence": ("aegis_core.evidence", None),
-    "evidence_collector": ("aegis_core.evidence_collector", None),
-    "resilience": ("aegis_core.resilience", None),
-    "homeostasis": ("aegis_core.resilience", None),
     "inference_provider": ("aegis_core.inference_provider", None),
     "insights": ("aegis_core.insights", None),
     "integrity": ("aegis_core.integrity", None),
@@ -74,15 +70,11 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "metrics": ("aegis_core.metrics", None),
     "operations": ("aegis_core.operations", None),
     "outcomes": ("aegis_core.outcomes", None),
-    "quarantine": ("aegis_core.quarantine", None),
     "receipts": ("aegis_core.receipts", None),
     "scoring": ("aegis_core.scoring", None),
-    "sentinels": ("aegis_core.sentinels", None),
     "skills": ("aegis_core.skills", None),
     "yaml": ("aegis_core.yaml", None),
     "storage": ("aegis_core.storage", None),
-    "sweep_session": ("aegis_core.sweep_session", None),
-    "sync": ("aegis_core.sync", None),
     "taxonomy": ("aegis_core.taxonomy", None),
     "telemetry": ("aegis_core.telemetry", None),
     "verification": ("aegis_core.verification", None),

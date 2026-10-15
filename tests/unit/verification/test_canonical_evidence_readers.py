@@ -2,15 +2,12 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
-import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from aegis_core.yaml import dump_frontmatter
-import pytest
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
 ENZYMES = ROOT / "enzymes"
@@ -72,21 +69,6 @@ def test_aggregate_signals_reports_errors_preserves_dimensions_and_weights(tmp_p
     assert result.counts["triggered"]["has_triggers"] is True
     assert "legacy" not in result.counts
     assert result.errors and result.errors[0]["line"] == 4
-
-
-def test_sync_fails_on_malformed_complete_signal_row(tmp_path, monkeypatch, capsys):
-    import aegis_cli.sync as sync
-
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text("{bad}\n", encoding="utf-8")
-    monkeypatch.setattr(sync, "resolve_root", lambda _args: tmp_path)
-
-    assert sync.run_sync(argparse.Namespace(dry_run=False, json=True)) == 1
-    output = json.loads(capsys.readouterr().out)
-    assert output["status"] == "error"
-    assert output["errors"][0]["line"] == 1
 
 
 def test_status_uses_canonical_triggers_not_legacy(tmp_path, capsys):
@@ -158,25 +140,6 @@ def test_owned_production_has_no_active_legacy_evidence_paths():
         if needle in path.read_text(encoding="utf-8").replace("', 'evidence', '", "/evidence/").replace('\", \"evidence\", \"', "/evidence/")
     }
     assert offenders == {}
-
-
-def test_sync_malformed_ledger_does_not_apply_partial_counts(tmp_path, monkeypatch, capsys):
-    import aegis_cli.sync as sync
-
-    cell = tmp_path / ".aegis" / "rules" / "vacuoles" / "mixed.md"
-    _cell(cell, "mixed")
-    original = cell.read_bytes()
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text(
-        json.dumps(_signal("mixed", "trigger")) + "\n{bad}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(sync, "resolve_root", lambda _args: tmp_path)
-
-    assert sync.run_sync(argparse.Namespace(dry_run=False, json=True)) == 1
-    assert cell.read_bytes() == original
-    assert json.loads(capsys.readouterr().out)["errors"]
 
 
 def test_lifecycle_does_not_infer_zero_triggers_from_outcome_only_data(tmp_path):
