@@ -35,6 +35,7 @@ import re
 import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
+from aegis_core.errors import WorkspaceError
 from aegis_core.storage import atomic_write_bytes, atomic_write_text, locked, read_jsonl
 from aegis_core.taxonomy import CANONICAL_RULE_TYPES, RULE_TYPE_DIRS, RULE_TYPE_NORMALIZATION
 from aegis_core.workspace.layout import (
@@ -45,7 +46,7 @@ from aegis_core.workspace.layout import (
     WorkspaceLayout,
 )
 
-__all__ = ["DERIVED_KEYS", "MigrationPlan", "MigrationResult", "apply", "plan"]
+__all__ = ["DERIVED_KEYS", "MigrationPlan", "MigrationRefused", "MigrationResult", "apply", "plan"]
 
 # Frontmatter keys that are derived from the ledger; rule files never carry them (v4.3 §10.2).
 DERIVED_KEYS = frozenset({
@@ -95,6 +96,10 @@ _DROPPED_CONF = {
 }
 
 
+class MigrationRefused(WorkspaceError):
+    """The workspace cannot be migrated safely (for example, .aegis is a symlink)."""
+
+
 @dataclass
 class _RuleMove:
     source: Path
@@ -122,6 +127,9 @@ class MigrationPlan:
     unreadable: List[str] = field(default_factory=list)
     removals: List[str] = field(default_factory=list)
     left_in_place: List[str] = field(default_factory=list)
+    skipped: List[Dict[str, str]] = field(default_factory=list)
+    already_moved: List[Path] = field(default_factory=list)
+    refusal: Optional[str] = None
 
     @property
     def creates_config(self) -> bool:
@@ -130,14 +138,21 @@ class MigrationPlan:
 
     @property
     def pending(self) -> bool:
-        return bool(self.ledger_sources or self.config_sources or self.moves or self.strips or self.removals)
+        if self.refusal:
+            return False
+        return bool(
+            self.ledger_sources or self.config_sources or self.moves or self.strips
+            or self.removals or self.already_moved
+        )
 
     def _rel(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()
 
     def to_dict(self) -> Dict[str, Any]:
+        status = "refused" if self.refusal else ("pending" if self.pending else "up_to_date")
         return {
-            "status": "pending" if self.pending else "up_to_date",
+            "status": status,
+            "refusal": self.refusal,
             "root": str(self.root),
             "ledger": dict(self.ledger_stats, sources=self.ledger_sources) if self.ledger_sources else None,
             "config": self.config if self.pending and (self.config_sources or self.creates_config) else None,
@@ -151,6 +166,8 @@ class MigrationPlan:
             "unmapped": self.unmapped,
             "conflicts": self.conflicts,
             "unreadable": self.unreadable,
+            "skipped": self.skipped,
+            "already_moved": [self._rel(path) for path in self.already_moved],
             "remove": self.removals,
             "left_in_place": self.left_in_place,
         }
@@ -186,6 +203,9 @@ def _strip_derived(text: str) -> Tuple[str, List[str]]:
     """
     from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
+    if text.startswith("\ufeff"):
+        stripped, keys = _strip_derived(text[1:])
+        return "\ufeff" + stripped, keys
     lines = text.splitlines(keepends=True)
     span = _frontmatter_span(lines)
     if span is None:
@@ -232,6 +252,12 @@ def _set_type(text: str, rule_type: str) -> str:
             return "".join(lines)
     lines.insert(start, f"type: {rule_type}{eol}")
     return "".join(lines)
+
+
+def _inside(root: Path, path: Path) -> bool:
+    """True if ``path``, with every symlink resolved, stays inside ``root``."""
+    real, base = os.path.realpath(path), os.path.realpath(root)
+    return real == base or real.startswith(base.rstrip(os.sep) + os.sep)
 
 
 def _canonical_type(raw: Any) -> Optional[str]:
@@ -420,6 +446,9 @@ def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             if source.name == "README.md" or any(part.startswith(".") for part in source.relative_to(soma).parts):
                 continue
             rel = result._rel(source)
+            if source.is_symlink() or not _inside(layout.root, source):
+                result.skipped.append({"path": rel, "reason": "a symlink or outside the workspace; not followed"})
+                continue
             try:
                 text = source.read_bytes().decode("utf-8-sig")  # bytes: keep CRLF as it is
             except (OSError, UnicodeError):
@@ -432,16 +461,25 @@ def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
                 result.unmapped.append({"path": rel, "type": str(raw_type)})
                 continue
             target = layout.rules_dir / RULE_TYPE_DIRS[rule_type] / source.name
+            content, _keys = _strip_derived(_set_type(text, rule_type))
+            if not _inside(layout.root, target.parent):
+                result.skipped.append({"path": rel, "reason": f"{result._rel(target.parent)} resolves outside the workspace"})
+                continue
             if os.path.lexists(target) or target in planned_targets:
-                result.conflicts.append({"path": rel, "to": result._rel(target)})
+                if _same_text(target, content):
+                    result.already_moved.append(source)  # an interrupted apply: only the source is left
+                else:
+                    result.conflicts.append({"path": rel, "to": result._rel(target)})
                 continue
             planned_targets.add(target)
-            content, _keys = _strip_derived(_set_type(text, rule_type))
             result.moves.append(_RuleMove(source, target, rule_type, content))
 
     if layout.rules_dir.is_dir():
         for path in sorted(layout.rules_dir.rglob("*.md")):
-            if path.name == "README.md" or path.is_symlink():
+            if path.name == "README.md":
+                continue
+            if path.is_symlink() or not _inside(layout.root, path):
+                result.skipped.append({"path": result._rel(path), "reason": "a symlink or outside the workspace; not rewritten"})
                 continue
             try:
                 text = path.read_bytes().decode("utf-8")
@@ -451,6 +489,13 @@ def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             new_text, keys = _strip_derived(text)
             if keys:
                 result.strips.append((path, keys, new_text))
+
+
+def _same_text(path: Path, content: str) -> bool:
+    try:
+        return not path.is_symlink() and path.read_bytes() == content.encode("utf-8")
+    except OSError:
+        return False
 
 
 def _plan_state(result: MigrationPlan, layout: WorkspaceLayout) -> None:
@@ -472,6 +517,12 @@ def plan(root: Any) -> MigrationPlan:
     """Read the workspace at ``root`` and decide what ``apply`` would do. Writes nothing."""
     layout = WorkspaceLayout(Path(os.fspath(root)).resolve())
     result = MigrationPlan(root=layout.root)
+    for directory in (layout.aegis_dir, layout.legacy_soma_dir):
+        if directory.is_symlink():
+            result.refusal = (
+                f"{directory.name} is a symlink; aegis migrate reads and writes only inside the workspace"
+            )
+            return result
     _plan_ledger(result, layout)
     _plan_config(result, layout)
     _plan_rules(result, layout)
@@ -514,6 +565,8 @@ def apply(migration: MigrationPlan) -> MigrationResult:
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
     result = MigrationResult(plan=migration)
+    if migration.refusal:
+        raise MigrationRefused(migration.refusal)
     if not migration.pending:
         return result
     layout = WorkspaceLayout(migration.root)
@@ -522,7 +575,7 @@ def apply(migration: MigrationPlan) -> MigrationResult:
     with locked(root):
         backup = _backup_dir(layout)
         touched = [root / rel for rel in migration.removals]
-        touched += [move.source for move in migration.moves]
+        touched += [move.source for move in migration.moves] + list(migration.already_moved)
         touched += [path for path, _keys, _text in migration.strips]
         for path in touched:
             if os.path.lexists(path):
@@ -554,6 +607,9 @@ def apply(migration: MigrationPlan) -> MigrationResult:
         for move in migration.moves:
             if move.target.is_file() and os.path.lexists(move.source):
                 move.source.unlink()
+        for source in migration.already_moved:
+            if os.path.lexists(source):
+                source.unlink()
         for rel in migration.removals:
             _remove(root / rel)
     return result

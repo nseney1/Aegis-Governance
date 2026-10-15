@@ -19,6 +19,9 @@ __all__ = ["MigrateCommand", "run_migrate"]
 
 def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
     root = report["root"]
+    if report["status"] == "refused":
+        print(f"aegis migrate: {root}: refused: {report['refusal']}")
+        return
     if report["status"] == "up_to_date":
         print(f"aegis migrate: {root} is already on the v4 layout; nothing to do.")
     elif applied:
@@ -48,6 +51,10 @@ def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
         print(f"  ! {entry['to']} already exists: {entry['path']} left in place")
     for path in report["unreadable"]:
         print(f"  ! cannot read {path}: left in place")
+    for entry in report["skipped"]:
+        print(f"  ! {entry['path']}: {entry['reason']}")
+    for path in report["already_moved"]:
+        print(f"  remove (already converted, backed up first): {path}")
     for path in report["left_in_place"]:
         print(f"  note: {path} is not part of the v4 layout; left in place")
     if report["user_config"]:
@@ -67,7 +74,7 @@ def run_migrate(args: argparse.Namespace) -> int:
     apply_it = bool(getattr(args, "apply", False))
     report = plan.to_dict()  # before applying: the report describes what was planned
     backup = None
-    if apply_it:
+    if apply_it and not plan.refusal:
         backup = migrate.apply(plan).backup
     if apply_it and report["status"] == "pending":
         report["status"] = "applied"
@@ -76,7 +83,9 @@ def run_migrate(args: argparse.Namespace) -> int:
         print(json.dumps(report, indent=2))
     else:
         _print_report(report, apply_it and backup is not None, backup)
-    left_behind = report["unmapped"] or report["conflicts"] or report["unreadable"]
+    if plan.refusal:
+        return 1
+    left_behind = report["unmapped"] or report["conflicts"] or report["unreadable"] or report["skipped"]
     return 1 if apply_it and left_behind else 0
 
 

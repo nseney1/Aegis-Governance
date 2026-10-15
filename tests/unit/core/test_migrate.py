@@ -389,3 +389,89 @@ def test_backup_is_written_before_anything_is_removed(legacy: Path, monkeypatch)
     assert len(backups) == 1
     assert (backups[0] / ".aegis" / "evidence" / "signals.jsonl").is_file()
     assert calls
+
+
+# ── Crash windows and untrusted shapes ───────────────────────────────────────
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+
+def test_a_symlinked_aegis_dir_is_refused_and_nothing_is_written(tmp_path: Path):
+    root = tmp_path / "ws"
+    root.mkdir()
+    outside = tmp_path / "elsewhere"
+    (outside / "evidence").mkdir(parents=True)
+    (outside / "evidence" / "signals.jsonl").write_text(json.dumps(CITADEL_ROWS[0]) + "\n", encoding="utf-8")
+    _symlink_or_skip(root / ".aegis", outside)
+    before = _snapshot(outside)
+
+    plan = migrate.plan(root)
+    assert plan.to_dict()["status"] == "refused"
+    assert ".aegis is a symlink" in plan.to_dict()["refusal"]
+    with pytest.raises(migrate.MigrationRefused):
+        migrate.apply(plan)
+    assert _snapshot(outside) == before
+
+
+def test_a_rerun_after_an_interrupted_apply_converges(legacy: Path, monkeypatch):
+    real_unlink = Path.unlink
+
+    def crash_on_soma(self, *args, **kwargs):
+        if ".soma" in self.parts:
+            raise OSError("power cut")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", crash_on_soma)
+    with pytest.raises(OSError, match="power cut"):
+        migrate.apply(migrate.plan(legacy))
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+
+    plan = migrate.plan(legacy)
+    report = plan.to_dict()
+    assert report["conflicts"] == []
+    assert len(report["already_moved"]) == 5
+    migrate.apply(plan)
+
+    assert sorted(p.name for p in (legacy / ".soma" / "cells").rglob("*.md")) == ["README.md", "ribosome-mystery.md"]
+    rows = ledger.read(legacy).rows
+    assert len(rows) == 3  # the rerun re-read the v3 ledger and appended nothing twice
+    assert migrate.plan(legacy).to_dict()["status"] == "up_to_date"
+
+
+def test_rule_paths_that_resolve_outside_the_workspace_are_not_written(tmp_path: Path):
+    root = tmp_path / "ws"
+    (root / ".aegis" / "rules").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "trap-victim.md"
+    victim.write_text("---\nid: v\nfitness:\n  triggers: 1\n---\nB\n", encoding="utf-8")
+    _symlink_or_skip(root / ".aegis" / "rules" / "traps", outside)
+    _cell(root / ".soma" / "cells" / "vacuoles" / "trap-new.md", "vacuole")
+
+    plan = migrate.plan(root)
+    report = plan.to_dict()
+    assert report["strip"] == [] and report["rules"] == []
+    skipped = {s["path"] for s in report["skipped"]}
+    assert ".soma/cells/vacuoles/trap-new.md" in skipped  # its destination dir leaves the workspace
+    # rglob may or may not descend a symlinked dir (it varies by Python version); either way
+    # the rule behind it is never rewritten
+    assert skipped <= {".soma/cells/vacuoles/trap-new.md", ".aegis/rules/traps/trap-victim.md"}
+    migrate.apply(plan)
+
+    assert victim.read_text(encoding="utf-8") == "---\nid: v\nfitness:\n  triggers: 1\n---\nB\n"
+    assert sorted(p.name for p in outside.iterdir()) == ["trap-victim.md"]
+
+
+def test_a_rule_with_a_bom_keeps_it(tmp_path: Path):
+    root = tmp_path / "ws"
+    rule = root / ".aegis" / "rules" / "traps" / "trap-bom.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_bytes("﻿---\nid: trap-bom\nscore: 0.4\n---\nBody\n".encode("utf-8"))
+
+    migrate.apply(migrate.plan(root))
+
+    assert rule.read_bytes() == "﻿---\nid: trap-bom\n---\nBody\n".encode("utf-8")
