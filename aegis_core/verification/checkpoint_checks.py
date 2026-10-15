@@ -1,12 +1,11 @@
 """Shared, deterministic, read-only checkpoint checks for CLI and MCP."""
 from __future__ import annotations
 
-import json
 import os
 import re
 import stat
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import List
 
 from aegis_core.evidence import aggregate_signals
 from aegis_core.taxonomy import DIR_TO_ALLOWED_RULE_TYPES as DIR_TO_TYPE
@@ -410,6 +409,14 @@ def check_hardcoded_paths(root: Path) -> list[dict]:
 
 
 def check_assertion_density(root: Path) -> list[dict]:
+    """Every ``test_*`` function under tests/ must assert something and not be a stub.
+
+    Judged per function by AST (#1): text such as "assert " in a comment, a
+    docstring or a neighbouring test no longer passes a file.
+    """
+    from aegis_core.verification.quality_gate import check_assertion_density as density
+    from aegis_core.verification.quality_gate import check_no_bare_pass as bare_pass
+
     issues = []  # type: List[dict]
     try:
         test_files = find_python_files(root, "tests")
@@ -419,47 +426,22 @@ def check_assertion_density(root: Path) -> list[dict]:
     for test_file in test_files:
         if not test_file.name.startswith("test_"):
             continue
-        if not _is_regular_file(
-            "assertion_density", root, test_file, issues
-        ):
+        if not _is_regular_file("assertion_density", root, test_file, issues):
             continue
         try:
-            content = test_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            issues.append(_failure(
-                "assertion_density", root, test_file, "read", exc
-            ))
+            found = [density(str(test_file)), bare_pass(str(test_file))]
+        except (OSError, SyntaxError, UnicodeError, ValueError) as exc:
+            issues.append(_failure("assertion_density", root, test_file, "parse", exc))
             continue
-        has_assertion = (
-            "assert " in content
-            or "assert(" in content
-            or "pytest.raises" in content
-            or "pytest.fail" in content
-            or "self.assert" in content
-        )
-        if not has_assertion:
-            try:
-                from aegis_core.verification.quality_gate import (
-                    check_assertion_density as ast_check,
-                )
-                evidence = ast_check(str(test_file))
-                if evidence.verdict:
-                    continue
-            except (OSError, UnicodeError, ValueError, SyntaxError) as exc:
-                issues.append(_failure(
-                    "assertion_density", root, test_file, "parse", exc
-                ))
-                continue
-            except ImportError:
-                pass
-            issues.append({
-                "check": "assertion_density",
-                "file": _relative(root, test_file),
-                "message": (
-                    f"Low assertion density in {test_file.name}: "
-                    "no assert statements found"
-                ),
-            })
+        prefixes = ("Low assertion density in", "Placeholder tests in")
+        for prefix, evidence in zip(prefixes, found):
+            if not evidence.verdict:
+                issues.append({
+                    "check": "assertion_density",
+                    "file": _relative(root, test_file),
+                    "lines": evidence.lines,
+                    "message": f"{prefix} {test_file.name}: {evidence.detail[0].lower()}{evidence.detail[1:]}",
+                })
     return issues
 
 
@@ -524,7 +506,6 @@ def check_cell_conventions(root: Path) -> list[dict]:
             continue
         if isinstance(allowed_types, str):
             allowed_types = (allowed_types,)
-        expected_type = allowed_types[0]
         rel = entry.relative_path
         try:
             content = entry.content.decode("utf-8")
