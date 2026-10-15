@@ -14,7 +14,6 @@ from aegis_core.errors import WorkspaceError
 from aegis_core.workspace.confinement import confine_path_internal, validate_workspace_path
 from aegis_core.workspace.discovery import is_aegis_repo, resolve_workspace_root
 from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
-from aegis_core.workspace.scaffold import scaffold_workspace
 
 if TYPE_CHECKING:
     from aegis_core.workspace.git import GitWorkspace
@@ -71,39 +70,9 @@ class Workspace(os.PathLike[str]):
         return self.layout.aegis_dir
 
     @property
-    def soma_dir(self) -> Path:
-        """Path to .aegis directory."""
-        return self.aegis_dir
-
-    @property
     def rules_dir(self) -> Path:
         """Path to active rules directory (.aegis/rules)."""
         return self.layout.rules_dir
-
-    @property
-    def cells_dir(self) -> Path:
-        """Path to active rules directory (.aegis/rules)."""
-        return self.rules_dir
-
-    @property
-    def metrics_dir(self) -> Path:
-        """Path to metrics directory."""
-        return self.layout.metrics_dir
-
-    @property
-    def evidence_dir(self) -> Path:
-        """Path to evidence directory."""
-        return self.layout.evidence_dir
-
-    @property
-    def locks_dir(self) -> Path:
-        """Path to locks directory."""
-        return self.layout.locks_dir
-
-    @property
-    def signals_file(self) -> Path:
-        """Path to signals.jsonl file."""
-        return self.layout.signals_file
 
     @property
     def is_git(self) -> bool:
@@ -148,19 +117,12 @@ class Workspace(os.PathLike[str]):
         return cls(root=resolved)
 
     def scaffold(self, minimal: bool = False, dry_run: bool = False) -> list[Path]:
-        """Scaffold standard directory structure for Aegis governance.
+        """Create the D12 directories (.aegis/rules/<type>/, .aegis/state/); refuse bare repos."""
+        # Imported here: scaffold writes through aegis_core.storage, which imports the
+        # workspace package's layout module, so a module-level import would be circular.
+        from aegis_core.workspace.scaffold import scaffold_workspace
 
-        Creates .aegis/rules/ and .aegis/evidence/ (and .aegis/metrics/).
-        Guards against bare git repositories.
-        """
-        return scaffold_workspace(
-            root=self.root,
-            cells_dir=self.rules_dir,
-            evidence_dir=self.evidence_dir,
-            metrics_dir=self.metrics_dir,
-            minimal=minimal,
-            dry_run=dry_run,
-        )
+        return scaffold_workspace(self.layout, minimal=minimal, dry_run=dry_run)
 
     @classmethod
     def resolve(

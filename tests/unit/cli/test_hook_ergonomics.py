@@ -251,7 +251,8 @@ class TestHybridDispatcher:
         assert rc == 0
         assert not (repo / ".git" / "hooks" / "pre-commit").exists()
 
-    def test_dispatch_safety_gate(self):
+    def test_dispatch_safety_gate(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)  # the gate logs into the cwd's workspace
         args = argparse.Namespace(
             hook_action="safety-gate",
             phase="safety-gate",

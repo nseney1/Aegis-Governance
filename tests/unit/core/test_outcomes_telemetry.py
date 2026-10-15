@@ -48,6 +48,11 @@ def test_record_verification_telemetry(tmp_path: Path):
         source="session",
     )
     assert ok_fail is True
+    from aegis_core.telemetry_engine import ledger
+    # One row per rule and run; each outcome row is also the trigger.
+    assert ledger.aggregate(tmp_path, "test-cell") == {
+        "triggers": 2, "tp": 1, "fp": 1, "last_ts": ledger.read(tmp_path).rows[-1]["ts"],
+    }
 
     # Target files do not match
     assert record_verification_telemetry(ws, ["unmatched/file.txt"], passed=True) is False
@@ -69,5 +74,5 @@ def test_telemetry_edge_cases_and_error_branches(tmp_path: Path, monkeypatch):
     cell_file.write_text(f"---\n{dump_frontmatter(fm)}---\n\n# Body\n", encoding="utf-8")
     def mock_append_err(*args, **kwargs):
         raise RuntimeError("db error")
-    monkeypatch.setattr("aegis_core.telemetry_engine.ledger.append_signals", mock_append_err)
+    monkeypatch.setattr("aegis_core.telemetry_engine.ledger.append", mock_append_err)
     assert record_verification_telemetry(ws, ["src/foo.py"], passed=True) is False

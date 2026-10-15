@@ -99,22 +99,20 @@ def _naive_utc(timestamp: Any) -> Optional[datetime]:
 
 
 def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any]]:
-    """Load lifecycle dimensions from the canonical signal ledger."""
-    from aegis_core.evidence import aggregate_signals
+    """Load lifecycle dimensions from the outcome ledger."""
+    from aegis_core.telemetry_engine import ledger
     ws = workspace if isinstance(workspace, Workspace) else (
         Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
     )
-    evidence_dir = str(ws.evidence_dir)
-    aggregation = aggregate_signals(evidence_dir)
     return {
-        cell_id: {
-            "triggers": counts["triggers"],
-            "tp": counts["tp"],
-            "fp": counts["fp"],
-            "last_trigger_ts": _naive_utc(counts["last_trigger"]),
-            "has_triggers": counts["has_triggers"],
+        rule: {
+            "triggers": totals["triggers"],
+            "tp": totals["tp"],
+            "fp": totals["fp"],
+            "last_trigger_ts": _naive_utc(totals["last_ts"]),
+            "has_triggers": totals["triggers"] > 0,
         }
-        for cell_id, counts in aggregation.counts.items()
+        for rule, totals in ledger.aggregate(ws.root).items()
     }
 
 

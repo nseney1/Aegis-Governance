@@ -12,37 +12,13 @@ Promotion criteria (deterministic):
 Demotion criteria (deterministic):
   - fp_rate > 0.5 OR triggers == 0 for 90 days
 """
-import json
-import os
 import sys
-from datetime import datetime, timedelta
 
-import pytest
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from tests.helpers_rule import make_cell
-
-
-def write_evidence(evidence_dir, cell_id, triggers=0, tp=0, fp=0):
-    """Write canonical trigger and outcome rows to signals.jsonl."""
-    signal_file = os.path.join(str(evidence_dir), "signals.jsonl")
-    timestamp = datetime.now().isoformat()
-    with open(signal_file, "a", encoding="utf-8") as stream:
-        for _ in range(triggers):
-            stream.write(json.dumps({
-                "cell": cell_id,
-                "signal": "trigger",
-                "timestamp": timestamp,
-            }) + "\n")
-        for signal, count in (("tp", tp), ("fp", fp)):
-            for _ in range(count):
-                stream.write(json.dumps({
-                    "cell": cell_id,
-                    "signal": signal,
-                    "timestamp": timestamp,
-                }) + "\n")
+from tests.helpers_rule import make_cell, write_evidence
 
 
 class TestLifecycleImport:
@@ -71,7 +47,7 @@ class TestPromotionCriteria:
 
         make_cell(str(cells_dir), "proven-cell", cell_type="trap",
                   created_days_ago=45)
-        write_evidence(str(evidence_dir), "proven-cell", triggers=25, tp=23, fp=2)
+        write_evidence(evidence_dir.parent.parent, "proven-cell", triggers=25, tp=23, fp=2)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 1
@@ -90,7 +66,7 @@ class TestPromotionCriteria:
 
         make_cell(str(cells_dir), "young-cell", cell_type="trap",
                   created_days_ago=45)
-        write_evidence(str(evidence_dir), "young-cell", triggers=10, tp=9, fp=1)
+        write_evidence(evidence_dir.parent.parent, "young-cell", triggers=10, tp=9, fp=1)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 0
@@ -106,7 +82,7 @@ class TestPromotionCriteria:
 
         make_cell(str(cells_dir), "noisy-cell", cell_type="trap",
                   created_days_ago=45)
-        write_evidence(str(evidence_dir), "noisy-cell", triggers=25, tp=15, fp=10)
+        write_evidence(evidence_dir.parent.parent, "noisy-cell", triggers=25, tp=15, fp=10)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 0
@@ -122,7 +98,7 @@ class TestPromotionCriteria:
 
         make_cell(str(cells_dir), "new-cell", cell_type="trap",
                   created_days_ago=15)
-        write_evidence(str(evidence_dir), "new-cell", triggers=30, tp=28, fp=2)
+        write_evidence(evidence_dir.parent.parent, "new-cell", triggers=30, tp=28, fp=2)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 0
@@ -141,7 +117,7 @@ class TestPromotionCriteria:
 
         make_cell(str(cells_dir), "proven-wall", cell_type="wall",
                   created_days_ago=60)
-        write_evidence(str(evidence_dir), "proven-wall", triggers=30, tp=28, fp=2)
+        write_evidence(evidence_dir.parent.parent, "proven-wall", triggers=30, tp=28, fp=2)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 1
@@ -172,7 +148,7 @@ class TestDemotionCriteria:
 
         make_cell(str(cells_dir), "noisy-wall", cell_type="wall",
                   created_days_ago=60)
-        write_evidence(str(evidence_dir), "noisy-wall", triggers=20, tp=6, fp=14)
+        write_evidence(evidence_dir.parent.parent, "noisy-wall", triggers=20, tp=6, fp=14)
 
         candidates = evaluate_demotions(str(tmp_path))
         assert len(candidates) == 1
@@ -208,7 +184,7 @@ class TestDemotionCriteria:
 
         make_cell(str(cells_dir), "good-wall", cell_type="wall",
                   created_days_ago=60)
-        write_evidence(str(evidence_dir), "good-wall", triggers=25, tp=23, fp=2)
+        write_evidence(evidence_dir.parent.parent, "good-wall", triggers=25, tp=23, fp=2)
 
         candidates = evaluate_demotions(str(tmp_path))
         assert len(candidates) == 0
@@ -224,7 +200,7 @@ class TestDemotionCriteria:
 
         make_cell(str(cells_dir), "bad-wall", cell_type="wall",
                   created_days_ago=60)
-        write_evidence(str(evidence_dir), "bad-wall", triggers=10, tp=3, fp=7)
+        write_evidence(evidence_dir.parent.parent, "bad-wall", triggers=10, tp=3, fp=7)
 
         candidates = evaluate_demotions(str(tmp_path))
         assert len(candidates) == 1
@@ -257,7 +233,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "edge-cell-19", cell_type="trap",
                   created_days_ago=45)
         # 19 triggers, all TP → tp_rate = 1.0 (passes rate check)
-        write_evidence(str(evidence_dir), "edge-cell-19", triggers=19, tp=19, fp=0)
+        write_evidence(evidence_dir.parent.parent, "edge-cell-19", triggers=19, tp=19, fp=0)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 0
@@ -274,7 +250,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "edge-cell-20", cell_type="trap",
                   created_days_ago=45)
         # 20 triggers, 18 TP → tp_rate = 0.90 (passes >=0.85)
-        write_evidence(str(evidence_dir), "edge-cell-20", triggers=20, tp=18, fp=2)
+        write_evidence(evidence_dir.parent.parent, "edge-cell-20", triggers=20, tp=18, fp=2)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 1
@@ -292,7 +268,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "low-tp-cell", cell_type="trap",
                   created_days_ago=45)
         # 25 triggers, 21 TP → tp_rate = 0.84
-        write_evidence(str(evidence_dir), "low-tp-cell", triggers=25, tp=21, fp=4)
+        write_evidence(evidence_dir.parent.parent, "low-tp-cell", triggers=25, tp=21, fp=4)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 0
@@ -309,7 +285,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "few-triggers", cell_type="wall",
                   created_days_ago=10)
         # 4 triggers, 3 FP → fp_rate would be 0.75, but <5 triggers skips check
-        write_evidence(str(evidence_dir), "few-triggers", triggers=4, tp=1, fp=3)
+        write_evidence(evidence_dir.parent.parent, "few-triggers", triggers=4, tp=1, fp=3)
 
         candidates = evaluate_demotions(str(tmp_path))
         # Should NOT be demoted — not enough triggers for fp_rate check
@@ -328,7 +304,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "noisy-5", cell_type="wall",
                   created_days_ago=10)
         # 5 triggers, 3 FP → fp_rate = 0.60 (>0.5 threshold)
-        write_evidence(str(evidence_dir), "noisy-5", triggers=5, tp=2, fp=3)
+        write_evidence(evidence_dir.parent.parent, "noisy-5", triggers=5, tp=2, fp=3)
 
         candidates = evaluate_demotions(str(tmp_path))
         assert len(candidates) == 1
@@ -347,7 +323,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "tp-085-cell", cell_type="trap",
                   created_days_ago=45)
         # 20 triggers, 17 TP → tp_rate = 0.85
-        write_evidence(str(evidence_dir), "tp-085-cell", triggers=20, tp=17, fp=3)
+        write_evidence(evidence_dir.parent.parent, "tp-085-cell", triggers=20, tp=17, fp=3)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 1
@@ -367,7 +343,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "age-29-cell", cell_type="trap",
                   created_days_ago=28)
         # Passes trigger and tp_rate checks
-        write_evidence(str(evidence_dir), "age-29-cell", triggers=25, tp=24, fp=1)
+        write_evidence(evidence_dir.parent.parent, "age-29-cell", triggers=25, tp=24, fp=1)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 0
@@ -384,7 +360,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "age-30-cell", cell_type="trap",
                   created_days_ago=30)
         # Passes trigger and tp_rate checks
-        write_evidence(str(evidence_dir), "age-30-cell", triggers=25, tp=24, fp=1)
+        write_evidence(evidence_dir.parent.parent, "age-30-cell", triggers=25, tp=24, fp=1)
 
         candidates = evaluate_promotions(str(tmp_path))
         assert len(candidates) == 1
@@ -402,7 +378,7 @@ class TestLifecycleBoundaries:
         make_cell(str(cells_dir), "fp-050-wall", cell_type="wall",
                   created_days_ago=10)
         # 10 triggers, 5 FP → fp_rate = 0.50 exactly
-        write_evidence(str(evidence_dir), "fp-050-wall", triggers=10, tp=5, fp=5)
+        write_evidence(evidence_dir.parent.parent, "fp-050-wall", triggers=10, tp=5, fp=5)
 
         candidates = evaluate_demotions(str(tmp_path))
         assert len(candidates) == 0
@@ -457,10 +433,10 @@ class TestModernRuleLifecycle:
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(traps_dir), "proven-trap", cell_type="trap", created_days_ago=45)
-        write_evidence(str(evidence_dir), "proven-trap", triggers=25, tp=23, fp=2)
+        write_evidence(evidence_dir.parent.parent, "proven-trap", triggers=25, tp=23, fp=2)
 
         make_cell(str(inv_dir), "noisy-invariant", cell_type="invariant", created_days_ago=45)
-        write_evidence(str(evidence_dir), "noisy-invariant", triggers=20, tp=4, fp=16)
+        write_evidence(evidence_dir.parent.parent, "noisy-invariant", triggers=20, tp=4, fp=16)
 
         promotions = evaluate_promotions(str(tmp_path))
         assert len(promotions) == 1

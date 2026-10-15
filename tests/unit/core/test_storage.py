@@ -1,21 +1,51 @@
-"""Unit tests for aegis_core.storage atomic operations and retry backoff."""
+"""aegis_core.storage atomic writes and JSONL I/O (ADR 0005 AD-3 L0)."""
+from __future__ import annotations
+
+import json
 import os
 from pathlib import Path
+import stat
 from unittest.mock import patch
 
 import pytest
 
-from aegis_core.storage import atomic_write_text, atomic_write_bytes
+from aegis_core.storage import append_jsonl, atomic_write_bytes, atomic_write_text, read_jsonl
+
+posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
 
 
-def test_atomic_write_text_creates_file(tmp_path: Path):
+@pytest.fixture
+def umask():
+    """Set the process umask for one test and restore it."""
+    saved = []
+
+    def set_mask(mask: int) -> None:
+        saved.append(os.umask(mask))
+
+    yield set_mask
+    if saved:
+        os.umask(saved[0])
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+# ── atomic writes ────────────────────────────────────────────────────────────
+
+def test_atomic_write_text_creates_parent_and_file(tmp_path: Path):
     target = tmp_path / "subdir" / "test.txt"
     atomic_write_text(target, "hello world\n")
-    assert target.exists()
-    assert target.read_text(encoding="utf-8") == "hello world\n"
+    assert target.read_bytes() == b"hello world\n"
 
 
-def test_atomic_write_text_overwrites_existing(tmp_path: Path):
+def test_atomic_write_text_keeps_crlf_bytes(tmp_path: Path):
+    target = tmp_path / "crlf.md"
+    atomic_write_text(target, "a\r\nb\r\n")
+    assert target.read_bytes() == b"a\r\nb\r\n"
+
+
+def test_atomic_write_overwrites_existing(tmp_path: Path):
     target = tmp_path / "test.txt"
     target.write_text("initial content", encoding="utf-8")
     atomic_write_text(target, "updated content")
@@ -24,22 +54,40 @@ def test_atomic_write_text_overwrites_existing(tmp_path: Path):
 
 def test_atomic_write_bytes(tmp_path: Path):
     target = tmp_path / "binary.dat"
-    data = b"\x00\x01\x02\xff"
-    atomic_write_bytes(target, data)
-    assert target.read_bytes() == data
+    atomic_write_bytes(target, b"\x00\x01\x02\xff")
+    assert target.read_bytes() == b"\x00\x01\x02\xff"
 
 
-def test_atomic_write_retries_on_windows_permission_error(tmp_path: Path):
+@posix_only
+@pytest.mark.parametrize("mask, expected", [(0o022, 0o644), (0o077, 0o600), (0o002, 0o664)])
+def test_new_file_mode_follows_the_umask(tmp_path: Path, umask, mask: int, expected: int):
+    umask(mask)
+    target = tmp_path / "new.json"
+    atomic_write_text(target, "{}")
+    assert _mode(target) == expected
+
+
+@posix_only
+@pytest.mark.parametrize("mode", [0o640, 0o755, 0o600])
+def test_existing_file_keeps_its_mode(tmp_path: Path, umask, mode: int):
+    umask(0o022)
+    target = tmp_path / "rule.md"
+    target.write_text("old", encoding="utf-8")
+    os.chmod(target, mode)
+    atomic_write_text(target, "new")
+    assert target.read_text(encoding="utf-8") == "new"
+    assert _mode(target) == mode
+
+
+def test_atomic_write_retries_windows_sharing_violation(tmp_path: Path):
     target = tmp_path / "locked.txt"
     attempts = 0
-
     real_replace = os.replace
 
     def flaky_replace(src, dst):
         nonlocal attempts
         attempts += 1
         if attempts < 3:
-            # Simulate Windows WinError 32 ERROR_SHARING_VIOLATION
             err = PermissionError("[WinError 32] The process cannot access the file")
             err.winerror = 32
             raise err
@@ -47,42 +95,159 @@ def test_atomic_write_retries_on_windows_permission_error(tmp_path: Path):
 
     with patch("os.replace", side_effect=flaky_replace):
         atomic_write_text(target, "eventually written", initial_delay=0.001)
-
     assert attempts == 3
     assert target.read_text(encoding="utf-8") == "eventually written"
 
 
-def test_atomic_write_cleans_up_temp_on_failure(tmp_path: Path):
+def test_atomic_write_gives_up_after_eight_attempts(tmp_path: Path):
+    target = tmp_path / "never.txt"
+    attempts = 0
+
+    def always_locked(src, dst):
+        nonlocal attempts
+        attempts += 1
+        raise PermissionError("[WinError 32] Sharing violation")
+
+    with patch("os.replace", side_effect=always_locked):
+        with pytest.raises(PermissionError):
+            atomic_write_text(target, "x", initial_delay=0.0001)
+    assert attempts == 8
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_atomic_write_failure_leaves_target_and_no_temp(tmp_path: Path):
     target = tmp_path / "fail.txt"
+    target.write_text("original", encoding="utf-8")
 
-    def fail_replace(src, dst):
-        raise RuntimeError("Disk explosion")
-
-    with patch("os.replace", side_effect=fail_replace):
+    with patch("os.replace", side_effect=RuntimeError("Disk explosion")):
         with pytest.raises(RuntimeError, match="Disk explosion"):
             atomic_write_text(target, "doomed", initial_delay=0.001)
 
-    # No leftover .tmp files
-    tmp_files = list(tmp_path.glob(".*.tmp")) + list(tmp_path.glob("*.tmp"))
-    assert tmp_files == []
+    assert target.read_text(encoding="utf-8") == "original"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["fail.txt"]
 
 
-def test_atomic_write_retries_up_to_eight_times(tmp_path: Path):
-    from aegis_core.storage import atomic_write_text
+# ── append_jsonl ─────────────────────────────────────────────────────────────
 
-    target = tmp_path / "retry8.txt"
-    attempts = 0
-    real_replace = os.replace
+def test_append_jsonl_writes_one_object_per_line(tmp_path: Path):
+    path = tmp_path / "state" / "ledger.jsonl"
+    assert append_jsonl(path, [{"a": 1}, {"b": "two"}]) == 2
+    assert append_jsonl(path, [{"c": None}]) == 1
+    assert [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] == [
+        {"a": 1}, {"b": "two"}, {"c": None},
+    ]
 
-    def flaky_replace_seven_times(src, dst):
-        nonlocal attempts
-        attempts += 1
-        if attempts < 8:
-            raise PermissionError("[WinError 32] Sharing violation")
-        return real_replace(src, dst)
 
-    with patch("os.replace", side_effect=flaky_replace_seven_times):
-        atomic_write_text(target, "success on 8th attempt", initial_delay=0.0001)
+def test_append_jsonl_keeps_the_file_valid_utf8(tmp_path: Path):
+    path = tmp_path / "ledger.jsonl"
+    append_jsonl(path, [{"note": "café \ud800  "}])
+    raw = path.read_bytes()
+    raw.decode("utf-8")  # a lone surrogate must not reach the file as raw bytes
+    assert read_jsonl(path).rows == [{"note": "café \ud800  "}]
+    assert raw.count(b"\n") == 1
 
-    assert attempts == 8
-    assert target.read_text(encoding="utf-8") == "success on 8th attempt"
+
+def test_append_jsonl_terminates_a_torn_tail_before_writing(tmp_path: Path):
+    path = tmp_path / "ledger.jsonl"
+    path.write_bytes(b'{"a":1}\n{"b":')  # a crash mid-write
+    append_jsonl(path, [{"c": 3}])
+    assert path.read_bytes() == b'{"a":1}\n{"b":\n{"c":3}\n'
+    result = read_jsonl(path)
+    assert result.rows == [{"a": 1}, {"c": 3}]
+    assert result.skipped_lines == [2]
+
+
+def test_append_jsonl_writes_nothing_when_a_row_cannot_be_serialized(tmp_path: Path):
+    path = tmp_path / "ledger.jsonl"
+    path.write_bytes(b'{"a":1}\n')
+    with pytest.raises((TypeError, ValueError)):
+        append_jsonl(path, [{"ok": 1}, {"bad": object()}])
+    with pytest.raises(ValueError):
+        append_jsonl(path, [{"nan": float("nan")}])
+    with pytest.raises(ValueError, match="JSON object"):
+        append_jsonl(path, [["not", "an", "object"]])
+    assert path.read_bytes() == b'{"a":1}\n'
+
+
+def test_append_jsonl_fsyncs_once_per_call(tmp_path: Path):
+    path = tmp_path / "ledger.jsonl"
+    path.write_bytes(b'{"a":1}\n')
+    real_fsync = os.fsync
+    calls = []
+
+    def counting(fd):
+        calls.append(fd)
+        return real_fsync(fd)
+
+    with patch("os.fsync", side_effect=counting):
+        append_jsonl(path, [{"n": i} for i in range(50)])
+    assert len(calls) == 1
+    assert len(read_jsonl(path).rows) == 51
+
+
+@posix_only
+def test_append_jsonl_new_file_follows_the_umask(tmp_path: Path, umask):
+    umask(0o022)
+    path = tmp_path / "ledger.jsonl"
+    append_jsonl(path, [{"a": 1}])
+    assert _mode(path) == 0o644
+
+
+def test_append_jsonl_with_no_rows_creates_nothing(tmp_path: Path):
+    path = tmp_path / "ledger.jsonl"
+    assert append_jsonl(path, []) == 0
+    assert not path.exists()
+
+
+# ── read_jsonl ───────────────────────────────────────────────────────────────
+
+def test_read_jsonl_missing_file_is_empty(tmp_path: Path):
+    result = read_jsonl(tmp_path / "nope.jsonl")
+    assert (result.rows, result.skipped, result.torn_tail, result.error) == ([], 0, False, None)
+
+
+def test_read_jsonl_skips_and_counts_invalid_lines(tmp_path: Path):
+    path = tmp_path / "ledger.jsonl"
+    deep = b"[" * 100000 + b"]" * 100000
+    path.write_bytes(
+        b"\xef\xbb\xbf" + b'{"first":1}\n'   # BOM
+        + b"\n"                               # blank: ignored, not counted
+        + b"not json\n"                       # 3
+        + b'"a string"\n'                     # 4: not an object
+        + b'{"bad":"\xff\xfe"}\n'             # 5: invalid UTF-8
+        + deep + b"\n"                        # 6: nesting past the recursion limit
+        + b'{"crlf":true}\r\n'                # CRLF line endings are fine
+        + b"   \t\n"                          # whitespace only: ignored
+        + b'{"last":2}\n'
+    )
+    result = read_jsonl(path)
+    assert result.rows == [{"first": 1}, {"crlf": True}, {"last": 2}]
+    assert result.line_numbers == [1, 7, 9]
+    assert result.skipped_lines == [3, 4, 5, 6]
+    assert result.skipped == 4
+    assert result.torn_tail is False
+
+
+def test_read_jsonl_reports_a_torn_tail_separately(tmp_path: Path):
+    path = tmp_path / "ledger.jsonl"
+    path.write_bytes(b'{"a":1}\n{"b":')
+    result = read_jsonl(path)
+    assert result.rows == [{"a": 1}]
+    assert result.skipped == 0
+    assert result.torn_tail is True
+
+
+def test_read_jsonl_accepts_a_complete_last_line_without_newline(tmp_path: Path):
+    path = tmp_path / "ledger.jsonl"
+    path.write_bytes(b'{"a":1}\n{"b":2}')
+    result = read_jsonl(path)
+    assert result.rows == [{"a": 1}, {"b": 2}]
+    assert result.torn_tail is False
+
+
+def test_read_jsonl_reports_an_unreadable_file_without_raising(tmp_path: Path):
+    path = tmp_path / "dir.jsonl"
+    path.mkdir()
+    result = read_jsonl(path)
+    assert result.rows == []
+    assert result.error is not None and str(path) in result.error

@@ -100,7 +100,7 @@ def test_report_outcome_without_rules_is_rejected(mcp_workspace: Path):
         "error": "'rules_used' must name at least one rule from aegis_scan: "
                  "an outcome with no rule has nothing to credit.",
     }
-    assert not (mcp_workspace / ".aegis" / "evidence" / "signals.jsonl").exists()
+    assert not (mcp_workspace / ".aegis" / "state" / "ledger.jsonl").exists()
 
 
 def test_report_outcome_rejects_bad_workspace():
@@ -112,7 +112,7 @@ def test_report_outcome_surfaces_a_ledger_write_failure(mcp_workspace: Path, mon
     def disk_full(*_args, **_kwargs):
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(telemetry_handlers, "append_signals", disk_full)
+    monkeypatch.setattr(telemetry_handlers.ledger, "append", disk_full)
     res = handle_report_outcome({
         "workspace": str(mcp_workspace),
         "outcome": "success",

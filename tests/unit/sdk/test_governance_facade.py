@@ -71,13 +71,13 @@ def ws(tmp_path: Path) -> Path:
     (root / ".aegis" / "rules" / "invariants").mkdir(parents=True)
     (root / ".aegis" / "rules" / "traps" / "trap-src-drift.md").write_text(TRAP, encoding="utf-8")
     (root / ".aegis" / "rules" / "invariants" / "invariant-app-pure.md").write_text(INVARIANT, encoding="utf-8")
-    (root / ".aegis" / "evidence").mkdir()
+    (root / ".aegis" / "state").mkdir()
     rows = [
         {"cell": "trap-src-drift", "signal": "trigger", "source": "ci"},
         {"cell": "trap-src-drift", "signal": "tp", "source": "ci"},
         {"cell": "invariant-app-pure", "signal": "trigger", "source": "mcp"},
     ]
-    (root / ".aegis" / "evidence" / "signals.jsonl").write_text(
+    (root / ".aegis" / "state" / "ledger.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
     )
     (root / "src").mkdir()

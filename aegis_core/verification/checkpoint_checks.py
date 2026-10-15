@@ -7,7 +7,6 @@ import stat
 from pathlib import Path
 from typing import List
 
-from aegis_core.evidence import aggregate_signals
 from aegis_core.taxonomy import DIR_TO_ALLOWED_RULE_TYPES as DIR_TO_TYPE
 
 
@@ -222,8 +221,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_hooks_lifecycle.py")
     if stem == "errors":
         candidates.append(test_dir / "test_domain_errors.py")
-    if stem == "evidence":
-        candidates.append(test_dir / "test_canonical_evidence_readers.py")
     if stem == "frontmatter":
         candidates.append(test_dir / "test_core_lifecycle.py")
     if stem == "rule_inventory":
@@ -409,22 +406,27 @@ def check_assertion_density(root: Path) -> list[dict]:
 
 
 def check_cell_fitness(root: Path) -> list[dict]:
-    issues = []  # type: List[dict]
-    evidence_dir = root / ".aegis" / "evidence"
-    aggregation = aggregate_signals(evidence_dir)
+    from aegis_core.telemetry_engine import ledger
 
-    for error in aggregation.errors:
-        error_path = Path(error.get("file") or evidence_dir / "signals.jsonl")
-        rel = _relative(root, error_path)
-        line = error.get("line")
-        location = f" line {line}" if line is not None else ""
+    issues = []  # type: List[dict]
+    view = ledger.read(root)
+    rel = _relative(root, Path(view.path)) if view.path is not None else "ledger"
+    if view.error:
+        issues.append({"check": "cell_fitness", "file": rel, "message": f"{rel}: {view.error}"})
+    for line in view.skipped_lines:
         issues.append({
             "check": "cell_fitness",
             "file": rel,
-            "message": f"{rel}:{location} {error.get('error', 'signal aggregation failed')}",
+            "message": f"{rel}: line {line} is not a JSON object row",
+        })
+    if view.unusable_rows:
+        issues.append({
+            "check": "cell_fitness",
+            "file": rel,
+            "message": f"{rel}: {view.unusable_rows} row(s) lack a rule, a valid outcome or a valid weight",
         })
 
-    for cell_id, counts in aggregation.counts.items():
+    for cell_id, counts in ledger.aggregate_rows(view.rows).items():
         tp = counts["tp"]
         fp = counts["fp"]
         total = tp + fp

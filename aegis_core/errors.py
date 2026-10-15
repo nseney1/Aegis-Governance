@@ -34,17 +34,17 @@ class RuleParseError(AegisError):
 
 
 class LockTimeoutError(AegisError, TimeoutError):
-    """Raised when a workspace lock cannot be acquired within the timeout period."""
+    """Raised when the workspace lock cannot be acquired within the timeout period."""
 
     def __init__(
         self,
         message: str = "",
-        resource: str | None = None,
+        path: str | None = None,
         code: str = "LOCK_TIMEOUT",
         **kwargs: Any,
     ) -> None:
-        super().__init__(message, code=code, resource=resource, **kwargs)
-        self.resource = resource
+        super().__init__(message, code=code, path=path, **kwargs)
+        self.path = path
 
 
 class WorkspaceError(AegisValidationError):

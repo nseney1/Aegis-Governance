@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from aegis_core.scoring import compute_cell_fitness
-from aegis_core.telemetry_engine.ledger import append_signals
+from aegis_core.telemetry_engine import ledger
 from aegis_mcp.tools import execute_tool
 
 
@@ -22,13 +22,11 @@ def _rule(root: Path, name: str, fitness_block: str = "") -> None:
     )
 
 
-def _signals(root: Path, rule: str, *signals: str) -> None:
-    events = [
-        {"cell_name": rule, "signal_type": signal, "source": "ci", "principal": "test",
-         "idempotency_scope": "t", "idempotency_key": f"{rule}-{i}"}
-        for i, signal in enumerate(signals)
-    ]
-    append_signals(str(root), events)
+def _outcomes(root: Path, rule: str, *outcomes: str) -> None:
+    ledger.append(root, [
+        {"rule": rule, "outcome": outcome, "source": "ci", "key": f"{rule}-{i}"}
+        for i, outcome in enumerate(outcomes)
+    ])
 
 
 def _by_name(result):
@@ -41,7 +39,7 @@ def workspace(tmp_path):
         "fitness:\n  triggers: 99\n  true_positives: 99\n  false_positives: 0\n  score: 0.99\n"
     ))
     _rule(tmp_path, "unobserved")
-    _signals(tmp_path, "inflated", "trigger", "trigger", "trigger", "tp", "tp", "fp")
+    _outcomes(tmp_path, "inflated", "tp", "tp", "fp")  # every outcome row is a trigger
     return tmp_path
 
 
@@ -60,19 +58,19 @@ def test_a_rule_with_no_ledger_rows_is_unobserved(workspace):
     assert fitness == {"triggers": 0, "tp": 0, "fp": 0, "score": compute_cell_fitness({})}
 
 
-def test_outcome_rows_without_trigger_rows_still_count_as_observations(tmp_path):
+def test_every_outcome_row_counts_as_a_trigger(tmp_path):
     _rule(tmp_path, "reported")
-    _signals(tmp_path, "reported", "tp", "tp", "tp")
+    _outcomes(tmp_path, "reported", "tp", "tp", "tp", "trigger")
 
     fitness = _by_name(execute_tool("aegis_list_rules", {"workspace": str(tmp_path)}))["reported"]["fitness"]
 
-    assert fitness["tp"] == 3
+    assert (fitness["triggers"], fitness["tp"], fitness["fp"]) == (4, 3, 0)
     assert 0.0 < fitness["score"] <= 1.0
 
 
 def test_unreadable_ledger_rows_do_not_break_the_listing(workspace):
-    ledger = workspace / ".aegis" / "evidence" / "signals.jsonl"
-    with ledger.open("a", encoding="utf-8") as f:
+    path = workspace / ".aegis" / "state" / "ledger.jsonl"
+    with path.open("a", encoding="utf-8") as f:
         f.write("{not json\n")
     rules = _by_name(execute_tool("aegis_list_rules", {"workspace": str(workspace)}))
     assert rules["inflated"]["fitness"]["tp"] == 2

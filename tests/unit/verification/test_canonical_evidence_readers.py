@@ -1,4 +1,4 @@
-"""Cross-reader contract tests for canonical signal evidence."""
+"""Cross-reader contract tests: every reader takes rule totals from the one ledger."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,10 @@ ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml"
 ENZYMES = ROOT / "enzymes"
 if str(ENZYMES) not in sys.path:
     sys.path.insert(0, str(ENZYMES))
+
+
+def _ledger(root: Path) -> Path:
+    return root / ".aegis" / "state" / "ledger.jsonl"
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -42,46 +46,40 @@ def _cell(path: Path, cell_id: str, cell_type: str = "trap", age_days: int = 45)
     path.write_text(dump_frontmatter(metadata, body=f"# {cell_id}\n"), encoding="utf-8")
 
 
-def test_aggregate_signals_reports_errors_preserves_dimensions_and_weights(tmp_path):
-    from aegis_core.evidence import aggregate_signals
+def test_ledger_reader_reports_bad_lines_and_keeps_weights(tmp_path):
+    from aegis_core.telemetry_engine import ledger
 
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text(
+    path = _ledger(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(
         json.dumps(_signal("outcome-only", "tp", weight="0.25")) + "\n"
         + json.dumps(_signal("outcome-only", "fp", weight="0.5")) + "\n"
         + json.dumps(_signal("triggered", "trigger")) + "\n"
         + "{malformed}\n",
         encoding="utf-8",
     )
-    _write_jsonl(evidence / "fitness.jsonl", [{"cell_id": "legacy", "triggered_at": "x"}])
-    _write_jsonl(evidence / "outcomes.jsonl", [{"cell_id": "legacy", "outcome": "tp"}])
+    legacy = tmp_path / ".aegis" / "evidence"
+    _write_jsonl(legacy / "fitness.jsonl", [{"cell_id": "legacy", "triggered_at": "x"}])
+    _write_jsonl(legacy / "signals.jsonl", [_signal("legacy", "tp")])
 
-    result = aggregate_signals(str(evidence))
-    assert result.counts["outcome-only"] == {
-        "triggers": 0,
-        "tp": 0.25,
-        "fp": 0.5,
-        "last_trigger": None,
-        "has_triggers": False,
-        "has_outcomes": True,
-    }
-    assert result.counts["triggered"]["has_triggers"] is True
-    assert "legacy" not in result.counts
-    assert result.errors and result.errors[0]["line"] == 4
+    totals = ledger.aggregate(tmp_path)
+    # Every outcome row is also a trigger (#15).
+    assert totals["outcome-only"] == {"triggers": 2, "tp": 0.25, "fp": 0.5, "last_ts": "2026-01-01T00:00:00Z"}
+    assert totals["triggered"]["triggers"] == 1
+    assert "legacy" not in totals  # v3 files are read only by `aegis migrate`
+    assert ledger.read(tmp_path).skipped_lines == [4]
 
 
-def test_status_uses_canonical_triggers_not_legacy(tmp_path, capsys):
+def test_status_uses_ledger_triggers(tmp_path, capsys):
     from aegis_cli.status import run_status
 
     (tmp_path / "genome").mkdir()
     (tmp_path / "genome" / "canonical.md").write_text("# canonical\n", encoding="utf-8")
-    evidence = tmp_path / ".aegis" / "evidence"
-    _write_jsonl(evidence / "signals.jsonl", [
+    _write_jsonl(_ledger(tmp_path), [
         _signal("canonical", "trigger", "2026-01-01T00:00:00Z"),
         _signal("canonical", "trigger", "2026-01-01T00:01:00Z"),
     ])
-    _write_jsonl(evidence / "fitness.jsonl", [{"cell_id": "legacy", "triggered_at": "2026-01-01T00:00:00Z"}])
+    _write_jsonl(tmp_path / ".aegis" / "evidence" / "signals.jsonl", [_signal("canonical", "trigger")] * 5)
 
     assert run_status(argparse.Namespace(_root=tmp_path)) == 0
     status_output = capsys.readouterr().out
@@ -89,16 +87,17 @@ def test_status_uses_canonical_triggers_not_legacy(tmp_path, capsys):
     assert canonical_line.split()[1] == "2"
 
 
-def test_lifecycle_uses_weighted_canonical_signals(tmp_path):
+def test_lifecycle_uses_weighted_ledger_rows(tmp_path):
     from aegis_core.lifecycle.promotion import evaluate_promotions
 
     cells = tmp_path / ".aegis" / "rules" / "traps"
     _cell(cells / "canonical.md", "canonical")
-    evidence = tmp_path / ".aegis" / "evidence"
-    signals = [_signal("canonical", "trigger", f"2026-01-01T00:{index:02d}:00Z") for index in range(20)]
-    signals += [_signal("canonical", "tp", weight="0.5") for _ in range(34)]
-    _write_jsonl(evidence / "signals.jsonl", signals)
-    _write_jsonl(evidence / "outcomes.jsonl", [{"cell_id": "canonical", "outcome": "fp"}] * 100)
+    rows = [
+        {"v": 2, "seq": i + 1, "ts": f"2026-01-01T00:{i:02d}:00Z", "rule": "canonical",
+         "outcome": "tp", "source": "ci", "weight": 0.85}
+        for i in range(20)
+    ]
+    _write_jsonl(_ledger(tmp_path), rows)
 
     candidates = evaluate_promotions(str(tmp_path))
     assert candidates[0]["cell_id"] == "canonical"
@@ -108,18 +107,17 @@ def test_lifecycle_uses_weighted_canonical_signals(tmp_path):
 def test_checkpoint_fails_closed_and_uses_weighted_outcomes(tmp_path):
     from aegis_core.verification.checkpoint_checks import check_cell_fitness
 
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text(
+    path = _ledger(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(
         json.dumps(_signal("weighted", "tp", weight="0.5")) + "\n"
         + json.dumps(_signal("weighted", "fp", weight="1.5")) + "\n"
         + "not-json\n",
         encoding="utf-8",
     )
-    _write_jsonl(evidence / "outcomes.jsonl", [{"cell_id": "weighted", "outcome": "tp"}] * 10)
 
     issues = check_cell_fitness(tmp_path)
-    assert any("parse" in issue["message"].lower() for issue in issues)
+    assert any("line 3 is not a JSON object row" in issue["message"] for issue in issues)
     assert any(issue.get("cell_id") == "weighted" and "75%" in issue["message"] for issue in issues)
 
 
@@ -142,45 +140,30 @@ def test_owned_production_has_no_active_legacy_evidence_paths():
     assert offenders == {}
 
 
-def test_lifecycle_does_not_infer_zero_triggers_from_outcome_only_data(tmp_path):
+def test_lifecycle_does_not_demote_a_rule_with_outcome_only_rows(tmp_path):
     from aegis_core.lifecycle.promotion import evaluate_demotions
 
     cell = tmp_path / ".aegis" / "rules" / "walls" / "outcome-only.md"
     _cell(cell, "outcome-only", cell_type="wall", age_days=120)
-    _write_jsonl(
-        tmp_path / ".aegis" / "evidence" / "signals.jsonl",
-        [_signal("outcome-only", "tp", weight="0.5")],
-    )
+    # A v1 outcome row with no trigger row is still a recent trigger: not dormant.
+    recent = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    _write_jsonl(_ledger(tmp_path), [_signal("outcome-only", "tp", recent, weight="0.5")])
 
     assert evaluate_demotions(str(tmp_path)) == []
 
 
-def test_invalid_present_credit_weight_is_a_structured_error(tmp_path):
-    from aegis_core.evidence import aggregate_signals
+def test_invalid_weights_make_a_row_unusable_and_the_checkpoint_says_so(tmp_path):
+    from aegis_core.telemetry_engine import ledger
+    from aegis_core.verification.checkpoint_checks import check_cell_fitness
 
-    evidence = tmp_path / ".aegis" / "evidence"
-    _write_jsonl(evidence / "signals.jsonl", [_signal("bad-weight", "tp", weight="NaN")])
-
-    result = aggregate_signals(str(evidence))
-    assert result.counts["bad-weight"]["tp"] == 0
-    assert result.counts["bad-weight"]["has_outcomes"] is True
-    assert result.errors[0]["line"] == 1
-    assert "credit_weight" in result.errors[0]["error"]
-
-
-def test_negative_or_excessive_credit_weight_rejected(tmp_path):
-    from aegis_core.evidence import aggregate_signals
-
-    evidence = tmp_path / ".aegis" / "evidence"
-    _write_jsonl(evidence / "signals.jsonl", [
+    _write_jsonl(_ledger(tmp_path), [
+        _signal("bad-weight", "tp", weight="NaN"),
         _signal("cell-neg", "tp", weight=-1.5),
         _signal("cell-huge", "tp", weight=50),
+        _signal("fine", "tp", weight=1),
     ])
 
-    result = aggregate_signals(str(evidence))
-    assert result.counts["cell-neg"]["tp"] == 0
-    assert result.counts["cell-huge"]["tp"] == 0
-    assert len(result.errors) == 2
-    assert "credit_weight" in result.errors[0]["error"]
-    assert "credit_weight" in result.errors[1]["error"]
-
+    view = ledger.read(tmp_path)
+    assert [r["rule"] for r in view.rows] == ["fine"]
+    assert view.unusable_rows == 3
+    assert any("3 row(s) lack a rule, a valid outcome or a valid weight" in i["message"] for i in check_cell_fitness(tmp_path))

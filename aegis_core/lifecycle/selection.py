@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 import shutil
@@ -10,10 +9,8 @@ from typing import Optional
 
 from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
 from aegis_core.yaml_engine.serializer import dump_frontmatter
-from aegis_core.locking import workspace_lock
-from aegis_core.storage import atomic_write_text
+from aegis_core.storage import append_jsonl, atomic_write_text, locked
 from aegis_core.workspace.base import Workspace
-from aegis_core.workspace.layout import LockResource
 from .constants import (
     EXTINCTION_THRESHOLD,
 )
@@ -41,9 +38,7 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
     )
     cells_dir = ws.rules_dir
     archive_dir = cells_dir / ".archive"
-    evidence_dir = ws.evidence_dir
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    fitness_log = evidence_dir / "lifecycle.jsonl"
+    lifecycle_log = ws.layout.lifecycle_log
 
     if not cells_dir.exists():
         print("No cells directory found.")
@@ -71,15 +66,14 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
         # Classified unlocked, changed under the lock one rule at a time (as
         # the tier pass does): a pass over hundreds of rules must not starve
         # concurrent create/promote into LockTimeoutError.
-        with workspace_lock(ws.root, LockResource.RULES):
+        with locked(ws.root):
             action = _apply_locked(fpath, cells_dir, archive_dir)
-        if action:
-            with open(fitness_log, "a", encoding="utf-8") as log:
-                log.write(json.dumps({
+            if action:
+                append_jsonl(lifecycle_log, [{
                     "timestamp": _utc_timestamp(),
                     "cell": fpath.name,
                     "action": action,
-                }) + "\n")
+                }])
     return 0
 
 

@@ -30,7 +30,6 @@ from aegis_cli.hooks.safety import (
     DANGEROUS_FLAGS,
     METACHARACTERS,
     SAFE_COMMAND_PREFIXES,
-    _find_gate_log_dir,
     log_gate_event,
     run_safety_gate,
 )
@@ -41,7 +40,6 @@ __all__ = [
     "DANGEROUS_FLAGS",
     "SECRET_REPLACEMENTS",
     "redact_secrets",
-    "_find_gate_log_dir",
     "log_gate_event",
     "run_safety_gate",
     "_AEGIS_HOOK_START",

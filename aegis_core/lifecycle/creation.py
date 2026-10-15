@@ -6,11 +6,9 @@ import json
 import os
 from pathlib import Path
 
-from aegis_core.locking import workspace_lock
-from aegis_core.storage import atomic_write_text
+from aegis_core.storage import atomic_write_text, locked
 from aegis_core.taxonomy import normalize_review_mode
 from aegis_core.workspace.base import Workspace
-from aegis_core.workspace.layout import LockResource
 from .constants import (
     VALID_ENFORCEMENT,
     VALID_TYPES,
@@ -174,7 +172,7 @@ lineage:
 
     AegisYAML.parse_text(content)
 
-    with workspace_lock(ws.root, LockResource.RULES):
+    with locked(ws.root):
         # Checked under the lock that promote/demote hold: replacing a rule
         # would discard its fitness and lineage, and the same id in a second
         # tier would make two active rules answer to one id. A symlink at the

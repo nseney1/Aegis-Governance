@@ -160,8 +160,8 @@ class TestSafetyGate:
         assert res["decision"] == "allow"
 
 
-    def test_redacts_credentials_in_logs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("AEGIS_LOGS_DIR", str(tmp_path))
+    def test_redacts_credentials_in_logs(self, tmp_path: Path):
+        (tmp_path / ".aegis").mkdir()
         fake_akia = "AKIA" + "IOSFODNN7EXAMPLE"
         fake_ghp = "ghp_" + ("a" * 36)
         fake_sk = "sk-" + ("b" * 30)
@@ -179,7 +179,7 @@ class TestSafetyGate:
         rc, res = run_safety_gate(cmd=sensitive_cmd, workspace=tmp_path)
         assert res["decision"] == "allow"
 
-        log_file = tmp_path / "governance" / "gate_events.jsonl"
+        log_file = tmp_path / ".aegis" / "state" / "gate_events.jsonl"
         assert log_file.is_file()
         content = log_file.read_text(encoding="utf-8")
         assert fake_akia not in content
@@ -199,6 +199,11 @@ class TestSafetyGate:
         assert "my_key" not in content
         assert "GEMINI_API_KEY=REDACTED" in content
         assert "Bearer REDACTED" in content
+
+    def test_gate_outside_an_aegis_workspace_writes_no_log(self, tmp_path: Path):
+        rc, res = run_safety_gate(cmd="ls", workspace=tmp_path)
+        assert (rc, res["decision"]) == (0, "allow")
+        assert list(tmp_path.iterdir()) == []
 
     @pytest.mark.parametrize(
         "cmd,expected_snippet",
@@ -222,12 +227,18 @@ class TestSafetyGate:
 class TestCliDispatch:
     """Test CLI and module dispatch for aegis hook."""
 
-    def test_aegis_cli_hook_subcommand(self):
+    def test_aegis_cli_hook_subcommand(self, tmp_path: Path):
+        import os
+
+        repo_root = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
+        env = dict(os.environ, PYTHONPATH=repo_root + os.pathsep + os.environ.get("PYTHONPATH", ""))
         proc = subprocess.run(
             [sys.executable, "-m", "aegis_cli", "hook", "safety-gate", "--cmd", "git status"],
             capture_output=True,
             text=True,
             encoding="utf-8",
+            cwd=str(tmp_path),  # never log into the repository running the tests
+            env=env,
         )
         assert proc.returncode == 0
         data = json.loads(proc.stdout.strip())

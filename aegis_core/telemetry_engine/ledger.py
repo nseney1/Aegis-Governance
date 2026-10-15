@@ -1,282 +1,446 @@
-"""Atomic evidence ledger, process locks, generation fencing, and signal I/O."""
+"""The outcome ledger, ``.aegis/state/ledger.jsonl`` (build-sheet D13, ADR 0005 AD-1/AD-5).
+
+The ledger is append-only and the only source of rule fitness. Every row is versioned::
+
+    {"v": 2, "seq": 7, "ts": "2026-10-15T12:00:00Z", "rule": "trap-x", "outcome": "tp",
+     "source": "mcp", "host": "claude-code", "session": "…", "key": "report-1",
+     "weight": 0.5, "meta": {…}}
+
+- ``outcome`` is ``tp``, ``fp`` or ``trigger``. Every outcome row is also a trigger (#15):
+  a rule credited with a tp was, by definition, relevant. ``trigger`` alone says the
+  rule was relevant without a verdict.
+- ``weight`` (0..1, default 1) scales the tp/fp credit; it never scales the trigger count.
+- ``seq`` increases by one per row. ``(key, rule)`` is the idempotency identity: one
+  report naming N rules shares one key and writes N rows; a retry writes nothing and
+  returns the stored row. Reusing a key for a different payload is an EventConflictError.
+- Rows are appended under the one workspace lock with one fsync (aegis_core.storage);
+  nothing ever rewrites a row. A migration appends an epoch row instead.
+
+Readers accept v1 rows (the ``cell``/``rule_id`` + ``signal`` shape of the v3
+``signals.jsonl``) and convert them in memory; see ``normalize_rows``.
+"""
 from __future__ import annotations
-from contextlib import contextmanager
+
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import math
 import os
-import tempfile
-import threading
 from pathlib import Path
-from typing import Any, Optional
+import threading
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from aegis_core.locking import _acquire_os_lock, _get_thread_lock, _release_os_lock
-from aegis_core.taxonomy import TELEMETRY_LOCK_TIMEOUT_SECONDS
-from aegis_core.workspace.layout import LockResource, WorkspaceLayout
+from aegis_core.storage import append_jsonl, locked, read_jsonl
+from aegis_core.workspace.layout import WorkspaceLayout
 
-VALID_SIGNAL_TYPES = frozenset({"tp", "fp", "fn", "trigger"})
-VALID_SOURCES = frozenset({"ci", "session", "mcp", "manual"})
-SIGNALS_FILENAME = "signals.jsonl"
-LOCK_FILENAME = ".signals.lock"
-EPOCH_FILENAME = "epoch_generation"
-DEFAULT_GENERATION = 1
-_MSVCRT_RETRY_SECONDS = 0.05
+__all__ = [
+    "LEDGER_VERSION",
+    "OUTCOMES",
+    "SOURCES",
+    "EventConflictError",
+    "LedgerView",
+    "aggregate",
+    "aggregate_rows",
+    "append",
+    "append_epoch",
+    "append_rows",
+    "ledger_path",
+    "normalize_rows",
+    "read",
+]
+
+LEDGER_VERSION = 2
+OUTCOMES = ("tp", "fp", "trigger")
+SOURCES = ("ci", "session", "mcp", "manual", "migrate")
+_V1_SIGNALS = {"tp": "tp", "success": "tp", "fp": "fp", "failure": "fp", "trigger": "trigger"}
+_MAX_LEGACY_WEIGHT = Decimal("10")
+
 
 class EventConflictError(ValueError):
-    """An event_id already exists in the log with a different payload."""
+    """An idempotency key was already recorded for this rule with a different payload."""
 
-class StaleGenerationError(RuntimeError):
-    """The caller's expected epoch generation no longer matches the workspace."""
 
-_lock_tls = threading.local()
-_SIGNALS_CACHE: dict[str, tuple[tuple[int, int, int], bytes, dict[str, dict]]] = {}
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def _resolve_evidence_dir(workspace: str) -> str:
-    ws = str(workspace)
-    from aegis_core.workspace.discovery import check_legacy_soma_sentinel
-    check_legacy_soma_sentinel(ws)
-    return os.path.join(ws, ".aegis", "evidence")
 
-def _atomic_replace_bytes(path: str, data: bytes) -> None:
-    from aegis_core.storage import fsync_dir
-    parent = os.path.dirname(os.path.abspath(path))
-    os.makedirs(parent, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(prefix=".signals.", suffix=".tmp", dir=parent)
+def ledger_path(workspace: Any) -> Path:
+    return WorkspaceLayout(Path(os.fspath(workspace)).resolve()).ledger_file
+
+
+def _weight(row: Dict[str, Any]) -> Optional[Decimal]:
+    value = row.get("weight", 1)
+    if isinstance(value, bool):
+        return None
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data); fh.flush(); os.fsync(fh.fileno())
-        os.replace(tmp_path, path)
-        fsync_dir(parent)
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+        weight = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not weight.is_finite() or weight < 0 or weight > _MAX_LEGACY_WEIGHT:
+        return None
+    return weight
 
-@contextmanager
-def evidence_lock(workspace: str):
-    """Context manager acquiring both the per-process thread lock and the OS file lock."""
-    evidence_dir = _resolve_evidence_dir(workspace)
-    os.makedirs(evidence_dir, exist_ok=True)
-    legacy_lock_path = os.path.join(evidence_dir, LOCK_FILENAME)
-    try:
-        if not os.path.exists(legacy_lock_path):
-            with open(legacy_lock_path, "a", encoding="utf-8"):
-                pass
-    except OSError:
-        pass
-    canonical_lock = WorkspaceLayout(Path(str(workspace))).lock_file(LockResource.SIGNALS)
-    os.makedirs(str(canonical_lock.parent), exist_ok=True)
-    lock_path = os.path.realpath(str(canonical_lock))
-    with _get_thread_lock(lock_path):
-        if not hasattr(_lock_tls, "held"):
-            _lock_tls.held = {}
-        depth, fh = _lock_tls.held.get(lock_path, (0, None))
-        if depth > 0 and fh is not None:
-            _lock_tls.held[lock_path] = (depth + 1, fh)
-            try:
-                yield lock_path
-            finally:
-                d, h = _lock_tls.held.get(lock_path, (1, fh))
-                if d <= 1:
-                    _lock_tls.held.pop(lock_path, None)
-                else:
-                    _lock_tls.held[lock_path] = (d - 1, h)
-        else:
-            with open(lock_path, "a+") as new_fh:
-                if not _acquire_os_lock(new_fh.fileno(), timeout_sec=TELEMETRY_LOCK_TIMEOUT_SECONDS):
-                    raise TimeoutError("Timed out waiting for file lock")
-                _lock_tls.held[lock_path] = (1, new_fh)
-                try:
-                    yield lock_path
-                finally:
-                    try:
-                        _release_os_lock(new_fh.fileno())
-                    finally:
-                        _lock_tls.held.pop(lock_path, None)
 
-def read_generation(workspace: str) -> int:
-    gen_path = os.path.join(str(workspace), ".aegis", EPOCH_FILENAME)
-    if not os.path.isfile(gen_path):
-        return DEFAULT_GENERATION
-    try:
-        with open(gen_path, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            return int(content) if content else DEFAULT_GENERATION
-    except (OSError, ValueError):
-        return DEFAULT_GENERATION
+# ── v1 compatibility ─────────────────────────────────────────────────────────
 
-def get_signals_path(workspace: str) -> str:
-    return os.path.join(_resolve_evidence_dir(workspace), SIGNALS_FILENAME)
+def _v1_rule(row: Dict[str, Any]) -> Optional[str]:
+    for key in ("rule_id", "cell", "cell_id"):
+        value = row.get(key)
+        if isinstance(value, str) and value:
+            return value
+    used = row.get("cells_used")
+    if isinstance(used, list) and used and isinstance(used[0], str) and used[0]:
+        return used[0]
+    return None
 
-def _normalize_signal_record(record: dict) -> dict:
-    rule_id = record.get("rule_id") or record.get("cell")
-    if isinstance(rule_id, str) and rule_id:
-        record.setdefault("rule_id", rule_id)
-        record.setdefault("cell", rule_id)
-    return record
 
-def read_signals(workspace: str) -> list[dict]:
-    path = get_signals_path(str(workspace))
-    if not os.path.isfile(path):
-        return []
-    records = []
-    with open(path, "r", encoding="utf-8", errors="surrogatepass") as f:
-        for line in f:
-            line_str = line.strip()
-            if line_str:
-                try:
-                    rec = json.loads(line_str)
-                    if isinstance(rec, dict):
-                        records.append(_normalize_signal_record(rec))
-                except Exception:
-                    pass
-    return records
+def _v1_to_v2(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    rule = _v1_rule(row)
+    signal = row.get("signal") or row.get("outcome")
+    outcome = _V1_SIGNALS.get(signal) if isinstance(signal, str) else None
+    if rule is None or outcome is None:
+        return None
+    meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    meta = dict(meta)
+    out: Dict[str, Any] = {
+        "v": LEDGER_VERSION,
+        "ts": row.get("timestamp") or row.get("triggered_at") or row.get("ts"),
+        "rule": rule,
+        "outcome": outcome,
+        "source": row.get("source"),
+        "host": meta.pop("host", None),
+        "session": meta.pop("session", None),
+        "key": row.get("event_id"),
+        "from": "v1",
+    }
+    if "credit_weight" in meta:
+        out["weight"] = meta.pop("credit_weight")
+    if meta:
+        out["meta"] = meta
+    return out
 
-def compute_payload_digest(cell_name: str, signal_type: str, source: str, metadata: Any) -> str:
-    normalized = json.dumps(
-        {"cell": cell_name, "signal": signal_type, "source": source, "metadata": metadata or None},
-        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-    )
-    return hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()
 
-def compute_event_id(principal: str, idempotency_scope: str, idempotency_key: str, cell_name: str) -> str:
-    identity = f"{principal}:{idempotency_scope}:{idempotency_key}:{cell_name}"
-    return hashlib.sha256(identity.encode("utf-8", errors="surrogatepass")).hexdigest()
+def normalize_rows(rows: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    """Return ``(v2 outcome rows, unusable row count)`` for raw ledger rows of any version.
 
-def _read_existing_events(log_path: str) -> tuple[bytes, dict[str, dict]]:
-    try:
-        st = os.stat(log_path)
-    except FileNotFoundError:
-        _SIGNALS_CACHE.pop(log_path, None); return b"", {}
-    fingerprint = (st.st_ino, st.st_mtime_ns, st.st_size)
-    cached = _SIGNALS_CACHE.get(log_path)
-    if cached is not None and cached[0] == fingerprint:
-        return cached[1], dict(cached[2])
-    try:
-        with open(log_path, "rb") as f:
-            raw = f.read()
-    except FileNotFoundError:
-        _SIGNALS_CACHE.pop(log_path, None); return b"", {}
-    by_id: dict[str, dict] = {}
-    for line in raw.splitlines():
-        try:
-            record = json.loads(line.decode("utf-8", errors="surrogatepass"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+    v2 rows pass through; rows without ``rule`` and ``outcome`` (an epoch row) are
+    dropped without counting as unusable. v1 rows are converted in memory, never
+    rewritten on disk. v1 counted triggers in separate ``trigger`` rows (v3 ``aegis
+    check`` wrote one trigger row and one outcome row per rule and run), while a v2
+    outcome row is itself a trigger. So per rule, a v1 trigger row is dropped for each
+    v1 outcome row it pairs with: the rule ends with max(v1 triggers, v1 outcomes)
+    triggers, as v3 readers counted it. The trigger rows kept are the latest ones, so
+    the last trigger time survives. v1 MCP rows (``source: "mcp"``) never pair: v3
+    wrote a report as one outcome row, and a "partial" as one trigger row.
+    """
+    out: List[Dict[str, Any]] = []
+    unusable = 0
+    v1_triggers: Dict[str, List[Dict[str, Any]]] = {}
+    v1_outcomes: Dict[str, int] = {}
+    for row in rows:
+        if row.get("v") == LEDGER_VERSION:
+            if "rule" not in row and "outcome" not in row:
+                continue  # epoch or other bookkeeping row
+            if (
+                isinstance(row.get("rule"), str) and row["rule"]
+                and row.get("outcome") in OUTCOMES and _weight(row) is not None
+            ):
+                out.append(row)
+            else:
+                unusable += 1
             continue
-        if isinstance(record, dict) and record.get("event_id"):
-            by_id.setdefault(record["event_id"], _normalize_signal_record(record))
-    _SIGNALS_CACHE[log_path] = (fingerprint, raw, dict(by_id))
-    return raw, by_id
+        converted = _v1_to_v2(row)
+        if converted is None or _weight(converted) is None:
+            unusable += 1
+            continue
+        rule = converted["rule"]
+        if converted["source"] == "mcp":
+            out.append(converted)
+        elif converted["outcome"] == "trigger":
+            v1_triggers.setdefault(rule, []).append(converted)
+        else:
+            v1_outcomes[rule] = v1_outcomes.get(rule, 0) + 1
+            out.append(converted)
+    for rule, triggers in v1_triggers.items():
+        paired = min(len(triggers), v1_outcomes.get(rule, 0))
+        out.extend(triggers[paired:])
+    return out, unusable
 
-def _migration_in_progress(workspace: str) -> bool:
-    layout = WorkspaceLayout(Path(str(workspace)))
-    return any(os.path.exists(p) for p in (
-        str(layout.lock_file(LockResource.MIGRATION)),
-        os.path.join(workspace, ".aegis", "migration.lock"),
-        os.path.join(workspace, ".aegis", "evidence", ".migration.lock"),
-    ))
 
-def _validate_event(event: dict) -> tuple[str, str, str, Optional[dict], str, str, str]:
-    if not isinstance(event, dict):
-        raise ValueError("each event must be a mapping")
-    cell_name = event.get("cell_name") or event.get("rule_id") or event.get("cell")
-    signal_type = event.get("signal_type") or event.get("signal")
-    source, metadata = event.get("source"), event.get("metadata")
-    principal, scope, key = event.get("principal", "unknown"), event.get("idempotency_scope", "global"), event.get("idempotency_key", "")
-    if not isinstance(cell_name, str) or not cell_name:
-        raise ValueError("cell_name must be a nonempty string")
-    if signal_type not in VALID_SIGNAL_TYPES:
-        raise ValueError(f"signal_type must be one of {sorted(VALID_SIGNAL_TYPES)}, got {signal_type!r}")
-    if source not in VALID_SOURCES:
-        raise ValueError(f"source must be one of {sorted(VALID_SOURCES)}, got {source!r}")
-    if metadata is not None and not isinstance(metadata, dict):
-        raise ValueError("metadata must be a mapping or None")
-    for name, value in (("principal", principal), ("idempotency_scope", scope), ("idempotency_key", key)):
-        if not isinstance(value, str):
-            raise ValueError(f"{name} must be a string")
-    if metadata is not None:
-        if "credit_weight" in metadata:
-            cw = metadata["credit_weight"]
-            if not isinstance(cw, (int, float, Decimal)):
-                raise ValueError(f"credit_weight must be numeric, got {type(cw)}")
-            if cw < 0 or cw > 1:
-                raise ValueError(f"credit_weight must be between 0.0 and 1.0, got {cw}")
+# ── Reading ──────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class LedgerView:
+    """The ledger as read: normalized v2 outcome rows plus what could not be used."""
+
+    rows: List[Dict[str, Any]]
+    skipped_lines: List[int] = field(default_factory=list)
+    unusable_rows: int = 0
+    torn_tail: bool = False
+    error: Optional[str] = None
+    path: Optional[Path] = None
+
+
+def read(workspace: Any) -> LedgerView:
+    """Read the ledger. Never raises for its content; a missing ledger is empty."""
+    path = ledger_path(workspace)
+    raw = read_jsonl(path)
+    rows, unusable = normalize_rows(raw.rows)
+    return LedgerView(rows, list(raw.skipped_lines), unusable, raw.torn_tail, raw.error, path)
+
+
+def _plain(value: Decimal) -> Any:
+    return int(value) if value == value.to_integral_value() else float(value)
+
+
+def aggregate(workspace: Any, rule: Optional[str] = None) -> Dict[str, Any]:
+    """Per-rule totals ``{triggers, tp, fp, last_ts}`` from the ledger.
+
+    With ``rule``, that rule's totals (zeros and ``last_ts: None`` when it has no rows);
+    without, a mapping of every rule with rows to its totals. Every outcome row counts
+    as one trigger; tp/fp sum the row weights. A row whose weight is not a number in
+    [0, 10] (v1 allowed up to 10) is unusable: read() counts it and nothing uses it.
+    """
+    return aggregate_rows(read(workspace).rows, rule)
+
+
+def aggregate_rows(rows: Iterable[Dict[str, Any]], rule: Optional[str] = None) -> Dict[str, Any]:
+    """aggregate() over rows already read (normalized v2 outcome rows)."""
+    sums: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        name = row["rule"]
+        if rule is not None and name != rule:
+            continue
+        entry = sums.setdefault(name, {"triggers": 0, "tp": Decimal(0), "fp": Decimal(0), "last_ts": None})
+        entry["triggers"] += 1
+        ts = row.get("ts")
+        if isinstance(ts, str) and (entry["last_ts"] is None or ts > entry["last_ts"]):
+            entry["last_ts"] = ts
+        if row["outcome"] in ("tp", "fp"):
+            entry[row["outcome"]] += _weight(row) or Decimal(0)
+    for entry in sums.values():
+        entry["tp"] = _plain(entry["tp"])
+        entry["fp"] = _plain(entry["fp"])
+    if rule is not None:
+        return sums.get(rule, {"triggers": 0, "tp": 0, "fp": 0, "last_ts": None})
+    return sums
+
+
+# ── Writing ──────────────────────────────────────────────────────────────────
+
+def _payload_digest(row: Dict[str, Any]) -> str:
+    # Attribution (host, session) and position (seq, ts) are not part of the payload:
+    # a retry after a reconnect comes from a new session and must deduplicate.
+    payload = {k: row.get(k) for k in ("outcome", "source", "weight", "meta")}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=True).encode("ascii")).hexdigest()
+
+
+@dataclass
+class _Index:
+    """What appends need from the ledger: the next seq and the (key, rule) identities.
+
+    Cached per ledger file and refreshed from the bytes appended since the last look,
+    so an append in a long-lived process reads only the new tail.
+    """
+
+    device: int = -1
+    inode: int = -1
+    offset: int = 0
+    last_seq: int = 0
+    keyed: Dict[Tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
+
+    def absorb(self, raw_rows: Iterable[Dict[str, Any]]) -> None:
+        for raw in raw_rows:
+            seq = raw.get("seq")
+            if isinstance(seq, int) and not isinstance(seq, bool) and seq > self.last_seq:
+                self.last_seq = seq
+        rows, _ = normalize_rows(raw_rows)
+        for row in rows:
+            key = row.get("key")
+            if isinstance(key, str) and key:
+                self.keyed.setdefault((key, row["rule"]), row)
+
+
+_INDEX_GUARD = threading.Lock()
+_INDEXES: Dict[str, _Index] = {}
+
+
+def _parse_tail(data: bytes) -> List[Dict[str, Any]]:
+    rows = []
+    for line in data.split(b"\n"):
+        line = line.rstrip(b"\r")
+        if not line.strip():
+            continue
         try:
-            json.dumps(metadata, sort_keys=True, ensure_ascii=False)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("metadata must be JSON serializable") from exc
-    return cell_name, signal_type, source, metadata, principal, scope, key
+            value = json.loads(line.decode("utf-8-sig"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
+    return rows
 
-def append_signals(workspace: str, events: list[dict], expected_generation: Optional[int] = None) -> list[dict]:
-    if _migration_in_progress(workspace):
-        raise RuntimeError("migration in progress")
-    if isinstance(events, (str, bytes)):
-        raise ValueError("events must be an iterable of mappings")
+
+def _current_index(path: Path) -> _Index:
+    """The index of ``path`` as it is on disk now. Call with the workspace lock held."""
+    key = str(path)
+    with _INDEX_GUARD:
+        index = _INDEXES.get(key)
     try:
-        event_specs = list(events)
-    except TypeError as exc:
-        raise ValueError("events must be an iterable of mappings") from exc
-    if not event_specs:
+        st = os.stat(path)
+    except FileNotFoundError:
+        index = _Index()
+        with _INDEX_GUARD:
+            _INDEXES[key] = index
+        return index
+    if index is None or (index.device, index.inode) != (st.st_dev, st.st_ino) or st.st_size < index.offset:
+        index = _Index(device=st.st_dev, inode=st.st_ino)
+    if st.st_size > index.offset:
+        with open(path, "rb") as fh:
+            fh.seek(index.offset)
+            data = fh.read(st.st_size - index.offset)
+        complete = data.rfind(b"\n") + 1  # a torn tail is read again once it is terminated
+        index.absorb(_parse_tail(data[:complete]))
+        index.offset += complete
+    with _INDEX_GUARD:
+        _INDEXES[key] = index
+    return index
+
+
+def _write(path: Path, rows: List[Dict[str, Any]]) -> None:
+    """Append rows and absorb them into the index. Call with the workspace lock held."""
+    try:
+        append_jsonl(path, rows)
+    except BaseException:
+        with _INDEX_GUARD:
+            _INDEXES.pop(str(path), None)  # the file may hold part of the write: re-read it next time
+        raise
+    _current_index(path)
+
+
+def _validated(event: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(event, dict):
+        raise ValueError("each ledger event must be a mapping")
+    rule, outcome, source = event.get("rule"), event.get("outcome"), event.get("source")
+    if not isinstance(rule, str) or not rule.strip():
+        raise ValueError("rule must be a non-empty string")
+    if outcome not in OUTCOMES:
+        raise ValueError(f"outcome must be one of {list(OUTCOMES)}, got {outcome!r}")
+    if source not in SOURCES:
+        raise ValueError(f"source must be one of {list(SOURCES)}, got {source!r}")
+    for name in ("host", "session", "key"):
+        value = event.get(name)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"{name} must be a string or None")
+    row: Dict[str, Any] = {
+        "v": LEDGER_VERSION,
+        "rule": rule,
+        "outcome": outcome,
+        "source": source,
+        "host": event.get("host"),
+        "session": event.get("session"),
+        "key": event.get("key") or None,
+    }
+    weight = event.get("weight")
+    if weight is not None:
+        if isinstance(weight, bool) or not isinstance(weight, (int, float, Decimal)):
+            raise ValueError(f"weight must be a number, got {type(weight).__name__}")
+        if not math.isfinite(float(weight)) or not 0 <= weight <= 1:
+            raise ValueError(f"weight must be between 0 and 1, got {weight}")
+        if weight != 1:
+            row["weight"] = float(weight)
+    meta = event.get("meta")
+    if meta is not None:
+        if not isinstance(meta, dict):
+            raise ValueError("meta must be a mapping or None")
+        try:
+            json.dumps(meta, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("meta must be JSON serializable") from exc
+        if meta:
+            row["meta"] = meta
+    return row
+
+
+def append(workspace: Any, events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Append outcome events; return the row for each event, in order.
+
+    An event is ``{"rule", "outcome", "source"}`` plus optional ``host``, ``session``,
+    ``key``, ``weight`` (0..1) and ``meta``. Every event is validated before anything
+    is written. An event whose ``(key, rule)`` is already in the ledger writes nothing
+    and returns the stored row; with a different payload it raises EventConflictError
+    and the call writes nothing.
+    """
+    if isinstance(events, (str, bytes, dict)):
+        raise ValueError("events must be an iterable of mappings")
+    planned = [_validated(e) for e in events]
+    if not planned:
         return []
-    log_path = get_signals_path(workspace)
-    with evidence_lock(workspace):
-        if _migration_in_progress(workspace):
-            raise RuntimeError("migration in progress")
-        generation = read_generation(workspace)
-        if expected_generation is not None and expected_generation != generation:
-            raise StaleGenerationError(f"expected generation {expected_generation}, workspace is at {generation}")
-        raw, existing_by_id = _read_existing_events(log_path)
-        planned_by_id, new_records, results = dict(existing_by_id), [], []
-        for event in event_specs:
-            cell_name, signal_type, source, metadata, principal, scope, key = _validate_event(event)
-            event_id = payload_digest = None
-            if key:
-                event_id = compute_event_id(principal, scope, key, cell_name)
-                payload_digest = compute_payload_digest(cell_name, signal_type, source, metadata)
-                existing = planned_by_id.get(event_id)
-                if existing is not None:
-                    existing_cell = existing.get("cell") or existing.get("rule_id")
-                    existing_digest = existing.get("payload_digest") or compute_payload_digest(
-                        existing_cell, existing.get("signal"), existing.get("source"), existing.get("metadata")
+    path = ledger_path(workspace)
+    with locked(workspace):
+        index = _current_index(path)
+        seen: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        results: List[Dict[str, Any]] = []
+        new_rows: List[Dict[str, Any]] = []
+        seq = index.last_seq
+        stamp = _utc_now()
+        for row in planned:
+            identity = (row["key"], row["rule"]) if row["key"] else None
+            existing = None
+            if identity is not None:
+                existing = seen.get(identity) or index.keyed.get(identity)
+            if existing is not None:
+                if _payload_digest(existing) != _payload_digest(row):
+                    raise EventConflictError(
+                        f"key {row['key']!r} is already recorded for rule {row['rule']!r} with a different payload"
                     )
-                    if existing_digest != payload_digest:
-                        raise EventConflictError(f"event {event_id} already recorded with a different payload")
-                    results.append(_normalize_signal_record(existing))
-                    continue
-            record: dict[str, Any] = {
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "rule_id": cell_name, "cell": cell_name, "signal": signal_type, "source": source,
-            }
-            if event_id is not None:
-                record["event_id"], record["payload_digest"] = event_id, payload_digest
-            record["generation"] = generation
-            if metadata:
-                record["metadata"] = metadata
-            json.dumps(record, ensure_ascii=False)
-            new_records.append(record); results.append(record)
-            if event_id is not None:
-                planned_by_id[event_id] = record
-        if new_records:
-            prefix = raw + (b"\n" if raw and not raw.endswith(b"\n") else b"")
-            payload = b"".join((json.dumps(r, ensure_ascii=False) + "\n").encode("utf-8", errors="surrogatepass") for r in new_records)
-            new_bytes = prefix + payload
-            _atomic_replace_bytes(log_path, new_bytes)
-            try:
-                st = os.stat(log_path)
-                _SIGNALS_CACHE[log_path] = ((st.st_ino, st.st_mtime_ns, st.st_size), new_bytes, dict(planned_by_id))
-            except OSError:
-                _SIGNALS_CACHE.pop(log_path, None)
+                results.append(existing)
+                continue
+            seq += 1
+            written = {"v": LEDGER_VERSION, "seq": seq, "ts": stamp, **{k: v for k, v in row.items() if k != "v"}}
+            new_rows.append(written)
+            results.append(written)
+            if identity is not None:
+                seen[identity] = written
+        if new_rows:
+            _write(path, new_rows)
         return results
 
-def append_signal(
-    workspace: str, cell_name: str = "", signal_type: str = "", source: str = "",
-    metadata: Optional[dict] = None, principal: str = "unknown",
-    idempotency_scope: str = "global", idempotency_key: str = "",
-    expected_generation: Optional[int] = None, *, rule_id: Optional[str] = None,
-) -> dict:
-    target_rule = rule_id if rule_id is not None else cell_name
-    events = [{"cell_name": target_rule, "rule_id": target_rule, "signal_type": signal_type, "source": source, "metadata": metadata, "principal": principal, "idempotency_scope": idempotency_scope, "idempotency_key": idempotency_key}]
-    return append_signals(workspace, events, expected_generation=expected_generation)[0]
+
+def append_epoch(workspace: Any, note: Dict[str, Any]) -> Dict[str, Any]:
+    """Append an epoch row (no rule, no outcome) recording a migration; return it."""
+    if not isinstance(note, dict):
+        raise ValueError("note must be a mapping")
+    path = ledger_path(workspace)
+    with locked(workspace):
+        index = _current_index(path)
+        row = {"v": LEDGER_VERSION, "seq": index.last_seq + 1, "ts": _utc_now(), "epoch": note}
+        _write(path, [row])
+        return row
+
+
+def append_rows(workspace: Any, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Append already-formed v2 outcome rows (``aegis migrate``), renumbering their seq.
+
+    Rows whose ``(key, rule)`` is already in the ledger are skipped, so a re-run adds
+    nothing. Returns the rows written.
+    """
+    path = ledger_path(workspace)
+    with locked(workspace):
+        index = _current_index(path)
+        seq = index.last_seq
+        seen = set(index.keyed)
+        new_rows = []
+        for row in rows:
+            key = row.get("key")
+            identity = (key, row.get("rule")) if isinstance(key, str) and key else None
+            if identity is not None and identity in seen:
+                continue
+            seq += 1
+            new_rows.append({"v": LEDGER_VERSION, "seq": seq, **{k: v for k, v in row.items() if k not in ("v", "seq")}})
+            if identity is not None:
+                seen.add(identity)
+        if new_rows:
+            _write(path, new_rows)
+        return new_rows

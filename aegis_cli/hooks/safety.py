@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import datetime
-import json
-import os
 from pathlib import Path
 import re
 import shlex
 from typing import Any
 
 from aegis_cli.hooks.redaction import redact_secrets
+from aegis_core.storage import append_jsonl
+from aegis_core.workspace.layout import WorkspaceLayout
 
 SAFE_COMMAND_PREFIXES: tuple[str, ...] = (
     "git status",
@@ -39,37 +39,25 @@ METACHARACTERS: frozenset[str] = frozenset({";", "&", "|", ">", "<", "`", "$", "
 DANGEROUS_FLAGS: tuple[str, ...] = ("-f", "--force", "-D", "-d", "-M", "--output", "--ext-cmd", "--delete")
 
 
-def _find_gate_log_dir(workspace: Path) -> Path:
-    """Locate the canonical directory for gate event logging."""
-    env_logs = os.environ.get("AEGIS_LOGS_DIR")
-    if env_logs:
-        return Path(env_logs) / "governance"
-    home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
-    candidate = home / ".gemini" / "antigravity" / "scratch" / "ai-conversation-logs" / "governance"
-    if candidate.parent.exists():
-        return candidate
-    return workspace / ".aegis" / "governance"
-
-
 def log_gate_event(cmd: str, decision: str, reason: str, workspace: Path) -> None:
-    """Log safety gate evaluations to gate_events.jsonl."""
-    log_dir = _find_gate_log_dir(workspace)
-    log_file = log_dir / "gate_events.jsonl"
-    snippet = redact_secrets(cmd)[:200]
-    now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """Append a safety-gate decision to the workspace's .aegis/state/gate_events.jsonl.
+
+    Only an Aegis workspace gets a log: a gate run from any other directory must not
+    create .aegis/ there. Logging never fails the gate.
+    """
+    layout = WorkspaceLayout(Path(workspace).resolve())
+    if not layout.aegis_dir.is_dir():
+        return
     record = {
-        "timestamp": now_iso,
-        "command": snippet,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "command": redact_secrets(cmd)[:200],
         "decision": decision,
     }
     if reason:
         record["reason"] = reason
-
     try:
-        log_dir.mkdir(parents=True, exist_ok=True)
-        with open(log_file, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
-    except OSError:
+        append_jsonl(layout.gate_log, [record])
+    except (OSError, ValueError):
         pass
 
 

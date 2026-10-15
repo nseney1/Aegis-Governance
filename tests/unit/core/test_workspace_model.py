@@ -101,9 +101,8 @@ class TestWorkspaceModel:
         ws = Workspace.resolve(aegis_ws)
         assert ws.aegis_dir == ws.root / ".aegis"
         assert ws.rules_dir == ws.root / ".aegis" / "rules"
-        assert ws.metrics_dir == ws.root / ".aegis" / "metrics"
-        assert ws.evidence_dir == ws.root / ".aegis" / "evidence"
-        assert ws.signals_file == ws.root / ".aegis" / "evidence" / "signals.jsonl"
+        assert ws.layout.state_dir == ws.root / ".aegis" / "state"
+        assert ws.layout.ledger_file == ws.root / ".aegis" / "state" / "ledger.jsonl"
         assert ws / "subdir" == ws.root / "subdir"
 
     def test_workspace_pathlike_and_immutability(self, aegis_ws: Path):

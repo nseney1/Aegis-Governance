@@ -1,7 +1,7 @@
 """M1 and timestamp regressions for rule-file writes in the lifecycle engine.
 
 Invariants under test (docs/adr/0005-evidence-review.md M1):
-- every rule-file mutation waits for ``workspace_lock(RULES)``, the lock that
+- every rule-file mutation waits for ``storage.locked()``, the lock that
   promote/demote already hold;
 - every rule-file write is atomic: when the filesystem refuses the final
   write, the rules directory is byte-identical to before (no truncated rule,
@@ -107,8 +107,7 @@ _SCENARIOS = {
 _LOCK_HOLDER = r"""
 import hashlib, os, sys, time
 from pathlib import Path
-from aegis_core.locking import workspace_lock
-from aegis_core.workspace.layout import LockResource
+from aegis_core.storage import locked
 
 def snap(root):
     out = []
@@ -120,7 +119,7 @@ def snap(root):
     return sorted(out)
 
 ws, rules, hold = Path(sys.argv[1]), sys.argv[2], float(sys.argv[3])
-with workspace_lock(ws, LockResource.RULES):
+with locked(ws):
     before = snap(rules)
     print("locked", flush=True)
     time.sleep(hold)
@@ -226,7 +225,7 @@ def test_selection_writes_valid_utc_timestamps(tmp_path: Path) -> None:
 
     meta = parse_frontmatter(rule.read_text(encoding="utf-8")) or {}
     _assert_utc(meta.get("dormant_since"))
-    log_lines = (ws / ".aegis" / "evidence" / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    log_lines = (ws / ".aegis" / "state" / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
     entry = json.loads(log_lines[-1])
     assert entry["action"] == "marked_dormant"
     _assert_utc(entry["timestamp"])
@@ -240,7 +239,7 @@ def _rival_on_first_lock(monkeypatch: pytest.MonkeyPatch, rival, module=promotio
     This is the window a concurrent process gets between promote/demote's
     unlocked existence checks and their locked move.
     """
-    real_lock = module.workspace_lock
+    real_lock = module.locked
     pending = [rival]
 
     @contextmanager
@@ -250,7 +249,7 @@ def _rival_on_first_lock(monkeypatch: pytest.MonkeyPatch, rival, module=promotio
         with real_lock(*args, **kwargs) as held:
             yield held
 
-    monkeypatch.setattr(module, "workspace_lock", lock_after_rival)
+    monkeypatch.setattr(module, "locked", lock_after_rival)
 
 
 def _rival_rule(path: Path, marker: str) -> None:
@@ -325,10 +324,9 @@ def test_concurrent_demotes_of_one_rule_demote_it_once(tmp_path: Path, monkeypat
 _LOCK_HOLDER_UNTIL_EOF = r"""
 import sys
 from pathlib import Path
-from aegis_core.locking import workspace_lock
-from aegis_core.workspace.layout import LockResource
+from aegis_core.storage import locked
 
-with workspace_lock(Path(sys.argv[1]), LockResource.RULES):
+with locked(Path(sys.argv[1])):
     print("locked", flush=True)
     sys.stdin.read()
 """
@@ -358,7 +356,7 @@ def test_tier_pass_with_nothing_to_change_does_not_wait_for_the_rules_lock(tmp_p
     )
     try:
         assert holder.stdout.readline().strip() == "locked", holder.stderr.read()
-        # Needing the lock here would raise LockTimeoutError after 5 s.
+        # Needing the lock here would raise LockTimeoutError after 10 s.
         res = evaluate_cell_tiers(ws, execute=True)
     finally:
         holder.stdin.close()
@@ -404,7 +402,7 @@ def _dormant(path: Path, rule_id: str) -> Path:
 
 
 def _log_actions(ws: Path) -> list[tuple[str, str]]:
-    log = ws / ".aegis" / "evidence" / "lifecycle.jsonl"
+    log = ws / ".aegis" / "state" / "lifecycle.jsonl"
     if not log.exists():
         return []
     return [(e["cell"], e["action"]) for e in map(json.loads, log.read_text(encoding="utf-8").splitlines())]
@@ -422,7 +420,7 @@ def test_selection_with_nothing_to_change_does_not_wait_for_the_rules_lock(tmp_p
     )
     try:
         assert holder.stdout.readline().strip() == "locked", holder.stderr.read()
-        # Needing the lock here would raise LockTimeoutError after 5 s.
+        # Needing the lock here would raise LockTimeoutError after 10 s.
         rc = run_cell_selection(ws, execute=True)
     finally:
         holder.stdin.close()
@@ -444,7 +442,7 @@ def test_selection_takes_the_rules_lock_once_per_changed_rule(tmp_path: Path, mo
     for name in ("quiet-a", "quiet-b", "quiet-c"):
         _rule(_rules(ws) / "traps" / f"{name}.md", name, "trap")
     _rule(_rules(ws) / "traps" / "strong.md", "strong", "trap", triggers=10, tp=10)
-    real_lock = selection.workspace_lock
+    real_lock = selection.locked
     depth: list[int] = []
     held = [0]
 
@@ -458,7 +456,7 @@ def test_selection_takes_the_rules_lock_once_per_changed_rule(tmp_path: Path, mo
         finally:
             held[0] -= 1
 
-    monkeypatch.setattr(selection, "workspace_lock", counting_lock)
+    monkeypatch.setattr(selection, "locked", counting_lock)
 
     assert run_cell_selection(ws, execute=True) == 0
 

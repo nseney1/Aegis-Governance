@@ -6,7 +6,6 @@ import argparse
 from datetime import date, timedelta
 import json
 
-import pytest
 
 from aegis_cli.status import run_status
 
@@ -59,7 +58,7 @@ class TestStatus:
         assert "Adaptive rules: 2 (traps/patterns)" in captured.out
 
     def test_status_reads_trigger_counts(self, tmp_path, capsys):
-        """Canonical signals.jsonl trigger rows win over contradictory legacy evidence."""
+        """Ledger rows win over contradictory legacy evidence."""
         genome = tmp_path / "genome"
         genome.mkdir()
         (genome / "rule-a.md").write_text("# Rule A\n")
@@ -73,7 +72,9 @@ class TestStatus:
             {"cell": "rule-a", "signal": "trigger", "timestamp": "2026-09-30T12:02:00Z"},
             {"cell": "rule-b", "signal": "trigger", "timestamp": "2026-09-30T12:03:00Z"},
         ]
-        (evidence / "signals.jsonl").write_text(
+        state = tmp_path / ".aegis" / "state"
+        state.mkdir(parents=True)
+        (state / "ledger.jsonl").write_text(
             "\n".join(json.dumps(r) for r in records) + "\n"
         )
         legacy_records = [
@@ -117,9 +118,9 @@ class TestStatus:
             "---\ncreated: 2026-09-01\nexpiry_days: 30\n---\n# Rule B\n"
         )
 
-        evidence = tmp_path / ".aegis" / "evidence"
-        evidence.mkdir(parents=True)
-        (evidence / "signals.jsonl").write_text(
+        state = tmp_path / ".aegis" / "state"
+        state.mkdir(parents=True)
+        (state / "ledger.jsonl").write_text(
             json.dumps(
                 {
                     "cell": "rule-a",

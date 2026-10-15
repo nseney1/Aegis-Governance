@@ -1,67 +1,47 @@
-"""Workspace scaffolding and initialization for Aegis (Layer 0 Core).
+"""Workspace scaffolding: the D12 directories and ``.aegis/.gitignore``.
 
-Creates canonical directory structure (.aegis/rules/{invariants,traps,gates}, .aegis/evidence, .aegis/metrics).
-Guards against bare git repositories.
-Strictly zero-dependency: uses only Python standard library.
+Creates ``.aegis/rules/<type>/`` and ``.aegis/state/`` and refuses bare git
+repositories. Standard library only.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
-import tempfile
 
 from aegis_core.errors import WorkspaceBareRepoError
-from aegis_core.workspace.layout import RUNTIME_STATE_IGNORES
+from aegis_core.storage import atomic_write_bytes
+from aegis_core.workspace.layout import GITIGNORE_ENTRIES, WorkspaceLayout
 
 _GITIGNORE_HEADER = (
-    "# Aegis machine-local runtime state. `aegis init` appends any missing entry\n"
-    "# and keeps your own lines; negate an entry (!/evidence/) to commit it.\n"
+    "# Aegis machine-local state. `aegis init` appends any missing entry\n"
+    "# and keeps your own lines.\n"
 )
 
 
-def scaffold_workspace(
-    root: Path,
-    cells_dir: Path,
-    evidence_dir: Path,
-    metrics_dir: Path,
-    minimal: bool = False,
-    dry_run: bool = False,
-) -> list[Path]:
-    """Scaffold standard directory structure for Aegis governance.
+def scaffold_workspace(layout: WorkspaceLayout, minimal: bool = False, dry_run: bool = False) -> list[Path]:
+    """Create the D12 directories; return the directories that make up the layout.
 
-    Creates .aegis/rules/ and .aegis/evidence/ (and .aegis/metrics/).
-    Guards against bare git repositories.
+    ``minimal`` scaffolds only ``rules/invariants/``; otherwise traps and gates too.
     """
+    root = layout.root
     if (
         (root / "HEAD").is_file()
         and (root / "config").is_file()
         and (root / "objects").is_dir()
         and not (root / ".git").exists()
     ):
-        raise WorkspaceBareRepoError(
-            f"Cannot scaffold aegis in a bare git repository: {root}"
-        )
+        raise WorkspaceBareRepoError(f"Cannot scaffold aegis in a bare git repository: {root}")
 
-    dirs_to_create: list[Path] = [
-        cells_dir / "invariants",
-        evidence_dir,
-    ]
+    dirs = [layout.rules_dir / "invariants", layout.state_dir]
     if not minimal:
-        dirs_to_create.extend([
-            cells_dir / "traps",
-            cells_dir / "gates",
-            metrics_dir,
-        ])
-
+        dirs[1:1] = [layout.rules_dir / "traps", layout.rules_dir / "gates"]
     if not dry_run:
-        for d in dirs_to_create:
+        for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
-
-    return dirs_to_create
+    return dirs
 
 
 def ensure_runtime_gitignore(aegis_dir: Path, dry_run: bool = False) -> str:
-    """Make ``.aegis/.gitignore`` list every runtime-state entry; return what happened.
+    """Make ``.aegis/.gitignore`` list ``state/``; return what happened.
 
     Returns ``"created"``, ``"updated"``, ``"unchanged"``, ``"symlink"`` (left alone:
     appending would edit whatever file it points at) or ``"dry-run"``. Existing bytes
@@ -77,7 +57,7 @@ def ensure_runtime_gitignore(aegis_dir: Path, dry_run: bool = False) -> str:
     existing = path.read_bytes().decode("utf-8", "surrogateescape") if path.is_file() else None
     eol = "\r\n" if existing and "\r\n" in existing else "\n"
     present = {line.strip().lstrip("!") for line in (existing or "").splitlines()}
-    missing = [entry for entry in RUNTIME_STATE_IGNORES if entry not in present]
+    missing = [entry for entry in GITIGNORE_ENTRIES if entry not in present]
     if existing is not None and not missing:
         return "unchanged"
     if dry_run:
@@ -90,26 +70,7 @@ def ensure_runtime_gitignore(aegis_dir: Path, dry_run: bool = False) -> str:
         sep = "" if existing == "" or existing.endswith("\n") else eol
         header = "" if _GITIGNORE_HEADER.splitlines()[0] in existing else _GITIGNORE_HEADER.replace("\n", eol)
         content = existing + sep + header + block
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".gitignore.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="") as fh:
-            fh.write(content)
-        if existing is not None:
-            mode = path.stat().st_mode & 0o7777
-        else:
-            umask = os.umask(0)  # single-threaded CLI: no file creation can race this
-            os.umask(umask)
-            mode = 0o666 & ~umask
-        os.chmod(tmp, mode)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write_bytes(path, content.encode("utf-8", "surrogateescape"))
     return "created" if existing is None else "updated"
 
 

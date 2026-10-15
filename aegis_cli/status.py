@@ -8,7 +8,6 @@ from pathlib import Path
 
 from aegis_cli import resolve_root, sanitize_display
 from aegis_cli.base import CommandCategory, AegisCommand
-from aegis_core.evidence import aggregate_signals
 from aegis_core.taxonomy import (
     CHARS_PER_TOKEN_ESTIMATE,
     JIT_DEFAULT_MAX_TOKENS,
@@ -90,18 +89,11 @@ def _format_adaptive_expiry(created_val, expiry_days_val) -> str:
     return f"{remaining_days}d"
 
 
-def _read_trigger_counts(evidence_dir: Path) -> dict[str, int]:
-    """Read the canonical trigger count dimension per cell."""
-    try:
-        aggregation = aggregate_signals(str(evidence_dir))
-    except Exception:
-        return {}
+def _read_trigger_counts(project_root: Path) -> dict[str, int]:
+    """Trigger count per rule from the outcome ledger."""
+    from aegis_core.telemetry_engine import ledger
 
-    return {
-        str(cell_id): int(entry["triggers"])
-        for cell_id, entry in aggregation.counts.items()
-        if isinstance(entry, dict) and entry.get("has_triggers")
-    }
+    return {rule: int(totals["triggers"]) for rule, totals in ledger.aggregate(project_root).items()}
 
 
 # ── CLAUDE.md merged rules (BUG-033) ────────────────────────────────────────
@@ -343,9 +335,8 @@ def run_status(args: argparse.Namespace) -> int:
             if p.is_file() and p.name.lower() != "readme.md":
                 adaptive_files.append(p)
 
-    # 3. Read canonical trigger counts from .aegis/evidence/signals.jsonl
-    evidence_dir = layout.evidence_dir
-    trigger_counts = _read_trigger_counts(evidence_dir)
+    # 3. Trigger counts from the outcome ledger
+    trigger_counts = _read_trigger_counts(proj)
 
     # 4. Process all rules and calculate character overhead
     _type_norm = RULE_TYPE_NORMALIZATION

@@ -9,10 +9,8 @@ from typing import Any, Dict, Optional
 
 from aegis_core.yaml_engine.serializer import dump_frontmatter
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
-from aegis_core.locking import workspace_lock
-from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink, atomic_write_text
+from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink, atomic_write_text, locked
 from aegis_core.workspace.base import Workspace
-from aegis_core.workspace.layout import LockResource
 from .constants import (
     DORMANT_DAYS_THRESHOLD,
     MAX_FP_RATE_FOR_DEMOTION,
@@ -143,7 +141,6 @@ def evaluate_demotions(workspace: Workspace | Path | str) -> list[dict]:
             "last_trigger_ts": None, "has_triggers": True,
         })
         triggers = ev["triggers"]
-        tp = ev["tp"]
         fp = ev["fp"]
         age_days = _cell_age_days(cell)
 
@@ -287,7 +284,7 @@ def promote_cell(
         }
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    with workspace_lock(ws.root, LockResource.RULES):
+    with locked(ws.root):
         conflict = _recheck_move_locked(cell_id, cell_path, target_path)
         if conflict is not None:
             return conflict
@@ -358,7 +355,7 @@ def demote_cell(
         }
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    with workspace_lock(ws.root, LockResource.RULES):
+    with locked(ws.root):
         conflict = _recheck_move_locked(clean_id, cell_path, target_path)
         if conflict is not None:
             return conflict
@@ -457,7 +454,7 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
             # LockTimeoutError. Re-plan from the bytes on disk under the lock so
             # a concurrent edit is not clobbered and a rule promoted or demoted
             # meanwhile is not resurrected at its old path.
-            with workspace_lock(ws.root, LockResource.RULES):
+            with locked(ws.root):
                 current = _read_rule_text(file_path)
                 if current is None:
                     continue

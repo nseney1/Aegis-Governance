@@ -114,26 +114,19 @@ def soma_workspace(tmp_path):
     return workspace
 
 
-def write_evidence(evidence_dir, cell_id, triggers=0, tp=0, fp=0):
-    """Write canonical trigger and outcome signals for one rule."""
-    evidence_dir = str(evidence_dir)
-    signals_file = os.path.join(evidence_dir, "signals.jsonl")
+def write_evidence(workspace, cell_id, triggers=0, tp=0, fp=0):
+    """Append ledger rows giving one rule ``triggers`` triggers, ``tp`` tps and ``fp`` fps.
 
-    with open(signals_file, "a", encoding="utf-8") as f:
-        for _ in range(triggers):
+    Each v2 outcome row is also a trigger, so the rows are tp + fp outcome rows plus
+    ``triggers - tp - fp`` bare trigger rows (``triggers`` must cover tp + fp).
+    """
+    assert triggers >= tp + fp, "every tp/fp row is a trigger"
+    ledger = os.path.join(str(workspace), ".aegis", "state", "ledger.jsonl")
+    os.makedirs(os.path.dirname(ledger), exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    outcomes = ["tp"] * tp + ["fp"] * fp + ["trigger"] * (triggers - tp - fp)
+    with open(ledger, "a", encoding="utf-8") as f:
+        for outcome in outcomes:
             f.write(json.dumps({
-                "cell": cell_id,
-                "signal": "trigger",
-                "source": "manual",
-                "timestamp": datetime.now().isoformat(),
-                "metadata": {"matched_files": ["test.py"]},
+                "v": 2, "ts": stamp, "rule": cell_id, "outcome": outcome, "source": "manual",
             }) + "\n")
-        for _ in range(tp):
-            f.write(json.dumps({
-                "cell": cell_id, "signal": "tp", "source": "manual",
-            }) + "\n")
-        for _ in range(fp):
-            f.write(json.dumps({
-                "cell": cell_id, "signal": "fp", "source": "manual",
-            }) + "\n")
-

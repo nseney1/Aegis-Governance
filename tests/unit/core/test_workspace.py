@@ -50,8 +50,7 @@ class TestWorkspaceCore:
         ws = Workspace(root=tmp_path / "repo")
         assert ws.aegis_dir == tmp_path / "repo" / ".aegis"
         assert ws.rules_dir == tmp_path / "repo" / ".aegis" / "rules"
-        assert ws.metrics_dir == tmp_path / "repo" / ".aegis" / "metrics"
-        assert ws.signals_file == tmp_path / "repo" / ".aegis" / "evidence" / "signals.jsonl"
+        assert ws.layout.ledger_file == tmp_path / "repo" / ".aegis" / "state" / "ledger.jsonl"
 
     def test_confine_workspace(self, tmp_path: Path):
         ws = tmp_path / "valid"
