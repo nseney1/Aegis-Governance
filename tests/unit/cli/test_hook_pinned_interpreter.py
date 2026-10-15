@@ -219,6 +219,46 @@ def test_status_reports_the_pinned_interpreter(tmp_path):
     assert hook_status(project)["interpreter"] == {"path": gone, "exists": False}
 
 
+def test_status_reports_the_pinned_aegis_path(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    install_hook(project, python=sys.executable)
+    assert hook_status(project)["aegis_path"] == {"path": str(AEGIS_ROOT), "exists": True}
+
+    gone = str(tmp_path / "gone-site")
+    install_hook(project, python=sys.executable, import_root=gone)
+    assert hook_status(project)["aegis_path"] == {"path": gone, "exists": False}
+
+
+def test_status_text_names_each_missing_pinned_path(tmp_path, capsys):
+    from aegis_cli.cli import main
+
+    project = bare_repo(tmp_path / "p")
+    py, site = str(tmp_path / "gone-py"), str(tmp_path / "gone-site")
+    install_hook(project, python=py, import_root=site)
+    assert main(["hook", "status", "--workspace", str(project)]) == 0
+    out = capsys.readouterr().out
+    assert f"Runs:            {py} ❌ (missing: run 'aegis hook install')" in out
+    assert f"Aegis path:      {site} ❌ (missing: run 'aegis hook install')" in out
+
+
+@pytest.mark.parametrize("missing", ["interpreter", "aegis_path"])
+def test_doctor_flags_a_current_hook_that_would_fail_closed(tmp_path, capsys, missing):
+    """The hook refuses every commit when either pinned path is gone, so doctor must not show green."""
+    from aegis_cli.doctor import _check_precommit_hook
+
+    project = bare_repo(tmp_path / "p")
+    gone = str(tmp_path / "gone")
+    if missing == "interpreter":
+        install_hook(project, python=gone)
+    else:
+        install_hook(project, python=sys.executable, import_root=gone)
+    assert _check_precommit_hook(project) is False
+    out = capsys.readouterr().out
+    assert "is current" not in out
+    assert f"pins {gone}, which no longer exists" in out
+    assert "aegis hook install" in out
+
+
 @pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_doctor_flags_every_earlier_format_as_outdated(tmp_path, capsys, version):
     """Formats 1-4 resolved aegis through PATH or the repo; re-install to pin it."""
@@ -246,7 +286,7 @@ def test_doctor_accepts_current_hook(tmp_path):
     from aegis_cli.doctor import _check_precommit_hook
 
     project = bare_repo(tmp_path / "p")
-    install_hook(project, python="/usr/bin/python3")
+    install_hook(project, python=sys.executable)
     assert _check_precommit_hook(project) is True
 
 
@@ -332,3 +372,39 @@ def test_no_warning_when_the_hooks_dir_is_not_in_the_work_tree(tmp_path, capsys,
     captured = capsys.readouterr()
     assert json.loads(captured.out)["hooks_dir_in_work_tree"] is False
     assert captured.err == ""
+
+
+def _init(project: Path, tmp_path: Path, monkeypatch) -> int:
+    from aegis_cli.cli import main
+
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.chdir(project)
+    return main(["init", "--platform", "claude", "--local", "--yes"])
+
+
+def test_init_warns_when_core_hooks_path_is_inside_the_work_tree(tmp_path, monkeypatch, capsys):
+    """init is the main entry point; it pins the same machine paths as hook install."""
+    project = git_repo(tmp_path / "p")
+    subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=str(project), check=True)
+    rc = _init(project, tmp_path, monkeypatch)
+    hook = (project / ".githooks" / "pre-commit").resolve()
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert hook.is_file()
+    assert f"Pre-commit hook installed ({hook})" in captured.out
+    assert ".git/hooks/pre-commit" not in captured.out
+    assert _work_tree_warning(hook) in captured.err
+
+
+def test_init_names_the_hook_it_wrote_without_a_warning_under_git_dir(tmp_path, monkeypatch, capsys):
+    project = git_repo(tmp_path / "p")
+    rc = _init(project, tmp_path, monkeypatch)
+    hook = (project / ".git" / "hooks" / "pre-commit").resolve()
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert hook.is_file()
+    assert f"Pre-commit hook installed ({hook})" in captured.out
+    assert "inside the work tree" not in captured.err

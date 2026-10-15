@@ -291,7 +291,8 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
 # ── Pre-commit hook ──────────────────────────────────────────────────────────
 
 def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
-    """True for a current hook block, False for an older one, None if absent.
+    """True for a current, runnable hook block; False for an older one or one whose
+    pinned interpreter or aegis path is gone; None if absent.
 
     Blocks before the current format resolved aegis through PATH, $VIRTUAL_ENV
     or the repository's .venv, so repository code could run on commit.
@@ -302,6 +303,11 @@ def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
     if not st["managed_by_aegis"]:
         return None
     if st["status"] == "installed":
+        gone = [p["path"] for p in (st["interpreter"], st["aegis_path"]) if p and not p["exists"]]
+        if gone:
+            print(f"  ❌ Pre-commit hook ({st['hook_file']}) pins {gone[0]}, which no longer exists,\n"
+                  "      so every commit fails closed. Re-run `aegis hook install` to re-pin it.")
+            return False
         print(f"  ✅ Pre-commit hook is current ({st['hook_file']})")
         return True
     print(f"  ❌ Pre-commit hook uses an old block (format {st['format_version']}, {st['hook_file']}).\n"
@@ -321,7 +327,7 @@ def run_doctor(args: argparse.Namespace) -> int:
         getattr(args, "workspace", None) or getattr(args, "_project_root", None)
     )
     ws = ws_obj.root
-    use_json = bool(getattr(args, "json", False) or getattr(args, "format", None) == "json")
+    use_json = bool(getattr(args, "json", False))
 
     if getattr(args, "drivers", False):
         if not use_json:

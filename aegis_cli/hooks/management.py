@@ -306,10 +306,20 @@ def _hooks_dir_in_work_tree(root: Path, git_hooks_dir: Path) -> bool:
     return False
 
 
-def _work_tree_warning(hook_file: str) -> str:
+def work_tree_warning(hook_file: str) -> str:
     return (f"Warning: {hook_file} is inside the work tree (core.hooksPath) and pins this "
             "machine's Python; do not commit it, or other clones fail closed until they run "
             "aegis hook install.")
+
+
+def _pinned_value(text: str, var: str) -> str | None:
+    match = re.search(rf"^{var}=(.+)$", text, re.MULTILINE)
+    if not match:
+        return None
+    try:
+        return shlex.split(match.group(1))[0]
+    except (ValueError, IndexError):
+        return match.group(1)
 
 
 def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
@@ -355,14 +365,16 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
                 status = "unreadable"
 
     interpreter = None
+    aegis_path = None
     if managed:
-        match = re.search(r"^AEGIS_PYTHON=(.+)$", text, re.MULTILINE)
-        if match:
-            try:
-                pinned = shlex.split(match.group(1))[0]
-            except (ValueError, IndexError):
-                pinned = match.group(1)
+        pinned = _pinned_value(text, "AEGIS_PYTHON")
+        if pinned is not None:
             interpreter = {"path": pinned, "exists": os.path.isfile(pinned) and os.access(pinned, os.X_OK)}
+        # The same test the hook makes before it runs; either missing path fails every commit.
+        pinned = _pinned_value(text, "AEGIS_PATH")
+        if pinned is not None:
+            aegis_path = {"path": pinned,
+                          "exists": os.path.isfile(os.path.join(pinned, "aegis_cli", "__init__.py"))}
 
     is_worktree = False
     if root and (root / ".git").is_file():
@@ -379,6 +391,7 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
         "format_version": format_version,
         "current_format_version": CURRENT_HOOK_FORMAT_VERSION,
         "interpreter": interpreter,
+        "aegis_path": aegis_path,
         "hooks_dir_in_work_tree": bool(git_hooks_dir) and _hooks_dir_in_work_tree(root, git_hooks_dir),
     }
 
@@ -399,7 +412,7 @@ def run_hook_install(args: Any) -> int:
         else:
             print("❌ Failed to install the aegis pre-commit hook (no .git directory or symlink outside repo)", file=sys.stderr)
     if st.get("hooks_dir_in_work_tree"):
-        print(_work_tree_warning(st["hook_file"]), file=sys.stderr)
+        print(work_tree_warning(st["hook_file"]), file=sys.stderr)
     return 0 if ok else 1
 
 
@@ -426,7 +439,7 @@ def run_hook_status(args: Any) -> int:
     st = hook_status(ws)
 
     if st["hooks_dir_in_work_tree"]:
-        print(_work_tree_warning(st["hook_file"]), file=sys.stderr)
+        print(work_tree_warning(st["hook_file"]), file=sys.stderr)
     if use_json:
         print(json.dumps(st, indent=2))
         return 0
@@ -449,8 +462,8 @@ def run_hook_status(args: Any) -> int:
     else:
         print("  Pre-commit Hook: ❌ Not installed — run 'aegis hook install'")
 
-    interp = st.get("interpreter")
-    if interp:
-        mark = "✅" if interp["exists"] else "❌ (missing: run 'aegis hook install')"
-        print(f"  Runs:            {interp['path']} {mark}")
+    for label, pinned in (("Runs:", st.get("interpreter")), ("Aegis path:", st.get("aegis_path"))):
+        if pinned:
+            mark = "✅" if pinned["exists"] else "❌ (missing: run 'aegis hook install')"
+            print(f"  {label:<17}{pinned['path']} {mark}")
     return 0

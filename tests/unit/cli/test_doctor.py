@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -50,7 +49,6 @@ def test_doctor_returns_zero_in_valid_env(tmp_path, monkeypatch):
 
     # Mock get_rules_dir to return our fake rules dir
     with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"):
-        from aegis_cli.init import get_rules_dir as _orig  # noqa: F811
         with patch(
             "aegis_cli.init.get_rules_dir",
             return_value=rules_dir,
@@ -253,7 +251,7 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
     with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/node"), \
          patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace()
-        res = run_doctor(args)
+        run_doctor(args)
     assert not (tmp_path / ".aegis" / "slots.yaml").exists()
     out = capsys.readouterr().out
     assert "Run 'aegis doctor --fix' to provision" in out
@@ -328,7 +326,7 @@ def test_check_precommit_hook_all_branches(tmp_path, capsys):
 
     # 2. Current hook
     from aegis_cli.hooks.management import generate_hook_block
-    hook_file.write_text("#!/bin/sh\n" + generate_hook_block("/usr/bin/python3"), encoding="utf-8")
+    hook_file.write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
     assert _check_precommit_hook(tmp_path) is True
     assert "Pre-commit hook is current" in capsys.readouterr().out
 
