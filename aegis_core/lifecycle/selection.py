@@ -10,7 +10,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import os
 from pathlib import Path
-import shutil
 from typing import Any, Dict, List, Optional
 
 from aegis_core.fitness import for_rules
@@ -58,19 +57,35 @@ def evaluate_archives(workspace: Workspace | Path | str, now: Optional[datetime]
 
 
 def _park(path: Path, dest_dir: Path) -> Path:
-    """Move a rule into ``dest_dir`` without replacing a rule already parked there."""
+    """Move a rule into ``dest_dir`` without replacing a rule already parked there.
+
+    One rename (the archive is inside the rules directory, so on the same filesystem):
+    it either happens or the rule stays where it was, never a half-copied file.
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / path.name
     n = 1
     while os.path.lexists(dest):
         dest = dest_dir / f"{path.stem}.{n}{path.suffix}"
         n += 1
-    shutil.move(str(path), str(dest))
+    os.replace(path, dest)
     return dest
 
 
+def _still_misfiring(ws: Workspace, rule_id: str) -> bool:
+    from .promotion import suggest
+
+    rule = load_rules(ws).get(rule_id)
+    return rule is not None and suggest(rule, for_rules(ws, [rule])[rule_id]) == "archive"
+
+
 def archive_rule(workspace: Workspace | Path | str, rule_id: str, dry_run: bool = False) -> Dict[str, Any]:
-    """Move one rule to ``.aegis/rules/.archive/`` and log it."""
+    """Move one rule to ``.aegis/rules/.archive/`` and log it.
+
+    Only a rule whose ledger evidence supports archiving (``promotion.suggest``) moves,
+    and that is checked again under the lock: evidence recorded since the caller judged
+    the rule wins.
+    """
     clean = sanitize_cell_id(rule_id)
     if not clean:
         return {"status": "invalid_id", "message": f"Invalid rule ID: '{rule_id}'"}
@@ -84,6 +99,8 @@ def archive_rule(workspace: Workspace | Path | str, rule_id: str, dry_run: bool 
     with locked(ws.root):
         if not path.is_file():
             return {"status": "not_found", "message": f"Rule '{clean}' was moved or removed before the rules lock was acquired"}
+        if not _still_misfiring(ws, clean):
+            return {"status": "ineligible", "message": f"Rule '{clean}' no longer has evidence that supports archiving it"}
         dest = _park(path, archive_dir)
         append_jsonl(ws.layout.lifecycle_log, [{
             "timestamp": _utc_timestamp(),
@@ -104,13 +121,14 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
         print("No rules to archive.")
         return 0
     for c in candidates:
-        note = "" if execute else " (dry run)"
+        note = " (dry run)"
+        if execute:
+            result = archive_rule(ws, c["rule_id"])
+            note = "" if result["status"] == "archived" else f" (not archived: {result['message']})"
         print(
             f"[ARCHIVE] {c['rule_id']} (fitness {c['fitness']:.2f}, misfire bound {c['misfire']:.2f}, "
             f"tp {c['tp']:g}, fp {c['fp']:g}){note}"
         )
-        if execute:
-            archive_rule(ws, c["rule_id"])
     return 0
 
 

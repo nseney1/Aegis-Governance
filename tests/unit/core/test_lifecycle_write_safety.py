@@ -11,8 +11,9 @@ Invariants under test (docs/adr/0005-evidence-review.md M1):
   lock are repeated under it, so a rival create or move that lands in between
   is never overwritten and never crashes the second mover;
 - the tier pass and the archive pass change only the rules that need it and hold
-  the lock per rule, not for the whole pass; archiving never revisits a hidden
-  directory and never overwrites a rule already archived under the same name.
+  the lock per rule, not for the whole pass; archiving re-checks the rule's ledger
+  evidence under the lock, never revisits a hidden directory and never overwrites a
+  rule already archived under the same name.
 
 Fitness comes only from the ledger (aegis_core.fitness), so every scenario that should
 move a rule gives it ledger evidence; frontmatter counters are never read.
@@ -179,7 +180,7 @@ def test_rule_writes_wait_for_the_rules_lock(tmp_path: Path, scenario: str) -> N
     assert _snapshot(rules_dir) != before, f"{scenario} did not change the rules directory"
 
 
-@pytest.mark.parametrize("scenario", sorted(set(_SCENARIOS) - {"archive"}))
+@pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
 def test_failed_final_write_leaves_rules_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str
 ) -> None:
@@ -430,7 +431,7 @@ def test_tier_pass_leaves_a_rule_whose_tier_changed_meanwhile(
     assert (parse_frontmatter(rule.read_text(encoding="utf-8")) or {})["enforcement"] == "gate"
 
 
-# ── Archive pass: per-rule lock, no revisits, no overwrites ──
+# ── Archive pass: per-rule lock, re-checked under it, no revisits, no overwrites ──
 
 def _log_actions(ws: Path) -> list[tuple[str, str]]:
     log = ws / ".aegis" / "state" / "lifecycle.jsonl"
@@ -482,6 +483,24 @@ def test_archive_pass_takes_the_rules_lock_once_per_changed_rule(tmp_path: Path,
     assert depth == [1, 1, 1]
     assert sorted(_log_actions(ws)) == [(f"quiet-{x}", "moved_to_archive") for x in "abc"]
     assert (_rules(ws) / "traps" / "strong.md").is_file()
+
+
+def test_archiving_acts_on_the_evidence_as_it_is_under_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The rule is judged unlocked; true positives recorded before the lock must win."""
+    ws = _ws(tmp_path)
+    rule = _misfiring(_rules(ws) / "traps" / "revived.md", "revived")
+    _rival_on_first_lock(monkeypatch, lambda: _evidence(ws, "revived", tp=10), module=selection)
+
+    assert run_cell_selection(ws, execute=True) == 0
+
+    out = capsys.readouterr().out
+    assert "[ARCHIVE] revived" in out
+    assert "(not archived: Rule 'revived' no longer has evidence that supports archiving it)" in out
+    assert rule.is_file(), "a rule whose evidence recovered before the lock must not be archived"
+    assert not (_rules(ws) / ".archive" / "revived.md").exists()
+    assert _log_actions(ws) == []
 
 
 def test_archiving_skips_a_rule_moved_away_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
