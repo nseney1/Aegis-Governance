@@ -280,6 +280,26 @@ def test_stripping_keeps_every_other_byte_and_hoists_impact_weight(tmp_path: Pat
     ).encode("utf-8")
 
 
+def test_trigger_keyword_lists_are_rule_content_not_counters(tmp_path: Path):
+    root = tmp_path / "ws"
+    rule = root / ".aegis" / "rules" / "traps" / "trap-doc.md"
+    rule.parent.mkdir(parents=True)
+    original = (
+        "---\nid: trap-doc\ntype: trap\ntriggers:\n  - documentation_edit\n  - readme_modification\n"
+        "score: high\nfitness:\n  score: 0.3333\n  triggers: 63\n---\nBody\n"
+    )
+    rule.write_text(original, encoding="utf-8")
+
+    plan = migrate.plan(root)
+    assert {s["path"]: s["keys"] for s in plan.to_dict()["strip"]} == {".aegis/rules/traps/trap-doc.md": ["fitness"]}
+    migrate.apply(plan)
+
+    assert rule.read_text(encoding="utf-8") == (
+        "---\nid: trap-doc\ntype: trap\ntriggers:\n  - documentation_edit\n  - readme_modification\n"
+        "score: high\n---\nBody\n"
+    )
+
+
 def test_a_second_apply_changes_nothing(legacy: Path):
     migrate.apply(migrate.plan(legacy))
     before = _snapshot(legacy)

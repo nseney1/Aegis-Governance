@@ -52,6 +52,27 @@ DERIVED_KEYS = frozenset({
     "fitness", "triggers", "true_positives", "false_positives", "last_trigger_date",
     "last_triggered", "score", "fitness_score", "tp", "fp", "tp_rate", "fp_rate",
 })
+_TIMESTAMP_KEYS = frozenset({"last_trigger_date", "last_triggered"})
+
+
+def _is_derived(key: str, value: Any) -> bool:
+    """Whether ``key: value`` is a ledger-derived counter. Only counter-shaped values count:
+    ``triggers: [documentation_edit]`` is a rule's list of trigger keywords, and stays."""
+    if key not in DERIVED_KEYS:
+        return False
+    if key == "fitness":
+        return isinstance(value, (dict, int, float)) or value is None
+    if key in _TIMESTAMP_KEYS:
+        return value is None or isinstance(value, str) or hasattr(value, "isoformat")
+    if isinstance(value, bool):
+        return False
+    if value is None or isinstance(value, (int, float)):
+        return True
+    try:
+        float(str(value))
+        return True
+    except ValueError:
+        return False
 _REPO_CONF_NAMES = (LEGACY_REPO_CONF, "soma.conf")
 # The v2 organelle names RULE_TYPE_NORMALIZATION does not carry (it has wall and
 # membrane), exactly as v2.1's `aegis migrate` mapped them (ORGANELLE_MAPPING, commit
@@ -176,7 +197,7 @@ def _strip_derived(text: str) -> Tuple[str, List[str]]:
     i = start
     while i < end:
         match = _TOP_KEY.match(lines[i])
-        if match and match.group(1) in DERIVED_KEYS:
+        if match and isinstance(meta, dict) and match.group(1) in meta and _is_derived(match.group(1), meta[match.group(1)]):
             key = match.group(1)
             removed.append(key)
             i += 1
