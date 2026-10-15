@@ -80,8 +80,9 @@ class CheckCommand(AegisCommand):
             "--llm-cmd",
             metavar="CMD",
             default=None,
-            help="Layer 2 model command, e.g. 'claude -p': gets the prompt on stdin, prints the reply "
-            "(default: $AEGIS_LLM_CMD; never read from repository files)",
+            help="Layer 2 model command, e.g. 'claude -p': gets the prompt on stdin, prints the reply. "
+            "It runs in an empty temporary directory, never the repository, so give scripts absolute "
+            "paths (default: $AEGIS_LLM_CMD; never read from repository files)",
         )
         parser.add_argument(
             "--dry-run",

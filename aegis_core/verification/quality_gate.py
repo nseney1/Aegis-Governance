@@ -22,6 +22,9 @@ _FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 _FAIL_CALLS = {("pytest", "fail"), ("self", "fail")}
 _SKIP_CALLS = {("pytest", "skip"), ("pytest", "xfail"), ("self", "skipTest")}
 _PYTEST_CONTEXT_ASSERTIONS = {"raises", "warns", "deprecated_call"}
+# The call forms check on their own: pytest.raises(E, func, *args), pytest.warns(W, func),
+# pytest.deprecated_call(func). With fewer arguments they only build an unused context manager.
+_PYTEST_CALL_FORM_MIN_ARGS = {"raises": 2, "warns": 2, "deprecated_call": 1}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -89,20 +92,24 @@ def _skips(func: _FuncDef) -> bool:
 
 
 def _environment_placeholders(tree: ast.Module) -> set[int]:
-    """ids of skipping tests that stand in for a same-name test in the other ``if`` branch.
+    """ids of skipping tests that stand in for a real same-name test in the other ``if`` branch.
 
     ``if HAVE_X: def test_a(): <real> else: def test_a(): pytest.skip(...)`` defines one
     test either way; the real branch is judged on its own, so the placeholder is exempt.
+    A twin that is itself only a skip is not real: two placeholders never excuse each other.
     """
     exempt: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.If):
             continue
         branches = (node.body, node.orelse)
-        names = [{f.name for f in branch if isinstance(f, _FUNC_TYPES)} for branch in branches]
-        for branch, other in zip(branches, reversed(names)):
+        real = [
+            {f.name for f in branch if isinstance(f, _FUNC_TYPES) and (_has_assert(f) or not _skips(f))}
+            for branch in branches
+        ]
+        for branch, other_real in zip(branches, reversed(real)):
             for func in branch:
-                if isinstance(func, _FUNC_TYPES) and func.name in other and _skips(func):
+                if isinstance(func, _FUNC_TYPES) and func.name in other_real and _skips(func):
                     exempt.add(id(func))
     return exempt
 
@@ -121,8 +128,12 @@ def _has_assert(func: _FuncDef) -> bool:
                     and _callee_name(ctx) in _PYTEST_CONTEXT_ASSERTIONS
                 ):
                     return True
-        if isinstance(node, ast.Call) and _is_assertion_call(node):
-            return True
+        if isinstance(node, ast.Call):
+            if _is_assertion_call(node):
+                return True
+            min_args = _PYTEST_CALL_FORM_MIN_ARGS.get(_callee_name(node))
+            if min_args and _receiver(node) == "pytest" and len(node.args) >= min_args:
+                return True
     return False
 
 
@@ -172,7 +183,12 @@ def _evidence(tool: str, test_file: str, offenders: List[Tuple[str, int]], fail:
 
 
 def check_assertion_density(test_file: str) -> ToolEvidence:
-    """Check that every ``test_*`` function in *test_file* has ≥1 assertion."""
+    """Check that every ``test_*`` function in *test_file* has ≥1 assertion.
+
+    Syntactic, so these limits are accepted: an assertion anywhere in the body counts,
+    including one in a nested def that is never called or under ``if False:``, and any
+    call named ``assert*`` counts as an assertion helper.
+    """
     tree = _parse(test_file)
     placeholders = _environment_placeholders(tree)
     missing = [

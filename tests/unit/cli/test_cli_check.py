@@ -32,6 +32,9 @@ FAKE_LLM = textwrap.dedent(
     if mode == "fail":
         sys.stderr.write("quota exceeded\\n")
         sys.exit(7)
+    if mode == "dump":
+        with open(sys.argv[2], "a", encoding="utf-8") as out:
+            out.write(prompt)
     if mode == "block" and spec:
         print(json.dumps([{
             "category": "code_injection", "severity": "critical",
@@ -62,12 +65,13 @@ def ws(tmp_path: Path) -> Path:
 def llm(tmp_path: Path):
     script = tmp_path / "fake_llm.py"
     script.write_text(FAKE_LLM, encoding="utf-8")
-    return lambda mode: shlex.join([sys.executable, str(script), mode])
+    return lambda mode, *extra: shlex.join([sys.executable, str(script), mode, *extra])
 
 
 @pytest.fixture(autouse=True)
 def _no_ambient_backend(monkeypatch):
     monkeypatch.delenv("AEGIS_LLM_CMD", raising=False)
+    monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
 
 
 def _git(root: Path, *args: str) -> None:
@@ -82,6 +86,21 @@ def _git_repo(root: Path) -> Path:
     _git(root, "add", "README.md")
     _git(root, "commit", "-q", "-m", "init")
     return root
+
+
+def _shallow_clone_of_a_branch_without_main(origin: Path, tmp_path: Path) -> Path:
+    """A depth-1 CI-style checkout: no HEAD~1, no main/develop, so no base to diff against."""
+    _git_repo(origin)
+    _git(origin, "checkout", "-q", "-b", "feature")
+    (origin / "CHANGELOG.md").write_text("- x\n", encoding="utf-8")
+    _git(origin, "add", "CHANGELOG.md")
+    _git(origin, "commit", "-q", "-m", "feature")
+    clone = tmp_path / "ci-checkout"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", "--branch", "feature", "--single-branch", origin.as_uri(), str(clone)],
+        check=True, capture_output=True,
+    )
+    return clone
 
 
 # ── Flag diet ───────────────────────────────────────────────────────────────
@@ -165,6 +184,58 @@ class TestLayer1:
         out = capsys.readouterr().out
         assert "forbid_ast: .aegis/rules/invariants/no-subprocess.md" in out
         assert "PASSED" not in out
+
+    def test_a_malformed_forbid_ast_rule_fails_the_check(self, ws, capsys):
+        invariants = ws / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "r1.md").write_text(
+            "---\nid: r1\ntype: invariant\nenforcement: gate\nforbid_ast:\n  - calls: [eval]\n---\n", encoding="utf-8"
+        )
+        (ws / "bad.py").write_text("def main(x):\n    return eval(x)\n", encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook", "bad.py"]) == 1
+        out = capsys.readouterr().out
+        assert "forbid_ast: .aegis/rules/invariants/r1.md" in out
+        assert "PASSED" not in out
+
+    def test_a_directory_target_checks_the_files_under_it(self, ws, capsys):
+        _git_repo(ws)
+        (ws / "src").mkdir()
+        (ws / "src" / "m.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--format", "json", "src"]) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["files"] == ["src/m.py"]
+        assert [r["tool"] for r in payload["layer1"] if not r["verdict"]] == ["import_guard"]
+
+    def test_a_directory_target_skips_git_ignored_files(self, ws, capsys):
+        _git_repo(ws)
+        (ws / ".gitignore").write_text("build/\n", encoding="utf-8")
+        (ws / "src" / "build").mkdir(parents=True)
+        (ws / "src" / "build" / "gen.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        (ws / "src" / "ok.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--format", "json", "src"]) == 0
+        assert json.loads(capsys.readouterr().out)["files"] == ["src/ok.py"]
+
+    def test_a_directory_target_outside_a_git_work_tree_is_an_error(self, ws, capsys):
+        (ws / "src").mkdir()
+        (ws / "src" / "m.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "src"]) == 1
+        captured = capsys.readouterr()
+        assert "cannot list the files under src" in captured.err
+        assert "PASSED" not in captured.out
+
+    def test_a_named_file_no_check_applies_to_is_not_reported_as_no_changes(self, ws, capsys):
+        (ws / "notes.txt").write_text("remember the milk\n", encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "notes.txt"]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1: no check applies to the 1 target file (0 checks run, PASSED)" in out
+        assert "No changed files" not in out
+
+    def test_no_base_commit_is_said_not_called_a_clean_repository(self, ws, tmp_path, capsys):
+        clone = _shallow_clone_of_a_branch_without_main(ws, tmp_path)
+        assert _exit_code(["check", "--workspace", str(clone)]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1: 0 files changed (no base commit found to diff against" in out
+        assert "clean repository" not in out
 
     @pytest.mark.parametrize(
         "extra, fast",
@@ -272,7 +343,9 @@ class TestHook:
         assert _exit_code(["check", "--workspace", str(ws), "--hook"]) == 1
         assert "import_guard: bad.py" in capsys.readouterr().out
 
-    @pytest.mark.parametrize("extra", [["--full"], ["--plan", "x"], ["--plan-file", "plan.md"]])
+    @pytest.mark.parametrize(
+        "extra", [["--full"], ["--plan", "x"], ["--plan-file", "plan.md"], ["--plan", ""], ["--plan-file", ""]]
+    )
     def test_hook_never_runs_layer2(self, ws, capsys, llm, extra):
         assert _exit_code(["check", "--workspace", str(ws), "--hook", "--llm-cmd", llm("ship"), *extra]) == 2
         assert "--hook runs Layer 1 only" in capsys.readouterr().err
@@ -318,6 +391,34 @@ class TestLayer2:
         captured = capsys.readouterr()
         assert "Layer 2 needs --llm-cmd or AEGIS_LLM_CMD" in captured.err
         assert "skipped" not in (captured.out + captured.err).lower()
+        assert "Layer 1:" not in captured.out
+
+    @pytest.mark.parametrize(
+        "extra",
+        [["--plan", ""], ["--plan", "  \n"], ["--plan-file", ""], ["--full", "--plan-file", " "],
+         ["--plan-file", "blank.md"]],
+        ids=["plan-empty", "plan-blank", "plan-file-empty", "full+plan-file-blank", "plan-file-blank-content"],
+    )
+    @pytest.mark.parametrize("backend", [False, True], ids=["no-backend", "backend"])
+    def test_an_empty_plan_is_a_usage_error_never_a_layer1_pass(self, ws, capsys, llm, extra, backend):
+        # `--plan "$PLAN"` with PLAN unset asked for Layer 2: it must never read as a Layer 1 pass (b1-verify F1).
+        (ws / "blank.md").write_text("  \n", encoding="utf-8")
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        cmd = ["--llm-cmd", llm("ship")] if backend else []
+        assert _exit_code(["check", "--workspace", str(ws), *cmd, *extra, "clean.py"]) == 2
+        captured = capsys.readouterr()
+        # Without a backend, a plan file that is read and found empty may report the missing backend first.
+        needs_plan = backend or "blank.md" not in extra
+        assert ("Layer 2 needs a task plan" if needs_plan else "Layer 2 needs") in captured.err
+        assert "Layer 1:" not in captured.out
+
+    def test_full_with_no_changes_and_no_base_commit_exits_2(self, ws, tmp_path, capsys, llm):
+        clone = _shallow_clone_of_a_branch_without_main(ws, tmp_path)
+        argv = ["check", "--workspace", str(clone), "--full", "--plan", "x", "--llm-cmd", llm("ship")]
+        assert _exit_code(argv) == 2
+        captured = capsys.readouterr()
+        assert "no base commit found to diff against (a shallow clone?)" in captured.err
+        assert "pass the files to review" in captured.err
         assert "Layer 1:" not in captured.out
 
     def test_env_backend_ship_passes(self, ws, monkeypatch, capsys, llm):
@@ -395,3 +496,46 @@ class TestLayer2:
         payload = json.loads(capsys.readouterr().out)
         assert payload["passed"] is False
         assert payload["layer2"]["verdict"] == "block"
+
+
+class TestDefaultPlanDiscovery:
+    """Without --plan/--plan-file, docs/plan.md, .aegis/plan.md or PLAN.md is the plan sent to the model."""
+
+    @staticmethod
+    def _symlink(link: Path, target: Path) -> None:
+        try:
+            link.symlink_to(target, target_is_directory=target.is_dir())
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"cannot create symlinks here: {exc}")
+
+    def test_a_regular_default_plan_is_sent_to_the_model(self, ws, tmp_path, llm):
+        (ws / "PLAN.md").write_text("Add compute\n", encoding="utf-8")
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        prompts = tmp_path / "prompts.txt"
+        argv = ["check", "--workspace", str(ws), "--full", "--llm-cmd", llm("dump", str(prompts)), "clean.py"]
+        assert _exit_code(argv) == 0
+        assert "Add compute" in prompts.read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize("layout", ["file-to-outside", "dir-to-outside", "file-to-inside"])
+    def test_a_symlinked_default_plan_is_never_read(self, ws, tmp_path, capsys, llm, layout):
+        # A hostile branch must not route a secret into the model prompt via PLAN.md (b1-verify review).
+        secrets = tmp_path / "secrets"
+        secrets.mkdir()
+        (secrets / "plan.md").write_text("TOKEN-5150\n", encoding="utf-8")
+        if layout == "file-to-outside":
+            self._symlink(ws / "PLAN.md", secrets / "plan.md")
+        elif layout == "dir-to-outside":
+            self._symlink(ws / "docs", secrets)
+        else:
+            (ws / "notes").mkdir()
+            (ws / "notes" / "real.md").write_text("TOKEN-5150\n", encoding="utf-8")
+            self._symlink(ws / "PLAN.md", ws / "notes" / "real.md")
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        prompts = tmp_path / "prompts.txt"
+        argv = ["check", "--workspace", str(ws), "--full", "--llm-cmd", llm("dump", str(prompts)), "clean.py"]
+        assert _exit_code(argv) == 2
+        captured = capsys.readouterr()
+        assert "Layer 2 needs a task plan" in captured.err
+        assert "is a symlink or leaves the repository" in captured.err
+        assert not prompts.exists()
+        assert "TOKEN-5150" not in captured.out + captured.err

@@ -458,6 +458,59 @@ class TestLayer1FailsClosed:
             ("forbid_ast:no-eval", "bad.py"),
         }
 
+    @pytest.mark.parametrize(
+        "spec, reason",
+        [
+            ("forbid_ast:\n  - calls: [eval]\n", "forbid_ast must map imports/calls/decorators to lists, not list"),
+            ("forbid_ast: true\n", "forbid_ast must map imports/calls/decorators to lists, not bool"),
+            ("forbid_ast:\n", "forbid_ast must map imports/calls/decorators to lists, not NoneType"),
+            ("forbid_ast: {}\n", "forbid_ast declares no patterns"),
+            ("forbid_ast:\n  calls: []\n", "forbid_ast declares no patterns"),
+            ("forbid_ast:\n  calls: eval\n", "forbid_ast.calls must be a list of non-empty strings, not str"),
+            ("forbid_ast:\n  calls:\n    - eval\n    - 3\n", "forbid_ast.calls must be a list of non-empty strings"),
+            ("forbid_ast:\n  calls: ['  ']\n", "forbid_ast.calls must be a list of non-empty strings"),
+            ("forbid_ast:\n  call: [eval]\n", "unknown forbid_ast key 'call' (allowed: imports, calls, decorators)"),
+        ],
+        ids=["list", "scalar", "null", "empty-map", "empty-list", "string-value", "non-string-item", "blank-item",
+             "unknown-key"],
+    )
+    def test_a_malformed_forbid_ast_fails_closed(self, tmp_path, spec, reason):
+        """A rule declaring forbid_ast in a shape that enforces nothing must not pass silently (b1-verify F2)."""
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "r1.md").write_text(
+            f"---\nid: r1\ntype: invariant\nenforcement: gate\n{spec}---\nNo eval.\n", encoding="utf-8"
+        )
+        (tmp_path / "bad.py").write_text("def main(x):\n    return eval(x)\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        failed = [(r.tool, r.target, r.verdict) for r in results if r.tool.startswith("forbid_ast")]
+        assert failed == [("forbid_ast", ".aegis/rules/invariants/r1.md", False)]
+        detail = next(r.detail for r in results if r.tool == "forbid_ast")
+        assert detail.startswith(f"forbid_ast: cannot load rule .aegis/rules/invariants/r1.md: {reason}")
+        assert runner.gate_verdict(results) is False
+
+    def test_an_expired_rule_with_a_malformed_forbid_ast_is_not_enforced(self, tmp_path):
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "old.md").write_text(
+            "---\nid: old\nexpired_at: '2026-01-01'\nforbid_ast: true\n---\n", encoding="utf-8"
+        )
+        (tmp_path / "mod.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert [r for r in results if r.tool.startswith("forbid_ast")] == []
+
+    def test_a_well_formed_forbid_ast_still_enforces(self, tmp_path):
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "r1.md").write_text(
+            "---\nid: r1\nforbid_ast:\n  imports: []\n  calls: [eval]\n---\n", encoding="utf-8"
+        )
+        (tmp_path / "bad.py").write_text("def main(x):\n    return eval(x)\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert [(r.tool, r.target, r.verdict) for r in results if r.tool.startswith("forbid_ast")] == [
+            ("forbid_ast:r1", "bad.py", False)
+        ]
+
     def test_unparseable_notes_that_never_name_forbid_ast_are_not_rules(self, tmp_path):
         notes = tmp_path / "rules"
         notes.mkdir()

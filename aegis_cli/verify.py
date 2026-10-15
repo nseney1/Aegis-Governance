@@ -52,23 +52,65 @@ def _resolve_git_cwd(args: argparse.Namespace) -> str:
     )
 
 
+def _files_under(directory: str, git_cwd: str) -> list[str] | None:
+    """Tracked and untracked, not ignored, files under *directory*; None outside a git work tree."""
+    try:
+        res = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", directory],
+            capture_output=True, timeout=30, cwd=git_cwd,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if res.returncode != 0:
+        return None
+    listed = (os.fsdecode(raw) for raw in res.stdout.split(b"\0") if raw)
+    # A tracked file deleted from the working tree is listed too; there is nothing to check.
+    return [f for f in dict.fromkeys(listed) if os.path.isfile(os.path.join(git_cwd, f))]
+
+
 def resolve_target_files(args: argparse.Namespace) -> list[str]:
-    """Resolve target files from --files flag or git staged/changed files."""
+    """Resolve target files from FILES (a directory means the files under it) or git changes.
+
+    Without FILES, sets ``args._diff_base`` to the base ref the changes came from, or
+    ``args._no_diff_base`` when nothing changed and no base ref could be diffed against
+    (a shallow clone, a repository with no main branch), so a clean tree is not assumed.
+    """
     git_cwd = _resolve_git_cwd(args)
     explicit = getattr(args, "files", None)
     if explicit:
+        from aegis_cli import sanitize_display
+
         repo_root = os.path.realpath(git_cwd)
         safe_files = []
         for f in explicit:
             resolved = os.path.realpath(os.path.join(repo_root, f))
             if not resolved.startswith(repo_root + os.sep) and resolved != repo_root:
-                from aegis_cli import sanitize_display
                 print(f"Warning: skipping out-of-tree file: {sanitize_display(f)}", file=sys.stderr)
+                continue
+            if os.path.isdir(resolved):
+                listed = _files_under(f, git_cwd)
+                if listed is None:
+                    # Fail closed: a named target that cannot be expanded is not checked.
+                    print(
+                        f"Error: cannot list the files under {sanitize_display(f)}: not a git work tree; "
+                        "name the files instead",
+                        file=sys.stderr,
+                    )
+                    return []
+                if not listed:
+                    print(f"Warning: no files to check under {sanitize_display(f)}", file=sys.stderr)
+                for g in listed:
+                    real = os.path.realpath(os.path.join(repo_root, g))
+                    if real.startswith(repo_root + os.sep):
+                        safe_files.append(g)
+                    else:
+                        print(f"Warning: skipping out-of-tree file: {sanitize_display(g)}", file=sys.stderr)
                 continue
             safe_files.append(f)
         if not safe_files:
-            print("Error: all specified files are outside the repository", file=sys.stderr)
-        return safe_files
+            print("Error: none of the specified files can be checked (outside the repository or empty)",
+                  file=sys.stderr)
+        return list(dict.fromkeys(safe_files))
 
     files: list[str] = []
     for cmd in (
@@ -88,6 +130,7 @@ def resolve_target_files(args: argparse.Namespace) -> list[str]:
             base_ref = os.environ["GITHUB_BASE_REF"]
             base_candidates.extend([f"origin/{base_ref}...HEAD", f"{base_ref}...HEAD"])
         base_candidates.extend(["origin/main...HEAD", "main...HEAD", "origin/develop...HEAD", "develop...HEAD", "HEAD~1"])
+        diffed = False
         for ref in base_candidates:
             try:
                 res = subprocess.run(
@@ -95,6 +138,7 @@ def resolve_target_files(args: argparse.Namespace) -> list[str]:
                     capture_output=True, text=True, timeout=10, cwd=git_cwd,
                 )
                 if res.returncode == 0:
+                    diffed = True
                     cand_files = [f.strip() for f in res.stdout.splitlines() if f.strip()]
                     if cand_files:
                         files = cand_files
@@ -102,6 +146,8 @@ def resolve_target_files(args: argparse.Namespace) -> list[str]:
                         break
             except (subprocess.SubprocessError, FileNotFoundError):
                 pass
+        if not diffed:
+            setattr(args, "_no_diff_base", True)
     return files
 
 
@@ -112,8 +158,12 @@ def discover_test_evidence(target_files: list[str], repo_root: str) -> tuple[lis
 
 
 def resolve_task_plan(args: argparse.Namespace, repo_root: str) -> str | None:
-    """Resolve task plan from --plan, --plan-file, or standard plan conventions."""
-    if getattr(args, "plan", None):
+    """Resolve task plan from --plan, --plan-file, or standard plan conventions.
+
+    An explicit --plan is returned as given (stripped), even when empty: the caller
+    rejects an empty plan rather than falling back to a plan file nobody named.
+    """
+    if getattr(args, "plan", None) is not None:
         return args.plan.strip()
 
     plan_file = getattr(args, "plan_file", None)
@@ -129,8 +179,16 @@ def resolve_task_plan(args: argparse.Namespace, repo_root: str) -> str | None:
             print(f"Error: could not read plan file {plan_file}: {e}", file=sys.stderr)
             return None
 
+    real_root = os.path.realpath(repo_root)
     for default_name in ("docs/plan.md", ".aegis/plan.md", "PLAN.md"):
         cand = os.path.join(repo_root, default_name)
+        if not os.path.lexists(cand):
+            continue
+        # Nobody named this file, and its text goes to the model: a branch must not be
+        # able to route a secret from outside the repository into the prompt.
+        if os.path.islink(cand) or not os.path.realpath(cand).startswith(real_root + os.sep):
+            print(f"Warning: ignoring {default_name}: it is a symlink or leaves the repository", file=sys.stderr)
+            continue
         if os.path.isfile(cand):
             try:
                 with open(cand, encoding="utf-8") as f:
@@ -162,9 +220,16 @@ def run_verify(args: argparse.Namespace) -> int:
     from aegis_core.workspace import Workspace
 
     hook = bool(getattr(args, "hook", False))
-    layer2 = bool(getattr(args, "full", False) or getattr(args, "plan", None) or getattr(args, "plan_file", None))
+    plan = getattr(args, "plan", None)
+    plan_file = getattr(args, "plan_file", None)
+    # Presence, not truthiness: `--plan "$PLAN"` with PLAN unset still asked for Layer 2.
+    layer2 = bool(getattr(args, "full", False)) or plan is not None or plan_file is not None
     if hook and layer2:
         return _usage_error("--hook runs Layer 1 only; drop --full, --plan and --plan-file")
+    if plan is not None and not plan.strip():
+        return _usage_error("Layer 2 needs a task plan: --plan is empty")
+    if plan_file is not None and not plan_file.strip():
+        return _usage_error("Layer 2 needs a task plan: --plan-file is empty")
 
     backend = None
     if layer2:
@@ -195,7 +260,7 @@ def run_verify(args: argparse.Namespace) -> int:
     task_plan = None
     if layer2:
         task_plan = resolve_task_plan(args, repo_root)
-        if getattr(args, "plan_file", None) and task_plan is None:
+        if plan_file and task_plan is None:
             return 1
         if not task_plan:
             return _usage_error("Layer 2 needs a task plan: pass --plan or --plan-file (or add docs/plan.md)")
@@ -208,6 +273,12 @@ def run_verify(args: argparse.Namespace) -> int:
     target_files = resolve_target_files(args)
     if getattr(args, "files", None) and not target_files:
         return 1
+    no_diff_base = not target_files and bool(getattr(args, "_no_diff_base", False))
+    if layer2 and no_diff_base:
+        return _usage_error(
+            "Layer 2 has nothing to review: no changed files, and no base commit found to diff "
+            "against (a shallow clone?); pass the files to review"
+        )
     if getattr(args, "files", None) and not getattr(args, "dry_run", False):
         missing = [f for f in target_files if not os.path.exists(os.path.join(repo_root, f))]
         if missing:
@@ -230,7 +301,10 @@ def run_verify(args: argparse.Namespace) -> int:
         _print_checkpoint(issues, strict)
 
     if not target_files:
-        summary = "Layer 1: 0 files changed (clean repository)"
+        if no_diff_base:
+            summary = "Layer 1: 0 files changed (no base commit found to diff against; pass the files to check)"
+        else:
+            summary = "Layer 1: 0 files changed (clean repository)"
         # Say so: a Layer 2 run that reviewed nothing must not read like a Layer 1-only pass.
         layer2_summary = "Layer 2: no changed files to review"
         if use_json:
@@ -259,7 +333,11 @@ def run_verify(args: argparse.Namespace) -> int:
 
     tools_pass = runner.gate_verdict(results)
     layer1_pass = tools_pass and not blocking
-    summary = runner.format_summary(results)
+    if results:
+        summary = runner.format_summary(results)
+    else:
+        n = len(target_files)
+        summary = f"Layer 1: no check applies to the {n} target file{'' if n == 1 else 's'} (0 checks run, PASSED)"
     if not use_json:
         for r in results:
             if not r.verdict:

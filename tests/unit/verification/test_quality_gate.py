@@ -143,6 +143,36 @@ class TestCheckAssertionDensity:
         assert result.tool == "assertion_density"
         assert result.verdict is True
 
+    def test_assertion_density_recognizes_the_call_form_of_pytest_raises(self, tmp_path):
+        """pytest.raises(E, func, *args) and pytest.warns(W, func) assert without a `with` (b1-verify review)."""
+        test_file = tmp_path / "test_raises_call.py"
+        test_file.write_text(textwrap.dedent("""\
+            import warnings
+            import pytest
+
+            def test_raises_call():
+                pytest.raises(ValueError, int, "x")
+
+            def test_warns_call():
+                pytest.warns(UserWarning, warnings.warn, "w")
+
+            def test_deprecated_call_form():
+                pytest.deprecated_call(warnings.warn, "d", DeprecationWarning)
+        """))
+        result = check_assertion_density(str(test_file))
+        assert result.verdict is True, result.detail
+
+    def test_a_bare_pytest_raises_object_is_not_an_assertion(self, tmp_path):
+        test_file = tmp_path / "test_raises_object.py"
+        test_file.write_text(textwrap.dedent("""\
+            import pytest
+
+            def test_builds_but_never_enters():
+                pytest.raises(ValueError)
+        """))
+        result = check_assertion_density(str(test_file))
+        assert (result.verdict, result.detail) == (False, "Tests lacking assertions: test_builds_but_never_enters")
+
     def test_assertion_density_recognizes_pytest_fail(self, tmp_path):
         """pytest.fail is an assertion-equivalent and should pass density check."""
         test_file = tmp_path / "test_fail.py"
@@ -432,6 +462,37 @@ class TestSkipIsNotAnAssertion:
                     pytest.skip("not here")
         """)
         assert (result.verdict, result.lines) == (False, [4])
+
+    def test_two_skip_only_twins_are_both_stubs(self, tmp_path):
+        """The exemption needs a real twin: two placeholders do not excuse each other (b1-verify review)."""
+        result = self._density(tmp_path, """\
+            import sys
+            import pytest
+
+            if sys.platform == "linux":
+                def test_a():
+                    pytest.skip("not yet")
+            else:
+                def test_a():
+                    pytest.skip("not yet")
+        """)
+        assert (result.verdict, result.lines) == (False, [5, 8])
+
+    def test_a_placeholder_whose_twin_skips_then_asserts_is_exempt(self, tmp_path):
+        result = self._density(tmp_path, """\
+            import shutil
+            import pytest
+
+            if shutil.which("git"):
+                def test_git():
+                    if not shutil.which("git-lfs"):
+                        pytest.skip("git-lfs missing")
+                    assert shutil.which("git-lfs")
+            else:
+                def test_git():
+                    pytest.skip("git missing")
+        """)
+        assert result.verdict is True, result.detail
 
     def test_a_skip_only_test_without_a_same_name_twin_is_a_stub(self, tmp_path):
         result = self._density(tmp_path, """\

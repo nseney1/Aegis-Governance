@@ -4,12 +4,21 @@ The command (for example ``claude -p``, ``codex exec`` or ``gemini -p``) is run 
 argv list with no shell. It reads the prompt on stdin and prints the reply on stdout.
 It comes only from ``--llm-cmd`` or ``AEGIS_LLM_CMD``: a file in the repository being
 checked must never choose what Aegis executes (BUG-073).
+
+The command runs in a fresh empty directory, not in the repository: agent CLIs load
+project config from their working directory (``.claude/settings.json`` hooks,
+``AGENTS.md``/``GEMINI.md`` instructions, MCP servers), and the code under review must
+not be able to steer its reviewer. The prompt carries everything the review needs. So a
+script in the command needs an absolute path, and ``codex exec`` needs
+``--skip-git-repo-check``.
 """
 from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
+import tempfile
 from typing import List, Mapping, Optional, Sequence
 
 ENV_VAR = "AEGIS_LLM_CMD"
@@ -35,15 +44,20 @@ class CommandBackend:
     def generate(self, prompt: str) -> str:
         # input= gives the child a fresh stdin pipe, so it can never read (and steal)
         # this process's stdin, which carries JSON-RPC when Aegis runs under MCP.
+        workdir = tempfile.mkdtemp(prefix="aegis-llm-")
         try:
             proc = subprocess.run(
-                self.argv, input=prompt, capture_output=True, text=True,
+                self.argv, input=prompt, capture_output=True, text=True, cwd=workdir,
                 encoding="utf-8", errors="replace", timeout=self.timeout, check=False,
             )
         except subprocess.TimeoutExpired:
             raise LLMCommandError(f"LLM command timed out after {self.timeout:g}s: {self.argv[0]}") from None
         except OSError as exc:
             raise LLMCommandError(f"cannot run LLM command {self.argv[0]}: {exc.strerror or exc}") from None
+        finally:
+            # Not TemporaryDirectory: ignore_cleanup_errors needs 3.10, and a Windows child
+            # killed on timeout may briefly hold a file in it.
+            shutil.rmtree(workdir, ignore_errors=True)
         if proc.returncode != 0:
             detail = (proc.stderr or "").strip().splitlines()
             raise LLMCommandError(f"LLM command exited {proc.returncode}: {detail[-1] if detail else 'no stderr'}")
