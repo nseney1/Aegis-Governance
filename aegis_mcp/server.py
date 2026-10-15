@@ -41,10 +41,6 @@ _RATE_LIMITS = {
 _tool_call_times: Dict[str, list] = defaultdict(list)
 _rate_limit_lock = threading.Lock()
 
-# Messages that mean "the operation did not happen", regardless of the tool.
-_ERROR_STATUSES = ("FAIL", "FAILED", "ERROR", "REJECTED", "BLOCKED", "ESCALATION_REQUIRED")
-_ERROR_TEXT_PREFIXES = ("ERROR", "CRITICAL ERROR")
-
 
 def strip_server_owned(args: Any) -> Dict[str, Any]:
     """Return a copy of client arguments without server-owned keys."""
@@ -99,26 +95,9 @@ def send_response(response: Dict[str, Any]):
     print(json.dumps(response), flush=True)
 
 
-def _is_error_text(value: Any) -> bool:
-    return isinstance(value, str) and value.lstrip().upper().startswith(_ERROR_TEXT_PREFIXES)
-
-
 def _is_error_result(result: Any) -> bool:
-    """Decide whether a tool result represents a failure.
-
-    A tool can signal failure three ways: an "error" key, an explicit failure
-    "status", or a failure-prefixed message string.
-    """
-    if _is_error_text(result):
-        return True
-    if isinstance(result, dict):
-        if "error" in result:
-            return True
-        if str(result.get("status", "")).upper() in _ERROR_STATUSES:
-            return True
-        if _is_error_text(result.get("result")):
-            return True
-    return False
+    """A handler reports failure as {"status": "FAIL", "error": ...}."""
+    return isinstance(result, dict) and ("error" in result or result.get("status") == "FAIL")
 
 
 def _error(req_id: Any, code: int, message: str) -> Dict[str, Any]:
@@ -205,8 +184,7 @@ def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
         return _tool_result(req_id, f"Tool execution failed: {exc}", True)
-    text = result if isinstance(result, str) else json.dumps(result)
-    return _tool_result(req_id, text, _is_error_result(result))
+    return _tool_result(req_id, json.dumps(result), _is_error_result(result))
 
 
 def _resolve_workspace() -> tuple[Optional[Workspace], str]:
