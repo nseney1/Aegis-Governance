@@ -25,6 +25,8 @@ from typing import Optional
 
 AEGIS_DIRNAME = ".aegis"
 LEGACY_SOMA_DIRNAME = ".soma"
+# The rules directory as a repo-relative POSIX path (what inventories and manifests record).
+RULES_RELDIR = f"{AEGIS_DIRNAME}/rules"
 
 # The whole of .aegis/.gitignore that `aegis init` writes: everything machine-local
 # lives under state/, so one entry covers it.
@@ -199,6 +201,7 @@ __all__ = [
     "LEGACY_SOMA_DIRNAME",
     "LEGACY_SOMA_RULES_DIR",
     "LEGACY_STATE_ENTRIES",
+    "RULES_RELDIR",
     "UserLayout",
     "WorkspaceLayout",
     "has_rules_dir",

@@ -5,6 +5,7 @@ import argparse
 import sys
 
 from aegis_cli.base import CommandCategory, AegisCommand
+from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = ["run_uninstall", "UninstallCommand"]
 
@@ -37,7 +38,7 @@ def run_uninstall(args: argparse.Namespace) -> int:
 
         # 2. Clean .aegis directory if --purge requested
         if purge:
-            aegis_dir = ws_path / ".aegis"
+            aegis_dir = WorkspaceLayout(Path(ws_path)).aegis_dir
             if aegis_dir.is_dir():
                 if dry_run:
                     res.messages.append(f"[dry-run] Would remove {aegis_dir}")

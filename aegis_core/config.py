@@ -30,7 +30,7 @@ import stat
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from aegis_core.errors import AegisValidationError, PathTraversalError
-from aegis_core.workspace.layout import UserLayout, WorkspaceLayout
+from aegis_core.workspace.layout import AEGIS_DIRNAME, UserLayout, WorkspaceLayout
 
 __all__ = [
     "CONFIG_VERSION",
@@ -54,8 +54,8 @@ __all__ = [
 CONFIG_VERSION = 1
 MAX_CONFIG_BYTES = 64 * 1024
 DEFAULT_EXPIRY_DAYS = 30
-REPO_LABEL = ".aegis/config.json"
-USER_LABEL = "~/.aegis/config.json"
+REPO_LABEL = f"{AEGIS_DIRNAME}/config.json"
+USER_LABEL = f"~/{AEGIS_DIRNAME}/config.json"
 
 ENV_WORKSPACE = "AEGIS_WORKSPACE"
 ENV_CLIENT = "AEGIS_CLIENT"

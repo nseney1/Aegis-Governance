@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 from aegis_core.errors import PathTraversalError, WorkspaceError, WorkspaceNotFoundError
+from aegis_core.workspace.layout import has_rules_dir
 
 _WINDOWS_DEVICE_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
@@ -89,8 +90,7 @@ def validate_workspace_path(
 
     check_legacy_soma_sentinel(resolved)
 
-    aegis_rules = os.path.join(resolved, ".aegis", "rules")
-    if not os.path.isdir(aegis_rules):
+    if not has_rules_dir(resolved):
         raise WorkspaceError(f"not a valid Aegis workspace (missing .aegis/rules): {resolved}")
 
     return Path(resolved)

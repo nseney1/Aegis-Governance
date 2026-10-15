@@ -7,10 +7,9 @@ import errno
 import json
 import os
 from pathlib import Path
-import shutil
 import stat
 import tempfile
-from typing import Any, Optional
+from typing import Any
 
 from aegis_core.config import ENV_WORKSPACE
 

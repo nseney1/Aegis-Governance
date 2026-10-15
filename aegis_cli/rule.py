@@ -32,6 +32,7 @@ from aegis_core.lifecycle.promotion import (
 )
 from aegis_core.lifecycle.selection import prune_cells
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
+from aegis_core.workspace.layout import is_aegis_workspace
 
 __all__ = [
     "run_rule", "RuleCommand", "run_promote", "run_demote", "_force_promote",
@@ -172,7 +173,7 @@ def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = Fals
         if top is not None and root in top.parents:
             raise _not_a_workspace(start)
 
-    if require_aegis and not (root / ".aegis").is_dir():
+    if require_aegis and not is_aegis_workspace(root):
         raise _not_a_workspace(root)
     return root
 

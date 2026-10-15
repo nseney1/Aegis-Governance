@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 from aegis_cli.base import AegisCommand, CommandCategory
 from aegis_core.workspace.discovery import LEGACY_SOMA_UPGRADE_MSG
+from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = [
     "run_migrate",
@@ -23,8 +24,9 @@ def migrate_workspace(
 ) -> Dict[str, Any]:
     """Check workspace migration state and emit the Upgrade Sentinel diagnostic for .soma/."""
     root = Path(workspace_root).resolve()
-    soma_dir = root / ".soma"
-    aegis_dir = root / ".aegis"
+    layout = WorkspaceLayout(root)
+    soma_dir = layout.legacy_soma_dir
+    aegis_dir = layout.aegis_dir
 
     if aegis_dir.exists() and not soma_dir.exists():
         return {

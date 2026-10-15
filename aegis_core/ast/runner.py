@@ -18,11 +18,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Dict, List, Mapping, Optional, Tuple, Union
 
 from aegis_core.ast.drivers.python import parse_python_ast
 from aegis_core.ast.schema import NormalizedAST
-from aegis_core.errors import AegisError, AegisValidationError
+from aegis_core.errors import AegisError
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import as_workspace
 

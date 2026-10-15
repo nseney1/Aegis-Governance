@@ -22,6 +22,7 @@ from aegis_cli.formatters.report import (
     format_layer2_json,
     format_layer2_summary,
 )
+from aegis_core.workspace.layout import AEGIS_DIRNAME
 
 __all__ = [
     "discover_test_evidence",
@@ -160,7 +161,7 @@ def resolve_task_plan(args: argparse.Namespace, repo_root: str) -> str | None:
             return None
 
     real_root = os.path.realpath(repo_root)
-    for default_name in ("docs/plan.md", ".aegis/plan.md", "PLAN.md"):
+    for default_name in ("docs/plan.md", f"{AEGIS_DIRNAME}/plan.md", "PLAN.md"):
         cand = os.path.join(repo_root, default_name)
         if not os.path.lexists(cand):
             continue

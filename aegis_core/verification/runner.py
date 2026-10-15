@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
+from aegis_core.workspace.layout import RULES_RELDIR, WorkspaceLayout
 from typing import Optional
 
 from . import ToolEvidence
@@ -88,7 +89,7 @@ def _discover_forbid_ast_rules(
     except Exception:
         ws_obj = None
 
-    candidate_dirs = [root_path / "rules", root_path / ".aegis" / "rules"]
+    candidate_dirs = [root_path / "rules", WorkspaceLayout(root_path).rules_dir]
     discovered: list[tuple[str, dict, list[str]]] = []
     broken: list[tuple[str, str]] = []
     seen_ids: set[str] = set()
@@ -398,7 +399,7 @@ def run_layer1(
         forbid_rules, broken_rules = [], []
         results.append(ToolEvidence(
             tool="forbid_ast",
-            target=".aegis/rules",
+            target=RULES_RELDIR,
             verdict=False,
             detail=f"forbid_ast: cannot load rules: {type(exc).__name__}: {exc}",
         ))

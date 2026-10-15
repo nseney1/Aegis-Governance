@@ -15,6 +15,7 @@ from pathlib import Path
 
 from aegis_cli.base import AegisCommand, CommandCategory
 from aegis_core.errors import WorkspaceError
+from aegis_core.workspace.layout import is_aegis_workspace
 
 __all__ = ["ScanCommand", "run_scan"]
 
@@ -45,7 +46,7 @@ def run_scan(args: argparse.Namespace) -> int:
     except WorkspaceError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_USAGE
-    if not (root / ".aegis").is_dir():
+    if not is_aegis_workspace(root):
         print(f"Error: not an Aegis workspace (no .aegis/ in {root}); run aegis init", file=sys.stderr)
         return EXIT_USAGE
 

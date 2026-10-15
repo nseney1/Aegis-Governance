@@ -32,6 +32,7 @@ from aegis_core.taxonomy import (
 from aegis_core.workspace.layout import WorkspaceLayout
 from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
 from aegis_mcp.rule_cache import CellCache
+from aegis_core.workspace.layout import has_rules_dir
 
 # Module-level singleton — persists across MCP tool invocations
 _cell_cache = CellCache()
@@ -348,7 +349,7 @@ def _load_rules(workspace: str) -> list[dict[str, Any]]:
     """Rules from .aegis/rules/, or from a top-level rules/ dir when there is no .aegis/rules/."""
     all_cells = list(_cell_cache.get_cells(workspace))
     top_rules_dir = os.path.join(str(workspace), "rules")
-    if not os.path.isdir(top_rules_dir) or os.path.isdir(os.path.join(str(workspace), ".aegis", "rules")):
+    if not os.path.isdir(top_rules_dir) or has_rules_dir(str(workspace)):
         return all_cells
     seen_names = {c.get("_name") for c in all_cells}
     for rule_file in sorted(glob.glob(os.path.join(top_rules_dir, "**", "*.md"), recursive=True)):

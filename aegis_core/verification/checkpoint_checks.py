@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import List
 
 from aegis_core.taxonomy import DIR_TO_ALLOWED_RULE_TYPES as DIR_TO_TYPE
+from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, RULES_RELDIR, WorkspaceLayout
 
 
 HARDCODED_PATH_RE = re.compile(r'''(?:"|')(/home/|/Users/|/tmp/)''')
 SKIP_DIRS = {
-    "__pycache__", ".git", ".soma", ".aegis", "node_modules", ".venv", "venv",
+    "__pycache__", ".git", LEGACY_SOMA_DIRNAME, AEGIS_DIRNAME, "node_modules", ".venv", "venv",
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", "egg-info",
 }
 
@@ -463,7 +464,7 @@ def check_cell_conventions(root: Path) -> list[dict]:
         if os.path.basename(entry.relative_path) == "README.md":
             continue
         parts = entry.relative_path.split("/")
-        if len(parts) < 4 or parts[:2] != [".aegis", "rules"]:
+        if len(parts) < 4 or "/".join(parts[:2]) != RULES_RELDIR:
             continue
         type_dir_name = parts[2]
         allowed_types = DIR_TO_TYPE.get(type_dir_name)
@@ -568,9 +569,10 @@ def check_cell_conventions(root: Path) -> list[dict]:
 def check_paper_walls(root: Path) -> list[dict]:
     """Verify that all wall cells have 'gate' enforcement and valid frontmatter."""
     issues = []
-    walls_dir = root / ".aegis" / "rules" / "invariants"
+    rules_dir = WorkspaceLayout(Path(root).resolve()).rules_dir
+    walls_dir = rules_dir / "invariants"
     if not walls_dir.is_dir():
-        walls_dir = root / ".aegis" / "rules" / "walls"
+        walls_dir = rules_dir / "walls"
     if not walls_dir.is_dir():
         return issues
 

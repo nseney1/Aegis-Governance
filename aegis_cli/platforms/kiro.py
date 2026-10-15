@@ -6,6 +6,7 @@ import shutil
 from typing import Any
 
 from aegis_cli.platforms.base import PlatformAdapter, PlatformInstallResult
+from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = ["KiroAdapter"]
 
@@ -18,7 +19,7 @@ class KiroAdapter(PlatformAdapter):
     def get_target_dirs(self, local: bool = False) -> tuple[Path, Path]:
         """Return (steering_dir, skills_dir)."""
         if local:
-            base = self.workspace / ".aegis"
+            base = WorkspaceLayout(Path(self.workspace)).aegis_dir
             return base / "steering", base / "skills"
         base = self.home / ".kiro"
         return base / "steering", base / "skills"

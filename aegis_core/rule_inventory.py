@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import stat
+from aegis_core.workspace.layout import WorkspaceLayout
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Tuple
 
@@ -163,8 +164,9 @@ def inventory_rules(workspace: str) -> CellInventory:
     checked before and after capture so concurrent changes fail closed.
     """
     workspace_abs = os.path.abspath(os.fspath(workspace))
-    parent_dir = os.path.join(workspace_abs, ".aegis")
-    cells_dir = os.path.join(parent_dir, "rules")
+    layout = WorkspaceLayout(Path(workspace_abs))
+    parent_dir = str(layout.aegis_dir)
+    cells_dir = str(layout.rules_dir)
 
     workspace_info = _optional_stat(workspace_abs)
     if workspace_info is None:
@@ -253,7 +255,7 @@ def inventory_rules(workspace: str) -> CellInventory:
 def find_rules_dirs(workspace: str | Path) -> List[Path]:
     """Return existing rules directories for a workspace (.aegis/rules and rules)."""
     ws_path = Path(os.fspath(workspace)).resolve()
-    candidates = [ws_path / ".aegis" / "rules", ws_path / "rules"]
+    candidates = [WorkspaceLayout(ws_path).rules_dir, ws_path / "rules"]
     return [p for p in candidates if p.is_dir()]
 
 
