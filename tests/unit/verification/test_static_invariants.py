@@ -401,6 +401,37 @@ def test_no_undefined_names_in_python_code():
     assert proc.returncode == 0, f"Found undefined names (F821):\n{proc.stdout}"
 
 
+def test_no_dangling_aegis_imports():
+    """Every `from aegis_x import name` resolves, including lazy imports inside functions.
+
+    A cut (v4 D14 removed inference_provider.resolve_provider) leaves function-level
+    imports that only fail when that code path runs, or that an `except ImportError`
+    quietly turns into a fallback. ruff F821 cannot see either.
+    """
+    import ast
+    import importlib
+
+    dangling = []
+    for pkg in ("aegis_core", "aegis_cli", "aegis_mcp", "aegis_sdk"):
+        for path in sorted(iter_source_files(os.path.join(REPO_ROOT, pkg), (".py",))):
+            rel = os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
+            tree = ast.parse(read(path), filename=rel)
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module):
+                    continue
+                if not node.module.split(".")[0].startswith("aegis_"):
+                    continue
+                module = importlib.import_module(node.module)
+                for alias in node.names:
+                    if alias.name == "*" or hasattr(module, alias.name):
+                        continue
+                    try:
+                        importlib.import_module(f"{node.module}.{alias.name}")
+                    except ModuleNotFoundError:
+                        dangling.append(f"{rel}:{node.lineno} {node.module}.{alias.name}")
+    assert dangling == []
+
+
 def test_no_javascript_sdk_in_readme():
     """README.md must not reference nonexistent npm package or require('soma-governance')."""
     readme = read(os.path.join(REPO_ROOT, "README.md"))
