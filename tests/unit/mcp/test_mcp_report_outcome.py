@@ -180,3 +180,17 @@ def test_rate_limit_still_applies_to_report_outcome(served):
     })
     assert response["error"]["code"] == -32000
     assert response["error"]["message"].startswith("Rate limit exceeded for 'aegis_report_outcome'")
+
+
+def test_same_key_from_a_new_session_is_refused_not_recorded_twice(served):
+    args = {"outcome": "tp", "rules_used": ["trap-x"], "idempotency_key": "cross-session"}
+    _call(args)
+    server.handle_request({"jsonrpc": "2.0", "id": 5, "method": "initialize",
+                           "params": {"clientInfo": {"name": "claude-code"}}})
+
+    response, payload = _call(args, req_id=6)
+
+    assert response["result"]["isError"] is True
+    assert payload["error"].startswith("Failed to record outcome: event ")
+    assert payload["error"].endswith("already recorded with a different payload")
+    assert len(_rows(served)) == 1
