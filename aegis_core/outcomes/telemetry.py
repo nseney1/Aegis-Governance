@@ -105,7 +105,7 @@ def record_verification_telemetry(
     source: str = "session",
     run_id: Optional[str] = None,
 ) -> bool:
-    """Record ambient verification evidence (triggers and outcomes) for matched cells."""
+    """Append ambient verification evidence (triggers and outcomes) for matched cells to the ledger."""
     if not workspace or not target_files:
         return False
 
@@ -117,7 +117,7 @@ def record_verification_telemetry(
         return False
 
     from aegis_core.outcomes.engine import match_cells_to_changes
-    from aegis_core.outcomes.fitness import compute_credit_weights, update_cell_fitness
+    from aegis_core.outcomes.fitness import compute_credit_weights
 
     matched = match_cells_to_changes(ws, target_files)
     if not matched:
@@ -130,9 +130,7 @@ def record_verification_telemetry(
 
     credit_weights = compute_credit_weights(matched, target_files)
     events = []
-    fitness_signals = []
     sig_type = "tp" if passed else "fp"
-    signal_val = 1.0 if passed else -1.0
 
     for cell in matched:
         cell_id = cell.get("_name") or cell.get("id")
@@ -172,17 +170,11 @@ def record_verification_telemetry(
             "idempotency_key": f"{run_id}:out:{cell_id}",
         })
 
-        fitness_signals.append({
-            "cell": cell_id,
-            "_path": cell.get("_path"),
-            "signal": signal_val,
-            "credit_weight": weight,
-        })
-
+    # Ledger only: rule files are never rewritten at runtime (ADR 0005 AD-1/H6). Bumping
+    # frontmatter here dirtied tracked .aegis/rules on every `aegis check --hook` and
+    # broke the committed manifest.
     try:
         append_signals(workspace, events)
-        if fitness_signals:
-            update_cell_fitness(workspace, fitness_signals)
         return True
     except Exception as exc:
         print(f"    ! failed to record ambient verification telemetry: {exc}", file=sys.stderr)
