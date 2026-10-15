@@ -42,6 +42,14 @@ class RuleCorruptError(AegisError):
         self.rule_id = actual_id
 
 
+class RuleNotFoundError(AegisError):
+    """Raised when a rule file does not exist."""
+
+
+class RuleParseError(AegisError):
+    """Raised when a rule file cannot be parsed (missing or malformed frontmatter)."""
+
+
 class LockTimeoutError(AegisError, TimeoutError):
     """Raised when a workspace lock cannot be acquired within the timeout period."""
 

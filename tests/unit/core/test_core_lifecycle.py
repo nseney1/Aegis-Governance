@@ -145,6 +145,14 @@ class TestDecay:
         assert decayed["triggers"] == 100  # unchanged
 
 
+@pytest.mark.parametrize("stress, multiplier", [(0, 1.0), (1, 1.05), (5, 1.25), (10, 1.5), (100, 1.5)])
+def test_antifragile_bonus_is_five_percent_per_survived_review_capped_at_ten(stress, multiplier):
+    from aegis_core.lifecycle.decay import antifragile_bonus
+
+    assert antifragile_bonus({"fitness": {"stress_survived": stress}}) == pytest.approx(multiplier)
+    assert antifragile_bonus({}) == 1.0
+
+
 class TestCellPromoteAndDemote:
     """Verifies file movements and frontmatter updates for promotions and demotions."""
 

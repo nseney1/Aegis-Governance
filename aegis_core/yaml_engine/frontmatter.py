@@ -91,6 +91,22 @@ def parse_rule_frontmatter(content_or_path: str) -> Tuple[Dict[str, Any], str]:
     return data, body
 
 
+def parse_rule_file(filepath: str) -> Tuple[Dict[str, Any], str]:
+    """Parse the rule file at ``filepath`` into (frontmatter_dict, body).
+
+    Raises RuleNotFoundError if it is not a file and RuleParseError if its
+    frontmatter is missing or malformed. Public through ``aegis_sdk``.
+    """
+    from aegis_core.errors import RuleNotFoundError, RuleParseError
+
+    if not os.path.isfile(filepath):
+        raise RuleNotFoundError(f"Rule file not found: {filepath}")
+    try:
+        return parse_rule_frontmatter(filepath)
+    except ValueError as exc:
+        raise RuleParseError(f"Error parsing rule {filepath}: {exc}") from exc
+
+
 class AegisYAML:
     """Primary zero-dependency AegisYAML engine."""
 
@@ -159,5 +175,6 @@ __all__ = [
     "AegisYAML",
     "_get_body",
     "parse_frontmatter",
+    "parse_rule_file",
     "parse_rule_frontmatter",
 ]

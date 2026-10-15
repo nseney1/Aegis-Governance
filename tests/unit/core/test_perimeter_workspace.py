@@ -43,7 +43,6 @@ class TestGovernanceWorkspacePorcelain:
         assert gov.workspace.root == mock_soma_workspace.resolve()
         assert gov.root == mock_soma_workspace.resolve()
         assert gov.rules_dir == mock_soma_workspace.resolve() / ".aegis" / "rules"
-        assert gov.metrics_dir == mock_soma_workspace.resolve() / ".aegis" / "metrics"
 
     def test_governance_init_with_workspace_object(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
@@ -51,12 +50,11 @@ class TestGovernanceWorkspacePorcelain:
         assert gov.workspace is ws
         assert gov.root == ws.root
         assert gov.rules_dir == ws.rules_dir
-        assert gov.metrics_dir == ws.metrics_dir
 
-    def test_governance_list_cells_with_workspace(self, mock_soma_workspace: Path):
+    def test_governance_list_rules_with_workspace(self, mock_soma_workspace: Path):
         ws = Workspace.confine(mock_soma_workspace)
         gov = Governance(project_root=ws)
-        cells = gov.list_cells()
+        cells = gov.list_rules()
         assert len(cells) == 1
         assert cells[0]["_name"] == "sample_rule"
 

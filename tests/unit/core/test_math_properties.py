@@ -7,8 +7,7 @@ import pytest
 pytest.importorskip("hypothesis")
 from hypothesis import given, settings, strategies as st
 
-from aegis_sdk.scoring import laplace_score, wilson_lower_bound, bayesian_posterior, bayesian_score
-from aegis_sdk.rules import RuleFitness
+from aegis_core.scoring import laplace_score, wilson_lower_bound, bayesian_posterior, bayesian_score
 from aegis_core.lifecycle.quorum import calculate_fitness_status
 from aegis_core.lifecycle.constants import (
     STATUS_NEW,
@@ -138,23 +137,4 @@ class TestMathematicalInvariants:
         w_score = wilson_lower_bound(tp, triggers)
         assert isinstance(w_score, float)
         assert 0.0 <= w_score <= 1.0
-
-    @settings(max_examples=100)
-    @given(
-        tp=st.integers(min_value=0, max_value=10_000),
-        fp=st.integers(min_value=0, max_value=10_000),
-    )
-    def test_cell_fitness_snr_invariants(self, tp: int, fp: int):
-        """RuleFitness SNR respects signal detection theory boundary conditions."""
-        f = RuleFitness(triggers=tp + fp, true_positives=tp, false_positives=fp)
-        snr = f.snr_db
-        if tp > 0 and fp > 0:
-            assert isinstance(snr, float)
-            assert snr == round(10 * __import__("math").log10(tp / fp), 1)
-        elif tp > 0 and fp == 0:
-            assert snr is None  # RFC 8259 JSON-safe positive infinite
-        elif tp == 0 and fp > 0:
-            assert snr == -99.0  # RFC 8259 JSON-safe pure noise / zero signal
-        else:
-            assert snr == 0.0
 

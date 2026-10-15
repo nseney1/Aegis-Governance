@@ -1,18 +1,19 @@
-"""Core Governance API."""
+"""Governance: read-only governance reports over a workspace, as thin wrappers over aegis_core."""
 from __future__ import annotations
 
+import math
 import os
-import re
-import warnings
 from pathlib import Path
 from typing import Any, Optional
 
+from aegis_core.lifecycle.decay import compute_cells_fitness
+from aegis_core.metrics import calculate_coverage, calculate_governance_grade
+from aegis_core.outcomes.engine import _get_changed_files, match_cells_to_changes
 from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
-from aegis_core.taxonomy import ReviewMode, normalize_review_mode
-from aegis_core.yaml_engine.frontmatter import parse_frontmatter
-from aegis_core.telemetry_engine.ledger import EventConflictError, StaleGenerationError
 from aegis_core.workspace.base import Workspace
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
+# Legacy (v1/v2) rule type names accepted by list_rules(rule_type=...).
 TYPE_TRANSLATION_MAP: dict[str, str] = {
     "safety-guard": "invariant",
     "learned-trap": "trap",
@@ -30,36 +31,28 @@ TYPE_TRANSLATION_MAP: dict[str, str] = {
 
 __all__ = ["Governance", "TYPE_TRANSLATION_MAP"]
 
-VALID_SOURCES = ('ci', 'manual', 'mcp', 'session')
-
 
 class Governance:
-    """Aegis governance interface.
-    
+    """Aegis governance reports for one workspace.
+
     Usage:
         from aegis_sdk import Governance
         gov = Governance(project_root='.')
-        
-        landscape = gov.fitness_landscape(bayesian=True)
-        coverage = gov.coverage_report()
         grade = gov.grade()
+        coverage = gov.coverage_report()
     """
-    
+
     def __init__(self, project_root: str | Path | os.PathLike[str] | Workspace = '.') -> None:
         self.workspace: Workspace = (
             project_root if isinstance(project_root, Workspace) else Workspace.resolve(project_root)
         )
         self.root: Path = self.workspace.root
         self.rules_dir: Path = self.workspace.rules_dir
-        self.cells_dir: Path = self.workspace.rules_dir
-        self.metrics_dir: Path = self.workspace.metrics_dir
-    
-    # === Rule & Rule Management ===
-    
-    def list_cells(self, cell_type: Optional[str] = None) -> list[dict[str, Any]]:
-        """List immune cells, optionally filtered by cell_type or porcelain alias.
 
-        Invalid cell contents remain visible as diagnostic records. Unsafe or
+    def list_rules(self, rule_type: Optional[str] = None) -> list[dict[str, Any]]:
+        """List rules (frontmatter plus ``_name``/``_path``), optionally filtered by type.
+
+        Invalid rule contents stay visible as ``_error`` records. Unsafe or
         unreadable inventory trees fail closed because callers cannot safely
         distinguish an empty tree from an incomplete one.
         """
@@ -68,12 +61,12 @@ class Governance:
         except RuleInventoryError as exc:
             raise RuntimeError(str(exc)) from exc
 
-        canonical_filter = TYPE_TRANSLATION_MAP.get(cell_type, cell_type) if cell_type else None
+        canonical_filter = TYPE_TRANSLATION_MAP.get(rule_type, rule_type) if rule_type else None
 
-        cells = []
+        rules = []
         for entry in inventory.entries:
             relative_path = entry.relative_path
-            cell_name = Path(relative_path).stem
+            rule_name = Path(relative_path).stem
             if Path(relative_path).name == 'README.md':
                 continue
 
@@ -90,212 +83,38 @@ class Governance:
             try:
                 content = entry.content.decode('utf-8')
             except UnicodeDecodeError as exc:
-                if not path_matches:
-                    continue
-                cells.append({
-                    '_name': cell_name,
-                    '_path': relative_path,
-                    '_error': f'invalid UTF-8: {exc}',
-                })
+                if path_matches:
+                    rules.append({'_name': rule_name, '_path': relative_path, '_error': f'invalid UTF-8: {exc}'})
                 continue
 
             frontmatter = parse_frontmatter(content)
             if frontmatter is None:
-                if not path_matches:
-                    continue
-                cells.append({
-                    '_name': cell_name,
-                    '_path': relative_path,
-                    '_error': 'malformed YAML frontmatter',
-                })
+                if path_matches:
+                    rules.append({'_name': rule_name, '_path': relative_path, '_error': 'malformed YAML frontmatter'})
                 continue
             if not frontmatter:
-                if not path_matches:
-                    continue
-                cells.append({
-                    '_name': cell_name,
-                    '_path': relative_path,
-                    '_error': 'no frontmatter metadata',
-                })
+                if path_matches:
+                    rules.append({'_name': rule_name, '_path': relative_path, '_error': 'no frontmatter metadata'})
                 continue
 
-            if canonical_filter:
-                entry_type = frontmatter.get('type')
-                type_matches = (entry_type == canonical_filter) or path_matches
-                if not type_matches:
-                    continue
+            if canonical_filter and frontmatter.get('type') != canonical_filter and not path_matches:
+                continue
 
-            frontmatter['_name'] = cell_name
+            frontmatter['_name'] = rule_name
             frontmatter['_path'] = relative_path
-            cells.append(frontmatter)
-        return cells
+            rules.append(frontmatter)
+        return rules
 
-    def list_rules(self, rule_type: Optional[str] = None) -> list[dict[str, Any]]:
-        """List active rules (porcelain alias for list_cells)."""
-        return self.list_cells(cell_type=rule_type)
-
-    def record_outcome(
-        self,
-        rule_id: str,
-        success: bool,
-        metric: Optional[dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """Record an empirical rule outcome (tp/fp) in-process via atomic evidence telemetry.
-        
-        Underlying data updates Wilson confidence scores and Bayesian fitness.
-        """
-        # I-03: Validate rule_id against active inventory (advisory warning)
-        try:
-            inventory = inventory_rules(str(self.root))
-            known_cells = {
-                Path(entry.relative_path).stem
-                for entry in inventory.entries
-                if Path(entry.relative_path).name != 'README.md'
-            }
-            if known_cells and rule_id not in known_cells:
-                warnings.warn(f"Rule '{rule_id}' not found in active inventory", UserWarning, stacklevel=2)
-        except Exception:
-            pass
-
-        if isinstance(success, str):
-            norm = success.strip().lower()
-            if norm in ("tp", "pass", "true", "1", "success"):
-                signal_type = "tp"
-            elif norm in ("fp", "fail", "false", "0", "failure"):
-                signal_type = "fp"
-            else:
-                raise ValueError(f"Invalid outcome string: {success!r}")
-        elif isinstance(success, (bool, int)):
-            signal_type = "tp" if bool(success) else "fp"
-        else:
-            raise TypeError(f"success must be a bool or string, got {type(success).__name__}")
-
-        merged_metric = dict(metric or {})
-        session_id = kwargs.pop("session_id", None)
-        source = kwargs.pop("source", "manual")
-        principal = kwargs.pop("principal", "unknown")
-        idempotency_scope = kwargs.pop("idempotency_scope", None)
-        if idempotency_scope is None:
-            idempotency_scope = session_id if session_id else "global"
-        idempotency_key = kwargs.pop("idempotency_key", "")
-        expected_generation = kwargs.pop("expected_generation", None)
-
-        if source not in VALID_SOURCES:
-            raise ValueError(f"Invalid telemetry source '{source}'. Must be one of: {', '.join(VALID_SOURCES)}")
-        merged_metric.update(kwargs)
-        if session_id:
-            merged_metric["session_id"] = session_id
-        try:
-            from aegis_core.telemetry_engine.ledger import append_signal
-            return append_signal(
-                workspace=str(self.root),
-                cell_name=rule_id,
-                signal_type=signal_type,
-                source=source,
-                metadata={"metric": merged_metric} if merged_metric else {},
-                principal=principal,
-                idempotency_scope=idempotency_scope,
-                idempotency_key=idempotency_key,
-                expected_generation=expected_generation,
-            )
-        except (EventConflictError, StaleGenerationError, ValueError):
-            raise
-        except Exception:
-            raw_output = self.signal(rule_id, signal_type, metric=merged_metric)
-            return {
-                "cell": rule_id,
-                "signal": signal_type,
-                "source": source,
-                "status": "fallback_recorded",
-                "raw": str(raw_output),
-            }
-    
-    def create_cell(
-        self,
-        hypothesis: str,
-        type: str = 'trap',
-        target_paths: Optional[list[str]] = None,
-        minimum_mode: str = str(ReviewMode.PATROL),
-        tags: Optional[list[str]] = None,
-        cell_id: Optional[str] = None,
-    ) -> dict[str, Any] | str:
-        """Create a new immune cell."""
-        from aegis_core.lifecycle.creation import create_cell as core_create_cell
-        raw_slug = cell_id or hypothesis[:40]
-        safe_slug = re.sub(r'[^a-zA-Z0-9_.-]', '-', raw_slug).strip('-')
-        canonical_type = TYPE_TRANSLATION_MAP.get(type, type)
-        normalized_mode = normalize_review_mode(minimum_mode, default=str(ReviewMode.PATROL))
-        created_path = core_create_cell(
-            cell_type=canonical_type,
-            hypothesis=hypothesis,
-            minimum_mode=normalized_mode,
-            tags=tags,
-            target_paths=target_paths,
-            id_override=safe_slug,
-            workspace=self.root,
-        )
-        return str(created_path)
-
-    def create_rule(
-        self,
-        hypothesis: str,
-        type: str = 'trap',
-        target_paths: Optional[list[str]] = None,
-        minimum_mode: str = str(ReviewMode.PATROL),
-        tags: Optional[list[str]] = None,
-        cell_id: Optional[str] = None,
-        rule_id: Optional[str] = None,
-    ) -> dict[str, Any] | str:
-        """Create a new immune rule (porcelain alias for create_cell)."""
-        return self.create_cell(
-            hypothesis=hypothesis,
-            type=type,
-            target_paths=target_paths,
-            minimum_mode=minimum_mode,
-            tags=tags,
-            cell_id=rule_id or cell_id,
-        )
-
-    def parse_rule_file(self, filepath: str) -> tuple[dict, str]:
-        """Parse a cell markdown file into (frontmatter_dict, body_text)."""
-        from aegis_sdk.rules import parse_rule_file
-        return parse_rule_file(filepath)
-
-    parse_rule_file = parse_rule_file
-    
-    def signal(
-        self, cell_name: str, signal_type: str, metric: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any] | str:
-        """Send a fitness signal to a cell in-process."""
-        from aegis_core.telemetry_engine.ledger import append_signal
-        return append_signal(
-            workspace=str(self.root),
-            cell_name=cell_name,
-            signal_type=signal_type,
-            source="manual",
-            metadata={"metric": metric} if metric else None,
-        )
-    
-    # === Analysis ===
-    
     def fitness_landscape(self, bayesian: bool = False) -> list[dict[str, Any]]:
-        """Get fitness scores for all cells."""
-        from aegis_core.lifecycle.decay import compute_cells_fitness
+        """Fitness scores for every rule (with the Bayesian posterior when ``bayesian``)."""
         return compute_cells_fitness(workspace=str(self.root), bayesian=bayesian)
 
-    def rule_fitness(self, bayesian: bool = False) -> list[dict[str, Any]]:
-        """Get fitness scores for all rules (porcelain alias for fitness_landscape)."""
-        return self.fitness_landscape(bayesian=bayesian)
-    
     def coverage_report(self, exclude: Optional[str] = None) -> dict[str, Any]:
-        """Get cell coverage report."""
-        from aegis_core.metrics import calculate_coverage
+        """Which workspace files the rules' target_paths cover, overall and per directory."""
         return calculate_coverage(workspace=str(self.root), exclude=[exclude] if exclude else None)
-    
+
     def grade(self) -> dict[str, Any]:
-        """Get governance report card."""
-        from aegis_core.metrics import calculate_governance_grade
+        """Governance report card; a fixed all-F report when there are no rules."""
         report = calculate_governance_grade(workspace=str(self.root))
         if report is None:
             return {
@@ -310,28 +129,25 @@ class Governance:
                 "note": "No cells found to grade",
             }
         return report
-    
+
     def scan(self, files: Optional[list[str]] = None) -> list[dict[str, Any]]:
-        """Scan current diff against cells."""
-        from aegis_core.outcomes.engine import match_cells_to_changes, _get_changed_files
+        """Rules whose target_paths match ``files`` (default: the files git reports changed)."""
         changed = files if files is not None else _get_changed_files(str(self.root))
         return match_cells_to_changes(str(self.root), changed)
 
     def entropy(self) -> dict[str, Any]:
-        """Compute immune entropy across all cells."""
-        import math
-        cells = self.list_cells()
-        if not cells:
+        """Rule population and the Shannon entropy (bits) of its type distribution."""
+        rules = self.list_rules()
+        if not rules:
             return {"population": {"total": 0, "active": 0, "dormant": 0}, "type_entropy": 0.0}
         type_counts: dict[str, int] = {}
-        for c in cells:
-            ct = str(c.get('type', 'unknown'))
-            type_counts[ct] = type_counts.get(ct, 0) + 1
-        total = len(cells)
+        for r in rules:
+            rt = str(r.get('type', 'unknown'))
+            type_counts[rt] = type_counts.get(rt, 0) + 1
+        total = len(rules)
         type_entropy = 0.0
-        if total > 0 and len(type_counts) > 1:
-            type_probs = [n / total for n in type_counts.values()]
-            type_entropy = -sum(p * math.log2(p) for p in type_probs if p > 0)
+        if len(type_counts) > 1:
+            type_entropy = -sum((n / total) * math.log2(n / total) for n in type_counts.values() if n > 0)
         return {
             "population": {"total": total},
             "type_entropy": {"value": round(type_entropy, 4), "distribution": type_counts},

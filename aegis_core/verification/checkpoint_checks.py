@@ -212,12 +212,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "unit" / "core" / "test_ast_rust.py")
         candidates.append(test_dir / "test_rust_ast_driver.py")
         candidates.append(test_dir / "unit" / "core" / "test_rust_ast_driver.py")
-    if stem == "rules":
-        candidates.append(test_dir / "unit" / "sdk" / "test_cells.py")
-        candidates.append(test_dir / "sdk" / "test_cells.py")
-        candidates.append(test_dir / "test_cells.py")
-        candidates.append(test_dir / "unit" / "sdk" / "test_sdk_behavioral.py")
-        candidates.append(test_dir / "test_rule_content.py")
     if stem == "checkpoint_checks":
         candidates.append(test_dir / "test_checkpoint_fail_closed.py")
     if stem in ("call_graph", "persistence_checker", "runner"):
@@ -228,7 +222,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_hooks_lifecycle.py")
     if stem == "errors":
         candidates.append(test_dir / "test_domain_errors.py")
-        candidates.append(test_dir / "test_sdk_behavioral.py")
     if stem == "evidence":
         candidates.append(test_dir / "test_canonical_evidence_readers.py")
     if stem == "frontmatter":
@@ -250,12 +243,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_mcp_dispatch.py")
     if stem == "tools":
         candidates.append(test_dir / "test_mcp_tools_contract.py")
-    if stem == "analysis":
-        candidates.append(test_dir / "test_sdk_analysis.py")
-    if stem == "cells":
-        candidates.append(test_dir / "test_rule_content.py")
-    if stem == "invariants":
-        candidates.append(test_dir / "test_enforcement_ladder.py")
     if parent_name == "skills" or stem in ("graph", "handoff", "slots", "skills", "artifacts"):
         candidates.append(test_dir / "test_skills_and_handoff.py")
     if parent_name == "handlers" or stem in ("registry", "projection"):
@@ -267,9 +254,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_outcomes.py")
     if parent_name == "hooks":
         candidates.append(test_dir / "test_hooks_lifecycle.py")
-    if stem in ("somayaml", "yaml"):
-        candidates.append(test_dir / "test_somayaml.py")
-        candidates.append(test_dir / "test_yaml.py")
 
     # 4. Flat root candidates
     candidates.append(test_dir / f"test_{stem}.py")

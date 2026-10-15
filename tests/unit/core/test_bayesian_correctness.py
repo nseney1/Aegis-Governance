@@ -5,8 +5,6 @@ TDD Phase: Tests written BEFORE implementation (Phase 2.0).
 Expected: Some tests will fail against v0.73 (red phase) because Wilson
 interval is not yet implemented. They will pass after Phase 2.2.
 """
-import math
-import os
 import sys
 
 import pytest
@@ -14,7 +12,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_sdk.scoring import _wilson_interval, bayesian_posterior, laplace_score
+from aegis_core.scoring import _wilson_interval, bayesian_posterior, laplace_score
 
 
 class TestWilsonInterval:

@@ -19,7 +19,7 @@ from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = ["run_status", "StatusCommand"]
 
-from aegis_sdk.rules import parse_rule_file
+from aegis_core.yaml_engine.frontmatter import parse_rule_file
 
 
 def _repo_root(args: argparse.Namespace) -> Path:
