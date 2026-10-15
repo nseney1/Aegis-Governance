@@ -159,9 +159,9 @@ def default_candidates() -> list[str]:
 
 
 def scripts_dir(candidates: Iterable[str] | None = None) -> str | None:
-    """First candidate directory that contains a soma console script."""
+    """First candidate directory that contains an aegis or soma console script."""
     for directory in (default_candidates() if candidates is None else candidates):
-        for name in ("soma", "soma.exe"):
+        for name in ("aegis", "aegis.exe", "soma", "soma.exe"):
             if os.path.isfile(os.path.join(directory, name)):
                 return directory
     return None
@@ -183,8 +183,9 @@ def build_hint(env: Mapping[str, str] | None = None,
                platform: str | None = None,
                os_name: str | None = None,
                shell: str | None = None,
-               venv_prefix: object = _UNSET) -> str | None:
-    """Human-readable remedy, or None when `soma` already resolves."""
+               venv_prefix: object = _UNSET,
+               cmd_name: str = "soma") -> str | None:
+    """Human-readable remedy, or None when `aegis` or `soma` already resolves."""
     env = os.environ if env is None else env
     which = shutil.which if which is None else which
     home = os.path.expanduser("~") if home is None else home
@@ -192,21 +193,25 @@ def build_hint(env: Mapping[str, str] | None = None,
     os_name = os.name if os_name is None else os_name
     if venv_prefix is _UNSET:
         venv_prefix = _active_venv_prefix()
-    if which("soma", path=env.get("PATH", "")):
+    path_val = env.get("PATH", "")
+    if which("aegis", path=path_val) or which("soma", path=path_val):
         return None
 
+    is_aegis = cmd_name == "aegis"
+    pkg_name = "aegis-guardrails" if is_aegis else "soma-governance"
+    mod_name = "aegis_cli" if is_aegis else "soma_cli"
     py = "python" if os_name == "nt" else "python3"
-    fallback = f"    Until then you can run: {py} -m soma_cli <command>"
+    fallback = f"    Until then you can run: {py} -m {mod_name} <command>"
     directory = scripts_dir(candidates if candidates is not None else default_candidates())
     if directory is None:
-        return ("ℹ️  The 'soma' command is not installed for this Python.\n"
-                f"    Install it with: {py} -m pip install soma-governance\n"
-                "    (or pipx install soma-governance)")
+        return (f"ℹ️  The '{cmd_name}' command is not installed for this Python.\n"
+                f"    Install it with: {py} -m pip install {pkg_name}\n"
+                f"    (or pipx install {pkg_name})")
 
     shell = shell or detect_shell(env, os_name=os_name)
     sep = ";" if os_name == "nt" else ":"
     if on_path(directory, env.get("PATH", ""), sep=sep, casefold=os_name == "nt"):
-        return (f"ℹ️  'soma' is in {directory}, which is already on PATH.\n"
+        return (f"ℹ️  '{cmd_name}' is in {directory}, which is already on PATH.\n"
                 "    Open a new terminal (or run `hash -r` / `rehash`) so the shell picks it up.\n"
                 + fallback)
 
@@ -224,7 +229,7 @@ def build_hint(env: Mapping[str, str] | None = None,
             vprefix = str(venv_prefix).replace("\\", "/")
             script = f"{vprefix}/bin/activate" + (".fish" if shell == "fish" else "")
             activate = "source " + shlex.quote(script)
-        return (f"ℹ️  'soma' is installed in the virtual environment {venv_prefix},\n"
+        return (f"ℹ️  '{cmd_name}' is installed in the virtual environment {venv_prefix},\n"
                 "    which is not active in this shell. Activate it first:\n"
                 f"      {activate}\n"
                 + fallback)
@@ -232,7 +237,7 @@ def build_hint(env: Mapping[str, str] | None = None,
     line = remedy(shell, directory, home, os_name=os_name)
     rc = rc_file(shell, env=env, platform=platform)
     shell_label = shell if shell != "unknown" else "shell"
-    lines = [f"ℹ️  'soma' was installed to {directory}, which is not on your {shell_label} PATH."]
+    lines = [f"ℹ️  '{cmd_name}' was installed to {directory}, which is not on your {shell_label} PATH."]
     if shell == "pwsh" and os_name == "nt":
         lines.append("    Run this once in PowerShell, then open a new terminal:")
     elif rc:

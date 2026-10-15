@@ -337,8 +337,12 @@ def run_init(args: argparse.Namespace) -> int:
     else:
         platform = detect_platform(project_root)
         # Fallback: check home directory if project-level detection fails
-        if platform == "unknown" and not getattr(args, "_project_root", None):
-            platform = detect_platform(Path.home())
+        if platform == "unknown" and (
+            not getattr(args, "_project_root", None)
+            or getattr(args, "_allow_home_fallback", False)
+        ):
+            home_dir = Path(getattr(args, "_home", getattr(args, "_home_override", None)) or Path.home())
+            platform = detect_platform(home_dir)
         if platform == "unknown":
             print("  ⚠️  Could not detect platform.")
             print("     Use --platform to specify: gemini, claude, cursor, copilot, kiro")
@@ -463,7 +467,10 @@ def run_init(args: argparse.Namespace) -> int:
         try:
             from aegis_cli.pathcheck import build_hint
 
-            hint = build_hint()
+            try:
+                hint = build_hint(cmd_name="aegis")
+            except TypeError:
+                hint = build_hint()
             if hint:
                 print(hint)
                 print()
