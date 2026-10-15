@@ -6,8 +6,6 @@ import os
 from pathlib import Path
 import re
 import shlex
-import shutil
-import subprocess
 import sys
 from typing import Any
 
@@ -17,45 +15,46 @@ _SOMA_HOOK_START = "# >>> soma pre-commit >>>"
 _SOMA_HOOK_END = "# <<< soma pre-commit <<<"
 AEGIS_HOOK_FORMAT = "# aegis-hook-format:"
 SOMA_HOOK_FORMAT = "# soma-hook-format:"
-CURRENT_HOOK_FORMAT_VERSION = 4
+CURRENT_HOOK_FORMAT_VERSION = 5
 
 
-def generate_hook_block(python: str | None = None) -> str:
-    """The marked pre-commit block (portable POSIX sh with dynamic multi-repo resolution)."""
-    py = python if python is not None else sys.executable
-    if os.name == "nt":
-        py = py.replace("\\", "/")
-    q = shlex.quote(py)
+# The hook runs this code with the pinned interpreter. -I keeps the working
+# tree (and PYTHON* variables) off sys.path, so a repository cannot substitute
+# its own aegis_cli; AEGIS_PATH is the directory aegis_cli was installed in.
+_HOOK_RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from aegis_cli.cli import main; sys.exit(main(sys.argv[2:]))"
+
+
+def _default_import_root() -> str:
+    import aegis_cli
+
+    return str(Path(aegis_cli.__file__).resolve().parent.parent)
+
+
+def _sh_path(path: str) -> str:
+    return path.replace("\\", "/") if os.name == "nt" else path
+
+
+def generate_hook_block(python: str | None = None, import_root: str | None = None) -> str:
+    """The marked pre-commit block: run the aegis that installed it, or fail closed.
+
+    One absolute interpreter (default: sys.executable of the installing aegis)
+    and the directory aegis_cli was imported from are baked in at install
+    time. Nothing is looked up on PATH, in $VIRTUAL_ENV or in the repository.
+    """
+    py = shlex.quote(_sh_path(python if python is not None else sys.executable))
+    root = shlex.quote(_sh_path(import_root if import_root is not None else _default_import_root()))
+    runner = shlex.quote(_HOOK_RUNNER)
     return (
         f"{_AEGIS_HOOK_START}\n"
         "# Installed by aegis hook install\n"
         f"{AEGIS_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}\n"
-        "if command -v aegis >/dev/null 2>&1; then\n"
-        "  exec aegis check --hook\n"
-        "elif command -v soma >/dev/null 2>&1; then\n"
-        "  exec soma check --hook\n"
-        'elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/bin/python" ] && "$VIRTUAL_ENV/bin/python" -c \'import aegis_cli\' >/dev/null 2>&1; then\n'
-        '  exec "$VIRTUAL_ENV/bin/python" -m aegis_cli check --hook\n'
-        'elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/Scripts/python.exe" ] && "$VIRTUAL_ENV/Scripts/python.exe" -c \'import aegis_cli\' >/dev/null 2>&1; then\n'
-        '  exec "$VIRTUAL_ENV/Scripts/python.exe" -m aegis_cli check --hook\n'
-        'elif [ -x "$PWD/.venv/bin/python" ] && "$PWD/.venv/bin/python" -c \'import aegis_cli\' >/dev/null 2>&1; then\n'
-        '  exec "$PWD/.venv/bin/python" -m aegis_cli check --hook\n'
-        'elif [ -x "$PWD/.venv/Scripts/python.exe" ] && "$PWD/.venv/Scripts/python.exe" -c \'import aegis_cli\' >/dev/null 2>&1; then\n'
-        '  exec "$PWD/.venv/Scripts/python.exe" -m aegis_cli check --hook\n'
-        f"elif {q} -c 'import aegis_cli' >/dev/null 2>&1; then\n"
-        f"  exec {q} -m aegis_cli check --hook\n"
-        "elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0)' 2>/dev/null && python3 -c 'import aegis_cli' >/dev/null 2>&1; then\n"
-        "  exec python3 -m aegis_cli check --hook\n"
-        'elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/bin/python" ] && "$VIRTUAL_ENV/bin/python" -c \'import soma_cli\' >/dev/null 2>&1; then\n'
-        '  exec "$VIRTUAL_ENV/bin/python" -m soma_cli check --hook\n'
-        "elif python3 -c 'import soma_cli' >/dev/null 2>&1; then\n"
-        "  exec python3 -m soma_cli check --hook\n"
-        "else\n"
-        '  echo "aegis pre-commit: cannot execute quality checks." >&2\n'
-        '  echo "  Neither \'aegis\' nor a Python interpreter with \'aegis_cli\' installed was found on PATH." >&2\n'
-        '  echo "  Run \'aegis hook status\' or \'aegis doctor\' to diagnose environment resolution." >&2\n'
-        "  exit 1\n"
+        f"AEGIS_PYTHON={py}\n"
+        f"AEGIS_PATH={root}\n"
+        'if [ -x "$AEGIS_PYTHON" ] && [ -f "$AEGIS_PATH/aegis_cli/__init__.py" ]; then\n'
+        f'  exec "$AEGIS_PYTHON" -I -c {runner} "$AEGIS_PATH" check --hook\n'
         "fi\n"
+        'echo "aegis pre-commit: aegis not found at $AEGIS_PYTHON; run aegis hook install, or commit with --no-verify" >&2\n'
+        "exit 1\n"
         f"{_AEGIS_HOOK_END}\n"
     )
 
@@ -86,8 +85,9 @@ def install_hook(
     force: bool = False,
     python: str | None = None,
     dry_run: bool = False,
+    import_root: str | None = None,
 ) -> bool:
-    """Install or refresh Soma pre-commit hook into a git repository."""
+    """Install or refresh the aegis pre-commit hook in a git repository."""
     from aegis_core.workspace import Workspace, resolve_git_hooks_dir
 
     if isinstance(project_root, Workspace):
@@ -137,7 +137,7 @@ def install_hook(
                 return False
             target_file = real_target
 
-    block = generate_hook_block(python)
+    block = generate_hook_block(python, import_root=import_root)
 
     if target_file.exists():
         content = target_file.read_text(encoding="utf-8")
@@ -183,7 +183,7 @@ def uninstall_hook(
     force: bool = False,
     dry_run: bool = False,
 ) -> bool:
-    """Safely remove Soma pre-commit hook while preserving user hooks."""
+    """Remove the aegis block from the pre-commit hook, keeping user hook lines."""
     from aegis_core.workspace import Workspace, resolve_git_hooks_dir
 
     if isinstance(project_root, Workspace):
@@ -287,7 +287,7 @@ def uninstall_hook(
 
 
 def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
-    """Inspect and report the status of Soma git hooks in the target repository."""
+    """Inspect the aegis pre-commit hook in the target repository."""
     from aegis_core.workspace import Workspace, resolve_git_hooks_dir
 
     if isinstance(project_root, Workspace):
@@ -302,7 +302,7 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
     hook_file = (git_hooks_dir / "pre-commit") if is_git_repo else None
 
     hook_exists = hook_file.is_file() if hook_file else False
-    managed_by_soma = False
+    managed = False
     format_version = None
     status = "no_git_repository"
 
@@ -313,7 +313,7 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
             try:
                 text = hook_file.read_text(encoding="utf-8", errors="replace")
                 if _AEGIS_HOOK_START in text or _SOMA_HOOK_START in text:
-                    managed_by_soma = True
+                    managed = True
                     match = re.search(r"(?:aegis|soma)-hook-format:\s*(\d+)", text)
                     if match:
                         format_version = int(match.group(1))
@@ -328,23 +328,15 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
             except OSError:
                 status = "unreadable"
 
-    soma_path = shutil.which("soma")
-    venv_env = os.environ.get("VIRTUAL_ENV")
-    local_venv = None
-    if root:
-        for candidate in (root / ".venv" / "bin" / "python", root / ".venv" / "Scripts" / "python.exe"):
-            if candidate.is_file():
-                local_venv = str(candidate)
-                break
-
-    py3_path = shutil.which("python3")
-    py3_valid = False
-    if py3_path:
-        try:
-            res = subprocess.run([py3_path, "-c", "import sys; sys.exit(0)"], capture_output=True, timeout=2)
-            py3_valid = (res.returncode == 0)
-        except Exception:
-            py3_valid = False
+    interpreter = None
+    if managed:
+        match = re.search(r"^AEGIS_PYTHON=(.+)$", text, re.MULTILINE)
+        if match:
+            try:
+                pinned = shlex.split(match.group(1))[0]
+            except (ValueError, IndexError):
+                pinned = match.group(1)
+            interpreter = {"path": pinned, "exists": os.path.isfile(pinned) and os.access(pinned, os.X_OK)}
 
     is_worktree = False
     if root and (root / ".git").is_file():
@@ -357,17 +349,10 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
         "repository_root": str(root),
         "git_hooks_dir": str(git_hooks_dir) if git_hooks_dir else None,
         "hook_file": str(hook_file) if hook_file else None,
-        "managed_by_soma": managed_by_soma,
+        "managed_by_aegis": managed,
         "format_version": format_version,
         "current_format_version": CURRENT_HOOK_FORMAT_VERSION,
-        "interpreters": {
-            "soma_on_path": soma_path is not None,
-            "soma_path": soma_path,
-            "virtual_env": venv_env,
-            "local_venv": local_venv,
-            "python3": py3_path,
-            "python3_valid": py3_valid,
-        },
+        "interpreter": interpreter,
     }
 
 
@@ -383,9 +368,9 @@ def run_hook_install(args: Any) -> int:
     else:
         if ok:
             st = hook_status(ws)
-            print(f"✅ Soma pre-commit hook installed ({st.get('hook_file')})")
+            print(f"✅ aegis pre-commit hook installed ({st.get('hook_file')})")
         else:
-            print("❌ Failed to install Soma pre-commit hook (no .git directory or symlink outside repo)", file=sys.stderr)
+            print("❌ Failed to install the aegis pre-commit hook (no .git directory or symlink outside repo)", file=sys.stderr)
     return 0 if ok else 1
 
 
@@ -400,9 +385,9 @@ def run_hook_uninstall(args: Any) -> int:
         print(json.dumps({"status": "uninstalled" if ok else "not_found", "success": ok}))
     else:
         if ok:
-            print("✅ Soma pre-commit hook removed")
+            print("✅ aegis pre-commit hook removed")
         else:
-            print("ℹ️ No Soma pre-commit hook found to uninstall")
+            print("ℹ️ No aegis pre-commit hook found to uninstall")
     return 0 if ok else 1
 
 
@@ -415,7 +400,7 @@ def run_hook_status(args: Any) -> int:
         print(json.dumps(st, indent=2))
         return 0
 
-    print("🪝 Soma Git Hook Status")
+    print("Aegis Git Hook Status")
     print(f"  Repository Root: {st['repository_root']}")
     if not st["is_git_repo"]:
         print("  Hooks Directory: ❌ No .git directory found")
@@ -427,20 +412,14 @@ def run_hook_status(args: Any) -> int:
     if st["status"] == "installed":
         print(f"  Pre-commit Hook: ✅ Installed & Current (format: {st['format_version']})")
     elif st["status"] == "outdated":
-        print(f"  Pre-commit Hook: ⚠️  Outdated format ({st['format_version']} < {st['current_format_version']}) — run 'soma hook install' to refresh")
+        print(f"  Pre-commit Hook: ⚠️  Outdated format ({st['format_version']} < {st['current_format_version']}) — run 'aegis hook install' to refresh")
     elif st["status"] == "unmanaged":
-        print("  Pre-commit Hook: ⚠️  Existing pre-commit hook present (not managed by Soma)")
+        print("  Pre-commit Hook: ⚠️  Existing pre-commit hook present (not managed by aegis)")
     else:
-        print("  Pre-commit Hook: ❌ Not installed — run 'soma hook install'")
+        print("  Pre-commit Hook: ❌ Not installed — run 'aegis hook install'")
 
-    interp = st.get("interpreters", {})
-    print("  Environment Resolution:")
-    soma_disp = f"✅ ({interp['soma_path']})" if interp.get("soma_on_path") else "❌ (not found)"
-    print(f"    • soma on PATH: {soma_disp}")
-    venv_disp = f"✅ ({interp['virtual_env']})" if interp.get("virtual_env") else "❌ (none active)"
-    print(f"    • VIRTUAL_ENV:  {venv_disp}")
-    local_disp = f"✅ ({interp['local_venv']})" if interp.get("local_venv") else "❌ (none)"
-    print(f"    • .venv:        {local_disp}")
-    py3_disp = f"✅ ({interp['python3']})" if interp.get("python3_valid") else "❌ (invalid or missing)"
-    print(f"    • python3:      {py3_disp}")
+    interp = st.get("interpreter")
+    if interp:
+        mark = "✅" if interp["exists"] else "❌ (missing: run 'aegis hook install')"
+        print(f"  Runs:            {interp['path']} {mark}")
     return 0

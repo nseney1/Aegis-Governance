@@ -1,11 +1,11 @@
 """Tests for Phase 19: Multi-Repo Hook Ergonomics & Dedicated Hook Management (v0.116.0).
 
 Validates:
-1. `soma hook install` porcelain: atomic install, idempotency, user-hook preservation, symlink guards.
-2. `soma hook status` porcelain: inspection of hook state, format detection, interpreter probe, JSON output.
-3. `soma hook uninstall` porcelain: clean block removal, total cleanup if solitary, user-hook preservation.
+1. `aegis hook install` porcelain: atomic install, idempotency, user-hook preservation, symlink guards.
+2. `aegis hook status` porcelain: inspection of hook state, format detection, interpreter probe, JSON output.
+3. `aegis hook uninstall` porcelain: clean block removal, total cleanup if solitary, user-hook preservation.
 4. Dispatcher: install/status/uninstall plus the isolated `safety-gate` (lifecycle phases were cut in v4, D15).
-5. Cross-platform dynamic hook generator: Format 3 portable shell script without transient venv baking.
+5. Hook generator: POSIX sh block that pins the installing interpreter (format 5).
 6. Genesis integration: `--install-hooks` and `--no-hooks` flags.
 7. Smart `soma init` attachment: attaching local repository without clobbering existing global rules.
 """
@@ -27,6 +27,7 @@ from aegis_cli.hooks import (
     _SOMA_HOOK_END,
     _SOMA_HOOK_START,
     AEGIS_HOOK_FORMAT,
+    CURRENT_HOOK_FORMAT_VERSION,
     SOMA_HOOK_FORMAT,
     hook_status,
     install_hook,
@@ -50,7 +51,7 @@ def _setup_git_repo(tmp_path: Path) -> Path:
 class TestHookInstallPorcelain:
     """Tests for soma hook install porcelain."""
 
-    def test_install_creates_hook_with_format_3(self, tmp_path: Path):
+    def test_install_creates_hook_with_current_format(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)
         ok = install_hook(repo)
         assert ok is True
@@ -61,9 +62,10 @@ class TestHookInstallPorcelain:
         assert content.startswith("#!/bin/sh\n")
         assert _AEGIS_HOOK_START in content or _SOMA_HOOK_START in content
         assert _AEGIS_HOOK_END in content or _SOMA_HOOK_END in content
-        assert "hook-format: 4" in content or "hook-format: 3" in content
-        assert "VIRTUAL_ENV" in content
-        assert ".venv" in content
+        assert f"aegis-hook-format: {CURRENT_HOOK_FORMAT_VERSION}" in content
+        # The hook never resolves aegis from the environment or the repository.
+        assert "VIRTUAL_ENV" not in content
+        assert ".venv" not in content
         if os.name != "nt":
             assert hook.stat().st_mode & stat.S_IXUSR
 
@@ -103,7 +105,7 @@ class TestHookInstallPorcelain:
         content = hook.read_text(encoding="utf-8")
         assert "echo pre" in content
         assert "echo post" in content
-        assert "hook-format: 4" in content or "hook-format: 3" in content
+        assert f"aegis-hook-format: {CURRENT_HOOK_FORMAT_VERSION}" in content
         assert "soma-hook-format: 2" not in content
 
     def test_install_refuses_external_symlink_without_force(self, tmp_path: Path):
@@ -170,17 +172,16 @@ class TestHookStatusPorcelain:
         st = hook_status(repo)
         assert st["status"] == "not_installed"
         assert st["is_git_repo"] is True
-        assert st["managed_by_soma"] is False
+        assert st["managed_by_aegis"] is False
 
-    def test_status_reports_installed_and_format_3(self, tmp_path: Path):
+    def test_status_reports_installed_and_current_format(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)
         install_hook(repo)
         st = hook_status(repo)
         assert st["status"] == "installed"
-        assert st["managed_by_soma"] is True
-        assert st["format_version"] in (3, 4)
-        assert "interpreters" in st
-        assert "interpreters" in st
+        assert st["managed_by_aegis"] is True
+        assert st["format_version"] == CURRENT_HOOK_FORMAT_VERSION
+        assert st["interpreter"]["path"] == sys.executable
 
     def test_status_reports_outdated_format(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)
@@ -191,7 +192,7 @@ class TestHookStatusPorcelain:
         )
         st = hook_status(repo)
         assert st["status"] == "outdated"
-        assert st["managed_by_soma"] is True
+        assert st["managed_by_aegis"] is True
         assert st["format_version"] == 2
 
     def test_status_reports_no_git_repository(self, tmp_path: Path):

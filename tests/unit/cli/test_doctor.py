@@ -332,9 +332,15 @@ def test_check_precommit_hook_all_branches(tmp_path, capsys):
     assert _check_precommit_hook(tmp_path) is None
 
     # 2. Current hook
-    hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\n# aegis-hook-format: 4\naegis check --hook\n", encoding="utf-8")
+    from aegis_cli.hooks.management import generate_hook_block
+    hook_file.write_text("#!/bin/sh\n" + generate_hook_block("/usr/bin/python3"), encoding="utf-8")
     assert _check_precommit_hook(tmp_path) is True
     assert "Pre-commit hook is current" in capsys.readouterr().out
+
+    # 2b. Format 4 resolved aegis through PATH and the repo: outdated now
+    hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\n# aegis-hook-format: 4\naegis check --hook\n# <<< aegis pre-commit <<<\n", encoding="utf-8")
+    assert _check_precommit_hook(tmp_path) is False
+    assert "Pre-commit hook uses an old block" in capsys.readouterr().out
 
     # 3. Old hook format
     hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\nsoma checkpoint --pre-commit\n# <<< aegis pre-commit <<<\n", encoding="utf-8")

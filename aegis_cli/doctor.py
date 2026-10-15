@@ -298,40 +298,25 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
     return all_resolvable
 
 
-# ── Pre-commit hook (BUG-047) ────────────────────────────────────────────────
+# ── Pre-commit hook ──────────────────────────────────────────────────────────
 
 def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
-    """False for a pre-BUG-047 hook block, True if current, None if absent."""
-    from aegis_cli.hooks.management import (
-        AEGIS_HOOK_FORMAT,
-        CURRENT_HOOK_FORMAT_VERSION,
-        SOMA_HOOK_FORMAT,
-        _AEGIS_HOOK_START,
-        _SOMA_HOOK_START,
-    )
-    from aegis_core.workspace import resolve_git_hooks_dir
+    """True for a current hook block, False for an older one, None if absent.
 
-    hooks_dir = resolve_git_hooks_dir(project_root)
-    if not hooks_dir:
+    Blocks before the current format resolved aegis through PATH, $VIRTUAL_ENV
+    or the repository's .venv, so repository code could run on commit.
+    """
+    from aegis_cli.hooks.management import hook_status
+
+    st = hook_status(project_root)
+    if not st["managed_by_aegis"]:
         return None
-    hook = hooks_dir / "pre-commit"
-    try:
-        text = hook.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    if _AEGIS_HOOK_START not in text and _SOMA_HOOK_START not in text:
-        return None
-    if (
-        f"{AEGIS_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}" in text
-        or f"{SOMA_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}" in text
-        or AEGIS_HOOK_FORMAT in text
-        or SOMA_HOOK_FORMAT in text
-    ):
-        print(f"  ✅ Pre-commit hook is current ({hook})")
+    if st["status"] == "installed":
+        print(f"  ✅ Pre-commit hook is current ({st['hook_file']})")
         return True
-    print(f"  ❌ Pre-commit hook uses an old block ({hook}).\n"
-          "      It aborts commits when the CLI is not on the\n"
-          "      hook's PATH (BUG-047). Re-run `aegis hook install` to refresh it.")
+    print(f"  ❌ Pre-commit hook uses an old block (format {st['format_version']}, {st['hook_file']}).\n"
+          "      It can run an aegis found on PATH or in the repository instead of\n"
+          "      the one you installed. Re-run `aegis hook install` to refresh it.")
     return False
 
 

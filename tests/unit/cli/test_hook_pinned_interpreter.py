@@ -1,0 +1,247 @@
+"""The git pre-commit hook runs only the aegis that installed it (Citadel finding, H7).
+
+`aegis hook install` bakes one absolute interpreter (sys.executable of the
+installing aegis) and the directory aegis_cli was imported from. The hook runs
+that interpreter with -I, so neither the repository's working tree, nor a
+repo-resident .venv, nor whatever `aegis` or `python3` is first on PATH can
+run in its place. When the interpreter or aegis is gone, the hook fails
+closed with one line naming the fix; `git commit --no-verify` stays the
+documented bypass.
+
+Formerly tests/unit/core/test_precommit_hook_fallback.py (BUG-047), whose
+PATH/venv fallback chain is what made repo-resident code runnable.
+"""
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+import aegis_cli
+from aegis_cli.hooks.management import (
+    CURRENT_HOOK_FORMAT_VERSION,
+    _AEGIS_HOOK_END,
+    _AEGIS_HOOK_START,
+    _SOMA_HOOK_END,
+    _SOMA_HOOK_START,
+    generate_hook_block,
+    hook_status,
+    install_hook,
+)
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="runs the hook with /bin/sh")
+
+AEGIS_ROOT = Path(aegis_cli.__file__).resolve().parent.parent
+
+OLD_BLOCK = (f"{_SOMA_HOOK_START}\n"
+             "# Installed by soma init — runs deterministic quality checks before commit.\n"
+             "soma checkpoint --pre-commit\n"
+             f"{_SOMA_HOOK_END}\n")
+
+
+def _not_found(path) -> str:
+    return (f"aegis pre-commit: aegis not found at {path}; "
+            "run aegis hook install, or commit with --no-verify\n")
+
+
+def git_repo(path: Path) -> Path:
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(path), check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=str(path), check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=str(path), check=True)
+    return path
+
+
+def bare_repo(path: Path) -> Path:
+    (path / ".git" / "hooks").mkdir(parents=True)
+    return path
+
+
+def marker_script(path: Path, marker: Path, exit_code: int = 0) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'#!/bin/sh\necho "$0 $*" >> "{marker}"\nexit {exit_code}\n', encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def run_hook(project: Path, path_dirs, extra_env=None):
+    hook = project / ".git" / "hooks" / "pre-commit"
+    env = {"PATH": os.pathsep.join(str(d) for d in path_dirs), "HOME": str(project.parent)}
+    env.update(extra_env or {})
+    return subprocess.run(["/bin/sh", str(hook)], cwd=str(project), env=env,
+                          capture_output=True, text=True, timeout=120)
+
+
+def test_repo_resident_code_never_runs(tmp_path):
+    """A planted .venv python, a repo-local aegis_cli and PATH impostors are all ignored."""
+    project = git_repo(tmp_path / "p")
+    marker = tmp_path / "marker"
+    marker_script(project / ".venv" / "bin" / "python", marker)
+    marker_script(project / ".venv" / "bin" / "python3", marker)
+    planted = project / "aegis_cli"
+    planted.mkdir()
+    for name in ("__init__.py", "__main__.py", "cli.py"):
+        (planted / name).write_text(
+            f"open({str(marker)!r}, 'a').write('repo aegis_cli imported\\n')\n"
+            "def main(*a, **k):\n    return 0\n",
+            encoding="utf-8",
+        )
+    fakebin = tmp_path / "fakebin"
+    marker_script(fakebin / "aegis", marker)
+    marker_script(fakebin / "python3", marker)
+    (project / "app.py").write_text("def add(a: int, b: int) -> int:\n    return a + b\n", encoding="utf-8")
+    subprocess.run(["git", "add", "app.py"], cwd=str(project), check=True)
+
+    install_hook(project)
+    proc = run_hook(project, [fakebin, "/usr/bin", "/bin"],
+                    {"VIRTUAL_ENV": str(project / ".venv")})
+
+    assert not marker.exists(), marker.read_text(encoding="utf-8")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PASSED" in proc.stdout
+
+
+def test_missing_interpreter_fails_closed_with_one_line(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    gone = tmp_path / "gone dir" / "python3"
+    marker = tmp_path / "marker"
+    fakebin = tmp_path / "fakebin"
+    marker_script(fakebin / "aegis", marker)
+    marker_script(fakebin / "python3", marker)
+    install_hook(project, python=str(gone))
+    proc = run_hook(project, [fakebin, "/usr/bin", "/bin"])
+    assert proc.returncode == 1
+    assert proc.stderr == _not_found(gone)
+    assert not marker.exists()
+
+
+def test_missing_aegis_package_fails_closed_with_one_line(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    empty_root = tmp_path / "uninstalled"
+    empty_root.mkdir()
+    install_hook(project, python=sys.executable, import_root=str(empty_root))
+    proc = run_hook(project, ["/usr/bin", "/bin"])
+    assert proc.returncode == 1
+    assert proc.stderr == _not_found(sys.executable)
+
+
+def test_check_failure_propagates_and_stops_the_hook(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    log = tmp_path / "log"
+    py = marker_script(tmp_path / "py dir'x" / "python", log, exit_code=3)
+    install_hook(project, python=str(py), import_root=str(AEGIS_ROOT))
+    hook = project / ".git" / "hooks" / "pre-commit"
+    hook.write_text(hook.read_text(encoding="utf-8") + "echo user-tail\n", encoding="utf-8")
+    proc = run_hook(project, ["/usr/bin", "/bin"])
+    assert proc.returncode == 3
+    assert "user-tail" not in proc.stdout
+    # A space and a quote in the path prove the interpreter is shell-quoted;
+    # -I keeps the working tree off sys.path.
+    call = log.read_text(encoding="utf-8")
+    assert call.startswith(f"{py} -I -c ")
+    assert call.rstrip("\n").endswith(f"{AEGIS_ROOT} check --hook")
+
+
+def test_block_names_no_path_or_repo_relative_interpreter():
+    block = generate_hook_block("/opt/py/bin/python3", import_root="/opt/site")
+    for unsafe in ("command -v", "$PWD", ".venv", "VIRTUAL_ENV", "soma"):
+        assert unsafe not in block
+    assert f"aegis-hook-format: {CURRENT_HOOK_FORMAT_VERSION}" in block
+    exec_lines = [ln.strip() for ln in block.splitlines() if ln.strip().startswith("exec ")]
+    assert len(exec_lines) == 1
+    tokens = shlex.split(exec_lines[0])
+    assert tokens[2] == "-I"
+
+
+def test_default_interpreter_and_import_root_are_the_installing_aegis(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    install_hook(project)
+    text = (project / ".git" / "hooks" / "pre-commit").read_text(encoding="utf-8")
+    assert f"AEGIS_PYTHON={shlex.quote(sys.executable)}\n" in text
+    assert f"AEGIS_PATH={shlex.quote(str(AEGIS_ROOT))}\n" in text
+
+
+def test_hook_is_posix_sh(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    install_hook(project, python="/usr/bin/python3")
+    text = (project / ".git" / "hooks" / "pre-commit").read_text(encoding="utf-8")
+    assert text.startswith("#!/bin/sh\n")
+    for bashism in ("[[", "function ", "$(<", "local "):
+        assert bashism not in text
+
+
+def test_reinstall_replaces_old_block_in_place(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    hook = project / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho user-before\n\n" + OLD_BLOCK + "echo user-after\n",
+                    encoding="utf-8")
+    install_hook(project, python="/usr/bin/python3")
+    text = hook.read_text(encoding="utf-8")
+    assert text.count(_AEGIS_HOOK_START) == 1 and text.count(_AEGIS_HOOK_END) == 1
+    assert _SOMA_HOOK_START not in text
+    assert text.startswith("#!/bin/sh\necho user-before\n\n")
+    assert text.endswith(_AEGIS_HOOK_END + "\necho user-after\n")
+    assert "check --hook" in text
+    # Idempotent: a second run is byte-identical.
+    install_hook(project, python="/usr/bin/python3")
+    assert hook.read_text(encoding="utf-8") == text
+
+
+def test_unterminated_block_is_left_alone(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    hook = project / ".git" / "hooks" / "pre-commit"
+    broken = "#!/bin/sh\n" + _SOMA_HOOK_START + "\nsoma checkpoint --pre-commit\necho mine\n"
+    hook.write_text(broken, encoding="utf-8")
+    install_hook(project, python="/usr/bin/python3")
+    assert hook.read_text(encoding="utf-8") == broken
+
+
+def test_status_reports_the_pinned_interpreter(tmp_path):
+    project = bare_repo(tmp_path / "p")
+    install_hook(project, python=sys.executable)
+    st = hook_status(project)
+    assert st["status"] == "installed"
+    assert st["interpreter"] == {"path": sys.executable, "exists": True}
+
+    gone = str(tmp_path / "gone" / "python3")
+    install_hook(project, python=gone)
+    assert hook_status(project)["interpreter"] == {"path": gone, "exists": False}
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
+def test_doctor_flags_every_earlier_format_as_outdated(tmp_path, capsys, version):
+    """Formats 1-4 resolved aegis through PATH or the repo; re-install to pin it."""
+    from aegis_cli.doctor import _check_precommit_hook
+
+    project = bare_repo(tmp_path / "p")
+    (project / ".git" / "hooks" / "pre-commit").write_text(
+        f"#!/bin/sh\n{_AEGIS_HOOK_START}\n# aegis-hook-format: {version}\nexec aegis check --hook\n{_AEGIS_HOOK_END}\n",
+        encoding="utf-8",
+    )
+    assert _check_precommit_hook(project) is False
+    assert "aegis hook install" in capsys.readouterr().out
+
+
+def test_doctor_flags_unversioned_soma_block(tmp_path, capsys):
+    from aegis_cli.doctor import _check_precommit_hook
+
+    project = bare_repo(tmp_path / "p")
+    (project / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\n" + OLD_BLOCK, encoding="utf-8")
+    assert _check_precommit_hook(project) is False
+    assert "aegis hook install" in capsys.readouterr().out
+
+
+def test_doctor_accepts_current_hook(tmp_path):
+    from aegis_cli.doctor import _check_precommit_hook
+
+    project = bare_repo(tmp_path / "p")
+    install_hook(project, python="/usr/bin/python3")
+    assert _check_precommit_hook(project) is True
+
+
+def test_doctor_silent_without_hook(tmp_path):
+    from aegis_cli.doctor import _check_precommit_hook
+
+    assert _check_precommit_hook(bare_repo(tmp_path / "p")) is None
