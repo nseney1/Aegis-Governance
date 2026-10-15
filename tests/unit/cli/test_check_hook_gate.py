@@ -6,6 +6,7 @@ These run the real `check --hook` path against staged files in a temp repo.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -74,6 +75,33 @@ def test_json_mode_reports_the_blocking_check(repo, capsys):
     out = capsys.readouterr().out
     assert '"passed": false' in out
     assert '"import_guard"' in out
+
+
+def _entries_naming(node, name):
+    if isinstance(node, dict):
+        if name in (node.get("tool"), node.get("check")):
+            yield node
+        for value in node.values():
+            yield from _entries_naming(value, name)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _entries_naming(value, name)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=json.JSONDecodeError,
+    reason="check --hook --json prints two JSON documents (checkpoint, then Layer 1); "
+           "the one-document fix belongs to aegis_cli/check.py (lane b1-verify). Drop this mark with it.",
+)
+def test_json_mode_stdout_is_one_document_naming_the_blocking_check(repo, capsys):
+    """The removed `hook pre-commit --json` printed one parseable document; `check --hook --json` must too."""
+    _stage(repo, "aegis_core/bad_mod.py", "import google.genai\n\ndef run():\n    return 1\n")
+    assert main(["check", "--hook", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["passed"] is False
+    blocking = [e for e in _entries_naming(payload, "import_guard") if e.get("verdict") is not True]
+    assert blocking, payload
 
 
 def test_gate_rule_under_aegis_rules_blocks_a_forbid_ast_hit(repo, capsys):
