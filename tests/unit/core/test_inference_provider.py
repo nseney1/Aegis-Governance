@@ -6,7 +6,9 @@ The command gets the prompt on stdin and its stdout is the reply. It comes from
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import subprocess
 import sys
 import textwrap
 import time
@@ -52,7 +54,9 @@ def fake_llm(tmp_path: Path) -> Path:
 
 
 def _cmd(script: Path, *args: str) -> str:
-    return shlex.join([sys.executable, str(script), *args])
+    """The command line as a user would write it here: POSIX shell quoting, or Windows double quotes."""
+    argv = [sys.executable, str(script), *args]
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
 
 
 class TestCommandBackend:
@@ -62,9 +66,9 @@ class TestCommandBackend:
 
     def test_command_is_split_into_argv_without_a_shell(self, fake_llm, tmp_path):
         marker = tmp_path / "pwned"
-        raw = _cmd(fake_llm, "argv") + f" 'a;b' '$HOME' '; touch {marker}'"
-        reply = resolve_backend(raw, environ={}).generate("x")
-        assert reply.strip() == f'["a;b", "$HOME", "; touch {marker}"]'
+        args = ["a;b", "$HOME", f"; touch {marker}"]
+        reply = resolve_backend(_cmd(fake_llm, "argv", *args), environ={}).generate("x")
+        assert json.loads(reply) == args
         assert not marker.exists()
 
     def test_non_zero_exit_raises_with_exit_code_and_stderr(self, fake_llm):
@@ -127,6 +131,33 @@ class TestResolveBackend:
     def test_unbalanced_quotes_are_an_error(self):
         with pytest.raises(LLMCommandError, match="AEGIS_LLM_CMD|--llm-cmd"):
             resolve_backend("claude -p 'unterminated", environ={})
+
+    def test_windows_command_keeps_the_backslashes_of_native_paths(self, monkeypatch):
+        # POSIX shlex reads '\' as an escape: C:\tools\llm.exe became C:toolsllm.exe.
+        monkeypatch.setattr("aegis_core.inference_provider.os.name", "nt")
+        backend = resolve_backend(None, environ={ENV_VAR: r"C:\Python312\python.exe C:\tools\llm.py -p"})
+        assert backend.argv == [r"C:\Python312\python.exe", r"C:\tools\llm.py", "-p"]
+
+    def test_windows_command_groups_a_double_quoted_path_with_spaces(self, monkeypatch):
+        monkeypatch.setattr("aegis_core.inference_provider.os.name", "nt")
+        backend = resolve_backend(r'"C:\Program Files\nodejs\node.exe" D:\tools\llm.js --json', environ={})
+        assert backend.argv == [r"C:\Program Files\nodejs\node.exe", r"D:\tools\llm.js", "--json"]
+
+    def test_windows_command_accepts_posix_single_quoting(self, monkeypatch):
+        # What shlex.join (and docs written for a POSIX shell) produce for these paths.
+        monkeypatch.setattr("aegis_core.inference_provider.os.name", "nt")
+        backend = resolve_backend(r"'C:\Program Files\llm.exe' 'C:\tools\x.py' ship", environ={})
+        assert backend.argv == [r"C:\Program Files\llm.exe", r"C:\tools\x.py", "ship"]
+
+    def test_windows_command_with_unbalanced_quotes_is_an_error(self, monkeypatch):
+        monkeypatch.setattr("aegis_core.inference_provider.os.name", "nt")
+        with pytest.raises(LLMCommandError, match="AEGIS_LLM_CMD|--llm-cmd"):
+            resolve_backend(r'"C:\Program Files\llm.exe -p', environ={})
+
+    def test_posix_command_honors_shell_quoting_and_escapes(self, monkeypatch):
+        monkeypatch.setattr("aegis_core.inference_provider.os.name", "posix")
+        backend = resolve_backend(r"my\ llm -p 'two words'", environ={})
+        assert backend.argv == ["my llm", "-p", "two words"]
 
     def test_missing_backend_message_names_both_sources(self):
         assert MISSING_BACKEND == "Layer 2 needs --llm-cmd or AEGIS_LLM_CMD"
