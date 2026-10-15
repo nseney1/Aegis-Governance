@@ -50,6 +50,31 @@ def test_removed_name_exits_2_with_one_pointer_line(argv, line, capsys):
     assert captured.err == line + "\n"
 
 
+HOST_HOOK_POINTER = "no replacement; remove it from your agent host's hook config"
+
+
+@pytest.mark.parametrize(
+    "argv, line",
+    [
+        (["hook", "pre-commit"], "aegis hook pre-commit was removed in v4: use aegis check --hook"),
+        (["hook", "pre-commit", "--strict"], "aegis hook pre-commit was removed in v4: use aegis check --hook"),
+        (["hook", "pre-invocation"], f"aegis hook pre-invocation was removed in v4: {HOST_HOOK_POINTER}"),
+        (["hook", "governance-monitor"], f"aegis hook governance-monitor was removed in v4: {HOST_HOOK_POINTER}"),
+        (["hook", "immune-init"], f"aegis hook immune-init was removed in v4: {HOST_HOOK_POINTER}"),
+        (["hook", "session-close"], f"aegis hook session-close was removed in v4: {HOST_HOOK_POINTER}"),
+        (["hook", "stop"], f"aegis hook stop was removed in v4: {HOST_HOOK_POINTER}"),
+        (["hook", "post-session", "--transcript", "t.jsonl"],
+         f"aegis hook post-session was removed in v4: {HOST_HOOK_POINTER}"),
+    ],
+)
+def test_removed_hook_phase_exits_2_with_one_pointer_line(argv, line, capsys):
+    rc = main(argv)
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err == line + "\n"
+
+
 def test_agent_without_a_known_action_points_at_both_replacements(capsys):
     assert main(["agent"]) == 2
     err = capsys.readouterr().err

@@ -296,7 +296,6 @@ class TestInitIntegration:
 
 
 def test_main_dispatches_through_the_registry(tmp_path, monkeypatch):
-    import argparse
     from aegis_cli.base import CommandCategory, AegisCommand
     from aegis_cli.registry import CommandRegistry
 

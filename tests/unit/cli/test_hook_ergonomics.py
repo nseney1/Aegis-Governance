@@ -4,7 +4,7 @@ Validates:
 1. `soma hook install` porcelain: atomic install, idempotency, user-hook preservation, symlink guards.
 2. `soma hook status` porcelain: inspection of hook state, format detection, interpreter probe, JSON output.
 3. `soma hook uninstall` porcelain: clean block removal, total cleanup if solitary, user-hook preservation.
-4. Hybrid dispatcher: backward compatibility with legacy lifecycle phases (`safety-gate`, `pre-commit`, etc.).
+4. Dispatcher: install/status/uninstall plus the isolated `safety-gate` (lifecycle phases were cut in v4, D15).
 5. Cross-platform dynamic hook generator: Format 3 portable shell script without transient venv baking.
 6. Genesis integration: `--install-hooks` and `--no-hooks` flags.
 7. Smart `soma init` attachment: attaching local repository without clobbering existing global rules.
@@ -203,7 +203,7 @@ class TestHookStatusPorcelain:
 
 
 class TestHybridDispatcher:
-    """Tests for hybrid routing between porcelain actions and lifecycle phases."""
+    """Tests for routing `aegis hook` actions."""
 
     def test_dispatch_porcelain_install(self, tmp_path: Path):
         repo = _setup_git_repo(tmp_path)
@@ -249,25 +249,13 @@ class TestHybridDispatcher:
         assert rc == 0
         assert not (repo / ".git" / "hooks" / "pre-commit").exists()
 
-    def test_dispatch_legacy_lifecycle_safety_gate(self):
+    def test_dispatch_safety_gate(self):
         args = argparse.Namespace(
             hook_action="safety-gate",
             phase="safety-gate",
             cmd="git status",
             workspace=None,
             json=False,
-        )
-        rc = run_hook(args)
-        assert rc == 0
-
-    def test_dispatch_legacy_lifecycle_pre_commit(self, tmp_path: Path):
-        repo = _setup_git_repo(tmp_path)
-        args = argparse.Namespace(
-            hook_action="pre-commit",
-            phase="pre-commit",
-            workspace=str(repo),
-            strict=False,
-            json=True,
         )
         rc = run_hook(args)
         assert rc == 0

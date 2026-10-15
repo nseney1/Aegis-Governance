@@ -478,104 +478,6 @@
           }
         ],
         "commands": {
-          "governance-monitor": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              }
-            ]
-          },
-          "immune-init": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              }
-            ]
-          },
           "install": {
             "aliases": [],
             "arguments": [
@@ -647,174 +549,6 @@
               }
             ]
           },
-          "post-session": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "default": null,
-                "dest": "transcript",
-                "flags": [
-                  "--transcript"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              }
-            ]
-          },
-          "pre-commit": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "strict",
-                "flags": [
-                  "--strict"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              }
-            ]
-          },
-          "pre-invocation": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              }
-            ]
-          },
           "safety-gate": {
             "aliases": [],
             "arguments": [
@@ -875,105 +609,7 @@
               }
             ]
           },
-          "session-close": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              }
-            ]
-          },
           "status": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              }
-            ]
-          },
-          "stop": {
             "aliases": [],
             "arguments": [
               {
@@ -2250,7 +1886,7 @@
     {
       "aliases": [],
       "category": "Plumbing",
-      "help": "Manage and run cross-platform lifecycle hooks",
+      "help": "Install, inspect or remove the git pre-commit hook",
       "name": "hook"
     },
     {
@@ -2300,6 +1936,13 @@
     "detect": "use aegis doctor",
     "drivers": "use aegis doctor",
     "handoff": "no replacement",
+    "hook governance-monitor": "no replacement; remove it from your agent host's hook config",
+    "hook immune-init": "no replacement; remove it from your agent host's hook config",
+    "hook post-session": "no replacement; remove it from your agent host's hook config",
+    "hook pre-commit": "use aegis check --hook",
+    "hook pre-invocation": "no replacement; remove it from your agent host's hook config",
+    "hook session-close": "no replacement; remove it from your agent host's hook config",
+    "hook stop": "no replacement; remove it from your agent host's hook config",
     "install": "use aegis init --host",
     "languages": "use aegis doctor",
     "report": "aegis status shows rule trigger counts; outcomes are recorded with the MCP tool aegis_report_outcome",

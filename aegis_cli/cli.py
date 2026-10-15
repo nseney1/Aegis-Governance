@@ -18,8 +18,12 @@ __all__ = ["main", "AegisParser", "REMOVED_COMMANDS"]
 
 PROG = "aegis"
 
+_HOST_HOOK = "no replacement; remove it from your agent host's hook config"
+
 # "name" or "name action" -> what to use instead. The longest match wins, so
-# `aegis agent scan` and `aegis agent record` get their own pointers.
+# `aegis agent scan` gets its own pointer, and a removed action of a live
+# command (`aegis hook session-close`, still called by v3 host hook configs)
+# gets one too.
 REMOVED_COMMANDS: Dict[str, str] = {
     "install": "use aegis init --host",
     "system": "use aegis doctor",
@@ -44,6 +48,13 @@ REMOVED_COMMANDS: Dict[str, str] = {
     "handoff": "no replacement",
     "verify": "use aegis check",
     "checkpoint": "use aegis check",
+    "hook pre-commit": "use aegis check --hook",
+    "hook pre-invocation": _HOST_HOOK,
+    "hook governance-monitor": _HOST_HOOK,
+    "hook immune-init": _HOST_HOOK,
+    "hook session-close": _HOST_HOOK,
+    "hook stop": _HOST_HOOK,
+    "hook post-session": _HOST_HOOK,
 }
 
 # Global options that take a value, so the removed-name scan can skip it.
@@ -92,13 +103,15 @@ def removed_command_pointer(argv: List[str]) -> Optional[str]:
     is cut in another module keeps working until that module drops it.
     """
     words = _positionals(argv)
-    if not words or words[0] not in REMOVED_COMMANDS:
+    if not words:
         return None
-    if get_default_registry().get(words[0]) is not None:
+    pair = " ".join(words[:2])
+    if len(words) > 1 and pair in REMOVED_COMMANDS:
+        name = pair
+    elif words[0] in REMOVED_COMMANDS and get_default_registry().get(words[0]) is None:
+        name = words[0]
+    else:
         return None
-    name = words[0]
-    if len(words) > 1 and f"{name} {words[1]}" in REMOVED_COMMANDS:
-        name = f"{name} {words[1]}"
     return f"{PROG} {name} was removed in v4: {REMOVED_COMMANDS[name]}"
 
 
