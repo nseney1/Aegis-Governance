@@ -6,7 +6,7 @@ This page explains where Aegis's rules came from, what the project measured, wha
 
 **How to read the numbers.** Every number here is one of two kinds:
 
-- **Re-derived**: computed by a command run at commit `895bbf5`; every such command is listed under [Sources](#sources).
+- **Re-derived**: computed by a command run at commit `895bbf5`; every such command is listed under [Sources](#sources). Where a figure is a difference of two printed values (a time span or a day count), the comment next to the command says so.
 - **Quoted**: taken from a document, with its source and a caveat. Several sources were deleted from the tree in v4; git keeps them. Read one from the v3.3.0 release tag, for example `git show v3.3.0:docs/project/METRICS.md`.
 
 ## 1. The problem: a rules file is a gentleman's agreement
@@ -25,7 +25,7 @@ So Aegis tries to do three things, in this order of trust:
 
 1. Check deterministically whatever can be checked, in CI on the exact commit.
 2. Put the relevant rule in front of the agent at the moment it edits a matching file, instead of hoping it remembers a long instruction file.
-3. Keep a local record of outcomes, so a rule that never helps can be found and removed.
+3. Keep a local record of outcomes, so a rule that never fires can be found and pruned.
 
 ## 2. Where the rules came from
 
@@ -49,7 +49,7 @@ The itemized rows sum to 473 steps (63% of the waste). The other 276 steps happe
 
 ## 3. Design principles
 
-Principles C1–C6 emerged from that work and are listed in the evolution log ("Design Principles"). C7 was learned the hard way and written down in ADR 0005. The v4 build sheet cites them by these keys.
+Principles C1–C6 emerged from that work and are listed in the evolution log ("Design Principles"). C7 was learned the hard way: the C7 key is defined in the [v4 build sheet](specs/v4-build-sheet.md), which cites all seven by these keys, and rests on [ADR 0005](adr/0005-v4-plan-of-record.md) H6 and AD-1.
 
 | Key | Principle | In one sentence |
 |---|---|---|
@@ -78,7 +78,7 @@ In v3 the first one was claimed but not delivered: an MCP caller could write tru
 | Same project, weak rules vs "full governance" | 27.6% of 547 steps vs 1.1% of 1,325 steps | `METRICS.md` "Live A/B Validation" | two sessions, one project |
 | 66 masked production sessions, ~7 weeks | rules deployed without skills (an installer gap), so the review steps the rules named could not run | `METRICS.md` "Expanded Dataset Analysis" | observational, different model family |
 
-Percentages are re-derived from the quoted counts. Everything else in the table is quoted.
+The first two percentages are re-derived from the quoted counts. The A/B percentages are quoted: `METRICS.md` gives them with total steps but not the wasted-step counts. Everything else in the table is quoted.
 
 **Limitations** (the first four are paraphrased from the project's research abstract, `docs/research/abstract.md` at `v3.3.0`):
 
@@ -86,7 +86,7 @@ Percentages are re-derived from the quoted counts. Everything else in the table 
 - Waste classification lacked multi-rater reliability.
 - The full rule lifecycle was never validated end to end against human assessment.
 - The fitness function optimized for precision and ignored recall (false negatives).
-- The "A/B" compares two sessions doing different work at different times, not a controlled experiment.
+- The "A/B" compares two sessions of the same project (TAB AI) at different times, and the two sessions need not have faced the same task; it is not a controlled experiment.
 - Outcome signals in v3 could be written by the agent being measured (review H4), so any fitness number from that period is self-graded.
 - Token figures in the old metrics were estimated with a word-count ratio calibrated for one model family, not measured with a tokenizer. This page quotes none of them.
 
@@ -169,10 +169,10 @@ Each v4 decision carries a falsifiable prediction (principle C6). A failed predi
 |---|---|---|---|
 | AD-1 ledger only | Zero "tampered rule" exclusions and zero lost increments in a 3-process test | After real sessions, `git status --porcelain .aegis/rules` lists no change made by Aegis; `python3 -m pytest tests/integration/test_no_rule_writes.py` passes; the 3-process ledger test passes | Partly. The no-rule-writes test exists; the 3-process ledger test lands with v4.0-b (wave B2) and is not in the tree yet |
 | AD-2 CI attestation | No release tag without a green CI run on the same SHA | For each tag: `python3 .github/scripts/ci_green.py "$(git rev-list -n1 <tag>)"` exits 0 (needs the `gh` CLI) | Yes |
-| AD-3 layered core | Duplicate implementations go to 0, and the import-boundary test stays green | Run the import-boundary test with the suite | No. The boundary test lands with v4.0-b (wave B2) and is not in the tree yet |
+| AD-3 layered core | Duplicate implementations go to 0, and the import-boundary test stays green | `python3 -m pytest tests/integration/test_mulch_invariants.py`; the full layered boundary test once it lands | Partly. `tests/integration/test_mulch_invariants.py` checks that `aegis_core` imports no adapter package and that the CLI and MCP server never import the SDK; the full layered boundary test lands with v4.0-b (wave B2) |
 | AD-4 workspace binding | In 3 real sessions per host, every scan resolves to the intended repository and none to `$HOME` | For each scan, compare the workspace root the resolver reports with the repository you were in | No. The resolver lands with v4.0-c (wave C) and is not in the tree yet |
 | AD-5 versioned formats | The next major version ships without a clean-slate purge | Its CHANGELOG entry gives an `aegis migrate` path, not a purge, for every on-disk format it changes | Partly. `aegis migrate` exists today only as a diagnostic for legacy `.soma/` workspaces; format versions land with v4.0-b (wave B2) |
-| AD-6 small contract | The contract changes in under 10% of PRs; ghost CLI flags drop to 0 | `git log --oneline -- tests/contract/` against merged PRs (`python3 -m pytest tests/contract` fails on any CLI or MCP surface change until the snapshot is regenerated in the same PR) | Partly. The snapshot tests exist; no test counts ghost flags (options the code reads but the parser never registers) across the CLI yet |
+| AD-6 small contract | The contract changes in under 10% of PRs; ghost CLI flags drop to 0 | `git log --oneline -- tests/contract/` against merged PRs (`python3 -m pytest tests/contract` fails on any CLI or MCP surface change until the snapshot is regenerated in the same PR) | Partly. Ghost flags are options the parser registers and `--help` advertises that the code ignores or does not honor, such as the removed `rule create --from-description`. The snapshot tests list every registered flag, and the flags v4 removed have rejection tests, but nothing yet checks that each registered flag is read |
 | AD-7 git-native team | In 20 multi-lane sessions, no cross-lane write conflict reaches a merge | Merge history; prune leases if none is denied in 30 days | No. `aegis team` and leases are v4.1 (wave D) |
 | AD-9 bootstrap and JIT | Scan-before-edit rate of at least 80% on each Phase-1 host after 3 sessions | The per-host scan-before-edit rate the server records | No. The metric lands with v4.0-c (wave C) and is not in the tree yet |
 
@@ -210,11 +210,11 @@ The trade Aegis does not make: it does not claim enforcement it lacks. CI on eve
 **Re-derived** (run from the repository root at `895bbf5`):
 
 ```sh
-python3 -c "print(749/1339, 180+110+103+50+30, 749-473, 1317/7015)"   # 0.559, 473, 276, 0.188
-git log -1 --format='%h %ci' 2c85f58; git log -1 --format='%h %ci' 6f47f13   # 02:50 and 23:30 on 2026-10-14
+python3 -c "print(749/1339, 180+110+103+50+30, 749-473, 473/749, 1317/7015, 1-22188/39426)"   # 0.559, 473, 276, 0.632, 0.188, 0.437
+git log -1 --format='%h %ci' 2c85f58; git log -1 --format='%h %ci' 6f47f13   # 02:50 and 23:30 on 2026-10-14; 20 h 40 min is their difference
 git rev-list --count 9e4d976; git tag | wc -l                                  # 850, 94
-git log --reverse --format=%ci 9e4d976 | head -1                               # 2026-09-26 (19 days to 2026-10-14)
-git for-each-ref --format='%(creatordate:iso) %(refname:short)' refs/tags/v3.3.0   # 23:14, 16 min before 6f47f13
+git log --reverse --format=%ci 9e4d976 | head -1                               # 2026-09-26; to 2026-10-14 is 19 calendar days, counting both ends
+git for-each-ref --format='%(creatordate:iso) %(refname:short)' refs/tags/v3.3.0   # 23:14; 16 min is the difference to 6f47f13 (23:30)
 python3 -c "import aegis_mcp.registry as r; print(len(r.TOOL_DEFINITIONS))"   # 4
 # Python lines and files under aegis_core, aegis_cli, aegis_mcp, aegis_sdk (all lines, blank and comment lines included):
 for rev in 9e4d976 895bbf5; do
