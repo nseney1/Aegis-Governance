@@ -383,6 +383,12 @@ def run_layer1(
                 norm_ast = ast_cache[full_path]
                 if norm_ast is None:  # no AST driver for this file type: rule does not apply
                     continue
+                violations: list[str] = []
+                if not isinstance(norm_ast, ASTExtractionError):
+                    try:
+                        violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                    except ASTExtractionError as exc:  # decorators had to be re-read from disk
+                        norm_ast = exc
                 if isinstance(norm_ast, ASTExtractionError):
                     # Fail closed: a gate rule that cannot read the file must not pass it.
                     results.append(
@@ -394,7 +400,6 @@ def run_layer1(
                         )
                     )
                     continue
-                violations = evaluate_forbid_ast(norm_ast, forbid_spec)
                 if violations:
                     results.append(
                         VerificationResult(

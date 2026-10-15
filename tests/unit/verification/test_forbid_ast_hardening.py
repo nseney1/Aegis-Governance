@@ -11,6 +11,7 @@ instead of being skipped.
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 import pytest
 
@@ -702,3 +703,311 @@ class TestDynamicImportResolution:
         doc = evaluate_forbid_ast.__doc__
         for phrase in ("computed module names", "getattr", "rebinding"):
             assert phrase in doc
+
+
+# ── Review round 3, finding 1 (out of lane scope): Layer 1 aborts on latin-1 ───
+
+class TestLayer1LegacyEncodingGap:
+    @pytest.mark.xfail(
+        strict=True,
+        raises=UnicodeDecodeError,
+        reason=(
+            "Layer 1's call_graph/import_guard read .py files as strict UTF-8 and raise before "
+            "the forbid_ast loop (runner.py, import_guard.py and hooks/runtime.py are outside "
+            "lane a1-forbid-ast). Remove this marker when the follow-up lane lands."
+        ),
+    )
+    def test_latin1_module_reaches_forbid_ast_through_layer1(self, ws: Path):
+        (ws / "src" / "legacy.py").write_bytes(_LATIN1_SOURCE + b"import subprocess\nsubprocess.run(['ls'])\n")
+        _, results = _forbid_results(ws, "src/legacy.py")
+        assert [(r.verdict, r.detail) for r in results] == [
+            (
+                False,
+                "Forbidden import 'pickle' matched rule forbid_ast.imports; "
+                "Forbidden call 'subprocess.run' matched rule forbid_ast.calls",
+            )
+        ]
+
+
+# ── Review round 3, finding 2: binding fan-out must stay linear ───────────────
+
+def _generated(*blocks: list[str]) -> str:
+    return "\n".join(line for block in blocks for line in block) + "\n"
+
+
+FAN_OUT_SHAPES = [
+    pytest.param(
+        [f"from m{i} import x{i} as n" for i in range(1500)], ["n()"] * 15000,
+        id="one-name-bound-1500x-called-15000x",
+    ),
+    pytest.param(
+        [f"import m{i} as n" for i in range(2000)], [f"n.a{j}()" for j in range(20000)],
+        id="one-name-bound-2000x-20000-distinct-attributes",
+    ),
+    pytest.param(
+        [f"import m{i}.sub as n" for i in range(1000)] + [f"from p{i} import m{i}" for i in range(1000)],
+        [f"n.a{j}()" for j in range(10000)],
+        id="dotted-originals-requalified",
+    ),
+    pytest.param(
+        [f"import m{i} as n" for i in range(2000)],
+        [f"@n.d{j}\ndef f{j}():\n    pass" for j in range(5000)],
+        id="decorators-on-a-name-bound-2000x",
+    ),
+]
+
+
+class TestBindingFanOutStaysLinear:
+    """A name bound N times and referenced M times costs about N + M, not N * M."""
+
+    @pytest.mark.parametrize("bindings, uses", FAN_OUT_SHAPES)
+    def test_generated_file_is_checked_within_budget(self, bindings, uses):
+        code = _generated(bindings, ["import subprocess as n"], uses, ["n.run(['ls'])"])
+        spec = {"calls": ["subprocess.run", "os.system"], "decorators": ["functools.lru_cache"]}
+        start = time.perf_counter()
+        violations = _violations(code, spec)
+        elapsed = time.perf_counter() - start
+        assert violations == ["Forbidden call 'subprocess.run' matched rule forbid_ast.calls"]
+        assert elapsed < 5.0, f"forbid_ast took {elapsed:.1f}s on a {len(code) // 1024} KiB file"
+
+
+# Reference semantics, written out longhand: a reference ``head + rest`` (the head ends at
+# the first "." or "::") is spelled as written and with each alias original in place of the
+# head; each spelling is also qualified through the import map (an exact key, else its part
+# before the first "."); a pattern matches a spelling it equals or is a dot-suffix of.
+def _reference_split(ref: str) -> tuple[str, str]:
+    cuts = [i for i in (ref.find("."), ref.find("::")) if i != -1]
+    cut = min(cuts) if cuts else len(ref)
+    return ref[:cut], ref[cut:]
+
+
+def _reference_spellings(ref: str, quals: dict, aliases: dict, *, calls: bool) -> list[str]:
+    head, rest = _reference_split(ref)
+    out = []
+    for spelled in [ref, *(orig + rest for orig in aliases.get(head, []))]:
+        out.append(spelled)
+        if spelled in quals:
+            out.extend(quals[spelled])
+        elif calls and "." in spelled:
+            first, tail = spelled.split(".", 1)
+            out.extend(f"{q}.{tail}" for q in quals.get(first, []))
+    return out
+
+
+def _reference_violations(quals, aliases, call_targets, decorators, spec) -> list[str]:
+    def hit(refs, pattern, calls):
+        return any(
+            s == pattern or s.endswith("." + pattern)
+            for ref in refs
+            for s in _reference_spellings(ref, quals, aliases, calls=calls)
+        )
+
+    out = [f"Forbidden call '{p}' matched rule forbid_ast.calls" for p in spec["calls"] if hit(call_targets, p, True)]
+    out += [
+        f"Forbidden decorator '{p}' matched rule forbid_ast.decorators"
+        for p in spec["decorators"]
+        if hit(decorators, p, False)
+    ]
+    return out
+
+
+_NAMES = ["n", "x", "a", "b", "m", "os", "run", "sp", "a.b", "pkg.m", "x::y", "Cmd", "Command"]
+_RESTS = ["", ".f", ".run", ".a.b", "::new", "::x.y", ".b::c", ".system"]
+
+
+class TestSpellingSemantics:
+    def test_evaluation_agrees_with_reference_spellings_on_random_inputs(self):
+        import random
+
+        rng = random.Random(20261015)
+        for case in range(4000):
+            quals: dict[str, list[str]] = {}
+            aliases: dict[str, list[str]] = {}
+            imports = []
+            for _ in range(rng.randint(0, 6)):
+                src, key = rng.choice(_NAMES[:10]), rng.choice(_NAMES)
+                if key != src:
+                    imports.append(ImportNode(source=src, imported_symbols=(key,)))
+                    if f"{src}.{key}" not in quals.setdefault(key, []):
+                        quals[key].append(f"{src}.{key}")
+            for _ in range(rng.randint(0, 6)):
+                bound, orig = rng.choice(_NAMES[:8] + ["Cmd", "p"]), rng.choice(_NAMES)
+                imports.append(ImportNode(source="", aliases=((bound, orig),)))
+                if orig not in aliases.setdefault(bound, []):
+                    aliases[bound].append(orig)
+            targets = [rng.choice(_NAMES + ["Cmd", "p"]) + rng.choice(_RESTS) for _ in range(rng.randint(1, 4))]
+            decorators = [rng.choice(_NAMES) + rng.choice(_RESTS[:4]) for _ in range(rng.randint(0, 3))]
+            spec = {
+                "calls": [rng.choice(_NAMES) + rng.choice(_RESTS) for _ in range(3)],
+                "decorators": [rng.choice(_NAMES) + rng.choice(_RESTS[:4]) for _ in range(2)],
+            }
+            spec["calls"] = list(dict.fromkeys(spec["calls"]))
+            spec["decorators"] = list(dict.fromkeys(spec["decorators"]))
+            norm_ast = NormalizedAST(
+                file_path="<generated>",
+                imports=imports,
+                call_sites=[CallSiteNode(target=t) for t in targets],
+                metadata={"decorators": decorators},
+            )
+            expected = _reference_violations(quals, aliases, targets, decorators, spec)
+            assert evaluate_forbid_ast(norm_ast, spec) == expected, (case, imports, targets, decorators, spec)
+
+
+# ── Review round 3, finding 3: nesting depth must not make a file unverifiable ──
+
+class TestDeepNestingIsChecked:
+    """Any file CPython parses is checked: extraction must not recurse once per nesting level."""
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "x = a" + ".b()" * 1000 + "\n",
+            "x = " + " + ".join(["'s'"] * 2000) + "\n",
+            "x = (" + "1 if c else " * 1000 + "2)\n",
+            "@" + "a." * 1000 + "b\ndef f():\n    pass\n",
+            "__import__('os')" + ".path" * 5 + ".x()" * 1000 + "\n",
+        ],
+        ids=["method-chain-1000", "concatenation-2000", "conditional-1000", "decorator-attribute-1000", "dynamic-import-chain-1000"],
+    )
+    def test_long_generated_expression_does_not_hide_violation(self, prefix):
+        code = prefix + "import subprocess\nsubprocess.run(['ls'])\n"
+        assert _violations(code, {"calls": ["subprocess.run"]}) == [
+            "Forbidden call 'subprocess.run' matched rule forbid_ast.calls"
+        ]
+
+    def test_call_inside_long_chain_on_dynamic_import_is_reported(self):
+        code = "__import__('subprocess').run(['ls'])" + ".strip()" * 1000 + "\n"
+        assert _violations(code, {"calls": ["subprocess.run"], "imports": ["subprocess"]}) == [
+            "Forbidden import 'subprocess' matched rule forbid_ast.imports",
+            "Forbidden call 'subprocess.run' matched rule forbid_ast.calls",
+        ]
+
+    def test_deep_decorator_name_is_resolved(self):
+        code = "@" + "a." * 1000 + "lru_cache\ndef f():\n    pass\n"
+        assert _violations(code, {"decorators": ["lru_cache"]}) == [
+            "Forbidden decorator 'lru_cache' matched rule forbid_ast.decorators"
+        ]
+
+
+# ── Review round 3, finding 4: literal dynamic-import spellings ───────────────
+
+class TestLiteralDynamicImportSpellings:
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "__builtins__.__import__('subprocess').run(['x'])\n",
+            "__import__(f'subprocess').run(['x'])\n",
+            "__import__('sub' + 'process').run(['x'])\n",
+            "__import__(f'sub' + 'pro' f'cess').run(['x'])\n",
+            "import importlib\nimportlib.import_module('.' + 'run', 'subprocess')\n",
+        ],
+        ids=["__builtins__.__import__", "f-string-without-fields", "concatenated-literals", "mixed-literals", "relative-run"],
+    )
+    def test_literal_spelling_is_reported_as_import(self, code):
+        assert "Forbidden import 'subprocess' matched rule forbid_ast.imports" in _violations(
+            code, {"imports": ["subprocess"]}
+        )
+
+    @pytest.mark.parametrize(
+        "code, imports, expected",
+        [
+            ("import importlib\nimportlib.import_module('.etree', 'xml')\n", ["xml.etree"], ["xml.etree"]),
+            ("import importlib\nimportlib.import_module('..etree', package='xml.dom')\n", ["xml.etree"], ["xml.etree"]),
+            ("from importlib import import_module\nimport_module('.', 'xml.etree')\n", ["xml.etree"], ["xml.etree"]),
+            ("import importlib\nimportlib.import_module('...etree', 'xml')\n", ["xml.etree"], []),
+            ("import importlib\nimportlib.import_module('.etree', pkg)\n", ["xml.etree"], []),
+        ],
+        ids=["one-dot", "two-dots-package-kw", "dot-only", "beyond-top-level", "non-literal-package"],
+    )
+    def test_relative_import_module_resolves_against_literal_package(self, code, imports, expected):
+        assert _violations(code, {"imports": imports}) == [
+            f"Forbidden import '{m}' matched rule forbid_ast.imports" for m in expected
+        ]
+
+    def test_call_on_relatively_imported_module_matches_calls_rule(self):
+        code = "import importlib\nimportlib.import_module('.ElementTree', 'xml.etree').parse('f')\n"
+        assert _violations(code, {"calls": ["xml.etree.ElementTree.parse"]}) == [
+            "Forbidden call 'xml.etree.ElementTree.parse' matched rule forbid_ast.calls"
+        ]
+
+    def test_subscript_access_stays_documented_out_of_scope(self):
+        """Subscript access is dynamic lookup, like getattr: listed in evaluate_forbid_ast's docstring."""
+        assert _violations("__builtins__['__import__']('subprocess')\n", {"imports": ["subprocess"]}) == []
+        assert "subscript" in evaluate_forbid_ast.__doc__
+
+
+# ── Review round 3, finding 5: aliases from the TypeScript, Rust and Go drivers ─
+
+class TestExternalDriverAliases:
+    @pytest.mark.parametrize(
+        "record, expected",
+        [
+            (
+                {"module": "std::process::Command", "imported_names": ["Command"], "alias": "Cmd", "is_wildcard": False},
+                (("Cmd", "Command"),),
+            ),
+            ({"module": "std::process", "imported_names": ["process"], "alias": "p", "is_wildcard": False}, (("p", "process"),)),
+            (
+                {"source": "child_process", "imported_symbols": ["dflt"], "alias": "cp", "is_wildcard": True},
+                (("cp", "child_process"),),
+            ),
+            ({"module": "os/exec", "imported_names": [], "alias": "ex", "is_wildcard": False}, (("ex", "os/exec"),)),
+            ({"module": "os/exec", "imported_names": [], "alias": "_", "is_wildcard": False}, ()),
+            ({"module": "fmt", "imported_names": [], "alias": ".", "is_wildcard": False}, ()),
+            ({"module": "std::process::{Command", "imported_names": ["{Command"], "alias": "C2, exit}"}, ()),
+            ({"module": "m", "imported_names": ["a", "b"], "alias": "z", "is_wildcard": False}, ()),
+            ({"module": "m", "imported_names": ["a"], "alias": None}, ()),
+        ],
+        ids=["rust-use-as", "rust-module-as", "ts-namespace", "go-named", "go-blank", "go-dot", "garbled", "ambiguous", "no-alias"],
+    )
+    def test_driver_alias_becomes_an_alias_pair(self, record, expected):
+        assert ImportNode.from_dict(record).aliases == expected
+
+    @pytest.mark.parametrize(
+        "plain, aliased, pattern",
+        [
+            (
+                "use std::process::Command;\nfn main() { Command::new(\"ls\"); }\n",
+                "use std::process::Command as Cmd;\nfn main() { Cmd::new(\"ls\"); }\n",
+                "Command::new",
+            ),
+            (
+                "use std::process;\nfn main() { process::Command::new(\"ls\"); }\n",
+                "use std::process as p;\nfn main() { p::Command::new(\"ls\"); }\n",
+                "process::Command::new",
+            ),
+        ],
+        ids=["use-item-as", "use-module-as"],
+    )
+    def test_rust_alias_is_judged_like_the_plain_use(self, plain, aliased, pattern):
+        from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+        def violations(src: str) -> list[str]:
+            return evaluate_forbid_ast(NormalizedAST.from_dict(parse_rust_source(src, "m.rs")), {"calls": [pattern]})
+
+        assert violations(plain) == [f"Forbidden call '{pattern}' matched rule forbid_ast.calls"]
+        assert violations(aliased) == violations(plain)
+
+
+# ── Review round 3: the decorator fallback read must not fail open ────────────
+
+class TestDecoratorFallbackRead:
+    def test_bom_source_decorators_are_found_without_metadata(self, tmp_path: Path):
+        target = tmp_path / "bom.py"
+        target.write_bytes(b"\xef\xbb\xbfimport functools\n@functools.lru_cache\ndef f():\n    pass\n")
+        assert evaluate_forbid_ast(parse_python_ast(target), {"decorators": ["functools.lru_cache"]}) == [
+            "Forbidden decorator 'functools.lru_cache' matched rule forbid_ast.decorators"
+        ]
+
+    def test_unparseable_source_raises_instead_of_passing(self, tmp_path: Path):
+        from aegis_core.ast.policy import ASTExtractionError
+
+        target = tmp_path / "broken.py"
+        target.write_text("@functools.lru_cache\ndef (:\n", encoding="utf-8")
+        with pytest.raises(ASTExtractionError, match=r"^cannot verify .*broken\.py: SyntaxError: "):
+            evaluate_forbid_ast(NormalizedAST(file_path=str(target)), {"decorators": ["functools.lru_cache"]})
+
+    def test_unparseable_source_is_not_read_without_decorator_patterns(self, tmp_path: Path):
+        target = tmp_path / "broken.py"
+        target.write_text("def (:\n", encoding="utf-8")
+        assert evaluate_forbid_ast(NormalizedAST(file_path=str(target)), {"calls": ["eval"]}) == []

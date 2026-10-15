@@ -30,8 +30,52 @@ _DYNAMIC_IMPORTERS = {
     "importlib.import_module": "module",
     "__import__": "package",
     "builtins.__import__": "package",
+    "__builtins__.__import__": "package",
     "importlib.__import__": "package",
 }
+
+_SCOPE_NODES = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _literal_str(node: Optional[ast.AST]) -> Optional[str]:
+    """The value of a string built only from literals (``'a'``, ``'a' + 'b'``, ``f'ab'``), else None.
+
+    Iterative so a long generated concatenation does not exhaust the recursion limit.
+    """
+    parts: List[str] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.Constant) and isinstance(current.value, str):
+            parts.append(current.value)
+        elif isinstance(current, ast.JoinedStr):
+            stack.extend(reversed(current.values))
+        elif isinstance(current, ast.BinOp) and isinstance(current.op, ast.Add):
+            stack.extend((current.right, current.left))
+        else:
+            return None
+    return "".join(parts)
+
+
+def _call_argument(call: ast.Call, position: int, keyword: str) -> Optional[ast.AST]:
+    if len(call.args) > position:
+        return call.args[position]
+    return next((k.value for k in call.keywords if k.arg == keyword), None)
+
+
+def _resolve_relative(name: str, package: Optional[str]) -> str:
+    """``importlib.import_module``'s resolution of a leading-dot name; ``name`` when it cannot resolve."""
+    level = len(name) - len(name.lstrip("."))
+    bits = (package or "").rsplit(".", level - 1)
+    if not package or len(bits) < level:  # no package, or beyond the top-level package
+        return name
+    return f"{bits[0]}.{name[level:]}" if name[level:] else bits[0]
+
+
+def _chain_base(func: ast.AST) -> ast.AST:
+    while isinstance(func, ast.Attribute):
+        func = func.value
+    return func
 
 
 @functools.lru_cache(maxsize=None)
@@ -95,10 +139,19 @@ def _alias_pairs(names: List[ast.alias]) -> Tuple[Tuple[str, str], ...]:
     return tuple((a.asname, a.name) for a in names if a.asname and a.asname != a.name)
 
 
-class _PythonASTVisitor(ast.NodeVisitor):
+class _PythonASTVisitor:
+    """Collects the NormalizedAST parts in one pre-order pass (``walk``).
+
+    The pass uses an explicit stack, not ``ast.NodeVisitor`` recursion, so nesting depth is
+    bounded by what CPython parses rather than by the recursion limit: a long generated method
+    chain or concatenation is checked instead of failing as unverifiable. Each ``visit_*``
+    handler runs when its node is entered; scopes are popped when the node is left.
+    """
+
     def __init__(self, file_path: str, bindings: Optional[Dict[str, Tuple[str, ...]]] = None):
         self.file_path = file_path
         self.bindings = bindings or {}
+        self._binding_sets = {name: frozenset(quals) for name, quals in self.bindings.items()}
         self._dynamic_cache: Dict[int, Optional[Tuple[str, FrozenSet[str]]]] = {}
         self.dunder_all: Optional[Set[str]] = None
         self.scope_stack: List[str] = []
@@ -109,6 +162,22 @@ class _PythonASTVisitor(ast.NodeVisitor):
         self.imports: List[ImportNode] = []
         self.mutation_points: List[MutationPoint] = []
 
+    def walk(self, tree: ast.AST) -> None:
+        stack: List[Tuple[ast.AST, bool]] = [(tree, False)]
+        while stack:
+            node, leaving = stack.pop()
+            if leaving:
+                self.scope_stack.pop()
+                if isinstance(node, ast.ClassDef):
+                    self.class_stack.pop()
+                continue
+            handler = getattr(self, f"visit_{type(node).__name__}", None)
+            if handler is not None:
+                handler(node)
+            if isinstance(node, _SCOPE_NODES):
+                stack.append((node, True))
+            stack.extend((child, False) for child in reversed(list(ast.iter_child_nodes(node))))
+
     def visit_Assign(self, node: ast.Assign):
         # Extract __all__ = ["func1", "func2"]
         for target in node.targets:
@@ -118,7 +187,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     for elt in node.value.elts:
                         if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                             self.dunder_all.add(elt.value)
-        self.generic_visit(node)
 
     def visit_Import(self, node: ast.Import):
         for alias in node.names:
@@ -131,7 +199,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     aliases=_alias_pairs([alias]),
                 )
             )
-        self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
         source = node.module or ""
@@ -144,7 +211,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                 aliases=_alias_pairs(node.names),
             )
         )
-        self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef):
         class_name = node.name
@@ -163,9 +229,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
         )
         self.class_stack.append(class_name)
         self.scope_stack.append(class_name)
-        self.generic_visit(node)
-        self.scope_stack.pop()
-        self.class_stack.pop()
 
     def _visit_func(self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]):
         func_name = node.name
@@ -189,8 +252,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
         )
 
         self.scope_stack.append(func_name)
-        self.generic_visit(node)
-        self.scope_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self._visit_func(node)
@@ -198,10 +259,20 @@ class _PythonASTVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         self._visit_func(node)
 
-    def _qualified(self, target: str) -> List[str]:
-        """``target`` plus each spelling it has through the file's import bindings."""
+    def _importer_kinds(self, target: str) -> FrozenSet[str]:
+        """Kinds of the dynamic importers ``target`` names, as written or through an import binding.
+
+        Same answer as testing every spelling ``qual + rest`` of the target, at one set lookup
+        per known importer instead of one string per binding of its head.
+        """
         head, dot, tail = target.partition(".")
-        return [target, *(f"{qual}{dot}{tail}" for qual in self.bindings.get(head, ()))]
+        rest = dot + tail
+        quals = self._binding_sets.get(head, frozenset())
+        return frozenset(
+            kind
+            for name, kind in _DYNAMIC_IMPORTERS.items()
+            if name == target or (name.endswith(rest) and name[: len(name) - len(rest)] in quals)
+        )
 
     def _call_targets(self, func: ast.AST) -> List[str]:
         """Dotted call targets; a chain on a dynamic import resolves to the imported module."""
@@ -219,18 +290,25 @@ class _PythonASTVisitor(ast.NodeVisitor):
 
     def _dynamic_import(self, call: ast.Call) -> Optional[Tuple[str, FrozenSet[str]]]:
         """(module name, importer kinds) when ``call`` imports a literal module name."""
-        key = id(call)
-        if key not in self._dynamic_cache:
-            kinds = frozenset(
-                _DYNAMIC_IMPORTERS[qual]
-                for target in self._call_targets(call.func)
-                for qual in self._qualified(target)
-                if qual in _DYNAMIC_IMPORTERS
-            )
-            arg = call.args[0] if call.args else next((k.value for k in call.keywords if k.arg == "name"), None)
-            name = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else ""
-            self._dynamic_cache[key] = (name, kinds) if kinds and name else None
-        return self._dynamic_cache[key]
+        # Resolve a method chain from its innermost call outward, so resolving each link only
+        # reads the cached link below it: recursion stays flat however long the chain.
+        pending: List[ast.Call] = []
+        node: ast.AST = call
+        while isinstance(node, ast.Call) and id(node) not in self._dynamic_cache:
+            pending.append(node)
+            node = _chain_base(node.func)
+        for link in reversed(pending):
+            self._dynamic_cache[id(link)] = self._resolve_dynamic_import(link)
+        return self._dynamic_cache[id(call)]
+
+    def _resolve_dynamic_import(self, call: ast.Call) -> Optional[Tuple[str, FrozenSet[str]]]:
+        kinds = frozenset().union(*(self._importer_kinds(t) for t in self._call_targets(call.func)))
+        if not kinds:
+            return None
+        name = _literal_str(_call_argument(call, 0, "name")) or ""
+        if name.startswith(".") and "module" in kinds:
+            name = _resolve_relative(name, _literal_str(_call_argument(call, 1, "package")))
+        return (name, kinds) if name else None
 
     def _modules_returned(self, call: ast.Call) -> List[str]:
         """Modules a dynamic import call evaluates to (both candidates when unsure)."""
@@ -259,7 +337,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     caller_scope=caller_scope,
                 )
             )
-        self.generic_visit(node)
 
     def visit_Compare(self, node: ast.Compare):
         # Extract comparison mutation points
@@ -284,7 +361,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                         mutation_type="comparison",
                     )
                 )
-        self.generic_visit(node)
 
     def visit_BinOp(self, node: ast.BinOp):
         bin_map = {
@@ -305,7 +381,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     mutation_type="binary_op",
                 )
             )
-        self.generic_visit(node)
 
 
 def parse_python_ast(
@@ -334,7 +409,7 @@ def parse_python_ast(
         raise ValueError(f"Failed to parse Python AST for {resolved_path}: {exc}") from exc
 
     visitor = _PythonASTVisitor(file_path=resolved_path, bindings=_import_bindings(tree))
-    visitor.visit(tree)
+    visitor.walk(tree)
 
     return NormalizedAST(
         file_path=resolved_path,

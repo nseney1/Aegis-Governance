@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import ast
 import json
 import os
+import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 __all__ = [
@@ -27,42 +28,53 @@ def _normalize_ast_token(token: str) -> str:
     return t
 
 
+def _dotted_name(node: ast.AST) -> Optional[str]:
+    """``a.b.c`` for a Name/Attribute chain (only the attributes when the base is not a Name).
+
+    Iterative so a generated attribute chain thousands of links long resolves instead of
+    exhausting the recursion limit.
+    """
+    parts: List[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts)) or None
+
+
 def _extract_python_decorators_from_tree(tree: ast.AST) -> Tuple[str, ...]:
     """Extract normalized decorator names from a parsed Python AST."""
     decorators: List[str] = []
-
-    def _resolve_name(node: ast.AST) -> Optional[str]:
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            parent = _resolve_name(node.value)
-            return f"{parent}.{node.attr}" if parent else node.attr
-        return None
-
+    seen: set = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             for dec in node.decorator_list:
                 target = dec.func if isinstance(dec, ast.Call) else dec
-                dec_name = _resolve_name(target)
+                dec_name = _dotted_name(target)
                 if dec_name:
                     norm = _normalize_ast_token(dec_name)
-                    if norm and norm not in decorators:
+                    if norm and norm not in seen:
+                        seen.add(norm)
                         decorators.append(norm)
     return tuple(decorators)
 
 
 def _extract_python_decorators_from_file(file_path: str) -> Tuple[str, ...]:
-    """Extract decorator names from a Python file on disk if readable and valid."""
+    """Extract decorator names from a Python file on disk; () when there is no such file.
+
+    Decodes like CPython (BOM, coding cookie) and lets read, decode and syntax errors
+    propagate: a caller judging decorators must not mistake an unreadable file for one
+    without decorators.
+    """
     if not file_path or not file_path.endswith(".py") or not os.path.isfile(file_path):
         return ()
-    try:
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            source = f.read()
-        if not source.strip():
-            return ()
-        return _extract_python_decorators_from_tree(ast.parse(source, filename=file_path))
-    except Exception:
+    from aegis_core.ast.drivers.python import read_python_source  # the driver imports this module
+
+    source = read_python_source(file_path)
+    if not source.strip():
         return ()
+    return _extract_python_decorators_from_tree(ast.parse(source, filename=file_path))
 
 
 # ── Import bindings: the plain form of an import, shared by policy checks ─────
@@ -78,14 +90,46 @@ def _add_binding(table: Dict[str, List[str]], name: str, original: str) -> None:
         bound.append(original)
 
 
+_IDENTIFIER = re.compile(r"[A-Za-z_$][\w$]*\Z")
+
+
+def _driver_alias_pairs(data: Mapping[str, Any]) -> List[Tuple[str, str]]:
+    """``(bound, original)`` pairs of a serialized import record.
+
+    Reads ``aliases`` (pairs or a mapping) plus the single ``alias`` the TypeScript, Rust and
+    Go drivers emit for a name bound to the whole import. That alias renames the import's one
+    imported name (Rust ``use std::process::Command as Cmd`` -> ``("Cmd", "Command")``), or
+    the module itself for a namespace import or an import of no names (TypeScript
+    ``import * as cp from 'child_process'``, Go ``import ex "os/exec"``). Go's blank and dot
+    imports bind no name, and a record that does not say which name the alias renames (several
+    imported names, or text that is not an identifier) adds no pair.
+    """
+    raw = data.get("aliases") or ()
+    pairs = [(str(b), str(o)) for b, o in (raw.items() if isinstance(raw, Mapping) else raw)]
+    alias = data.get("alias")
+    if isinstance(alias, str) and _IDENTIFIER.match(alias) and alias != "_":
+        names = data.get("imported_symbols") or data.get("imported_names") or ()
+        source = data.get("source") or data.get("module") or ""
+        if data.get("is_wildcard") or not names:
+            original = str(source)
+        elif len(names) == 1:
+            original = str(names[0])
+        else:
+            original = ""
+        if original and original != alias and (alias, original) not in pairs:
+            pairs.append((alias, original))
+    return pairs
+
+
 def _import_aliases(imp: Any) -> Dict[str, Tuple[str, ...]]:
     """Map each name an import binds via ``as`` to every name it aliases.
 
     Multi-valued because one statement may bind a name twice
     (``from m import a as x, b as x``); keeping only one original would hide the other.
     """
-    raw = imp.get("aliases") if isinstance(imp, Mapping) else getattr(imp, "aliases", None)
-    pairs = raw.items() if isinstance(raw, Mapping) else (raw or ())
+    pairs = _driver_alias_pairs(imp) if isinstance(imp, Mapping) else (getattr(imp, "aliases", None) or ())
+    if isinstance(pairs, Mapping):
+        pairs = pairs.items()
     table: Dict[str, List[str]] = {}
     for a, o in pairs:
         if a and o:
@@ -123,6 +167,162 @@ def _extract_import_tuple(imp: Any) -> Tuple[str, Tuple[str, ...]]:
         if syms.count(sym) > len(originals):
             out.append(sym)
     return src, tuple(out)
+
+
+# ── Reference spellings: every name a call or decorator may mean, for policy checks ──
+
+def _split_reference(ref: str) -> tuple[str, str]:
+    """(head, rest): the head is the bound name, ended by the first ``.`` or Rust ``::``.
+
+    ``rest`` keeps its separator: ``sp.run`` -> ``("sp", ".run")``, ``Cmd::new`` ->
+    ``("Cmd", "::new")``.
+    """
+    cuts = [i for i in (ref.find("."), ref.find("::")) if i != -1]
+    cut = min(cuts) if cuts else len(ref)
+    return ref[:cut], ref[cut:]
+
+
+def _dot_suffixes(name: str) -> list[str]:
+    """``name`` and each part of it after a dot: exactly the patterns that match ``name``."""
+    return [name, *(name[i + 1:] for i, ch in enumerate(name) if ch == ".")]
+
+
+def _suffix_match(spelling: str, pattern: str) -> bool:
+    return spelling == pattern or spelling.endswith(f".{pattern}")
+
+
+def _dealias(target: str, aliases: Optional[Mapping[str, Any]]) -> list[str]:
+    """Rewrite a reference through each alias of its head to plain form (``sp.run`` -> ``subprocess.run``)."""
+    head, rest = _split_reference(target)
+    if not aliases or head not in aliases:
+        return []
+    return [f"{orig}{rest}" for orig in _as_names(aliases[head])]
+
+
+def _spellings(
+    ref: str,
+    imported_qual_map: Optional[Mapping[str, Any]],
+    aliases: Optional[Mapping[str, Any]],
+    *,
+    qualify_heads: bool,
+) -> list[str]:
+    """Every spelling of ``ref``: as written and through each alias original, each also
+    qualified through the import map (an exact key, else, for calls, its part before the
+    first dot). The reference semantics that ``_SpellingIndex`` answers without listing."""
+    out: list[str] = []
+    for spelled in [ref, *_dealias(ref, aliases)]:
+        out.append(spelled)
+        if imported_qual_map:
+            if spelled in imported_qual_map:
+                out.extend(_as_names(imported_qual_map[spelled]))
+            elif qualify_heads and "." in spelled:
+                head, tail = spelled.split(".", 1)
+                if head in imported_qual_map:
+                    out.extend(f"{qual}.{tail}" for qual in _as_names(imported_qual_map[head]))
+    return out
+
+
+class _SpellingIndex:
+    """Answers "does any spelling of this reference match the pattern" without listing them.
+
+    Every spelling of ``head + rest`` is ``origin + rest`` or ``qual + w + rest``, where the
+    origins (the head and its alias originals) and the qualifications depend only on the head,
+    and a pattern matches a spelling iff it is one of the spelling's dot-suffixes. So a check
+    is a few lookups in per-head suffix sets: a name bound N times and referenced M ways costs
+    about N + M, not N * M. A map key that itself contains ``.`` or ``::`` (hand-built ASTs,
+    never a driver) turns a whole reference into an exact key, so such maps enumerate
+    ``_spellings`` instead.
+    """
+
+    def __init__(
+        self,
+        imported_qual_map: Optional[Mapping[str, Any]],
+        aliases: Optional[Mapping[str, Any]],
+        *,
+        qualify_heads: bool,
+    ):
+        self._quals = imported_qual_map or {}
+        self._aliases = aliases or {}
+        self._qualify_heads = qualify_heads
+        self._enumerate = any("." in key or "::" in key for key in self._quals)
+        self._heads: dict[tuple[str, bool], tuple[frozenset[str], dict[str, frozenset[str]]]] = {}
+        self._qual_suffixes: dict[str, frozenset[str]] = {}
+
+    def matches(self, ref: str, pattern: str) -> bool:
+        if not ref or not pattern:
+            return False
+        if self._enumerate:
+            spellings = _spellings(ref, self._quals, self._aliases, qualify_heads=self._qualify_heads)
+            return any(_suffix_match(s, pattern) for s in spellings)
+        if _suffix_match(ref, pattern):  # covers the suffixes that lie inside ``rest``
+            return True
+        head, rest = _split_reference(ref)
+        if not pattern.endswith(rest):
+            return False
+        stem = pattern[: len(pattern) - len(rest)]
+        origins, qualified = self._index(head, rest)
+        if stem in origins:
+            return True
+        # qual + w + rest: the stem is a dot-suffix of some qual followed by w
+        for w in ("", *(stem[i:] for i, ch in enumerate(stem) if ch == ".")):
+            quals = qualified.get(w)
+            if quals is not None and stem[: len(stem) - len(w)] in quals:
+                return True
+        return False
+
+    def _index(self, head: str, rest: str) -> tuple[frozenset[str], dict[str, frozenset[str]]]:
+        # Calls qualify an origin through its part before the first dot (w is the remainder),
+        # except an undotted origin followed by ``::``; decorators only qualify a bare origin.
+        mode = rest.startswith("::") if self._qualify_heads else not rest
+        key = (head, mode)
+        if key not in self._heads:
+            origins = [head, *_as_names(self._aliases.get(head))]
+            members: dict[str, set[str]] = {}
+            for origin in origins:
+                if self._qualify_heads:
+                    origin_head = origin.partition(".")[0]
+                    w = origin[len(origin_head):]
+                    if origin_head in self._quals and not (mode and not w):
+                        members.setdefault(w, set()).add(origin_head)
+                elif mode and origin in self._quals:
+                    members.setdefault("", set()).add(origin)
+            self._heads[key] = (
+                frozenset(s for origin in origins for s in _dot_suffixes(origin)),
+                {w: self._suffixes_of(names) for w, names in members.items()},
+            )
+        return self._heads[key]
+
+    def _suffixes_of(self, names: set[str]) -> frozenset[str]:
+        sets = []
+        for name in names:
+            if name not in self._qual_suffixes:
+                self._qual_suffixes[name] = frozenset(
+                    s for qual in _as_names(self._quals[name]) for s in _dot_suffixes(qual)
+                )
+            sets.append(self._qual_suffixes[name])
+        return sets[0] if len(sets) == 1 else frozenset().union(*sets)
+
+
+def _call_target(call_item: Any) -> str:
+    if isinstance(call_item, str):
+        return _normalize_ast_token(call_item)
+    if isinstance(call_item, Mapping):
+        return _normalize_ast_token(str(call_item.get("target") or call_item.get("name") or ""))
+    return _normalize_ast_token(str(getattr(call_item, "target", "") or getattr(call_item, "name", "") or ""))
+
+
+def _decorator_name(decorator_item: Any) -> str:
+    if isinstance(decorator_item, str):
+        raw = decorator_item
+    elif isinstance(decorator_item, Mapping):
+        raw = str(decorator_item.get("name") or decorator_item.get("target") or "")
+    else:
+        raw = str(getattr(decorator_item, "name", "") or getattr(decorator_item, "target", "") or decorator_item)
+    return _normalize_ast_token(raw).split("(", 1)[0].strip()
+
+
+def _decorator_pattern(pattern: str) -> str:
+    return _normalize_ast_token(pattern).split("(", 1)[0].strip()
 
 
 @dataclass(frozen=True)
@@ -195,7 +395,10 @@ class ImportNode:
     ``aliases`` holds one ``(bound_name, original_name)`` pair per ``as`` rebinding:
     ``import os.path as osp`` -> ``("osp", "os.path")``; ``from os import path as p``
     -> ``("p", "path")``. Policy checks use it to judge the aliased form exactly like
-    the plain form, so renaming an import cannot hide a forbidden API.
+    the plain form, so renaming an import cannot hide a forbidden API. ``from_dict``
+    also turns the single ``alias`` of the TypeScript, Rust and Go drivers into a pair
+    (``_driver_alias_pairs``); a renamed member of a TypeScript ``{a as b}`` or Rust
+    ``{A as B}`` group is not emitted by those drivers, so it cannot be recovered here.
     """
 
     source: str
@@ -220,15 +423,12 @@ class ImportNode:
     def from_dict(cls, data: Mapping[str, Any]) -> ImportNode:
         source_val = data.get("source") if "source" in data else data.get("module", "")
         symbols = data.get("imported_symbols") if "imported_symbols" in data else data.get("imported_names", ())
-        raw_aliases = data.get("aliases") or ()
-        if isinstance(raw_aliases, Mapping):
-            raw_aliases = raw_aliases.items()
         return cls(
             source=str(source_val),
             imported_symbols=tuple(str(s) for s in symbols),
             line=int(data.get("line", 1)),
             is_type_only=bool(data.get("is_type_only", False)),
-            aliases=tuple((str(bound), str(orig)) for bound, orig in raw_aliases),
+            aliases=tuple(_driver_alias_pairs(data)),
         )
 
 

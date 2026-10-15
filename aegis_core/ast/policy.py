@@ -11,13 +11,18 @@ from aegis_core.ast.schema import (
     CallSiteNode,
     ImportNode,
     NormalizedAST,
+    _SpellingIndex,
     _add_binding,
-    _as_names,
+    _call_target,
+    _decorator_name,
+    _decorator_pattern,
     _extract_import_tuple,
     _extract_python_decorators_from_file,
     _extract_python_decorators_from_tree,
     _import_aliases,
     _normalize_ast_token,
+    _spellings,
+    _suffix_match,
 )
 
 __all__ = [
@@ -36,14 +41,6 @@ class ASTExtractionError(AegisError):
 
     def __init__(self, path: str, reason: str):
         super().__init__(f"cannot verify {path}: {reason}", code="AST_UNVERIFIABLE", path=path, reason=reason)
-
-
-def _dealias(target: str, aliases: Optional[Mapping[str, Any]]) -> list[str]:
-    """Rewrite a reference through each alias of its head to plain form (``sp.run`` -> ``subprocess.run``)."""
-    head, dot, tail = target.partition(".")
-    if not aliases or head not in aliases:
-        return []
-    return [f"{orig}{dot}{tail}" for orig in _as_names(aliases[head])]
 
 
 def _match_ImportNode_against_pattern(imp: Any, pattern: str) -> bool:
@@ -75,29 +72,10 @@ def _match_call_against_pattern(
     Map values may be one name or a sequence of names (every binding of the key).
     """
     call = _normalize_ast_token(pattern)
-    if not call:
+    target = _call_target(call_item)
+    if not call or not target:
         return False
-    if isinstance(call_item, str):
-        target = _normalize_ast_token(call_item)
-    elif isinstance(call_item, Mapping):
-        target = _normalize_ast_token(str(call_item.get("target") or call_item.get("name") or ""))
-    else:
-        target = _normalize_ast_token(str(getattr(call_item, "target", "") or getattr(call_item, "name", "") or ""))
-    if not target:
-        return False
-
-    candidates: list[str] = []
-    for ref in [target, *_dealias(target, aliases)]:
-        candidates.append(ref)
-        if imported_qual_map:
-            if ref in imported_qual_map:
-                candidates.extend(_as_names(imported_qual_map[ref]))
-            elif "." in ref:
-                head, tail = ref.split(".", 1)
-                if head in imported_qual_map:
-                    candidates.extend(f"{qual}.{tail}" for qual in _as_names(imported_qual_map[head]))
-
-    return any(cand == call or cand.endswith(f".{call}") for cand in candidates)
+    return any(_suffix_match(s, call) for s in _spellings(target, imported_qual_map, aliases, qualify_heads=True))
 
 
 def _match_decorator_against_pattern(
@@ -107,27 +85,11 @@ def _match_decorator_against_pattern(
     aliases: Optional[Mapping[str, Any]] = None,
 ) -> bool:
     """Return True if a decorator matches a forbidden decorator pattern (map values as for calls)."""
-    dec = _normalize_ast_token(pattern).split("(", 1)[0].strip()
-    if not dec:
+    dec = _decorator_pattern(pattern)
+    norm_d = _decorator_name(decorator_item)
+    if not dec or not norm_d:
         return False
-    if isinstance(decorator_item, str):
-        norm_d = _normalize_ast_token(decorator_item).split("(", 1)[0].strip()
-    elif isinstance(decorator_item, Mapping):
-        norm_d = _normalize_ast_token(str(decorator_item.get("name") or decorator_item.get("target") or "")).split("(", 1)[0].strip()
-    else:
-        norm_d = _normalize_ast_token(
-            str(getattr(decorator_item, "name", "") or getattr(decorator_item, "target", "") or decorator_item)
-        ).split("(", 1)[0].strip()
-    if not norm_d:
-        return False
-
-    candidates: list[str] = []
-    for ref in [norm_d, *_dealias(norm_d, aliases)]:
-        candidates.append(ref)
-        if imported_qual_map and ref in imported_qual_map:
-            candidates.extend(_as_names(imported_qual_map[ref]))
-
-    return any(cand == dec or cand.endswith(f".{dec}") for cand in candidates)
+    return any(_suffix_match(s, dec) for s in _spellings(norm_d, imported_qual_map, aliases, qualify_heads=False))
 
 
 def evaluate_forbid_ast(
@@ -137,12 +99,22 @@ def evaluate_forbid_ast(
     """Evaluate a NormalizedAST against declarative forbid_ast constraints.
 
     Aliased imports are judged as their plain form (``sp.run()`` after ``import subprocess as
-    sp`` as ``subprocess.run()``) plus the literal alias text, against every binding of a name
-    in the file. A literal name passed to ``__import__``/``importlib.import_module`` (however
-    imported, positional or ``name=``) is an import, and ``__import__("os").system()`` a call.
-    Syntactic only, so out of scope: computed module names, ``getattr``/``globals`` access,
+    sp`` as ``subprocess.run()``; Rust ``Cmd::new`` after ``use std::process::Command as Cmd``
+    as ``Command::new``) plus the literal alias text, against every binding of a name in the
+    file. A module named by literal strings (``'subprocess'``, ``'sub' + 'process'``,
+    ``f'subprocess'``, or a relative name with a literal package) passed to ``__import__``,
+    ``builtins.__import__``, ``__builtins__.__import__`` or ``importlib.import_module``
+    (however imported, positional or by keyword) is an import, and
+    ``__import__("os").system()`` a call.
+
+    Syntactic only, so out of scope: computed module names (a variable or an f-string field),
+    ``getattr``/``globals`` access and subscript access (``__builtins__['__import__']``),
     ``f = subprocess.run`` rebinding by assignment, a function passed as a value
-    (``map(subprocess.run, ...)``), ``from x import *``.
+    (``map(subprocess.run, ...)``), ``from x import *``, and the package a relative
+    ``__import__(name, ..., level)`` resolves against (its literal name is reported as written).
+
+    Raises ASTExtractionError when decorator patterns must be checked against ``file_path``
+    on disk (the AST carries no decorators) and that file cannot be read or parsed.
     """
     if normalized_ast is None or not forbid_spec or not isinstance(forbid_spec, dict):
         return []
@@ -182,6 +154,9 @@ def evaluate_forbid_ast(
     raw_call_sites = getattr(normalized_ast, "call_sites", ()) or ()
     raw_calls_attr = getattr(normalized_ast, "calls", ()) or ()
     all_call_items = list(raw_call_sites) + list(raw_calls_attr)
+    # Each distinct target once: the verdict per pattern is "any call matches".
+    call_targets = list(dict.fromkeys(t for t in map(_call_target, all_call_items) if t))
+    call_index = _SpellingIndex(imported_qual_map, aliases, qualify_heads=True)
 
     forbidden_calls = forbid_spec.get("calls")
     if isinstance(forbidden_calls, (list, tuple, set)):
@@ -191,10 +166,20 @@ def evaluate_forbid_ast(
             call = _normalize_ast_token(raw_call)
             if not call:
                 continue
-            if any(_match_call_against_pattern(item, call, imported_qual_map, aliases) for item in all_call_items):
+            if any(call_index.matches(target, _normalize_ast_token(call)) for target in call_targets):
                 violations.append(f"Forbidden call '{call}' matched rule forbid_ast.calls")
 
-    raw_decs_sources: list[Any] = list(getattr(normalized_ast, "decorators", None) or ())
+    forbidden_decs = forbid_spec.get("decorators")
+    if not isinstance(forbidden_decs, (list, tuple, set)) or not forbidden_decs:
+        return violations
+
+    # NormalizedAST.decorators, and the fallback below for other AST objects, read file_path
+    # when the AST carries no decorators: an unreadable file is not "no decorators".
+    fp = getattr(normalized_ast, "file_path", "")
+    try:
+        raw_decs_sources: list[Any] = list(getattr(normalized_ast, "decorators", None) or ())
+    except Exception as exc:
+        raise ASTExtractionError(str(fp), f"{type(exc).__name__}: {exc}") from exc
     meta = getattr(normalized_ast, "metadata", None)
     if isinstance(meta, dict) and isinstance(meta.get("decorators"), (list, tuple, set)):
         raw_decs_sources.extend(meta["decorators"])
@@ -204,22 +189,22 @@ def evaluate_forbid_ast(
             raw_decs_sources.extend(defn_decs)
         elif isinstance(defn, dict) and isinstance(defn.get("decorators"), (list, tuple, set)):
             raw_decs_sources.extend(defn["decorators"])
-
-    if not raw_decs_sources:
-        fp = getattr(normalized_ast, "file_path", "")
-        if isinstance(fp, str) and fp.endswith(".py") and os.path.isfile(fp):
+    if not raw_decs_sources and isinstance(fp, str) and fp.endswith(".py") and os.path.isfile(fp):
+        try:
             raw_decs_sources.extend(_extract_python_decorators_from_file(fp))
+        except Exception as exc:
+            raise ASTExtractionError(fp, f"{type(exc).__name__}: {exc}") from exc
 
-    forbidden_decs = forbid_spec.get("decorators")
-    if isinstance(forbidden_decs, (list, tuple, set)):
-        for raw_dec in forbidden_decs:
-            if not isinstance(raw_dec, str):
-                continue
-            dec = _normalize_ast_token(raw_dec).split("(", 1)[0].strip()
-            if not dec:
-                continue
-            if any(_match_decorator_against_pattern(d, dec, imported_qual_map, aliases) for d in raw_decs_sources):
-                violations.append(f"Forbidden decorator '{dec}' matched rule forbid_ast.decorators")
+    decorator_names = list(dict.fromkeys(n for n in map(_decorator_name, raw_decs_sources) if n))
+    decorator_index = _SpellingIndex(imported_qual_map, aliases, qualify_heads=False)
+    for raw_dec in forbidden_decs:
+        if not isinstance(raw_dec, str):
+            continue
+        dec = _decorator_pattern(raw_dec)
+        if not dec:
+            continue
+        if any(decorator_index.matches(name, _decorator_pattern(dec)) for name in decorator_names):
+            violations.append(f"Forbidden decorator '{dec}' matched rule forbid_ast.decorators")
 
     return violations
 
