@@ -13,6 +13,7 @@ __all__ = [
     "detect_project_languages",
     "resolve_recommended_drivers",
     "provision_ast_driver_slots",
+    "packaged_driver_for_extension",
     "LANGUAGE_DEFINITIONS",
 ]
 
@@ -64,6 +65,19 @@ LANGUAGE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "driver_filename": None,
     },
 }
+
+
+def packaged_driver_for_extension(extension: str) -> Optional[Dict[str, Any]]:
+    """Return the language definition whose packaged AST driver handles ``extension``, or None.
+
+    Its ``default_command`` is the repo slot value that opts in to that driver; the
+    command itself is never executed (see ``aegis_core.ast.runner``).
+    """
+    ext = "." + extension.strip().lower().lstrip(".")
+    for config in LANGUAGE_DEFINITIONS.values():
+        if ext in config["extensions"] and config.get("driver_filename") and config.get("default_command"):
+            return config
+    return None
 
 
 def _find_driver_template(filename: str) -> Optional[Path]:
@@ -157,6 +171,9 @@ def provision_ast_driver_slots(
     dry_run: bool = False,
 ) -> Tuple[Dict[str, str], List[str]]:
     """Automatically scaffold .aegis/slots.yaml and stage required driver recipes.
+
+    The ``ast_driver_<ext>`` values written here only opt the repo in to the packaged
+    driver for that extension; the staged copies under .aegis/drivers/ are never run.
 
     Returns:
         (slots_dict, list_of_created_files)

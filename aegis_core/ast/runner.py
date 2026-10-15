@@ -1,6 +1,12 @@
-"""AST Driver Runner and Registry for polyglot NormalizedAST execution."""
+"""AST Driver Runner and Registry for polyglot NormalizedAST execution.
+
+Driver argv never comes from repository content (H5). It comes from drivers
+registered in code, from the user-scope ~/.aegis/slots.yaml, or from the packaged
+templates in aegis_core/ast/drivers/templates, which a repo slot can only opt in to.
+"""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -8,7 +14,8 @@ import shlex
 import shutil
 import subprocess
 import sys
-from typing import Any, Dict, List, Mapping, Optional, Union
+import tempfile
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from aegis_core.ast.drivers.python import parse_python_ast
 from aegis_core.ast.schema import NormalizedAST
@@ -25,6 +32,9 @@ __all__ = [
 ]
 
 _PYTHON_NAMES = frozenset({"{python}", "python3", "python", "python.exe", "python3.exe"})
+_TEMPLATES_DIR = Path(__file__).resolve().parent / "drivers" / "templates"
+# Packaged template -> interpreter looked up on PATH. rust_ast.py runs in-process.
+_PACKAGED_INTERPRETERS = {"ts_ast.js": "node", "go_ast.go": "go"}
 
 
 def _is_python_name(name: str) -> bool:
@@ -44,6 +54,69 @@ class NoDriverConfiguredError(ASTDriverError):
     """Raised when no AST driver is available for a requested file extension."""
 
 
+@dataclass(frozen=True)
+class _DriverPlan:
+    """How to run the driver chosen for one extension."""
+
+    label: str
+    argv: Tuple[str, ...] = ()
+    cwd: Optional[str] = None  # None: the workspace root
+    in_process_rust: bool = False
+    go_template: Optional[str] = None  # packaged Go source, compiled before running
+    unavailable: Optional[str] = None  # why the chosen driver cannot run here
+
+
+def _command_plan(command: str, ext: str) -> _DriverPlan:
+    """Plan for a trusted command string (registered in code or from user scope)."""
+    if ext == ".rs" and "rust_ast.py" in command:
+        return _DriverPlan(label=command, in_process_rust=True)
+    parts = _split_command(command)
+    if parts and _is_python_name(parts[0]):
+        parts[0] = resolve_driver_executable(parts[0]) or parts[0]
+    return _DriverPlan(label=command, argv=tuple(parts))
+
+
+def _trusted_interpreter(name: str, ws_root: Path) -> Optional[str]:
+    """Resolve an interpreter on PATH, refusing relative PATH hits and binaries inside the workspace."""
+    found = shutil.which(name)
+    if not found or not os.path.isabs(found):
+        return None
+    for candidate in (Path(found), Path(found).resolve()):
+        try:
+            candidate.relative_to(ws_root.resolve())
+            return None
+        except ValueError:
+            continue
+    return found
+
+
+def _packaged_plan(ext: str, ws_root: Path) -> Optional[_DriverPlan]:
+    from aegis_core.ast.detect import packaged_driver_for_extension
+
+    config = packaged_driver_for_extension(ext)
+    if config is None:
+        return None
+    filename = config["driver_filename"]
+    label = f"packaged {filename}"
+    if filename == "rust_ast.py":
+        return _DriverPlan(label=label, in_process_rust=True)
+    interpreter = _PACKAGED_INTERPRETERS.get(filename)
+    if interpreter is None:
+        return None
+    exe = _trusted_interpreter(interpreter, ws_root)
+    if exe is None:
+        return _DriverPlan(
+            label=label,
+            unavailable=f"the packaged {filename} driver needs '{interpreter}' on PATH, outside the workspace",
+        )
+    template = str(_TEMPLATES_DIR / filename)
+    # cwd is the template dir, never the repo: ts_ast.js require()s from process.cwd(),
+    # and go resolves go.mod/go.work (and toolchain downloads) from it.
+    if filename == "go_ast.go":
+        return _DriverPlan(label=label, argv=(exe,), cwd=str(_TEMPLATES_DIR), go_template=template)
+    return _DriverPlan(label=label, argv=(exe, template), cwd=str(_TEMPLATES_DIR))
+
+
 class ASTDriverRegistry:
     """Registry mapping file extensions to driver commands."""
 
@@ -61,30 +134,41 @@ class ASTDriverRegistry:
         clean_ext = extension if extension.startswith(".") else f".{extension}"
         return self._drivers.get(clean_ext.lower())
 
+    def plan_driver(
+        self,
+        extension: str,
+        workspace_root: Optional[Union[Path, str, Workspace]] = None,
+    ) -> Optional[_DriverPlan]:
+        """Choose the driver for an extension: registered, then user scope, then packaged opt-in."""
+        clean_ext = extension if extension.startswith(".") else f".{extension}"
+        clean_ext = clean_ext.lower()
+
+        if clean_ext in self._drivers:
+            return _command_plan(self._drivers[clean_ext], clean_ext)
+        if not workspace_root:
+            return None
+
+        from aegis_core.skills.slots import SlotRegistry
+
+        ws_root = Path(as_workspace(workspace_root).root)
+        user_cmd = SlotRegistry.load_user(ws_root).get_ast_driver(clean_ext)
+        if user_cmd:
+            return _command_plan(user_cmd, clean_ext)
+        # A repo slot only opts in; its value is never run (see SlotRegistry.load).
+        if SlotRegistry.load(ws_root).get_ast_driver(clean_ext):
+            return _packaged_plan(clean_ext, ws_root)
+        return None
+
     def resolve_driver(
         self,
         extension: str,
         workspace_root: Optional[Union[Path, str, Workspace]] = None,
     ) -> Optional[str]:
-        """Resolve driver command for extension from registry or .soma/slots.yaml."""
-        clean_ext = extension if extension.startswith(".") else f".{extension}"
-        clean_ext = clean_ext.lower()
-
-        # 1. Registered drivers take precedence
-        if clean_ext in self._drivers:
-            return self._drivers[clean_ext]
-
-        # 2. Check workspace slots.yaml if available
-        if workspace_root:
-            ws = as_workspace(workspace_root)
-            from aegis_core.skills.slots import SlotRegistry
-
-            slot_reg = SlotRegistry.load(ws.root)
-            driver_from_slot = slot_reg.get_ast_driver(clean_ext)
-            if driver_from_slot:
-                return driver_from_slot
-
-        return None
+        """Describe the driver that would run for an extension, or None if none is configured and runnable."""
+        plan = self.plan_driver(extension, workspace_root=workspace_root)
+        if plan is None or plan.unavailable:
+            return None
+        return plan.label
 
     def get_configured_extensions(
         self,
@@ -98,8 +182,8 @@ class ASTDriverRegistry:
                 ws = as_workspace(workspace_root)
                 from aegis_core.skills.slots import SlotRegistry
 
-                slot_reg = SlotRegistry.load(ws.root)
-                exts.update(slot_reg.get_configured_extensions())
+                exts.update(SlotRegistry.load(ws.root).get_configured_extensions())
+                exts.update(SlotRegistry.load_user(ws.root).get_configured_extensions())
             except Exception:
                 pass
         return exts
@@ -171,15 +255,15 @@ class ASTDriverRunner:
         if ext == ".py":
             return parse_python_ast(target_path)
 
-        # Resolve driver command
-        driver_cmd = self.registry.resolve_driver(ext, workspace_root=ws_root)
-        if not driver_cmd:
+        plan = self.registry.plan_driver(ext, workspace_root=ws_root)
+        if plan is None or plan.unavailable:
+            reason = f": {plan.unavailable}" if plan is not None else ""
             raise NoDriverConfiguredError(
-                f"No AST driver configured for extension '{ext}' on {target_path.name}"
+                f"No AST driver configured for extension '{ext}' on {target_path.name}{reason}"
             )
 
         # Fast path 2: Built-in Rust driver executed in-process
-        if ext == ".rs" and "rust_ast.py" in driver_cmd:
+        if plan.in_process_rust:
             try:
                 from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
 
@@ -191,41 +275,48 @@ class ASTDriverRunner:
                     f"In-process Rust AST driver failed on {target_path.name}: {exc}"
                 ) from exc
 
-        cmd_parts = _split_command(driver_cmd)
-        if not cmd_parts:
+        if not plan.argv:
             raise ASTDriverError(f"Empty driver command for extension '{ext}'")
-        if _is_python_name(cmd_parts[0]):
-            cmd_parts[0] = resolve_driver_executable(cmd_parts[0]) or cmd_parts[0]
+        cwd = plan.cwd or str(ws_root)
 
-        full_cmd = cmd_parts + [str(target_path)]
-
-        try:
-            proc = subprocess.run(
-                full_cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=str(ws_root),
-                stdin=subprocess.DEVNULL,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise ASTDriverTimeoutError(
-                f"AST driver '{driver_cmd}' timed out after {timeout}s on {target_path.name}"
-            ) from exc
-        except Exception as exc:
-            raise ASTDriverError(
-                f"Failed to execute AST driver '{driver_cmd}': {exc}"
-            ) from exc
-
-        if proc.returncode != 0:
-            err_output = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
-            raise ASTDriverError(
-                f"AST driver '{driver_cmd}' failed with exit code {proc.returncode}: {err_output}"
-            )
+        if plan.go_template:
+            # Not 'go run': it takes every leading *.go argument, the target included, as a source file.
+            with tempfile.TemporaryDirectory(prefix="aegis-go-ast-") as tmp:
+                exe = os.path.join(tmp, "go_ast.exe" if os.name == "nt" else "go_ast")
+                _run_driver([plan.argv[0], "build", "-o", exe, plan.go_template], cwd, timeout, plan.label, target_path.name)
+                stdout = _run_driver([exe, str(target_path)], cwd, timeout, plan.label, target_path.name)
+        else:
+            stdout = _run_driver(list(plan.argv) + [str(target_path)], cwd, timeout, plan.label, target_path.name)
 
         try:
-            return NormalizedAST.from_json(proc.stdout)
+            return NormalizedAST.from_json(stdout)
         except (json.JSONDecodeError, ValueError, KeyError) as exc:
             raise ASTDriverError(
-                f"AST driver '{driver_cmd}' returned invalid NormalizedAST JSON: {exc}\nOutput: {proc.stdout[:300]}"
+                f"AST driver '{plan.label}' returned invalid NormalizedAST JSON: {exc}\nOutput: {stdout[:300]}"
             ) from exc
+
+
+def _run_driver(argv: List[str], cwd: str, timeout: float, label: str, target_name: str) -> str:
+    """Run one driver process without a shell and return its stdout, failing closed."""
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ASTDriverTimeoutError(
+            f"AST driver '{label}' timed out after {timeout}s on {target_name}"
+        ) from exc
+    except Exception as exc:
+        raise ASTDriverError(f"Failed to execute AST driver '{label}': {exc}") from exc
+
+    if proc.returncode != 0:
+        err_output = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
+        raise ASTDriverError(
+            f"AST driver '{label}' failed with exit code {proc.returncode}: {err_output}"
+        )
+    return proc.stdout
