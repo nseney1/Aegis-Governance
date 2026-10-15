@@ -19,12 +19,12 @@ from aegis_mcp.tools import execute_tool
 def _setup_workspace(tmp_path):
     """Create a minimal workspace with cells for MCP tools."""
     ws = str(tmp_path)
-    cells_dir = os.path.join(ws, '.aegis', "rules", 'vacuoles')
+    cells_dir = os.path.join(ws, '.aegis', "rules", 'traps')
     os.makedirs(cells_dir, exist_ok=True)
     # Create one cell
     fm = {
         'id': 'test-cell',
-        'type': 'vacuole',
+        'type': 'trap',
         'target_paths': ['src/*.py'],
         'hypothesis': 'Test hypothesis',
         'prediction': 'Test prediction',
@@ -75,13 +75,13 @@ class TestSomaScan:
 class TestSomaListCells:
     """Tests for aegis_list_rules tool."""
 
-    def test_list_returns_list(self, tmp_path, monkeypatch):
+    def test_list_returns_rules_stale_rules_and_ignored(self, tmp_path, monkeypatch):
         ws = _setup_workspace(tmp_path)
         monkeypatch.chdir(ws)
         result = execute_tool('aegis_list_rules', {})
-        assert isinstance(result, list)
-        assert len(result) >= 1
-        assert any(c.get('id') == 'test-cell' or c.get('_name') == 'test-cell' for c in result)
+        assert set(result) == {'rules', 'stale_rules', 'ignored'}
+        assert [r['_name'] for r in result['rules']] == ['test-cell']
+        assert result['stale_rules'] == [] and result['ignored'] == []
 
 
 class TestSomaCreateCell:

@@ -52,8 +52,15 @@ def test_rule_list_with_rules(tmp_path, capsys):
     rules_dir.mkdir(parents=True)
     rule_file = rules_dir / "inv-test.md"
     rule_file.write_text(
-        "---\nid: inv-test\ntype: invariant\nenforcement: strict\nfitness:\n  score: 0.95\n---\nRule body\n",
+        "---\nid: inv-test\ntype: invariant\nenforcement: gate\n---\nRule body\n",
         encoding="utf-8",
+    )
+    (rules_dir / "inv-young.md").write_text("---\nid: inv-young\nenforcement: gate\n---\n", encoding="utf-8")
+    state = tmp_path / ".aegis" / "state"
+    state.mkdir()
+    # Fitness is the ledger's: 30 of 30 verdicts are true positives (Wilson bound 0.92).
+    (state / "ledger.jsonl").write_text(
+        '{"v": 2, "rule": "inv-test", "outcome": "tp", "source": "ci"}\n' * 30, encoding="utf-8"
     )
 
     args = argparse.Namespace(
@@ -66,7 +73,8 @@ def test_rule_list_with_rules(tmp_path, capsys):
     rc = run_rule(args)
     assert rc == 0
     out = capsys.readouterr().out
-    assert "inv-test" in out
+    assert "inv-test" in out and "0.92" in out
+    assert "inv-young" not in out  # no verdicts yet: below --min-fitness 0.9
 
 
 def test_rule_promote_and_force_promote(tmp_path, capsys):

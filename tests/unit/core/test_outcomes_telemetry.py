@@ -16,14 +16,13 @@ def test_record_verification_telemetry(tmp_path: Path):
     # Missing cells_dir
     assert record_verification_telemetry(ws, ["src/foo.py"], passed=True) is False
 
-    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "traps"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_file = cells_dir / "test-cell.md"
     fm = {
         "id": "test-cell",
-        "type": "vacuole",
+        "type": "trap",
         "target_paths": ["src/*.py"],
-        "fitness": {"triggers": 0, "true_positives": 0, "false_positives": 0, "score": 0.5},
     }
     cell_file.write_text(f"---\n{dump_frontmatter(fm)}---\n\n# Body\n", encoding="utf-8")
 
@@ -62,14 +61,13 @@ def test_telemetry_edge_cases_and_error_branches(tmp_path: Path, monkeypatch):
     ws = str(tmp_path)
 
     # record_verification_telemetry: a failing ledger append is handled
-    cells_dir = tmp_path / ".aegis" / "rules" / "vacuoles"
+    cells_dir = tmp_path / ".aegis" / "rules" / "traps"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_file = cells_dir / "test-cell.md"
     fm = {
         "id": "test-cell",
-        "type": "vacuole",
+        "type": "trap",
         "target_paths": ["src/*.py"],
-        "fitness": {"triggers": 0, "true_positives": 0, "false_positives": 0, "score": 0.5},
     }
     cell_file.write_text(f"---\n{dump_frontmatter(fm)}---\n\n# Body\n", encoding="utf-8")
     def mock_append_err(*args, **kwargs):

@@ -5,7 +5,7 @@ Subcommands:
   aegis rule create               Create a rule (--hypothesis, optional --body-file)
   aegis rule promote <rule_id>    Promote a rule up lifecycle tiers
   aegis rule demote <rule_id>     Demote a rule down lifecycle tiers
-  aegis rule archive [--dry-run]  Archive extinct rules (applies unless --dry-run)
+  aegis rule archive [--dry-run]  Archive rules that misfire (applies unless --dry-run)
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.config import env_workspace
 from aegis_core.errors import WorkspaceNotFoundError
 from aegis_core.lifecycle.creation import MAX_RULE_BODY_BYTES, validate_rule_body
-from aegis_core.taxonomy import RULE_TYPE_DIRS
+from aegis_core.taxonomy import CANONICAL_RULE_TYPES
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace.discovery import _is_workspace_dir
 from aegis_core.workspace.layout import WorkspaceLayout
@@ -31,7 +31,6 @@ from aegis_core.lifecycle.promotion import (
     evaluate_cell_tiers,
 )
 from aegis_core.lifecycle.selection import prune_cells
-from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.workspace.layout import is_aegis_workspace
 
 __all__ = [
@@ -62,37 +61,6 @@ def _emit_error(args: argparse.Namespace, msg: str) -> int:
     else:
         print(f"Error: {msg}", file=sys.stderr)
     return 1
-
-
-# init re-seeds and re-signs the manifest from the rules on disk: an explicit
-# operator step, unlike the lifecycle writes. `aegis sync` replaces it (D3, B2b).
-_REGENERATE = "re-run aegis init to regenerate it."
-
-
-def _warn_if_manifest_stale(root: Path) -> None:
-    """Say so on stderr when ``.aegis/rules/manifest.json`` no longer matches the rules.
-
-    Lifecycle writes never re-attest the manifest (H1: that laundered tampered
-    rules), so after a mutation it is stale until the operator regenerates it.
-    With an HMAC key, the MCP rule cache refuses added or removed rules until
-    then (aegis_mcp/rule_cache.py).
-    """
-    from aegis_core.integrity import load_key, load_manifest, verify_manifest
-
-    manifest = load_manifest(root)
-    if manifest is None:
-        return
-    try:
-        issues = verify_manifest(WorkspaceLayout(root).rules_dir, manifest)
-    except ValueError:
-        print(f"Warning: .aegis/rules/manifest.json is not a valid manifest; {_REGENERATE}", file=sys.stderr)
-        return
-    if not issues:
-        return
-    msg = f"Warning: .aegis/rules/manifest.json is out of date ({len(issues)} rule file(s) changed); {_REGENERATE}"
-    if load_key(root) is not None and any(i.get("type") != "modified" for i in issues):
-        msg += " With an HMAC key configured, the MCP server will not load rules until then."
-    print(msg, file=sys.stderr)
 
 
 class _WorkspaceArg(argparse.Action):
@@ -180,37 +148,39 @@ def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = Fals
 
 def collect_workspace_rules(
     root: Path,
-    rules_dir: Path,
     rule_type_filter: str | None = None,
     min_fitness: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Scan the workspace rules directory and return filtered rule metadata dicts."""
+    """The workspace's rules (one loader) with their ledger fitness, filtered.
+
+    A rule file that cannot be loaded is listed with its ``error``; it has no fitness.
+    """
+    from aegis_core.fitness import for_rules
+    from aegis_core.rules import load_rules
+
+    ruleset = load_rules(root)
+    selected = [r for r in ruleset.rules if not rule_type_filter or r.type == rule_type_filter]
+    fits = for_rules(root, [r for r in selected if r.ok])
     rules: list[dict[str, Any]] = []
-    for md_file in sorted(rules_dir.rglob("*.md")):
-        if md_file.name == "README.md":
+    for rule in selected:
+        fit = fits.get(rule.id) if rule.ok else None
+        score = fit.score if fit is not None else None
+        if min_fitness is not None and (score is None or score < min_fitness):
             continue
-        try:
-            content = md_file.read_text(encoding="utf-8")
-            fm = parse_frontmatter(content) or {}
-            r_type = fm.get("type", md_file.parent.name.rstrip("s"))
-            if rule_type_filter and r_type != rule_type_filter:
-                continue
-
-            fitness_block = fm.get("fitness", {})
-            score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
-            if min_fitness is not None and score is not None and score < min_fitness:
-                continue
-
-            rules.append({
-                "id": fm.get("id", md_file.stem),
-                "type": r_type,
-                "domain": fm.get("domain", "general"),
-                "enforcement": fm.get("enforcement", "advisory"),
-                "score": score,
-                "path": str(md_file.relative_to(root)),
-            })
-        except Exception:
-            continue
+        entry: dict[str, Any] = {
+            "id": rule.id,
+            "type": rule.type,
+            "domain": rule.meta.get("domain", "general"),
+            "enforcement": rule.enforcement,
+            "score": score,
+            "triggers": fit.triggers if fit is not None else 0,
+            "path": rule.path,
+        }
+        if rule.error:
+            entry["error"] = rule.error
+        if rule.expired:
+            entry["expired"] = True
+        rules.append(entry)
     return rules
 
 
@@ -222,9 +192,12 @@ def _run_list(args: argparse.Namespace) -> int:
         print(json.dumps([]) if getattr(args, "json", False) else "No rules directory found.")
         return 0
 
-    rules = collect_workspace_rules(
-        root, rules_dir, getattr(args, "type", None), getattr(args, "min_fitness", None)
-    )
+    from aegis_core.rule_inventory import RuleInventoryError
+
+    try:
+        rules = collect_workspace_rules(root, getattr(args, "type", None), getattr(args, "min_fitness", None))
+    except RuleInventoryError as exc:
+        return _emit_error(args, str(exc))
     if getattr(args, "json", False):
         print(json.dumps(rules, indent=2))
         return 0
@@ -243,6 +216,8 @@ def _run_list(args: argparse.Namespace) -> int:
     tbl.add_column("Fitness", justify="right", no_wrap=True)
     for r in rules:
         score_str = ui.color_fitness(float(r["score"])) if isinstance(r.get("score"), (int, float)) else "—"
+        if r.get("error"):
+            score_str = "error"
         tbl.add_row(str(r["id"]), ui.color_rule_type(str(r["type"])), str(r["enforcement"]), score_str)
 
     print(f"Active Rules ({len(rules)} found):")
@@ -271,8 +246,6 @@ def _run_promote(args: argparse.Namespace) -> int:
 
     if getattr(args, "tier_check", False):
         res = evaluate_cell_tiers(root, execute=not dry_run)
-        if not dry_run:
-            _warn_if_manifest_stale(root)
         if use_json:
             print(json.dumps(res, indent=2))
         else:
@@ -281,7 +254,7 @@ def _run_promote(args: argparse.Namespace) -> int:
             if not changes:
                 print("  No tier changes required.")
             for c in changes:
-                print(f"    {c['cell']}: {c['old_tier']} → {c['new_tier']} ({c['reason']})")
+                print(f"    {c['rule']}: {c['old_tier']} → {c['new_tier']} ({c['reason']})")
         return 0
 
     if not rule_id:
@@ -293,7 +266,7 @@ def _run_promote(args: argparse.Namespace) -> int:
         else:
             print(f"  Promotion Candidates ({len(candidates)}):\n")
             for c in candidates:
-                print(f"    {c['cell_id']}: {c['from_type']} → {c['to_type']}\n      triggers={c['triggers']} tp_rate={c['tp_rate']:.0%} age={c['age_days']}d")
+                print(f"    {c['rule_id']}: {c['from_type']} → {c['to_type']}\n      triggers={c['triggers']} fitness={c['fitness']:.2f} age={c['age_days']}d")
             print()
         return 0
 
@@ -312,7 +285,6 @@ def _run_promote(args: argparse.Namespace) -> int:
     from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:
         return _emit_status(use_json, {"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}, f"  🔍 Would promote: {rule_id}: {from_t} → {to_t}", 0)
-    _warn_if_manifest_stale(root)
     return _emit_status(use_json, {"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Promoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
@@ -334,8 +306,8 @@ def _run_demote(args: argparse.Namespace) -> int:
         else:
             print(f"  ⚠️  Demotion Candidates ({len(candidates)}):\n")
             for c in candidates:
-                detail = f"triggers={c['triggers']} fp_rate={c.get('fp_rate', 0):.0%}" if c.get("triggers", 0) > 0 else f"dormant for {c.get('age_days', 0)}d"
-                print(f"    {c['cell_id']}: {c['from_type']} → {c['to_type']} ({c['reason']})\n      {detail}")
+                print(f"    {c['rule_id']}: {c['from_type']} → {c['to_type']} (misfiring)\n      "
+                      f"triggers={c['triggers']} tp={c['tp']:g} fp={c['fp']:g} misfire bound={c['misfire']:.2f}")
             print()
         return 0
 
@@ -362,7 +334,6 @@ def _run_demote(args: argparse.Namespace) -> int:
     from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:
         return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}, f"  🔍 Would demote: {rule_id}: {from_t} → {to_t}", 0)
-    _warn_if_manifest_stale(root)
     return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Demoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
@@ -382,10 +353,7 @@ def _run_archive(args: argparse.Namespace) -> int:
     """Archive extinct rules; --dry-run only reports what would move."""
     root = _resolve_workspace_root(args)
     execute = not getattr(args, "dry_run", False)
-    rc = prune_cells(workspace=root, execute=execute)
-    if execute:
-        _warn_if_manifest_stale(root)
-    return rc
+    return prune_cells(workspace=root, execute=execute)
 
 
 def _split_csv_arg(raw: Any) -> list[str] | None:
@@ -453,7 +421,6 @@ def _run_create(args: argparse.Namespace) -> int:
     except Exception as exc:
         return _emit_error(args, str(exc))
     print(json.dumps({"status": "created", "path": str(created), "id": created.stem}, indent=2) if getattr(args, "json", False) else f"Created rule: {created}")
-    _warn_if_manifest_stale(root)
     return 0
 
 
@@ -473,11 +440,11 @@ class RuleCommand(AegisCommand):
         sub = parser.add_subparsers(dest="rule_action", metavar="ACTION")
 
         p_list = sub.add_parser("list", parents=[common], help="List active rules and fitness metrics")
-        p_list.add_argument("--type", choices=list(RULE_TYPE_DIRS.keys()), help="Filter by rule type")
+        p_list.add_argument("--type", choices=list(CANONICAL_RULE_TYPES), help="Filter by rule type")
         p_list.add_argument("--min-fitness", type=float, help="Filter by minimum fitness score")
 
         p_create = sub.add_parser("create", parents=[common], help="Create a new governance rule")
-        p_create.add_argument("-t", "--type", dest="type", default="trap", help="Rule type (trap, invariant, boundary, persona, contract)")
+        p_create.add_argument("-t", "--type", dest="type", default="trap", help=f"Rule type ({', '.join(CANONICAL_RULE_TYPES)})")
         p_create.add_argument("--hypothesis", default="", help="Testable rule hypothesis")
         p_create.add_argument("-p", "--prediction", default="", help="Expected outcome when hypothesis holds")
         p_create.add_argument("-f", "--falsification", default="", help="Criteria that falsify the rule")
@@ -498,7 +465,7 @@ class RuleCommand(AegisCommand):
         p_dem.add_argument("rule_id", nargs="?", default=None, metavar="RULE_ID", help="Rule identifier to demote")
         p_dem.add_argument("--dry-run", action="store_true", help="Preview demotion without moving files")
 
-        p_arch = sub.add_parser("archive", parents=[common], help="Archive extinct rules")
+        p_arch = sub.add_parser("archive", parents=[common], help="Archive rules whose ledger evidence says they misfire")
         p_arch.add_argument("--dry-run", action="store_true", help="Report the rules that would be archived; move nothing")
 
     def execute(self, args: argparse.Namespace) -> int:

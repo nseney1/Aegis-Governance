@@ -20,16 +20,15 @@ What a plan converts:
   printed note for ``~/.aegis/config.json``, never into the repository; keys v4 no longer
   has are reported as dropped.
 - **Rules**: ``.soma/cells/<type>/*.md`` move to ``.aegis/rules/<canonical type>/`` through
-  the type-normalization table (taxonomy.RULE_TYPE_NORMALIZATION, plus the v2.1 organelle
-  names in LEGACY_ORGANELLE_TYPES); a type neither maps is reported and left in place,
+  the legacy type-name table (LEGACY_TYPE_NAMES: the v1-v3 aliases and the v2.1
+  organelle names); a type it does not map is reported and left in place,
   never guessed. Derived counters (``fitness``,
   ``triggers``, ``score``…) are stripped from every rule's frontmatter, line by line, so
   every other byte stays (v4.3 §10.2).
-- **Manifest**: a v3 ``.aegis/rules/manifest.json`` still excludes any rule whose digest
-  it does not list (RuleCache, until D3 replaces it in B2b), so the entries of the rules
-  this migration rewrites or moves in are updated to the new bytes, before any rule is
-  written. An entry that did not match the rule before migrating is left as it is: a
-  rule edited outside aegis stays refused, never re-attested (H1).
+- **Manifest**: the v3 integrity manifest (``.aegis/rules/manifest.json``, or the older
+  ``.aegis/manifest.json``) and its HMAC key are v3 state: v4 keeps an unsigned index in
+  ``.aegis/state/derived.json``, written by ``aegis sync`` (D3), so they are removed with
+  the other state below.
 - **State**: the v3 runtime files (layout.LEGACY_STATE_ENTRIES) are removed, except
   files under ``drivers/`` that are not the driver copies `aegis init` staged there
   byte for byte (a copy that differs from every version aegis shipped may hold the
@@ -52,8 +51,9 @@ import stat
 from typing import Any, Dict, List, Optional, Tuple
 
 from aegis_core.errors import PathTraversalError, WorkspaceError
+from aegis_core.rules import is_derived
 from aegis_core.storage import atomic_write_bytes, atomic_write_text, locked, read_jsonl, state_dir
-from aegis_core.taxonomy import CANONICAL_RULE_TYPES, RULE_TYPE_DIRS, RULE_TYPE_NORMALIZATION
+from aegis_core.taxonomy import CANONICAL_RULE_TYPES, RULE_TYPE_DIRS
 from aegis_core.workspace.layout import (
     LEGACY_CONFIG_ENTRIES,
     LEGACY_LEDGER_FILES,
@@ -62,39 +62,21 @@ from aegis_core.workspace.layout import (
     WorkspaceLayout,
 )
 
-__all__ = ["DERIVED_KEYS", "MigrationPlan", "MigrationRefused", "MigrationResult", "apply", "plan"]
+__all__ = ["MigrationPlan", "MigrationRefused", "MigrationResult", "apply", "plan"]
 
-# Frontmatter keys that are derived from the ledger; rule files never carry them (v4.3 §10.2).
-DERIVED_KEYS = frozenset({
-    "fitness", "triggers", "true_positives", "false_positives", "last_trigger_date",
-    "last_triggered", "score", "fitness_score", "tp", "fp", "tp_rate", "fp_rate",
-})
-_TIMESTAMP_KEYS = frozenset({"last_trigger_date", "last_triggered"})
-
-
-def _is_derived(key: str, value: Any) -> bool:
-    """Whether ``key: value`` is a ledger-derived counter. Only counter-shaped values count:
-    ``triggers: [documentation_edit]`` is a rule's list of trigger keywords, and stays."""
-    if key not in DERIVED_KEYS:
-        return False
-    if key == "fitness":
-        return isinstance(value, (dict, int, float)) or value is None
-    if key in _TIMESTAMP_KEYS:
-        return value is None or isinstance(value, str) or hasattr(value, "isoformat")
-    if isinstance(value, bool):
-        return False
-    if value is None or isinstance(value, (int, float)):
-        return True
-    try:
-        float(str(value))
-        return True
-    except ValueError:
-        return False
 _REPO_CONF_NAMES = (LEGACY_REPO_CONF, "soma.conf")
-# The v2 organelle names RULE_TYPE_NORMALIZATION does not carry (it has wall and
-# membrane), exactly as v2.1's `aegis migrate` mapped them (ORGANELLE_MAPPING, commit
-# 06a7e39). Production code keeps no other copy of this vocabulary.
-LEGACY_ORGANELLE_TYPES = {
+# Every legacy rule-type name a v1-v3 workspace can hold, mapped to its v4 type: the
+# v3 type-normalization aliases, plus the v2 organelle names exactly as v2.1's
+# `aegis migrate` mapped them (ORGANELLE_MAPPING, commit 06a7e39). Only migration reads
+# legacy names; the rest of Aegis knows the six types of taxonomy.RULE_TYPES.
+LEGACY_TYPE_NAMES = {
+    "wall": "invariant", "walls": "invariant", "invariants": "invariant", "safety-guard": "invariant",
+    "membrane": "boundary", "membranes": "boundary", "boundaries": "boundary",
+    "escalation-boundary": "boundary",
+    "traps": "trap", "patterns": "trap", "cells": "trap", "rules": "trap", "learned-trap": "trap",
+    "personas": "persona", "agent-persona": "persona",
+    "contracts": "contract", "contract-bridge": "contract",
+    "gates": "gate",
     "vacuole": "trap", "vacuoles": "trap",
     "chloroplast": "persona", "chloroplasts": "persona",
     "plasmodesmata": "contract",
@@ -129,15 +111,7 @@ class _RuleStrip:
     path: Path
     keys: List[str]
     content: str
-    original: bytes  # the bytes the plan read; the manifest re-attests only from these
-
-
-@dataclass
-class _ManifestUpdate:
-    path: Path
-    data: Dict[str, Any]  # the manifest with the planned entries already updated
-    updated: List[str] = field(default_factory=list)
-    mismatched: List[str] = field(default_factory=list)
+    original: bytes  # the bytes the plan read
 
 
 @dataclass
@@ -164,7 +138,6 @@ class MigrationPlan:
     left_in_place: List[str] = field(default_factory=list)
     skipped: List[Dict[str, str]] = field(default_factory=list)
     already_moved: List[Path] = field(default_factory=list)
-    manifest: Optional[_ManifestUpdate] = None
     refusal: Optional[str] = None
     # Every file whose bytes the plan converts, rewrites, removes for its content, or
     # expects absent (a rule destination): repo-relative POSIX path -> _fingerprint.
@@ -207,11 +180,6 @@ class MigrationPlan:
             "unreadable": self.unreadable,
             "skipped": self.skipped,
             "already_moved": [self._rel(path) for path in self.already_moved],
-            "manifest": None if self.manifest is None else {
-                "path": self._rel(self.manifest.path),
-                "update": self.manifest.updated,
-                "mismatched": self.manifest.mismatched,
-            },
             "remove": self.removals,
             "left_in_place": self.left_in_place,
         }
@@ -266,7 +234,7 @@ def _strip_derived(text: str) -> Tuple[str, List[str]]:
     i = start
     while i < end:
         match = _TOP_KEY.match(lines[i])
-        if match and isinstance(meta, dict) and match.group(1) in meta and _is_derived(match.group(1), meta[match.group(1)]):
+        if match and isinstance(meta, dict) and match.group(1) in meta and is_derived(match.group(1), meta[match.group(1)]):
             key = match.group(1)
             removed.append(key)
             i += 1
@@ -310,8 +278,7 @@ def _canonical_type(raw: Any) -> Optional[str]:
     name = raw.strip().lower()
     if name in CANONICAL_RULE_TYPES:
         return name
-    mapped = RULE_TYPE_NORMALIZATION.get(name) or LEGACY_ORGANELLE_TYPES.get(name)
-    return mapped if mapped in CANONICAL_RULE_TYPES else None
+    return LEGACY_TYPE_NAMES.get(name)
 
 
 def _merge_missing(current: Dict[str, Any], changes: Dict[str, Any]) -> None:
@@ -691,65 +658,6 @@ def _plan_state(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             result.left_in_place.append(result._rel(child))
 
 
-_MANIFEST_MAPPINGS = ("files", "cells", "rules")
-_MANIFEST_COUNTS = {"cell_count": "cells", "rule_count": "rules"}
-
-
-def _plan_manifest(result: MigrationPlan, layout: WorkspaceLayout) -> None:
-    path = layout.manifest_file
-    if not path.is_file() or path.is_symlink() or not _inside(layout.root, path):
-        return
-    try:
-        raw = path.read_bytes()
-        data = json.loads(raw.decode("utf-8-sig"))
-    except (OSError, UnicodeError, ValueError, RecursionError):
-        data = None
-    if not isinstance(data, dict):
-        result.unreadable.append(result._rel(path))
-        return
-    mappings = [data[name] for name in _MANIFEST_MAPPINGS if isinstance(data.get(name), dict)]
-    if not mappings:
-        return
-    update = _ManifestUpdate(path=path, data=data)
-    # (rule path, its bytes now or None for a rule moved in, its bytes after migrating)
-    rewritten: List[Tuple[Path, Optional[bytes], bytes]] = [
-        (move.target, None, move.content.encode("utf-8")) for move in result.moves
-    ]
-    rewritten += [(strip.path, strip.original, strip.content.encode("utf-8")) for strip in result.strips]
-    for rule, old, new in rewritten:
-        rel_rules = rule.relative_to(layout.rules_dir).as_posix()
-        names = (rel_rules, result._rel(rule), rule.name)
-        current = {_sha256(new), _sha256(new.replace(b"\r\n", b"\n"))}
-        before = set() if old is None else {_sha256(old), _sha256(old.replace(b"\r\n", b"\n"))}
-        outcome = None
-        for mapping in mappings:
-            entries = [name for name in names if name in mapping]
-            if not entries and old is None:
-                entries = [rel_rules]  # a rule this migration moves in, from the workspace's own .soma
-            for name in entries:
-                value = mapping.get(name)
-                digest = value.strip().lower() if isinstance(value, str) else ""
-                digest = digest[len("sha256:"):] if digest.startswith("sha256:") else digest
-                if digest in current:
-                    continue
-                if old is not None and digest not in before:
-                    outcome = "mismatched"
-                    continue
-                prefix = "" if isinstance(value, str) and not value.strip().lower().startswith("sha256:") else "sha256:"
-                mapping[name] = prefix + _sha256(new)
-                outcome = outcome or "updated"
-        if outcome:
-            getattr(update, outcome).append(result._rel(rule))
-    if update.updated or update.mismatched:
-        for count, name in _MANIFEST_COUNTS.items():
-            if count in data and isinstance(data.get(name), dict):
-                data[count] = len(data[name])
-        update.updated.sort()
-        update.mismatched.sort()
-        result.manifest = update
-        _record(result, path, raw)
-
-
 def plan(root: Any) -> MigrationPlan:
     """Read the workspace at ``root`` and decide what ``apply`` would do. Writes nothing."""
     layout = WorkspaceLayout(Path(os.fspath(root)).resolve())
@@ -768,7 +676,6 @@ def plan(root: Any) -> MigrationPlan:
     _plan_ledger(result, layout)
     _plan_config(result, layout)
     _plan_rules(result, layout)
-    _plan_manifest(result, layout)
     _plan_state(result, layout)
     result.removals = sorted(set(result.removals))
     return result
@@ -811,7 +718,6 @@ def _remove(path: Path) -> None:
 def apply(migration: MigrationPlan) -> MigrationResult:
     """Execute a plan: back up, write the v4 files, then remove what was converted."""
     from aegis_core.config import update_repo_config
-    from aegis_core.integrity import save_manifest
     from aegis_core.telemetry_engine import ledger
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
@@ -843,8 +749,6 @@ def apply(migration: MigrationPlan) -> MigrationResult:
         touched = [root / rel for rel in migration.removals]
         touched += [move.source for move in migration.moves] + list(migration.already_moved)
         touched += [strip.path for strip in migration.strips]
-        if migration.manifest is not None and migration.manifest.updated:
-            touched.append(migration.manifest.path)
         if writes_config:
             touched.append(layout.config_file)  # merged in place below
         if ensure_runtime_gitignore(layout.aegis_dir, dry_run=True) == "dry-run":
@@ -868,13 +772,6 @@ def apply(migration: MigrationPlan) -> MigrationResult:
                 "rows": len(written),
                 "backup": backup.relative_to(root).as_posix(),
             })
-
-        if migration.manifest is not None and migration.manifest.updated:
-            # Before any rule is written: a crash in between leaves rules the manifest
-            # refuses until the rerun writes them, never a rule it was not meant to admit.
-            # Signed with the v3 key while it still exists; the key goes with keys/ below.
-            save_manifest(root, migration.manifest.data)
-            result.written.append(result.plan._rel(migration.manifest.path))
 
         moved: List[_RuleMove] = []
         for move in migration.moves:

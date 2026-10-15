@@ -8,6 +8,7 @@
     "rule": "rule",
     "scan": "scan",
     "status": "status",
+    "sync": "sync",
     "uninstall": "uninstall"
   },
   "parser": {
@@ -1211,14 +1212,12 @@
               },
               {
                 "choices": [
-                  "trap",
                   "invariant",
+                  "trap",
                   "gate",
                   "boundary",
                   "persona",
-                  "contract",
-                  "wall",
-                  "membrane"
+                  "contract"
                 ],
                 "default": null,
                 "dest": "type",
@@ -1429,6 +1428,66 @@
           }
         ]
       },
+      "sync": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "kind": "help",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "kind": "store",
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "apply",
+            "flags": [
+              "--apply"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          }
+        ]
+      },
       "uninstall": {
         "aliases": [],
         "arguments": [
@@ -1579,6 +1638,12 @@
       "category": "Daily Workflow & Verification",
       "help": "Show active rules and stats",
       "name": "status"
+    },
+    {
+      "aliases": [],
+      "category": "Rule Evolution & Intelligence",
+      "help": "Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them)",
+      "name": "sync"
     },
     {
       "aliases": [],

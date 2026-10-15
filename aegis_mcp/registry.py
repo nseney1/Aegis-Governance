@@ -1,17 +1,15 @@
 """MCP tool definitions, workspace binding and the rule inventory used by the handlers."""
 from __future__ import annotations
 
-import os
 from typing import Any, Optional
 
-from aegis_core.telemetry_engine import ledger
-from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
-from aegis_core.scoring import compute_cell_fitness
-from aegis_core.taxonomy import CANONICAL_RULE_TYPES, REVIEW_MODES
+from aegis_core.fitness import for_rules
+from aegis_core.rule_inventory import RuleInventoryError
+from aegis_core.rules import load_rules
+from aegis_core.sync import read_derived, stale_rules
+from aegis_core.taxonomy import CANONICAL_RULE_TYPES, REVIEW_MODES, RULE_TYPES
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import resolve_workspace
-from aegis_core.yaml_engine.frontmatter import parse_frontmatter
-from aegis_mcp.jit_engine import warn
 
 _STATUS_FAIL = "FAIL"
 # A client whose clientInfo names no known host: its ledger rows say "generic" and its
@@ -32,105 +30,38 @@ def _get_workspace(args: Optional[dict] = None) -> Workspace:
     return Workspace.confine(raw or resolve_workspace(strict_env=True))
 
 
-def _rule_diagnostic(relative_path: str, message: str) -> dict:
+def list_rules(workspace: Workspace, rule_type: Optional[str] = None) -> Any:
+    """Every rule with its ledger fitness, plus what is stale or not a rule.
+
+    Returns ``{"rules": [...], "stale_rules": [...], "ignored": [...]}``. A rule file
+    that cannot be loaded stays in ``rules`` as a record with ``_error``; an unsafe
+    rules tree (a symlink escape, an unreadable directory) fails the whole call.
+    """
+    try:
+        ruleset = load_rules(workspace)
+    except RuleInventoryError as exc:
+        return {"status": _STATUS_FAIL, "error": str(exc)}
+    selected = [r for r in ruleset.rules if not rule_type or r.type == rule_type]
+    fits = for_rules(workspace, [r for r in selected if r.ok])
+    rules = []
+    for rule in selected:
+        data = rule.as_dict()
+        if rule.ok:
+            data["fitness"] = fits[rule.id].as_dict()
+        if rule.expired:
+            data["_expired"] = True
+        rules.append(data)
+    stale = stale_rules(ruleset, read_derived(workspace))
     return {
-        "_name": os.path.splitext(os.path.basename(relative_path))[0],
-        "_path": relative_path,
-        "_error": message,
+        "rules": rules,
+        "stale_rules": [s for s in stale if not rule_type or _type_of(s, ruleset) == rule_type],
+        "ignored": [{"path": i.path, "reason": i.reason} for i in ruleset.ignored],
     }
 
 
-def _matches_rule_type_filter(rel: str, rule_type: Optional[str] = None) -> bool:
-    if not rule_type:
-        return True
-    parent_name = os.path.basename(os.path.dirname(rel))
-    return (
-        parent_name in (rule_type, f"{rule_type}s")
-        or f"/{rule_type}/" in rel
-        or f"/{rule_type}s/" in rel
-    )
-
-
-def _ledger_fitness(counts: dict, rule: dict) -> dict:
-    """A rule's fitness from its outcome-ledger rows (ADR 0005 C7: ledger, not frontmatter)."""
-    entry = next(
-        (counts[key] for key in (rule.get("_name"), rule.get("id")) if isinstance(key, str) and key in counts),
-        {},
-    )
-    # Every v2 outcome row is also a trigger (#15), so triggers already counts tp + fp.
-    triggers, tp, fp = entry.get("triggers", 0), entry.get("tp", 0), entry.get("fp", 0)
-    score = compute_cell_fitness({
-        "fitness": {"triggers": triggers, "true_positives": tp, "false_positives": fp},
-        "impact_weight": rule.get("impact_weight", 1.0),
-    })
-    return {"triggers": triggers, "tp": tp, "fp": fp, "score": score}
-
-
-def list_rules(workspace: Workspace, rule_type: Optional[str] = None) -> Any:
-    """List rules from one byte snapshot of the rules directory, with ledger fitness.
-
-    A file that cannot be read or parsed becomes an ``_error`` record instead of
-    disappearing, and an inventory failure (a symlink escape, an unreadable
-    directory) fails the whole call. Unreadable ledger rows are skipped.
-    """
-    try:
-        inventory = inventory_rules(workspace)
-    except RuleInventoryError as exc:
-        return {"status": _STATUS_FAIL, "error": str(exc)}
-    counts = ledger.aggregate(workspace.root)
-
-    rules = []
-    for entry in inventory.entries:
-        rel = entry.relative_path
-        if os.path.basename(rel) == "README.md":
-            continue
-
-        path_matches = _matches_rule_type_filter(rel, rule_type)
-
-        try:
-            content = entry.content.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            if not path_matches:
-                continue
-            message = f"invalid UTF-8: {exc}"
-            warn(f"skipped rule {rel}: {message}")
-            rules.append(_rule_diagnostic(rel, message))
-            continue
-
-        fm = parse_frontmatter(content)
-        if fm is None:
-            if not path_matches:
-                continue
-            message = "malformed YAML frontmatter"
-            warn(f"skipped rule {rel}: {message}")
-            rules.append(_rule_diagnostic(rel, message))
-            continue
-        if not fm:
-            if not path_matches:
-                continue
-            message = "no frontmatter metadata"
-            warn(f"skipped rule {rel}: {message}")
-            rules.append(_rule_diagnostic(rel, message))
-            continue
-
-        if rule_type and not (fm.get("type") == rule_type or path_matches):
-            continue
-
-        fm["_name"] = os.path.splitext(os.path.basename(rel))[0]
-        fm["_path"] = rel
-        fm["fitness"] = _ledger_fitness(counts, fm)
-        rules.append(fm)
-    return rules
-
-
-_RULE_TYPE_GUIDE = {
-    "invariant": "Must ALWAYS hold (hard safety gate).",
-    "trap": "A known failure mode to watch for.",
-    "gate": "A check that blocks a change until it passes.",
-    "boundary": "A sensitive area that needs elevated review.",
-    "persona": "An idiomatic pattern to follow.",
-    "contract": "An API or data-shape agreement across services.",
-}
+def _type_of(stale: dict, ruleset: Any) -> Optional[str]:
+    rule = ruleset.get(stale.get("id") or "")
+    return rule.type if rule is not None else None
 
 
 def build_rule_create_prompt(
@@ -140,24 +71,13 @@ def build_rule_create_prompt(
     args: Optional[dict] = None,
 ) -> str:
     workspace = _get_workspace(args)
-    examples = []
-    for entry in inventory_rules(workspace).entries:
-        rel = entry.relative_path
-        if os.path.basename(rel) == "README.md":
-            continue
-        try:
-            content = entry.content.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            warn(f"skipped rule example {rel}: invalid UTF-8: {exc}")
-            continue
-        if content.startswith("---"):
-            examples.append(content[:500])
+    examples = [rule.raw.decode("utf-8-sig")[:500] for rule in load_rules(workspace).served]
 
     example_text = "\n---\n".join(examples[:3]) if examples else "No existing rules found."
     domain_context = f"\nDomain hint: {domain_hint}" if domain_hint else ""
     type_hint = f"\nPreferred rule type: {rule_type}" if rule_type else ""
     type_lines = "\n".join(
-        f"- {name}: {_RULE_TYPE_GUIDE.get(name, '')}".rstrip() for name in CANONICAL_RULE_TYPES
+        f"- {name}: {spec.description}" for name, spec in RULE_TYPES.items()
     )
 
     return f"""You are a governance rule generator for Aegis.

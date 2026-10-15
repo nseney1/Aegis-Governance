@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aegis_core.yaml_engine.serializer import dump_frontmatter
@@ -38,7 +38,7 @@ def _cell(path: Path, cell_id: str, cell_type: str = "trap", age_days: int = 45)
         "id": cell_id,
         "domain": "testing",
         "type": cell_type,
-        "enforcement": "gate" if cell_type in ("wall", "invariant") else "advisory",
+        "enforcement": "gate" if cell_type in ("gate", "invariant") else "advisory",
         "created": created,
         "expiry_days": 365,
         "expiry_sessions": 365,
@@ -92,33 +92,44 @@ def test_lifecycle_uses_weighted_ledger_rows(tmp_path):
 
     cells = tmp_path / ".aegis" / "rules" / "traps"
     _cell(cells / "canonical.md", "canonical")
-    rows = [
-        {"v": 2, "seq": i + 1, "ts": f"2026-01-01T00:{i:02d}:00Z", "rule": "canonical",
-         "outcome": "tp", "source": "ci", "weight": 0.85}
-        for i in range(20)
-    ]
-    _write_jsonl(_ledger(tmp_path), rows)
 
+    recent = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # no decay
+
+    def rows(n):
+        return [
+            {"v": 2, "seq": i + 1, "ts": recent, "rule": "canonical", "outcome": "tp", "source": "ci", "weight": 0.85}
+            for i in range(n)
+        ]
+
+    # 22 rows weigh 18.7 verdicts: fewer than the 20 a promotion needs.
+    _write_jsonl(_ledger(tmp_path), rows(22))
+    assert evaluate_promotions(str(tmp_path)) == []
+
+    _write_jsonl(_ledger(tmp_path), rows(25))
     candidates = evaluate_promotions(str(tmp_path))
-    assert candidates[0]["cell_id"] == "canonical"
-    assert candidates[0]["tp_rate"] == 0.85
+    assert [(c["rule_id"], c["tp"], c["triggers"]) for c in candidates] == [("canonical", 21.25, 25)]
 
 
 def test_checkpoint_fails_closed_and_uses_weighted_outcomes(tmp_path):
-    from aegis_core.verification.checkpoint_checks import check_cell_fitness
+    from aegis_core.verification.checkpoint_checks import check_rule_fitness
 
     path = _ledger(tmp_path)
     path.parent.mkdir(parents=True)
+    # Counted at full weight the tp would make this 3 false positives of 4 verdicts,
+    # which is not confidently a misfire; at weight 0 it is 3 of 3.
     path.write_text(
-        json.dumps(_signal("weighted", "tp", weight="0.5")) + "\n"
-        + json.dumps(_signal("weighted", "fp", weight="1.5")) + "\n"
+        json.dumps(_signal("weighted", "tp", weight="0")) + "\n"
+        + "".join(json.dumps(_signal("weighted", "fp", weight="1")) + "\n" for _ in range(3))
         + "not-json\n",
         encoding="utf-8",
     )
 
-    issues = check_cell_fitness(tmp_path)
-    assert any("line 3 is not a JSON object row" in issue["message"] for issue in issues)
-    assert any(issue.get("cell_id") == "weighted" and "75%" in issue["message"] for issue in issues)
+    issues = check_rule_fitness(tmp_path)
+    assert any("line 5 is not a JSON object row" in issue["message"] for issue in issues)
+    assert [issue["message"] for issue in issues if issue.get("rule") == "weighted"] == [
+        "Rule 'weighted' misfires: 3 of 3 verdicts are false positives (misfire bound 0.53 > 0.5); "
+        "aegis sync suggests demoting or archiving it"
+    ]
 
 
 def test_owned_production_has_no_active_legacy_evidence_paths():
@@ -143,10 +154,10 @@ def test_owned_production_has_no_active_legacy_evidence_paths():
 def test_lifecycle_does_not_demote_a_rule_with_outcome_only_rows(tmp_path):
     from aegis_core.lifecycle.promotion import evaluate_demotions
 
-    cell = tmp_path / ".aegis" / "rules" / "walls" / "outcome-only.md"
-    _cell(cell, "outcome-only", cell_type="wall", age_days=120)
-    # A v1 outcome row with no trigger row is still a recent trigger: not dormant.
-    recent = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    cell = tmp_path / ".aegis" / "rules" / "invariants" / "outcome-only.md"
+    _cell(cell, "outcome-only", cell_type="invariant", age_days=120)
+    # A v1 outcome row with no trigger row is still a trigger and a verdict: not a misfire.
+    recent = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     _write_jsonl(_ledger(tmp_path), [_signal("outcome-only", "tp", recent, weight="0.5")])
 
     assert evaluate_demotions(str(tmp_path)) == []
@@ -154,7 +165,7 @@ def test_lifecycle_does_not_demote_a_rule_with_outcome_only_rows(tmp_path):
 
 def test_invalid_weights_make_a_row_unusable_and_the_checkpoint_says_so(tmp_path):
     from aegis_core.telemetry_engine import ledger
-    from aegis_core.verification.checkpoint_checks import check_cell_fitness
+    from aegis_core.verification.checkpoint_checks import check_rule_fitness
 
     _write_jsonl(_ledger(tmp_path), [
         _signal("bad-weight", "tp", weight="NaN"),
@@ -166,4 +177,4 @@ def test_invalid_weights_make_a_row_unusable_and_the_checkpoint_says_so(tmp_path
     view = ledger.read(tmp_path)
     assert [r["rule"] for r in view.rows] == ["fine"]
     assert view.unusable_rows == 3
-    assert any("3 row(s) lack a rule, a valid outcome or a valid weight" in i["message"] for i in check_cell_fitness(tmp_path))
+    assert any("3 row(s) lack a rule, a valid outcome or a valid weight" in i["message"] for i in check_rule_fitness(tmp_path))

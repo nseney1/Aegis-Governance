@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from aegis_mcp.jit_engine import express, estimate_tokens
+from aegis_core.scan import estimate_tokens, scan as express
 
 
 class TestJITContextBudgetClamping(unittest.TestCase):
@@ -14,15 +14,15 @@ class TestJITContextBudgetClamping(unittest.TestCase):
         self.test_dir = tempfile.mkdtemp(prefix="soma_test_jit_budget_")
         self.ws = Path(self.test_dir)
         self.rules_dir = self.ws / ".aegis" / "rules"
-        (self.rules_dir / "vacuoles").mkdir(parents=True, exist_ok=True)
-        (self.rules_dir / "walls").mkdir(parents=True, exist_ok=True)
+        (self.rules_dir / "traps").mkdir(parents=True, exist_ok=True)
+        (self.rules_dir / "invariants").mkdir(parents=True, exist_ok=True)
 
         # Helper to create a cell with custom length
         self._create_cell(
-            "walls",
+            "invariants",
             "wall-security.md",
             frontmatter={
-                "type": "wall",
+                "type": "invariant",
                 "enforcement": "gate",
                 "target_paths": ["*.py"],
                 "hypothesis": "Prevent security vulnerabilities",
@@ -31,10 +31,10 @@ class TestJITContextBudgetClamping(unittest.TestCase):
             body="Security guidelines detailed instructions " * 15,  # ~60 words -> ~80 tokens
         )
         self._create_cell(
-            "vacuoles",
+            "traps",
             "vacuole-style.md",
             frontmatter={
-                "type": "vacuole",
+                "type": "trap",
                 "enforcement": "advisory",
                 "target_paths": ["*.py"],
                 "hypothesis": "Ensure consistent code style",
@@ -43,10 +43,10 @@ class TestJITContextBudgetClamping(unittest.TestCase):
             body="Code style conventions detailed instructions " * 30,  # ~120 words -> ~160 tokens
         )
         self._create_cell(
-            "vacuoles",
+            "traps",
             "vacuole-perf.md",
             frontmatter={
-                "type": "vacuole",
+                "type": "trap",
                 "enforcement": "advisory",
                 "target_paths": ["*.py"],
                 "hypothesis": "Optimize hot paths",
@@ -101,11 +101,11 @@ class TestJITContextBudgetClamping(unittest.TestCase):
 
     def test_env_var_overrides_token_budget(self):
         """AEGIS_MAX_JIT_TOKENS environment variable should set default budget."""
-        with patch.dict(os.environ, {"AEGIS_MAX_JIT_TOKENS": "120"}):
+        with patch.dict(os.environ, {"AEGIS_MAX_JIT_TOKENS": "160"}):
             res = express(str(self.ws), changed_files=["main.py"])
             stats = res["stats"]
-            self.assertEqual(stats.get("max_tokens_budget"), 120)
-            self.assertLessEqual(stats.get("estimated_tokens", 999), 120)
+            self.assertEqual(stats.get("max_tokens_budget"), 160)
+            self.assertLessEqual(stats.get("estimated_tokens", 999), 160)
             self.assertTrue(stats.get("clamped"))
 
     def test_config_file_sets_token_budget(self):
@@ -130,7 +130,7 @@ class TestJITContextBudgetClamping(unittest.TestCase):
 
     def test_mandatory_cells_prioritized_under_tight_budget(self):
         """Mandatory wall/gate cells must be included first before advisory cells under a tight budget."""
-        wall_only = express(str(self.ws), changed_files=["main.py"], budget=0, max_tokens=10_000)
+        wall_only = express(str(self.ws), changed_files=["main.py"], budget=1, max_tokens=10_000)
         self.assertEqual([c["name"] for c in wall_only["relevant_rules"]], ["wall-security"])
 
         # Enough for the wall and the "2 more rules omitted" notice (~17 tokens as sent),

@@ -76,7 +76,7 @@ def test_create_rule_rejects_bad_workspace():
 
 
 def test_list_rules_returns_frontmatter_records(mcp_workspace: Path):
-    res = handle_list_rules({"workspace": str(mcp_workspace)})
+    res = handle_list_rules({"workspace": str(mcp_workspace)})["rules"]
     assert [r["id"] for r in res] == ["sample-rule"]
     assert res[0]["_path"] == ".aegis/rules/traps/sample-rule.md"
 
@@ -85,8 +85,11 @@ def test_list_rules_filters_by_type(mcp_workspace: Path):
     invariants = mcp_workspace / ".aegis" / "rules" / "invariants"
     invariants.mkdir()
     (invariants / "inv.md").write_text("---\nid: inv\ntype: invariant\n---\n", encoding="utf-8")
-    assert [r["id"] for r in handle_list_rules({"workspace": str(mcp_workspace), "rule_type": "invariant"})] == ["inv"]
-    assert [r["id"] for r in handle_list_rules({"workspace": str(mcp_workspace), "rule_type": "trap"})] == ["sample-rule"]
+    def ids(rule_type):
+        return [r["id"] for r in handle_list_rules({"workspace": str(mcp_workspace), "rule_type": rule_type})["rules"]]
+
+    assert ids("invariant") == ["inv"]
+    assert ids("trap") == ["sample-rule"]
 
 
 def test_list_rules_rejects_bad_workspace():
@@ -120,3 +123,4 @@ def test_report_outcome_surfaces_a_ledger_write_failure(mcp_workspace: Path, mon
         "idempotency_key": "k-fail",
     })
     assert res == {"status": "FAIL", "error": "Failed to record outcome: disk full"}
+

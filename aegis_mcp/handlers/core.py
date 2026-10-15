@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, List
 
-from aegis_mcp.jit_engine import express as jit_express
+from aegis_core.scan import scan
 from aegis_mcp.registry import _STATUS_FAIL, DEFAULT_CLIENT_PLATFORM, _get_workspace
 
 
@@ -41,7 +41,7 @@ def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
         res["guidance"] = reg.resolve(val, strict=False)
 
     seen_ids = set()
-    for list_key in ("relevant_rules", "genome_guidance", "invariant_warnings"):
+    for list_key in ("relevant_rules", "invariant_warnings"):
         items = res.get(list_key)
         if not isinstance(items, list):
             continue
@@ -71,8 +71,8 @@ def handle_scan(args: dict) -> dict:
         except ValueError as exc:
             return {"error": str(exc), "status": _STATUS_FAIL}
 
-    res = jit_express(workspace, changed_files=files)
-    if not isinstance(res, dict):
+    res = scan(workspace, changed_files=files)
+    if res.get("status") == _STATUS_FAIL:
         return res
     platform = args.get("_host") or DEFAULT_CLIENT_PLATFORM
     return _interpolate_scan_slots(res, str(platform), workspace)

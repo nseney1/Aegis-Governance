@@ -1,8 +1,7 @@
 """M1 and timestamp regressions for rule-file writes in the lifecycle engine.
 
 Invariants under test (docs/adr/0005-evidence-review.md M1):
-- every rule-file mutation waits for ``storage.locked()``, the lock that
-  promote/demote already hold;
+- every rule-file mutation waits for ``storage.locked()``, the one workspace lock;
 - every rule-file write is atomic: when the filesystem refuses the final
   write, the rules directory is byte-identical to before (no truncated rule,
   no stray temp file, no half-finished move);
@@ -11,10 +10,12 @@ Invariants under test (docs/adr/0005-evidence-review.md M1):
 - the existence checks that promote/demote run before taking the
   lock are repeated under it, so a rival create or move that lands in between
   is never overwritten and never crashes the second mover;
-- the tier pass and the selection pass change only the rules that need it
-  and hold the rules lock per rule, not for the whole pass; selection re-reads
-  each rule under the lock, never revisits the queues it moves rules into and
-  never overwrites a rule already archived or queued under the same name.
+- the tier pass and the archive pass change only the rules that need it and hold
+  the lock per rule, not for the whole pass; archiving never revisits a hidden
+  directory and never overwrites a rule already archived under the same name.
+
+Fitness comes only from the ledger (aegis_core.fitness), so every scenario that should
+move a rule gives it ledger evidence; frontmatter counters are never read.
 """
 from __future__ import annotations
 
@@ -38,21 +39,36 @@ from conftest import REPO_ROOT
 import aegis_core.lifecycle.promotion as promotion
 import aegis_core.lifecycle.selection as selection
 from aegis_core.lifecycle.creation import create_cell
-from aegis_core.lifecycle.promotion import demote_cell, evaluate_cell_tiers, promote_cell
-from aegis_core.lifecycle.selection import run_cell_selection
+from aegis_core.lifecycle.promotion import demote_cell, evaluate_cell_tiers, evaluate_demotions, promote_cell
+from aegis_core.lifecycle.selection import evaluate_archives, run_cell_selection
+from aegis_core.telemetry_engine import ledger
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 _UTC_TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_KEYS = iter(range(10**9))
 
 
-def _rule(path: Path, rule_id: str, rule_type: str, triggers: int = 0, tp: int = 0, fp: int = 0) -> Path:
+def _rule(path: Path, rule_id: str, rule_type: str, enforcement: str = "advisory") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        f"---\nid: {rule_id}\ntype: {rule_type}\nenforcement: advisory\nimpact_weight: 1.0\n"
-        f"fitness:\n  triggers: {triggers}\n  true_positives: {tp}\n  false_positives: {fp}\n"
+        f"---\nid: {rule_id}\ntype: {rule_type}\nenforcement: {enforcement}\nimpact_weight: 1.0\n"
         f"---\n# {rule_id}\nBody text.\n",
         encoding="utf-8",
     )
+    return path
+
+
+def _evidence(ws: Path, rule_id: str, tp: int = 0, fp: int = 0) -> None:
+    """Append ``tp`` true-positive and ``fp`` false-positive ledger rows for ``rule_id``."""
+    rows = [{"rule": rule_id, "outcome": o, "source": "ci", "key": f"run-{next(_KEYS)}"}
+            for o in ["tp"] * tp + ["fp"] * fp]
+    ledger.append(ws, rows)
+
+
+def _misfiring(path: Path, rule_id: str, rule_type: str = "trap") -> Path:
+    """A rule the ledger is confident fires wrongly: 3 false positives, no true positive."""
+    _rule(path, rule_id, rule_type, "gate" if rule_type in ("invariant", "gate") else "advisory")
+    _evidence(path.parents[3], rule_id, fp=3)
     return path
 
 
@@ -73,35 +89,47 @@ def _ws(tmp_path: Path, name: str = "ws") -> Path:
     return ws
 
 
+def _rules(ws: Path) -> Path:
+    return ws / ".aegis" / "rules"
+
+
 def _scenario_create(tmp_path: Path):
     ws = _ws(tmp_path)
     return ws, lambda: create_cell("trap", "Locked create", id_override="locked-create", workspace=ws)
 
 
-def _scenario_selection(tmp_path: Path):
+def _scenario_archive(tmp_path: Path):
     ws = _ws(tmp_path)
-    _rule(ws / ".aegis" / "rules" / "traps" / "quiet.md", "quiet", "trap")
+    _misfiring(_rules(ws) / "traps" / "noisy.md", "noisy")
     return ws, lambda: run_cell_selection(ws, execute=True)
-
-
-def _scenario_tiers(tmp_path: Path):
-    ws = _ws(tmp_path)
-    _rule(ws / ".aegis" / "rules" / "traps" / "tiered.md", "tiered", "trap")
-    return ws, lambda: evaluate_cell_tiers(ws, execute=True)
 
 
 def _scenario_tier_escalation(tmp_path: Path):
     ws = _ws(tmp_path)
-    # 30 -> 28 triggers after decay: still >= 20, so advisory escalates to mechanical.
-    _rule(ws / ".aegis" / "rules" / "traps" / "proven.md", "proven", "trap", triggers=30, tp=30)
+    # 30 of 30 verdicts: Wilson bound 0.92 >= 0.85 over >= 20 verdicts, so advisory -> mechanical.
+    _rule(_rules(ws) / "traps" / "proven.md", "proven", "trap")
+    _evidence(ws, "proven", tp=30)
     return ws, lambda: evaluate_cell_tiers(ws, execute=True)
+
+
+def _scenario_promote(tmp_path: Path):
+    ws = _ws(tmp_path)
+    _rule(_rules(ws) / "traps" / "rising.md", "rising", "trap")
+    return ws, lambda: promote_cell(ws, "rising", force=True)
+
+
+def _scenario_demote(tmp_path: Path):
+    ws = _ws(tmp_path)
+    _rule(_rules(ws) / "invariants" / "falling.md", "falling", "invariant", "gate")
+    return ws, lambda: demote_cell(ws, "falling")
 
 
 _SCENARIOS = {
     "create": _scenario_create,
-    "selection": _scenario_selection,
-    "tiers": _scenario_tiers,
+    "archive": _scenario_archive,
     "tier_escalation": _scenario_tier_escalation,
+    "promote": _scenario_promote,
+    "demote": _scenario_demote,
 }
 
 _LOCK_HOLDER = r"""
@@ -130,7 +158,7 @@ with locked(ws):
 @pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
 def test_rule_writes_wait_for_the_rules_lock(tmp_path: Path, scenario: str) -> None:
     locked_ws, operation = _SCENARIOS[scenario](tmp_path)
-    rules_dir = locked_ws / ".aegis" / "rules"
+    rules_dir = _rules(locked_ws)
     before = _snapshot(rules_dir)
     env = dict(os.environ, PYTHONPATH=REPO_ROOT, HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"))
     proc = subprocess.Popen(
@@ -138,7 +166,7 @@ def test_rule_writes_wait_for_the_rules_lock(tmp_path: Path, scenario: str) -> N
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
     )
     try:
-        # The holder exits (EOF) on its own 5 s lock timeout, so this cannot hang.
+        # The holder exits (EOF) after its 1 s hold, so this cannot hang.
         first = proc.stdout.readline().strip()
         assert first == "locked", proc.stderr.read()
         operation()
@@ -151,12 +179,12 @@ def test_rule_writes_wait_for_the_rules_lock(tmp_path: Path, scenario: str) -> N
     assert _snapshot(rules_dir) != before, f"{scenario} did not change the rules directory"
 
 
-@pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
+@pytest.mark.parametrize("scenario", sorted(set(_SCENARIOS) - {"archive"}))
 def test_failed_final_write_leaves_rules_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str
 ) -> None:
     locked_ws, operation = _SCENARIOS[scenario](tmp_path)
-    rules_dir = locked_ws / ".aegis" / "rules"
+    rules_dir = _rules(locked_ws)
     before = _snapshot(rules_dir)
 
     def refuse(src, dst):
@@ -176,7 +204,7 @@ def test_rule_files_are_never_rewritten_in_place(
 ) -> None:
     """A plain open(..., "w") on a rule truncates it first; a crash then leaves a broken rule."""
     locked_ws, operation = _SCENARIOS[scenario](tmp_path)
-    rules_dir = (locked_ws / ".aegis" / "rules").resolve()
+    rules_dir = _rules(locked_ws).resolve()
     in_place: list[tuple[str, str]] = []
     real_open = builtins.open
 
@@ -204,11 +232,12 @@ def test_tier_escalation_is_metadata_only(tmp_path: Path) -> None:
 
     res = operation()
 
-    assert [(c["cell"], c["old_tier"], c["new_tier"]) for c in res["changes"]] == [("proven.md", "advisory", "mechanical")]
-    meta = parse_frontmatter((ws / ".aegis" / "rules" / "traps" / "proven.md").read_text(encoding="utf-8")) or {}
+    assert [(c["rule"], c["old_tier"], c["new_tier"]) for c in res["changes"]] == [("proven", "advisory", "mechanical")]
+    meta = parse_frontmatter((_rules(ws) / "traps" / "proven.md").read_text(encoding="utf-8")) or {}
     assert meta["enforcement"] == "mechanical"
-    assert "enforcement_artifact" not in meta
+    assert "enforcement_artifact" not in meta and "fitness" not in meta
     assert not (ws / ".aegis" / "enforcement").exists()
+
 
 # ── Timestamps ─────────────────────────────────────────────────────────
 
@@ -217,17 +246,15 @@ def _assert_utc(ts: object) -> None:
     datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
 
 
-def test_selection_writes_valid_utc_timestamps(tmp_path: Path) -> None:
+def test_archiving_logs_a_valid_utc_timestamp(tmp_path: Path) -> None:
     ws = _ws(tmp_path)
-    rule = _rule(ws / ".aegis" / "rules" / "traps" / "quiet.md", "quiet", "trap")
+    _misfiring(_rules(ws) / "traps" / "noisy.md", "noisy")
 
     assert run_cell_selection(ws, execute=True) == 0
 
-    meta = parse_frontmatter(rule.read_text(encoding="utf-8")) or {}
-    _assert_utc(meta.get("dormant_since"))
     log_lines = (ws / ".aegis" / "state" / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
     entry = json.loads(log_lines[-1])
-    assert entry["action"] == "marked_dormant"
+    assert (entry["rule"], entry["action"]) == ("noisy", "moved_to_archive")
     _assert_utc(entry["timestamp"])
 
 
@@ -262,10 +289,6 @@ def _rival_rule(path: Path, marker: str) -> None:
     path.write_text(f"---\nid: {path.stem}\ntype: rival\n---\n{marker}\n", encoding="utf-8")
 
 
-def _rules(ws: Path) -> Path:
-    return ws / ".aegis" / "rules"
-
-
 def test_promote_never_overwrites_a_rule_created_in_the_target_tier_meanwhile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -296,7 +319,7 @@ def test_concurrent_promotes_of_one_rule_promote_it_once(tmp_path: Path, monkeyp
 
 def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _ws(tmp_path)
-    source = _rule(ws / ".aegis" / "rules" / "invariants" / "guarded.md", "guarded", "invariant")
+    source = _rule(_rules(ws) / "invariants" / "guarded.md", "guarded", "invariant", "gate")
     _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "traps" / "guarded.md", "Rival trap"))
 
     res = demote_cell(ws, "guarded")
@@ -308,7 +331,7 @@ def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkey
 
 def test_concurrent_demotes_of_one_rule_demote_it_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _ws(tmp_path)
-    _rule(ws / ".aegis" / "rules" / "invariants" / "guarded.md", "guarded", "invariant")
+    _rule(_rules(ws) / "invariants" / "guarded.md", "guarded", "invariant", "gate")
     rival: list[dict] = []
     _rival_on_first_lock(monkeypatch, lambda: rival.append(demote_cell(ws, "guarded")))
 
@@ -332,10 +355,29 @@ with locked(Path(sys.argv[1])):
 """
 
 
+@contextmanager
+def _lock_held_by_another_process(tmp_path: Path, ws: Path):
+    env = dict(os.environ, PYTHONPATH=REPO_ROOT, HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"))
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER_UNTIL_EOF, str(ws)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked", holder.stderr.read()
+        yield
+    finally:
+        holder.stdin.close()
+        try:
+            holder.wait(timeout=15)
+        finally:
+            if holder.poll() is None:
+                holder.kill()
+                holder.wait()
+
+
 def test_tier_pass_does_not_rewrite_unchanged_rules(tmp_path: Path) -> None:
     ws = _ws(tmp_path)
     rules = [_rule(_rules(ws) / "traps" / f"steady-{i}.md", f"steady-{i}", "trap") for i in range(3)]
-    evaluate_cell_tiers(ws, execute=True)
     stamps = [(p.stat().st_ino, p.stat().st_mtime_ns) for p in rules]
 
     res = evaluate_cell_tiers(ws, execute=True)
@@ -347,25 +389,10 @@ def test_tier_pass_does_not_rewrite_unchanged_rules(tmp_path: Path) -> None:
 def test_tier_pass_with_nothing_to_change_does_not_wait_for_the_rules_lock(tmp_path: Path) -> None:
     ws = _ws(tmp_path)
     _rule(_rules(ws) / "traps" / "steady.md", "steady", "trap")
-    evaluate_cell_tiers(ws, execute=True)
     before = _snapshot(_rules(ws))
-    env = dict(os.environ, PYTHONPATH=REPO_ROOT, HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"))
-    holder = subprocess.Popen(
-        [sys.executable, "-c", _LOCK_HOLDER_UNTIL_EOF, str(ws)],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
-    )
-    try:
-        assert holder.stdout.readline().strip() == "locked", holder.stderr.read()
+    with _lock_held_by_another_process(tmp_path, ws):
         # Needing the lock here would raise LockTimeoutError after 10 s.
         res = evaluate_cell_tiers(ws, execute=True)
-    finally:
-        holder.stdin.close()
-        try:
-            holder.wait(timeout=15)
-        finally:
-            if holder.poll() is None:
-                holder.kill()
-                holder.wait()
 
     assert res == {"evaluated": 1, "changes": []}
     assert _snapshot(_rules(ws)) == before
@@ -375,73 +402,65 @@ def test_tier_pass_keeps_a_concurrent_edit_to_the_rule_it_rewrites(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Rules are read before the lock; the rewrite must start from what is on disk under it."""
-    ws = _ws(tmp_path)
-    rule = _rule(_rules(ws) / "traps" / "edited.md", "edited", "trap")
+    ws, operation = _scenario_tier_escalation(tmp_path)
+    rule = _rules(ws) / "traps" / "proven.md"
 
     def edit() -> None:
         rule.write_text(rule.read_text(encoding="utf-8").replace("Body text.", "Edited concurrently."), encoding="utf-8")
 
     _rival_on_first_lock(monkeypatch, edit)
 
-    evaluate_cell_tiers(ws, execute=True)
+    operation()
 
     text = rule.read_text(encoding="utf-8")
     assert "Edited concurrently." in text
-    assert "last_decay_epoch" in ((parse_frontmatter(text) or {}).get("fitness") or {})
+    assert (parse_frontmatter(text) or {})["enforcement"] == "mechanical"
 
 
-# ── Selection pass: per-rule lock, re-read under it, no revisits, no overwrites ──
-
-def _dormant(path: Path, rule_id: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f"---\nid: {rule_id}\ntype: trap\ndormant_since: '2026-01-01T00:00:00Z'\n---\n# {rule_id}\n",
-        encoding="utf-8",
+def test_tier_pass_leaves_a_rule_whose_tier_changed_meanwhile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws, operation = _scenario_tier_escalation(tmp_path)
+    rule = _rules(ws) / "traps" / "proven.md"
+    _rival_on_first_lock(
+        monkeypatch, lambda: rule.write_text(rule.read_text(encoding="utf-8").replace("advisory", "gate"), encoding="utf-8")
     )
-    return path
 
+    assert operation()["changes"] == []
+    assert (parse_frontmatter(rule.read_text(encoding="utf-8")) or {})["enforcement"] == "gate"
+
+
+# ── Archive pass: per-rule lock, no revisits, no overwrites ──
 
 def _log_actions(ws: Path) -> list[tuple[str, str]]:
     log = ws / ".aegis" / "state" / "lifecycle.jsonl"
     if not log.exists():
         return []
-    return [(e["cell"], e["action"]) for e in map(json.loads, log.read_text(encoding="utf-8").splitlines())]
+    return [(e["rule"], e["action"]) for e in map(json.loads, log.read_text(encoding="utf-8").splitlines())]
 
 
-def test_selection_with_nothing_to_change_does_not_wait_for_the_rules_lock(tmp_path: Path) -> None:
+def test_archive_pass_with_nothing_to_change_does_not_wait_for_the_rules_lock(tmp_path: Path) -> None:
     ws = _ws(tmp_path)
-    _rule(_rules(ws) / "traps" / "strong.md", "strong", "trap", triggers=10, tp=10)
-    _dormant(_rules(ws) / "traps" / "asleep.md", "asleep")
+    _rule(_rules(ws) / "traps" / "strong.md", "strong", "trap")
+    _evidence(ws, "strong", tp=10)
+    _rule(_rules(ws) / "traps" / "unproven.md", "unproven", "trap")
     before = _snapshot(_rules(ws))
-    env = dict(os.environ, PYTHONPATH=REPO_ROOT, HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"))
-    holder = subprocess.Popen(
-        [sys.executable, "-c", _LOCK_HOLDER_UNTIL_EOF, str(ws)],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
-    )
-    try:
-        assert holder.stdout.readline().strip() == "locked", holder.stderr.read()
+    with _lock_held_by_another_process(tmp_path, ws):
         # Needing the lock here would raise LockTimeoutError after 10 s.
         rc = run_cell_selection(ws, execute=True)
-    finally:
-        holder.stdin.close()
-        try:
-            holder.wait(timeout=15)
-        finally:
-            if holder.poll() is None:
-                holder.kill()
-                holder.wait()
 
     assert rc == 0
     assert _snapshot(_rules(ws)) == before
     assert _log_actions(ws) == []
 
 
-def test_selection_takes_the_rules_lock_once_per_changed_rule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_archive_pass_takes_the_rules_lock_once_per_changed_rule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A pass over hundreds of rules must not hold the lock across all of them (finding F5)."""
     ws = _ws(tmp_path)
     for name in ("quiet-a", "quiet-b", "quiet-c"):
-        _rule(_rules(ws) / "traps" / f"{name}.md", name, "trap")
-    _rule(_rules(ws) / "traps" / "strong.md", "strong", "trap", triggers=10, tp=10)
+        _misfiring(_rules(ws) / "traps" / f"{name}.md", name)
+    _rule(_rules(ws) / "traps" / "strong.md", "strong", "trap")
+    _evidence(ws, "strong", tp=10)
     real_lock = selection.locked
     depth: list[int] = []
     held = [0]
@@ -461,27 +480,13 @@ def test_selection_takes_the_rules_lock_once_per_changed_rule(tmp_path: Path, mo
     assert run_cell_selection(ws, execute=True) == 0
 
     assert depth == [1, 1, 1]
-    assert sorted(_log_actions(ws)) == [(f"quiet-{x}.md", "marked_dormant") for x in "abc"]
+    assert sorted(_log_actions(ws)) == [(f"quiet-{x}", "moved_to_archive") for x in "abc"]
+    assert (_rules(ws) / "traps" / "strong.md").is_file()
 
 
-def test_selection_acts_on_the_rule_as_it_is_under_the_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The rule is classified unlocked; an edit landing before the lock must win."""
+def test_archiving_skips_a_rule_moved_away_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _ws(tmp_path)
-    rule = _rule(_rules(ws) / "traps" / "revived.md", "revived", "trap", triggers=10, tp=0)
-    _rival_on_first_lock(
-        monkeypatch, lambda: _rule(rule, "revived", "trap", triggers=10, tp=10), module=selection
-    )
-
-    assert run_cell_selection(ws, execute=True) == 0
-
-    assert rule.is_file(), "a rule that became healthy before the lock must not be archived"
-    assert not (_rules(ws) / ".archive" / "revived.md").exists()
-    assert _log_actions(ws) == []
-
-
-def test_selection_skips_a_rule_moved_away_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    ws = _ws(tmp_path)
-    rule = _rule(_rules(ws) / "traps" / "doomed.md", "doomed", "trap", triggers=10, tp=0)
+    rule = _misfiring(_rules(ws) / "traps" / "doomed.md", "doomed")
     moved = _rules(ws) / "invariants" / "doomed.md"
 
     def move_away() -> None:
@@ -497,28 +502,25 @@ def test_selection_skips_a_rule_moved_away_meanwhile(tmp_path: Path, monkeypatch
     assert _log_actions(ws) == []
 
 
-def test_selection_leaves_an_apoptotic_rule_in_place_and_reports_it(tmp_path: Path, capsys) -> None:
-    """FP > 2x TP makes a rule an archive candidate, never silently parked (defense #4)."""
+def test_a_misfiring_invariant_is_a_demotion_candidate_not_archived(tmp_path: Path) -> None:
+    """Archiving is for rules with no lower tier; a gate or invariant steps down first."""
     ws = _ws(tmp_path)
-    noisy = _rule(_rules(ws) / "traps" / "noisy.md", "noisy", "trap", triggers=10, tp=1, fp=5)
-    before = noisy.read_bytes()
+    rule = _misfiring(_rules(ws) / "invariants" / "noisy-inv.md", "noisy-inv", "invariant")
+    before = rule.read_bytes()
 
+    assert evaluate_archives(ws) == []
     assert run_cell_selection(ws, execute=True) == 0
 
-    out = capsys.readouterr().out
-    assert noisy.is_file(), "an apoptotic rule must stay active, not be parked"
-    assert noisy.read_bytes() == before
-    assert not (_rules(ws) / ".last_gasp_queue").exists()
+    assert rule.read_bytes() == before
+    assert [c["rule_id"] for c in evaluate_demotions(ws)] == ["noisy-inv"]
     assert _log_actions(ws) == []
-    line = next(ln for ln in out.splitlines() if "noisy.md" in ln)
-    assert "archive candidate" in line
 
 
-def test_selection_never_revisits_a_legacy_last_gasp_queue(tmp_path: Path, capsys) -> None:
-    """Rules a v3 selection pass parked in .last_gasp_queue are left alone."""
+def test_archiving_never_revisits_a_legacy_last_gasp_queue(tmp_path: Path, capsys) -> None:
+    """Rules a v3 selection pass parked in .last_gasp_queue are not loaded, so never moved."""
     ws = _ws(tmp_path)
     queue = _rules(ws) / ".last_gasp_queue"
-    waiting = _rule(queue / "waiting.md", "waiting", "trap", triggers=10, tp=0)
+    waiting = _misfiring(queue / "waiting.md", "waiting")
     queued = _snapshot(queue)
 
     run_cell_selection(ws, execute=True)
@@ -526,15 +528,15 @@ def test_selection_never_revisits_a_legacy_last_gasp_queue(tmp_path: Path, capsy
     assert _snapshot(queue) == queued
     assert waiting.is_file()
     assert _log_actions(ws) == []
-    assert "waiting.md" not in capsys.readouterr().out
+    assert "waiting" not in capsys.readouterr().out
 
 
-def test_selection_never_overwrites_a_rule_already_archived_under_the_same_name(tmp_path: Path) -> None:
+def test_archiving_never_overwrites_a_rule_already_archived_under_the_same_name(tmp_path: Path) -> None:
     ws = _ws(tmp_path)
     earlier = _rules(ws) / ".archive" / "reused.md"
     earlier.parent.mkdir(parents=True)
     earlier.write_text("---\nid: reused\ntype: trap\n---\nThe earlier rule.\n", encoding="utf-8")
-    current = _rule(_rules(ws) / "traps" / "reused.md", "reused", "trap", triggers=10, tp=0, fp=0)
+    current = _misfiring(_rules(ws) / "traps" / "reused.md", "reused")
     current_text = current.read_text(encoding="utf-8")
 
     run_cell_selection(ws, execute=True)
@@ -542,14 +544,15 @@ def test_selection_never_overwrites_a_rule_already_archived_under_the_same_name(
     assert not current.exists()
     assert earlier.read_text(encoding="utf-8") == "---\nid: reused\ntype: trap\n---\nThe earlier rule.\n"
     assert (_rules(ws) / ".archive" / "reused.1.md").read_text(encoding="utf-8") == current_text
-    assert _log_actions(ws) == [("reused.md", "moved_to_archive")]
+    assert _log_actions(ws) == [("reused", "moved_to_archive")]
 
 
-def test_selection_runs_in_a_workspace_whose_path_contains_archive(tmp_path: Path) -> None:
+def test_archiving_runs_in_a_workspace_whose_path_contains_archive(tmp_path: Path) -> None:
     ws = _ws(tmp_path / "old.archive", "ws")
-    rule = _rule(_rules(ws) / "traps" / "quiet.md", "quiet", "trap")
+    rule = _misfiring(_rules(ws) / "traps" / "quiet.md", "quiet")
 
     run_cell_selection(ws, execute=True)
 
-    assert "dormant_since" in (parse_frontmatter(rule.read_text(encoding="utf-8")) or {})
-    assert _log_actions(ws) == [("quiet.md", "marked_dormant")]
+    assert not rule.exists()
+    assert (_rules(ws) / ".archive" / "quiet.md").is_file()
+    assert _log_actions(ws) == [("quiet", "moved_to_archive")]

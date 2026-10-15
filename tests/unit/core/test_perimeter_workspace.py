@@ -19,15 +19,13 @@ from aegis_sdk import Governance
 @pytest.fixture
 def mock_soma_workspace(tmp_path: Path) -> Path:
     """Create a minimal valid Soma workspace directory structure."""
-    cells_dir = tmp_path / ".aegis" / "rules" / "walls"
+    cells_dir = tmp_path / ".aegis" / "rules" / "invariants"
     cells_dir.mkdir(parents=True)
     sample_cell = cells_dir / "sample_rule.md"
     sample_cell.write_text(
-        "---\nname: sample-rule\ntype: wall\nenforcement: gate\n---\nRule content\n",
+        "---\nname: sample-rule\ntype: invariant\nenforcement: gate\n---\nRule content\n",
         encoding="utf-8",
     )
-    metrics_dir = tmp_path / ".aegis" / "metrics"
-    metrics_dir.mkdir(parents=True)
     tracked_file = tmp_path / "hello.py"
     tracked_file.write_text("print('hello')\n", encoding="utf-8")
     return tmp_path
@@ -66,5 +64,4 @@ class TestMCPToolsWorkspace:
         ws = Workspace.confine(mock_soma_workspace)
         result = execute_tool("aegis_list_rules", {"workspace": ws})
         data = json.loads(result) if isinstance(result, str) else result
-        assert isinstance(data, list)
-        assert any(c.get("name") == "sample-rule" or c.get("_name") == "sample_rule" for c in data)
+        assert [(r["_name"], r["name"]) for r in data["rules"]] == [("sample_rule", "sample-rule")]

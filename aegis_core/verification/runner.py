@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import sys
 from aegis_core.match import first_match, is_test_path
-from aegis_core.workspace.layout import RULES_RELDIR, WorkspaceLayout
+from aegis_core.workspace.layout import RULES_RELDIR
 from typing import Optional
 
 from . import ToolEvidence
@@ -47,78 +47,32 @@ def _forbid_ast_spec_error(spec: object) -> Optional[str]:
 def _discover_forbid_ast_rules(
     repo_root: str,
 ) -> tuple[list[tuple[str, dict, list[str]]], list[tuple[str, str]]]:
-    """Discover workspace rules in rules/ and .aegis/rules/ declaring forbid_ast.
+    """The workspace rules (aegis_core.rules, .aegis/rules/<type>/) that declare forbid_ast.
 
-    Returns (rules, broken): a rule file that cannot be read or parsed might declare
-    forbid_ast, and one whose forbid_ast is malformed enforces nothing, so each is
-    returned as (relative path, reason) for the caller to fail closed on instead of
-    being dropped.
+    Returns (rules, broken): a rule file that cannot be loaded and names forbid_ast, or
+    whose forbid_ast is malformed, would enforce nothing, so each is returned as
+    (relative path, reason) for the caller to fail closed on instead of being dropped.
+    An unsafe rules tree raises (RuleInventoryError), which the caller also fails on.
     """
-    from pathlib import Path
-    from aegis_core.yaml_engine.frontmatter import AegisYAML
-    from aegis_core.workspace.base import Workspace
+    from aegis_core.rules import load_rules, workspace_root
 
-    root_path = Path(str(getattr(repo_root, "root", repo_root))).resolve()
-    ws_obj = None
-    try:
-        ws_obj = Workspace(root_path)
-    except Exception:
-        ws_obj = None
-
-    candidate_dirs = [root_path / "rules", WorkspaceLayout(root_path).rules_dir]
+    ruleset = load_rules(workspace_root(repo_root))
     discovered: list[tuple[str, dict, list[str]]] = []
     broken: list[tuple[str, str]] = []
-    seen_ids: set[str] = set()
-
-    for rules_dir in candidate_dirs:
-        if not rules_dir.is_dir():
+    for rule in ruleset.rules:
+        if not rule.ok:
+            # Only a file that names the key can declare it: a damaged note does not gate.
+            if b"forbid_ast" in rule.raw:
+                broken.append((rule.path, rule.error or "cannot be loaded"))
             continue
-        for md_file in sorted(rules_dir.rglob("*.md")):
-            if md_file.name == "README.md" or md_file.is_symlink():
-                continue
-            try:
-                rel_md = md_file.relative_to(root_path)
-                if ws_obj is not None:
-                    doc = AegisYAML.parse_file(rel_md, ws_obj)
-                else:
-                    doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
-            except Exception:
-                try:
-                    doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
-                except Exception as exc:
-                    # Only a file that names the key can declare it: plain notes under a
-                    # rules/ directory stay out of the gate, a damaged forbid_ast rule does not.
-                    try:
-                        may_declare = b"forbid_ast" in md_file.read_bytes()
-                    except OSError:
-                        may_declare = True
-                    if may_declare:
-                        broken.append((md_file.relative_to(root_path).as_posix(), f"{type(exc).__name__}: {exc}"))
-                    continue
-
-            if doc.get("expired_at") or "forbid_ast" not in doc:
-                continue
-            forbid_spec = doc.get("forbid_ast")
-            spec_error = _forbid_ast_spec_error(forbid_spec)
-            if spec_error:
-                broken.append((md_file.relative_to(root_path).as_posix(), spec_error))
-                continue
-
-            rule_id = str(doc.get("id") or doc.get("name") or md_file.stem)
-            if rule_id in seen_ids:
-                continue
-            seen_ids.add(rule_id)
-
-            raw_paths = doc.get("target_paths") or doc.get("paths") or doc.get("globs") or []
-            if isinstance(raw_paths, str):
-                patterns = [raw_paths]
-            elif isinstance(raw_paths, (list, tuple, set)):
-                patterns = [str(p) for p in raw_paths if p]
-            else:
-                patterns = []
-
-            discovered.append((rule_id, forbid_spec, patterns))
-
+        if rule.expired or "forbid_ast" not in rule.meta:
+            continue
+        spec = rule.meta.get("forbid_ast")
+        spec_error = _forbid_ast_spec_error(spec)
+        if spec_error:
+            broken.append((rule.path, spec_error))
+            continue
+        discovered.append((rule.id, spec, list(rule.target_paths)))
     return discovered, broken
 
 

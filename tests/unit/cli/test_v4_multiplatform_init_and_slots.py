@@ -1,7 +1,8 @@
 """Unit tests for v4.0.0 Wave 1 Lane B:
 - Cross-model SlotRegistry.for_platform() and slot resolution
 - Multi-platform detect_platforms() and portable MCP configuration
-- Workspace SSOT rule seeding + manifest signing in aegis init
+- aegis init scaffolds .aegis/rules/<type>/ without copying host rules into it or
+  writing a manifest (D3)
 """
 from __future__ import annotations
 
@@ -11,13 +12,12 @@ from pathlib import Path
 
 from aegis_cli.init import generate_mcp_config, run_init
 from aegis_cli.platforms import McpAdapter, detect_platform, detect_platforms
-from aegis_core.rule_inventory import inventory_rules
+from aegis_core.rules import load_rules
 from aegis_core.skills.slots import (
     DEFAULT_SLOTS,
     PLATFORM_SLOT_PROFILES,
     SlotRegistry,
 )
-from aegis_mcp.rule_cache import RuleCache
 
 
 class TestCrossModelSlotRegistry:
@@ -185,10 +185,10 @@ class TestMultiPlatformDetectionAndPortableMcp:
         assert adapter.verify(local=True)
 
 
-class TestInitSeedsWorkspaceRulesSSOT:
-    """Verify aegis init always seeds <workspace>/.aegis/rules/ and manifest.json."""
+class TestInitWorkspaceRules:
+    """aegis init gives the workspace the D12 rules layout and nothing a scan cannot serve."""
 
-    def test_init_seeds_workspace_rules_and_manifest_on_fresh_repo(self, tmp_path: Path):
+    def test_init_scaffolds_type_dirs_without_seeding_host_rules_or_a_manifest(self, tmp_path: Path):
         project_root = tmp_path / "citadel_repo"
         project_root.mkdir()
         fake_home = tmp_path / "home"
@@ -211,14 +211,9 @@ class TestInitSeedsWorkspaceRulesSSOT:
         assert rc == 0
 
         ws_rules = project_root / ".aegis" / "rules"
-        assert ws_rules.is_dir()
-        assert (ws_rules / "manifest.json").is_file()
-
-        inv = inventory_rules(str(project_root))
-        assert len(inv.entries) >= 5
-
-        cached_rules = RuleCache().get_rules(str(project_root))
-        assert len(cached_rules) >= 5
-        rule_ids = {r.get("id") or r.get("_name") for r in cached_rules}
-        assert "providence" in rule_ids
-        assert "destructive-ops" in rule_ids
+        assert sorted(p.name for p in ws_rules.iterdir()) == ["gates", "invariants", "traps"]
+        assert not (ws_rules / "manifest.json").exists()
+        assert not (project_root / ".aegis" / "keys").exists()
+        # The host instruction rules went to the host; none of them is a workspace rule.
+        ruleset = load_rules(project_root)
+        assert (ruleset.rules, ruleset.ignored) == ((), ())

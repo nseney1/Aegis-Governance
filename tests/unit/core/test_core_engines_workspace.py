@@ -11,8 +11,10 @@ from pathlib import Path
 import pytest
 
 from aegis_core.lifecycle.creation import create_cell
-from aegis_core.lifecycle.decay import compute_cells_fitness
-from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
+from aegis_core.fitness import for_rules
+from aegis_core.lifecycle.parsers import find_cell_file
+from aegis_core.rules import load_rules
+from aegis_core.sync import build
 from aegis_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
 from aegis_core.lifecycle.selection import run_cell_selection
 from aegis_core.workspace.base import Workspace
@@ -74,23 +76,20 @@ class TestLifecycleWorkspaceInteroperability:
         assert created.is_file()
         assert str(mock_soma_workspace.rules_dir) in str(created)
 
-    def test_compute_cells_fitness_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        fitness_list = compute_cells_fitness(workspace=mock_soma_workspace)
-        assert len(fitness_list) >= 1
-        names = [f["cell"] for f in fitness_list]
-        assert "test-rule.md" in names
+    def test_derived_view_with_workspace_instance(self, mock_soma_workspace: Workspace):
+        derived = build(mock_soma_workspace)
+        assert derived["rules"]["test-rule"]["triggers"] == 1  # the ledger row, not the frontmatter
 
     def test_run_cell_selection_with_workspace_instance(self, mock_soma_workspace: Workspace):
         res = run_cell_selection(workspace=mock_soma_workspace, execute=False)
         assert res == 0
 
     def test_parsers_and_promotions_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        cells = _load_cells(mock_soma_workspace)
-        assert len(cells) >= 1
-        assert any(c["id"] == "test-rule" for c in cells)
+        rules = load_rules(mock_soma_workspace)
+        assert rules.get("test-rule") is not None
 
-        evidence = _load_evidence(mock_soma_workspace)
-        assert "test-rule" in evidence
+        fits = for_rules(mock_soma_workspace, rules.rules)
+        assert fits["test-rule"].tp == 1
 
         cand_file, ctype = find_cell_file(mock_soma_workspace, "test-rule")
         assert cand_file is not None

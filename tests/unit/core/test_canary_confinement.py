@@ -1,7 +1,7 @@
 """Canary test verifying workspace confinement and discovery for .aegis and .soma."""
 from pathlib import Path
 from aegis_core.workspace.confinement import validate_workspace_path, confine_path_internal
-from aegis_core.workspace.discovery import is_aegis_repo, is_aegis_repo, resolve_workspace_root
+from aegis_core.workspace.discovery import resolve_workspace_root
 from aegis_core.workspace.base import Workspace
 
 
@@ -39,7 +39,7 @@ def test_confinement_accepts_soma_cells(tmp_path: Path):
 
 
 def test_workspace_discovery_dual_brand(tmp_path: Path):
-    """Verify discovery detects .aegis as valid workspace and repository fingerprinting."""
+    """Verify discovery detects .aegis as a valid workspace."""
     ws_aegis = tmp_path / "ws_aegis"
     ws_aegis.mkdir()
     (ws_aegis / ".aegis" / "rules").mkdir(parents=True)
@@ -48,10 +48,3 @@ def test_workspace_discovery_dual_brand(tmp_path: Path):
     ws_obj = Workspace(ws_aegis)
     assert ws_obj.aegis_dir == ws_aegis / ".aegis"
     assert ws_obj.rules_dir == ws_aegis / ".aegis" / "rules"
-
-    # Fingerprinting for Aegis repo
-    (ws_aegis / "pyproject.toml").write_text('[project]\nname = "aegis-governance"\n')
-    (ws_aegis / "aegis_core").mkdir()
-    (ws_aegis / "aegis_cli").mkdir()
-    assert is_aegis_repo(ws_aegis)
-    assert is_aegis_repo(ws_aegis)

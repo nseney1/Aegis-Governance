@@ -65,6 +65,14 @@ def test_calculate_coverage_and_governance_grade_on_aegis_rules_workspace(tmp_pa
 
     grade = calculate_governance_grade(str(tmp_path))
     assert grade["details"]["total_rules"] == 1
+    # The frontmatter `fitness:` block is a legacy counter: without ledger evidence the
+    # invariant is not yet shown to be healthy.
+    assert grade["components"]["invariant_strength"] == 0
+
+    from aegis_core.telemetry_engine import ledger
+
+    ledger.append(tmp_path, [{"rule": "inv-src-app", "outcome": "tp", "source": "ci", "key": f"k{n}"} for n in range(5)])
+    grade = calculate_governance_grade(str(tmp_path))
     assert grade["components"]["invariant_strength"] > 0
 
 

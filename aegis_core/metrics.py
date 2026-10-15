@@ -1,21 +1,14 @@
 """Rule coverage of the workspace's files and the governance report card (SDK grade/coverage_report)."""
 from __future__ import annotations
 
-import glob
 import math
 import os
 from pathlib import Path
-import sys
 from typing import List, Optional, Union
 
 from aegis_core import gitsafe
 from aegis_core.match import first_match
-from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, WorkspaceLayout
-from aegis_core.yaml_engine.frontmatter import parse_frontmatter
-
-
-def _resolve_rules_dir(workspace: str | Path) -> str:
-    return str(WorkspaceLayout(Path(workspace).resolve()).rules_dir)
+from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME
 
 
 def _list_workspace_files(workspace: str) -> list[str]:
@@ -32,9 +25,14 @@ def _list_workspace_files(workspace: str) -> list[str]:
     return files
 
 
+def _served_rules(workspace: str) -> list:
+    from aegis_core.rules import load_rules
+
+    return list(load_rules(workspace).served)
+
+
 def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] = None) -> dict:
-    """Calculate cell coverage mapping and directory tier breakdown."""
-    cells_dir = _resolve_rules_dir(workspace)
+    """Which workspace files the rules' target_paths cover, overall and per directory."""
     all_files = _list_workspace_files(workspace)
     EXCLUDE_PATTERNS = [f'{AEGIS_DIRNAME}/', f'{LEGACY_SOMA_DIRNAME}/', 'vendor/', '.git/', 'node_modules/']
     if exclude:
@@ -44,26 +42,10 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
             EXCLUDE_PATTERNS.extend(exclude)
     all_files = [f for f in all_files if not any(p in f for p in EXCLUDE_PATTERNS)]
 
-    cell_patterns = []
-    if os.path.isdir(cells_dir):
-        for cell_file in glob.glob(os.path.join(cells_dir, '**', '*.md'), recursive=True):
-            if os.path.basename(cell_file) == 'README.md':
-                continue
-            try:
-                with open(cell_file, 'r', encoding='utf-8') as f:
-                    fm = parse_frontmatter(f.read()) or {}
-                paths = fm.get('target_paths', [])
-                if isinstance(paths, str):
-                    paths = [paths]
-                name = fm.get('id', os.path.splitext(os.path.basename(cell_file))[0])
-                cell_patterns.append({
-                    'name': name,
-                    'patterns': paths,
-                    'type': fm.get('type', ''),
-                    'enforcement': fm.get('enforcement', 'advisory')
-                })
-            except Exception as exc:
-                sys.stderr.write(f"Warning: Failed to parse cell {cell_file}: {exc}\n")
+    cell_patterns = [
+        {'name': rule.id, 'patterns': list(rule.target_paths), 'type': rule.type, 'enforcement': rule.enforcement}
+        for rule in _served_rules(workspace)
+    ]
 
     covered_files = set()
     uncovered_files = set()
@@ -126,45 +108,31 @@ def letter_grade(pct: float) -> str:
 
 
 def calculate_governance_grade(workspace: str) -> Optional[dict]:
-    """Calculate complete governance report card."""
-    cells_dir = _resolve_rules_dir(workspace)
-    cells = []
-    if os.path.isdir(cells_dir):
-        for cell_file in glob.glob(os.path.join(cells_dir, '**', '*.md'), recursive=True):
-            if os.path.basename(cell_file) == 'README.md':
-                continue
-            try:
-                with open(cell_file, 'r', encoding='utf-8') as f:
-                    fm = parse_frontmatter(f.read()) or {}
-                if isinstance(fm.get('fitness'), (int, float)):
-                    fm['fitness'] = {'score': float(fm['fitness'])}
-                fm['_name'] = os.path.splitext(os.path.basename(cell_file))[0]
-                cells.append(fm)
-            except Exception as exc:
-                sys.stderr.write(f"Warning: Failed to parse cell {cell_file}: {exc}\n")
+    """Calculate complete governance report card (fitness from the ledger)."""
+    from aegis_core.fitness import for_rules
 
-    if not cells:
+    rules = _served_rules(workspace)
+    if not rules:
         return None
+    fits = for_rules(workspace, rules)
 
     all_files = _list_workspace_files(workspace)
     exclude = [f'{AEGIS_DIRNAME}/', f'{LEGACY_SOMA_DIRNAME}/', 'vendor/', '.git/', 'node_modules/']
     all_files = [f for f in all_files if not any(p in f for p in exclude)]
 
-    all_patterns = []
-    for c in cells:
-        all_patterns.extend(c.get('target_paths', []))
+    all_patterns = [p for rule in rules for p in rule.target_paths]
 
     covered = sum(1 for f in all_files if first_match(all_patterns, f) is not None)
     coverage_pct = (covered / len(all_files) * 100) if all_files else 0
 
-    scores = [(c.get('fitness') or {}).get('score') for c in cells if (c.get('fitness') or {}).get('score') is not None]
+    # A rule with no verdict yet has no measured fitness: it is not averaged in as zero.
+    scores = [fits[r.id].score for r in rules if fits[r.id].verdicts]
     avg_fitness = (sum(scores) / len(scores)) if scores else 0
     fitness_pct = avg_fitness * 100
 
     type_counts = {}
-    for c in cells:
-        ct = c.get('type', 'unknown')
-        type_counts[ct] = type_counts.get(ct, 0) + 1
+    for rule in rules:
+        type_counts[rule.type] = type_counts.get(rule.type, 0) + 1
     total = sum(type_counts.values())
     if len(type_counts) > 1:
         entropy = -sum((n/total) * math.log(n/total) for n in type_counts.values() if n > 0)
@@ -173,19 +141,18 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
     else:
         diversity = 0
 
-    stale = sum(1 for c in cells if (c.get('fitness') or {}).get('triggers', 0) == 0)
-    staleness_pct = 100 - (stale / len(cells) * 100) if cells else 100
+    stale = sum(1 for r in rules if fits[r.id].triggers == 0)
+    staleness_pct = 100 - (stale / len(rules) * 100)
 
-    walls = [c for c in cells if c.get('type') in ('wall', 'invariant')]
-    healthy_walls = sum(1 for w in walls if ((w.get('fitness') or {}).get('score') is not None and (w.get('fitness') or {}).get('score', 0) > 0.3))
-    wall_pct = (healthy_walls / len(walls) * 100) if walls else 100
+    invariants = [r for r in rules if r.type == 'invariant']
+    healthy_invariants = sum(1 for r in invariants if fits[r.id].score > 0.3)
+    invariant_pct = (healthy_invariants / len(invariants) * 100) if invariants else 100
 
-    overall_pct = (coverage_pct * 0.3 + fitness_pct * 0.25 + diversity * 0.15 + staleness_pct * 0.15 + wall_pct * 0.15)
+    overall_pct = (coverage_pct * 0.3 + fitness_pct * 0.25 + diversity * 0.15 + staleness_pct * 0.15 + invariant_pct * 0.15)
 
     tier_counts = {}
-    for c in cells:
-        tier = c.get('enforcement', 'advisory')
-        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+    for rule in rules:
+        tier_counts[rule.enforcement] = tier_counts.get(rule.enforcement, 0) + 1
 
     uncovered_dirs = {}
     for f in all_files:
@@ -199,20 +166,15 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
         'avg_fitness': {'pct': round(fitness_pct, 1), 'grade': letter_grade(fitness_pct), 'score': avg_fitness},
         'diversity': {'pct': round(diversity, 1), 'grade': letter_grade(diversity)},
         'staleness': {'pct': round(staleness_pct, 1), 'grade': letter_grade(staleness_pct)},
-        'wall_integrity': {'pct': round(wall_pct, 1), 'grade': letter_grade(wall_pct)},
-        'invariant_integrity': {'pct': round(wall_pct, 1), 'grade': letter_grade(wall_pct)},
+        'invariant_integrity': {'pct': round(invariant_pct, 1), 'grade': letter_grade(invariant_pct)},
         'tiers': tier_counts,
         'overall': {'pct': round(overall_pct, 1), 'grade': letter_grade(overall_pct)},
         'top_improvement': f'Add rules for {top_gap[0]}/ ({top_gap[1]} uncovered files)',
         'top_gap_count': top_gap[1],
         'details': {
-            'total_cells': len(cells),
-            'total_rules': len(cells),
-            'walls': len(walls),
-            'invariants': len(walls),
-            'healthy_walls': healthy_walls,
-            'healthy_invariants': healthy_walls,
-            'stale_cells': stale,
+            'total_rules': len(rules),
+            'invariants': len(invariants),
+            'healthy_invariants': healthy_invariants,
             'stale_rules': stale,
         },
         'components': {
@@ -220,9 +182,7 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
             'avg_fitness': round(fitness_pct, 1),
             'diversity': round(diversity, 1),
             'staleness': round(staleness_pct, 1),
-            'wall_strength': round(wall_pct, 1),
-            'invariant_strength': round(wall_pct, 1),
-            'wall_integrity': round(wall_pct, 1),
+            'invariant_strength': round(invariant_pct, 1),
         },
     }
 

@@ -77,25 +77,21 @@ def test_the_legacy_sentinel_points_at_migrate(tmp_path: Path):
     assert "aegis migrate --apply" in LEGACY_SOMA_UPGRADE_MSG
 
 
-def test_the_report_says_which_rules_the_manifest_re_attests_and_which_it_still_refuses(tmp_path: Path, capsys):
-    from aegis_core import integrity
-
+def test_the_report_lists_the_v3_manifest_for_removal(tmp_path: Path, capsys):
+    """The signed v3 manifest is v3 state (D3): backed up and removed, never re-attested."""
     root = tmp_path / "ws"
     rules = root / ".aegis" / "rules" / "traps"
     rules.mkdir(parents=True)
     for name in ("trap-a", "trap-b"):
         (rules / f"{name}.md").write_text(f"---\nid: {name}\nfitness:\n  triggers: 2\n---\nBody\n", encoding="utf-8")
-    integrity.save_manifest(root, integrity.generate_manifest(root / ".aegis" / "rules"))
-    (rules / "trap-b.md").write_text("---\nid: trap-b\nfitness:\n  triggers: 2\n---\nEdited\n", encoding="utf-8")
+    (root / ".aegis" / "rules" / "manifest.json").write_text('{"cells": {}}', encoding="utf-8")
 
     assert main(["migrate", "--workspace", str(root)]) == 0
 
     out = capsys.readouterr().out
-    assert "manifest: .aegis/rules/manifest.json: re-attest 1 rule(s) this migration rewrites or moves in" in out
-    assert (
-        "! .aegis/rules/traps/trap-b.md did not match .aegis/rules/manifest.json before migrating: "
-        "not re-attested (the MCP server keeps refusing it)"
-    ) in out
+    assert "  remove (backed up first): .aegis/rules/manifest.json" in out
+    assert "  strip: fitness from .aegis/rules/traps/trap-a.md" in out
+    assert "manifest: " not in out and "re-attest" not in out
 
 
 def test_a_rule_edited_between_plan_and_apply_is_reported_and_nothing_changes(tmp_path: Path, capsys, monkeypatch):
