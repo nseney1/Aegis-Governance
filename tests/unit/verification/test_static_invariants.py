@@ -125,26 +125,8 @@ def test_no_infinity_emitted_in_json_payloads():
     )
 
 
-# ── SOMA-C01: soma_mcp must import without third-party packages ─────────
-
-def test_soma_mcp_has_no_unguarded_third_party_imports():
-    """SOMA-C01: a bare `import yaml` in soma_mcp/ stopped the server from
-    starting at all, violating .aegis/rules/walls/wall-mcp-zero-deps.md."""
-    offenders = []
-    for path in iter_source_files(os.path.join(REPO_ROOT, "soma_mcp"), (".py",)):
-        lines = read(path).splitlines()
-        for lineno, line in enumerate(lines, 1):
-            stripped = line.strip()
-            if stripped in ("import yaml",) or stripped.startswith("from yaml"):
-                # Acceptable only inside a try: block.
-                context = "\n".join(lines[max(0, lineno - 4):lineno])
-                if "try:" not in context:
-                    rel = os.path.relpath(path, REPO_ROOT)
-                    offenders.append(f"{rel}:{lineno}: unguarded {stripped}")
-    assert not offenders, (
-        "soma_mcp must degrade without pyyaml:\n" + "\n".join(offenders)
-    )
-
+# ── SOMA-C01: the MCP server must start without third-party packages ─────
+# (no runtime import outside the standard library: tests/contract/test_import_boundary.py)
 
 def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
     """SOMA-C01 end to end: initialize + tools/list must return valid JSON on a
@@ -170,80 +152,6 @@ def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
     assert first["result"]["serverInfo"]["name"] in ("aegis-mcp", "soma-mcp")
     tools = json.loads(lines[1])["result"]["tools"]
     assert len(tools) >= 1
-
-
-# ── SOMA-C02: Framework-wide zero third-party runtime dependencies ──────
-
-def test_entire_runtime_has_zero_third_party_imports():
-    """SOMA-C02: soma_cli/, soma_core/, soma_mcp/, soma_sdk/, and enzymes/
-    must have strictly ZERO third-party runtime package imports.
-    Only Python standard library modules and internal modules are permitted at runtime,
-    with no optional extras either: Layer 2 shells out to --llm-cmd (D14)."""
-    import ast
-    from aegis_core.verification.import_guard import _get_stdlib_modules
-
-    stdlib = set(_get_stdlib_modules()) | set(sys.builtin_module_names)
-    internal_prefixes = ("soma_", "aegis_", "install", "genome", "rules")
-    soma_core_dir = os.path.join(REPO_ROOT, "soma_core")
-    aegis_core_dir = os.path.join(REPO_ROOT, "aegis_core")
-    soma_core_modules = {
-        f[:-3] for f in os.listdir(soma_core_dir) if f.endswith(".py")
-    } if os.path.isdir(soma_core_dir) else set()
-    aegis_core_modules = {
-        f[:-3] for f in os.listdir(aegis_core_dir) if f.endswith(".py")
-    } if os.path.isdir(aegis_core_dir) else set()
-    internal_names = soma_core_modules | aegis_core_modules | {"conftest"}
-
-    offenders = []
-    runtime_dirs = ["soma_cli", "soma_core", "soma_mcp", "soma_sdk", "aegis_cli", "aegis_core", "aegis_mcp", "aegis_sdk"]
-    for rdir in runtime_dirs:
-        dir_path = os.path.join(REPO_ROOT, rdir)
-        for path in iter_source_files(dir_path, (".py",)):
-            try:
-                tree = ast.parse(read(path), filename=path)
-            except SyntaxError as e:
-                rel = os.path.relpath(path, REPO_ROOT)
-                offenders.append(f"{rel}:{e.lineno}: SyntaxError: {e.msg}")
-                continue
-
-            for node in ast.walk(tree):
-                modules: list[str] = []
-                if isinstance(node, ast.Import):
-                    modules = [alias.name.split(".")[0] for alias in node.names]
-                elif isinstance(node, ast.ImportFrom):
-                    if node.level > 0:
-                        continue  # relative imports within package are internal
-                    if node.module:
-                        modules = [node.module.split(".")[0]]
-                elif isinstance(node, ast.Call):
-                    if (
-                        isinstance(node.func, ast.Name)
-                        and node.func.id == "__import__"
-                        and node.args
-                        and isinstance(node.args[0], ast.Constant)
-                        and isinstance(node.args[0].value, str)
-                    ):
-                        modules = [node.args[0].value.split(".")[0]]
-                    elif (
-                        isinstance(node.func, ast.Attribute)
-                        and node.func.attr == "import_module"
-                        and node.args
-                        and isinstance(node.args[0], ast.Constant)
-                        and isinstance(node.args[0].value, str)
-                    ):
-                        modules = [node.args[0].value.split(".")[0]]
-
-                for mod in modules:
-                    if mod in stdlib:
-                        continue
-                    if any(mod.startswith(p) for p in internal_prefixes) or mod in internal_names:
-                        continue
-                    rel = os.path.relpath(path, REPO_ROOT)
-                    offenders.append(f"{rel}:{node.lineno}: {mod}")
-    assert not offenders, (
-        "SOMA-C02 violation: Runtime modules must have zero third-party imports:\n"
-        + "\n".join(offenders)
-    )
 
 
 # ── SOMA-M03: failure paths must exit nonzero ───────────────────────────

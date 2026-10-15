@@ -149,18 +149,5 @@ class Workspace(os.PathLike[str]):
         """
         return confine_path_internal(self.root, untrusted_path)
 
-    def validate_rule_names(self, rule_names: list[str]) -> list[str]:
-        """Validate that rule names reference rules that actually exist.
-
-        Returns a list of invalid names (empty list means all names are valid).
-        """
-        if not rule_names:
-            return []
-
-        from aegis_core.rules import load_rules
-
-        known = {rule.id for rule in load_rules(self).rules if rule.ok}
-        return [name for name in rule_names if name not in known]
-
 
 __all__ = ["Workspace"]

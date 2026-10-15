@@ -14,10 +14,10 @@ from aegis_core.errors import (
     WorkspaceNotFoundError,
 )
 from aegis_core.workspace.base import Workspace
+from aegis_core.rules import validate_rule_names
 from aegis_core.workspace import (
     confine_path,
     resolve_workspace,
-    validate_rule_names,
 )
 
 
@@ -158,10 +158,10 @@ class TestWorkspaceModel:
         with pytest.raises(PathTraversalError, match="reserved Windows device name"):
             ws.confine_path("CON.txt")
 
-    def test_workspace_validate_rule_names(self, aegis_ws: Path):
+    def test_validate_rule_names_takes_a_workspace(self, aegis_ws: Path):
         ws = Workspace.resolve(aegis_ws)
-        assert ws.validate_rule_names(["invariant-test"]) == []
-        assert ws.validate_rule_names(["invariant-test", "invariant-nonexistent"]) == ["invariant-nonexistent"]
+        assert validate_rule_names(["invariant-test"], ws) == []
+        assert validate_rule_names(["invariant-test", "invariant-nonexistent"], ws) == ["invariant-nonexistent"]
 
 
 class TestWorkspaceBackwardCompatibilityFacades:

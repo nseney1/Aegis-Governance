@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 # ── 1. Review Modes & Escalation Hierarchy ──────────────────────────────────
@@ -163,6 +163,39 @@ RULE_TYPE_DIRS: Dict[str, str] = {name: spec.directory for name, spec in RULE_TY
 DIR_RULE_TYPES: Dict[str, str] = {spec.directory: name for name, spec in RULE_TYPES.items()}
 
 
+# Every legacy rule-type name a v1-v3 workspace can hold, mapped to its v4 type: the
+# v3 type-normalization aliases, plus the v2 organelle names exactly as v2.1's
+# `aegis migrate` mapped them (ORGANELLE_MAPPING, commit 06a7e39). Only aegis migrate
+# converts legacy names; the loader looks one up only to say a rule needs migrating.
+LEGACY_TYPE_NAMES = {
+    "wall": "invariant", "walls": "invariant", "invariants": "invariant", "safety-guard": "invariant",
+    "membrane": "boundary", "membranes": "boundary", "boundaries": "boundary",
+    "escalation-boundary": "boundary",
+    "traps": "trap", "patterns": "trap", "cells": "trap", "rules": "trap", "learned-trap": "trap",
+    "personas": "persona", "agent-persona": "persona",
+    "contracts": "contract", "contract-bridge": "contract",
+    "gates": "gate",
+    "vacuole": "trap", "vacuoles": "trap",
+    "chloroplast": "persona", "chloroplasts": "persona",
+    "plasmodesmata": "contract",
+}
+
+
+def legacy_rule_type(raw: Any) -> Optional[str]:
+    """The v4 type that a type name or type-directory name of any version (``wall``,
+    ``walls``, ``Trap``, ``invariant``) stands for, or None.
+
+    Only migration reads legacy names; the loader asks only to say that aegis migrate
+    can convert a rule it cannot serve.
+    """
+    if not isinstance(raw, str):
+        return None
+    name = raw.strip().lower()
+    if name in CANONICAL_RULE_TYPES:
+        return name
+    return LEGACY_TYPE_NAMES.get(name)
+
+
 # ── 4. Timeouts, TTLs, Retries & Rate Limits ────────────────────────────────
 # Rule expiry is a repository setting with its default in aegis_core.config (D10).
 
@@ -218,6 +251,8 @@ __all__ = [
     "DIR_RULE_TYPES",
     "RULE_TYPES",
     "RuleTypeSpec",
+    "LEGACY_TYPE_NAMES",
+    "legacy_rule_type",
     "LOCK_TIMEOUT_SECONDS",
     "LOCK_RETRY_INTERVAL_SECONDS",
     "LOCK_MAX_BACKOFF_SECONDS",

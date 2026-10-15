@@ -40,7 +40,8 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from aegis_core.match import first_match, is_test_path, matching_files
 from aegis_core.rule_inventory import RuleInventory, RuleInventoryEntry, inventory_rules
-from aegis_core.taxonomy import DIR_RULE_TYPES, RULE_TYPES
+from aegis_core.taxonomy import DIR_RULE_TYPES, RULE_TYPES, legacy_rule_type
+from aegis_core.workspace import as_workspace
 from aegis_core.workspace.layout import RULES_RELDIR
 from aegis_core.yaml_engine.frontmatter import split_frontmatter
 from aegis_core.yaml_engine.parser import AegisYAMLError, parse_yaml_subset
@@ -58,6 +59,7 @@ __all__ = [
     "is_legacy_key",
     "load_rules",
     "lf_digest",
+    "validate_rule_names",
     "workspace_root",
 ]
 
@@ -309,13 +311,6 @@ def _unknown_enforcement_keys(meta: Mapping[str, Any]) -> List[str]:
     return sorted(found)
 
 
-def _legacy_type_name(name: Any) -> Optional[str]:
-    """The v4 type a v1-v3 type or directory name stands for (aegis migrate's table)."""
-    from aegis_core.migrate import legacy_rule_type
-
-    return legacy_rule_type(name)
-
-
 def _parse(entry: RuleInventoryEntry, rule_type: Optional[str], directory: str) -> Rule:
     relative = entry.relative_path
     stem = _stem(relative)
@@ -349,7 +344,7 @@ def _parse(entry: RuleInventoryEntry, rule_type: Optional[str], directory: str) 
     declared_type = clean.get("type")
     if rule_type is not None and declared_type is not None and declared_type != rule_type:
         problem = f"type {declared_type!r} does not match its directory {directory!r} ({rule_type})"
-        if _legacy_type_name(declared_type) == rule_type:
+        if legacy_rule_type(declared_type) == rule_type:
             problem += f"; aegis migrate rewrites it to {rule_type!r}"
         problems.append(problem)
     enforcement = clean.get("enforcement")
@@ -422,7 +417,7 @@ def _classify(entry: RuleInventoryEntry, parts: List[str]) -> Tuple[Optional[Rul
         return _unserved(entry, "", "it is not in a rule type directory", expected) + (None,)
     if parts[0] in DIR_RULE_TYPES:
         return _unserved(entry, parts[0], f"rules are not loaded from subdirectories of {parts[0]}/", expected) + (None,)
-    legacy = _legacy_type_name(parts[0])
+    legacy = legacy_rule_type(parts[0])
     if legacy is not None:
         fix = f"a v3 type directory: aegis migrate moves its rules to {RULES_RELDIR}/{RULE_TYPES[legacy].directory}/"
         return _unserved(entry, parts[0], f"{parts[0]}/ is not a rule type directory", fix,
@@ -472,6 +467,17 @@ def load_rules(workspace: Any, inventory: Optional[RuleInventory] = None) -> Rul
             loaded[i] = Rule(rule.id, rule.path, rule.type, rule.meta, rule.body, rule.digest, message,
                              rule.legacy_keys, rule.raw)
     return RuleSet(tuple(loaded), tuple(ignored), snapshot.fingerprint)
+
+
+def validate_rule_names(rule_names: List[str], workspace: Any) -> List[str]:
+    """The names in ``rule_names`` that are not the id of a rule that loads cleanly, in
+    order (empty when every name is valid). ``workspace`` is a Workspace, or a path the
+    workspace is resolved from."""
+    ws = as_workspace(workspace)
+    if not rule_names:
+        return []
+    known = {rule.id for rule in load_rules(ws).rules if rule.ok}
+    return [name for name in rule_names if name not in known]
 
 
 class RuleCache:

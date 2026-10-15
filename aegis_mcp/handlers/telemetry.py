@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from aegis_core.rule_inventory import RuleInventoryError
+from aegis_core.rules import validate_rule_names
 from aegis_core.telemetry_engine import ledger
 from aegis_mcp.registry import _STATUS_FAIL, _VALID_OUTCOMES, _get_workspace
 
@@ -51,7 +52,7 @@ def handle_report_outcome(args: dict) -> dict:
         return _fail("'rules_used' must be a list of rule names.")
     rules_used = list(rules_used)
     try:
-        invalid = workspace.validate_rule_names(rules_used)
+        invalid = validate_rule_names(rules_used, workspace)
     except RuleInventoryError as exc:
         return _fail(f"Cannot check 'rules_used' against the rules: {exc}")
     if invalid:

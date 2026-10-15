@@ -85,8 +85,8 @@ _ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml
 _TYPE_WORDS = set(CANONICAL_RULE_TYPES) | set(RULE_TYPE_DIRS.values()) | {
     "wall", "walls", "membrane", "membranes", "genome", "vacuole", "safety-guard", "learned-trap",
 }
-# The table itself, and migrate's legacy-name table (only migration reads legacy names).
-_TABLE_OWNERS = {"aegis_core/taxonomy.py", "aegis_core/migrate.py"}
+# The table itself, which also holds the legacy-name table aegis migrate converts with.
+_TABLE_OWNERS = {"aegis_core/taxonomy.py"}
 
 
 def test_no_module_keeps_a_second_rule_type_vocabulary():
