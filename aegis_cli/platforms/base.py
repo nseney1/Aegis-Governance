@@ -182,8 +182,8 @@ def detect_platforms(
     if home is not None:
         detected_set.update(_detect_markers_in_dir(Path(home)))
     elif project_root is None:
-        default_home = Path(os.environ.get("HOME") or Path.home())
-        detected_set.update(_detect_markers_in_dir(default_home))
+        # Path.home(), not $HOME: on Windows it is USERPROFILE, where the agent CLIs live.
+        detected_set.update(_detect_markers_in_dir(Path.home()))
 
     result = [p for p in ordered if p in detected_set]
     return result if result else ["gemini"]
@@ -208,9 +208,7 @@ def get_rules_dir(
     local: bool = False,
 ) -> Path:
     """Return the target rules directory for the given platform."""
-    if home is None:
-        home = Path(os.environ.get("HOME") or Path.home())
-    home = Path(home)
+    home = Path(home) if home is not None else Path.home()
     if project_root is None:
         project_root = Path.cwd()
     project_root = Path(project_root)

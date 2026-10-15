@@ -130,6 +130,15 @@ class TestGetRulesDir:
         with pytest.raises(ValueError, match="Unsupported platform"):
             get_rules_dir("unknown", tmp_path, local=True)
 
+    def test_default_home_is_path_home_even_when_home_differs(self, tmp_path, monkeypatch):
+        # Path.home() is USERPROFILE on Windows, where the agent CLIs read their rules;
+        # a different HOME (Git Bash, CI) must not send the rules somewhere else.
+        from aegis_cli.init import get_rules_dir
+        profile = tmp_path / "profile"
+        monkeypatch.setattr("pathlib.Path.home", lambda: profile)
+        monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+        assert get_rules_dir("cursor", project_root=tmp_path) == profile / ".cursor" / "rules"
+
 
 class TestInstallStarterRules:
     """Verify starter rule installation."""
