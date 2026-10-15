@@ -166,7 +166,7 @@ class TestMandatoryInvariantSlots:
         from jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=1)
 
-        cell_names = [c['name'] for c in result['relevant_cells']]
+        cell_names = [c['name'] for c in result['relevant_rules']]
         assert 'wall-no-secrets' in cell_names, \
             f"Wall cell must always load. Got: {cell_names}"
 
@@ -175,7 +175,7 @@ class TestMandatoryInvariantSlots:
         from jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=1)
 
-        cell_names = [c['name'] for c in result['relevant_cells']]
+        cell_names = [c['name'] for c in result['relevant_rules']]
         assert 'gate-auth' in cell_names, \
             f"Gate-tier cell must always load. Got: {cell_names}"
 
@@ -185,7 +185,7 @@ class TestMandatoryInvariantSlots:
         from jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=3)
 
-        cell_names = [c['name'] for c in result['relevant_cells']]
+        cell_names = [c['name'] for c in result['relevant_rules']]
         # 2 mandatory + 1 advisory = 3
         assert 'wall-no-secrets' in cell_names
         assert 'gate-auth' in cell_names
@@ -196,7 +196,7 @@ class TestMandatoryInvariantSlots:
         from jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=10)
 
-        cell_names = [c['name'] for c in result['relevant_cells']]
+        cell_names = [c['name'] for c in result['relevant_rules']]
         assert len(cell_names) == 4, f"Expected all 4 cells, got {len(cell_names)}: {cell_names}"
 
     def test_mandatory_can_exceed_budget(self, populated_workspace):
@@ -206,7 +206,7 @@ class TestMandatoryInvariantSlots:
         # Budget=2 but we have 2 mandatory cells. Advisory gets 0 slots.
         result = express(populated_workspace, changed_files=["app.py"], budget=2)
 
-        cell_names = [c['name'] for c in result['relevant_cells']]
+        cell_names = [c['name'] for c in result['relevant_rules']]
         assert 'wall-no-secrets' in cell_names
         assert 'gate-auth' in cell_names
         # Advisory cells should NOT load since budget is consumed
@@ -218,16 +218,16 @@ class TestMandatoryInvariantSlots:
         """When no files are changed, no cells load (including mandatory)."""
         from jit_engine import express
         result = express(populated_workspace, changed_files=[], budget=10)
-        assert len(result['relevant_cells']) == 0
+        assert len(result['relevant_rules']) == 0
 
     def test_stats_report_correct_counts(self, populated_workspace):
         """Stats should report total, matched, and expressed counts."""
         from jit_engine import express
         result = express(populated_workspace, changed_files=["app.py"], budget=3)
 
-        assert result['stats']['total_cells'] == 4
+        assert result['stats']['total_rules'] == 4
         assert result['stats']['matched'] == 4  # all match *.py
-        assert result['stats']['expressed'] == 3  # budget=3
+        assert result['rules_staged'] == 3  # budget=3
 
 # ── Phase 2: C1 — NEW/DORMANT Status Restoration ─────────────────────────
 

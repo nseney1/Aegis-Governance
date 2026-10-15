@@ -36,13 +36,12 @@ def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
     _add_scan_warnings(res, loaded.warnings)
     reg = loaded.sanitized()
 
-    for top_key in ("context", "guidance"):
-        val = res.get(top_key)
-        if isinstance(val, str) and "${SLOT." in val:
-            res[top_key] = reg.resolve(val, strict=False)
+    val = res.get("guidance")
+    if isinstance(val, str) and "${SLOT." in val:
+        res["guidance"] = reg.resolve(val, strict=False)
 
     seen_ids = set()
-    for list_key in ("relevant_rules", "relevant_cells", "genome_guidance", "target_constraints", "wall_warnings", "invariant_warnings"):
+    for list_key in ("relevant_rules", "genome_guidance", "invariant_warnings"):
         items = res.get(list_key)
         if not isinstance(items, list):
             continue
@@ -50,7 +49,7 @@ def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
             if not isinstance(item, dict) or id(item) in seen_ids:
                 continue
             seen_ids.add(id(item))
-            for field in ("content", "body", "guidance", "summary", "hypothesis", "prediction"):
+            for field in ("body", "hypothesis", "prediction"):
                 val = item.get(field)
                 if isinstance(val, str) and "${SLOT." in val:
                     item[field] = reg.resolve(val, strict=False)

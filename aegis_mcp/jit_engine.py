@@ -1,40 +1,45 @@
 #!/usr/bin/env python3
-"""JIT Rule Expression Engine — Soma v0.30
+"""JIT rule expression engine.
 
-Implements just-in-time governance delivery based on context engineering research:
-- Gloaguen et al. (2026): Static context files don't improve task success
-- ACE (2025): Evolving, curated context improves agent performance by 10%+
+Instead of loading every rule into the system prompt, aegis_scan returns only the
+rules for the files about to change:
 
-Instead of dumping all rules into the system prompt, this engine:
-1. Reads the current git diff to identify changed files
-2. Matches cells by target_paths (fnmatch)
-3. Ranks by Bayesian fitness score (highest first)
-4. Returns only the top N cells (default: 3) with full guidance text
-5. Includes relevant non-standard genome rules
+1. Read the changed files (the caller's list, or the git diff).
+2. Match rules by target_paths (fnmatch on the path and the basename).
+3. Gates and invariants always load; other rules are ranked by salience and
+   fitness, kept type-diverse, and capped by a rule count.
+4. The whole response is clamped to the token budget (AEGIS_MAX_JIT_TOKENS):
+   a rule that does not fit is omitted and counted, never silently dropped.
 
-Dependency policy: pyyaml is OPTIONAL here. aegis_mcp/ must import and run on a
-bare interpreter (see .soma/cells/walls/wall-mcp-zero-deps.md), so frontmatter
-falls back to a stdlib parser covering the YAML subset the cells actually use.
+aegis_mcp imports only the standard library and aegis_core.
 """
 from __future__ import annotations
 
-import os
-import sys
-from typing import Any
-import glob
-import re
-import subprocess
 import fnmatch
+import glob
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 
-yaml = None  # Backward-compatible sentinel: zero-dependency runtime
-
+from aegis_core.scoring import compute_cell_fitness, compute_salience
+from aegis_core.taxonomy import (
+    JIT_DEFAULT_MAX_TOKENS,
+    JIT_DEFAULT_RULE_COUNT_BUDGET,
+    SUBPROCESS_DEFAULT_TIMEOUT_SECONDS,
+    WORDS_TO_TOKENS_FACTOR,
+)
+from aegis_core.workspace.layout import WorkspaceLayout
+from aegis_core.yaml import _get_body, parse_frontmatter
 from aegis_mcp.rule_cache import CellCache
 
 # Module-level singleton — persists across MCP tool invocations
 _cell_cache = CellCache()
 
-# Ensure parent dir is importable
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+NO_CHANGES_TEXT = "No changed files detected. Governance guidance will be provided when files are modified."
+NO_MATCH_TEXT = "No governance rules match your current changes."
 
 
 def warn(message: str) -> None:
@@ -47,35 +52,6 @@ def warn(message: str) -> None:
     except Exception:
         pass
 
-
-from pathlib import Path
-
-from aegis_core.yaml import (
-    FrontmatterError,
-    parse_yaml_subset,
-    parse_frontmatter,
-    _get_body,
-)
-from aegis_core.scoring import compute_cell_fitness, compute_salience
-from aegis_core.taxonomy import (
-    JIT_DEFAULT_MAX_TOKENS,
-    JIT_DEFAULT_RULE_COUNT_BUDGET,
-    JIT_GATE_TIER_RATIO,
-    SUBPROCESS_DEFAULT_TIMEOUT_SECONDS,
-    WORDS_TO_TOKENS_FACTOR,
-)
-from aegis_core.workspace.layout import WorkspaceLayout
-try:
-    from aegis_core.ast.match import (
-        evaluate_forbid_ast,
-        match_ast_triggers,
-        prefilter_ast_tokens,
-        synthesize_planned_ast,
-    )
-except ImportError:
-    from aegis_core.ast_match import match_ast_triggers, prefilter_ast_tokens
-    evaluate_forbid_ast = None  # type: ignore[assignment]
-    synthesize_planned_ast = None  # type: ignore[assignment]
 
 def estimate_tokens(text: object | None) -> int:
     """Estimate token count using fast stdlib heuristic (~1.35 tokens per word).
@@ -95,14 +71,12 @@ def estimate_tokens(text: object | None) -> int:
 
 def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -> int:
     """Resolve JIT context token budget with precedence: arg > env > config > default(2000)."""
-    # 1. Explicit max_tokens argument
     if max_tokens is not None:
         try:
             return int(max_tokens)
         except (ValueError, TypeError):
             pass
 
-    # 2. Environment variable AEGIS_MAX_JIT_TOKENS
     env_val = os.environ.get("AEGIS_MAX_JIT_TOKENS")
     if env_val:
         try:
@@ -110,7 +84,6 @@ def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -
         except (ValueError, TypeError):
             pass
 
-    # 3. Workspace aegis.conf configuration
     if workspace:
         conf_path = os.path.join(workspace, "aegis.conf")
         if os.path.isfile(conf_path):
@@ -128,7 +101,6 @@ def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -
             except Exception:
                 pass
 
-    # 4. Default fallback: 2000 tokens
     return JIT_DEFAULT_MAX_TOKENS
 
 
@@ -170,7 +142,6 @@ def load_all_cells(workspace: str) -> list[dict[str, object]]:
             if not fm:
                 warn(f'skipped cell {rel}: no frontmatter metadata')
                 continue
-            # Skip expired cells (pruned by cell_expiry --prune)
             if fm.get('expired_at'):
                 continue
             fm['_name'] = os.path.splitext(os.path.basename(cell_file))[0]
@@ -183,121 +154,53 @@ def load_all_cells(workspace: str) -> list[dict[str, object]]:
     return cells
 
 
-def match_cells_for_diff(
-    cells: list[dict[str, Any]],
-    changed_files: list[str],
-    diff_text: str = "",
-    repo_root: str = "",
-    workspace: str = "",
-    planned_symbols: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Match cells against changed files using AST syntactic triggers, forbid_ast, planned_symbols, and target_paths globs.
-
-    Returns a list of match records, each containing the matched cell, match_type,
-    and matched_files.
-    """
-    matched = []
-    base_root = workspace or repo_root
-    planned_ast = (
-        synthesize_planned_ast(planned_symbols)
-        if (planned_symbols and synthesize_planned_ast is not None)
-        else None
-    )
-
-    for cell in cells:
-        ast_trigs = cell.get("ast_triggers")
-        forbid_spec = cell.get("forbid_ast")
-        target_paths = cell.get("target_paths") or cell.get("paths") or cell.get("globs") or []
-        if isinstance(target_paths, str):
-            target_paths = [target_paths]
-
-        is_match = False
-        match_type = "glob_match"
-        matched_files = []
-
-        # 0. Pre-edit planned_symbols matching against ast_triggers and forbid_ast
-        if planned_ast is not None and evaluate_forbid_ast is not None:
-            trig_hits = (
-                evaluate_forbid_ast(planned_ast, ast_trigs)
-                if (ast_trigs and isinstance(ast_trigs, dict))
-                else []
-            )
-            forbid_hits = (
-                evaluate_forbid_ast(planned_ast, forbid_spec)
-                if (forbid_spec and isinstance(forbid_spec, dict))
-                else []
-            )
-            if trig_hits or forbid_hits:
-                is_match = True
-                match_type = "ast_match"
-                matched_files.extend(changed_files if changed_files else ["<planned_symbols>"])
-
-        # 1. Syntactic AST triggers & forbid_ast on files (highest precision)
-        for spec_obj in (ast_trigs, forbid_spec):
-            if spec_obj and isinstance(spec_obj, dict):
-                for f in changed_files:
-                    f_path = os.path.join(base_root, f) if (base_root and not os.path.isabs(f)) else f
-                    ast_matched, _ = match_ast_triggers(
-                        spec_obj,
-                        file_path=f_path,
-                        diff_text=diff_text,
-                    )
-                    if ast_matched:
-                        is_match = True
-                        match_type = "ast_match"
-                        matched_files.append(f)
-
-        # 2. Path matching (if not already matched by AST or if cell has target_paths)
-        if not is_match and target_paths:
-            for changed in changed_files:
-                base = os.path.basename(changed)
-                for pattern in target_paths:
-                    if changed == pattern:
-                        is_match = True
-                        match_type = "exact_path"
-                        matched_files.append(changed)
-                        break
-                    elif (
-                        fnmatch.fnmatch(changed, pattern)
-                        or fnmatch.fnmatch(base, pattern)
-                        or (pattern.startswith("**/") and (fnmatch.fnmatch(changed, pattern[3:]) or fnmatch.fnmatch(base, pattern[3:])))
-                    ):
-                        is_match = True
-                        if match_type != "exact_path":
-                            match_type = "glob_match"
-                        matched_files.append(changed)
-                        break
-
-        if is_match:
-            cell_copy = cell.copy()
-            unique_files = list(dict.fromkeys(matched_files))
-            cell_copy["_matched_files"] = unique_files
-            cell_copy["match_type"] = match_type
-            match_entry = {
-                "cell": cell_copy,
-                "match_type": match_type,
-                "matched_files": unique_files,
-                **cell_copy,
-            }
-            matched.append(match_entry)
-
-    return matched
+def _path_match_type(target_paths: list[str], changed: str) -> str | None:
+    base = os.path.basename(changed)
+    for pattern in target_paths:
+        if changed == pattern:
+            return "exact_path"
+        if (
+            fnmatch.fnmatch(changed, pattern)
+            or fnmatch.fnmatch(base, pattern)
+            or (pattern.startswith("**/") and (fnmatch.fnmatch(changed, pattern[3:]) or fnmatch.fnmatch(base, pattern[3:])))
+        ):
+            return "glob_match"
+    return None
 
 
 def match_cells_to_files(
     cells: list[dict[str, object]],
     changed_files: list[str],
-    workspace: str = "",
-    planned_symbols: list[str] | None = None,
 ) -> list[dict[str, object]]:
-    """Match cells to changed files by target_paths (fnmatch), AST triggers, and planned_symbols."""
-    matches = match_cells_for_diff(
-        cells,
-        changed_files,
-        workspace=workspace,
-        planned_symbols=planned_symbols,
-    )
-    return [m["cell"] for m in matches]
+    """Match rules to changed files by target_paths.
+
+    Each match is a copy of the rule carrying ``_matched_files`` and ``match_type``
+    (``exact_path`` when a changed file equals a pattern, else ``glob_match``).
+    """
+    matched = []
+    for cell in cells:
+        target_paths = cell.get("target_paths") or cell.get("paths") or cell.get("globs") or []
+        if isinstance(target_paths, str):
+            target_paths = [target_paths]
+        if not target_paths:
+            continue
+
+        match_type = None
+        matched_files = []
+        for changed in changed_files:
+            kind = _path_match_type(target_paths, changed)
+            if kind is None:
+                continue
+            matched_files.append(changed)
+            if kind == "exact_path" or match_type is None:
+                match_type = kind
+
+        if matched_files:
+            cell_copy = cell.copy()
+            cell_copy["_matched_files"] = list(dict.fromkeys(matched_files))
+            cell_copy["match_type"] = match_type
+            matched.append(cell_copy)
+    return matched
 
 
 def get_fitness_score(cell: dict[str, object]) -> float:
@@ -311,7 +214,6 @@ def rank_cells(matched_cells: list[dict[str, object]]) -> list[dict[str, object]
         cell['_fitness_score'] = get_fitness_score(cell)
         cell['_salience'] = compute_salience(cell, match_type=cell.get('match_type', 'glob_match'))
 
-    # Sort by salience (descending), then fitness, then match count
     return sorted(
         matched_cells,
         key=lambda c: (c['_salience'], c['_fitness_score'], len(c.get('_matched_files', []))),
@@ -324,14 +226,12 @@ def ensure_type_diversity(ranked_cells: list[dict[str, object]], budget: int) ->
     selected = []
     seen_types = set()
 
-    # First pass: one of each type
     for cell in ranked_cells:
         ctype = cell.get('type', 'unknown')
         if ctype not in seen_types and len(selected) < budget:
             selected.append(cell)
             seen_types.add(ctype)
 
-    # Second pass: fill remaining budget
     for cell in ranked_cells:
         if cell not in selected and len(selected) < budget:
             selected.append(cell)
@@ -376,7 +276,6 @@ def format_cell_guidance(cell: dict[str, object]) -> dict[str, object]:
     if matched:
         guidance += f"   Triggered by: {', '.join(matched[:5])}\n"
     if body:
-        # Truncate body to keep context tight
         body_lines = body.strip().split('\n')[:8]
         guidance += f"   Detail: {' '.join(line.strip() for line in body_lines)[:300]}\n"
     guidance += f"   Fitness: {fitness:.2f}\n"
@@ -392,161 +291,6 @@ def format_cell_guidance(cell: dict[str, object]) -> dict[str, object]:
         'fitness': fitness,
         'guidance': guidance,
         'body': body[:500] if body else ''
-    }
-
-
-def compress_to_atomic_directive(cell: dict[str, Any]) -> str:
-    """Compress a security gate cell into an Atomic Invariant Directive.
-
-    Strips historical prose, examples, and detailed explanations while preserving
-    the core invariant statement, enforcement consequence, and trigger patterns.
-    Typically consumes ~35-55 tokens.
-    """
-    cid = cell.get("id") or cell.get("_name") or cell.get("name") or "gate-contract"
-    hypothesis = cell.get("hypothesis") or cell.get("name") or "Security contract"
-    prediction = cell.get("prediction") or "Contract violation causes security failure"
-
-    patterns = []
-    ast_trigs = cell.get("ast_triggers") or {}
-    if isinstance(ast_trigs, dict):
-        for k, v in ast_trigs.items():
-            if v:
-                patterns.append(f"AST {k}: {v}")
-    target_paths = cell.get("target_paths") or []
-    if target_paths:
-        if isinstance(target_paths, str):
-            patterns.append(f"Paths: {target_paths}")
-        else:
-            patterns.append(f"Paths: {', '.join(str(p) for p in target_paths[:3])}")
-    pattern_str = " | ".join(patterns) if patterns else "All matching files"
-
-    return (
-        f"### 🛡️ [GATE: ATOMIC] {cid}\n"
-        f"- **Invariant**: {hypothesis}\n"
-        f"- **Consequence**: {prediction}\n"
-        f"- **Pattern**: {pattern_str}\n"
-    )
-
-
-def pack_two_tier_context(
-    gates: list[dict[str, Any]],
-    advisory: list[dict[str, Any]],
-    total_budget: int = JIT_DEFAULT_MAX_TOKENS,
-    tier1_ratio: float = JIT_GATE_TIER_RATIO,
-) -> dict[str, Any]:
-    """Partitioned 2-Tier Token Budget packing with Incompressible Gate Guarantee.
-
-    Allocation:
-    - Tier 1: Security Gates (guaranteed 60% = 1200 tokens default)
-    - Tier 2: Advisory Rules (dynamic headroom, up to remaining budget)
-
-    Degradation ladder:
-    1. If gates fit in Tier 1 budget: gates full-fidelity, unused headroom flows to Tier 2.
-    2. If gates exceed Tier 1 budget (<= 1800 tokens): Tier 2 dropped to 0, gates pack full-fidelity up to budget.
-    3. Extreme Gate Pressure: Gates are NEVER dropped. Overflow gates compress into Atomic Invariant Directives.
-    4. Advisory cells sorted by descending Salience.
-    """
-    tier1_budget = int(total_budget * tier1_ratio)
-
-    def _get_salience(c: dict[str, Any]) -> float:
-        if "_salience" in c:
-            try:
-                return float(c["_salience"])
-            except (ValueError, TypeError):
-                pass
-        match_type = c.get("match_type", "glob_match")
-        return compute_salience(c, match_type=match_type)
-
-    sorted_gates = sorted(gates, key=_get_salience, reverse=True)
-    sorted_advisory = sorted(advisory, key=_get_salience, reverse=True)
-
-    def _full_content(c: dict[str, Any]) -> str:
-        if "_full" in c and c["_full"]:
-            return str(c["_full"])
-        body = c.get("body") or c.get("_body") or ""
-        fg = format_cell_guidance(c)
-        if body and len(body) > 300:
-            return f"{fg['guidance']}\n   Full Detail: {body}"
-        return fg["guidance"]
-
-    gate_sizes = []
-    for g in sorted_gates:
-        full_text = _full_content(g)
-        full_tok = estimate_tokens(full_text)
-        atomic_text = compress_to_atomic_directive(g)
-        atomic_tok = estimate_tokens(atomic_text)
-        gate_sizes.append({
-            "cell": g,
-            "full_text": full_text,
-            "full_tokens": full_tok,
-            "atomic_text": atomic_text,
-            "atomic_tokens": atomic_tok,
-        })
-
-    total_full_gate_tokens = sum(item["full_tokens"] for item in gate_sizes)
-
-    expressed_gates: list[dict[str, Any]] = []
-    used_gate_tokens = 0
-
-    if total_full_gate_tokens <= total_budget:
-        for item in gate_sizes:
-            cell_data = item["cell"].copy()
-            cell_data["compressed"] = False
-            cell_data["content"] = item["full_text"]
-            cell_data["tokens"] = item["full_tokens"]
-            expressed_gates.append(cell_data)
-            used_gate_tokens += item["full_tokens"]
-    else:
-        # Extreme gate pressure: pack full fidelity as many as fit within tier1_budget,
-        # and compress the rest into Atomic Invariant Directives
-        for i, item in enumerate(gate_sizes):
-            remaining_atomic_tokens = sum(g["atomic_tokens"] for g in gate_sizes[i+1:])
-            if (used_gate_tokens + item["full_tokens"] + remaining_atomic_tokens <= total_budget
-                    and used_gate_tokens + item["full_tokens"] <= tier1_budget):
-                cell_data = item["cell"].copy()
-                cell_data["compressed"] = False
-                cell_data["content"] = item["full_text"]
-                cell_data["tokens"] = item["full_tokens"]
-                expressed_gates.append(cell_data)
-                used_gate_tokens += item["full_tokens"]
-            else:
-                cell_data = item["cell"].copy()
-                cell_data["compressed"] = True
-                cell_data["content"] = item["atomic_text"]
-                cell_data["tokens"] = item["atomic_tokens"]
-                expressed_gates.append(cell_data)
-                used_gate_tokens += item["atomic_tokens"]
-
-    # Calculate available budget for Tier 2 Advisory Rules
-    if total_full_gate_tokens > tier1_budget:
-        advisory_budget = 0
-    else:
-        advisory_budget = max(0, total_budget - used_gate_tokens)
-
-    expressed_advisory: list[dict[str, Any]] = []
-    used_advisory_tokens = 0
-
-    for a in sorted_advisory:
-        a_text = _full_content(a)
-        a_tok = estimate_tokens(a_text)
-        if used_advisory_tokens + a_tok <= advisory_budget:
-            cell_data = a.copy()
-            cell_data["compressed"] = False
-            cell_data["content"] = a_text
-            cell_data["tokens"] = a_tok
-            expressed_advisory.append(cell_data)
-            used_advisory_tokens += a_tok
-
-    total_tokens = used_gate_tokens + used_advisory_tokens
-    clamped = (len(expressed_advisory) < len(advisory)) or any(g.get("compressed") for g in expressed_gates)
-
-    return {
-        "expressed_gates": expressed_gates,
-        "expressed_advisory": expressed_advisory,
-        "total_tokens": total_tokens,
-        "gate_tokens": used_gate_tokens,
-        "advisory_tokens": used_advisory_tokens,
-        "clamped": clamped,
     }
 
 
@@ -597,40 +341,102 @@ def load_genome_rules(workspace: str, changed_files: list[str]) -> list[dict[str
             if fm is None:
                 warn(f'skipped genome rule {rel}: malformed YAML frontmatter')
                 continue
-            # Only include non-standard rules
             non_standard = fm.get('non_standard', 'false')
             if str(non_standard).lower() not in ('true', 'yes', '1'):
                 continue
-            # Include if it has target_paths matching, or if it has no target_paths (global)
             target_paths = fm.get('target_paths', [])
             if isinstance(target_paths, str):
                 target_paths = [target_paths]
-            if not target_paths:
-                # Global non-standard rule — always include
+            if not target_paths or any(
+                fnmatch.fnmatch(changed, pattern) for changed in changed_files for pattern in target_paths
+            ):
                 body = _get_body(content)
                 relevant.append({
                     'name': os.path.splitext(os.path.basename(rule_file))[0],
                     'body': body[:500] if body else '',
                     'category': fm.get('category', 'general')
                 })
-            else:
-                # Check if any changed files match
-                for changed in changed_files:
-                    for pattern in target_paths:
-                        if fnmatch.fnmatch(changed, pattern):
-                            body = _get_body(content)
-                            relevant.append({
-                                'name': os.path.splitext(os.path.basename(rule_file))[0],
-                                'body': body[:500] if body else '',
-                                'category': fm.get('category', 'general')
-                            })
-                            break
-                    else:
-                        continue
-                    break
         except Exception as e:
             warn(f'skipped genome rule {rel}: {e.__class__.__name__}: {e}')
     return relevant
+
+
+def _is_mandatory(cell: dict[str, Any]) -> bool:
+    """Gates and invariants load before any ranked rule and ignore the rule count."""
+    return cell.get('type') in ('wall', 'invariant', 'gate') or cell.get('enforcement') == 'gate'
+
+
+def _is_invariant(constraint: dict[str, Any]) -> bool:
+    return constraint.get('tier') in ('wall', 'invariant') or constraint.get('type') in ('wall', 'invariant')
+
+
+def _load_rules(workspace: str) -> list[dict[str, Any]]:
+    """Rules from .aegis/rules/, or from a top-level rules/ dir when there is no .aegis/rules/."""
+    all_cells = list(_cell_cache.get_cells(workspace))
+    top_rules_dir = os.path.join(str(workspace), "rules")
+    if not os.path.isdir(top_rules_dir) or os.path.isdir(os.path.join(str(workspace), ".aegis", "rules")):
+        return all_cells
+    seen_names = {c.get("_name") for c in all_cells}
+    for rule_file in sorted(glob.glob(os.path.join(top_rules_dir, "**", "*.md"), recursive=True)):
+        if os.path.basename(rule_file) == "README.md":
+            continue
+        name = os.path.splitext(os.path.basename(rule_file))[0]
+        if name in seen_names:
+            continue
+        try:
+            with open(rule_file, encoding="utf-8-sig") as f:
+                content = f.read()
+        except OSError:
+            continue
+        fm = parse_frontmatter(content)
+        if not fm or fm.get("expired_at"):
+            continue
+        fm["_name"] = name
+        fm["_path"] = os.path.relpath(rule_file, str(workspace))
+        fm["_body"] = _get_body(content)
+        fm["_full"] = content
+        all_cells.append(fm)
+        seen_names.add(name)
+    return all_cells
+
+
+def _omitted_note(omitted: int) -> str:
+    noun = "rule" if omitted == 1 else "rules"
+    return f"⚠️ {omitted} more {noun} omitted (raise AEGIS_MAX_JIT_TOKENS)"
+
+
+def _render_guidance(staged: list[dict[str, Any]], genome: list[dict[str, Any]], omitted: int) -> str:
+    parts = []
+    invariants = [s for s in staged if _is_invariant(s['constraint'])]
+    if invariants:
+        parts.append("## Pre-Edit Invariants & Constraints\n")
+        parts.append("CRITICAL: You must adhere to the following invariants when modifying target files:\n")
+        for s in invariants:
+            parts.append(f"- 🧱 [INVARIANT] {s['constraint']['name']}: {s['constraint']['hypothesis']}\n")
+    if staged:
+        parts.append("## Active Governance Rules\n")
+        parts.extend(s['text'] for s in staged)
+    if genome:
+        parts.append("\n## Project-Specific Rules\n")
+        parts.extend(f"### {rule['name']}\n{rule['body']}\n" for rule in genome)
+    if omitted:
+        parts.append(f"\n{_omitted_note(omitted)}\n")
+    return '\n'.join(parts) if parts else NO_MATCH_TEXT
+
+
+def _payload(staged, genome, omitted, guidance, stats) -> dict[str, Any]:
+    return {
+        'relevant_rules': [s['item'] for s in staged],
+        'guidance': guidance,
+        'genome_guidance': genome,
+        'invariant_warnings': [s['constraint'] for s in staged if _is_invariant(s['constraint'])],
+        'rules_staged': len(staged),
+        'stats': dict(stats, clamped=omitted > 0, omitted=omitted),
+    }
+
+
+def _payload_tokens(payload: dict[str, Any]) -> int:
+    return estimate_tokens(json.dumps(payload))
 
 
 def express(
@@ -638,231 +444,80 @@ def express(
     changed_files: list[str] | None = None,
     budget: int | None = None,
     max_tokens: int | None = None,
-    planned_symbols: list[str] | None = None,
 ) -> dict[str, object]:
     """Main JIT expression function.
 
-    Returns the minimum effective governance context for the current change,
-    clamped to rule count (budget) and token budget (max_tokens).
+    Returns the rules for the current change. ``budget`` caps how many optional
+    (non-gate, non-invariant) rules load; ``max_tokens`` bounds the whole response,
+    gates included, and every rule that does not fit is counted in stats.omitted.
     """
     token_budget = resolve_token_budget(workspace, max_tokens)
-
     if budget is None:
-        budget = int(os.environ.get('AEGIS_CONTEXT_BUDGET', str(JIT_DEFAULT_RULE_COUNT_BUDGET)))
-
-    if planned_symbols is None:
-        try:
-            caller = sys._getframe(1)
-            if caller.f_code.co_name in ("_handle_scan", "handle_scan"):
-                caller_args = caller.f_locals.get("args")
-                if isinstance(caller_args, dict) and "planned_symbols" in caller_args:
-                    raw_ps = caller_args.get("planned_symbols")
-                    if isinstance(raw_ps, (list, tuple)):
-                        planned_symbols = [str(s) for s in raw_ps if isinstance(s, str)]
-        except Exception:
-            pass
+        budget = JIT_DEFAULT_RULE_COUNT_BUDGET
 
     if not changed_files:
         changed_files = get_git_diff_files(workspace)
 
-    if not changed_files and not planned_symbols:
-        return {
-            'relevant_cells': [],
-            'relevant_rules': [],
-            'genome_guidance': [],
-            'target_constraints': [],
-            'wall_warnings': [],
-            'invariant_warnings': [],
-            'cells_staged': 0,
-            'rules_staged': 0,
-            'context': 'No changed files detected. Governance guidance will be provided when files are modified.',
-            'guidance': 'No changed files detected. Governance guidance will be provided when files are modified.',
-            'stats': {
-                'total_cells': 0,
-                'total_rules': 0,
-                'matched': 0,
-                'expressed': 0,
-                'cells_staged': 0,
-                'rules_staged': 0,
-                'budget': budget,
-                'changed_files': 0,
-                'estimated_tokens': 0,
-                'max_tokens_budget': token_budget,
-                'clamped': False,
-            }
-        }
-
-    # Load and match cells
-    all_cells = list(_cell_cache.get_cells(workspace))
-    top_rules_dir = os.path.join(str(workspace), "rules")
-    if os.path.isdir(top_rules_dir):
-        seen_names = {c.get("_name") for c in all_cells}
-        has_dot_aegis = os.path.isdir(os.path.join(str(workspace), ".aegis", "rules"))
-        for rule_file in sorted(glob.glob(os.path.join(top_rules_dir, "**", "*.md"), recursive=True)):
-            if os.path.basename(rule_file) == "README.md":
-                continue
-            name = os.path.splitext(os.path.basename(rule_file))[0]
-            if name in seen_names:
-                continue
-            try:
-                with open(rule_file, encoding="utf-8-sig") as f:
-                    content = f.read()
-                fm = parse_frontmatter(content)
-                if not fm or fm.get("expired_at"):
-                    continue
-                if not has_dot_aegis or fm.get("forbid_ast") or fm.get("ast_triggers"):
-                    fm["_name"] = name
-                    fm["_path"] = os.path.relpath(rule_file, str(workspace))
-                    fm["_body"] = _get_body(content)
-                    fm["_full"] = content
-                    all_cells.append(fm)
-                    seen_names.add(name)
-            except Exception:
-                continue
-
-    matched = match_cells_to_files(
-        all_cells,
-        changed_files or [],
-        workspace=workspace,
-        planned_symbols=planned_symbols,
-    )
-
-    # Score ALL matched cells first (fixes C3: mandatory cells displaying Fitness: 0.00)
-    for cell in matched:
-        cell['_fitness_score'] = get_fitness_score(cell)
-
-    # Apply hot zone boost from bug registry (v0.85 antifragile loop)
-    try:
-        from aegis_sdk.hot_zones import compute_cell_boost, load_report_from_workspace
-        hz_report = load_report_from_workspace(workspace)
-        if hz_report and (hz_report.active_file_zones or hz_report.active_pattern_zones):
-            for cell in matched:
-                fitness = cell.get('fitness', {})
-                tp = int(fitness.get('true_positives', 0)) if isinstance(fitness, dict) else 0
-                fp = int(fitness.get('false_positives', 0)) if isinstance(fitness, dict) else 0
-                outcome_count = tp + fp
-                boost = compute_cell_boost(cell, hz_report, outcome_count)
-                if boost > 0:
-                    cell['_fitness_score'] *= (1 + boost)
-                    cell['_hot_zone_boost'] = boost
-    except ImportError:
-        pass  # Graceful degradation
-
-    # Stage 0: Mandatory invariants — walls, invariants, and gate-tier cells always load
-    mandatory = []
-    candidates = []
-    for cell in matched:
-        cell_type = cell.get('type', 'trap')
-        enforcement = cell.get('enforcement', 'advisory')
-        if cell_type in ('wall', 'invariant') or enforcement == 'gate':
-            mandatory.append(cell)
-        else:
-            candidates.append(cell)
-
-    # Stage 1-2: Rank and diversify remaining candidates within leftover budget
-    remaining_budget = max(0, budget - len(mandatory))
-    ranked = rank_cells(candidates)
-    selected_candidates = ensure_type_diversity(ranked, remaining_budget)
-
-    # Stage 3: Pre-seed constraints and token budget clamping (Issue #75 & Issue #77)
-    target_constraints = extract_target_constraints(matched, changed_files)
-    early_warning_parts = []
-    wall_constraints = [
-        c for c in target_constraints
-        if c.get('tier') in ('wall', 'invariant') or c.get('type') in ('wall', 'invariant')
-    ]
-
-    if wall_constraints:
-        early_warning_parts.append("## Pre-Edit Invariants & Constraints\n")
-        early_warning_parts.append("CRITICAL: You must adhere to the following invariants when modifying target files:\n")
-        for wc in wall_constraints:
-            early_warning_parts.append(f"- 🧱 [INVARIANT] {wc['name']}: {wc['hypothesis']}\n")
-
-    early_warning_text = "".join(early_warning_parts)
-    accumulated_tokens = estimate_tokens(early_warning_text)
-    expressed_cells = []
-    clamped = False
-
-    # Mandatory cells are prioritized
-    for cell in mandatory:
-        fg = format_cell_guidance(cell)
-        cell_tokens = estimate_tokens(fg['guidance'])
-        if accumulated_tokens + cell_tokens <= token_budget:
-            expressed_cells.append(fg)
-            accumulated_tokens += cell_tokens
-        else:
-            expressed_cells.append(fg)
-            accumulated_tokens += cell_tokens
-            clamped = True
-
-    # Candidate cells fill remaining budget
-    for cell in selected_candidates:
-        fg = format_cell_guidance(cell)
-        cell_tokens = estimate_tokens(fg['guidance'])
-        if accumulated_tokens + cell_tokens <= token_budget:
-            expressed_cells.append(fg)
-            accumulated_tokens += cell_tokens
-        else:
-            clamped = True
-
-    # Load matching non-standard genome rules
-    genome_rules = load_genome_rules(workspace, changed_files)
-    expressed_genome = []
-    for rule in genome_rules:
-        rule_text = f"### {rule['name']}\n{rule['body']}\n"
-        rule_tokens = estimate_tokens(rule_text)
-        if accumulated_tokens + rule_tokens <= token_budget:
-            expressed_genome.append(rule)
-            accumulated_tokens += rule_tokens
-        else:
-            clamped = True
-
-    # Build the combined guidance text
-    guidance_parts = []
-    if early_warning_parts:
-        guidance_parts.extend(early_warning_parts)
-
-    if expressed_cells:
-        guidance_parts.append("## Active Governance Cells\n")
-        for cg in expressed_cells:
-            guidance_parts.append(cg['guidance'])
-
-    if expressed_genome:
-        guidance_parts.append("\n## Project-Specific Rules\n")
-        for rule in expressed_genome:
-            guidance_parts.append(f"### {rule['name']}\n{rule['body']}\n")
-
-    combined = '\n'.join(guidance_parts) if guidance_parts else 'No governance cells match your current changes.'
-    total_tokens = estimate_tokens(combined)
-
-    return {
-        'relevant_cells': expressed_cells,
-        'relevant_rules': expressed_cells,
-        'genome_guidance': expressed_genome,
-        'target_constraints': target_constraints,
-        'wall_warnings': wall_constraints,
-        'invariant_warnings': wall_constraints,
-        'cells_staged': len(expressed_cells),
-        'rules_staged': len(expressed_cells),
-        'context': combined,
-        'guidance': combined,
-        'stats': {
-            'total_cells': len(all_cells),
-            'total_rules': len(all_cells),
-            'matched': len(matched),
-            'expressed': len(expressed_cells),
-            'cells_staged': len(expressed_cells),
-            'rules_staged': len(expressed_cells),
-            'budget': budget,
-            'changed_files': len(changed_files),
-            'estimated_tokens': total_tokens,
-            'max_tokens_budget': token_budget,
-            'clamped': clamped,
-        }
+    stats = {
+        'total_rules': 0,
+        'matched': 0,
+        'budget': budget,
+        'changed_files': len(changed_files),
+        'estimated_tokens': 0,
+        'max_tokens_budget': token_budget,
     }
+    if not changed_files:
+        payload = _payload([], [], 0, NO_CHANGES_TEXT, stats)
+        payload['stats']['estimated_tokens'] = _payload_tokens(payload)
+        return payload
 
+    all_cells = _load_rules(workspace)
+    matched = match_cells_to_files(all_cells, changed_files)
+    stats['total_rules'] = len(all_cells)
+    stats['matched'] = len(matched)
 
-load_all_rules = load_all_cells
-match_rules_to_files = match_cells_to_files
-format_rule_guidance = format_cell_guidance
-express_for_files = express
+    mandatory = rank_cells([c for c in matched if _is_mandatory(c)])
+    candidates = rank_cells([c for c in matched if not _is_mandatory(c)])
+    selected = ensure_type_diversity(candidates, max(0, budget - len(mandatory)))
+
+    # The rendered text carries the detail; the structured item is the index of it.
+    entries = []
+    for cell in mandatory + selected:
+        item = format_cell_guidance(cell)
+        text = item.pop('guidance')
+        item.pop('body')
+        constraint = extract_target_constraints([cell], changed_files)[0]
+        entries.append({'item': item, 'text': text, 'constraint': constraint})
+    genome_rules = load_genome_rules(workspace, changed_files)
+
+    # Fill in priority order and stop at the first rule that does not fit, so a
+    # lower-priority rule never displaces a gate. Then confirm against the serialized
+    # response: the per-entry estimate is additive only up to rounding.
+    used = _payload_tokens(_payload([], [], 0, _render_guidance([], [], 1), stats))
+    staged, genome, omitted = [], [], 0
+    for entry in entries:
+        cost = _payload_tokens(entry['item']) + estimate_tokens(entry['text'])
+        if _is_invariant(entry['constraint']):
+            cost += _payload_tokens(entry['constraint']) + estimate_tokens(entry['constraint']['hypothesis']) + 4
+        if omitted or used + cost > token_budget:
+            omitted += 1
+            continue
+        staged.append(entry)
+        used += cost
+    for rule in genome_rules:
+        cost = _payload_tokens(rule) + estimate_tokens(rule['body'])
+        if omitted or used + cost > token_budget:
+            omitted += 1
+            continue
+        genome.append(rule)
+        used += cost
+
+    while True:
+        payload = _payload(staged, genome, omitted, _render_guidance(staged, genome, omitted), stats)
+        tokens = _payload_tokens(payload)
+        if tokens <= token_budget or not (staged or genome):
+            break
+        (genome or staged).pop()
+        omitted += 1
+    payload['stats']['estimated_tokens'] = tokens
+    return payload
