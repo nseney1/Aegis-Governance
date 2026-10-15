@@ -96,7 +96,7 @@ def _v1_rule(row: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _v1_to_v2(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _v1_to_v2(row: Dict[str, Any], origin: Any = "v1") -> Optional[Dict[str, Any]]:
     rule = _v1_rule(row)
     signal = row.get("signal") or row.get("outcome")
     outcome = _V1_SIGNALS.get(signal) if isinstance(signal, str) else None
@@ -113,7 +113,7 @@ def _v1_to_v2(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "host": meta.pop("host", None),
         "session": meta.pop("session", None),
         "key": row.get("event_id"),
-        "from": "v1",
+        "from": origin,
     }
     if "credit_weight" in meta:
         out["weight"] = meta.pop("credit_weight")
@@ -122,7 +122,9 @@ def _v1_to_v2(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return out
 
 
-def normalize_rows(rows: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+def normalize_rows(
+    rows: Iterable[Dict[str, Any]], origins: Optional[List[Any]] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
     """Return ``(v2 outcome rows, unusable row count)`` for raw ledger rows of any version.
 
     v2 rows pass through; rows without ``rule`` and ``outcome`` (an epoch row) are
@@ -134,12 +136,15 @@ def normalize_rows(rows: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]]
     triggers, as v3 readers counted it. The trigger rows kept are the latest ones, so
     the last trigger time survives. v1 MCP rows (``source: "mcp"``) never pair: v3
     wrote a report as one outcome row, and a "partial" as one trigger row.
+
+    ``origins``, parallel to ``rows``, gives each converted row's ``from`` (provenance,
+    e.g. the v3 file and line ``aegis migrate`` read it from); the default is "v1".
     """
     out: List[Dict[str, Any]] = []
     unusable = 0
     v1_triggers: Dict[str, List[Dict[str, Any]]] = {}
     v1_outcomes: Dict[str, int] = {}
-    for row in rows:
+    for index, row in enumerate(rows):
         if row.get("v") == LEDGER_VERSION:
             if "rule" not in row and "outcome" not in row:
                 continue  # epoch or other bookkeeping row
@@ -151,7 +156,7 @@ def normalize_rows(rows: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]]
             else:
                 unusable += 1
             continue
-        converted = _v1_to_v2(row)
+        converted = _v1_to_v2(row, origins[index] if origins is not None else "v1")
         if converted is None or _weight(converted) is None:
             unusable += 1
             continue

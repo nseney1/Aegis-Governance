@@ -151,8 +151,10 @@ DIR_TO_ALLOWED_RULE_TYPES: dict[str, tuple[str, ...]] = {
 
 RULE_TYPE_NORMALIZATION: dict[str, str] = {
     "wall": RuleType.INVARIANT,
+    "walls": RuleType.INVARIANT,
     "invariants": RuleType.INVARIANT,
     "membrane": RuleType.BOUNDARY,
+    "membranes": RuleType.BOUNDARY,
     "boundaries": RuleType.BOUNDARY,
     "traps": RuleType.TRAP,
     "patterns": RuleType.TRAP,

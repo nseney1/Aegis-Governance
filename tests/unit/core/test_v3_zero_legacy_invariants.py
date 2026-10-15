@@ -95,6 +95,8 @@ class TestV3ZeroBiologicalRuleTypes:
         offenders: list[str] = []
         for path in _iter_python_files(PROD_PACKAGES):
             rel = path.relative_to(REPO_ROOT)
+            if rel.as_posix() == "aegis_core/migrate.py":
+                continue  # D21: the one table that converts legacy .soma cell types
             for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
                 if bio_re.search(line):
                     offenders.append(f"{rel}:{lineno}: {line.strip()}")

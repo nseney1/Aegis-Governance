@@ -18,7 +18,7 @@ from aegis_core.workspace.layout import LEGACY_SOMA_DIRNAME, has_rules_dir, is_a
 LEGACY_SOMA_UPGRADE_MSG = (
     "Legacy .soma/ workspace detected at {path}. "
     "Aegis v3.0+ requires a .aegis/ workspace. "
-    "Please run 'aegis migrate' on aegis-guardrails v2.1.x to upgrade."
+    "Run 'aegis migrate' to see the conversion, then 'aegis migrate --apply'."
 )
 
 

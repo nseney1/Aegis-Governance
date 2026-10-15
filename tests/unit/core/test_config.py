@@ -217,6 +217,29 @@ def _env_reads(tree: ast.AST):
             yield node.lineno, name.value if isinstance(name, ast.Constant) else ast.dump(name)
 
 
+def _env_mappings(tree: ast.AST):
+    """Dict literals that are environments: ``env=``/``environ=`` arguments, an ``"env"``
+    entry of another dict, or a value assigned to a name containing "env"."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if kw.arg in ("env", "environ") and isinstance(kw.value, ast.Dict):
+                    yield kw.value
+        elif isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and key.value == "env" and isinstance(value, ast.Dict):
+                    yield value
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            names += [t.attr for t in node.targets if isinstance(t, ast.Attribute)]
+            names += [
+                t.slice.value for t in node.targets
+                if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant) and isinstance(t.slice.value, str)
+            ]
+            if any("env" in n.lower() for n in names):
+                yield node.value
+
+
 def test_only_config_reads_aegis_environment_variables():
     """D11 ratchet: AEGIS_* and the cut config variables are read in aegis_core/config.py only."""
     banned_prefixes = ("AEGIS_", "RULE_EXPIRY", "CELL_TELOMERE", "SOMA_")
@@ -230,13 +253,12 @@ def test_only_config_reads_aegis_environment_variables():
             for lineno, name in _env_reads(tree):
                 if isinstance(name, str) and name.startswith(banned_prefixes):
                     offenders.append(f"{rel}:{lineno} reads {name}")
-            for node in ast.walk(tree):
+            for env_dict in _env_mappings(tree):
                 # an env mapping written for a child process or a host registration
-                if isinstance(node, ast.Dict):
-                    for key in node.keys:
-                        if isinstance(key, ast.Constant) and isinstance(key.value, str) \
-                                and key.value.startswith(banned_prefixes) and key.value not in ENV_VARS:
-                            offenders.append(f"{rel}:{key.lineno} sets {key.value}")
+                for key in env_dict.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str) \
+                            and key.value.startswith(banned_prefixes) and key.value not in ENV_VARS:
+                        offenders.append(f"{rel}:{key.lineno} sets {key.value}")
     assert offenders == []
 
 
