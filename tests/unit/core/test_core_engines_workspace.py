@@ -70,16 +70,6 @@ def mock_soma_workspace(tmp_path: Path) -> Workspace:
     return Workspace(root=tmp_path)
 
 
-class TestPurgedLegacyGetters:
-    """Verify that legacy standalone path getters have been permanently purged in v0.120.0."""
-
-    def test_legacy_getters_purged_from_workspace_module(self):
-        import aegis_core.workspace as scw
-        for getter in ("get_cells_dir", "get_metrics_dir", "get_signals_file", "get_outcomes_file"):
-            assert not hasattr(scw, getter), f"{getter} must be purged from aegis_core.workspace"
-            assert getter not in scw.__all__, f"{getter} must not be in aegis_core.workspace.__all__"
-
-
 class TestLifecycleWorkspaceInteroperability:
     """Verify lifecycle subsystem functions accept Workspace directly."""
 

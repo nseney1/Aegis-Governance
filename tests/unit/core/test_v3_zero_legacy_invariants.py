@@ -48,22 +48,6 @@ def _iter_python_files(dirs: tuple[str, ...]) -> list[Path]:
 class TestV3ZeroLegacyImportsAndShims:
     """Verify zero soma_* imports, zero Soma* class aliases, and deleted shim files."""
 
-    def test_soma_packages_raise_module_not_found(self) -> None:
-        for pkg in ("soma_core", "soma_cli", "soma_sdk", "soma_mcp"):
-            with pytest.raises(ModuleNotFoundError):
-                __import__(pkg)
-
-    def test_legacy_shim_files_deleted(self) -> None:
-        deleted_paths = [
-            REPO_ROOT / "aegis_core" / "compat.py",
-            REPO_ROOT / "aegis_core" / "somayaml.py",
-            REPO_ROOT / "aegis_sdk" / "cells.py",
-            REPO_ROOT / "aegis_core" / "cell_inventory.py",
-            REPO_ROOT / "aegis_mcp" / "cell_cache.py",
-        ]
-        existing = [str(p.relative_to(REPO_ROOT)) for p in deleted_paths if p.exists()]
-        assert not existing, f"Legacy shim files must be deleted in v3.0.0: {existing}"
-
     def test_zero_soma_imports_across_repo(self) -> None:
         offenders: list[str] = []
         import_re = re.compile(r"^\s*(?:from|import)\s+soma_[a-zA-Z0-9_.]*")

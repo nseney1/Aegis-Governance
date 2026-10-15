@@ -65,9 +65,8 @@ def _parse_oracle_table(section_header, filepath):
 def test_required_deps_in_pyproject():
     """Every package listed as 'Required' in optional-import-guard must be
     a declared dependency in pyproject.toml."""
-    oracle = REPO_ROOT / "genome" / ".oracles" / "optional-import-guard.md"
-    if not oracle.exists():
-        pytest.skip("optional-import-guard oracle not found")
+    oracle = REPO_ROOT / "rules" / ".oracles" / "optional-import-guard.md"
+    assert oracle.is_file(), f"optional-import-guard oracle missing: {oracle}"
     required = _parse_oracle_table("Required Dependencies", oracle)
     pyproject_deps = _parse_pyproject_deps()
     for pkg in required:
@@ -83,9 +82,8 @@ def test_required_deps_in_pyproject():
 def test_optional_deps_not_in_required():
     """Every package listed as 'Optional' in optional-import-guard must NOT
     be a declared required dependency in pyproject.toml."""
-    oracle = REPO_ROOT / "genome" / ".oracles" / "optional-import-guard.md"
-    if not oracle.exists():
-        pytest.skip("optional-import-guard oracle not found")
+    oracle = REPO_ROOT / "rules" / ".oracles" / "optional-import-guard.md"
+    assert oracle.is_file(), f"optional-import-guard oracle missing: {oracle}"
     optional = _parse_oracle_table("Known Optional Dependencies", oracle)
     pyproject_deps = _parse_pyproject_deps()
     for pkg in optional:
