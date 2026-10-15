@@ -170,6 +170,12 @@ class TestRunVerifyNamespaces:
         assert run_verify(args) == 0
         assert not marker.exists()
 
+    def test_namespace_without_files_checks_the_git_changes(self, tmp_path):
+        """A caller that sets no `files` attribute gets the default target discovery."""
+        from aegis_cli.verify import run_verify
+
+        assert run_verify(argparse.Namespace(hook=True, workspace=str(tmp_path))) == 0
+
     def test_layer1_run_records_telemetry(self, tmp_path, monkeypatch):
         from aegis_cli.verify import run_verify
 

@@ -55,10 +55,11 @@ def _resolve_git_cwd(args: argparse.Namespace) -> str:
 def resolve_target_files(args: argparse.Namespace) -> list[str]:
     """Resolve target files from --files flag or git staged/changed files."""
     git_cwd = _resolve_git_cwd(args)
-    if args.files:
+    explicit = getattr(args, "files", None)
+    if explicit:
         repo_root = os.path.realpath(git_cwd)
         safe_files = []
-        for f in args.files:
+        for f in explicit:
             resolved = os.path.realpath(os.path.join(repo_root, f))
             if not resolved.startswith(repo_root + os.sep) and resolved != repo_root:
                 from aegis_cli import sanitize_display

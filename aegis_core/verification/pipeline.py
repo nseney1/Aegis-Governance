@@ -287,6 +287,13 @@ class VerificationPipeline:
             else:
                 files = []
 
+        run_layer2 = bool(files) and not layer1_only
+        if run_layer2:
+            # Validate Layer 2's inputs before spending any Layer 1 work on them.
+            if not task_plan:
+                raise ValueError("Layer 2 needs a task plan")
+            _generate_fn(backend if backend is not None else self.adversarial_verifier.backend)
+
         # 1. Deterministic Layer 1
         if layer1_evidence is not None:
             l1_evidence = layer1_evidence
@@ -298,7 +305,7 @@ class VerificationPipeline:
         l1_passed = runner.gate_verdict(l1_evidence)
         l1_summary = runner.format_summary(l1_evidence)
 
-        if layer1_only or not files:
+        if not run_layer2:
             verdict = Verdict.SHIP if l1_passed else Verdict.BLOCK
             return VerificationPipelineResult(
                 target_files=list(files),
@@ -310,9 +317,6 @@ class VerificationPipeline:
             )
 
         # 2. Layer 2 Adversarial Verification
-        if not task_plan:
-            raise ValueError("Layer 2 needs a task plan")
-
         if (test_names is None or test_results is None) and files:
             try:
                 from aegis_core.verification.test_runner import discover_test_evidence

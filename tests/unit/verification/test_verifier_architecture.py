@@ -155,3 +155,13 @@ class TestVerificationPipeline:
         (tmp_path / "auth.py").write_text("def login():\n    return True\n", encoding="utf-8")
         with pytest.raises(ValueError, match="Layer 2 needs a task plan"):
             VerificationPipeline().run(changed_files=["auth.py"], workspace=tmp_path, backend=lambda p: "[]")
+
+    def test_pipeline_rejects_a_missing_backend_before_running_layer1(self, tmp_path, monkeypatch):
+        from aegis_core.verification import runner
+
+        ran = []
+        monkeypatch.setattr(runner, "run_layer1", lambda **kw: ran.append(kw) or [])
+        (tmp_path / "auth.py").write_text("def login():\n    return True\n", encoding="utf-8")
+        with pytest.raises(ValueError, match=MISSING_BACKEND):
+            VerificationPipeline().run(changed_files=["auth.py"], workspace=tmp_path, task_plan="p")
+        assert ran == []
