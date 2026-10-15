@@ -6,8 +6,12 @@ ast module. Operates purely in-process with zero external dependencies.
 from __future__ import annotations
 
 import ast
+import functools
+import io
+import os
 from pathlib import Path
-from typing import Any, List, Optional, Set, Tuple, Union
+import tokenize
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 from aegis_core.ast.schema import (
     CallSiteNode,
@@ -15,25 +19,140 @@ from aegis_core.ast.schema import (
     ImportNode,
     MutationPoint,
     NormalizedAST,
+    _add_binding,
 )
 
 
-def _resolve_attribute_chain(node: ast.AST) -> Optional[str]:
-    """Recursively resolve dot-separated attribute chain (e.g. os.path.join)."""
-    parts = []
-    current = node
-    while isinstance(current, ast.Attribute):
-        parts.append(current.attr)
-        current = current.value
-    if isinstance(current, ast.Name):
-        parts.append(current.id)
-        return ".".join(reversed(parts))
-    return None
+# Callables that import the module named by their literal first argument (or ``name=``).
+# "module": returns that module; "package" (the __import__ family): returns its top-level
+# package, or the module itself when a fromlist is passed.
+_DYNAMIC_IMPORTERS = {
+    "importlib.import_module": "module",
+    "__import__": "package",
+    "builtins.__import__": "package",
+    "__builtins__.__import__": "package",
+    "importlib.__import__": "package",
+}
+
+_SCOPE_NODES = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
 
-class _PythonASTVisitor(ast.NodeVisitor):
-    def __init__(self, file_path: str):
+def _literal_str(node: Optional[ast.AST]) -> Optional[str]:
+    """The value of a string built only from literals (``'a'``, ``'a' + 'b'``, ``f'ab'``), else None.
+
+    Iterative so a long generated concatenation does not exhaust the recursion limit.
+    """
+    parts: List[str] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.Constant) and isinstance(current.value, str):
+            parts.append(current.value)
+        elif isinstance(current, ast.JoinedStr):
+            stack.extend(reversed(current.values))
+        elif isinstance(current, ast.BinOp) and isinstance(current.op, ast.Add):
+            stack.extend((current.right, current.left))
+        else:
+            return None
+    return "".join(parts)
+
+
+def _call_argument(call: ast.Call, position: int, keyword: str) -> Optional[ast.AST]:
+    if len(call.args) > position:
+        return call.args[position]
+    return next((k.value for k in call.keywords if k.arg == keyword), None)
+
+
+def _resolve_relative(name: str, package: Optional[str]) -> str:
+    """``importlib.import_module``'s resolution of a leading-dot name; ``name`` when it cannot resolve."""
+    level = len(name) - len(name.lstrip("."))
+    bits = (package or "").rsplit(".", level - 1)
+    if not package or len(bits) < level:  # no package, or beyond the top-level package
+        return name
+    return f"{bits[0]}.{name[level:]}" if name[level:] else bits[0]
+
+
+def _chain_base(func: ast.AST) -> ast.AST:
+    while isinstance(func, ast.Attribute):
+        func = func.value
+    return func
+
+
+@functools.lru_cache(maxsize=None)
+def _decodes_ascii_as_itself(encoding: str) -> bool:
+    """True when every ASCII byte decodes to itself in any context under ``encoding``.
+
+    Every two-byte ASCII sequence is probed, so a stateful codec's shift sequence
+    (utf-7 ``+``, hz ``~{``, iso2022 ESC, unicode_escape ``\\``) shows up as a change,
+    plus an IDNA A-label: idna is the one stdlib codec whose trigger is longer than two
+    bytes. A codec that fails the probe in any way counts as not transparent (fail closed).
+    """
+    probe = bytes(b for hi in range(128) for lo in range(128) for b in (hi, lo)) + b".xn--ls8h."
+    try:
+        return probe.decode(encoding) == probe.decode("ascii")
+    except (LookupError, ValueError, TypeError):
+        return False
+
+
+def read_python_source(path: Union[str, Path]) -> str:
+    """Decode a Python source file with the encoding CPython chooses for it.
+
+    Honours a UTF-8 BOM and a PEP 263 coding cookie on line 1 or 2. Line endings are
+    normalised before the cookie search because CPython counts ``\\r`` and ``\\r\\n`` as
+    line breaks there; ``tokenize.open`` splits on ``\\n`` only, so it would honour a cookie
+    CPython ignores (a CR-only file whose fourth line declares utf-7) and decode different
+    code than CPython runs. Raises SyntaxError for an unknown or conflicting declaration,
+    UnicodeDecodeError for bytes the encoding cannot decode, and UnicodeError for an
+    encoding that does not decode ASCII to itself (utf-7, hz, iso2022, unicode_escape,
+    utf-16, EBCDIC): there the code's meaning depends on the decoder, so it is refused.
+    """
+    data = Path(path).read_bytes()
+    universal = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(universal).readline)
+    if encoding not in ("utf-8", "utf-8-sig") and not _decodes_ascii_as_itself(encoding):
+        raise UnicodeError(f"source encoding {encoding!r} does not decode ASCII to itself")
+    return data.decode(encoding)
+
+
+def _import_bindings(tree: ast.AST) -> Dict[str, Tuple[str, ...]]:
+    """Every qualified name each imported name is bound to, file-wide (any scope or order).
+
+    ``import importlib as il`` -> il: importlib; ``from importlib import import_module``
+    -> import_module: importlib.import_module. Multi-valued like the policy maps, so a
+    rebinding can add a meaning but never hide one.
+    """
+    table: Dict[str, List[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    _add_binding(table, a.asname, a.name)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for a in node.names:
+                if a.name != "*":
+                    _add_binding(table, a.asname or a.name, f"{node.module}.{a.name}")
+    return {name: tuple(quals) for name, quals in table.items()}
+
+
+def _alias_pairs(names: List[ast.alias]) -> Tuple[Tuple[str, str], ...]:
+    """(bound_name, original_name) for every real ``as`` rebinding in an import."""
+    return tuple((a.asname, a.name) for a in names if a.asname and a.asname != a.name)
+
+
+class _PythonASTVisitor:
+    """Collects the NormalizedAST parts in one pre-order pass (``walk``).
+
+    The pass uses an explicit stack, not ``ast.NodeVisitor`` recursion, so nesting depth is
+    bounded by what CPython parses rather than by the recursion limit: a long generated method
+    chain or concatenation is checked instead of failing as unverifiable. Each ``visit_*``
+    handler runs when its node is entered; scopes are popped when the node is left.
+    """
+
+    def __init__(self, file_path: str, bindings: Optional[Dict[str, Tuple[str, ...]]] = None):
         self.file_path = file_path
+        self.bindings = bindings or {}
+        self._binding_sets = {name: frozenset(quals) for name, quals in self.bindings.items()}
+        self._dynamic_cache: Dict[int, Optional[Tuple[str, FrozenSet[str]]]] = {}
         self.dunder_all: Optional[Set[str]] = None
         self.scope_stack: List[str] = []
         self.class_stack: List[str] = []
@@ -42,6 +161,22 @@ class _PythonASTVisitor(ast.NodeVisitor):
         self.call_sites: List[CallSiteNode] = []
         self.imports: List[ImportNode] = []
         self.mutation_points: List[MutationPoint] = []
+
+    def walk(self, tree: ast.AST) -> None:
+        stack: List[Tuple[ast.AST, bool]] = [(tree, False)]
+        while stack:
+            node, leaving = stack.pop()
+            if leaving:
+                self.scope_stack.pop()
+                if isinstance(node, ast.ClassDef):
+                    self.class_stack.pop()
+                continue
+            handler = getattr(self, f"visit_{type(node).__name__}", None)
+            if handler is not None:
+                handler(node)
+            if isinstance(node, _SCOPE_NODES):
+                stack.append((node, True))
+            stack.extend((child, False) for child in reversed(list(ast.iter_child_nodes(node))))
 
     def visit_Assign(self, node: ast.Assign):
         # Extract __all__ = ["func1", "func2"]
@@ -52,7 +187,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     for elt in node.value.elts:
                         if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                             self.dunder_all.add(elt.value)
-        self.generic_visit(node)
 
     def visit_Import(self, node: ast.Import):
         for alias in node.names:
@@ -62,9 +196,9 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     source=alias.name,
                     imported_symbols=imported,
                     line=node.lineno,
+                    aliases=_alias_pairs([alias]),
                 )
             )
-        self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
         source = node.module or ""
@@ -74,9 +208,9 @@ class _PythonASTVisitor(ast.NodeVisitor):
                 source=source,
                 imported_symbols=symbols,
                 line=node.lineno,
+                aliases=_alias_pairs(node.names),
             )
         )
-        self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef):
         class_name = node.name
@@ -95,9 +229,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
         )
         self.class_stack.append(class_name)
         self.scope_stack.append(class_name)
-        self.generic_visit(node)
-        self.scope_stack.pop()
-        self.class_stack.pop()
 
     def _visit_func(self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]):
         func_name = node.name
@@ -121,8 +252,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
         )
 
         self.scope_stack.append(func_name)
-        self.generic_visit(node)
-        self.scope_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self._visit_func(node)
@@ -130,15 +259,77 @@ class _PythonASTVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         self._visit_func(node)
 
-    def visit_Call(self, node: ast.Call):
-        target = None
-        if isinstance(node.func, ast.Name):
-            target = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            target = _resolve_attribute_chain(node.func)
+    def _importer_kinds(self, target: str) -> FrozenSet[str]:
+        """Kinds of the dynamic importers ``target`` names, as written or through an import binding.
 
-        if target:
-            caller_scope = self.scope_stack[-1] if self.scope_stack else None
+        Same answer as testing every spelling ``qual + rest`` of the target, at one set lookup
+        per known importer instead of one string per binding of its head.
+        """
+        head, dot, tail = target.partition(".")
+        rest = dot + tail
+        quals = self._binding_sets.get(head, frozenset())
+        return frozenset(
+            kind
+            for name, kind in _DYNAMIC_IMPORTERS.items()
+            if name == target or (name.endswith(rest) and name[: len(name) - len(rest)] in quals)
+        )
+
+    def _call_targets(self, func: ast.AST) -> List[str]:
+        """Dotted call targets; a chain on a dynamic import resolves to the imported module."""
+        parts: List[str] = []
+        current = func
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        tail = ".".join(reversed(parts))
+        if isinstance(current, ast.Name):
+            return [f"{current.id}.{tail}" if tail else current.id]
+        if isinstance(current, ast.Call) and tail:
+            return [f"{module}.{tail}" for module in self._modules_returned(current)]
+        return []
+
+    def _dynamic_import(self, call: ast.Call) -> Optional[Tuple[str, FrozenSet[str]]]:
+        """(module name, importer kinds) when ``call`` imports a literal module name."""
+        # Resolve a method chain from its innermost call outward, so resolving each link only
+        # reads the cached link below it: recursion stays flat however long the chain.
+        pending: List[ast.Call] = []
+        node: ast.AST = call
+        while isinstance(node, ast.Call) and id(node) not in self._dynamic_cache:
+            pending.append(node)
+            node = _chain_base(node.func)
+        for link in reversed(pending):
+            self._dynamic_cache[id(link)] = self._resolve_dynamic_import(link)
+        return self._dynamic_cache[id(call)]
+
+    def _resolve_dynamic_import(self, call: ast.Call) -> Optional[Tuple[str, FrozenSet[str]]]:
+        kinds = frozenset().union(*(self._importer_kinds(t) for t in self._call_targets(call.func)))
+        if not kinds:
+            return None
+        name = _literal_str(_call_argument(call, 0, "name")) or ""
+        if name.startswith(".") and "module" in kinds:
+            name = _resolve_relative(name, _literal_str(_call_argument(call, 1, "package")))
+        return (name, kinds) if name else None
+
+    def _modules_returned(self, call: ast.Call) -> List[str]:
+        """Modules a dynamic import call evaluates to (both candidates when unsure)."""
+        found = self._dynamic_import(call)
+        if not found:
+            return []
+        name, kinds = found
+        modules = [name] if "module" in kinds else []
+        if "package" in kinds:
+            modules.append(name.split(".")[0])
+            if len(call.args) > 3 or any(k.arg == "fromlist" for k in call.keywords):
+                modules.append(name)
+        return list(dict.fromkeys(modules))
+
+    def visit_Call(self, node: ast.Call):
+        found = self._dynamic_import(node)
+        if found:
+            self.imports.append(ImportNode(source=found[0], line=node.lineno))
+
+        caller_scope = self.scope_stack[-1] if self.scope_stack else None
+        for target in self._call_targets(node.func):
             self.call_sites.append(
                 CallSiteNode(
                     target=target,
@@ -146,7 +337,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     caller_scope=caller_scope,
                 )
             )
-        self.generic_visit(node)
 
     def visit_Compare(self, node: ast.Compare):
         # Extract comparison mutation points
@@ -171,7 +361,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                         mutation_type="comparison",
                     )
                 )
-        self.generic_visit(node)
 
     def visit_BinOp(self, node: ast.BinOp):
         bin_map = {
@@ -192,7 +381,6 @@ class _PythonASTVisitor(ast.NodeVisitor):
                     mutation_type="binary_op",
                 )
             )
-        self.generic_visit(node)
 
 
 def parse_python_ast(
@@ -201,10 +389,16 @@ def parse_python_ast(
 ) -> NormalizedAST:
     """Parse Python source code or file into a NormalizedAST instance."""
     resolved_path = str(file_path or source_or_path)
+    # With an explicit file_path a str is always source text: a one-line source that names
+    # an existing file must not be swapped for that file. os.path.isfile, not Path.is_file,
+    # because the latter raises OSError (ENAMETOOLONG) on a long one-line source.
     if isinstance(source_or_path, Path) or (
-        isinstance(source_or_path, str) and not "\n" in source_or_path and Path(source_or_path).is_file()
+        file_path is None
+        and isinstance(source_or_path, str)
+        and "\n" not in source_or_path
+        and os.path.isfile(source_or_path)
     ):
-        content = Path(source_or_path).read_text(encoding="utf-8")
+        content = read_python_source(source_or_path)
         resolved_path = str(source_or_path)
     else:
         content = str(source_or_path)
@@ -214,8 +408,8 @@ def parse_python_ast(
     except SyntaxError as exc:
         raise ValueError(f"Failed to parse Python AST for {resolved_path}: {exc}") from exc
 
-    visitor = _PythonASTVisitor(file_path=resolved_path)
-    visitor.visit(tree)
+    visitor = _PythonASTVisitor(file_path=resolved_path, bindings=_import_bindings(tree))
+    visitor.walk(tree)
 
     return NormalizedAST(
         file_path=resolved_path,
