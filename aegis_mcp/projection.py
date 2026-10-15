@@ -39,6 +39,7 @@ SUMMARY_FIELDS: frozenset[str] = frozenset({
     "warning",
     "risk_level",
     "ticket_id",
+    "rule_prompt",
 })
 
 

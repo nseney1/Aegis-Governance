@@ -181,6 +181,7 @@ def match_cells_for_diff(
     changed_files: list[str],
     diff_text: str = "",
     repo_root: str = "",
+    workspace: str = "",
 ) -> list[dict[str, Any]]:
     """Match cells against changed files using AST syntactic triggers and target_paths globs.
 
@@ -188,6 +189,7 @@ def match_cells_for_diff(
     and matched_files.
     """
     matched = []
+    base_root = workspace or repo_root
     for cell in cells:
         ast_trigs = cell.get("ast_triggers")
         target_paths = cell.get("target_paths", [])
@@ -201,7 +203,7 @@ def match_cells_for_diff(
         # 1. Syntactic AST triggers (highest precision)
         if ast_trigs and isinstance(ast_trigs, dict):
             for f in changed_files:
-                f_path = os.path.join(repo_root, f) if repo_root else f
+                f_path = os.path.join(base_root, f) if (base_root and not os.path.isabs(f)) else f
                 ast_matched, details = match_ast_triggers(
                     ast_trigs,
                     file_path=f_path,
@@ -245,9 +247,13 @@ def match_cells_for_diff(
     return matched
 
 
-def match_cells_to_files(cells: list[dict[str, object]], changed_files: list[str]) -> list[dict[str, object]]:
+def match_cells_to_files(
+    cells: list[dict[str, object]],
+    changed_files: list[str],
+    workspace: str = "",
+) -> list[dict[str, object]]:
     """Match cells to changed files by target_paths (fnmatch) and AST triggers."""
-    matches = match_cells_for_diff(cells, changed_files)
+    matches = match_cells_for_diff(cells, changed_files, workspace=workspace)
     return [m["cell"] for m in matches]
 
 
@@ -632,7 +638,7 @@ def express(
 
     # Load and match cells
     all_cells = _cell_cache.get_cells(workspace)
-    matched = match_cells_to_files(all_cells, changed_files)
+    matched = match_cells_to_files(all_cells, changed_files, workspace=workspace)
 
     # Score ALL matched cells first (fixes C3: mandatory cells displaying Fitness: 0.00)
     for cell in matched:

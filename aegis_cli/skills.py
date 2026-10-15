@@ -27,15 +27,13 @@ def run_skill(args: argparse.Namespace) -> int:
         if getattr(args, "json", False):
             print(json.dumps(slots, indent=2))
         else:
-            print(f"Soma Skill Slots ({len(slots)} configured):")
+            print(f"Aegis Skill Slots ({len(slots)} configured):")
             for k, v in sorted(slots.items()):
                 print(f"  {k}: {v}")
         return 0
 
     # Discover skills
-    project_skills = ws_root / ".aegis" / "skills"
-    global_skills = Path.home() / ".aegis" / "skills"
-    graph = SkillGraph.discover([project_skills, global_skills])
+    graph = SkillGraph.discover(SkillGraph.default_search_paths(ws_root))
 
     if action == "list":
         if getattr(args, "json", False):
@@ -60,7 +58,7 @@ def run_skill(args: argparse.Namespace) -> int:
             return 1
         if getattr(args, "json", False):
             d = node.to_dict()
-            d["instructions"] = node.load_instructions()
+            d["instructions"] = node.load_instructions(workspace_root=ws_root)
             print(json.dumps(d, indent=2))
         else:
             print(f"Skill: {node.id} (tier: {node.tier})")
@@ -72,7 +70,7 @@ def run_skill(args: argparse.Namespace) -> int:
                 print(f"Produces: {', '.join(node.produces)}")
             if node.handoff_targets:
                 print(f"Handoff Targets: {', '.join(node.handoff_targets)}")
-            inst = node.load_instructions()
+            inst = node.load_instructions(workspace_root=ws_root)
             if inst:
                 print("\nInstructions:")
                 print(inst)

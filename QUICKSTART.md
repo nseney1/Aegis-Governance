@@ -1,46 +1,38 @@
-# Aegis Quickstart Guide
+# Aegis Guardrails Quickstart Guide
 
 ## What Aegis Does
 
-Aegis (formerly Soma) is a governance framework for AI coding agents. It installs governance rules, provides a clean 5-noun-verb CLI and MCP server, and records evidence for adaptive rule management.
+**Aegis Guardrails** (v3.2.0) is an adaptive governance, AST verification, and Model Context Protocol (MCP) server framework for AI coding agents. It installs self-evolving governance rules, enforces a two-layer verification pipeline, and records empirical outcome evidence with zero runtime dependencies.
 
-## Installation
+---
+
+## 1. Installation
 
 Choose the option that matches your environment.
 
-### Option 1: Install the CLI from PyPI
+### Option 1: Install from PyPI (Recommended)
 
-**Requires:** Python 3.9+ and `pip`.
-
-```bash
-pip install aegis-governance
-```
-
-### Option 2: Editable source install
-
-**Requires:** Git, Python 3.9+, and `pip`.
+**Requires:** Python 3.10+ and `pip` (or `pipx`).
 
 ```bash
-git clone https://github.com/nseney1/Soma-Governance.git
-cd Soma-Governance
-pip install -e .
+pip install aegis-guardrails
+# Or in an isolated user-wide environment:
+pipx install aegis-guardrails
 ```
 
-### Option 3: Install CLI and agent integration with Make
+### Option 2: Editable Source Install
 
-**Requires:** Git, Python 3.9+, `pip`, Bash, and GNU Make.
+**Requires:** Git, Python 3.10+, and `pip`.
 
 ```bash
-git clone https://github.com/nseney1/Soma-Governance.git
-cd Soma-Governance
-make install AEGIS_PLATFORM=gemini
+git clone https://github.com/nseney1/Aegis-Guardrails.git
+cd Aegis-Guardrails
+pip install -e ".[dev]"
 ```
 
-> **PEP 668 (externally managed Python)?** Use an isolated virtual environment. If that is not possible, `pip install --user aegis-governance` may be appropriate for your system.
+> **PEP 668 (externally managed Python)?** Use a virtual environment (`python3 -m venv .venv && source .venv/bin/activate`) or `pipx install aegis-guardrails` (`pipx ensurepath` places `aegis` on your `PATH`).
 
-> **Tip:** for a user-wide CLI, `pipx install aegis-governance` keeps Aegis in its own environment and `pipx ensurepath` puts it on `PATH` for you.
-
-### Verify the install
+### Verify the Install
 
 ```bash
 aegis --version
@@ -49,109 +41,127 @@ aegis system doctor
 
 ### `aegis: command not found`?
 
-`pip install --user` puts `aegis` in your user scripts directory (`~/.local/bin` on Linux), which is often not on `PATH`. zsh in particular does not read `~/.profile`. Run `python3 -m aegis_cli system doctor` (use `python` on Windows): it prints the directory and the exact line for your shell. Typical fixes:
+`pip install --user` puts `aegis` in your user scripts directory (`~/.local/bin` on Linux), which may not be on `PATH`. Run `python3 -m aegis_cli.cli system doctor` (use `python` on Windows) to inspect your environment. Typical `PATH` fixes:
 
 | Shell | Add to | Line |
 |:--|:--|:--|
 | zsh | `~/.zshrc` | `export PATH="$HOME/.local/bin:$PATH"` |
 | bash | `~/.bashrc` (macOS: `~/.bash_profile`) | `export PATH="$HOME/.local/bin:$PATH"` |
-| fish | `~/.config/fish/config.fish` (or `$XDG_CONFIG_HOME/fish/config.fish`) | `fish_add_path $HOME/.local/bin` |
-| PowerShell | user `Path` variable | the `[Environment]::SetEnvironmentVariable(...)` line printed by `aegis system doctor` |
+| fish | `~/.config/fish/config.fish` | `fish_add_path $HOME/.local/bin` |
+| PowerShell | user `Path` variable | `[Environment]::SetEnvironmentVariable(...)` printed by `aegis system doctor` |
 
-Open a new terminal afterwards. Until then, `python3 -m aegis_cli system doctor` works anywhere `aegis` would.
+Prefer automated setup? Run `aegis system doctor --fix-path` for a dry-run preview, or `aegis system doctor --fix-path --yes` to append the `PATH` entry for `zsh`, `bash`, or `fish`.
 
-Prefer not to edit the file yourself? `python3 -m aegis_cli system doctor --fix-path` shows the exact file and line it would append (a dry run); add `--yes`, or answer `y` at its prompt, to apply it. It works for zsh, bash and fish only, marks the line `# added by aegis system doctor --fix-path`, does nothing if the line is already there, and records it so `install/uninstall.sh` removes exactly that line again. The installers themselves never edit your dotfiles, and `--fix-path` never touches a PowerShell `$PROFILE`.
+---
 
-If `git commit` fails with an aegis pre-commit message, the hook could not find `aegis` either: fix `PATH` as above, then re-run `aegis init` to refresh the hook.
+## 2. First Run with `aegis init` & `.mcp.json` Setup
 
-## First Run with `aegis init`
-
-`aegis init` detects Gemini, Claude Code, Cursor, and Copilot markers. If detection is ambiguous, select one of those platforms explicitly.
+`aegis init` auto-detects Gemini, Claude Code, Cursor, Copilot, and Kiro markers, scaffolding `.aegis/rules/`, `.aegis/slots.yaml`, and platform integrations.
 
 ```bash
-aegis init --platform gemini --yes
+# Auto-detect platform and initialize workspace governance
+aegis init --yes
+
+# Initialize with MCP server configuration (.mcp.json)
+aegis init --mcp --yes
+
+# Inspect workspace status and run Layer 1 verification
 aegis status
 aegis check
 ```
 
-Useful setup flags verified by `aegis --help`:
+Useful `aegis init` options:
 
 ```bash
 aegis init --dry-run
 aegis init --rules minimal --platform claude
 aegis init --rules standard --mcp --platform cursor --yes
-aegis init --rules full --platform copilot --force --yes
+aegis init --rules full --platform gemini --force --yes
 ```
 
-## Kiro and Generic MCP Installation
+Running `aegis init --mcp` writes a project-local `.mcp.json` (or platform-specific MCP config) pointing to `python3 -m aegis_mcp`:
 
-Kiro is supported by the Bash installer; it is not auto-detected by `aegis init`.
+```json
+{
+  "mcpServers": {
+    "aegis": {
+      "command": "python3",
+      "args": ["-m", "aegis_mcp"],
+      "env": {
+        "AEGIS_WORKSPACE": "/path/to/your/repo",
+        "AEGIS_EXECUTION_ENABLED": "1"
+      }
+    }
+  }
+}
+```
+
+---
+
+## 3. Core CLI Workflow
 
 ```bash
-bash install/install.sh kiro --dry-run
-bash install/install.sh kiro
+# 1. Workspace initialization & MCP setup
+aegis init                    # Auto-detect AI platform & configure .aegis/
+aegis init --mcp              # Generate .mcp.json for MCP-compatible agents
+
+# 2. Workspace status & outcome reporting
+aegis status                  # View active rules, lifecycle tiers, and Bayesian fitness
+aegis report --rule <id> --outcome pass   # Record rule execution outcome signal
+
+# 3. Two-Layer Verification Gate
+aegis check                   # Layer 1 deterministic AST checks (syntax, imports, call graph, pytest, mymut)
+aegis check --hook            # Fast git pre-commit verification gate
+aegis check --full            # Full Layer 1 + Layer 2 adversarial arbitration
+aegis check --in-band         # Zero-key interactive Layer 2 charge-sheet verification
+aegis check --release         # Release Gate 4.5 cryptographic receipt verification
+
+# 4. Adaptive Rule Management (.aegis/rules/)
+aegis rule list               # List rules with Thompson Sampling & Wilson fitness scores
+aegis rule create --type trap --id my-trap --title "Avoid Silent Catch"
+aegis rule promote <id>       # Promote rule up lifecycle tiers
+aegis rule demote <id>        # Demote rule down lifecycle tiers
+aegis rule archive            # Archive decayed or quarantined rules
+aegis rule clean              # Clean redundant or leaked rules
+
+# 5. Skills, Handoffs & System Diagnostics
+aegis skill list              # List horizontal agent skills in the SkillGraph
+aegis skill inspect <id>      # Inspect skill metadata, consumes/produces, and slots
+aegis skill slots             # Inspect .aegis/slots.yaml bindings
+aegis handoff --from <s1> --to <s2> --type <ArtifactType> --payload <json>
+aegis detect --fix            # Auto-detect project stack and provision polyglot AST drivers
+aegis system doctor           # Health diagnostics and environment repair
+aegis system hook             # Install or inspect git pre-commit hooks
 ```
 
-For any MCP-compatible agent, generate a project-local `.mcp.json` with the Bash installer:
+---
 
-```bash
-bash install/install.sh mcp --dry-run
-bash install/install.sh mcp
-```
+## 4. Shell Completion
 
-## The 5 Clean Verbs
-
-```bash
-# Workspace initialization & platform setup
-aegis init              # Auto-detect AI platform & configure governance
-
-# Workspace status & metrics
-aegis status            # View active rules, lifecycle distribution, and fitness stats
-
-# Unified verification gate
-aegis check             # Layer 1 deterministic AST verification
-aegis check --hook      # Fast git pre-commit verification gate
-aegis check --full      # Full verification with adversarial Layer 2 rebuttal
-aegis check --release   # Release Gate 4.5 validation
-
-# Rule lifecycle management
-aegis rule list         # List rules with Bayesian fitness scores
-aegis rule promote <id> # Promote rule up lifecycle tiers
-aegis rule demote <id>  # Demote rule down lifecycle tiers
-aegis rule archive      # Archive decayed or quarantined rules
-aegis rule clean        # Clean redundant or leaked rules
-
-# System diagnostics & driver management
-aegis system doctor     # Health diagnostics and repair
-aegis system hook       # Install or inspect git pre-commit hooks
-aegis system drivers    # AST driver detection and provisioning
-aegis system skills     # Inspect agent skills and slots
-```
-
-## Shell completion
-
-`aegis completion <shell>` prints a completion script for `bash`, `zsh` or `fish`. It is generated from the CLI's own argument parser each time, so it always matches your installed version. Aegis never edits your dotfiles: add the line yourself, then open a new terminal.
+`aegis completion <shell>` generates a completion script for `bash`, `zsh`, or `fish` directly from the CLI parser:
 
 | Shell | Add to | Line |
 |:--|:--|:--|
-| zsh | `~/.zshrc` (after `compinit`; oh-my-zsh runs it for you) | `eval "$(aegis completion zsh)"` |
+| zsh | `~/.zshrc` (after `compinit`) | `eval "$(aegis completion zsh)"` |
 | bash | `~/.bashrc` | `eval "$(aegis completion bash)"` |
 | fish | `~/.config/fish/config.fish` | `aegis completion fish \| source` |
 
-Without oh-my-zsh, put `autoload -Uz compinit && compinit` before the zsh line. To avoid running `aegis` at every shell start, save the script once instead, e.g. `aegis completion zsh > ~/.zfunc/_aegis` (with `~/.zfunc` on your `fpath`) or `aegis completion fish > ~/.config/fish/completions/aegis.fish`, and re-run it after upgrading Aegis.
+---
 
-## Make Targets
+## 5. Starter Governance Rules
 
-The repository Makefile provides `help`, `info`, `install`, `install-gemini`, `install-kiro`, `install-copilot`, `install-claude`, `install-mcp`, `install-windows`, `uninstall`, `doctor`, `validate`, `update`, `status`, and `test`. Run `make help` for descriptions.
+- `providence`: Grounds claims in codebase evidence and enforces read-before-write.
+- `destructive-ops`: Mandates dry-runs and explicit confirmation before destructive mutations.
+- `testing`: Enforces behavioral tests, sad-path coverage, and bans `ast.parse` test stubs.
+- `cost-optimization`: Minimizes wasted tokens while preserving verification accuracy.
+- `git-workflow`: Enforces safe branching, conventional commits, and `.gitignore` hygiene.
 
-## What the Standard Starter Rules Do
-
-- `providence`: grounds claims in evidence and requires read-before-write.
-- `destructive-ops`: requires safety gates for dangerous operations.
-- `testing`: requires behavioral tests and meaningful failure coverage.
-- `cost-optimization`: limits wasted tokens and compute without sacrificing correctness.
-- `git-workflow`: defines safe, consistent Git practices.
+---
 
 ## Next Steps
 
-See [README.md](README.md) for MCP configuration, receipt usage, SDK examples, and architecture details.
+- [Documentation Index](docs/index.md) — Full guide index by audience
+- [MCP Gateway Guide](docs/guides/mcp_gateway.md) — 17 MCP tools, receipt security, and `RuleCache`
+- [Rule Lifecycle Guide](docs/guides/rule_lifecycle.md) — Canonical rule types, `AegisYAML`, and Bayesian fitness
+- [Verification Pipeline Guide](docs/guides/verification_pipeline.md) — Layer 1 AST checks, Layer 2 Arbiter, and Gate 4.5
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Development setup and PR review workflow

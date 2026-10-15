@@ -597,6 +597,11 @@ class InitCommand(AegisCommand):
             action="store_true",
             help="Overwrite existing rules",
         )
+        parser.add_argument(
+            "--no-hooks",
+            action="store_true",
+            help="Skip installing git pre-commit hook",
+        )
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_init(args)

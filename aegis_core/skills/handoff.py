@@ -16,7 +16,7 @@ from aegis_core.schemas.artifacts import ArtifactEnvelope, ArtifactRegistry
 from aegis_core.skills.graph import SkillGraph, SkillNode
 from aegis_core.workspace import Workspace, as_workspace
 
-__all__ = ["HandoffTicket", "HandoffRouter", "soma_handoff"]
+__all__ = ["HandoffTicket", "HandoffRouter", "soma_handoff", "aegis_handoff"]
 
 
 @dataclass(frozen=True)
@@ -97,10 +97,7 @@ class HandoffRouter:
 
         # 1. Discover SkillGraph
         gov_dir = root / ".aegis"
-        home_gov = Path.home() / ".aegis"
-        project_skills = gov_dir / "skills"
-        global_skills = home_gov / "skills"
-        graph = SkillGraph.discover([project_skills, global_skills])
+        graph = SkillGraph.discover(SkillGraph.default_search_paths(root))
 
         from_node = graph.get(from_skill)
         tier = producer_tier or (from_node.tier if from_node else "method")
@@ -202,3 +199,6 @@ def soma_handoff(
         session_secret=session_secret,
         cycle_id=cycle_id,
     )
+
+
+aegis_handoff = soma_handoff

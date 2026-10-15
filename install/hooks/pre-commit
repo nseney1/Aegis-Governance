@@ -1,81 +1,33 @@
-#!/usr/bin/env bash
-# Soma — Git Pre-Commit Hook
-# Evaluates governance cells and applies mechanical enforcement blocking.
-set -uo pipefail
-
-# Resolve scripts directory relative to top-level repository root
+#!/bin/sh
+# >>> aegis pre-commit >>>
+# Installed by aegis system hook install
+# aegis-hook-format: 4
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-SCRIPT_DIR=""
-for candidate in "$REPO_ROOT/vendor/soma/enzymes" "$REPO_ROOT/enzymes"; do
-    if [ -d "$candidate" ]; then
-        SCRIPT_DIR="$candidate"
-        break
-    fi
-done
-
-if [ -z "$SCRIPT_DIR" ]; then
-    exit 0  # No Soma installation found, skip silently
+if [ ! -d "$REPO_ROOT/.aegis" ] && [ ! -d "$REPO_ROOT/.soma" ]; then
+  exit 0
 fi
-if [ ! -f "$SCRIPT_DIR/soma_python.sh" ]; then
-    echo "soma pre-commit: $SCRIPT_DIR/soma_python.sh is missing (older Soma copy?); skipping governance checks. Reinstall Soma to update it." >&2
-    exit 0
+if command -v aegis >/dev/null 2>&1; then
+  exec aegis check --hook
+elif command -v soma >/dev/null 2>&1; then
+  exec soma check --hook
+elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/bin/python" ] && "$VIRTUAL_ENV/bin/python" -c 'import aegis_cli' >/dev/null 2>&1; then
+  exec "$VIRTUAL_ENV/bin/python" -m aegis_cli check --hook
+elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/Scripts/python.exe" ] && "$VIRTUAL_ENV/Scripts/python.exe" -c 'import aegis_cli' >/dev/null 2>&1; then
+  exec "$VIRTUAL_ENV/Scripts/python.exe" -m aegis_cli check --hook
+elif [ -x "$PWD/.venv/bin/python" ] && "$PWD/.venv/bin/python" -c 'import aegis_cli' >/dev/null 2>&1; then
+  exec "$PWD/.venv/bin/python" -m aegis_cli check --hook
+elif [ -x "$PWD/.venv/Scripts/python.exe" ] && "$PWD/.venv/Scripts/python.exe" -c 'import aegis_cli' >/dev/null 2>&1; then
+  exec "$PWD/.venv/Scripts/python.exe" -m aegis_cli check --hook
+elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0)' 2>/dev/null && python3 -c 'import aegis_cli' >/dev/null 2>&1; then
+  exec python3 -m aegis_cli check --hook
+elif [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/bin/python" ] && "$VIRTUAL_ENV/bin/python" -c 'import soma_cli' >/dev/null 2>&1; then
+  exec "$VIRTUAL_ENV/bin/python" -m soma_cli check --hook
+elif python3 -c 'import soma_cli' >/dev/null 2>&1; then
+  exec python3 -m soma_cli check --hook
+else
+  echo "aegis pre-commit: cannot execute quality checks." >&2
+  echo "  Neither 'aegis' nor a Python interpreter with 'aegis_cli' installed was found on PATH." >&2
+  echo "  Run 'aegis system hook status' or 'aegis system doctor' to diagnose environment resolution." >&2
+  exit 1
 fi
-source "$SCRIPT_DIR/soma_python.sh"
-soma_resolve_python || true
-
-# Run cell scan
-TRIGGERED=$(soma_py "$SCRIPT_DIR/cell_scan.py" --json 2>/dev/null || echo '[]')
-COUNT=$(echo "$TRIGGERED" | soma_py -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
-
-if [ "$COUNT" -gt 0 ]; then
-    echo "🧬 Soma: $COUNT governance cell(s) triggered by this commit"
-    soma_py "$SCRIPT_DIR/cell_scan.py" 2>/dev/null
-    soma_py "$SCRIPT_DIR/cell_quorum.py" 2>/dev/null
-fi
-
-# Run mechanical enforcement checks
-ENFORCEMENT_DIR=".soma/enforcement"
-MECHANICAL_FAILED=0
-if [ -d "$ENFORCEMENT_DIR" ]; then
-    for check in "$ENFORCEMENT_DIR"/check-*.sh; do
-        if [ -f "$check" ]; then
-            bash "$check" 2>/dev/null
-            if [ $? -ne 0 ]; then
-                MECHANICAL_FAILED=1
-            fi
-        fi
-    done
-fi
-
-# Check coverage on new files
-NEW_FILES=$(git diff --cached --diff-filter=A --name-only 2>/dev/null)
-if [ -n "$NEW_FILES" ]; then
-    soma_py -c "
-import sys, glob
-from fnmatch import fnmatch
-from soma_core.somayaml import parse_frontmatter
-cells_dir = '.soma/cells'
-patterns = []
-for f in glob.glob(f'{cells_dir}/**/*.md', recursive=True):
-    try:
-        with open(f, encoding='utf-8-sig') as fh: c = fh.read()
-        fm = parse_frontmatter(c) or {}
-        patterns.extend(fm.get('target_paths', []))
-    except Exception: pass
-uncovered = []
-for nf in sys.stdin.read().strip().split('\n'):
-    if nf and not any(fnmatch(nf, p) for p in patterns):
-        uncovered.append(nf)
-if uncovered:
-    print('🔴 New files without governance coverage:')
-    for u in uncovered:
-        print(f'  ⚠️  {u}')
-" <<< "$NEW_FILES" 2>/dev/null
-fi
-
-if [ "$MECHANICAL_FAILED" -ne 0 ]; then
-    echo "❌ Commit blocked by mechanical enforcement gates."
-    exit 1
-fi
-
-exit 0
+# <<< aegis pre-commit <<<

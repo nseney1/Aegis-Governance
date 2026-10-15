@@ -40,11 +40,13 @@ def _handle_create_cell(args: dict, gov) -> dict:
     if args.get("dry_run"):
         return {
             "prompt": prompt,
+            "rule_prompt": prompt,
             "dry_run": True,
             "instruction": "Dry run: showing prompt that would be used. No cell will be created.",
         }
     return {
         "prompt": prompt,
+        "rule_prompt": prompt,
         "instruction": "Process this prompt and return the cell YAML. Then use a file-writing tool to save it to the appropriate .aegis/rules/ directory.",
     }
 

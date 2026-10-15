@@ -1,6 +1,12 @@
 ---
+id: adaptive-reviewer
 name: Adaptive Review Orchestrator
 description: Autonomously selects review protocols and dispatches nested subagents based on Sentry finding severity.
+kind: skill
+tier: sentinel
+consumes: [InspectionReceipt, ChargeSheet, TestVerdict]
+produces: [ChargeSheet, ArbitrationEvidence, InspectionReceipt]
+handoff_targets: [staff-review, spec-synthesizer, governance-auditor, post-mortem]
 trigger: user_request
 ---
 

@@ -28,8 +28,15 @@ class SkillNode:
 
     @classmethod
     def from_doc(cls, doc: AegisDocument, file_path: Optional[str | Path] = None) -> SkillNode:
+        if doc.get("id"):
+            skill_id = str(doc.get("id"))
+        elif file_path and Path(file_path).name.upper() == "SKILL.MD":
+            skill_id = Path(file_path).parent.name
+        else:
+            skill_id = str(doc.id or (Path(file_path).stem if file_path else "unknown"))
+
         return cls(
-            id=str(doc.id or (Path(file_path).stem if file_path else "unknown")),
+            id=skill_id,
             tier=str(doc.tier or "method"),
             consumes=tuple(str(c) for c in doc.consumes),
             produces=tuple(str(p) for p in doc.produces),
@@ -42,7 +49,11 @@ class SkillNode:
             else {},
         )
 
-    def load_instructions(self) -> str:
+    def load_instructions(
+        self,
+        workspace_root: Optional[str | Path] = None,
+        strict_slots: bool = False,
+    ) -> str:
         """Lazily load markdown body instructions from disk."""
         if not self.instructions_file:
             return ""
@@ -50,6 +61,11 @@ class SkillNode:
         if not p.exists():
             return ""
         doc = AegisYAML.parse_text(p.read_text(encoding="utf-8"))
+        if workspace_root is not None:
+            from aegis_core.skills.slots import SlotRegistry
+
+            reg = SlotRegistry.load(workspace_root)
+            return reg.resolve(doc.body, strict=strict_slots)
         return doc.body
 
     def to_dict(self) -> Dict[str, Any]:
@@ -85,6 +101,22 @@ class SkillGraph:
         return self._nodes.get(skill_id, default)
 
     @classmethod
+    def default_search_paths(cls, workspace_root: Optional[Path | str] = None) -> List[Path]:
+        """Return ordered default skill discovery paths (project, workspace, global, bundled)."""
+        paths: List[Path] = []
+        if workspace_root is not None:
+            ws = Path(workspace_root)
+            paths.append(ws / ".aegis" / "skills")
+            ws_skills = ws / "skills"
+            if ws_skills.is_dir():
+                paths.append(ws_skills)
+        paths.append(Path.home() / ".aegis" / "skills")
+        bundled_skills = Path(__file__).resolve().parents[2] / "skills"
+        if bundled_skills.exists():
+            paths.append(bundled_skills)
+        return paths
+
+    @classmethod
     def discover(cls, search_paths: Sequence[Path | str]) -> SkillGraph:
         """Discover skills across project and global paths without keeping bodies in RAM."""
         nodes: Dict[str, SkillNode] = {}
@@ -107,7 +139,11 @@ class SkillGraph:
                 try:
                     text = cand.read_text(encoding="utf-8")
                     doc = AegisYAML.parse_text(text)
-                    if doc.kind == "skill" or any(k in doc for k in ("tier", "consumes", "produces", "handoff_targets")):
+                    if (
+                        doc.kind == "skill"
+                        or cand.name.upper() == "SKILL.MD"
+                        or any(k in doc for k in ("kind", "tier", "consumes", "produces", "handoff_targets"))
+                    ):
                         node = SkillNode.from_doc(doc, file_path=str(cand.resolve()))
                         if node.id not in nodes:
                             nodes[node.id] = node

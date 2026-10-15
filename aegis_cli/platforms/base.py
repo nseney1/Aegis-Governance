@@ -162,7 +162,7 @@ class PlatformAdapter(ABC):
             pass
         return []
 
-    def render_mcp_entry(self, local: bool = False, command: str = "soma-mcp") -> dict[str, Any]:
+    def render_mcp_entry(self, local: bool = False, command: str = "aegis-mcp") -> dict[str, Any]:
         """Render MCP server entry; include AEGIS_WORKSPACE only for local installs."""
         entry: dict[str, Any] = {
             "command": command,
