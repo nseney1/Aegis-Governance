@@ -101,7 +101,7 @@ def test_optional_deps_not_in_required():
 
 def _collect_target_paths_from_rules():
     """Collect target_paths values from all cell frontmatter."""
-    from aegis_core.yaml import parse_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
     results = []
     cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".aegis" / "rules")
     if not cells_dir.exists():
@@ -222,7 +222,7 @@ def test_parsers_agree_on_id_and_domain():
 
 def _collect_glob_paths_from_cells():
     """Collect glob target_paths from all cell frontmatter."""
-    from aegis_core.yaml import parse_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
     results = []
     cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".aegis" / "rules")
     if not cells_dir.exists():

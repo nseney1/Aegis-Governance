@@ -3,7 +3,7 @@ from aegis_sdk.governance import Governance
 from aegis_sdk.rules import Rule, RuleFitness, parse_rule_file
 from aegis_sdk.errors import RuleNotFoundError, RuleParseError, AegisError
 from aegis_core.scoring import wilson_lower_bound
-from aegis_core.lifecycle import bayesian_fitness
+from aegis_core.lifecycle.decay import bayesian_fitness
 
 __version__ = '3.3.0'
 __all__ = [

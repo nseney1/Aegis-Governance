@@ -10,7 +10,7 @@ import subprocess
 import sys
 from typing import List, Optional, Union
 
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 
 def _resolve_rules_dir(workspace: str | Path) -> str:

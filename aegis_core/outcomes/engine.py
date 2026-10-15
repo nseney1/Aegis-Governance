@@ -5,7 +5,8 @@ from pathlib import Path
 import subprocess
 
 from aegis_core.rule_inventory import find_matching_cells
-from aegis_core.workspace import Workspace, as_workspace
+from aegis_core.workspace.base import Workspace
+from aegis_core.workspace import as_workspace
 
 __all__ = ["match_cells_to_changes"]
 

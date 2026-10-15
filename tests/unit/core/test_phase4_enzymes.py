@@ -10,7 +10,7 @@ ENZYMES_DIR = Path(REPO_ROOT) / "enzymes"
 
 
 def test_cell_selection_evaluation(tmp_path):
-    from aegis_core.lifecycle import run_cell_selection
+    from aegis_core.lifecycle.selection import run_cell_selection
 
     cells_dir = tmp_path / ".aegis" / "rules"
     walls_dir = cells_dir / "walls"

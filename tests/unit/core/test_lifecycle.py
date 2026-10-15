@@ -49,11 +49,11 @@ class TestLifecycleImport:
     """Lifecycle engine must be importable."""
 
     def test_evaluate_promotions_importable(self):
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
         assert callable(evaluate_promotions)
 
     def test_evaluate_demotions_importable(self):
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
         assert callable(evaluate_demotions)
 
 
@@ -62,7 +62,7 @@ class TestPromotionCriteria:
 
     def test_promotes_qualifying_vacuole(self, tmp_path):
         """Trap with 25 triggers, 90% tp_rate, 45 days old → promote to invariant."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -81,7 +81,7 @@ class TestPromotionCriteria:
 
     def test_rejects_too_few_triggers(self, tmp_path):
         """Only 10 triggers → not enough for promotion."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -97,7 +97,7 @@ class TestPromotionCriteria:
 
     def test_rejects_low_tp_rate(self, tmp_path):
         """tp_rate = 0.60 → below 0.85 threshold."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -113,7 +113,7 @@ class TestPromotionCriteria:
 
     def test_rejects_too_young(self, tmp_path):
         """Cell only 15 days old → must be > 30 days."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -129,7 +129,7 @@ class TestPromotionCriteria:
 
     def test_wall_promotes_to_genome(self, tmp_path):
         """Wall with strong evidence → promote to genome."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -149,7 +149,7 @@ class TestPromotionCriteria:
 
     def test_empty_workspace_returns_empty(self, tmp_path):
         """No cells → no promotion candidates."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         (tmp_path / ".aegis" / "evidence").mkdir(parents=True)
@@ -163,7 +163,7 @@ class TestDemotionCriteria:
 
     def test_demotes_noisy_cell(self, tmp_path):
         """fp_rate = 0.7 → demote."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -181,7 +181,7 @@ class TestDemotionCriteria:
 
     def test_demotes_dormant_cell(self, tmp_path):
         """Zero triggers for 90+ days → demote."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -199,7 +199,7 @@ class TestDemotionCriteria:
 
     def test_keeps_healthy_cell(self, tmp_path):
         """Cell with good metrics → no demotion."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -215,7 +215,7 @@ class TestDemotionCriteria:
 
     def test_wall_demotes_to_vacuole(self, tmp_path):
         """Demoted wall should become a trap."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -233,7 +233,7 @@ class TestDemotionCriteria:
 
     def test_empty_workspace_returns_empty(self, tmp_path):
         """No cells → no demotion candidates."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         (tmp_path / ".aegis" / "rules").mkdir(parents=True)
         (tmp_path / ".aegis" / "evidence").mkdir(parents=True)
@@ -247,7 +247,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_triggers_19_rejected(self, tmp_path):
         """19 triggers should NOT promote (need >=20)."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -264,7 +264,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_triggers_20_accepted(self, tmp_path):
         """Exactly 20 triggers should promote."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -282,7 +282,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_tp_rate_084_rejected(self, tmp_path):
         """0.84 tp_rate should NOT promote (need >=0.85)."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -299,7 +299,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_triggers_4_not_enough(self, tmp_path):
         """4 triggers too few for fp_rate demotion (need >=5)."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -318,7 +318,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_triggers_5_fp_demotes(self, tmp_path):
         """5 triggers with >50% FP should demote."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -337,7 +337,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_tp_rate_085_accepted(self, tmp_path):
         """Exactly 0.85 tp_rate should promote (inclusive >=)."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -356,7 +356,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_age_29_rejected(self, tmp_path):
         """29 days old should NOT promote (need >=30)."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -374,7 +374,7 @@ class TestLifecycleBoundaries:
 
     def test_promotion_boundary_age_30_accepted(self, tmp_path):
         """Exactly 30 days old should promote."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
         cells_dir.mkdir(parents=True)
@@ -392,7 +392,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_fp_rate_050_not_demoted(self, tmp_path):
         """fp_rate exactly 0.50 should NOT demote (need >0.50)."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -409,7 +409,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_dormancy_89_not_demoted(self, tmp_path):
         """89 days old with 0 triggers should NOT be demoted for dormancy (need >=90)."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -426,7 +426,7 @@ class TestLifecycleBoundaries:
 
     def test_demotion_boundary_dormancy_90_demoted(self, tmp_path):
         """90 days old with 0 triggers should be demoted for dormancy."""
-        from aegis_core.lifecycle import evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_demotions
 
         cells_dir = tmp_path / ".aegis" / "rules" / "walls"
         cells_dir.mkdir(parents=True)
@@ -447,7 +447,7 @@ class TestModernRuleLifecycle:
     """Lifecycle promotion and demotion for modern .aegis/rules/ types (trap <-> invariant)."""
 
     def test_promote_trap_to_invariant_and_demote_invariant_to_trap(self, tmp_path):
-        from aegis_core.lifecycle import evaluate_promotions, evaluate_demotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions, evaluate_demotions
 
         traps_dir = tmp_path / ".aegis" / "rules" / "traps"
         inv_dir = tmp_path / ".aegis" / "rules" / "invariants"

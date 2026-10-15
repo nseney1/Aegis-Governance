@@ -308,7 +308,7 @@ def generate_mcp_config(
 
 def run_init(args: argparse.Namespace) -> int:
     """Main init flow. Returns exit code."""
-    from aegis_core.workspace import Workspace
+    from aegis_core.workspace.base import Workspace
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
     # Allow test override of project root

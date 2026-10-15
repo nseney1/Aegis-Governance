@@ -9,8 +9,8 @@ from hypothesis import given, settings, strategies as st
 
 from aegis_sdk.scoring import laplace_score, wilson_lower_bound, bayesian_posterior, bayesian_score
 from aegis_sdk.rules import RuleFitness
-from aegis_core.lifecycle import (
-    calculate_fitness_status,
+from aegis_core.lifecycle.quorum import calculate_fitness_status
+from aegis_core.lifecycle.constants import (
     STATUS_NEW,
     STATUS_SURVIVE,
     STATUS_ADAPT,

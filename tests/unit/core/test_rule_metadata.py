@@ -503,7 +503,7 @@ def test_contract_rule_has_target_paths(rule_file):
 )
 def test_core_and_oracle_rules_declare_antigravity_trigger_and_description(rule_file: Path):
     """Every core and oracle rule must declare trigger and description so the IDE loads it into <user_rules>."""
-    from aegis_core.yaml import parse_frontmatter as parse_yaml_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter as parse_yaml_frontmatter
 
     fm = parse_yaml_frontmatter(rule_file.read_text(encoding="utf-8"))
     assert fm, f"{rule_file.name} has no parseable frontmatter"
@@ -518,7 +518,7 @@ def test_core_and_oracle_rules_declare_antigravity_trigger_and_description(rule_
 
 def test_meta_and_gitflow_review_gate_declare_always_on_trigger():
     """META.md and gitflow-review-gate.md must declare trigger: always_on so JIT scanning and PR review gates are always active."""
-    from aegis_core.yaml import parse_frontmatter as parse_yaml_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter as parse_yaml_frontmatter
 
     rules_root = REPO_ROOT / "rules"
     meta_file = rules_root / "META.md"

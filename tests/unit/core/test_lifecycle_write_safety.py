@@ -37,14 +37,10 @@ from conftest import REPO_ROOT
 
 import aegis_core.lifecycle.promotion as promotion
 import aegis_core.lifecycle.selection as selection
-from aegis_core.lifecycle import (
-    create_cell,
-    demote_cell,
-    evaluate_cell_tiers,
-    promote_cell,
-    run_cell_selection,
-)
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.lifecycle.creation import create_cell
+from aegis_core.lifecycle.promotion import demote_cell, evaluate_cell_tiers, promote_cell
+from aegis_core.lifecycle.selection import run_cell_selection
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 _UTC_TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 

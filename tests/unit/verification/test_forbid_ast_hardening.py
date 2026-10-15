@@ -22,7 +22,7 @@ from aegis_core.ast.drivers.python import parse_python_ast
 from aegis_core.ast.policy import evaluate_forbid_ast, extract_normalized_ast
 from aegis_core.ast.runner import ASTDriverError
 from aegis_core.ast.schema import CallSiteNode, ImportNode, NormalizedAST
-from aegis_core.verification import DeterministicVerifier
+from aegis_core.verification.pipeline import DeterministicVerifier
 from aegis_core.verification.runner import gate_verdict
 
 

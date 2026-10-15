@@ -151,7 +151,7 @@ class TestSkillGraph:
 
     def test_skill_node_from_doc_mutant_kills(self):
         from aegis_core.skills.graph import SkillNode
-        from aegis_core.yaml import AegisDocument
+        from aegis_core.yaml_engine.document import AegisDocument
         doc = AegisDocument(metadata={"id": "skill-custom", "tier": "specialist", "description": "desc"})
         node = SkillNode.from_doc(doc)
         assert node.tier == "specialist"

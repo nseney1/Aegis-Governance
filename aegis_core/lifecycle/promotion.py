@@ -7,10 +7,11 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from aegis_core.yaml import dump_frontmatter, parse_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.locking import workspace_lock
 from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink, atomic_write_text
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 from aegis_core.workspace.layout import LockResource
 from .constants import (
     DORMANT_DAYS_THRESHOLD,
@@ -388,7 +389,7 @@ def _plan_tier_update(content: str) -> Optional[tuple[dict, str, str, str, str]]
     Returns ``(metadata, body, old_tier, new_tier, reason)`` with ``metadata``
     already carrying the decay and the new tier, or None if unparseable.
     """
-    from aegis_core.yaml import parse_rule_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_rule_frontmatter
     try:
         metadata, body = parse_rule_frontmatter(content)
     except Exception:

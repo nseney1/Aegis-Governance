@@ -288,7 +288,7 @@ def find_matching_rules(
     allow_basename_match: bool = True,
 ) -> List[RuleMatch]:
     """Find all rules in cells_dir whose target_paths match changed_files."""
-    from aegis_core.yaml import parse_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
     cells_path = Path(cells_dir)
     if not cells_path.is_dir():
@@ -359,7 +359,7 @@ def find_matching_rules(
 
 def load_parsed_rules(workspace: str | Path, include_expired: bool = False) -> list[dict]:
     """Load and parse all rules from workspace using canonical inventory_rules + parse_frontmatter."""
-    from aegis_core.yaml import _get_body, parse_frontmatter
+    from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
 
     inventory = inventory_rules(str(workspace))
     rules: list[dict] = []
@@ -385,7 +385,7 @@ def load_parsed_rules(workspace: str | Path, include_expired: bool = False) -> l
     return rules
 
 
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 # Backward-compatible and canonical engineering aliases
 CellInventory = RuleInventory

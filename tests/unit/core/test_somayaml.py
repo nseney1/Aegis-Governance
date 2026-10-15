@@ -6,22 +6,19 @@ from pathlib import Path
 import pytest
 
 from conftest import symlink_or_skip
-from aegis_core.yaml import (
-    AegisYAML,
-    AegisDocument,
+from aegis_core.yaml_engine.frontmatter import AegisYAML, parse_frontmatter, parse_rule_frontmatter, _get_body
+from aegis_core.yaml_engine.document import AegisDocument
+from aegis_core.yaml_engine.parser import (
     AegisYAMLError,
     FrontmatterError,
-    dump_frontmatter,
-    parse_frontmatter,
-    parse_rule_frontmatter,
     parse_yaml_subset,
-    _get_body,
     MAX_DOC_BYTES,
     MAX_SCALAR_CHARS,
     MAX_LINES,
     MAX_DEPTH,
 )
-from aegis_core.workspace import Workspace
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.workspace.base import Workspace
 
 
 class TestSomaYAMLCoreParsing:
@@ -327,7 +324,7 @@ class TestBackwardCompatibilityParity:
 
 
 from tests.unit.core.test_frontmatter_engine import TestFrontmatterParser, TestFrontmatterDumper
-from aegis_core.yaml import write_frontmatter
+from aegis_core.yaml_engine.serializer import write_frontmatter
 import datetime
 
 
@@ -593,7 +590,7 @@ items:
             parse_yaml_subset(f"key: {deep_flow}")
 
         # Unterminated / mismatched quote scalar in _parse_scalar
-        from aegis_core.yaml import _parse_scalar
+        from aegis_core.yaml_engine.parser import _parse_scalar
         with pytest.raises(FrontmatterError, match="unterminated quoted scalar"):
             _parse_scalar("\"mismatched'")
 
@@ -602,11 +599,11 @@ items:
         assert res_bad_big_u["key"] == "U000000ZZ"
 
         # CRLF line continuation
-        from aegis_core.yaml import _unescape_double
+        from aegis_core.yaml_engine.parser import _unescape_double
         assert _unescape_double("line1\\\r\n  line2") == "line1  line2"
 
         # _strip_comment quote escaping
-        from aegis_core.yaml import _strip_comment, _is_quote_closed, _parse_flow
+        from aegis_core.yaml_engine.parser import _strip_comment, _is_quote_closed, _parse_flow
         assert _strip_comment(r'key: "val \"with\" quotes" # c') == r'key: "val \"with\" quotes" '
         assert _strip_comment("key: 'it''s awesome' # c") == "key: 'it''s awesome' "
 
@@ -663,7 +660,7 @@ items:
             parse_yaml_subset("items:\n  - \"unclosed\n  - sibling")
 
         # Depth limits on helper functions directly
-        from aegis_core.yaml import _parse_flow_map, _parse_block_map, _parse_block_seq
+        from aegis_core.yaml_engine.parser import _parse_flow_map, _parse_block_map, _parse_block_seq
         with pytest.raises(AegisYAMLError, match="nesting depth"):
             _parse_flow("a", 0, depth=35)
         with pytest.raises(AegisYAMLError, match="nesting depth"):

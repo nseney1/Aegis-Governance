@@ -9,9 +9,9 @@ from typing import Any, Optional
 
 from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
 from aegis_core.taxonomy import ReviewMode, normalize_review_mode
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.telemetry_engine.ledger import EventConflictError, StaleGenerationError
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 TYPE_TRANSLATION_MAP: dict[str, str] = {
     "safety-guard": "invariant",
@@ -221,7 +221,7 @@ class Governance:
         cell_id: Optional[str] = None,
     ) -> dict[str, Any] | str:
         """Create a new immune cell."""
-        from aegis_core.lifecycle import create_cell as core_create_cell
+        from aegis_core.lifecycle.creation import create_cell as core_create_cell
         raw_slug = cell_id or hypothesis[:40]
         safe_slug = re.sub(r'[^a-zA-Z0-9_.-]', '-', raw_slug).strip('-')
         canonical_type = TYPE_TRANSLATION_MAP.get(type, type)
@@ -281,7 +281,7 @@ class Governance:
     
     def fitness_landscape(self, bayesian: bool = False) -> list[dict[str, Any]]:
         """Get fitness scores for all cells."""
-        from aegis_core.lifecycle import compute_cells_fitness
+        from aegis_core.lifecycle.decay import compute_cells_fitness
         return compute_cells_fitness(workspace=str(self.root), bayesian=bayesian)
 
     def rule_fitness(self, bayesian: bool = False) -> list[dict[str, Any]]:

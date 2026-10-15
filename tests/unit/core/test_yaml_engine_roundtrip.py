@@ -13,19 +13,17 @@ import string
 
 import pytest
 
-from aegis_core.yaml_engine import (
-    AegisDocument,
-    AegisYAML,
+from aegis_core.yaml_engine.document import AegisDocument
+from aegis_core.yaml_engine.frontmatter import AegisYAML, parse_frontmatter, parse_rule_frontmatter
+from aegis_core.yaml_engine.parser import (
     AegisYAMLError,
     MAX_DEPTH,
     MAX_DOC_BYTES,
     MAX_LINES,
     MAX_SCALAR_CHARS,
-    dump_frontmatter,
-    parse_frontmatter,
-    parse_rule_frontmatter,
     parse_yaml_subset,
 )
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 try:
     from hypothesis import assume, given, settings, strategies as st

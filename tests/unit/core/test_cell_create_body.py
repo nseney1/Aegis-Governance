@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from aegis_core.lifecycle import create_cell
-from aegis_core.yaml import _get_body, parse_frontmatter
+from aegis_core.lifecycle.creation import create_cell
+from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
 
 MAX_BODY = 64 * 1024
 

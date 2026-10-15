@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from aegis_core.ast.drivers.python import parse_python_ast
 from aegis_core.ast.schema import NormalizedAST
 from aegis_core.errors import AegisError, AegisValidationError
-from aegis_core.workspace import Workspace, as_workspace
+from aegis_core.workspace.base import Workspace
+from aegis_core.workspace import as_workspace
 
 __all__ = [
     "ASTDriverError",

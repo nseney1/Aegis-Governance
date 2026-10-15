@@ -15,7 +15,7 @@ import pytest
 from conftest import symlink_or_skip
 
 from aegis_cli.init import run_init
-from aegis_core.workspace import WorkspaceLayout
+from aegis_core.workspace.layout import WorkspaceLayout
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from aegis_core.lifecycle import (
+from aegis_core.lifecycle.constants import (
     STATUS_ADAPT,
     STATUS_APOPTOSIS,
     STATUS_APOPTOSIS_WARNING,
@@ -14,13 +14,11 @@ from aegis_core.lifecycle import (
     STATUS_EXTINCT,
     STATUS_NEW,
     STATUS_SURVIVE,
-    apply_decay,
-    calculate_fitness_status,
-    demote_cell,
-    find_cell_file,
-    is_promotable,
-    promote_cell,
 )
+from aegis_core.lifecycle.decay import apply_decay
+from aegis_core.lifecycle.quorum import calculate_fitness_status, is_promotable
+from aegis_core.lifecycle.promotion import demote_cell, promote_cell
+from aegis_core.lifecycle.parsers import find_cell_file
 
 
 @pytest.fixture

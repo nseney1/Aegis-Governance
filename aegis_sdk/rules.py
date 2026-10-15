@@ -20,7 +20,7 @@ yaml = None  # Zero-dependency runtime sentinel
 
 
 def _stdlib_parse_frontmatter(yaml_text: str) -> dict:
-    from aegis_core.yaml import FrontmatterError, parse_yaml_subset
+    from aegis_core.yaml_engine.parser import FrontmatterError, parse_yaml_subset
     try:
         res = parse_yaml_subset(yaml_text)
         if not isinstance(res, dict):
@@ -186,7 +186,7 @@ def parse_rule_file(filepath: str) -> Tuple[dict, str]:
     if not os.path.isfile(filepath):
         raise RuleNotFoundError(f"Rule file not found: {filepath}")
 
-    from aegis_core.yaml import parse_rule_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_rule_frontmatter
     try:
         return parse_rule_frontmatter(filepath)
     except ValueError as exc:
@@ -199,7 +199,7 @@ def write_rule_frontmatter(
     body: str,
 ) -> None:
     """Write a rule file with YAML frontmatter and body text."""
-    from aegis_core.yaml import dump_frontmatter
+    from aegis_core.yaml_engine.serializer import dump_frontmatter
     yaml_text = dump_frontmatter(frontmatter)
 
     content = f"---\n{yaml_text.strip()}\n---\n"
@@ -314,7 +314,7 @@ def load_rule(
 
 def dump_rule(frontmatter: dict, body: str = "") -> str:
     """Dump rule dictionary and body to markdown with frontmatter."""
-    from aegis_core.yaml import dump_frontmatter
+    from aegis_core.yaml_engine.serializer import dump_frontmatter
     yaml_text = dump_frontmatter(frontmatter)
     content = f"---\n{yaml_text.strip()}\n---\n"
     if body:

@@ -14,15 +14,10 @@ import json
 import pytest
 
 from aegis_core.inference_provider import MISSING_BACKEND
-from aegis_core.verification import (
-    AdversarialVerifier,
-    DeterministicVerifier,
-    RiskCategory,
-    ToolEvidence,
-    Verdict,
-    VerificationPipeline,
-)
-from aegis_core.workspace import GitWorkspace, Workspace
+from aegis_core.verification.pipeline import AdversarialVerifier, DeterministicVerifier, VerificationPipeline
+from aegis_core.verification import RiskCategory, ToolEvidence, Verdict
+from aegis_core.workspace.git import GitWorkspace
+from aegis_core.workspace.base import Workspace
 
 
 class TestDeterministicVerifier:

@@ -8,8 +8,9 @@ from pathlib import Path
 import re
 from typing import Any, Optional, Tuple
 
-from aegis_core.yaml import dump_frontmatter, parse_frontmatter, parse_rule_frontmatter
-from aegis_core.workspace import Workspace
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter, parse_rule_frontmatter
+from aegis_core.workspace.base import Workspace
 from .constants import (
     TYPE_TO_DIR,
 )

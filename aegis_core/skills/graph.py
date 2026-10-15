@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
 from aegis_core.errors import AegisValidationError
-from aegis_core.yaml import AegisDocument, AegisYAML
+from aegis_core.yaml_engine.document import AegisDocument
+from aegis_core.yaml_engine.frontmatter import AegisYAML
 
 __all__ = ["SkillNode", "SkillGraph"]
 

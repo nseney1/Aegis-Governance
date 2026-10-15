@@ -216,8 +216,9 @@ def _print_checkpoint(issues: list[dict], strict: bool) -> None:
 def run_verify(args: argparse.Namespace) -> int:
     """Run `aegis check` for *args*. Returns 0, 1 or 2 (see the module docstring)."""
     from aegis_core.inference_provider import MISSING_BACKEND, LLMCommandError, resolve_backend
-    from aegis_core.verification import VerificationPipeline, runner
-    from aegis_core.workspace import Workspace
+    from aegis_core.verification.pipeline import VerificationPipeline
+    from aegis_core.verification import runner
+    from aegis_core.workspace.base import Workspace
 
     hook = bool(getattr(args, "hook", False))
     plan = getattr(args, "plan", None)

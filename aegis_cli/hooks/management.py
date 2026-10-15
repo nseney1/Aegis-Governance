@@ -95,7 +95,8 @@ def install_hook(
     import_root: str | None = None,
 ) -> bool:
     """Install or refresh the aegis pre-commit hook in a git repository."""
-    from aegis_core.workspace import Workspace, resolve_git_hooks_dir
+    from aegis_core.workspace.base import Workspace
+    from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
     if isinstance(project_root, Workspace):
         ws = project_root
@@ -190,7 +191,8 @@ def uninstall_hook(
     dry_run: bool = False,
 ) -> bool:
     """Remove the aegis block from the pre-commit hook, keeping user hook lines."""
-    from aegis_core.workspace import Workspace, resolve_git_hooks_dir
+    from aegis_core.workspace.base import Workspace
+    from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
     if isinstance(project_root, Workspace):
         ws = project_root
@@ -324,7 +326,8 @@ def _pinned_value(text: str, var: str) -> str | None:
 
 def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
     """Inspect the aegis pre-commit hook in the target repository."""
-    from aegis_core.workspace import Workspace, resolve_git_hooks_dir
+    from aegis_core.workspace.base import Workspace
+    from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
     if isinstance(project_root, Workspace):
         ws = project_root

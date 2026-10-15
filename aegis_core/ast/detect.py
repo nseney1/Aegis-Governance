@@ -8,7 +8,8 @@ import shutil
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from aegis_core.errors import PathTraversalError
-from aegis_core.yaml import AegisYAML, dump_frontmatter
+from aegis_core.yaml_engine.frontmatter import AegisYAML
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 __all__ = [
     "detect_project_languages",

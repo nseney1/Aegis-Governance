@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from aegis_core.errors import WorkspaceError
+from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import (
-    Workspace,
     confine_path,
     confine_workspace,
     resolve_workspace,

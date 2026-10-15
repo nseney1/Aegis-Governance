@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from aegis_cli.cli import main
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from tests.helpers_rule import soma_workspace, write_cell_with_fitness  # noqa: F401  (fixture)
 
 

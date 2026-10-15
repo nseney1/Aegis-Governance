@@ -8,7 +8,7 @@ sys.path. We use lazy imports inside test methods to avoid collection errors.
 """
 import os
 import sys
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 if REPO_ROOT not in sys.path:

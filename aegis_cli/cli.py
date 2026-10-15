@@ -167,7 +167,7 @@ def _build_parser(prog: str = PROG) -> argparse.ArgumentParser:
 
 def _attach_workspace(args: argparse.Namespace) -> None:
     """Resolve the workspace the command acts on (``args.ws``, ``args._project_root``)."""
-    from aegis_core.workspace import Workspace
+    from aegis_core.workspace.base import Workspace
 
     raw_ws = getattr(args, "workspace", None)
     if args.command == "scan":

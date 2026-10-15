@@ -77,8 +77,8 @@ def _discover_forbid_ast_rules(
     being dropped.
     """
     from pathlib import Path
-    from aegis_core.yaml import AegisYAML
-    from aegis_core.workspace import Workspace
+    from aegis_core.yaml_engine.frontmatter import AegisYAML
+    from aegis_core.workspace.base import Workspace
 
     root_path = Path(str(getattr(repo_root, "root", repo_root))).resolve()
     ws_obj = None

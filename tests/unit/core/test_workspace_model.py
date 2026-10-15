@@ -13,8 +13,8 @@ from aegis_core.errors import (
     WorkspaceError,
     WorkspaceNotFoundError,
 )
+from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import (
-    Workspace,
     confine_path,
     confine_workspace,
     resolve_workspace,

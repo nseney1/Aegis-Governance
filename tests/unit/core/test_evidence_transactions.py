@@ -2,7 +2,7 @@
 import json
 
 import pytest
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 
 def _rows(path):

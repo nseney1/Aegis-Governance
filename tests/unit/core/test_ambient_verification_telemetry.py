@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 
 def _create_cell(workspace: Path, cell_id: str, target_paths: list[str]) -> Path:

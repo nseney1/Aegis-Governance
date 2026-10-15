@@ -16,10 +16,7 @@ import sys
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_core.verification import (
-    Claim, Prediction, RiskCategory,
-    Severity, ToolEvidence, Verdict,
-)
+from aegis_core.verification import Claim, Prediction, RiskCategory, Severity, ToolEvidence, Verdict
 from aegis_core.verification.arbiter import arbitrate, format_report
 
 

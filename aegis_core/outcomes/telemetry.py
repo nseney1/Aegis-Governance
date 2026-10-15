@@ -6,7 +6,7 @@ import secrets
 import sys
 from typing import Any, Optional
 
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 __all__ = ["record_verification_telemetry"]
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aegis_core.operations import Operations
 from aegis_core.storage import Storage
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 
 def test_operations_text_and_bytes_io(tmp_path: Path):

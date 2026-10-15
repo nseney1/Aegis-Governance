@@ -1,65 +1,13 @@
-"""Behavioral tests verifying the modular soma_core/workspace/ package architecture.
-
-Validates:
-1. aegis_core.workspace is a proper package with __init__.py.
-2. Direct submodule imports: base, git, discovery, confinement, scaffold, hooks.
-3. Canonical symbols re-exported at package root.
-4. Workspace.is_aegis_repo compound property.
-5. Zero circular imports across submodules.
-"""
+"""Behavioral tests for the aegis_core.workspace helpers and Workspace.is_aegis_repo."""
 from __future__ import annotations
 
-import os
-from pathlib import Path
-import pytest
 
 
 class TestWorkspacePackageArchitecture:
-    """Verifies that soma_core/workspace is a clean modular package."""
-
-    def test_workspace_is_a_package(self):
-        import aegis_core.workspace
-        assert aegis_core.workspace.__file__ is not None
-        assert aegis_core.workspace.__file__.endswith("__init__.py")
-
-    def test_direct_submodule_imports(self):
-        import aegis_core.workspace.base
-        import aegis_core.workspace.git
-        import aegis_core.workspace.discovery
-        import aegis_core.workspace.confinement
-        import aegis_core.workspace.scaffold
-        import aegis_core.workspace.hooks
-
-        assert hasattr(aegis_core.workspace.base, "Workspace")
-        assert hasattr(aegis_core.workspace.git, "GitWorkspace")
-        assert hasattr(aegis_core.workspace.discovery, "is_aegis_repo")
-        assert hasattr(aegis_core.workspace.confinement, "confine_path_internal")
-        assert hasattr(aegis_core.workspace.scaffold, "scaffold_workspace")
-        assert hasattr(aegis_core.workspace.hooks, "resolve_git_hooks_dir")
-
-    def test_package_re_exports_canonical_symbols(self):
-        from aegis_core.workspace import (
-            GitWorkspace,
-            Workspace,
-            as_workspace,
-            confine_path,
-            confine_workspace,
-            resolve_git_hooks_dir,
-            resolve_workspace,
-            resolve_workspace_path,
-            validate_rule_names,
-        )
-
-        assert issubclass(GitWorkspace, Workspace)
-        assert callable(as_workspace)
-        assert callable(confine_path)
-        assert callable(confine_workspace)
-        assert callable(resolve_git_hooks_dir)
-        assert callable(resolve_workspace)
-        assert callable(validate_rule_names)
+    """Workspace fingerprinting and the resolve/confine helpers."""
 
     def test_is_aegis_repo_compound_fingerprint(self, tmp_path):
-        from aegis_core.workspace import Workspace
+        from aegis_core.workspace.base import Workspace
 
         # Dummy foreign repository
         foreign = tmp_path / "foreign"
@@ -88,12 +36,7 @@ class TestWorkspacePackageArchitecture:
         assert ws_aegis.is_aegis_repo
 
     def test_backward_compatibility_facades_work_unchanged(self, tmp_path):
-        from aegis_core.workspace import (
-            Workspace,
-            resolve_workspace,
-            confine_workspace,
-            confine_path,
-        )
+        from aegis_core.workspace import resolve_workspace, confine_workspace, confine_path
 
         repo = tmp_path / "project"
         repo.mkdir()

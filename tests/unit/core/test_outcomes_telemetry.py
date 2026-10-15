@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from aegis_core.outcomes.telemetry import record_verification_telemetry
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 
 def test_record_verification_telemetry(tmp_path: Path):

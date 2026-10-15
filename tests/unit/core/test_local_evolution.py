@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aegis_core.yaml import dump_frontmatter, parse_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.lifecycle.constants import (
     GLOBAL_PROMOTION_PATH,
     LOCAL_PROMOTION_PATH,
@@ -21,7 +22,7 @@ from aegis_core.lifecycle.constants import (
 )
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells
 from aegis_core.lifecycle.promotion import promote_cell, demote_cell
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 from aegis_mcp.jit_engine import load_genome_rules
 
 

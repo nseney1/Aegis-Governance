@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import aegis_mcp.server as server
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 _INIT = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                     "params": {"clientInfo": {"name": "pytest"}}})

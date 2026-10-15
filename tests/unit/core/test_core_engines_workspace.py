@@ -15,7 +15,7 @@ from aegis_core.lifecycle.decay import compute_cells_fitness
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
 from aegis_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
 from aegis_core.lifecycle.selection import run_cell_selection
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 
 @pytest.fixture

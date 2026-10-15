@@ -3,9 +3,7 @@ from __future__ import annotations
 
 
 
-from aegis_core.lifecycle import (
-    is_promotable,
-)
+from aegis_core.lifecycle.quorum import is_promotable
 
 
 class TestIdempotencyContracts:

@@ -13,7 +13,8 @@ import tempfile
 import textwrap
 
 import pytest
-from aegis_core.yaml import dump_frontmatter, parse_yaml_subset
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.yaml_engine.parser import parse_yaml_subset
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)

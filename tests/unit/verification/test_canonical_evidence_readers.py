@@ -7,7 +7,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
 ENZYMES = ROOT / "enzymes"
@@ -90,7 +90,7 @@ def test_status_uses_canonical_triggers_not_legacy(tmp_path, capsys):
 
 
 def test_lifecycle_uses_weighted_canonical_signals(tmp_path):
-    from aegis_core.lifecycle import evaluate_promotions
+    from aegis_core.lifecycle.promotion import evaluate_promotions
 
     cells = tmp_path / ".aegis" / "rules" / "traps"
     _cell(cells / "canonical.md", "canonical")
@@ -143,7 +143,7 @@ def test_owned_production_has_no_active_legacy_evidence_paths():
 
 
 def test_lifecycle_does_not_infer_zero_triggers_from_outcome_only_data(tmp_path):
-    from aegis_core.lifecycle import evaluate_demotions
+    from aegis_core.lifecycle.promotion import evaluate_demotions
 
     cell = tmp_path / ".aegis" / "rules" / "walls" / "outcome-only.md"
     _cell(cell, "outcome-only", cell_type="wall", age_days=120)

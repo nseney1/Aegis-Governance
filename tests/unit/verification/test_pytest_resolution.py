@@ -10,7 +10,7 @@ import pytest
 
 from aegis_core.errors import NoTestRunnerFoundError
 from aegis_core.verification.test_runner import resolve_pytest_cmd
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 
 class TestPytestResolution:

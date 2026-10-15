@@ -8,10 +8,11 @@ from pathlib import Path
 import shutil
 from typing import Optional
 
-from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter
+from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 from aegis_core.locking import workspace_lock
 from aegis_core.storage import atomic_write_text
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 from aegis_core.workspace.layout import LockResource
 from .constants import (
     EXTINCTION_THRESHOLD,

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from aegis_core.taxonomy import MCP_DEFAULT_RATE_LIMITS
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 from .projection import is_error_result
 from .registry import DEFAULT_CLIENT_PLATFORM, TOOL_DEFINITIONS

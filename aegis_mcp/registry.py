@@ -8,8 +8,9 @@ from aegis_core.evidence import aggregate_signals
 from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
 from aegis_core.scoring import compute_cell_fitness
 from aegis_core.taxonomy import CANONICAL_RULE_TYPES, REVIEW_MODES
-from aegis_core.workspace import Workspace, resolve_workspace
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.workspace.base import Workspace
+from aegis_core.workspace import resolve_workspace
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_mcp.jit_engine import warn
 
 _STATUS_FAIL = "FAIL"

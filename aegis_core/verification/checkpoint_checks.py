@@ -591,7 +591,7 @@ def check_paper_walls(root: Path) -> list[dict]:
     for wall_file in sorted(walls_dir.glob("*.md")):
         try:
             content = wall_file.read_text(encoding="utf-8")
-            from aegis_core.yaml import parse_frontmatter
+            from aegis_core.yaml_engine.frontmatter import parse_frontmatter
             meta = parse_frontmatter(content)
             if not isinstance(meta, dict):
                 issues.append({

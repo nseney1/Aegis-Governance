@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 
-from aegis_core.verification import (
-    Verdict,
-)
+from aegis_core.verification import Verdict
 from aegis_core.verification.pipeline import VerificationPipeline
 
 

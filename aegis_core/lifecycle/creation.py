@@ -9,7 +9,7 @@ from pathlib import Path
 from aegis_core.locking import workspace_lock
 from aegis_core.storage import atomic_write_text
 from aegis_core.taxonomy import normalize_review_mode
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 from aegis_core.workspace.layout import LockResource
 from .constants import (
     VALID_ENFORCEMENT,
@@ -170,7 +170,7 @@ lineage:
     content = frontmatter + body
 
     # Validate in memory so a malformed rule never reaches disk.
-    from aegis_core.yaml import AegisYAML
+    from aegis_core.yaml_engine.frontmatter import AegisYAML
 
     AegisYAML.parse_text(content)
 

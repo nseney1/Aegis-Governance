@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from aegis_cli.cli import main
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 
 @pytest.fixture

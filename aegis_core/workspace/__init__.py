@@ -1,39 +1,15 @@
-"""Shared workspace resolution and path containment for Soma (Layer 0 Core).
+"""Workspace resolution helpers over the Workspace value object (aegis_core.workspace.base).
 
-Modular package architecture providing:
-- Workspace value object (base.py)
-- GitWorkspace with zero-subprocess fast paths (git.py)
-- Workspace discovery & compound fingerprinting (discovery.py)
-- Path confinement and security boundaries (confinement.py)
-- Scaffolding and initialization (scaffold.py)
-- Git hook directory resolution (hooks.py)
-
-Strictly zero-dependency: uses only Python standard library.
+Submodules own the rest: base (Workspace), git (GitWorkspace), discovery,
+confinement, scaffold, hooks and layout. Import those names from there.
 """
 from __future__ import annotations
 
 import os
-import warnings
 from pathlib import Path
 
 from aegis_core.errors import PathTraversalError
 from aegis_core.workspace.base import Workspace
-from aegis_core.workspace.confinement import (
-    _WINDOWS_DEVICE_NAMES,
-    confine_path_internal,
-    validate_workspace_path,
-)
-from aegis_core.workspace.discovery import (
-    LEGACY_SOMA_UPGRADE_MSG,
-    _is_workspace_dir,
-    check_legacy_soma_sentinel,
-    is_aegis_repo,
-    resolve_workspace_root,
-)
-from aegis_core.workspace.git import GitWorkspace, _parse_worktree_porcelain
-from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
-from aegis_core.workspace.layout import LockResource, WorkspaceLayout
-from aegis_core.workspace.scaffold import scaffold_workspace
 
 
 def resolve_workspace(
@@ -91,23 +67,10 @@ def validate_rule_names(
 
 
 __all__ = [
-    "GitWorkspace",
-    "LEGACY_SOMA_UPGRADE_MSG",
-    "LockResource",
-    "Workspace",
-    "WorkspaceLayout",
     "as_workspace",
-    "check_legacy_soma_sentinel",
     "confine_path",
     "confine_workspace",
-    "is_aegis_repo",
-    "resolve_git_hooks_dir",
     "resolve_workspace",
     "resolve_workspace_path",
     "validate_rule_names",
-    "_WINDOWS_DEVICE_NAMES",
-    "_find_git_dirs",
-    "_is_workspace_dir",
-    "_parse_worktree_porcelain",
 ]
-

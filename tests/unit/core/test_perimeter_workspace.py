@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 from aegis_mcp.tools import execute_tool
 from aegis_sdk import Governance
 

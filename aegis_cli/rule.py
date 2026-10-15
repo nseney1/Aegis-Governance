@@ -20,13 +20,18 @@ from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.errors import WorkspaceNotFoundError
 from aegis_core.lifecycle.creation import MAX_RULE_BODY_BYTES, validate_rule_body
 from aegis_core.taxonomy import RULE_TYPE_DIRS
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 from aegis_core.workspace.discovery import _is_workspace_dir
 from aegis_core.workspace.layout import WorkspaceLayout
-from aegis_core.lifecycle import (
-    promote_cell, demote_cell, prune_cells, evaluate_promotions, evaluate_demotions, evaluate_cell_tiers,
+from aegis_core.lifecycle.promotion import (
+    promote_cell,
+    demote_cell,
+    evaluate_promotions,
+    evaluate_demotions,
+    evaluate_cell_tiers,
 )
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.lifecycle.selection import prune_cells
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 __all__ = [
     "run_rule", "RuleCommand", "run_promote", "run_demote", "_force_promote",

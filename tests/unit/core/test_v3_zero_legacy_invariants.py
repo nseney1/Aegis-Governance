@@ -22,7 +22,7 @@ import pytest
 from aegis_cli.cli import main as cli_main
 from aegis_cli.registry import get_default_registry
 from aegis_cli.ui.theme import OutputContext
-from aegis_core.yaml import parse_rule_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_rule_frontmatter
 from aegis_mcp.registry import TOOL_DEFINITIONS
 from aegis_mcp.tools import _TOOL_HANDLERS
 

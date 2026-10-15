@@ -32,7 +32,7 @@ from aegis_core.taxonomy import (
     WORDS_TO_TOKENS_FACTOR,
 )
 from aegis_core.workspace.layout import WorkspaceLayout
-from aegis_core.yaml import _get_body, parse_frontmatter
+from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
 from aegis_mcp.rule_cache import CellCache
 
 # Module-level singleton — persists across MCP tool invocations
@@ -327,7 +327,7 @@ def extract_target_constraints(cells: list[dict[str, object]], changed_files: li
 def load_genome_rules(workspace: str, changed_files: list[str]) -> list[dict[str, str]]:
     """Load genome rules marked as non_standard that match changed files."""
     try:
-        from aegis_core.workspace import Workspace
+        from aegis_core.workspace.base import Workspace
         ws = Workspace.resolve(workspace)
         if not ws.is_aegis_repo:
             return []

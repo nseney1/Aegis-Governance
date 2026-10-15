@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 from aegis_core.outcomes.engine import _get_changed_files, match_cells_to_changes
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 
 def _git(repo: Path, *args: str) -> None:

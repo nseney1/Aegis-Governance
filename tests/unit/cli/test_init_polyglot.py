@@ -5,7 +5,7 @@ import pytest
 
 from aegis_cli.init import run_init
 from aegis_core.skills.slots import SlotRegistry
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 
 def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):

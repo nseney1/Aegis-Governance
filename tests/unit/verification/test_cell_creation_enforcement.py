@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.lifecycle.creation import create_cell
 
 
