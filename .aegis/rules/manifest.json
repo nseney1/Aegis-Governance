@@ -14,7 +14,7 @@
     "invariants/invariant-oracles.md": "sha256:f3c42b042639ea697f911e531bdb6bb6e994ef379fbcc79d78bdf133497390e7",
     "invariants/invariant-prefer-subagent-delegation.md": "sha256:f32fd5350f33e90410e9dcee9de55d3d72726b2beaa1bdb4b8c798ad7e518f18",
     "invariants/invariant-safety-gate.md": "sha256:beac21861e6b60c647eadfbdf1c366d9fa0d39caa7d7411be00b8d031754f355",
-    "invariants/invariant-test-canonical-colocality.md": "sha256:414b490cc5547f89c60cb121910822f512dae5baf02398650a8f89bf9eb9342a",
+    "invariants/invariant-test-canonical-colocality.md": "sha256:b3763a503c7cd5ccf85b2ceabcc520e940482883124d69a72c0d99405ed9ef56",
     "personas/persona-bash-architect.md": "sha256:6b15c3efd69fb13537bfb5a5b31aea30e0409780d00d2bbe56285246573b58ff",
     "personas/persona-cross-platform-qa.md": "sha256:b1c0f9ac3b0d4ea809aa37b2832f7f94cd55d7192e22e331bb050c34b754b2f5",
     "personas/persona-mcp-specialist.md": "sha256:af867d685ef3e957f1fcf8e3954183a13a72a80093de53cdbca454cf47a8e73f",
@@ -50,7 +50,7 @@
     "traps/trap-unverified-delegation.md": "sha256:3941c48d8bab8c1f1007dcfafd654197e9a2a804771ea8aac1c68bc984be88d5",
     "traps/trap-version-drift.md": "sha256:f901543038683be2545ed78def26f92613dfc184fce4ae03076f067aef8513b9"
   },
-  "generated_at": "2026-10-15T12:03:12.983716+00:00",
+  "generated_at": "2026-10-15T12:03:53.825721+00:00",
   "rule_count": 48,
   "rules": {
     "boundaries/boundary-enzymes.md": "sha256:2711893b3ad5669d5e6bb2f61fed3e64be9d9d6257f2e5af3b6d43240e6f0144",
@@ -66,7 +66,7 @@
     "invariants/invariant-oracles.md": "sha256:f3c42b042639ea697f911e531bdb6bb6e994ef379fbcc79d78bdf133497390e7",
     "invariants/invariant-prefer-subagent-delegation.md": "sha256:f32fd5350f33e90410e9dcee9de55d3d72726b2beaa1bdb4b8c798ad7e518f18",
     "invariants/invariant-safety-gate.md": "sha256:beac21861e6b60c647eadfbdf1c366d9fa0d39caa7d7411be00b8d031754f355",
-    "invariants/invariant-test-canonical-colocality.md": "sha256:414b490cc5547f89c60cb121910822f512dae5baf02398650a8f89bf9eb9342a",
+    "invariants/invariant-test-canonical-colocality.md": "sha256:b3763a503c7cd5ccf85b2ceabcc520e940482883124d69a72c0d99405ed9ef56",
     "personas/persona-bash-architect.md": "sha256:6b15c3efd69fb13537bfb5a5b31aea30e0409780d00d2bbe56285246573b58ff",
     "personas/persona-cross-platform-qa.md": "sha256:b1c0f9ac3b0d4ea809aa37b2832f7f94cd55d7192e22e331bb050c34b754b2f5",
     "personas/persona-mcp-specialist.md": "sha256:af867d685ef3e957f1fcf8e3954183a13a72a80093de53cdbca454cf47a8e73f",

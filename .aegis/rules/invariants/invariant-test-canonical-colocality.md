@@ -34,7 +34,7 @@ Ad-hoc sprint and milestone names are strictly forbidden:
 
 ## 3. Strict Ban on Test Class Inheritance
 - ❌ Prohibit `class BaseTestCase` or any test base-class inheritance hierarchies.
-- Test dependencies must be injected via Pytest fixtures (`harness`).
+- Test dependencies must be injected via Pytest fixtures.
 - Classes are permitted *only* as uninherited organizational namespaces (e.g. `class TestPromoteValidation:`).
 
 ## 4. Behavioral Assertions & Anti-Tautology Mandate
