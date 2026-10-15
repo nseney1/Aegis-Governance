@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import glob
 import json
@@ -12,6 +13,7 @@ from typing import Any, Dict, Optional
 
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 from aegis_core.locking import workspace_lock
+from aegis_core.storage import atomic_write_text
 from aegis_core.workspace import Workspace, resolve_workspace
 from aegis_core.workspace.layout import LockResource
 from .constants import (
@@ -349,17 +351,22 @@ def demote_cell(
     with workspace_lock(ws.root, LockResource.RULES):
         content = cell_path.read_text(encoding="utf-8")
         new_content = _transform_frontmatter_type(content, next_type)
-        _atomic_write_and_unlink(cell_path, target_path, new_content)
-
-        if current_type in ("wall", "invariant") and next_type == "trap":
-            for pfx in ("check-", "gate-"):
-                for sfx in (".sh", ".py"):
-                    art = ws.aegis_dir / "enforcement" / f"{pfx}{clean_id}{sfx}"
-                    if art.exists():
-                        try:
-                            art.unlink()
-                        except Exception:
-                            pass
+        try:
+            _atomic_write_and_unlink(cell_path, target_path, new_content)
+        finally:
+            # Disk state, not the writer's return, decides whether the move
+            # happened: once the rule has left the gate tier its gate/check
+            # artifacts must go, even if the writer raised afterwards.
+            moved = target_path.is_file() and not cell_path.exists()
+            if moved and current_type in ("wall", "invariant") and next_type == "trap":
+                for pfx in ("check-", "gate-"):
+                    for sfx in (".sh", ".py"):
+                        art = ws.aegis_dir / "enforcement" / f"{pfx}{clean_id}{sfx}"
+                        if art.exists():
+                            try:
+                                art.unlink()
+                            except Exception:
+                                pass
 
     return {
         "status": "demoted",
@@ -394,98 +401,100 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
     changes: list[dict[str, Any]] = []
     evaluated = 0
 
-    for file_path in cell_files:
-        if os.path.basename(file_path) == "README.md":
-            continue
-        try:
-            with open(file_path, "r", encoding="utf-8-sig") as f:
-                content = f.read()
-        except Exception:
-            continue
-        from aegis_core.yaml import _get_body, parse_rule_frontmatter
-        try:
-            metadata, body = parse_rule_frontmatter(content)
-        except Exception:
-            continue
+    # Hold the rules lock for the whole read-modify-write pass so a concurrent
+    # promote/demote cannot move a file between our read and our rewrite.
+    with workspace_lock(ws.root, LockResource.RULES) if execute and cell_files else nullcontext():
+        for file_path in cell_files:
+            if os.path.basename(file_path) == "README.md":
+                continue
+            try:
+                with open(file_path, "r", encoding="utf-8-sig") as f:
+                    content = f.read()
+            except Exception:
+                continue
+            from aegis_core.yaml import _get_body, parse_rule_frontmatter
+            try:
+                metadata, body = parse_rule_frontmatter(content)
+            except Exception:
+                continue
 
-        cell_name = os.path.basename(file_path)
-        cell_base = os.path.splitext(cell_name)[0]
+            cell_name = os.path.basename(file_path)
+            cell_base = os.path.splitext(cell_name)[0]
 
-        enforcement = metadata.get("enforcement", "advisory")
-        fitness = normalize_fitness(metadata)
+            enforcement = metadata.get("enforcement", "advisory")
+            fitness = normalize_fitness(metadata)
 
-        metadata["fitness"] = fitness
-        apply_decay(metadata)
-        fitness = metadata["fitness"]
+            metadata["fitness"] = fitness
+            apply_decay(metadata)
+            fitness = metadata["fitness"]
 
-        triggers = fitness.get("triggers", 0)
-        tp = fitness.get("true_positives", 0)
-        fp = fitness.get("false_positives", 0)
+            triggers = fitness.get("triggers", 0)
+            tp = fitness.get("true_positives", 0)
+            fp = fitness.get("false_positives", 0)
 
-        escaped = escaped_counts.get(cell_base, 0)
-        total_cases = escaped + tp
-        defect_prevention_rate = tp / total_cases if total_cases > 0 else 1.0
+            escaped = escaped_counts.get(cell_base, 0)
+            total_cases = escaped + tp
+            defect_prevention_rate = tp / total_cases if total_cases > 0 else 1.0
 
-        fp_rate = fp / triggers if triggers > 0 else 0.0
-        trigger_rate = triggers / 30.0
+            fp_rate = fp / triggers if triggers > 0 else 0.0
+            trigger_rate = triggers / 30.0
 
-        new_tier = enforcement
-        reason = ""
+            new_tier = enforcement
+            reason = ""
 
-        if enforcement == "advisory":
-            if defect_prevention_rate > 0.85 and triggers >= 20 and fp_rate < 0.15:
-                new_tier = "mechanical"
-                reason = "defect_prevention_rate > 0.85, triggers >= 20, FP rate < 0.15"
-        elif enforcement == "mechanical":
-            if defect_prevention_rate > 0.95 and triggers >= 50 and fp_rate < 0.05:
-                new_tier = "gate"
-                reason = "defect_prevention_rate > 0.95, triggers >= 50, FP rate < 0.05"
-            elif fp_rate > 0.50 or trigger_rate < (1 / 30.0):
-                new_tier = "advisory"
-                reason = "FP rate > 0.50 or low trigger rate"
-        elif enforcement == "gate":
-            if fp_rate > 0.30 or escaped > 0:
-                new_tier = "mechanical"
-                reason = "FP rate > 0.30 or escaped defects spike"
+            if enforcement == "advisory":
+                if defect_prevention_rate > 0.85 and triggers >= 20 and fp_rate < 0.15:
+                    new_tier = "mechanical"
+                    reason = "defect_prevention_rate > 0.85, triggers >= 20, FP rate < 0.15"
+            elif enforcement == "mechanical":
+                if defect_prevention_rate > 0.95 and triggers >= 50 and fp_rate < 0.05:
+                    new_tier = "gate"
+                    reason = "defect_prevention_rate > 0.95, triggers >= 50, FP rate < 0.05"
+                elif fp_rate > 0.50 or trigger_rate < (1 / 30.0):
+                    new_tier = "advisory"
+                    reason = "FP rate > 0.50 or low trigger rate"
+            elif enforcement == "gate":
+                if fp_rate > 0.30 or escaped > 0:
+                    new_tier = "mechanical"
+                    reason = "FP rate > 0.30 or escaped defects spike"
 
-        evaluated += 1
+            evaluated += 1
 
-        if new_tier != enforcement:
-            changes.append({
-                "cell": cell_name,
-                "old_tier": enforcement,
-                "new_tier": new_tier,
-                "reason": reason,
-            })
-            metadata["enforcement"] = new_tier
+            if new_tier != enforcement:
+                changes.append({
+                    "cell": cell_name,
+                    "old_tier": enforcement,
+                    "new_tier": new_tier,
+                    "reason": reason,
+                })
+                metadata["enforcement"] = new_tier
 
-        if execute:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(dump_frontmatter(metadata, body=body))
+            if execute:
+                atomic_write_text(file_path, dump_frontmatter(metadata, body=body))
 
-            if new_tier in ("mechanical", "gate") and new_tier != enforcement:
-                try:
-                    from aegis_core.enforcement import (
-                        generate_gate_assertion,
-                        generate_precommit_check,
-                        update_cell_enforcement_artifact,
-                    )
-                    artifacts_dir = str(ws.aegis_dir / "enforcement")
-                    os.makedirs(artifacts_dir, exist_ok=True)
-                    if new_tier == "mechanical":
-                        artifact_content = generate_precommit_check(metadata, str(ws.root))
-                        artifact_name = f"check-{cell_base}.sh"
-                    else:
-                        artifact_content = generate_gate_assertion(metadata, str(ws.root))
-                        artifact_name = f"gate-{cell_base}.py"
-                    artifact_path = os.path.join(artifacts_dir, artifact_name)
-                    with open(artifact_path, "w", encoding="utf-8") as af:
-                        af.write(artifact_content)
-                    os.chmod(artifact_path, 0o755)
-                    metadata["_path"] = file_path
-                    update_cell_enforcement_artifact(metadata, artifact_path, str(ws.root))
-                except Exception:
-                    pass
+                if new_tier in ("mechanical", "gate") and new_tier != enforcement:
+                    try:
+                        from aegis_core.enforcement import (
+                            generate_gate_assertion,
+                            generate_precommit_check,
+                            update_cell_enforcement_artifact,
+                        )
+                        artifacts_dir = str(ws.aegis_dir / "enforcement")
+                        os.makedirs(artifacts_dir, exist_ok=True)
+                        if new_tier == "mechanical":
+                            artifact_content = generate_precommit_check(metadata, str(ws.root))
+                            artifact_name = f"check-{cell_base}.sh"
+                        else:
+                            artifact_content = generate_gate_assertion(metadata, str(ws.root))
+                            artifact_name = f"gate-{cell_base}.py"
+                        artifact_path = os.path.join(artifacts_dir, artifact_name)
+                        with open(artifact_path, "w", encoding="utf-8") as af:
+                            af.write(artifact_content)
+                        os.chmod(artifact_path, 0o755)
+                        metadata["_path"] = file_path
+                        update_cell_enforcement_artifact(metadata, artifact_path, str(ws.root))
+                    except Exception:
+                        pass
 
     return {"evaluated": evaluated, "changes": changes}
 
@@ -521,7 +530,13 @@ def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) ->
     if not matches:
         return {"status": "not_found", "message": f"Cell '{cell_id}' not found"}
 
-    cell_path = matches[0]
+    # Read, decide and move under one lock so a concurrent promote/demote
+    # cannot move the source between our read and our rewrite.
+    with workspace_lock(ws.root, LockResource.RULES):
+        return _metamorphose_locked(ws, cells_dir, matches[0])
+
+
+def _metamorphose_locked(ws: Workspace, cells_dir: Path, cell_path: Path) -> dict:
     content = cell_path.read_text(encoding="utf-8")
     meta = parse_frontmatter(content) or {}
     current_type = meta.get("type")
@@ -564,8 +579,8 @@ def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) ->
     from aegis_core.yaml import _get_body
     nfm = dump_frontmatter(meta)
     body = _get_body(content).lstrip()
-    target_path.write_text(f"---\n{nfm.strip()}\n---\n\n{body}\n" if body else f"---\n{nfm.strip()}\n---\n", encoding="utf-8")
-    cell_path.unlink()
+    new_content = f"---\n{nfm.strip()}\n---\n\n{body}\n" if body else f"---\n{nfm.strip()}\n---\n"
+    _atomic_write_and_unlink(cell_path, target_path, new_content)
 
     return {
         "status": "metamorphosed",
@@ -627,7 +642,9 @@ def adapt_cell(workspace: Workspace | Path | str, generate: bool = False) -> lis
                 meta_v2["created"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 nfm = dump_frontmatter(meta_v2)
                 body = _get_body(content).lstrip()
-                v2_path.write_text(f"---\n{nfm.strip()}\n---\n\n{body}\n" if body else f"---\n{nfm.strip()}\n---\n", encoding="utf-8")
+                v2_content = f"---\n{nfm.strip()}\n---\n\n{body}\n" if body else f"---\n{nfm.strip()}\n---\n"
+                with workspace_lock(ws.root, LockResource.RULES):
+                    atomic_write_text(v2_path, v2_content)
                 item["generated"] = str(v2_path)
 
     return results

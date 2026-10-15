@@ -10,8 +10,11 @@ import sys
 from typing import Optional
 
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
+from aegis_core.locking import workspace_lock
+from aegis_core.storage import atomic_write_text
 from aegis_core.taxonomy import REVIEW_MODES, ReviewMode, normalize_review_mode
 from aegis_core.workspace import Workspace, resolve_workspace
+from aegis_core.workspace.layout import LockResource
 from .constants import (
     VALID_ENFORCEMENT,
     VALID_TYPES,
@@ -111,13 +114,9 @@ def create_cell(
     )
     type_plural = VALID_TYPES[type_lower]
     target_dir = ws.rules_dir / type_plural
-    target_dir.mkdir(parents=True, exist_ok=True)
 
     slug = generate_slug(hypothesis, id_override)
     file_path = target_dir / f"{slug}.md"
-
-    if file_path.is_symlink():
-        file_path.unlink()
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     type_title = type_lower.capitalize()
@@ -145,7 +144,7 @@ def create_cell(
     expiry_sess_str = "null" if expiry_sessions is None else str(expiry_sessions)
     expiry_days_str = "null" if expiry_days is None else str(expiry_days)
 
-    content = f"""---
+    frontmatter = f"""---
 id: {slug}
 domain: {domain}
 type: {type_lower}
@@ -165,7 +164,8 @@ lineage:
   generation: 0
   siblings: []{optional_block}
 ---
-## {type_title}: {truncated_hypo}
+"""
+    body = f"""## {type_title}: {truncated_hypo}
 
 {hypothesis}
 
@@ -175,20 +175,20 @@ lineage:
 ### Falsification Criteria
 {falsification}
 """
+    content = frontmatter + body
 
-    file_path.write_text(content, encoding="utf-8")
-
-    if not file_path.is_file() or file_path.stat().st_size == 0:
-        if file_path.exists():
-            file_path.unlink()
-        raise RuntimeError(f"Cell was not written correctly (empty file): {file_path}")
-
-    read_back = file_path.read_text(encoding="utf-8")
-    if read_back.count("---") < 2:
-        raise ValueError(f"Cell frontmatter is malformed (missing closing '---'): {file_path}")
+    # Validate in memory so a malformed rule never reaches disk.
     from aegis_core.yaml import AegisYAML
 
-    AegisYAML.parse_text(read_back)
+    AegisYAML.parse_text(content)
+
+    with workspace_lock(ws.root, LockResource.RULES):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if file_path.is_symlink():
+            # The atomic writer resolves its target; drop the link so the
+            # write replaces it instead of following it out of the rules dir.
+            file_path.unlink()
+        atomic_write_text(file_path, content)
 
     return file_path
 
@@ -403,7 +403,8 @@ def transfer_cell(
     new_fm = dump_frontmatter(meta)
     body = _get_body(content).lstrip()
     new_content = f"---\n{new_fm.strip()}\n---\n\n{body}\n" if body else f"---\n{new_fm.strip()}\n---\n"
-    dest_path.write_text(new_content, encoding="utf-8")
+    with workspace_lock(target_dir, LockResource.RULES):
+        atomic_write_text(dest_path, new_content)
 
     metrics_dir = src_ws.metrics_dir
     metrics_dir.mkdir(parents=True, exist_ok=True)

@@ -12,7 +12,10 @@ import sys
 from typing import Optional
 
 from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter
+from aegis_core.locking import workspace_lock
+from aegis_core.storage import atomic_write_text
 from aegis_core.workspace import Workspace, resolve_workspace
+from aegis_core.workspace.layout import LockResource
 from .constants import (
     EXTINCTION_THRESHOLD,
 )
@@ -45,9 +48,17 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
         return 0
 
     print(f"Running cell selection (execute={execute})...")
-    if execute:
-        archive_dir.mkdir(parents=True, exist_ok=True)
+    if not execute:
+        _select(cells_dir, archive_dir, fitness_log, execute)
+        return 0
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    # Moves and rewrites happen under the same rules lock as promote/demote.
+    with workspace_lock(ws.root, LockResource.RULES):
+        _select(cells_dir, archive_dir, fitness_log, execute)
+    return 0
 
+
+def _select(cells_dir: Path, archive_dir: Path, fitness_log: Path, execute: bool) -> None:
     for root_str, _dirs, files in os.walk(cells_dir):
         if ".archive" in root_str:
             continue
@@ -113,7 +124,7 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
                     timestamp = datetime.now(timezone.utc).isoformat() + "Z"
                     meta["dormant_since"] = timestamp
                     body = _get_body(content).lstrip()
-                    fpath.write_text(dump_frontmatter(meta, body=body), encoding="utf-8")
+                    atomic_write_text(fpath, dump_frontmatter(meta, body=body))
                     action = "marked_dormant"
 
                 if action:
@@ -123,7 +134,6 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
                             "cell": f,
                             "action": action,
                         }) + "\n")
-    return 0
 
 
 def prune_cells(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
