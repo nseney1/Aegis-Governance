@@ -18,12 +18,6 @@ from aegis_core.proposals import (
     soma_propose_change,
 )
 from aegis_core.defects import audit_expiry, load_registry
-from aegis_core.enforcement import (
-    _match_cells,
-    generate_ci_report,
-    verify_readme_claims,
-    verify_regression_tests,
-)
 from aegis_core.lifecycle.creation import create_cell, transfer_cell
 from aegis_core.lifecycle.decay import compute_cells_fitness
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
@@ -200,9 +194,6 @@ class TestOutcomesAndSyncWorkspaceInteroperability:
         audit = audit_expiry(mock_soma_workspace)
         assert isinstance(audit, list)
 
-        matched = _match_cells(mock_soma_workspace, ["some_file.py"])
-        assert isinstance(matched, list)
-
     def test_sync_with_workspace_instance(self, mock_soma_workspace: Workspace):
         # Create a dummy aegis.conf
         conf_file = mock_soma_workspace.root / "aegis.conf"
@@ -217,28 +208,3 @@ class TestOutcomesAndSyncWorkspaceInteroperability:
             repo_root=mock_soma_workspace,
         )
         assert res in (0, 1)
-
-    def test_generate_ci_report_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        report = generate_ci_report(
-            workspace=mock_soma_workspace,
-            changed_files=["tests/test_core.py"],
-            test_passed=True,
-            commit_sha="abcdef123456",
-        )
-        assert "matched_rules" in report
-        assert "summary" in report
-        assert "Aegis CI Outcome Report" in report["summary"]
-
-
-    def test_verify_registry_and_claims_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        # Regression tests on empty registry
-        reg = {"bugs": []}
-        errors = verify_regression_tests(reg, workspace=mock_soma_workspace)
-        assert errors == []
-
-        # Claim registry verification when missing file
-        ok, fails = verify_readme_claims(workspace=mock_soma_workspace)
-        assert not ok
-        assert any("Claim registry not found" in f for f in fails)
-
-

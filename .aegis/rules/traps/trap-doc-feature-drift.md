@@ -9,7 +9,6 @@ falsification: 0 findings in 20 sessions → prune
 target_paths:
   - README.md
   - "docs/**/*.md"
-  - "docs/**/*.json"
   - "skills/*/SKILL.md"
   - "aegis_cli/*.py"
   - "aegis_mcp/*.py"

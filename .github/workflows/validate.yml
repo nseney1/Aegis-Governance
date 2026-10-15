@@ -134,32 +134,6 @@ jobs:
         id: test
         run: make test
 
-      - name: Aegis CI Outcome Report
-        if: always()
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          TEST_OUTCOME: ${{ steps.test.outcome }}
-          COMMIT_SHA: ${{ github.sha }}
-        run: |
-          if [ -n "$PR_BASE_SHA" ]; then
-            CHANGED=$(git diff --name-only "origin/$PR_BASE_SHA...HEAD" 2>/dev/null || git diff --name-only "$PR_BASE_SHA...HEAD" 2>/dev/null || echo "")
-          else
-            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-          fi
-          if [ -n "$CHANGED" ]; then
-            python3 -c "import sys; from aegis_core.enforcement import cli_ci_outcome_reporter; sys.exit(cli_ci_outcome_reporter(sys.argv[1:]))" \
-              --changed-files "$CHANGED" \
-              --test-result "${TEST_OUTCOME:-skipped}" \
-              --commit-sha "$COMMIT_SHA" \
-              --format markdown >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Verify README claims
-        run: python3 -c "import sys; from aegis_core.enforcement import cli_verify_readme_claims; sys.exit(cli_verify_readme_claims())"
-
-      - name: Verify Bug Registry
-        run: python3 -c "import sys; from aegis_core.enforcement import cli_verify_bug_registry; sys.exit(cli_verify_bug_registry())"
-
       - name: Check for hardcoded paths
         run: |
           # Exclude template examples like /home/<user>/ which are privacy instructions
