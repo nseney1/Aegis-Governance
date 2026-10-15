@@ -178,7 +178,7 @@ class TestInsightCursorDurability:
             replaced.append((src, dst))
             return real_replace(src, dst)
 
-        monkeypatch.setattr(oe.os, "replace", spy)
+        monkeypatch.setattr(os, "replace", spy)
         assert oe.commit_insight_cursor(ws, offset) is True
         assert replaced and replaced[-1][1] == _cursor_path(ws)
         with open(_cursor_path(ws)) as f:
