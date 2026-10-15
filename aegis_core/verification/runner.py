@@ -8,8 +8,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
-from aegis_core.workspace.layout import RULES_RELDIR, WorkspaceLayout
-from typing import Optional
+from aegis_core.match import is_test_path
+from aegis_core.workspace.layout import RULES_RELDIR
+from typing import Any, Optional
 
 from . import ToolEvidence
 from . import persistence_checker
@@ -18,31 +19,6 @@ from . import import_guard
 from . import mutation_tester
 
 VerificationResult = ToolEvidence
-
-
-def _matches_rule_patterns(rel_path: str, patterns: list[str]) -> bool:
-    """Check if rel_path matches any rule glob pattern (including **/ globs)."""
-    import fnmatch
-
-    if not patterns:
-        return True
-    norm_rel = rel_path.replace("\\", "/").lstrip("/")
-    base = os.path.basename(norm_rel)
-    for raw_pat in patterns:
-        pat = str(raw_pat).replace("\\", "/").strip()
-        if not pat:
-            continue
-        if norm_rel == pat or fnmatch.fnmatch(norm_rel, pat) or fnmatch.fnmatch(base, pat):
-            return True
-        if pat.startswith("**/"):
-            stripped = pat[3:]
-            if fnmatch.fnmatch(norm_rel, stripped) or fnmatch.fnmatch(base, stripped):
-                return True
-        if "/**/" in pat:
-            collapsed = pat.replace("/**/", "/")
-            if fnmatch.fnmatch(norm_rel, collapsed):
-                return True
-    return False
 
 
 _FORBID_AST_KEYS = ("imports", "calls", "decorators")
@@ -70,79 +46,33 @@ def _forbid_ast_spec_error(spec: object) -> Optional[str]:
 
 def _discover_forbid_ast_rules(
     repo_root: str,
-) -> tuple[list[tuple[str, dict, list[str]]], list[tuple[str, str]]]:
-    """Discover workspace rules in rules/ and .aegis/rules/ declaring forbid_ast.
+) -> tuple[list[tuple[Any, dict]], list[tuple[str, str]]]:
+    """The workspace rules (aegis_core.rules, .aegis/rules/<type>/) that declare forbid_ast.
 
-    Returns (rules, broken): a rule file that cannot be read or parsed might declare
-    forbid_ast, and one whose forbid_ast is malformed enforces nothing, so each is
-    returned as (relative path, reason) for the caller to fail closed on instead of
-    being dropped.
+    Returns (rules, broken): a rule file that cannot be loaded and names forbid_ast, or
+    whose forbid_ast is malformed, would enforce nothing, so each is returned as
+    (relative path, reason) for the caller to fail closed on instead of being dropped.
+    An unsafe rules tree raises (RuleInventoryError), which the caller also fails on.
     """
-    from pathlib import Path
-    from aegis_core.yaml_engine.frontmatter import AegisYAML
-    from aegis_core.workspace.base import Workspace
+    from aegis_core.rules import load_rules, workspace_root
 
-    root_path = Path(str(getattr(repo_root, "root", repo_root))).resolve()
-    ws_obj = None
-    try:
-        ws_obj = Workspace(root_path)
-    except Exception:
-        ws_obj = None
-
-    candidate_dirs = [root_path / "rules", WorkspaceLayout(root_path).rules_dir]
-    discovered: list[tuple[str, dict, list[str]]] = []
+    ruleset = load_rules(workspace_root(repo_root))
+    discovered: list[tuple[Any, dict]] = []
     broken: list[tuple[str, str]] = []
-    seen_ids: set[str] = set()
-
-    for rules_dir in candidate_dirs:
-        if not rules_dir.is_dir():
+    for rule in ruleset.rules:
+        if not rule.ok:
+            # Only a file that names the key can declare it: a damaged note does not gate.
+            if b"forbid_ast" in rule.raw:
+                broken.append((rule.path, rule.error or "cannot be loaded"))
             continue
-        for md_file in sorted(rules_dir.rglob("*.md")):
-            if md_file.name == "README.md" or md_file.is_symlink():
-                continue
-            try:
-                rel_md = md_file.relative_to(root_path)
-                if ws_obj is not None:
-                    doc = AegisYAML.parse_file(rel_md, ws_obj)
-                else:
-                    doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
-            except Exception:
-                try:
-                    doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
-                except Exception as exc:
-                    # Only a file that names the key can declare it: plain notes under a
-                    # rules/ directory stay out of the gate, a damaged forbid_ast rule does not.
-                    try:
-                        may_declare = b"forbid_ast" in md_file.read_bytes()
-                    except OSError:
-                        may_declare = True
-                    if may_declare:
-                        broken.append((md_file.relative_to(root_path).as_posix(), f"{type(exc).__name__}: {exc}"))
-                    continue
-
-            if doc.get("expired_at") or "forbid_ast" not in doc:
-                continue
-            forbid_spec = doc.get("forbid_ast")
-            spec_error = _forbid_ast_spec_error(forbid_spec)
-            if spec_error:
-                broken.append((md_file.relative_to(root_path).as_posix(), spec_error))
-                continue
-
-            rule_id = str(doc.get("id") or doc.get("name") or md_file.stem)
-            if rule_id in seen_ids:
-                continue
-            seen_ids.add(rule_id)
-
-            raw_paths = doc.get("target_paths") or doc.get("paths") or doc.get("globs") or []
-            if isinstance(raw_paths, str):
-                patterns = [raw_paths]
-            elif isinstance(raw_paths, (list, tuple, set)):
-                patterns = [str(p) for p in raw_paths if p]
-            else:
-                patterns = []
-
-            discovered.append((rule_id, forbid_spec, patterns))
-
+        if rule.expired or "forbid_ast" not in rule.meta:
+            continue
+        spec = rule.meta.get("forbid_ast")
+        spec_error = _forbid_ast_spec_error(spec)
+        if spec_error:
+            broken.append((rule.path, spec_error))
+            continue
+        discovered.append((rule, spec))
     return discovered, broken
 
 
@@ -331,17 +261,7 @@ def run_layer1(
     repo_root_str = str(getattr(repo_root, "root", repo_root))
 
     def _is_test_or_support(fpath: str) -> bool:
-        norm = fpath.replace('\\', '/')
-        bname = os.path.basename(fpath)
-        if norm.startswith(('soma_core/', 'soma_cli/', 'soma_sdk/', 'soma_mcp/')) and os.path.isdir(os.path.join(repo_root_str, 'aegis_core')):
-            return True
-        return (
-            norm.startswith('tests/')
-            or '/tests/' in norm
-            or bname.startswith('test_')
-            or bname.endswith(('_test.go', '_test.py', '.test.ts', '.spec.ts', '.test.js', '.spec.js'))
-            or bname in ('__init__.py', 'conftest.py', 'harness.py', 'helpers_cell.py')
-        )
+        return is_test_path(fpath) or os.path.basename(fpath) == '__init__.py'
 
     # ── Persistence Completeness ──────────────────────────────────────
     if persistence_targets:
@@ -420,20 +340,12 @@ def run_layer1(
                 rel_path = os.path.relpath(full_path, repo_root_str).replace("\\", "/")
             except ValueError:
                 rel_path = filepath.replace("\\", "/")
-            is_test_path = (
-                rel_path.startswith("tests/")
-                or "/tests/" in f"/{rel_path}"
-                or os.path.basename(rel_path).startswith("test_")
-            )
-
-            for rule_id, forbid_spec, patterns in forbid_rules:
-                rule_targets_tests = any(
-                    "tests/" in p.replace("\\", "/") or "test_" in p
-                    for p in patterns
-                )
-                if is_test_path and not rule_targets_tests:
-                    continue
-                if patterns and not _matches_rule_patterns(rel_path, patterns):
+            for rule, forbid_spec in forbid_rules:
+                rule_id = rule.id
+                # Rule.applies_to: target_paths ("**" when a forbid_ast rule names none),
+                # and test files only when the patterns name tests. Scan, telemetry and
+                # coverage ask the same question.
+                if not rule.applies_to(rel_path):
                     continue
 
                 try:

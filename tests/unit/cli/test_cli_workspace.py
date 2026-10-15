@@ -13,9 +13,9 @@ from aegis_core.workspace.base import Workspace
 @pytest.fixture
 def initialized_ws(tmp_path: Path) -> Workspace:
     ws_dir = tmp_path / "init_project"
-    (ws_dir / ".aegis" / "rules" / "walls").mkdir(parents=True)
-    (ws_dir / ".aegis" / "evidence").mkdir(parents=True)
-    (ws_dir / ".aegis" / "rules" / "walls" / "test.md").write_text("---\ntype: wall\n---\n")
+    (ws_dir / ".aegis" / "rules" / "invariants").mkdir(parents=True)
+    (ws_dir / ".aegis" / "state").mkdir(parents=True)
+    (ws_dir / ".aegis" / "rules" / "invariants" / "test.md").write_text("---\ntype: invariant\n---\n")
     return Workspace(root=ws_dir)
 
 

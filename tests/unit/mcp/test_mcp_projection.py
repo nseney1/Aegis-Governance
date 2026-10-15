@@ -38,23 +38,25 @@ def test_full_view_and_no_view_return_the_response_unchanged(workspace):
 
 def test_list_rules_ids_view_names_each_rule_by_its_file_stem(workspace):
     ids = execute_tool("aegis_list_rules", {"workspace": str(workspace), "view": "ids"})
-    assert ids == ["trap-noid", "trap-with-id"]
+    assert ids == {"rules": ["trap-noid", "trap-with-id"], "stale_rules": [], "ignored": []}
 
 
 def test_list_rules_summary_view_keeps_identity_type_and_fitness(workspace):
     summary = execute_tool("aegis_list_rules", {"workspace": str(workspace), "view": "summary"})
-    assert summary[0] == {
+    assert summary["rules_count"] == 2
+    assert summary["rules"][0] == {
         "_name": "trap-noid",
         "type": "trap",
-        "fitness": {"triggers": 0, "tp": 0, "fp": 0, "score": summary[0]["fitness"]["score"]},
+        "fitness": {"triggers": 0, "tp": 0, "fp": 0, "last_ts": None, "score": 0.0},
     }
-    assert summary[1]["_name"] == "trap-with-id"
-    assert "hypothesis" not in summary[1]
+    assert summary["rules"][1]["_name"] == "trap-with-id"
+    assert "hypothesis" not in summary["rules"][1]
+    assert (summary["stale_rules_count"], summary["ignored_count"]) == (0, 0)
 
 
 def test_scan_ids_view_names_the_matched_rules(workspace):
     ids = execute_tool("aegis_scan", {"workspace": str(workspace), "files": ["src/app.py"], "view": "ids"})
-    assert ids == {"relevant_rules": ["trap-noid"], "genome_guidance": [], "invariant_warnings": []}
+    assert ids == {"relevant_rules": ["trap-noid"], "invariant_warnings": [], "omitted_mandatory": [], "stale_rules": []}
 
 
 def test_scan_summary_view_counts_and_names_rules_without_the_rendered_guidance(workspace):
@@ -99,5 +101,5 @@ def test_projection_keeps_scalars_and_plain_string_lists():
 
 def test_frontmatter_keys_pass_through_the_full_view_unchanged(tmp_path):
     _rule(tmp_path, "trap-prompt", "type: trap\nprompt: kept as written\n")
-    rules = execute_tool("aegis_list_rules", {"workspace": str(tmp_path), "view": "full"})
+    rules = execute_tool("aegis_list_rules", {"workspace": str(tmp_path), "view": "full"})["rules"]
     assert rules[0]["prompt"] == "kept as written"

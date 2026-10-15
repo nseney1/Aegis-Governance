@@ -112,7 +112,7 @@ def test_read_tool_ignores_a_client_chosen_workspace(tmp_path, monkeypatch):
 
     response = _call("aegis_list_rules", {"workspace": str(other)})
 
-    names = {rule.get("_name") for rule in json.loads(response["result"]["content"][0]["text"])}
+    names = {rule.get("_name") for rule in json.loads(response["result"]["content"][0]["text"])["rules"]}
     assert names == {"rule-canonical"}
 
 

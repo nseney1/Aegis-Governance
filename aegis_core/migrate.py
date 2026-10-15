@@ -19,17 +19,19 @@ What a plan converts:
   become ``.aegis/config.json``. Command-like values (driver commands, slots) go to a
   printed note for ``~/.aegis/config.json``, never into the repository; keys v4 no longer
   has are reported as dropped.
-- **Rules**: ``.soma/cells/<type>/*.md`` move to ``.aegis/rules/<canonical type>/`` through
-  the type-normalization table (taxonomy.RULE_TYPE_NORMALIZATION, plus the v2.1 organelle
-  names in LEGACY_ORGANELLE_TYPES); a type neither maps is reported and left in place,
-  never guessed. Derived counters (``fitness``,
-  ``triggers``, ``score``…) are stripped from every rule's frontmatter, line by line, so
-  every other byte stays (v4.3 §10.2).
-- **Manifest**: a v3 ``.aegis/rules/manifest.json`` still excludes any rule whose digest
-  it does not list (RuleCache, until D3 replaces it in B2b), so the entries of the rules
-  this migration rewrites or moves in are updated to the new bytes, before any rule is
-  written. An entry that did not match the rule before migrating is left as it is: a
-  rule edited outside aegis stays refused, never re-attested (H1).
+- **Rules**: ``.soma/cells/<type>/*.md``, and the rules v3.1-v3.3 kept in a v3 type
+  directory of ``.aegis/rules`` (``walls/``, ``membranes/``…; notes there stay), move
+  to ``.aegis/rules/<canonical type>/`` through the legacy type-name table
+  (LEGACY_TYPE_NAMES: the v1-v3 aliases and the v2.1 organelle names); a type it does
+  not map is reported and left in place, never guessed. A v3 type name in a canonical
+  directory (``type: wall`` in ``invariants/``) is rewritten to the v4 name. Derived
+  counters (``fitness``, ``triggers``, ``score``…) and keys v4 never reads
+  (``enforcement_artifact``) are stripped from every rule's frontmatter, line by line,
+  so every other byte stays (v4.3 §10.2).
+- **Manifest**: the v3 integrity manifest (``.aegis/rules/manifest.json``, or the older
+  ``.aegis/manifest.json``) and its HMAC key are v3 state: v4 keeps an unsigned index in
+  ``.aegis/state/derived.json``, written by ``aegis sync`` (D3), so they are removed with
+  the other state below.
 - **State**: the v3 runtime files (layout.LEGACY_STATE_ENTRIES) are removed, except
   files under ``drivers/`` that are not the driver copies `aegis init` staged there
   byte for byte (a copy that differs from every version aegis shipped may hold the
@@ -52,8 +54,9 @@ import stat
 from typing import Any, Dict, List, Optional, Tuple
 
 from aegis_core.errors import PathTraversalError, WorkspaceError
+from aegis_core.rules import is_legacy_key
 from aegis_core.storage import atomic_write_bytes, atomic_write_text, locked, read_jsonl, state_dir
-from aegis_core.taxonomy import CANONICAL_RULE_TYPES, RULE_TYPE_DIRS, RULE_TYPE_NORMALIZATION
+from aegis_core.taxonomy import CANONICAL_RULE_TYPES, DIR_RULE_TYPES, RULE_TYPE_DIRS
 from aegis_core.workspace.layout import (
     LEGACY_CONFIG_ENTRIES,
     LEGACY_LEDGER_FILES,
@@ -62,39 +65,21 @@ from aegis_core.workspace.layout import (
     WorkspaceLayout,
 )
 
-__all__ = ["DERIVED_KEYS", "MigrationPlan", "MigrationRefused", "MigrationResult", "apply", "plan"]
+__all__ = ["MigrationPlan", "MigrationRefused", "MigrationResult", "apply", "legacy_rule_type", "plan"]
 
-# Frontmatter keys that are derived from the ledger; rule files never carry them (v4.3 §10.2).
-DERIVED_KEYS = frozenset({
-    "fitness", "triggers", "true_positives", "false_positives", "last_trigger_date",
-    "last_triggered", "score", "fitness_score", "tp", "fp", "tp_rate", "fp_rate",
-})
-_TIMESTAMP_KEYS = frozenset({"last_trigger_date", "last_triggered"})
-
-
-def _is_derived(key: str, value: Any) -> bool:
-    """Whether ``key: value`` is a ledger-derived counter. Only counter-shaped values count:
-    ``triggers: [documentation_edit]`` is a rule's list of trigger keywords, and stays."""
-    if key not in DERIVED_KEYS:
-        return False
-    if key == "fitness":
-        return isinstance(value, (dict, int, float)) or value is None
-    if key in _TIMESTAMP_KEYS:
-        return value is None or isinstance(value, str) or hasattr(value, "isoformat")
-    if isinstance(value, bool):
-        return False
-    if value is None or isinstance(value, (int, float)):
-        return True
-    try:
-        float(str(value))
-        return True
-    except ValueError:
-        return False
 _REPO_CONF_NAMES = (LEGACY_REPO_CONF, "soma.conf")
-# The v2 organelle names RULE_TYPE_NORMALIZATION does not carry (it has wall and
-# membrane), exactly as v2.1's `aegis migrate` mapped them (ORGANELLE_MAPPING, commit
-# 06a7e39). Production code keeps no other copy of this vocabulary.
-LEGACY_ORGANELLE_TYPES = {
+# Every legacy rule-type name a v1-v3 workspace can hold, mapped to its v4 type: the
+# v3 type-normalization aliases, plus the v2 organelle names exactly as v2.1's
+# `aegis migrate` mapped them (ORGANELLE_MAPPING, commit 06a7e39). Only migration reads
+# legacy names; the rest of Aegis knows the six types of taxonomy.RULE_TYPES.
+LEGACY_TYPE_NAMES = {
+    "wall": "invariant", "walls": "invariant", "invariants": "invariant", "safety-guard": "invariant",
+    "membrane": "boundary", "membranes": "boundary", "boundaries": "boundary",
+    "escalation-boundary": "boundary",
+    "traps": "trap", "patterns": "trap", "cells": "trap", "rules": "trap", "learned-trap": "trap",
+    "personas": "persona", "agent-persona": "persona",
+    "contracts": "contract", "contract-bridge": "contract",
+    "gates": "gate",
     "vacuole": "trap", "vacuoles": "trap",
     "chloroplast": "persona", "chloroplasts": "persona",
     "plasmodesmata": "contract",
@@ -126,18 +111,13 @@ class _RuleMove:
 
 @dataclass
 class _RuleStrip:
+    """A rule rewritten in place: legacy ``keys`` stripped and/or a v3 type name renamed."""
+
     path: Path
     keys: List[str]
     content: str
-    original: bytes  # the bytes the plan read; the manifest re-attests only from these
-
-
-@dataclass
-class _ManifestUpdate:
-    path: Path
-    data: Dict[str, Any]  # the manifest with the planned entries already updated
-    updated: List[str] = field(default_factory=list)
-    mismatched: List[str] = field(default_factory=list)
+    original: bytes  # the bytes the plan read
+    retype: Optional[Tuple[str, str]] = None  # (v3 type name, v4 type)
 
 
 @dataclass
@@ -164,7 +144,6 @@ class MigrationPlan:
     left_in_place: List[str] = field(default_factory=list)
     skipped: List[Dict[str, str]] = field(default_factory=list)
     already_moved: List[Path] = field(default_factory=list)
-    manifest: Optional[_ManifestUpdate] = None
     refusal: Optional[str] = None
     # Every file whose bytes the plan converts, rewrites, removes for its content, or
     # expects absent (a rule destination): repo-relative POSIX path -> _fingerprint.
@@ -201,17 +180,16 @@ class MigrationPlan:
             "rules": [
                 {"from": self._rel(m.source), "to": self._rel(m.target), "type": m.rule_type} for m in self.moves
             ],
-            "strip": [{"path": self._rel(strip.path), "keys": strip.keys} for strip in self.strips],
+            "strip": [{"path": self._rel(strip.path), "keys": strip.keys} for strip in self.strips if strip.keys],
+            "retype": [
+                {"path": self._rel(strip.path), "from": strip.retype[0], "to": strip.retype[1]}
+                for strip in self.strips if strip.retype
+            ],
             "unmapped": self.unmapped,
             "conflicts": self.conflicts,
             "unreadable": self.unreadable,
             "skipped": self.skipped,
             "already_moved": [self._rel(path) for path in self.already_moved],
-            "manifest": None if self.manifest is None else {
-                "path": self._rel(self.manifest.path),
-                "update": self.manifest.updated,
-                "mismatched": self.manifest.mismatched,
-            },
             "remove": self.removals,
             "left_in_place": self.left_in_place,
         }
@@ -240,7 +218,7 @@ def _eol(lines: List[str]) -> str:
 
 
 def _strip_derived(text: str) -> Tuple[str, List[str]]:
-    """Remove derived top-level keys (and their nested lines) from the frontmatter.
+    """Remove derived and retired top-level keys (and their nested lines) from the frontmatter.
 
     A ``fitness`` block's ``impact_weight`` is a property, not a counter: it moves to the
     top level when the rule has none there. Every other byte is kept.
@@ -266,7 +244,7 @@ def _strip_derived(text: str) -> Tuple[str, List[str]]:
     i = start
     while i < end:
         match = _TOP_KEY.match(lines[i])
-        if match and isinstance(meta, dict) and match.group(1) in meta and _is_derived(match.group(1), meta[match.group(1)]):
+        if match and isinstance(meta, dict) and match.group(1) in meta and is_legacy_key(match.group(1), meta[match.group(1)]):
             key = match.group(1)
             removed.append(key)
             i += 1
@@ -283,6 +261,8 @@ def _strip_derived(text: str) -> Tuple[str, List[str]]:
 
 
 def _set_type(text: str, rule_type: str) -> str:
+    if text.startswith("\ufeff"):
+        return "\ufeff" + _set_type(text[1:], rule_type)
     lines = text.splitlines(keepends=True)
     span = _frontmatter_span(lines)
     if span is None:
@@ -304,14 +284,19 @@ def _inside(root: Path, path: Path) -> bool:
     return real == base or real.startswith(base.rstrip(os.sep) + os.sep)
 
 
-def _canonical_type(raw: Any) -> Optional[str]:
+def legacy_rule_type(raw: Any) -> Optional[str]:
+    """The v4 type that a type name or type-directory name of any version (``wall``,
+    ``walls``, ``Trap``, ``invariant``) stands for, or None.
+
+    Only migration reads legacy names; the loader asks only to say that aegis migrate
+    can convert a rule it cannot serve.
+    """
     if not isinstance(raw, str):
         return None
     name = raw.strip().lower()
     if name in CANONICAL_RULE_TYPES:
         return name
-    mapped = RULE_TYPE_NORMALIZATION.get(name) or LEGACY_ORGANELLE_TYPES.get(name)
-    return mapped if mapped in CANONICAL_RULE_TYPES else None
+    return LEGACY_TYPE_NAMES.get(name)
 
 
 def _merge_missing(current: Dict[str, Any], changes: Dict[str, Any]) -> None:
@@ -459,7 +444,7 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
                 else:
                     setting(("expiry", "days"), days)
             elif upper.startswith(("RULE_EXPIRY_", "CELL_TELOMERE_")):
-                rule_type = _canonical_type(upper.split("_", 2)[-1].lower())
+                rule_type = legacy_rule_type(upper.split("_", 2)[-1].lower())
                 if rule_type and (value.isdigit() or value.lower() == "null"):
                     setting(("expiry", "per_type", rule_type), None if value.lower() == "null" else int(value))
                 else:
@@ -523,53 +508,94 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
         result.user_config["slots"] = slots
 
 
-def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
+def _plan_moves(
+    result: MigrationPlan, layout: WorkspaceLayout, source_dir: Path, planned_targets: set, notes_stay: bool,
+) -> List[Path]:
+    """Plan moving the rules under ``source_dir`` (a v3 type directory) to their canonical
+    directory; return the sources planned. With ``notes_stay``, a file without
+    frontmatter is a note and stays where it is (the loader reports it as ignored)."""
     from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
-    planned_targets = set()
-    soma = layout.legacy_soma_rules_dir
-    if soma.is_dir():
-        for source in sorted(soma.rglob("*.md")):
-            if source.name == "README.md" or any(part.startswith(".") for part in source.relative_to(soma).parts):
-                continue
-            rel = result._rel(source)
-            if source.is_symlink() or not _inside(layout.root, source):
-                result.skipped.append({"path": rel, "reason": "a symlink or outside the workspace; not followed"})
-                continue
-            try:
-                raw = source.read_bytes()
-                text = raw.decode("utf-8-sig")  # bytes: keep CRLF as it is
-            except (OSError, UnicodeError):
-                result.unreadable.append(rel)
-                continue
-            meta = parse_frontmatter(text)
-            raw_type = meta.get("type") if isinstance(meta, dict) and meta.get("type") else source.parent.name
-            rule_type = _canonical_type(raw_type)
-            if rule_type is None:
-                result.unmapped.append({"path": rel, "type": str(raw_type)})
-                continue
-            target = layout.rules_dir / RULE_TYPE_DIRS[rule_type] / source.name
-            content, _keys = _strip_derived(_set_type(text, rule_type))
-            if not _inside(layout.root, target.parent):
-                result.skipped.append({"path": rel, "reason": f"{result._rel(target.parent)} resolves outside the workspace"})
-                continue
-            if os.path.lexists(target) or target in planned_targets:
-                if _same_text(target, content):
-                    result.already_moved.append(source)  # an interrupted apply: only the source is left
-                    _record(result, source, raw)
-                    _record(result, target, content.encode("utf-8"))
-                else:
-                    result.conflicts.append({"path": rel, "to": result._rel(target)})
-                continue
-            planned_targets.add(target)
-            result.moves.append(_RuleMove(source, target, rule_type, content))
-            _record(result, source, raw)
-            result.inputs[result._rel(target)] = None  # must still be absent when applying
+    sources: List[Path] = []
+    for source in sorted(source_dir.rglob("*.md")):
+        if source.name.lower() == "readme.md" or any(part.startswith(".") for part in source.relative_to(source_dir).parts):
+            continue
+        rel = result._rel(source)
+        if source.is_symlink() or not _inside(layout.root, source):
+            result.skipped.append({"path": rel, "reason": "a symlink or outside the workspace; not followed"})
+            continue
+        try:
+            raw = source.read_bytes()
+            text = raw.decode("utf-8-sig")  # bytes: keep CRLF as it is
+        except (OSError, UnicodeError):
+            result.unreadable.append(rel)
+            continue
+        meta = parse_frontmatter(text)
+        if notes_stay and meta == {}:
+            continue  # no frontmatter: a note (frontmatter that cannot be read still moves)
+        raw_type = meta.get("type") if isinstance(meta, dict) and meta.get("type") else source.parent.name
+        rule_type = legacy_rule_type(raw_type)
+        if rule_type is None:
+            result.unmapped.append({"path": rel, "type": str(raw_type)})
+            continue
+        target = layout.rules_dir / RULE_TYPE_DIRS[rule_type] / source.name
+        content, _keys = _strip_derived(_set_type(text, rule_type))
+        if not _inside(layout.root, target.parent):
+            result.skipped.append({"path": rel, "reason": f"{result._rel(target.parent)} resolves outside the workspace"})
+            continue
+        sources.append(source)
+        if os.path.lexists(target) or target in planned_targets:
+            if _same_text(target, content):
+                result.already_moved.append(source)  # an interrupted apply: only the source is left
+                _record(result, source, raw)
+                _record(result, target, content.encode("utf-8"))
+            else:
+                result.conflicts.append({"path": rel, "to": result._rel(target)})
+            continue
+        planned_targets.add(target)
+        result.moves.append(_RuleMove(source, target, rule_type, content))
+        _record(result, source, raw)
+        result.inputs[result._rel(target)] = None  # must still be absent when applying
+    return sources
+
+
+def _v3_type_dirs(layout: WorkspaceLayout) -> List[Path]:
+    """Directories of .aegis/rules named for a v3 type (``walls/``, ``membranes/``…)."""
+    if not layout.rules_dir.is_dir():
+        return []
+    return [
+        child for child in sorted(layout.rules_dir.iterdir())
+        if child.is_dir() and not child.is_symlink() and not child.name.startswith(".")
+        and child.name not in DIR_RULE_TYPES and legacy_rule_type(child.name) is not None
+    ]
+
+
+def _retype(text: str, directory: str) -> Optional[Tuple[str, str]]:
+    """(v3 name, v4 type) when a rule in a canonical directory spells its own type the
+    v3 way (``type: wall`` in invariants/, ``type: Trap`` in traps/). A name for some
+    other type contradicts the directory: the loader reports it, migrate never guesses."""
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
+
+    rule_type = DIR_RULE_TYPES.get(directory)
+    meta = parse_frontmatter(text)
+    declared = meta.get("type") if isinstance(meta, dict) else None
+    if rule_type is None or not isinstance(declared, str) or declared == rule_type:
+        return None
+    return (declared, rule_type) if legacy_rule_type(declared) == rule_type else None
+
+
+def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
+    planned_targets: set = set()
+    moving: set = set()
+    if layout.legacy_soma_rules_dir.is_dir():
+        _plan_moves(result, layout, layout.legacy_soma_rules_dir, planned_targets, notes_stay=False)
+    for directory in _v3_type_dirs(layout):
+        moving.update(_plan_moves(result, layout, directory, planned_targets, notes_stay=True))
 
     if layout.rules_dir.is_dir():
         for path in sorted(layout.rules_dir.rglob("*.md")):
-            if path.name == "README.md":
-                continue
+            if path.name == "README.md" or path in moving:
+                continue  # a moved rule is stripped on its way
             if path.is_symlink() or not _inside(layout.root, path):
                 result.skipped.append({"path": result._rel(path), "reason": "a symlink or outside the workspace; not rewritten"})
                 continue
@@ -579,9 +605,12 @@ def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             except (OSError, UnicodeError):
                 result.unreadable.append(result._rel(path))
                 continue
-            new_text, keys = _strip_derived(text)
-            if keys:
-                result.strips.append(_RuleStrip(path, keys, new_text, raw))
+            in_type_dir = path.parent.parent == layout.rules_dir
+            retype = _retype(text, path.parent.name) if in_type_dir else None
+            new_text = _set_type(text, retype[1]) if retype else text
+            new_text, keys = _strip_derived(new_text)
+            if keys or retype:
+                result.strips.append(_RuleStrip(path, keys, new_text, raw, retype))
                 _record(result, path, raw)
 
 
@@ -691,65 +720,6 @@ def _plan_state(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             result.left_in_place.append(result._rel(child))
 
 
-_MANIFEST_MAPPINGS = ("files", "cells", "rules")
-_MANIFEST_COUNTS = {"cell_count": "cells", "rule_count": "rules"}
-
-
-def _plan_manifest(result: MigrationPlan, layout: WorkspaceLayout) -> None:
-    path = layout.manifest_file
-    if not path.is_file() or path.is_symlink() or not _inside(layout.root, path):
-        return
-    try:
-        raw = path.read_bytes()
-        data = json.loads(raw.decode("utf-8-sig"))
-    except (OSError, UnicodeError, ValueError, RecursionError):
-        data = None
-    if not isinstance(data, dict):
-        result.unreadable.append(result._rel(path))
-        return
-    mappings = [data[name] for name in _MANIFEST_MAPPINGS if isinstance(data.get(name), dict)]
-    if not mappings:
-        return
-    update = _ManifestUpdate(path=path, data=data)
-    # (rule path, its bytes now or None for a rule moved in, its bytes after migrating)
-    rewritten: List[Tuple[Path, Optional[bytes], bytes]] = [
-        (move.target, None, move.content.encode("utf-8")) for move in result.moves
-    ]
-    rewritten += [(strip.path, strip.original, strip.content.encode("utf-8")) for strip in result.strips]
-    for rule, old, new in rewritten:
-        rel_rules = rule.relative_to(layout.rules_dir).as_posix()
-        names = (rel_rules, result._rel(rule), rule.name)
-        current = {_sha256(new), _sha256(new.replace(b"\r\n", b"\n"))}
-        before = set() if old is None else {_sha256(old), _sha256(old.replace(b"\r\n", b"\n"))}
-        outcome = None
-        for mapping in mappings:
-            entries = [name for name in names if name in mapping]
-            if not entries and old is None:
-                entries = [rel_rules]  # a rule this migration moves in, from the workspace's own .soma
-            for name in entries:
-                value = mapping.get(name)
-                digest = value.strip().lower() if isinstance(value, str) else ""
-                digest = digest[len("sha256:"):] if digest.startswith("sha256:") else digest
-                if digest in current:
-                    continue
-                if old is not None and digest not in before:
-                    outcome = "mismatched"
-                    continue
-                prefix = "" if isinstance(value, str) and not value.strip().lower().startswith("sha256:") else "sha256:"
-                mapping[name] = prefix + _sha256(new)
-                outcome = outcome or "updated"
-        if outcome:
-            getattr(update, outcome).append(result._rel(rule))
-    if update.updated or update.mismatched:
-        for count, name in _MANIFEST_COUNTS.items():
-            if count in data and isinstance(data.get(name), dict):
-                data[count] = len(data[name])
-        update.updated.sort()
-        update.mismatched.sort()
-        result.manifest = update
-        _record(result, path, raw)
-
-
 def plan(root: Any) -> MigrationPlan:
     """Read the workspace at ``root`` and decide what ``apply`` would do. Writes nothing."""
     layout = WorkspaceLayout(Path(os.fspath(root)).resolve())
@@ -768,7 +738,6 @@ def plan(root: Any) -> MigrationPlan:
     _plan_ledger(result, layout)
     _plan_config(result, layout)
     _plan_rules(result, layout)
-    _plan_manifest(result, layout)
     _plan_state(result, layout)
     result.removals = sorted(set(result.removals))
     return result
@@ -811,7 +780,6 @@ def _remove(path: Path) -> None:
 def apply(migration: MigrationPlan) -> MigrationResult:
     """Execute a plan: back up, write the v4 files, then remove what was converted."""
     from aegis_core.config import update_repo_config
-    from aegis_core.integrity import save_manifest
     from aegis_core.telemetry_engine import ledger
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
@@ -843,8 +811,6 @@ def apply(migration: MigrationPlan) -> MigrationResult:
         touched = [root / rel for rel in migration.removals]
         touched += [move.source for move in migration.moves] + list(migration.already_moved)
         touched += [strip.path for strip in migration.strips]
-        if migration.manifest is not None and migration.manifest.updated:
-            touched.append(migration.manifest.path)
         if writes_config:
             touched.append(layout.config_file)  # merged in place below
         if ensure_runtime_gitignore(layout.aegis_dir, dry_run=True) == "dry-run":
@@ -868,13 +834,6 @@ def apply(migration: MigrationPlan) -> MigrationResult:
                 "rows": len(written),
                 "backup": backup.relative_to(root).as_posix(),
             })
-
-        if migration.manifest is not None and migration.manifest.updated:
-            # Before any rule is written: a crash in between leaves rules the manifest
-            # refuses until the rerun writes them, never a rule it was not meant to admit.
-            # Signed with the v3 key while it still exists; the key goes with keys/ below.
-            save_manifest(root, migration.manifest.data)
-            result.written.append(result.plan._rel(migration.manifest.path))
 
         moved: List[_RuleMove] = []
         for move in migration.moves:

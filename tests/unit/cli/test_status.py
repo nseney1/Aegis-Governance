@@ -41,21 +41,109 @@ class TestStatus:
         assert "3 active" in captured.out
 
     def test_status_counts_adaptive_rules(self, tmp_path, capsys):
-        """Create 2 .md files in mock .aegis/rules/ → counts them."""
-        cells = tmp_path / ".aegis" / "rules"
-        cells.mkdir(parents=True)
-        (cells / "rule1.md").write_text("# Rule 1\n")
-        sub = cells / "patterns"
-        sub.mkdir()
-        (sub / "rule2.md").write_text("# Rule 2\n")
-        # README should be excluded
-        (cells / "README.md").write_text("# Ignore me\n")
+        """Rules in their type directories are counted; other markdown is listed as not a rule."""
+        rules = tmp_path / ".aegis" / "rules"
+        (rules / "traps").mkdir(parents=True)
+        (rules / "invariants").mkdir()
+        (rules / "traps" / "rule1.md").write_text("---\nid: rule1\n---\n# Rule 1\n")
+        (rules / "invariants" / "rule2.md").write_text("---\nid: rule2\nenforcement: gate\n---\n# Rule 2\n")
+        (rules / "notes.md").write_text("# Not a rule\n")
+        (rules / "README.md").write_text("# Ignore me\n")
 
         args = argparse.Namespace(_root=tmp_path)
         ret = run_status(args)
         assert ret == 0
         captured = capsys.readouterr()
         assert "Adaptive rules: 2 (traps/patterns)" in captured.out
+        assert ".aegis/rules/notes.md: not a rule: it is not in a rule type directory" in captured.out
+        assert "README" not in captured.out
+
+    def test_status_lists_rules_that_cannot_be_loaded_and_exits_1(self, tmp_path, capsys):
+        """Nothing is excluded unseen: scan refuses these, so status names them."""
+        rules = tmp_path / ".aegis" / "rules"
+        (rules / "traps").mkdir(parents=True)
+        (rules / "walls").mkdir()
+        (rules / "traps" / "ok.md").write_text("---\nid: ok\n---\n")
+        (rules / "walls" / "old.md").write_text("---\nid: old\ntype: wall\n---\n")
+
+        assert run_status(argparse.Namespace(_root=tmp_path)) == 1
+        out = capsys.readouterr().out
+        assert "1 rule file(s) cannot be loaded; aegis scan fails until they are fixed:" in out
+        assert ".aegis/rules/walls/old.md: not served: walls/ is not a rule type directory" in out
+        assert "Adaptive rules: 1 (traps/patterns)" in out
+
+    def test_status_names_rules_that_still_carry_derived_counters(self, tmp_path, capsys):
+        rules = tmp_path / ".aegis" / "rules" / "traps"
+        rules.mkdir(parents=True)
+        (rules / "legacy.md").write_text("---\nid: legacy\nfitness:\n  score: 0.9\ntriggers: 12\n---\n")
+
+        assert run_status(argparse.Namespace(_root=tmp_path, json=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["needs_migrate"] == [{"path": ".aegis/rules/traps/legacy.md", "keys": ["fitness", "triggers"]}]
+        assert [r["score"] for r in payload["rules"]] == [None]  # never the frontmatter 0.9
+
+        assert run_status(argparse.Namespace(_root=tmp_path)) == 0
+        assert "run aegis migrate --apply to strip them" in capsys.readouterr().out
+
+    def test_status_names_rules_that_still_carry_a_retired_v3_key(self, tmp_path, capsys):
+        """v3 tier escalation wrote enforcement_artifact; v4 serves the rule and ignores the key."""
+        rules = tmp_path / ".aegis" / "rules" / "gates"
+        rules.mkdir(parents=True)
+        (rules / "g.md").write_text("---\nid: g\nenforcement: gate\nenforcement_artifact: .aegis/enforcement/g.py\n---\n")
+
+        assert run_status(argparse.Namespace(_root=tmp_path, json=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["needs_migrate"] == [{"path": ".aegis/rules/gates/g.md", "keys": ["enforcement_artifact"]}]
+        assert payload["rule_errors"] == [] and [r["name"] for r in payload["rules"]] == ["g"]
+
+    def test_status_reports_rules_edited_since_the_last_sync(self, tmp_path, capsys):
+        from aegis_core.sync import sync
+
+        rules = tmp_path / ".aegis" / "rules" / "traps"
+        rules.mkdir(parents=True)
+        (rules / "edited.md").write_text("---\nid: edited\n---\nBefore\n")
+        assert run_status(argparse.Namespace(_root=tmp_path, json=True)) == 0
+        assert json.loads(capsys.readouterr().out)["last_sync"] is None
+
+        sync(tmp_path)
+        (rules / "edited.md").write_text("---\nid: edited\n---\nAfter\n")
+
+        assert run_status(argparse.Namespace(_root=tmp_path, json=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["stale_rules"] == [{"id": "edited", "path": ".aegis/rules/traps/edited.md", "change": "edited"}]
+        assert payload["last_sync"] is not None
+        assert run_status(argparse.Namespace(_root=tmp_path)) == 0
+        assert "1 rule(s) changed since the last aegis sync:" in capsys.readouterr().out
+
+    def test_status_names_an_incomplete_ledger_and_rules_that_apply_to_no_file(self, tmp_path, capsys):
+        """Fitness from a ledger with unreadable lines is partial, and a rule without
+        target_paths is never served: both are shown, never left for the reader to guess."""
+        from aegis_core.telemetry_engine import ledger
+
+        rules = tmp_path / ".aegis" / "rules" / "traps"
+        rules.mkdir(parents=True)
+        (rules / "scoped.md").write_text("---\nid: scoped\ntarget_paths: ['src/*.py']\n---\n")
+        (rules / "nowhere.md").write_text("---\nid: nowhere\n---\n")
+        ledger.append(tmp_path, [{"rule": "scoped", "outcome": "tp", "source": "ci", "key": f"k{i}"} for i in range(2)])
+        with ledger.ledger_path(tmp_path).open("ab") as fh:
+            fh.write(b"{garbled\n")
+        ledger.append(tmp_path, [{"rule": "scoped", "outcome": "fp", "source": "ci", "key": "k-fp"}])
+
+        assert run_status(argparse.Namespace(_root=tmp_path, json=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["ledger"] == {"skipped_lines": [3], "unusable_rows": 0, "error": None, "torn_tail": False}
+        assert payload["untargeted"] == [{"id": "nowhere", "path": ".aegis/rules/traps/nowhere.md"}]
+        assert {r["name"]: (r["triggers"]) for r in payload["rules"]} == {"scoped": 3, "nowhere": 0}
+
+        assert run_status(argparse.Namespace(_root=tmp_path)) == 0
+        out = capsys.readouterr().out
+        assert (
+            "⚠️  The ledger is incomplete (1 unreadable line(s)): fitness counts only the rows "
+            "that could be read, so moves that rely on it (sync --apply, rule archive, tier changes) "
+            "are refused" in out
+        )
+        assert "1 rule(s) apply to no file (no target_paths), so scan and check never serve them:" in out
+        assert "nowhere: .aegis/rules/traps/nowhere.md" in out
 
     def test_status_reads_trigger_counts(self, tmp_path, capsys):
         """Ledger rows win over contradictory legacy evidence."""
@@ -178,7 +266,7 @@ class TestStatus:
 
     def test_status_adaptive_rule_expiry_active(self, tmp_path, capsys):
         """Active adaptive rules show remaining days."""
-        cells = tmp_path / ".aegis" / "rules"
+        cells = tmp_path / ".aegis" / "rules" / "traps"
         cells.mkdir(parents=True)
         created = (date.today() - timedelta(days=10)).isoformat()
         (cells / "pattern.md").write_text(
@@ -194,7 +282,7 @@ class TestStatus:
 
     def test_status_adaptive_rule_expiry_expired(self, tmp_path, capsys):
         """Expired adaptive rules show 'expired'."""
-        cells = tmp_path / ".aegis" / "rules"
+        cells = tmp_path / ".aegis" / "rules" / "traps"
         cells.mkdir(parents=True)
         created = (date.today() - timedelta(days=40)).isoformat()
         (cells / "stale.md").write_text(
@@ -271,14 +359,20 @@ class TestStatus:
         rules_dir = tmp_path / ".aegis" / "rules"
         (rules_dir / "invariants").mkdir(parents=True)
         (rules_dir / "traps").mkdir(parents=True)
+        # The frontmatter `fitness:` blocks are legacy counters: the ledger decides the scores.
         (rules_dir / "invariants" / "inv-auth.md").write_text(
-            "---\nid: inv-auth\ntype: wall\nfitness:\n  score: 0.92\n---\n# Auth Invariant\n",
+            "---\nid: inv-auth\ntype: invariant\nenforcement: gate\nfitness:\n  score: 0.11\n---\n# Auth Invariant\n",
             encoding="utf-8",
         )
         (rules_dir / "traps" / "trap-retry.md").write_text(
-            "---\nid: trap-retry\ntype: trap\nfitness:\n  score: 0.42\n---\n# Retry Trap\n",
+            "---\nid: trap-retry\ntype: trap\nfitness:\n  score: 0.13\n---\n# Retry Trap\n",
             encoding="utf-8",
         )
+        state = tmp_path / ".aegis" / "state"
+        state.mkdir(parents=True)
+        rows = [{"v": 2, "rule": "inv-auth", "outcome": "tp", "source": "ci"}] * 30
+        rows += [{"v": 2, "rule": "trap-retry", "outcome": o, "source": "ci"} for o in ["tp"] * 8 + ["fp"] * 2]
+        (state / "ledger.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
         tty_ui = OutputContext(color_enabled=True, emoji_enabled=True, plain=False)
         args_tty = argparse.Namespace(_root=tmp_path, ui=tty_ui)
@@ -286,8 +380,9 @@ class TestStatus:
         out_tty = capsys.readouterr().out
         assert "🛡️ Aegis Workspace Status" in out_tty
         assert "\x1b[" in out_tty
-        assert "0.92" in out_tty
-        assert "0.42" in out_tty
+        assert "0.92" in out_tty  # Wilson lower bound of 30 of 30
+        assert "0.54" in out_tty  # of 8 of 10
+        assert "0.11" not in out_tty and "0.13" not in out_tty
         assert "wall" not in out_tty.lower()
         assert "vacuole" not in out_tty.lower()
 

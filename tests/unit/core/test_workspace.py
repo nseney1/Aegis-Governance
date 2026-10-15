@@ -89,11 +89,12 @@ class TestWorkspaceCore:
         ws = tmp_path / "rules_ws"
         rules_dir = ws / ".aegis" / "rules" / "invariants"
         rules_dir.mkdir(parents=True)
-        (rules_dir / "invariant-alpha.md").write_text("# Rule")
-        (rules_dir / "invariant-beta.md").write_text("# Rule")
+        (rules_dir / "invariant-alpha.md").write_text("---\nid: invariant-alpha\n---\n# Rule")
+        (rules_dir / "invariant-beta.md").write_text("---\nid: invariant-beta\n---\n# Rule")
+        (rules_dir / "invariant-broken.md").write_text("# no frontmatter: the loader cannot serve it")
 
         invalid = validate_rule_names(["invariant-alpha", "invariant-beta"], ws)
         assert invalid == []
 
-        invalid = validate_rule_names(["invariant-alpha", "invariant-gamma"], ws)
-        assert invalid == ["invariant-gamma"]
+        invalid = validate_rule_names(["invariant-alpha", "invariant-gamma", "invariant-broken"], ws)
+        assert invalid == ["invariant-gamma", "invariant-broken"]

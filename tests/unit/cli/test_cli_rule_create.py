@@ -288,7 +288,7 @@ def test_promote_into_a_protected_namespace_fails(repo, capsys) -> None:
     rc = main(["rule", "promote", "testing"])
 
     assert rc == 1
-    assert "Cannot promote cell into protected core rule namespace: 'testing'" in capsys.readouterr().out
+    assert "Cannot promote a rule into the protected core rule namespace: 'testing'" in capsys.readouterr().out
     assert source.is_file()
 
 
@@ -296,7 +296,7 @@ def test_demote_with_an_invalid_rule_id_fails(repo, capsys) -> None:
     rc = main(["rule", "demote", "../escape", "--json"])
 
     assert rc == 1
-    assert json.loads(capsys.readouterr().out) == {"error": "Invalid cell ID: '../escape'"}
+    assert json.loads(capsys.readouterr().out) == {"error": "Invalid rule ID: '../escape'"}
 
 
 # ── --body-file ────────────────────────────────────────────────────────
@@ -448,13 +448,13 @@ def test_lifecycle_actions_reject_cut_arguments(repo, capsys, argv) -> None:
 
 
 def _extinct(repo: Path, rule_id: str) -> Path:
+    """A rule the ledger says misfires: three false positives and no true positive."""
+    from aegis_core.telemetry_engine import ledger
+
     path = repo / ".aegis" / "rules" / "traps" / f"{rule_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f"---\nid: {rule_id}\ntype: trap\nhypothesis: h\n"
-        "fitness:\n  triggers: 10\n  true_positives: 0\n  false_positives: 0\n---\nBody\n",
-        encoding="utf-8",
-    )
+    path.write_text(f"---\nid: {rule_id}\ntype: trap\nhypothesis: h\n---\nBody\n", encoding="utf-8")
+    ledger.append(repo, [{"rule": rule_id, "outcome": "fp", "source": "ci", "key": f"run-{n}"} for n in range(3)])
     return path
 
 
@@ -484,3 +484,46 @@ def test_rule_clean_points_at_manual_cleanup(repo, capsys) -> None:
         "aegis rule clean was removed in v4: no replacement; "
         "remove leaked global rule copies by hand\n"
     )
+
+
+# ── Rules that would never apply ─────────────────────────────────────────
+
+_UNSCOPED = (
+    "Warning: rule 'unscoped' has no target_paths, so it matches no file: aegis scan never "
+    "shows it and aegis check records nothing for it. Pass --target-paths (for example 'src/**/*.py')."
+)
+
+
+def test_create_without_target_paths_warns_that_the_rule_matches_no_file(repo, capsys) -> None:
+    rc = main(["rule", "create", "--hypothesis", "Scope me", "--id", "unscoped"])
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert captured.err.strip() == _UNSCOPED
+    assert _created(repo, "unscoped").is_file()
+
+
+def test_create_json_lists_the_warning(repo, capsys) -> None:
+    rc = main(["rule", "create", "--hypothesis", "Scope me", "--id", "unscoped", "--json"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "created" and payload["id"] == "unscoped"
+    assert payload["warnings"] == [_UNSCOPED[len("Warning: "):]]
+
+
+def test_create_with_target_paths_does_not_warn(repo, capsys) -> None:
+    rc = main(["rule", "create", "--hypothesis", "Scoped", "--id", "scoped", "--target-paths", "src/*.py", "--json"])
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["warnings"] == [] and captured.err == ""
+
+
+@pytest.mark.parametrize("rule_id", ["readme", "README", "ReadMe", ".hidden"])
+def test_create_rejects_an_id_the_loader_would_never_serve(repo, capsys, rule_id: str) -> None:
+    rc = main(["rule", "create", "--hypothesis", "h", "--id", rule_id, "--target-paths", "src/*.py"])
+
+    assert rc == 1
+    assert f"Error: Invalid rule id {rule_id!r}: " in capsys.readouterr().err
+    assert list((repo / ".aegis" / "rules").rglob("*.md")) == []

@@ -29,12 +29,12 @@ def _run_without_fcntl(code, env_extra=None):
 
 
 def _make_workspace(tmp_path, cell_name="trap-example"):
-    cells = tmp_path / ".aegis" / "rules" / "vacuoles"
+    cells = tmp_path / ".aegis" / "rules" / "traps"
     cells.mkdir(parents=True)
     (cells / f"{cell_name}.md").write_text(
         "---\n"
         f"id: {cell_name}\n"
-        "type: vacuole\n"
+        "type: trap\n"
         "domain: testing\n"
         "hypothesis: Example hypothesis\n"
         "prediction: Example prediction\n"

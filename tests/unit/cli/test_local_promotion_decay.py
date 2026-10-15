@@ -31,7 +31,7 @@ class TestPromotionZeroTriggerGuard:
         make_cell(str(cells_dir), "zero-cell", cell_type="trap", created_days_ago=60)
         # 0 triggers in evidence
         candidates = evaluate_promotions(str(tmp_path))
-        assert not any(c["cell_id"] == "zero-cell" for c in candidates), \
+        assert not any(c["rule_id"] == "zero-cell" for c in candidates), \
             "Zero-trigger cell must not appear in promotion candidates"
 
     def test_normalize_fitness_high_triggers_preserves_data(self, tmp_path):
@@ -48,6 +48,6 @@ class TestPromotionZeroTriggerGuard:
         write_evidence(evidence_dir.parent.parent, "high-cell", triggers=50, tp=48, fp=1)
 
         candidates = evaluate_promotions(str(tmp_path))
-        promoted_ids = [c["cell_id"] for c in candidates]
+        promoted_ids = [c["rule_id"] for c in candidates]
         assert "high-cell" in promoted_ids, \
             f"High-quality cell should be promoted, got candidates {candidates}"

@@ -122,12 +122,13 @@ def test_list_rules_returns_every_rule_with_name_and_path(ws: Path) -> None:
     assert by_name["invariant-app-pure"]["enforcement"] == "gate"
 
 
-def test_list_rules_filters_by_type_including_legacy_names(ws: Path) -> None:
+def test_list_rules_filters_by_canonical_type(ws: Path) -> None:
     gov = Governance(ws)
 
     assert [r["_name"] for r in gov.list_rules("trap")] == ["trap-src-drift"]
-    assert [r["_name"] for r in gov.list_rules("learned-trap")] == ["trap-src-drift"]
     assert [r["_name"] for r in gov.list_rules("invariant")] == ["invariant-app-pure"]
+    # The v1/v2 type names are gone (one rule-type table); aegis migrate converts old rules.
+    assert gov.list_rules("learned-trap") == []
 
 
 def test_list_rules_keeps_a_malformed_rule_visible_as_an_error_record(ws: Path) -> None:
@@ -135,18 +136,27 @@ def test_list_rules_keeps_a_malformed_rule_visible_as_an_error_record(ws: Path) 
 
     broken = [r for r in Governance(ws).list_rules() if r["_name"] == "broken"]
 
-    assert broken == [{"_name": "broken", "_path": broken[0]["_path"], "_error": "malformed YAML frontmatter"}]
+    assert broken == [{
+        "type": "trap",
+        "_name": "broken",
+        "_path": ".aegis/rules/traps/broken.md",
+        "_error": "malformed YAML frontmatter: unterminated flow sequence",
+    }]
 
 
 def test_grade_reports_every_component_with_a_letter(ws: Path) -> None:
     report = Governance(ws).grade()
 
-    for key in ("coverage", "avg_fitness", "diversity", "staleness", "wall_integrity", "overall"):
+    for key in ("coverage", "avg_fitness", "diversity", "staleness", "invariant_integrity", "overall"):
         assert set(report[key]) >= {"pct", "grade"}, key
         assert isinstance(report[key]["pct"], float)
     assert report["coverage"]["pct"] == 50.0  # src/app.py of {src/app.py, docs/notes.txt}
     assert report["tiers"] == {"advisory": 1, "gate": 1}
     assert report["details"]["total_rules"] == 2
+    assert (report["details"]["invariants"], report["details"]["healthy_invariants"]) == (1, 0)
+    # One name per field: the v3 "wall"/"cell" aliases are gone (citadel reads invariant_* first).
+    assert "wall_integrity" not in report
+    assert not {"walls", "healthy_walls", "total_cells", "stale_cells"} & set(report["details"])
 
 
 def test_grade_of_a_workspace_without_rules_is_the_documented_fallback(tmp_path: Path) -> None:
@@ -156,7 +166,33 @@ def test_grade_of_a_workspace_without_rules_is_the_documented_fallback(tmp_path:
 
     assert report["overall"] == {"pct": 0.0, "grade": "F"}
     assert report["status"] == "PASS"
-    assert report["note"] == "No cells found to grade"
+    assert report["note"] == "No rules found to grade"
+    assert report["rule_errors"] == 0
+
+
+def test_grade_of_a_workspace_whose_rules_cannot_be_loaded_says_so(tmp_path: Path) -> None:
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    (traps / "broken.md").write_text("---\nid: [unclosed\n---\n", encoding="utf-8")
+
+    report = Governance(tmp_path).grade()
+
+    assert report["overall"] == {"pct": 0.0, "grade": "F"}
+    assert report["status"] == "FAIL" and report["rule_errors"] == 1
+    assert report["note"] == "No rule could be graded: 1 rule file(s) cannot be loaded (aegis status lists them)"
+
+
+def test_scan_refuses_a_rule_set_with_a_broken_rule(ws: Path) -> None:
+    """A partial rule set is never returned as the rules for these files (defense #19)."""
+    (ws / ".aegis" / "rules" / "traps" / "trap-src-drift-copy.md").write_text(
+        "---\nid: trap-src-drift-copy\npaths: ['src/*.py']\n---\nB\n", encoding="utf-8"
+    )
+
+    with pytest.raises(RuleParseError, match="1 rule file\\(s\\) cannot be served") as raised:
+        Governance(ws).scan(["src/app.py"])
+
+    assert raised.value.rule_errors[0]["path"] == ".aegis/rules/traps/trap-src-drift-copy.md"
+    assert isinstance(raised.value, AegisError)
 
 
 def test_coverage_report_maps_files_to_rules(ws: Path) -> None:
@@ -205,20 +241,26 @@ def test_entropy_of_an_empty_workspace(tmp_path: Path) -> None:
     }
 
 
-def test_fitness_landscape_scores_every_rule(ws: Path) -> None:
-    landscape = {row["cell"]: row for row in Governance(ws).fitness_landscape()}
+def test_fitness_landscape_scores_every_rule_from_the_ledger(ws: Path) -> None:
+    landscape = {row["rule"]: row for row in Governance(ws).fitness_landscape()}
 
-    assert set(landscape) == {"invariant-app-pure.md", "trap-src-drift.md"}
-    trap = landscape["trap-src-drift.md"]
-    assert (trap["type"], trap["triggers"], trap["tp"], trap["fp"]) == ("trap", 10, 8, 2)
-    assert 0.0 < trap["score"] <= 1.0
+    assert set(landscape) == {"invariant-app-pure", "trap-src-drift"}
+    trap = landscape["trap-src-drift"]
+    # The ledger pairs the trap's v1 trigger row with its tp row (one trigger); the
+    # frontmatter `fitness:` block (10 triggers, 8 tp) is a legacy counter and is ignored.
+    assert (trap["type"], trap["triggers"], trap["tp"], trap["fp"]) == ("trap", 1, 1, 0)
+    assert trap["path"] == ".aegis/rules/traps/trap-src-drift.md"
+    assert trap["score"] == 0.2698  # the Wilson lower bound of 1 of 1
+    assert trap["suggestion"] is None
+    assert (landscape["invariant-app-pure"]["triggers"], landscape["invariant-app-pure"]["score"]) == (1, 0.0)
     assert "bayesian" not in trap
 
 
-def test_fitness_landscape_with_bayesian_adds_the_posterior(ws: Path) -> None:
-    landscape = Governance(ws).fitness_landscape(bayesian=True)
+def test_fitness_landscape_with_bayesian_adds_the_interval(ws: Path) -> None:
+    landscape = {row["rule"]: row for row in Governance(ws).fitness_landscape(bayesian=True)}
 
-    assert all({"lower", "upper"} <= set(row["bayesian"]) for row in landscape)
+    assert landscape["trap-src-drift"]["bayesian"] == {"lower": 0.2698, "upper": 1.0}
+    assert landscape["invariant-app-pure"]["bayesian"] == {"lower": 0.0, "upper": 1.0}
 
 
 # ── parse_rule_file ────────────────────────────────────────────────────────

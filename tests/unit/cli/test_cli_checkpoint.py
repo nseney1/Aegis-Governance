@@ -2,7 +2,8 @@
 
 v3's `aegis checkpoint` is gone (D5): its checks run on every `aegis check`.
 - Issues are warnings ([WARN], exit 0) unless --strict ([FAIL], exit 1).
-- A paper wall (an invariant/wall rule whose enforcement is not `gate`) always blocks.
+- A paper wall (a gate or invariant rule whose enforcement is not `gate`) always blocks,
+  and so does a rule file that cannot be loaded (aegis scan refuses to serve the set).
 - Checks: test file per source file, hardcoded /home, /Users, /tmp paths,
   per-test assertions, unhealthy rule fitness from the ledger, rule conventions.
 - The checkpoint reads the workspace and never writes to it.
@@ -47,10 +48,10 @@ def _clean_workspace(root: Path) -> Path:
 
 
 def _paper_wall(root: Path) -> None:
-    walls = root / ".aegis" / "rules" / "walls"
-    walls.mkdir(parents=True, exist_ok=True)
-    (walls / "wall-bad.md").write_text(
-        "---\nid: wall-bad\ntype: wall\nenforcement: advisory\n---\n# Bad Wall\n", encoding="utf-8"
+    invariants = root / ".aegis" / "rules" / "invariants"
+    invariants.mkdir(parents=True, exist_ok=True)
+    (invariants / "wall-bad.md").write_text(
+        "---\nid: wall-bad\ntype: invariant\nenforcement: advisory\n---\n# Bad Wall\n", encoding="utf-8"
     )
 
 
@@ -86,7 +87,7 @@ class TestRunCheckpoint:
         walls = [i for i in issues if i["check"] == "paper_walls"]
         assert [i["file"] for i in walls] == [".aegis/rules/invariants/invariant-x.md"]
         assert walls[0]["message"].startswith(
-            "Wall cell 'invariant-x.md' cannot be read, so it cannot be shown to use 'gate': UnicodeDecodeError:"
+            "Invariant rule 'invariant-x.md' cannot be read, so it cannot be shown to use 'gate': invalid UTF-8:"
         )
         assert blocking is True
 
@@ -138,7 +139,7 @@ class TestRunCheckpoint:
             encoding="utf-8",
         )
         issues, _ = run_checkpoint(tmp_path, strict=True)
-        assert [(i["check"], i.get("cell_id")) for i in issues] == [("cell_fitness", "noisy-rule")]
+        assert [(i["check"], i.get("rule")) for i in issues] == [("rule_fitness", "noisy-rule")]
 
 
 class TestCheckpointThroughCheck:
@@ -161,7 +162,19 @@ class TestCheckpointThroughCheck:
         assert _exit_code(["check", "--workspace", str(tmp_path)]) == 1
         assert _exit_code(["check", "--workspace", str(tmp_path), "--hook"]) == 1
         out = capsys.readouterr().out
-        assert "[FAIL] Wall cell 'wall-bad.md' enforcement is 'advisory'" in out
+        assert "[FAIL] Invariant rule 'wall-bad.md' enforcement is 'advisory'" in out
+
+    def test_a_rule_left_in_a_v3_directory_fails_check_without_strict(self, tmp_path, capsys):
+        """It would silently stop applying; check blocks until it is migrated (#19)."""
+        _clean_workspace(tmp_path)
+        walls = tmp_path / ".aegis" / "rules" / "walls"
+        walls.mkdir(parents=True)
+        (walls / "wall-bad.md").write_text(
+            "---\nid: wall-bad\ntype: wall\nenforcement: gate\n---\n# Old wall\n", encoding="utf-8"
+        )
+        assert _exit_code(["check", "--workspace", str(tmp_path)]) == 1
+        out = capsys.readouterr().out
+        assert "[FAIL] .aegis/rules/walls/wall-bad.md: not served: walls/ is not a rule type directory" in out
 
     def test_json_reports_issues_in_one_document(self, tmp_path, capsys):
         (tmp_path / "src").mkdir()

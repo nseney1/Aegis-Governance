@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from aegis_core.ast.drivers.python import read_python_source
 from aegis_core.ast.schema import NormalizedAST
+from aegis_core.match import is_test_path
 from . import ToolEvidence
 
 __all__ = ["check", "check_normalized"]
@@ -414,10 +415,7 @@ def check_normalized(
         norm_file_abs = os.path.abspath(norm_ast.file_path)
 
         for fpath in _get_searchable_source_files(repo_root, allowed_exts):
-            fname = os.path.basename(fpath)
-            if fname.startswith("test_") or fname.endswith(
-                ("_test.go", "_test.py", ".test.ts", ".spec.ts", ".test.js", ".spec.js")
-            ):
+            if is_test_path(os.path.relpath(fpath, repo_root)):
                 continue
             if os.path.abspath(fpath) == norm_file_abs:
                 continue

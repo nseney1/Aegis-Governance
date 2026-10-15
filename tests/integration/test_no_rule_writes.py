@@ -3,7 +3,7 @@
 Fitness lives in the ledger (.aegis/state/ledger.jsonl), never in rule
 frontmatter. `aegis check` used to bump triggers/true_positives/last_trigger_date
 in every rule matching the changed files, which dirtied tracked .aegis/rules/**
-on each pre-commit run and broke the committed manifest (PR #173 CI failure).
+on each pre-commit run and broke the committed v3 manifest (PR #173 CI failure).
 
 Each test below drives one runtime entry point against a temp git repo whose
 rules match the changed file, then asserts every byte under .aegis/rules is
@@ -20,7 +20,6 @@ from pathlib import Path
 import pytest
 
 from aegis_cli.cli import main
-from aegis_core.integrity import generate_manifest, save_manifest
 from aegis_core.telemetry_engine import ledger
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_mcp.tools import execute_tool
@@ -93,7 +92,6 @@ def repo(tmp_path, monkeypatch):
     (rules / "invariants").mkdir(parents=True)
     (rules / "traps" / "trap-app-drift.md").write_text(TRAP, encoding="utf-8")
     (rules / "invariants" / "invariant-app-pure.md").write_text(INVARIANT, encoding="utf-8")
-    save_manifest(root, generate_manifest(rules))
     (root / "src").mkdir()
     (root / "src" / "app.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
 
@@ -192,6 +190,19 @@ def test_status_and_doctor_never_rewrite_rules(repo, argv, capsys):
 
     out = capsys.readouterr().out
     assert rc in (0, 1), out
+    _assert_rules_untouched(repo, before)
+
+
+@pytest.mark.parametrize("argv", [["sync"], ["sync", "--json"]])
+def test_sync_rebuilds_derived_state_and_never_rewrites_rules(repo, argv, capsys):
+    """`aegis sync` writes only .aegis/state/derived.json; `--apply` is the explicit move."""
+    before = _rule_bytes(repo)
+
+    rc = main(argv)
+
+    capsys.readouterr()
+    assert rc == 0
+    assert (repo / ".aegis" / "state" / "derived.json").is_file()
     _assert_rules_untouched(repo, before)
 
 

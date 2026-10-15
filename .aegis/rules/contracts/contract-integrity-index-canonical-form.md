@@ -11,7 +11,7 @@ expiry_days: 60
 created: "2026-10-15T16:11:59Z"
 impact_weight: 1.0
 tags: ["debrief", "citadel", "integrity", "manifest"]
-target_paths: ["aegis_core/integrity.py", "aegis_mcp/rule_cache.py", "aegis_core/lifecycle/creation.py", "aegis_core/lifecycle/promotion.py", "aegis_core/lifecycle/selection.py", "aegis_core/outcomes/fitness.py", "aegis_cli/init.py", "tests/unit/core/**", "tests/integration/**"]
+target_paths: ["aegis_core/sync.py", "aegis_core/rules.py", "aegis_core/lifecycle/creation.py", "aegis_core/lifecycle/promotion.py", "aegis_core/lifecycle/selection.py", "aegis_cli/init.py", "tests/unit/core/**", "tests/integration/**"]
 lineage:
   parent_id: null
   created_by: "manual"

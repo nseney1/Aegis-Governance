@@ -2,8 +2,10 @@
 
 The CLI twin of the MCP tool aegis_scan, and the command the AGENTS.md
 bootstrap tells agents to run before editing (`aegis scan FILE`). Exit codes
-are a contract: 0 when the scan ran (matches or not), 2 for a usage or
-workspace error. With --json, stdout carries only the JSON document.
+are a contract: 0 when the scan ran (matches or not), 1 when the rules cannot all
+be served (a rule file cannot be loaded or the rules tree cannot be read safely: the
+scan fails closed and names them), 2 for a usage or workspace error. With --json,
+stdout carries only the JSON document.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from aegis_core.workspace.layout import is_aegis_workspace
 __all__ = ["ScanCommand", "run_scan"]
 
 EXIT_SCANNED = 0
+EXIT_UNSERVED = 1
 EXIT_USAGE = 2
 
 
@@ -50,16 +53,18 @@ def run_scan(args: argparse.Namespace) -> int:
         print(f"Error: not an Aegis workspace (no .aegis/ in {root}); run aegis init", file=sys.stderr)
         return EXIT_USAGE
 
-    # Wave B2 moves the JIT engine into aegis_core; the CLI must not import aegis_mcp after that.
-    from aegis_mcp.jit_engine import express
+    from aegis_core.scan import scan
 
     files = [_workspace_relative(f, root) for f in args.files]
-    result = express(str(root), changed_files=files)
+    result = scan(str(root), changed_files=files)
+    failed = result.get("status") == "FAIL"
     if getattr(args, "json", False):
         print(json.dumps(result, indent=2, default=str))
+    elif failed:
+        print(f"Error: {result.get('error')}", file=sys.stderr)
     else:
         print(result.get("guidance", ""))
-    return EXIT_SCANNED
+    return EXIT_UNSERVED if failed else EXIT_SCANNED
 
 
 class ScanCommand(AegisCommand):

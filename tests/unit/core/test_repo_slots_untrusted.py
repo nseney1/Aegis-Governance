@@ -719,11 +719,11 @@ def test_provision_writes_a_regular_config_and_copies_no_driver(ws: Path):
 
 
 def _scan_workspace(ws: Path, body_line: str) -> None:
-    rules = ws / ".aegis" / "rules" / "vacuoles"
+    rules = ws / ".aegis" / "rules" / "traps"
     rules.mkdir(parents=True, exist_ok=True)
     fm = {
         "id": "slot-rule",
-        "type": "vacuole",
+        "type": "trap",
         "target_paths": ["src/*.py"],
         "hypothesis": "Run ${SLOT.TOOL_RUN} with ${SLOT.MODEL_FAST}",
     }

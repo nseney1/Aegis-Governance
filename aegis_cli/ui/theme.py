@@ -7,7 +7,7 @@ import re
 import sys
 from typing import Any, Mapping, Optional
 
-from aegis_core.taxonomy import RULE_TYPE_THEME_STYLES
+from aegis_core.taxonomy import RULE_TYPES
 
 __all__ = ["ANSI_ESCAPE_RE", "OutputContext", "strip_ansi"]
 
@@ -26,7 +26,11 @@ _ANSI_CODES: dict[str, str] = {
     "white": "\x1b[37m",
 }
 
-_RULE_TYPE_STYLES: dict[str, tuple[str, ...]] = RULE_TYPE_THEME_STYLES
+# "core" is the status label of host-installed instruction rules, not a rule type.
+_RULE_TYPE_STYLES: dict[str, tuple[str, ...]] = {
+    **{name: spec.style for name, spec in RULE_TYPES.items()},
+    "core": ("bold", "green"),
+}
 
 
 def strip_ansi(text: str) -> str:

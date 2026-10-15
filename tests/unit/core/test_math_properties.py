@@ -1,140 +1,53 @@
-"""Property-based tests verifying mathematical invariants across Soma scoring engines."""
+"""Mathematical invariants of the one fitness estimator (seeded properties, stdlib only)."""
 from __future__ import annotations
 
+import math
+import random
 
 import pytest
 
-pytest.importorskip("hypothesis")
-from hypothesis import given, settings, strategies as st
-
-from aegis_core.scoring import laplace_score, wilson_lower_bound, bayesian_posterior, bayesian_score
-from aegis_core.lifecycle.quorum import calculate_fitness_status
-from aegis_core.lifecycle.constants import (
-    STATUS_NEW,
-    STATUS_SURVIVE,
-    STATUS_ADAPT,
-    STATUS_EXTINCT,
-    STATUS_APOPTOSIS,
-    STATUS_APOPTOSIS_WARNING,
-    STATUS_DORMANT,
-)
+from aegis_core.fitness import compute, wilson_interval, wilson_lower_bound
 
 
-class TestMathematicalInvariants:
-    """Hypothesis-driven mathematical property testing."""
+def _pairs(seed: int, count: int, high: int):
+    rng = random.Random(seed)
+    for _ in range(count):
+        yield rng.randint(0, high), rng.randint(0, high)
 
-    @settings(max_examples=200)
-    @given(
-        tp=st.integers(min_value=0, max_value=1_000_000),
-        extra_triggers=st.integers(min_value=0, max_value=1_000_000),
-    )
-    def test_laplace_score_bounds_and_monotonicity(self, tp: int, extra_triggers: int):
-        """Laplace score is strictly in [0.0, 1.0] and monotonic with respect to tp."""
-        triggers = tp + extra_triggers
-        score = laplace_score(tp, triggers)
-        assert 0.0 <= score <= 1.0
 
-        if extra_triggers > 0:
-            higher_score = laplace_score(tp + 1, triggers)
-            assert higher_score > score
+def test_the_interval_is_ordered_and_inside_the_unit_interval():
+    for tp, fp in _pairs(1, 500, 1000):
+        lower, upper = wilson_interval(tp, tp + fp)
+        assert 0.0 <= lower <= upper <= 1.0
+        if tp + fp:
+            assert lower <= tp / (tp + fp) + 1e-9 <= upper + 2e-9
 
-    @settings(max_examples=200)
-    @given(
-        tp=st.integers(min_value=0, max_value=1_000_000),
-        extra_triggers=st.integers(min_value=0, max_value=1_000_000),
-    )
-    def test_wilson_lower_bound_bounds(self, tp: int, extra_triggers: int):
-        """Wilson lower bound is strictly in [0.0, 1.0]."""
-        triggers = tp + extra_triggers
-        score = wilson_lower_bound(tp, triggers)
-        assert 0.0 <= score <= 1.0
 
-    @settings(max_examples=200)
-    @given(
-        tp=st.integers(min_value=0, max_value=100_000),
-        fp=st.integers(min_value=0, max_value=100_000),
-    )
-    def test_bayesian_score_monotonicity_and_bounds(self, tp: int, fp: int):
-        """Bayesian score increases with tp, decreases with fp, and is bounded in [0, 1]."""
-        triggers = tp + fp
-        score = bayesian_score(tp, triggers)
-        assert 0.0 <= score <= 1.0
+def test_more_data_at_the_same_rate_narrows_the_interval():
+    rng = random.Random(2)
+    for _ in range(300):
+        tp, fp, scale = rng.randint(1, 100), rng.randint(0, 100), rng.randint(2, 5)
+        lo1, hi1 = wilson_interval(tp, tp + fp)
+        lo2, hi2 = wilson_interval(tp * scale, (tp + fp) * scale)
+        assert hi2 - lo2 <= hi1 - lo1 + 1e-9
 
-        # Monotonicity with TP
-        score_more_tp = bayesian_score(tp + 1, triggers + 1)
-        assert score_more_tp >= score
 
-        # Monotonicity with FP
-        score_more_fp = bayesian_score(tp, triggers + 1)
-        assert score_more_fp <= score
+def test_fitness_rises_with_true_positives_and_falls_with_false_positives():
+    for tp, fp in _pairs(3, 500, 2000):
+        base = compute({"tp": tp, "fp": fp}).score
+        assert compute({"tp": tp + 1, "fp": fp}).score >= base
+        assert compute({"tp": tp, "fp": fp + 1}).score <= base
 
-        # Modern Bayesian posterior checks
-        post = bayesian_posterior(tp, fp)
-        assert 0.0 <= post["mean"] <= 1.0
-        assert 0.0 <= post["lower"] <= 1.0
-        assert 0.0 <= post["upper"] <= 1.0
-        assert post["lower"] <= post["upper"]
 
-        post_more_tp = bayesian_posterior(tp + 1, fp)
-        assert post_more_tp["mean"] >= post["mean"]
+@pytest.mark.parametrize("bad", [-5, 0, 10**8, float("nan"), float("inf"), -float("inf"), None, "x", True])
+def test_corrupt_counts_never_raise_and_stay_bounded(bad):
+    for n in (bad, 10, 0):
+        value = wilson_lower_bound(bad, n)
+        assert isinstance(value, float) and 0.0 <= value <= 1.0 and not math.isnan(value)
+    fit = compute({"tp": bad, "fp": bad, "triggers": 3, "last_ts": "garbage"}, half_life_days=30)
+    assert 0.0 <= fit.score <= 1.0 and 0.0 <= fit.misfire <= 1.0
 
-        post_more_fp = bayesian_posterior(tp, fp + 1)
-        assert post_more_fp["mean"] <= post["mean"]
 
-    @settings(max_examples=100)
-    @given(
-        tp=st.integers(min_value=0, max_value=10_000),
-        fp=st.integers(min_value=0, max_value=10_000),
-        triggers=st.integers(min_value=0, max_value=20_000),
-        dec_score=st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
-    )
-    def test_calculate_fitness_status_always_returns_valid_enum(
-        self, tp: int, fp: int, triggers: int, dec_score: float
-    ):
-        """calculate_fitness_status returns one of the canonical states for all inputs."""
-        status = calculate_fitness_status(
-            cell_type="wall",
-            tp=tp,
-            fp=fp,
-            triggers=triggers,
-            dec_score=dec_score,
-            is_unobserved=False,
-        )
-        assert status in {
-            STATUS_NEW,
-            STATUS_SURVIVE,
-            STATUS_ADAPT,
-            STATUS_EXTINCT,
-            STATUS_APOPTOSIS,
-            STATUS_APOPTOSIS_WARNING,
-            STATUS_DORMANT,
-        }
-
-    def test_clock_skew_future_timestamp_does_not_crash(self):
-        """A cell created with a timestamp in the future does not cause negative days error."""
-        future_str = "2099-01-01T00:00:00Z"
-        status = calculate_fitness_status(
-            cell_type="vacuole",
-            tp=0,
-            fp=0,
-            triggers=0,
-            is_unobserved=True,
-            created_str=future_str,
-            expiry_days=30,
-        )
-        assert status == STATUS_NEW
-
-    @given(
-        tp=st.sampled_from([-5, 0, 10**7, float("nan"), float("inf"), -float("inf")]),
-        triggers=st.sampled_from([-1, 0, 10**8, float("nan"), float("inf")]),
-    )
-    def test_extreme_inputs_never_raise(self, tp, triggers):
-        """Scoring functions handle extreme/corrupt inputs without division-by-zero or crash."""
-        score = laplace_score(tp, triggers)
-        assert isinstance(score, float)
-        assert 0.0 <= score <= 1.0
-
-        w_score = wilson_lower_bound(tp, triggers)
-        assert isinstance(w_score, float)
-        assert 0.0 <= w_score <= 1.0
-
+def test_a_future_trigger_time_does_not_raise_fitness():
+    totals = {"tp": 20, "fp": 0, "last_ts": "2099-01-01T00:00:00Z"}
+    assert compute(totals, half_life_days=30).score == compute(totals).score

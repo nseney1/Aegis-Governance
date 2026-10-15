@@ -388,7 +388,7 @@ class TestLayer1FailsClosed:
     def test_forbid_ast_exception_becomes_a_failing_result(self, ws, monkeypatch):
         import aegis_core.ast.policy as policy
 
-        rules = ws / ".aegis" / "rules"
+        rules = ws / ".aegis" / "rules" / "invariants"
         rules.mkdir(parents=True)
         (rules / "no-eval.md").write_text(
             "---\nid: no-eval\ntype: invariant\nenforcement: gate\nforbid_ast:\n  calls: [eval]\n---\n",
@@ -435,7 +435,7 @@ class TestLayer1FailsClosed:
         failed = [r for r in results if r.tool == "forbid_ast"]
         assert [(r.target, r.verdict) for r in failed] == [(".aegis/rules/invariants/no-subprocess.md", False)]
         assert failed[0].detail.startswith(
-            "forbid_ast: cannot load rule .aegis/rules/invariants/no-subprocess.md: UnicodeDecodeError:"
+            "forbid_ast: cannot load rule .aegis/rules/invariants/no-subprocess.md: invalid UTF-8:"
         )
         assert runner.gate_verdict(results) is False
 

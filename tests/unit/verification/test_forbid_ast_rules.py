@@ -89,7 +89,7 @@ class TestLayer1DeterministicVerifierForbidAST:
     """Layer 1 DeterministicVerifier tests with workspace rules declaring forbid_ast."""
 
     def _setup_workspace_with_rule(self, tmp_path: Path) -> Path:
-        rules_dir = tmp_path / ".aegis" / "rules"
+        rules_dir = tmp_path / ".aegis" / "rules" / "invariants"
         rules_dir.mkdir(parents=True, exist_ok=True)
         rule_md = (
             "---\n"

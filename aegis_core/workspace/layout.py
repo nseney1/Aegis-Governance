@@ -47,6 +47,8 @@ LEGACY_STATE_ENTRIES: tuple[str, ...] = (
     "governance/",        # safety-gate event log
     "locks/",
     "keys/",              # HMAC keys for receipts and the v3 manifest
+    "rules/manifest.json",  # the v3 signed rule manifest; v4 indexes rules in state/derived.json (D3)
+    "manifest.json",      # an older v3 rule manifest location
     "quarantine/",
     "swarm/",
     "handoffs/",
@@ -87,16 +89,6 @@ class WorkspaceLayout:
     @property
     def rules_dir(self) -> Path:
         return self.aegis_dir / "rules"
-
-    @property
-    def manifest_file(self) -> Path:
-        # v3 integrity manifest; removed with the HMAC signing in wave B2b (D3).
-        return self.rules_dir / "manifest.json"
-
-    @property
-    def manifest_key_file(self) -> Path:
-        # v3 manifest HMAC key; removed with the HMAC signing in wave B2b (D3).
-        return self.aegis_dir / "keys" / "manifest.key"
 
     @property
     def state_dir(self) -> Path:

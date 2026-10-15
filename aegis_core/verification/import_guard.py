@@ -17,6 +17,7 @@ import sys
 from dataclasses import dataclass
 
 from aegis_core.ast.drivers.python import read_python_source
+from aegis_core.match import is_test_path
 
 from . import ToolEvidence
 
@@ -215,8 +216,7 @@ def check(
         allowed_deps = set(allowed_deps)
 
     # For test files, pytest is standard
-    norm_path = filepath.replace('\\', '/')
-    if '/tests/' in norm_path or os.path.basename(filepath).startswith(('test_', 'conftest')):
+    if is_test_path(filepath):
         allowed_deps.add('pytest')
 
     # Auto-detect local packages from project root

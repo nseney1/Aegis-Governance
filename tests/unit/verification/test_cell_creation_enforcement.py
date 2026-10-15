@@ -1,7 +1,7 @@
-"""Tests for cell creation schema enforcement (BUG-083).
+"""Tests for rule creation schema enforcement (BUG-083).
 
-Ensures that cells generated via create_cell include the required 'enforcement'
-frontmatter field, preventing pre-commit soma checkpoint cell_conventions failures.
+Ensures that rules generated via create_cell include the required 'enforcement'
+frontmatter field, so they pass the checkpoint's rule_conventions and rule_load checks.
 """
 from __future__ import annotations
 
@@ -67,9 +67,9 @@ class TestCellCreationEnforcement:
                 workspace=tmp_path,
             )
 
-    def test_generated_cells_pass_checkpoint_cell_conventions(self, tmp_path: Path):
-        """Cells created via create_cell pass checkpoint cell_conventions checks."""
-        from aegis_core.verification.checkpoint_checks import check_cell_conventions
+    def test_generated_rules_pass_checkpoint_rule_conventions(self, tmp_path: Path):
+        """Rules created via create_cell load and pass the checkpoint rule_conventions checks."""
+        from aegis_core.verification.checkpoint_checks import check_rule_conventions
 
         # Create one trap and one invariant
         create_cell(
@@ -85,5 +85,5 @@ class TestCellCreationEnforcement:
             workspace=tmp_path,
         )
 
-        issues = check_cell_conventions(tmp_path)
+        issues = check_rule_conventions(tmp_path)
         assert issues == []

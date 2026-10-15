@@ -8,7 +8,6 @@ Strictly zero-dependency: uses only Python standard library.
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 from aegis_core.config import env_workspace
@@ -50,33 +49,6 @@ def _is_workspace_dir(d: str) -> bool:
         if is_aegis_workspace(d):
             return True
     return False
-
-
-def is_aegis_repo(root: Path) -> bool:
-    """Compound check to verify if a workspace root is the core Aegis repository.
-
-    Requires:
-    1. pyproject.toml containing non-commented name = 'aegis-guardrails' or 'aegis-governance'
-    2. Both aegis_core/ and aegis_cli/ directories exist.
-    """
-    pyproject = root / "pyproject.toml"
-    if not pyproject.is_file():
-        return False
-
-    try:
-        content = pyproject.read_text(encoding="utf-8", errors="replace")
-        if not re.search(
-            r'^[ \t]*name[ \t]*=[ \t]*["\'](?:aegis-guardrails|(?:soma|aegis)-governance)["\']',
-            content,
-            re.MULTILINE,
-        ):
-            return False
-    except OSError:
-        return False
-
-    has_core = (root / "aegis_core").is_dir()
-    has_cli = (root / "aegis_cli").is_dir()
-    return has_core and has_cli
 
 
 def resolve_workspace_root(
@@ -145,6 +117,5 @@ __all__ = [
     "LEGACY_SOMA_UPGRADE_MSG",
     "_is_workspace_dir",
     "check_legacy_soma_sentinel",
-    "is_aegis_repo",
     "resolve_workspace_root",
 ]

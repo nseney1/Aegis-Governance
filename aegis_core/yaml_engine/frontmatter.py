@@ -14,47 +14,46 @@ from aegis_core.yaml_engine.parser import (
 )
 
 
-def _get_body(content: str) -> str:
-    """Extract body text after YAML frontmatter delimiters."""
+def split_frontmatter(content: str) -> Tuple[str, Optional[str], str]:
+    """The one frontmatter delimiter scanner: ``(status, frontmatter text, body)``.
+
+    ``status`` is ``"ok"``, ``"none"`` (the text does not start with ``---``; the body is
+    the whole text) or ``"unterminated"`` (no closing ``---`` line). Leading zero-width
+    characters (a BOM) are not part of the text. The façades below keep their own
+    failure contracts on top of it (defense #30).
+    """
     for zw in ZERO_WIDTH_CHARS:
         if content.startswith(zw):
             content = content[len(zw):]
     if not content.startswith("---"):
-        return content
+        return "none", None, content
     nl = content.find("\n")
     if nl == -1:
-        return content
+        return "unterminated", None, content
     m = _CLOSING_DELIM_RE.search(content, nl + 1)
     if not m:
-        return content
-    return content[m.end():].strip()
+        return "unterminated", None, content
+    return "ok", content[nl + 1 : m.start()], content[m.end():]
+
+
+def _get_body(content: str) -> str:
+    """Extract body text after YAML frontmatter delimiters."""
+    status, _fm, body = split_frontmatter(content)
+    return body.strip() if status == "ok" else body
 
 
 def parse_frontmatter(content: str) -> Optional[Dict[str, Any]]:
     """Legacy helper: parse frontmatter mapping or return None/empty dict."""
     if not isinstance(content, str):
         return None
-
-    for zw in ZERO_WIDTH_CHARS:
-        if content.startswith(zw):
-            content = content[len(zw):]
-
-    if not content.startswith("---"):
+    status, fm_text, _body = split_frontmatter(content)
+    if status == "none":
         return {}
-
-    nl = content.find("\n")
-    if nl == -1:
+    if status == "unterminated" or fm_text is None:
         return None
-
-    rest = content[nl + 1 :]
-    m = _CLOSING_DELIM_RE.search(rest)
-    if not m:
-        return None
-
-    fm_text = rest[: m.start()].strip()
+    fm_text = fm_text.strip()
     if not fm_text:
         return {}
-
     try:
         return parse_yaml_subset(fm_text)
     except Exception:
@@ -69,25 +68,14 @@ def parse_rule_frontmatter(content_or_path: str) -> Tuple[Dict[str, Any], str]:
     else:
         content = content_or_path
 
-    for zw in ZERO_WIDTH_CHARS:
-        if content.startswith(zw):
-            content = content[len(zw):]
-
-    if not content.startswith("---"):
+    status, fm_text, body = split_frontmatter(content)
+    if status == "none":
         raise ValueError("No frontmatter delimiter")
-
-    nl = content.find("\n")
-    if nl == -1:
+    if status == "unterminated" or fm_text is None:
         raise ValueError("Unclosed frontmatter")
-    m = _CLOSING_DELIM_RE.search(content, nl + 1)
-    if not m:
-        raise ValueError("Unclosed frontmatter")
-
-    fm_text = content[nl + 1 : m.start()].strip()
+    fm_text = fm_text.strip()
     data = {} if not fm_text else parse_yaml_subset(fm_text)
-
-    body = content[m.end():].lstrip("\r\n")
-    return data, body
+    return data, body.lstrip("\r\n")
 
 
 def parse_rule_file(filepath: str) -> Tuple[Dict[str, Any], str]:
@@ -114,20 +102,12 @@ class AegisYAML:
         """Parse pure in-memory markdown or yaml string into an AegisDocument. Never touches disk."""
         # Same leading-only strip as the other entry points: removing these characters anywhere in the
         # document silently altered metadata values and the body (review M5).
-        working_content = content
-        for zw in ZERO_WIDTH_CHARS:
-            if working_content.startswith(zw):
-                working_content = working_content[len(zw):]
-
-        if working_content.startswith("---"):
-            nl = working_content.find("\n")
-            if nl != -1:
-                m = _CLOSING_DELIM_RE.search(working_content, nl + 1)
-                if m:
-                    fm_text = working_content[nl + 1 : m.start()].strip()
-                    body = working_content[m.end():].strip()
-                    metadata = parse_yaml_subset(fm_text) if fm_text else {}
-                    return AegisDocument(metadata=metadata, body=body)
+        status, fm_text, body = split_frontmatter(content)
+        if status == "ok" and fm_text is not None:
+            fm_text = fm_text.strip()
+            metadata = parse_yaml_subset(fm_text) if fm_text else {}
+            return AegisDocument(metadata=metadata, body=body.strip())
+        working_content = body
 
         data = parse_yaml_subset(working_content)
         return AegisDocument(metadata=data, body="")
@@ -167,4 +147,5 @@ __all__ = [
     "parse_frontmatter",
     "parse_rule_file",
     "parse_rule_frontmatter",
+    "split_frontmatter",
 ]

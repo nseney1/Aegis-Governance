@@ -27,7 +27,6 @@ NON_AEGIS_WRITERS = {
     ("aegis_cli/platforms/copilot.py", "CopilotAdapter.install"): ".github instructions (wave C)",
     ("aegis_cli/platforms/gemini.py", "GeminiAdapter.install"): "~/.gemini rules and skills (wave C)",
     ("aegis_cli/platforms/kiro.py", "KiroAdapter.install"): "~/.kiro steering (wave C)",
-    ("aegis_core/integrity.py", "generate_key"): "the v3 HMAC key; deleted with manifest signing in wave B2b (D3)",
 }
 _WRITE_MODE = re.compile(r"[wax+]")
 _COPIES = {"copy", "copy2", "copyfile", "copytree"}

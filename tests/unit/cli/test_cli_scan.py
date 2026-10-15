@@ -1,7 +1,8 @@
 """`aegis scan FILE... [--json]`: which rules apply to these files (v4 replacement for `agent scan`).
 
 Exit codes are part of the contract: 0 when the scan ran (with or without
-matches), 2 for a usage or workspace error. Runs against real scratch
+matches), 1 when the rules cannot all be served (the scan fails closed and names the
+files), 2 for a usage or workspace error. Runs against real scratch
 workspaces; nothing in the JIT engine is patched.
 """
 from __future__ import annotations
@@ -55,6 +56,21 @@ def test_text_mode_prints_the_rule_guidance(ws, capsys):
     assert rc == 0
     assert "trap-src-python" in out
     assert "Source modules must not read the clock directly" in out
+
+
+def test_a_rule_that_cannot_be_loaded_fails_the_scan_with_exit_1(ws, capsys):
+    (ws / ".aegis" / "rules" / "traps" / "broken.md").write_text("---\nid: [x\n---\n", encoding="utf-8")
+
+    assert main(["scan", "src/app.py"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("Error: 1 rule file(s) cannot be served, so no partial rule set is returned: ")
+    assert ".aegis/rules/traps/broken.md: malformed YAML frontmatter" in captured.err
+
+    assert main(["scan", "src/app.py", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "FAIL"
+    assert [e["path"] for e in payload["rule_errors"]] == [".aegis/rules/traps/broken.md"]
 
 
 def test_no_matching_rule_still_exits_zero(ws, capsys):

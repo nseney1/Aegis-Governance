@@ -4,6 +4,8 @@ from __future__ import annotations
 import collections.abc
 from typing import Any, Dict, Iterator, List, Optional
 
+from aegis_core.taxonomy import CANONICAL_RULE_TYPES
+
 
 class AegisDocument(collections.abc.Mapping):
     """Unified polymorphic document model representing Rules or Skills.
@@ -36,12 +38,8 @@ class AegisDocument(collections.abc.Mapping):
         if "kind" in self._metadata and self._metadata["kind"]:
             return str(self._metadata["kind"]).strip().lower()
 
-        cell_types = {
-            "wall", "membrane",
-            "invariant", "boundary", "trap", "persona", "contract", "gate",
-        }
         m_type = str(self._metadata.get("type", "")).lower()
-        if m_type in cell_types:
+        if m_type in CANONICAL_RULE_TYPES:
             return "rule"
 
         if any(k in self._metadata for k in ("tier", "consumes", "produces", "handoff_targets")):

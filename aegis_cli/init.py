@@ -11,7 +11,7 @@ from pathlib import Path
 
 from aegis_cli.base import CommandCategory, AegisCommand
 
-__all__ = ["run_init", "InitCommand", "seed_workspace_rules", "generate_mcp_config"]
+__all__ = ["run_init", "InitCommand", "generate_mcp_config"]
 
 # ── Starter Pack ────────────────────────────────────────────────────────────
 # The 5 rules that deliver immediate value on any project, any language.
@@ -55,7 +55,6 @@ from aegis_cli.platforms import detect_platform, get_rules_dir
 from aegis_cli.platforms.base import McpConfigError, load_mcp_config, write_json_atomic
 from aegis_core.config import ENV_WORKSPACE
 from aegis_core.storage import atomic_write_bytes
-from aegis_core.workspace.layout import WorkspaceLayout
 
 
 def detect_project_type(project_root: Path) -> str:
@@ -252,23 +251,6 @@ def install_starter_rules(
     return _install_named_rules(rules_dir, STARTER_RULES, force=force, dry_run=dry_run)
 
 
-def seed_workspace_rules(
-    project_root: Path | str,
-    preset: str = "standard",
-    force: bool = False,
-    dry_run: bool = False,
-) -> list[str]:
-    """Seed <project_root>/.aegis/rules/ with preset rules and generate manifest.json."""
-    root = Path(project_root).resolve()
-    ws_rules_dir = WorkspaceLayout(root).rules_dir
-    seeded = install_rules(ws_rules_dir, preset=preset, dry_run=dry_run, force=force)
-    if not dry_run and ws_rules_dir.is_dir():
-        from aegis_core.integrity import generate_manifest, save_manifest
-        manifest = generate_manifest(ws_rules_dir)
-        save_manifest(root, manifest)
-    return seeded
-
-
 # ── MCP Config ──────────────────────────────────────────────────────────────
 
 def generate_mcp_config(
@@ -426,9 +408,10 @@ def run_init(args: argparse.Namespace) -> int:
         print("  ⚠️  .aegis/.gitignore is a symlink; not modified. Add Aegis runtime state to it yourself.")
     elif gitignore_status in ("created", "updated"):
         print(f"  🙈 .aegis/.gitignore {gitignore_status}: machine-local runtime state stays out of git")
+    # The preset rules are host instruction rules (no type, no target_paths): they go to
+    # the host's rules directory only. .aegis/rules/<type>/ holds the rules aegis scan
+    # serves, and init no longer copies the presets there (they were never served).
     installed = install_rules(rules_dir, preset=preset, dry_run=dry_run, force=force)
-    if not getattr(args, "mcp_only", False):
-        seed_workspace_rules(project_root, preset=preset, force=force, dry_run=dry_run)
 
     for name in installed:
         if dry_run:
@@ -616,7 +599,7 @@ class InitCommand(AegisCommand):
         parser.add_argument(
             "--mcp",
             action="store_true",
-            help="Generate .mcp.json for JIT cell matching",
+            help="Generate .mcp.json for JIT rule matching",
         )
         parser.add_argument(
             "--yes",

@@ -1,240 +1,165 @@
-"""Tests for aegis_core.lifecycle — canonical cell state transitions, scoring, and operations."""
+"""The lifecycle (aegis_core.lifecycle): suggestions from ledger fitness, and the moves.
+
+``suggest`` reads only the ledger (through aegis_core.fitness). promote/demote move a
+rule one step on the ladder trap -> invariant -> gate; nothing reads or writes a
+fitness block in a rule file.
+"""
 from __future__ import annotations
 
-import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-from aegis_core.lifecycle.constants import (
-    STATUS_ADAPT,
-    STATUS_APOPTOSIS,
-    STATUS_APOPTOSIS_WARNING,
-    STATUS_DORMANT,
-    STATUS_EXTINCT,
-    STATUS_NEW,
-    STATUS_SURVIVE,
-)
-from aegis_core.lifecycle.decay import apply_decay
-from aegis_core.lifecycle.quorum import calculate_fitness_status, is_promotable
-from aegis_core.lifecycle.promotion import demote_cell, promote_cell
-from aegis_core.lifecycle.parsers import find_cell_file
+from aegis_core.fitness import Fitness
+from aegis_core.lifecycle.parsers import find_cell_file, rule_age_days
+from aegis_core.lifecycle.promotion import demote_cell, promote_cell, suggest
+from aegis_core.rules import load_rules
+from aegis_core.telemetry_engine import ledger
+
+OLD = "2026-01-01"
+NOW = datetime(2026, 10, 15, tzinfo=timezone.utc)
 
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
-    """Create a minimal workspace with .aegis/rules directories."""
     (tmp_path / ".aegis" / "rules" / "traps").mkdir(parents=True)
     (tmp_path / ".aegis" / "rules" / "invariants").mkdir(parents=True)
-    (tmp_path / ".aegis" / "rules" / "walls").mkdir(parents=True)
-    (tmp_path / "genome").mkdir(parents=True)
-    (tmp_path / "aegis_core").mkdir(parents=True)
-    (tmp_path / "aegis_cli").mkdir(parents=True)
-    (tmp_path / "pyproject.toml").write_text('name = "aegis-governance"\n', encoding="utf-8")
     return tmp_path
 
 
-def _create_cell_file(path: Path, cell_id: str, cell_type: str, triggers: int = 0, tp: int = 0, fp: int = 0) -> Path:
+def _rule(ws: Path, directory: str, rule_id: str, rule_type: str, created: str = OLD) -> Path:
+    path = ws / ".aegis" / "rules" / directory / f"{rule_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = f"""---
-id: {cell_id}
-type: {cell_type}
-domain: testing
-fitness:
-  triggers: {triggers}
-  true_positives: {tp}
-  false_positives: {fp}
-  score: 0.5
----
-# {cell_id}
-Description here.
-"""
-    path.write_text(content, encoding="utf-8")
+    enforcement = "gate" if rule_type in ("invariant", "gate") else "advisory"
+    path.write_text(
+        f"---\nid: {rule_id}\ntype: {rule_type}\ndomain: testing\nenforcement: {enforcement}\n"
+        f"created: '{created}'\n---\n# {rule_id}\nDescription here.\n",
+        encoding="utf-8",
+    )
     return path
 
 
-class TestFitnessStatusEvaluation:
-    """Evaluates cell lifecycle status from decay, scores, and apoptosis."""
-
-    def test_apoptosis_for_vacuole_when_false_positives_dominate(self):
-        status = calculate_fitness_status(
-            cell_type="trap", tp=5, fp=15, triggers=20, dec_score=0.25
-        )
-        assert status == STATUS_APOPTOSIS
-
-    def test_apoptosis_warning_for_wall(self):
-        status = calculate_fitness_status(
-            cell_type="wall", tp=5, fp=15, triggers=20, dec_score=0.25
-        )
-        assert status == STATUS_APOPTOSIS_WARNING
-
-    def test_survive_status_high_score(self):
-        status = calculate_fitness_status(
-            cell_type="trap", tp=18, fp=2, triggers=20, dec_score=0.85
-        )
-        assert status == STATUS_SURVIVE
-
-    def test_adapt_status_medium_score(self):
-        status = calculate_fitness_status(
-            cell_type="trap", tp=10, fp=10, triggers=20, dec_score=0.5
-        )
-        assert status == STATUS_ADAPT
-
-    def test_extinct_status_below_threshold(self):
-        status = calculate_fitness_status(
-            cell_type="trap", tp=1, fp=1, triggers=20, dec_score=0.10
-        )
-        assert status == STATUS_EXTINCT
-
-    def test_dormant_vs_new_unobserved(self):
-        # Unobserved older than expiry -> DORMANT
-        status_old = calculate_fitness_status(
-            cell_type="trap", tp=0, fp=0, triggers=0, is_unobserved=True,
-            created_str="2020-01-01T00:00:00Z", expiry_days=30
-        )
-        assert status_old == STATUS_DORMANT
-
-        # Unobserved recent -> NEW
-        status_new = calculate_fitness_status(
-            cell_type="trap", tp=0, fp=0, triggers=0, is_unobserved=True,
-            created_str="2099-01-01T00:00:00Z", expiry_days=30
-        )
-        assert status_new == STATUS_NEW
+def _report(ws: Path, rule_id: str, tp: int = 0, fp: int = 0) -> None:
+    events = [{"rule": rule_id, "outcome": "tp", "source": "ci", "key": f"tp{i}"} for i in range(tp)]
+    events += [{"rule": rule_id, "outcome": "fp", "source": "ci", "key": f"fp{i}"} for i in range(fp)]
+    ledger.append(ws, events)
 
 
-class TestPromotableAndExtinct:
-    """Verifies boundary thresholds for promotion and extinction."""
-
-    def test_is_promotable_above_threshold(self):
-        # tp=19, triggers=20 -> (19+1)/(20+2) = 0.909 > 0.85
-        assert is_promotable(tp=19, triggers=20) is True
-
-    def test_is_promotable_insufficient_triggers(self):
-        # Perfect score but only 10 triggers
-        assert is_promotable(tp=10, triggers=10) is False
-
-    def test_zero_triggers_neither(self):
-        assert is_promotable(tp=0, triggers=0) is False
+def _suggestion(ws: Path, rule_id: str, fit: Fitness) -> str | None:
+    return suggest(load_rules(ws).get(rule_id), fit, NOW)
 
 
-class TestDecay:
-    """Verifies exponential decay and idempotency."""
+class TestSuggestions:
+    def test_strong_evidence_on_an_old_enough_rule_suggests_promotion(self, workspace: Path):
+        _rule(workspace, "traps", "t", "trap")
+        assert _suggestion(workspace, "t", Fitness("t", triggers=25, tp=25, fp=0, score=0.89)) == "promote"
 
-    def test_decay_reduces_counts(self):
-        fitness = {
-            "triggers": 100,
-            "true_positives": 90,
-            "false_positives": 10,
-            "last_decay_epoch": 0,
-        }
-        decayed = apply_decay({"fitness": fitness})["fitness"]
-        assert decayed["triggers"] == 95
-        assert decayed["true_positives"] == 85
-        assert decayed["false_positives"] == 9
-        assert decayed["last_decay_epoch"] > 0
+    def test_too_few_verdicts_too_low_a_bound_or_too_young_is_no_promotion(self, workspace: Path):
+        _rule(workspace, "traps", "t", "trap")
+        _rule(workspace, "traps", "young", "trap", created=(NOW - timedelta(days=5)).strftime("%Y-%m-%d"))
+        assert _suggestion(workspace, "t", Fitness("t", tp=19, fp=0, score=0.9)) is None
+        assert _suggestion(workspace, "t", Fitness("t", tp=30, fp=5, score=0.7)) is None
+        assert _suggestion(workspace, "young", Fitness("young", tp=40, fp=0, score=0.95)) is None
 
-    def test_decay_idempotency(self):
-        now = int(time.time())
-        fitness = {
-            "triggers": 100,
-            "true_positives": 90,
-            "false_positives": 10,
-            "last_decay_epoch": now - 60,  # 1 min ago (< 3600s)
-        }
-        decayed = apply_decay({"fitness": fitness})["fitness"]
-        assert decayed["triggers"] == 100  # unchanged
+    def test_a_misfiring_rule_is_demoted_or_archived_at_the_bottom(self, workspace: Path):
+        _rule(workspace, "traps", "t", "trap")
+        _rule(workspace, "invariants", "i", "invariant")
+        misfire = dict(tp=0, fp=3, misfire=0.53)
+        assert _suggestion(workspace, "i", Fitness("i", **misfire)) == "demote"
+        assert _suggestion(workspace, "t", Fitness("t", **misfire)) == "archive"
+        assert _suggestion(workspace, "t", Fitness("t", tp=1, fp=4, misfire=0.43)) is None
 
+    def test_protected_expired_and_broken_rules_get_no_suggestion(self, workspace: Path):
+        _rule(workspace, "traps", "providence", "trap")
+        expired = _rule(workspace, "traps", "gone", "trap")
+        expired.write_text(expired.read_text(encoding="utf-8").replace("---\n#", "expired_at: '2026-01-01'\n---\n#"), encoding="utf-8")
+        ruleset = load_rules(workspace)
+        assert suggest(ruleset.get("providence"), Fitness(tp=0, fp=9, misfire=0.8), NOW) is None
+        assert suggest(ruleset.get("gone"), Fitness(tp=0, fp=9, misfire=0.8), NOW) is None
 
-@pytest.mark.parametrize("stress, multiplier", [(0, 1.0), (1, 1.05), (5, 1.25), (10, 1.5), (100, 1.5)])
-def test_antifragile_bonus_is_five_percent_per_survived_review_capped_at_ten(stress, multiplier):
-    from aegis_core.lifecycle.decay import antifragile_bonus
-
-    assert antifragile_bonus({"fitness": {"stress_survived": stress}}) == pytest.approx(multiplier)
-    assert antifragile_bonus({}) == 1.0
+    def test_rule_age_comes_from_created(self, workspace: Path):
+        _rule(workspace, "traps", "t", "trap", created="2026-10-05")
+        assert rule_age_days(load_rules(workspace).get("t"), NOW) == 10
 
 
-class TestCellPromoteAndDemote:
-    """Verifies file movements and frontmatter updates for promotions and demotions."""
-
+class TestPromoteAndDemote:
     def test_find_cell_file(self, workspace: Path):
-        trap = _create_cell_file(workspace / ".aegis" / "rules" / "traps" / "test-v.md", "test-v", "trap")
-        found_path, found_type = find_cell_file(workspace, "test-v")
-        assert found_path == trap
-        assert found_type == "trap"
-
-        # Traversal attempt returns None
+        trap = _rule(workspace, "traps", "test-v", "trap")
+        assert find_cell_file(workspace, "test-v") == (trap, "trap")
         assert find_cell_file(workspace, "../etc/passwd") == (None, None)
 
-    def test_promote_vacuole_to_wall(self, workspace: Path):
-        trap = _create_cell_file(
-            workspace / ".aegis" / "rules" / "traps" / "promote-me.md",
-            "promote-me", "trap", triggers=25, tp=24, fp=1
-        )
+    def test_promotion_without_force_needs_ledger_evidence(self, workspace: Path):
+        trap = _rule(workspace, "traps", "promote-me", "trap")
+        refused = promote_cell(workspace, "promote-me", force=False)
+        assert refused["status"] == "ineligible" and trap.exists()
+
+        _report(workspace, "promote-me", tp=25)
         res = promote_cell(workspace, "promote-me", force=False)
-        assert res["status"] == "promoted"
-        assert res["from_type"] == "trap"
-        assert res["to_type"] == "invariant"
 
-        # Original trap path no longer exists
+        assert (res["status"], res["from_type"], res["to_type"]) == ("promoted", "trap", "invariant")
         assert not trap.exists()
-
-        # Invariant path exists with updated frontmatter
         inv_path = workspace / ".aegis" / "rules" / "invariants" / "promote-me.md"
-        assert inv_path.exists()
         content = inv_path.read_text(encoding="utf-8")
-        assert "type: invariant" in content
+        assert "type: invariant" in content and "enforcement: gate" in content
+        assert "fitness" not in content
 
-    def test_promote_wall_to_genome(self, workspace: Path):
-        wall = _create_cell_file(
-            workspace / ".aegis" / "rules" / "invariants" / "wall-cell.md",
-            "wall-cell", "invariant", triggers=30, tp=29, fp=1
-        )
-        res = promote_cell(workspace, "wall-cell", force=True)
-        assert res["status"] == "promoted"
-        assert res["to_type"] == "genome"
-        assert not wall.exists()
-        assert (workspace / "genome" / "wall-cell.md").exists()
+    def test_a_frontmatter_fitness_block_does_not_make_a_rule_eligible(self, workspace: Path):
+        trap = _rule(workspace, "traps", "claims", "trap")
+        trap.write_text(trap.read_text(encoding="utf-8").replace(
+            "---\n#", "fitness:\n  triggers: 99\n  true_positives: 99\n  score: 1.0\n---\n#"), encoding="utf-8")
+        assert promote_cell(workspace, "claims", force=False)["status"] == "ineligible"
 
-    def test_promote_terminal_genome_cell(self, workspace: Path):
-        _create_cell_file(workspace / "genome" / "terminal.md", "terminal", "genome")
-        res = promote_cell(workspace, "terminal", force=True)
-        assert res["status"] == "already_terminal"
+    def test_an_invariant_promotes_to_a_gate_and_a_gate_is_terminal(self, workspace: Path):
+        _rule(workspace, "invariants", "inv", "invariant")
+        assert promote_cell(workspace, "inv", force=True)["to_type"] == "gate"
+        assert (workspace / ".aegis" / "rules" / "gates" / "inv.md").is_file()
+        assert promote_cell(workspace, "inv", force=True)["status"] == "already_terminal"
 
-    def test_demote_wall_to_vacuole(self, workspace: Path):
-        wall = _create_cell_file(workspace / ".aegis" / "rules" / "invariants" / "demote-wall.md", "demote-wall", "invariant")
-        res = demote_cell(workspace, "demote-wall")
-        assert res["status"] == "demoted"
-        assert res["from_type"] in ("invariant", "wall")
-        assert res["to_type"] == "trap"
-        assert not wall.exists()
-        trap_path = workspace / ".aegis" / "rules" / "traps" / "demote-wall.md"
-        assert trap_path.exists()
-        assert "type: trap" in trap_path.read_text(encoding="utf-8")
+    def test_demote_invariant_to_trap(self, workspace: Path):
+        inv = _rule(workspace, "invariants", "demote-me", "invariant")
+        res = demote_cell(workspace, "demote-me")
+        assert (res["status"], res["from_type"], res["to_type"]) == ("demoted", "invariant", "trap")
+        trap_path = workspace / ".aegis" / "rules" / "traps" / "demote-me.md"
+        assert not inv.exists() and "type: trap" in trap_path.read_text(encoding="utf-8")
+        assert demote_cell(workspace, "demote-me")["status"] == "already_base"
 
-    def test_demote_protected_rules_blocked(self, workspace: Path):
-        for rule in ("providence", "cost-optimization", "git-workflow"):
-            _create_cell_file(workspace / "genome" / f"{rule}.md", rule, "genome")
-            with pytest.raises(ValueError, match="Cannot demote protected core rule"):
-                demote_cell(workspace, rule)
-
-    def test_promote_protected_rule_blocked(self, workspace: Path):
-        _create_cell_file(
-            workspace / ".aegis" / "rules" / "invariants" / "providence.md",
-            "providence", "invariant", triggers=30, tp=29, fp=1
-        )
+    def test_protected_rules_cannot_be_demoted_or_promoted(self, workspace: Path):
+        _rule(workspace, "invariants", "providence", "invariant")
+        with pytest.raises(ValueError, match="Cannot demote protected core rule"):
+            demote_cell(workspace, "providence")
         res = promote_cell(workspace, "providence", force=True)
         assert res["status"] == "protected_rule_immutable"
         assert "protected core rule" in res["message"].lower()
 
-    def test_apoptosis_triggers_for_zero_tp(self):
-        status = calculate_fitness_status("vacuole", tp=0, fp=5, triggers=5, dec_score=0.1)
-        assert status == STATUS_APOPTOSIS
 
-        status_wall = calculate_fitness_status("wall", tp=0, fp=5, triggers=5, dec_score=0.1)
-        assert status_wall == STATUS_APOPTOSIS_WARNING
+def test_generate_slug_names_a_rule_from_its_hypothesis():
+    from aegis_core.lifecycle.parsers import generate_slug
 
-    def test_extinction_boundary_parity(self):
-        # dec_score == 0.15 should be EXTINCT, matching is_extinct
-        status = calculate_fitness_status("vacuole", tp=1, fp=1, triggers=2, dec_score=0.15)
-        assert status == STATUS_EXTINCT
+    assert generate_slug("Never shell out from src/!") == "never-shell-out-from-src"
+    assert generate_slug("!!!") == "unnamed-rule"
+    assert generate_slug("ignored", id_override="explicit-id") == "explicit-id"
+    with pytest.raises(ValueError, match="path traversal"):
+        generate_slug("x", id_override="../escape")
 
+
+@pytest.mark.parametrize("domain, tags, target_paths", [
+    ("security #high", ["a: b"], ["src/*.py"]),
+    ("true", ["null", "#tag"], ["it's/*.py", "**"]),
+    ("12", ["- dash"], ['say "hi"/*.md']),
+])
+def test_create_cell_writes_every_value_back_exactly_as_given(tmp_path, domain, tags, target_paths):
+    """create_cell serializes through the one frontmatter writer (defense #30): a value that
+    looks like a comment, a boolean, a number or a list item is quoted, never reinterpreted."""
+    from aegis_core.lifecycle.creation import create_cell
+
+    path = create_cell(
+        "trap", 'He said: "keep # this"', domain=domain, tags=tags, target_paths=target_paths,
+        workspace=tmp_path, id_override="exact",
+    )
+
+    rule = load_rules(tmp_path).get("exact")
+    assert rule is not None and rule.path == ".aegis/rules/traps/exact.md"
+    assert (rule.meta["domain"], rule.meta["tags"], rule.meta["target_paths"]) == (domain, tags, target_paths)
+    assert rule.meta["hypothesis"] == 'He said: "keep # this"'
+    assert path.read_text(encoding="utf-8").startswith("---\nid: exact\ndomain: ")

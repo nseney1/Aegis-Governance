@@ -7,7 +7,7 @@ import stat
 from pathlib import Path
 from typing import List
 
-from aegis_core.taxonomy import DIR_TO_ALLOWED_RULE_TYPES as DIR_TO_TYPE
+from aegis_core.taxonomy import RULE_TYPES
 from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, RULES_RELDIR, WorkspaceLayout
 
 
@@ -226,11 +226,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_core_lifecycle.py")
     if stem == "rule_inventory":
         candidates.append(test_dir / "test_rule_inventory.py")
-    if stem == "rule_cache":
-        candidates.append(test_dir / "test_rule_cache.py")
-    if stem == "integrity":
-        candidates.append(test_dir / "test_evidence_integrity.py")
-        candidates.append(test_dir / "unit" / "mcp" / "test_manifest_hmac.py")
     if stem == "adversarial_verify":
         candidates.append(test_dir / "unit" / "verification" / "test_adversarial_verify.py")
     if stem in ("taxonomy", "operations", "layout", "discovery"):
@@ -406,203 +401,108 @@ def check_assertion_density(root: Path) -> list[dict]:
     return issues
 
 
-def check_cell_fitness(root: Path) -> list[dict]:
+def check_rule_fitness(root: Path) -> list[dict]:
+    """Unreadable ledger rows, and rules the ledger says misfire (the lifecycle's own
+    criterion: the Wilson lower bound of the false-positive rate above 0.5)."""
+    from aegis_core.fitness import compute
+    from aegis_core.lifecycle.constants import MISFIRE_THRESHOLD
     from aegis_core.telemetry_engine import ledger
 
     issues = []  # type: List[dict]
     view = ledger.read(root)
     rel = _relative(root, Path(view.path)) if view.path is not None else "ledger"
     if view.error:
-        issues.append({"check": "cell_fitness", "file": rel, "message": f"{rel}: {view.error}"})
+        issues.append({"check": "rule_fitness", "file": rel, "message": f"{rel}: {view.error}"})
     for line in view.skipped_lines:
         issues.append({
-            "check": "cell_fitness",
+            "check": "rule_fitness",
             "file": rel,
             "message": f"{rel}: line {line} is not a JSON object row",
         })
     if view.unusable_rows:
         issues.append({
-            "check": "cell_fitness",
+            "check": "rule_fitness",
             "file": rel,
             "message": f"{rel}: {view.unusable_rows} row(s) lack a rule, a valid outcome or a valid weight",
         })
 
-    for cell_id, counts in ledger.aggregate_rows(view.rows).items():
-        tp = counts["tp"]
-        fp = counts["fp"]
-        total = tp + fp
-        if total >= 2 and fp / total > 0.5:
-            rate = fp / total
+    for rule_id, counts in sorted(ledger.aggregate_rows(view.rows).items()):
+        fit = compute(counts, rule=rule_id)
+        if fit.misfire > MISFIRE_THRESHOLD:
             issues.append({
-                "check": "cell_fitness",
-                "cell_id": cell_id,
+                "check": "rule_fitness",
+                "rule": rule_id,
                 "message": (
-                    f"Rule '{cell_id}' has unhealthy fitness: "
-                    f"{fp}/{total} false positives "
-                    f"({rate:.0%} FP rate)"
+                    f"Rule '{rule_id}' misfires: {fit.fp:g} of {fit.verdicts:g} verdicts are false "
+                    f"positives (misfire bound {fit.misfire:.2f} > {MISFIRE_THRESHOLD}); "
+                    "aegis sync suggests demoting or archiving it"
                 ),
             })
     return issues
 
 
-def check_cell_conventions(root: Path) -> list[dict]:
+def check_rule_conventions(root: Path) -> list[dict]:
+    """Every rule file loads (aegis_core.rules) and carries the fields its type needs.
+
+    A rule that cannot be loaded is a ``rule_load`` issue: aegis scan refuses to serve
+    the rule set while it exists, so ``aegis check`` blocks on it too.
+    """
+    from aegis_core.rule_inventory import RuleInventoryError
+    from aegis_core.rules import load_rules
+
     issues = []  # type: List[dict]
-    from aegis_core.rule_inventory import CellInventoryError, inventory_rules
-
     try:
-        inventory = inventory_rules(str(root))
-    except CellInventoryError as exc:
-        path = Path(exc.path)
-        issues.append(_failure(
-            "cell_conventions", root, path, exc.operation, exc
-        ))
-        return issues
+        ruleset = load_rules(root)
+    except RuleInventoryError as exc:
+        return [_failure("rule_load", root, Path(exc.path), exc.operation, exc)]
 
-    from aegis_core.rule_inventory import parse_frontmatter
-
-    for entry in inventory.entries:
-        if os.path.basename(entry.relative_path) == "README.md":
+    for rule in ruleset.rules:
+        if rule.error:
+            issues.append({"check": "rule_load", "file": rule.path, "message": f"{rule.path}: {rule.error}"})
             continue
-        parts = entry.relative_path.split("/")
-        if len(parts) < 4 or "/".join(parts[:2]) != RULES_RELDIR:
-            continue
-        type_dir_name = parts[2]
-        allowed_types = DIR_TO_TYPE.get(type_dir_name)
-        if allowed_types is None:
-            continue
-        if isinstance(allowed_types, str):
-            allowed_types = (allowed_types,)
-        rel = entry.relative_path
-        try:
-            content = entry.content.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            issues.append(_failure(
-                "cell_conventions", root, Path(entry.absolute_path), "decode", exc
-            ))
-            continue
-        if not content.startswith("---"):
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": f"{rel}: missing YAML frontmatter",
-            })
-            continue
-        lines = content.splitlines()
-        closing = next(
-            (index for index, line in enumerate(lines[1:], 1) if line.strip() == "---"),
-            None,
-        )
-        if closing is None:
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": f"{rel}: unterminated YAML frontmatter",
-            })
-            continue
-        try:
-            meta = parse_frontmatter(content)
-        except Exception as exc:
-            issues.append(_failure(
-                "cell_conventions", root, Path(entry.absolute_path), "parse", exc
-            ))
-            continue
-        if meta is None:
-            frontmatter_lines = [line.strip() for line in lines[1:closing] if line.strip()]
-            if frontmatter_lines and frontmatter_lines[0].startswith("-"):
-                message = f"{rel}: cell frontmatter must be a mapping"
-            else:
-                message = f"{rel}: malformed YAML frontmatter"
-            issues.append({
-                "check": "cell_conventions", "file": rel, "message": message,
-            })
-            continue
-        if not isinstance(meta, dict) or not meta:
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": f"{rel}: cell frontmatter must be a non-empty mapping",
-            })
-            continue
-
         required = ["id", "domain", "type"]
-        if any(t in ("wall", "invariant", "trap") for t in allowed_types):
+        if rule.type in ("invariant", "trap"):
             required.append("enforcement")
-        for field in required:
-            if field not in meta:
+        for name in required:
+            if name not in rule.meta:
                 issues.append({
-                    "check": "cell_conventions",
-                    "file": rel,
-                    "message": f"{rel}: missing required field '{field}'",
+                    "check": "rule_conventions",
+                    "file": rule.path,
+                    "message": f"{rule.path}: missing required field '{name}'",
                 })
-        cell_type = meta.get("type", "")
-        if cell_type not in allowed_types:
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": (
-                    f"{rel}: type '{cell_type}' doesn't match directory "
-                    f"'{type_dir_name}' (expected one of {allowed_types})"
-                ),
-            })
-        if cell_type in ("wall", "invariant") and meta.get("enforcement") != "gate":
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": (
-                    f"{rel}: wall/invariant enforcement is '{meta.get('enforcement')}' "
-                    "but must use 'gate'"
-                ),
-            })
-        stem = os.path.splitext(os.path.basename(entry.relative_path))[0]
-        if meta.get("id") != stem:
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": (
-                    f"{rel}: frontmatter id '{meta.get('id')}' "
-                    f"doesn't match filename '{stem}'"
-                ),
-            })
     return issues
 
 
 def check_paper_walls(root: Path) -> list[dict]:
-    """Verify that all wall cells have 'gate' enforcement and valid frontmatter."""
-    issues = []
-    rules_dir = WorkspaceLayout(Path(root).resolve()).rules_dir
-    walls_dir = rules_dir / "invariants"
-    if not walls_dir.is_dir():
-        walls_dir = rules_dir / "walls"
-    if not walls_dir.is_dir():
-        return issues
+    """A gate or invariant rule must use ``gate`` enforcement: one that does not claims to
+    be a gate and enforces nothing. A mandatory-type rule that cannot be loaded cannot be
+    shown to be a gate, so it is reported too."""
+    from aegis_core.rule_inventory import RuleInventoryError
+    from aegis_core.rules import load_rules
 
-    for wall_file in sorted(walls_dir.glob("*.md")):
-        try:
-            content = wall_file.read_text(encoding="utf-8")
-            from aegis_core.yaml_engine.frontmatter import parse_frontmatter
-            meta = parse_frontmatter(content)
-            if not isinstance(meta, dict):
-                issues.append({
-                    "check": "paper_walls",
-                    "file": _relative(root, wall_file),
-                    "message": f"Wall cell '{wall_file.name}' has missing or invalid frontmatter.",
-                })
-                continue
-            enforcement = meta.get("enforcement")
-            if enforcement != "gate":
-                issues.append({
-                    "check": "paper_walls",
-                    "file": _relative(root, wall_file),
-                    "message": f"Wall cell '{wall_file.name}' enforcement is '{enforcement}', but all walls must use 'gate'.",
-                })
-        except Exception as exc:
-            # An unreadable wall cannot be shown to be a gate: report it, never skip it.
+    try:
+        ruleset = load_rules(root)
+    except RuleInventoryError as exc:
+        return [_failure("paper_walls", root, Path(exc.path), exc.operation, exc)]
+    issues = []
+    for rule in ruleset.rules:
+        if rule.type is None or not RULE_TYPES[rule.type].mandatory:
+            continue
+        name = rule.path.rsplit("/", 1)[-1]
+        label = f"{rule.type.capitalize()} rule '{name}'"
+        if rule.error:
             issues.append({
                 "check": "paper_walls",
-                "file": _relative(root, wall_file),
+                "file": rule.path,
+                "message": f"{label} cannot be read, so it cannot be shown to use 'gate': {rule.error}",
+            })
+        elif rule.enforcement != "gate":
+            issues.append({
+                "check": "paper_walls",
+                "file": rule.path,
                 "message": (
-                    f"Wall cell '{wall_file.name}' cannot be read, so it cannot be shown to use 'gate': "
-                    f"{type(exc).__name__}: {exc}"
+                    f"{label} enforcement is '{rule.meta.get('enforcement')}', "
+                    f"but all {rule.type} rules must use 'gate'."
                 ),
             })
     return issues
@@ -612,16 +512,16 @@ ALL_CHECKS = [
     check_test_coverage,
     check_hardcoded_paths,
     check_assertion_density,
-    check_cell_fitness,
-    check_cell_conventions,
+    check_rule_fitness,
+    check_rule_conventions,
     check_paper_walls,
 ]
 CHECK_NAMES = [
     "test_coverage",
     "hardcoded_paths",
     "assertion_density",
-    "cell_fitness",
-    "cell_conventions",
+    "rule_fitness",
+    "rule_conventions",
     "paper_walls",
 ]
 

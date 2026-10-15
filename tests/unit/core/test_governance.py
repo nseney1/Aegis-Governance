@@ -1,4 +1,7 @@
 from pathlib import Path
+
+import pytest
+
 from aegis_sdk.governance import Governance
 
 def test_governance_fitness_landscape_in_process(tmp_path):
@@ -7,8 +10,11 @@ def test_governance_fitness_landscape_in_process(tmp_path):
     res = gov.fitness_landscape(bayesian=True)
     assert isinstance(res, list)
     assert len(res) == 5
-    cell_names = {c['cell'] for c in res}
-    assert "trap-test-trap.md" in cell_names
+    assert {row["rule"] for row in res} == {
+        "trap-test-trap", "invariant-test-guard", "persona-test-persona",
+        "boundary-test-boundary", "contract-test-bridge",
+    }
+    assert all(row["bayesian"] == {"lower": 0.0, "upper": 1.0} for row in res)
 
 
 def _populate_governed_workspace(root: Path):
@@ -45,34 +51,22 @@ def test_list_rules_with_rule_type_filter(tmp_path):
     assert len(traps) == 1
     assert traps[0]["_name"] == "trap-test-trap"
 
-    # Filter by porcelain alias
-    traps_alias = gov.list_rules(rule_type="learned-trap")
-    assert len(traps_alias) == 1
-    assert traps_alias[0]["_name"] == "trap-test-trap"
 
 
-def test_list_rules_porcelain_facade(tmp_path):
+@pytest.mark.parametrize("rule_type, name", [
+    ("invariant", "invariant-test-guard"),
+    ("persona", "persona-test-persona"),
+    ("boundary", "boundary-test-boundary"),
+    ("contract", "contract-test-bridge"),
+])
+def test_list_rules_filters_each_canonical_type(tmp_path, rule_type, name):
+    """The v1/v2 aliases (safety-guard, agent-persona, ...) are gone with the alias maps;
+    only the six types of the one rule-type table filter."""
     _populate_governed_workspace(tmp_path)
     gov = Governance(project_root=tmp_path)
 
-    all_rules = gov.list_rules()
-    assert len(all_rules) == 5
-
-    guards = gov.list_rules(rule_type="safety-guard")
-    assert len(guards) == 1
-    assert guards[0]["_name"] == "invariant-test-guard"
-
-    personas = gov.list_rules(rule_type="agent-persona")
-    assert len(personas) == 1
-    assert personas[0]["_name"] == "persona-test-persona"
-
-    boundaries = gov.list_rules(rule_type="escalation-boundary")
-    assert len(boundaries) == 1
-    assert boundaries[0]["_name"] == "boundary-test-boundary"
-
-    bridges = gov.list_rules(rule_type="contract-bridge")
-    assert len(bridges) == 1
-    assert bridges[0]["_name"] == "contract-test-bridge"
+    assert [r["_name"] for r in gov.list_rules(rule_type=rule_type)] == [name]
+    assert gov.list_rules(rule_type="safety-guard") == []
 
 
 def test_list_rules_corrupted_isolation(tmp_path):

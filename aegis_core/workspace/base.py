@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from aegis_core.errors import WorkspaceError
 from aegis_core.workspace.confinement import confine_path_internal, validate_workspace_path
-from aegis_core.workspace.discovery import is_aegis_repo, resolve_workspace_root
+from aegis_core.workspace.discovery import resolve_workspace_root
 from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
 
 if TYPE_CHECKING:
@@ -76,11 +76,6 @@ class Workspace(os.PathLike[str]):
     def is_git(self) -> bool:
         """True if the root is inside a git repository or worktree that git itself would accept."""
         return _find_git_dirs(self.root)[0] is not None
-
-    @property
-    def is_aegis_repo(self) -> bool:
-        """True if this workspace is the core Aegis Governance repository."""
-        return is_aegis_repo(self.root)
 
     def __fspath__(self) -> str:
         return str(self.root)
@@ -162,16 +157,9 @@ class Workspace(os.PathLike[str]):
         if not rule_names:
             return []
 
-        rules_dir = self.rules_dir
-        if not rules_dir.is_dir():
-            return list(rule_names)
+        from aegis_core.rules import load_rules
 
-        known = set()
-        for _dirpath, _dirnames, filenames in os.walk(str(rules_dir)):
-            for fn in filenames:
-                if fn.endswith(".md") and fn != "README.md":
-                    known.add(os.path.splitext(fn)[0])
-
+        known = {rule.id for rule in load_rules(self).rules if rule.ok}
         return [name for name in rule_names if name not in known]
 
 

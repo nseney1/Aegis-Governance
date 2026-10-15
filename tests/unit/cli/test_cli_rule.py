@@ -52,8 +52,15 @@ def test_rule_list_with_rules(tmp_path, capsys):
     rules_dir.mkdir(parents=True)
     rule_file = rules_dir / "inv-test.md"
     rule_file.write_text(
-        "---\nid: inv-test\ntype: invariant\nenforcement: strict\nfitness:\n  score: 0.95\n---\nRule body\n",
+        "---\nid: inv-test\ntype: invariant\nenforcement: gate\n---\nRule body\n",
         encoding="utf-8",
+    )
+    (rules_dir / "inv-young.md").write_text("---\nid: inv-young\nenforcement: gate\n---\n", encoding="utf-8")
+    state = tmp_path / ".aegis" / "state"
+    state.mkdir()
+    # Fitness is the ledger's: 30 of 30 verdicts are true positives (Wilson bound 0.92).
+    (state / "ledger.jsonl").write_text(
+        '{"v": 2, "rule": "inv-test", "outcome": "tp", "source": "ci"}\n' * 30, encoding="utf-8"
     )
 
     args = argparse.Namespace(
@@ -66,7 +73,50 @@ def test_rule_list_with_rules(tmp_path, capsys):
     rc = run_rule(args)
     assert rc == 0
     out = capsys.readouterr().out
-    assert "inv-test" in out
+    assert "inv-test" in out and "0.92" in out
+    assert "inv-young" not in out  # no verdicts yet: below --min-fitness 0.9
+
+
+def test_rule_list_flags_rules_edited_since_the_last_sync(tmp_path, capsys):
+    """The CLI twin of aegis_list_rules' stale_rules: listed, never excluded."""
+    from aegis_core.sync import sync
+
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    (traps / "edited.md").write_text("---\nid: edited\n---\nBefore\n", encoding="utf-8")
+    (traps / "steady.md").write_text("---\nid: steady\n---\nSame\n", encoding="utf-8")
+    sync(tmp_path)
+    (traps / "edited.md").write_text("---\nid: edited\n---\nAfter\n", encoding="utf-8")
+    (traps / "added.md").write_text("---\nid: added\n---\nNew\n", encoding="utf-8")
+
+    def listed(use_json):
+        args = argparse.Namespace(rule_action="list", workspace=str(tmp_path), json=use_json, type=None, min_fitness=None)
+        assert run_rule(args) == 0
+        return capsys.readouterr().out
+
+    rows = {r["id"]: r for r in json.loads(listed(True))}
+    assert set(rows) == {"added", "edited", "steady"}
+    assert (rows["edited"]["stale"], rows["added"]["stale"]) == ("edited", "new")
+    assert "stale" not in rows["steady"]
+
+    out = listed(False)
+    assert "2 rule(s) changed since the last aegis sync: added (new), edited (edited)" in out
+
+
+def test_rule_list_text_never_prints_terminal_escapes_from_rule_names(tmp_path, capsys):
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    try:
+        (traps / "evil\x1b]0;pwned\x07.md").write_text("---\ntype: trap\n---\n", encoding="utf-8")
+    except (OSError, ValueError):
+        pytest.skip("this filesystem refuses control characters in file names")
+
+    args = argparse.Namespace(rule_action="list", workspace=str(tmp_path), json=False, type=None, min_fitness=None, plain=True)
+    assert run_rule(args) == 0
+
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\x07" not in out
+    assert "evil" in out
 
 
 def test_rule_promote_and_force_promote(tmp_path, capsys):

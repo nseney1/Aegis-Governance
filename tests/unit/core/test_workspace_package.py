@@ -1,39 +1,10 @@
-"""Behavioral tests for the aegis_core.workspace helpers and Workspace.is_aegis_repo."""
+"""Behavioral tests for the aegis_core.workspace helpers."""
 from __future__ import annotations
 
 
 
 class TestWorkspacePackageArchitecture:
-    """Workspace fingerprinting and the resolve/confine helpers."""
-
-    def test_is_aegis_repo_compound_fingerprint(self, tmp_path):
-        from aegis_core.workspace.base import Workspace
-
-        # Dummy foreign repository
-        foreign = tmp_path / "foreign"
-        foreign.mkdir()
-        (foreign / ".aegis" / "rules").mkdir(parents=True)
-        (foreign / "pyproject.toml").write_text('[project]\nname = "my-awesome-tool"\n', encoding="utf-8")
-        ws_foreign = Workspace.resolve(foreign)
-        assert not ws_foreign.is_aegis_repo
-
-        # Fake repo with only pyproject.toml name but missing aegis_core/aegis_cli
-        fake = tmp_path / "fake"
-        fake.mkdir()
-        (fake / ".aegis" / "rules").mkdir(parents=True)
-        (fake / "pyproject.toml").write_text('[project]\nname = "aegis-guardrails"\n', encoding="utf-8")
-        ws_fake = Workspace.resolve(fake)
-        assert not ws_fake.is_aegis_repo
-
-        # Valid Aegis repository
-        aegis_mock = tmp_path / "aegis_mock"
-        aegis_mock.mkdir()
-        (aegis_mock / ".aegis" / "rules").mkdir(parents=True)
-        (aegis_mock / "pyproject.toml").write_text('[project]\nname = "aegis-guardrails"\n', encoding="utf-8")
-        (aegis_mock / "aegis_core").mkdir()
-        (aegis_mock / "aegis_cli").mkdir()
-        ws_aegis = Workspace.resolve(aegis_mock)
-        assert ws_aegis.is_aegis_repo
+    """The resolve/confine helpers."""
 
     def test_resolve_and_confine_helpers(self, tmp_path):
         from aegis_core.workspace import resolve_workspace, confine_path

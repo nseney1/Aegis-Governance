@@ -6,30 +6,16 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from aegis_core.lifecycle.decay import compute_cells_fitness
+from aegis_core.errors import RuleParseError
+from aegis_core.fitness import wilson_interval
 from aegis_core.metrics import calculate_coverage, calculate_governance_grade
-from aegis_core.outcomes.engine import _get_changed_files, match_cells_to_changes
-from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
+from aegis_core.outcomes.engine import _get_changed_files, match_rules_to_changes
+from aegis_core.rule_inventory import RuleInventoryError
+from aegis_core.rules import load_rules
+from aegis_core.sync import build
 from aegis_core.workspace.base import Workspace
-from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
-# Legacy (v1/v2) rule type names accepted by list_rules(rule_type=...).
-TYPE_TRANSLATION_MAP: dict[str, str] = {
-    "safety-guard": "invariant",
-    "learned-trap": "trap",
-    "agent-persona": "persona",
-    "escalation-boundary": "boundary",
-    "contract-bridge": "contract",
-    "invariant": "invariant",
-    "trap": "trap",
-    "persona": "persona",
-    "boundary": "boundary",
-    "contract": "contract",
-    "wall": "invariant",
-    "membrane": "boundary",
-}
-
-__all__ = ["Governance", "TYPE_TRANSLATION_MAP"]
+__all__ = ["Governance"]
 
 
 class Governance:
@@ -52,88 +38,97 @@ class Governance:
     def list_rules(self, rule_type: Optional[str] = None) -> list[dict[str, Any]]:
         """List rules (frontmatter plus ``_name``/``_path``), optionally filtered by type.
 
-        Invalid rule contents stay visible as ``_error`` records. Unsafe or
-        unreadable inventory trees fail closed because callers cannot safely
-        distinguish an empty tree from an incomplete one.
+        A rule file that cannot be loaded stays visible as an ``_error`` record. An
+        unsafe or unreadable rules tree raises, because callers cannot tell an empty
+        tree from an incomplete one.
         """
         try:
-            inventory = inventory_rules(str(self.root))
+            ruleset = load_rules(self.root)
         except RuleInventoryError as exc:
             raise RuntimeError(str(exc)) from exc
-
-        canonical_filter = TYPE_TRANSLATION_MAP.get(rule_type, rule_type) if rule_type else None
-
-        rules = []
-        for entry in inventory.entries:
-            relative_path = entry.relative_path
-            rule_name = Path(relative_path).stem
-            if Path(relative_path).name == 'README.md':
-                continue
-
-            if canonical_filter:
-                parent_name = Path(relative_path).parent.name
-                path_matches = (
-                    parent_name in (canonical_filter, canonical_filter + 's')
-                    or f"/{canonical_filter}/" in relative_path
-                    or f"/{canonical_filter}s/" in relative_path
-                )
-            else:
-                path_matches = True
-
-            try:
-                content = entry.content.decode('utf-8')
-            except UnicodeDecodeError as exc:
-                if path_matches:
-                    rules.append({'_name': rule_name, '_path': relative_path, '_error': f'invalid UTF-8: {exc}'})
-                continue
-
-            frontmatter = parse_frontmatter(content)
-            if frontmatter is None:
-                if path_matches:
-                    rules.append({'_name': rule_name, '_path': relative_path, '_error': 'malformed YAML frontmatter'})
-                continue
-            if not frontmatter:
-                if path_matches:
-                    rules.append({'_name': rule_name, '_path': relative_path, '_error': 'no frontmatter metadata'})
-                continue
-
-            if canonical_filter and frontmatter.get('type') != canonical_filter and not path_matches:
-                continue
-
-            frontmatter['_name'] = rule_name
-            frontmatter['_path'] = relative_path
-            rules.append(frontmatter)
-        return rules
+        return [rule.as_dict() for rule in ruleset.rules if not rule_type or rule.type == rule_type]
 
     def fitness_landscape(self, bayesian: bool = False) -> list[dict[str, Any]]:
-        """Fitness scores for every rule (with the Bayesian posterior when ``bayesian``)."""
-        return compute_cells_fitness(workspace=str(self.root), bayesian=bayesian)
+        """Ledger fitness of every rule that loads, with the lifecycle transition it suggests.
+
+        One row per rule: ``rule`` (its id), ``path``, ``type``, ``enforcement``,
+        ``hypothesis``, ``triggers``, ``tp``, ``fp``, ``last_ts``, ``score`` (aegis_core.fitness)
+        and ``suggestion`` (promote, demote, archive or None). ``bayesian`` adds the 90%
+        Wilson interval of the true-positive rate as ``bayesian: {lower, upper}``.
+        """
+        ruleset = load_rules(self.root)
+        derived = build(self.root, ruleset)
+        landscape = []
+        for rule_id, entry in sorted(derived["rules"].items()):
+            rule = ruleset.get(rule_id)
+            row = {
+                "rule": rule_id,
+                "path": entry["path"],
+                "type": entry["type"],
+                "enforcement": rule.enforcement if rule is not None else None,
+                "hypothesis": rule.meta.get("hypothesis", "") if rule is not None else "",
+                "triggers": entry["triggers"],
+                "tp": entry["tp"],
+                "fp": entry["fp"],
+                "last_ts": entry["last_ts"],
+                "score": entry["fitness"],
+                "suggestion": entry["suggestion"],
+            }
+            if bayesian:
+                lower, upper = wilson_interval(entry["tp"], entry["tp"] + entry["fp"])
+                row["bayesian"] = {"lower": round(lower, 4), "upper": round(upper, 4)}
+            landscape.append(row)
+        return landscape
 
     def coverage_report(self, exclude: Optional[str] = None) -> dict[str, Any]:
         """Which workspace files the rules' target_paths cover, overall and per directory."""
         return calculate_coverage(workspace=str(self.root), exclude=[exclude] if exclude else None)
 
     def grade(self) -> dict[str, Any]:
-        """Governance report card; a fixed all-F report when there are no rules."""
+        """Governance report card; a fixed all-F report when no rule can be graded.
+
+        ``rule_errors`` counts the rule files that cannot be loaded (they are not graded);
+        when no rule loads because of them, the fallback's status is FAIL.
+        """
         report = calculate_governance_grade(workspace=str(self.root))
         if report is None:
+            errors = len(load_rules(self.root).errors)
+            note = "No rules found to grade"
+            if errors:
+                note = f"No rule could be graded: {errors} rule file(s) cannot be loaded (aegis status lists them)"
             return {
                 "coverage": {"pct": 0.0, "grade": "F"},
                 "avg_fitness": {"pct": 0.0, "grade": "F", "score": 0.0},
                 "diversity": {"pct": 0.0, "grade": "F"},
                 "staleness": {"pct": 0.0, "grade": "F"},
-                "wall_integrity": {"pct": 0.0, "grade": "F"},
+                "invariant_integrity": {"pct": 0.0, "grade": "F"},
                 "tiers": {},
                 "overall": {"pct": 0.0, "grade": "F"},
-                "status": "PASS",
-                "note": "No cells found to grade",
+                "status": "FAIL" if errors else "PASS",
+                "note": note,
+                "rule_errors": errors,
             }
         return report
 
     def scan(self, files: Optional[list[str]] = None) -> list[dict[str, Any]]:
-        """Rules whose target_paths match ``files`` (default: the files git reports changed)."""
+        """Rules whose target_paths match ``files`` (default: the files git reports changed).
+
+        Like aegis scan, it never presents a partial rule set as the rules for these
+        files: if any rule file cannot be loaded it raises RuleParseError (an AegisError)
+        naming them, with ``rule_errors`` [{path, error}].
+        """
+        ruleset = load_rules(self.root)
+        if ruleset.errors:
+            errors = [{"path": r.path, "error": r.error or ""} for r in ruleset.errors]
+            listed = "; ".join(f"{e['path']}: {e['error']}" for e in errors[:5])
+            more = f" (and {len(errors) - 5} more)" if len(errors) > 5 else ""
+            raise RuleParseError(
+                f"{len(errors)} rule file(s) cannot be served, so no partial rule set is returned: {listed}{more}",
+                code="RULES_UNSERVABLE",
+                rule_errors=errors,
+            )
         changed = files if files is not None else _get_changed_files(str(self.root))
-        return match_cells_to_changes(str(self.root), changed)
+        return match_rules_to_changes(self.root, changed, ruleset)
 
     def entropy(self) -> dict[str, Any]:
         """Rule population and the Shannon entropy (bits) of its type distribution."""

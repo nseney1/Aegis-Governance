@@ -1,6 +1,7 @@
 """aegis_report_outcome: advisory self-reports appended to the outcome ledger."""
 from __future__ import annotations
 
+from aegis_core.rule_inventory import RuleInventoryError
 from aegis_core.telemetry_engine import ledger
 from aegis_mcp.registry import _STATUS_FAIL, _VALID_OUTCOMES, _get_workspace
 
@@ -49,7 +50,10 @@ def handle_report_outcome(args: dict) -> dict:
     if not isinstance(rules_used, (list, tuple)) or not all(isinstance(r, str) for r in rules_used):
         return _fail("'rules_used' must be a list of rule names.")
     rules_used = list(rules_used)
-    invalid = workspace.validate_rule_names(rules_used)
+    try:
+        invalid = workspace.validate_rule_names(rules_used)
+    except RuleInventoryError as exc:
+        return _fail(f"Cannot check 'rules_used' against the rules: {exc}")
     if invalid:
         return _fail(f"Unknown rule(s): {invalid}. Only existing rules can be reported.")
 

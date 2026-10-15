@@ -1,14 +1,13 @@
-"""Canonical, race-detecting inventory of governance cell files."""
+"""Canonical, race-detecting byte snapshot of the rule files (aegis_core.rules projects it)."""
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import os
 from pathlib import Path
 import stat
 from aegis_core.workspace.layout import WorkspaceLayout
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -43,12 +42,7 @@ class RuleInventoryError(RuntimeError):
         self.operation = operation
         self.path = os.path.abspath(path)
         self.cause = cause
-        super().__init__(f"cell inventory {operation} failed for {self.path}: {message}")
-
-
-CellInventoryEntry = RuleInventoryEntry
-CellInventory = RuleInventory
-CellInventoryError = RuleInventoryError
+        super().__init__(f"rule inventory {operation} failed for {self.path}: {message}")
 
 
 # On Windows os.stat() reports st_ctime as the creation time while os.fstat()
@@ -79,7 +73,7 @@ def _stat_path(path: str, operation: str = "stat") -> os.stat_result:
     try:
         return os.stat(path, follow_symlinks=False)
     except OSError as exc:
-        raise CellInventoryError(operation, path, str(exc), exc) from exc
+        raise RuleInventoryError(operation, path, str(exc), exc) from exc
 
 
 def _optional_stat(path: str) -> Optional[os.stat_result]:
@@ -88,21 +82,21 @@ def _optional_stat(path: str) -> Optional[os.stat_result]:
     except FileNotFoundError:
         return None
     except OSError as exc:
-        raise CellInventoryError("stat", path, str(exc), exc) from exc
+        raise RuleInventoryError("stat", path, str(exc), exc) from exc
 
 
 def _require_directory(path: str, info: os.stat_result) -> None:
     if stat.S_ISLNK(info.st_mode):
-        raise CellInventoryError("validate", path, "symlinked directory is not allowed")
+        raise RuleInventoryError("validate", path, "symlinked directory is not allowed")
     if not stat.S_ISDIR(info.st_mode):
-        raise CellInventoryError("validate", path, "expected a directory")
+        raise RuleInventoryError("validate", path, "expected a directory")
 
 
 def _read_stable_file(path: str, before: os.stat_result) -> bytes:
     if stat.S_ISLNK(before.st_mode):
-        raise CellInventoryError("validate", path, "symlinked .md cell is not allowed")
+        raise RuleInventoryError("validate", path, "symlinked .md rule is not allowed")
     if not stat.S_ISREG(before.st_mode):
-        raise CellInventoryError("validate", path, ".md cell is not a regular file")
+        raise RuleInventoryError("validate", path, ".md rule is not a regular file")
 
     flags = os.O_RDONLY
     # Without O_BINARY, Windows opens in text mode: os.read() turns CRLF into
@@ -113,22 +107,22 @@ def _read_stable_file(path: str, before: os.stat_result) -> bytes:
     try:
         fd = os.open(path, flags)
     except OSError as exc:
-        raise CellInventoryError("open", path, str(exc), exc) from exc
+        raise RuleInventoryError("open", path, str(exc), exc) from exc
 
     try:
         try:
             opened = os.fstat(fd)
         except OSError as exc:
-            raise CellInventoryError("stat", path, str(exc), exc) from exc
+            raise RuleInventoryError("stat", path, str(exc), exc) from exc
         if _stat_signature(opened) != _stat_signature(before):
-            raise CellInventoryError("read", path, "file changed before it was opened")
+            raise RuleInventoryError("read", path, "file changed before it was opened")
 
         chunks = []  # type: List[bytes]
         while True:
             try:
                 chunk = os.read(fd, 65536)
             except OSError as exc:
-                raise CellInventoryError("read", path, str(exc), exc) from exc
+                raise RuleInventoryError("read", path, str(exc), exc) from exc
             if not chunk:
                 break
             chunks.append(chunk)
@@ -136,9 +130,9 @@ def _read_stable_file(path: str, before: os.stat_result) -> bytes:
         try:
             after_read = os.fstat(fd)
         except OSError as exc:
-            raise CellInventoryError("stat", path, str(exc), exc) from exc
+            raise RuleInventoryError("stat", path, str(exc), exc) from exc
         if _stat_signature(after_read) != _stat_signature(opened):
-            raise CellInventoryError("read", path, "file changed while it was read")
+            raise RuleInventoryError("read", path, "file changed while it was read")
     finally:
         try:
             os.close(fd)
@@ -147,16 +141,16 @@ def _read_stable_file(path: str, before: os.stat_result) -> bytes:
 
     after_path = _stat_path(path)
     if _stat_signature(after_path) != _stat_signature(before):
-        raise CellInventoryError("read", path, "file changed during inventory")
+        raise RuleInventoryError("read", path, "file changed during inventory")
     return b"".join(chunks)
 
 
-def _empty_inventory() -> CellInventory:
-    digest = hashlib.sha256(b"soma-cell-inventory-v1\0").hexdigest()
-    return CellInventory(entries=(), fingerprint=digest)
+def _empty_inventory() -> RuleInventory:
+    digest = hashlib.sha256(b"aegis-rule-inventory-v1\0").hexdigest()
+    return RuleInventory(entries=(), fingerprint=digest)
 
 
-def inventory_rules(workspace: str) -> CellInventory:
+def inventory_rules(workspace: str) -> RuleInventory:
     """Capture every ``.md`` below ``.aegis/rules`` without following links.
 
     The returned content bytes are the same bytes used to calculate each entry
@@ -192,7 +186,7 @@ def inventory_rules(workspace: str) -> CellInventory:
 
     def walk_error(exc: OSError) -> None:
         path = getattr(exc, "filename", None) or cells_dir
-        raise CellInventoryError("list", path, str(exc), exc)
+        raise RuleInventoryError("list", path, str(exc), exc)
 
     try:
         walker = os.walk(cells_dir, topdown=True, followlinks=False, onerror=walk_error)
@@ -206,28 +200,30 @@ def inventory_rules(workspace: str) -> CellInventory:
                 child = os.path.join(dirpath, dirname)
                 child_info = _stat_path(child)
                 if stat.S_ISLNK(child_info.st_mode):
-                    raise CellInventoryError(
+                    raise RuleInventoryError(
                         "validate", child, "symlinked directory is not allowed"
                     )
                 if not stat.S_ISDIR(child_info.st_mode):
-                    raise CellInventoryError("validate", child, "expected a directory")
+                    raise RuleInventoryError("validate", child, "expected a directory")
 
             for filename in sorted(filenames):
-                if filename.endswith(".md"):
+                # Any case of the extension: the loader reports a rule named x.MD instead
+                # of letting it go unseen.
+                if filename.lower().endswith(".md"):
                     cell_paths.append(os.path.join(dirpath, filename))
-    except CellInventoryError:
+    except RuleInventoryError:
         raise
     except OSError as exc:
         path = getattr(exc, "filename", None) or cells_dir
-        raise CellInventoryError("list", path, str(exc), exc) from exc
+        raise RuleInventoryError("list", path, str(exc), exc) from exc
 
-    entries = []  # type: List[CellInventoryEntry]
+    entries = []  # type: List[RuleInventoryEntry]
     for path in sorted(cell_paths):
         before = _stat_path(path)
         content = _read_stable_file(path, before)
         digest = hashlib.sha256(content).hexdigest()
         relative = os.path.relpath(path, workspace_abs).replace(os.sep, "/")
-        entries.append(CellInventoryEntry(
+        entries.append(RuleInventoryEntry(
             relative_path=relative,
             absolute_path=os.path.abspath(path),
             content=content,
@@ -238,13 +234,13 @@ def inventory_rules(workspace: str) -> CellInventory:
     for path, expected in ancestor_identities.items():
         current = _stat_path(path)
         if _identity_signature(current) != expected:
-            raise CellInventoryError("list", path, "ancestor changed during inventory")
+            raise RuleInventoryError("list", path, "ancestor changed during inventory")
     for path, expected in directory_signatures.items():
         current = _stat_path(path)
         if _stat_signature(current) != expected:
-            raise CellInventoryError("list", path, "directory changed during inventory")
+            raise RuleInventoryError("list", path, "directory changed during inventory")
 
-    aggregate = hashlib.sha256(b"soma-cell-inventory-v1\0")
+    aggregate = hashlib.sha256(b"aegis-rule-inventory-v1\0")
     for entry in entries:
         aggregate.update(entry.relative_path.encode("utf-8") + b"\0")
         aggregate.update(bytes.fromhex(entry.digest))
@@ -252,140 +248,9 @@ def inventory_rules(workspace: str) -> CellInventory:
     return RuleInventory(entries=tuple(entries), fingerprint=aggregate.hexdigest())
 
 
-def find_rules_dirs(workspace: str | Path) -> List[Path]:
-    """Return existing rules directories for a workspace (.aegis/rules and rules)."""
-    ws_path = Path(os.fspath(workspace)).resolve()
-    candidates = [WorkspaceLayout(ws_path).rules_dir, ws_path / "rules"]
-    return [p for p in candidates if p.is_dir()]
-
-
-@dataclass(frozen=True)
-class RuleMatch:
-    """Represents a rule whose target_paths matched changed files."""
-
-    cell_id: str
-    cell_type: str
-    cell_path: str
-    frontmatter: dict
-    matched_files: Tuple[str, ...]
-    first_matching_target: Optional[str] = None
-
-    @property
-    def rule_id(self) -> str:
-        return self.cell_id
-
-    @property
-    def rule_type(self) -> str:
-        return self.cell_type
-
-    @property
-    def rule_path(self) -> str:
-        return self.cell_path
-
-
-def find_matching_rules(
-    cells_dir: str | Path,
-    changed_files: Iterable[str],
-    repo_root: str = "",
-    allow_basename_match: bool = True,
-) -> List[RuleMatch]:
-    """Find all rules in cells_dir whose target_paths match changed_files."""
-    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
-
-    cells_path = Path(cells_dir)
-    if not cells_path.is_dir():
-        return []
-
-    files_list = [f for f in changed_files if f]
-    if not files_list:
-        return []
-
-    rel_modified: List[str] = []
-    norm_root = str(repo_root).replace("\\", "/").rstrip("/") if repo_root else ""
-    for f in files_list:
-        norm_f = str(f).replace("\\", "/")
-        if norm_root and norm_f.startswith(norm_root):
-            rel = norm_f[len(norm_root):].lstrip("/")
-        else:
-            rel = norm_f.lstrip("/")
-        rel_modified.append(rel)
-
-    matches: List[RuleMatch] = []
-    for md_file in sorted(cells_path.rglob("*.md")):
-        if md_file.name == "README.md":
-            continue
-        try:
-            content = md_file.read_text(encoding="utf-8")
-            fm = parse_frontmatter(content) or {}
-        except Exception:
-            continue
-
-        raw_targets = fm.get("target_paths", [])
-        if isinstance(raw_targets, str):
-            raw_targets = [raw_targets]
-        if not isinstance(raw_targets, list) or not raw_targets:
-            continue
-
-        cell_id = fm.get("id") or md_file.stem
-        cell_type = fm.get("type", "unknown")
-
-        matched_for_cell: List[str] = []
-        first_target: Optional[str] = None
-
-        for rel_file in rel_modified:
-            file_matched = False
-            for target in raw_targets:
-                pat_norm = str(target).replace("\\", "/")
-                if fnmatch.fnmatch(rel_file, pat_norm) or (
-                    allow_basename_match and fnmatch.fnmatch(os.path.basename(rel_file), pat_norm)
-                ):
-                    file_matched = True
-                    if first_target is None:
-                        first_target = target
-                    break
-            if file_matched:
-                matched_for_cell.append(rel_file)
-
-        if matched_for_cell:
-            matches.append(RuleMatch(
-                cell_id=cell_id,
-                cell_type=cell_type,
-                cell_path=str(md_file.resolve()),
-                frontmatter=fm,
-                matched_files=tuple(sorted(set(matched_for_cell))),
-                first_matching_target=first_target,
-            ))
-
-    return matches
-
-
-from aegis_core.yaml_engine.frontmatter import parse_frontmatter
-
-# Backward-compatible and canonical engineering aliases
-CellInventory = RuleInventory
-CellInventoryEntry = RuleInventoryEntry
-CellInventoryError = RuleInventoryError
-CellMatch = RuleMatch
-inventory_cells = inventory_rules
-find_cells_dirs = find_rules_dirs
-find_matching_cells = find_matching_rules
-
 __all__ = [
-    "CellInventory",
-    "CellInventoryEntry",
-    "CellInventoryError",
-    "CellMatch",
     "RuleInventory",
     "RuleInventoryEntry",
     "RuleInventoryError",
-    "RuleMatch",
-    "find_cells_dirs",
-    "find_matching_cells",
-    "find_matching_rules",
-    "find_rules_dirs",
-    "inventory_cells",
     "inventory_rules",
-    "parse_frontmatter",
 ]
-
-

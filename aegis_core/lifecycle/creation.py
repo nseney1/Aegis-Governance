@@ -1,25 +1,20 @@
-"""Cell creation and cross-project transfer."""
+"""Rule creation: one new rule file in its type directory, under the workspace lock."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 
+from aegis_core.rules import VALID_ENFORCEMENT, load_rules
 from aegis_core.storage import atomic_write_text, locked
-from aegis_core.taxonomy import normalize_review_mode
+from aegis_core.taxonomy import CANONICAL_RULE_TYPES, RULE_TYPE_DIRS, RULE_TYPES, normalize_review_mode
 from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
-from .constants import (
-    VALID_ENFORCEMENT,
-    VALID_TYPES,
-)
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 from .parsers import (
     generate_slug,
     validate_cell_id,
 )
-# Rules parked by selection are no longer active, so their ids are free.
-from .selection import PARKED_RULE_DIRS
 
 __all__ = [
     "MAX_RULE_BODY_BYTES",
@@ -66,22 +61,23 @@ def create_cell(
         validate_rule_body(body)
 
     type_lower = cell_type.lower()
-    if type_lower not in VALID_TYPES:
+    if type_lower not in RULE_TYPES:
         raise ValueError(
-            f"Invalid type '{cell_type}'. Must be one of: trap, persona, invariant, boundary, contract."
+            f"Invalid type '{cell_type}'. Must be one of: {', '.join(CANONICAL_RULE_TYPES)}."
         )
+    mandatory = RULE_TYPES[type_lower].mandatory
 
     if enforcement is None:
-        enforcement = "gate" if type_lower in ("wall", "invariant") else "advisory"
+        enforcement = "gate" if mandatory else "advisory"
     else:
         enforcement_lower = enforcement.lower()
         if enforcement_lower not in VALID_ENFORCEMENT:
             raise ValueError(
                 f"Invalid enforcement '{enforcement}'. Must be one of: {', '.join(VALID_ENFORCEMENT)}."
             )
-        if type_lower in ("wall", "invariant") and enforcement_lower != "gate":
+        if mandatory and enforcement_lower != "gate":
             raise ValueError(
-                f"Wall cells must use 'gate' enforcement, got '{enforcement}'."
+                f"{type_lower.capitalize()} rules must use 'gate' enforcement, got '{enforcement}'."
             )
         enforcement = enforcement_lower
 
@@ -108,49 +104,38 @@ def create_cell(
         falsification = f"Behavior violates hypothesis: {hypothesis}"
 
     ws = literal_workspace(workspace)
-    type_plural = VALID_TYPES[type_lower]
+    type_plural = RULE_TYPE_DIRS[type_lower]
     target_dir = ws.rules_dir / type_plural
 
     slug = generate_slug(hypothesis, id_override)
+    _require_servable_id(slug)
     file_path = target_dir / f"{slug}.md"
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     type_title = type_lower.capitalize()
     truncated_hypo = hypothesis[:60] + ("..." if len(hypothesis) > 60 else "")
 
-    def escape_yaml_string(val: str) -> str:
-        s = val.replace("\\", "\\\\").replace('"', '\\"')
-        return " ".join(s.splitlines())
+    # One writer for rule frontmatter (defense #30): dump_frontmatter quotes any value a
+    # YAML reader could take for a comment, a boolean, a number or a list item.
+    meta = {
+        "id": slug,
+        "domain": domain,
+        "type": type_lower,
+        "enforcement": enforcement,
+        "hypothesis": " ".join(hypothesis.splitlines()),
+        "prediction": " ".join(prediction.splitlines()),
+        "falsification": " ".join(falsification.splitlines()),
+        "expiry_sessions": expiry_sessions,
+        "expiry_days": expiry_days,
+        "created": date_str,
+        "impact_weight": weight,
+        "tags": list(tags or []),
+        "target_paths": list(target_paths or []),
+        "lineage": {"parent_id": None, "created_by": "manual", "generation": 0, "siblings": []},
+    }
+    if minimum_mode:
+        meta["minimum_mode"] = minimum_mode
 
-    tags_list = tags or []
-    paths_list = target_paths or []
-
-    optional_block = f"\nminimum_mode: {minimum_mode}" if minimum_mode else ""
-
-    expiry_sess_str = "null" if expiry_sessions is None else str(expiry_sessions)
-    expiry_days_str = "null" if expiry_days is None else str(expiry_days)
-
-    frontmatter = f"""---
-id: {slug}
-domain: {domain}
-type: {type_lower}
-enforcement: {enforcement}
-hypothesis: "{escape_yaml_string(hypothesis)}"
-prediction: "{escape_yaml_string(prediction)}"
-falsification: "{escape_yaml_string(falsification)}"
-expiry_sessions: {expiry_sess_str}
-expiry_days: {expiry_days_str}
-created: "{date_str}"
-impact_weight: {weight}
-tags: {json.dumps(tags_list)}
-target_paths: {json.dumps(paths_list)}
-lineage:
-  parent_id: null
-  created_by: "manual"
-  generation: 0
-  siblings: []{optional_block}
----
-"""
     if body is None:
         body = f"""## {type_title}: {truncated_hypo}
 
@@ -164,7 +149,7 @@ lineage:
 """
     elif not body.endswith("\n"):
         body += "\n"
-    content = frontmatter + body
+    content = dump_frontmatter(meta, body=body)
 
     # Validate in memory so a malformed rule never reaches disk.
     from aegis_core.yaml_engine.frontmatter import AegisYAML
@@ -176,7 +161,7 @@ lineage:
         # would discard its fitness and lineage, and the same id in a second
         # tier would make two active rules answer to one id. A symlink at the
         # target counts as existing, so the writer never follows it out.
-        existing = file_path if os.path.lexists(file_path) else _active_rule_path(ws.rules_dir, slug)
+        existing = file_path if os.path.lexists(file_path) else _existing_rule_path(ws, slug)
         if existing is not None:
             raise FileExistsError(f"rule '{slug}' already exists: {existing}")
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -185,12 +170,19 @@ lineage:
     return file_path
 
 
-def _active_rule_path(rules_dir: Path, slug: str) -> Path | None:
-    name = f"{slug}.md"
-    for dirpath, dirnames, filenames in os.walk(rules_dir):
-        dirnames[:] = sorted(d for d in dirnames if d not in PARKED_RULE_DIRS)
-        if name in filenames:
-            return Path(dirpath) / name
+def _require_servable_id(slug: str) -> None:
+    """Refuse an id whose file the loader would never serve (aegis_core.rules)."""
+    if slug.lower() == "readme":
+        raise ValueError(f"Invalid rule id {slug!r}: a README.md under .aegis/rules is documentation, never a rule.")
+    if slug.startswith("."):
+        raise ValueError(f"Invalid rule id {slug!r}: a hidden file under .aegis/rules is never a rule.")
+
+
+def _existing_rule_path(ws: Workspace, slug: str) -> Path | None:
+    """A rule record already using ``slug`` (broken or not; archived rules free their id)."""
+    for rule in load_rules(ws).rules:
+        if rule.id == slug:
+            return ws.root / rule.path
     return None
 
 

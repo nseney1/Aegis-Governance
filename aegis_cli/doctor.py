@@ -34,8 +34,8 @@ def _check_zero_dependencies() -> bool:
     """Verify that the frontmatter engine is operational with zero dependencies."""
     from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
-    test_fm = "---\nid: test\ntype: wall\n---\n"
-    ok = parse_frontmatter(test_fm) == {"id": "test", "type": "wall"}
+    test_fm = "---\nid: test\ntype: invariant\n---\n"
+    ok = parse_frontmatter(test_fm) == {"id": "test", "type": "invariant"}
     if ok:
         print("  ✅ zero-dependency runtime operational (pure standard library)")
     else:

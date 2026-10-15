@@ -1,14 +1,14 @@
 """Rules match the files git reports as changed (the SDK `Governance.scan` path).
 
 `_get_changed_files` falls back to `git status --porcelain` when HEAD~1 does not
-exist, and `match_cells_to_changes` maps those paths to the rules that target them.
+exist, and `match_rules_to_changes` maps those paths to the rules that target them.
 """
 from __future__ import annotations
 
 import subprocess
 from pathlib import Path
 
-from aegis_core.outcomes.engine import _get_changed_files, match_cells_to_changes
+from aegis_core.outcomes.engine import _get_changed_files, match_rules_to_changes
 from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 
@@ -31,7 +31,7 @@ def _write_rule(ws: Path, rule_id: str, target_paths: list[str]) -> Path:
 
 
 def _matched_rules(ws: Path) -> set[str]:
-    return {c["_name"] for c in match_cells_to_changes(ws, _get_changed_files(str(ws)))}
+    return {c["_name"] for c in match_rules_to_changes(ws, _get_changed_files(str(ws)))}
 
 
 def test_rule_matches_an_unstaged_modification(tmp_path: Path) -> None:

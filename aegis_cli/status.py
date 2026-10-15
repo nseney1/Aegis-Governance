@@ -11,10 +11,8 @@ from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.taxonomy import (
     CHARS_PER_TOKEN_ESTIMATE,
     JIT_DEFAULT_MAX_TOKENS,
-    RULE_TYPE_DISPLAY_ORDER,
-    RULE_TYPE_NORMALIZATION,
+    RULE_TYPES,
 )
-from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = ["run_status", "StatusCommand"]
 
@@ -87,13 +85,6 @@ def _format_adaptive_expiry(created_val, expiry_days_val) -> str:
     if remaining_days < 0:
         return "expired"
     return f"{remaining_days}d"
-
-
-def _read_trigger_counts(project_root: Path) -> dict[str, int]:
-    """Trigger count per rule from the outcome ledger."""
-    from aegis_core.telemetry_engine import ledger
-
-    return {rule: int(totals["triggers"]) for rule, totals in ledger.aggregate(project_root).items()}
 
 
 # ── CLAUDE.md merged rules (BUG-033) ────────────────────────────────────────
@@ -326,21 +317,40 @@ def run_status(args: argparse.Namespace) -> int:
                 if p.is_file() and p.name.lower() != "readme.md":
                     core_files.append(p)
 
-    # 2. Count adaptive rules: .md files in .aegis/rules/ recursively (exclude README.md)
-    adaptive_files: list[Path] = []
-    layout = WorkspaceLayout(proj)
-    cells_dir = layout.rules_dir
-    if cells_dir.is_dir():
-        for p in sorted(cells_dir.rglob("*.md")):
-            if p.is_file() and p.name.lower() != "readme.md":
-                adaptive_files.append(p)
+    # 2. Workspace rules, through the one loader; fitness from the ledger.
+    from aegis_core.fitness import for_rules
+    from aegis_core.rule_inventory import RuleInventoryError
+    from aegis_core.rules import RuleSet, load_rules
+    from aegis_core.sync import read_derived, stale_rules
 
-    # 3. Trigger counts from the outcome ledger
-    trigger_counts = _read_trigger_counts(proj)
+    inventory_error = None
+    try:
+        ruleset = load_rules(proj)
+    except RuleInventoryError as exc:
+        inventory_error = str(exc)
+        ruleset = RuleSet(())
+    from aegis_core.telemetry_engine import ledger
+
+    # One ledger read for every number below; what it could not use is shown.
+    view = ledger.read(proj)
+    loaded = [r for r in ruleset.rules if r.ok]
+    fits = for_rules(proj, loaded, view=view)
+    derived = read_derived(proj)
+    stale = stale_rules(ruleset, derived)
+
+    # 3. Ledger totals of the host-installed rules (they have no rule file here)
+    from aegis_core.fitness import compute
+
+    totals = ledger.aggregate_rows(view.rows)
+
+    def _core_fitness(*names: str) -> tuple[int, float | None]:
+        entry = next((totals[n] for n in names if n in totals), {})
+        fit = compute(entry)
+        return fit.triggers, (fit.score if fit.verdicts else None)
 
     # 4. Process all rules and calculate character overhead
-    _type_norm = RULE_TYPE_NORMALIZATION
-    _type_order = RULE_TYPE_DISPLAY_ORDER
+    # Host-installed instruction rules ("core") list first, then the rule types in table order.
+    _type_order = {"core": 0, **{name: spec.display_order for name, spec in RULE_TYPES.items()}}
 
     total_chars = 0
     all_rules: list[dict] = []
@@ -353,9 +363,7 @@ def run_status(args: argparse.Namespace) -> int:
         total_chars += len(content)
         fm = _parse_frontmatter(str(f))
         rule_name = sanitize_display(str(fm.get("id") or f.stem))
-        triggers = trigger_counts.get(rule_name, trigger_counts.get(f.stem, 0))
-        fitness_block = fm.get("fitness", {})
-        score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
+        triggers, score = _core_fitness(rule_name, f.stem)
         all_rules.append({
             "name": rule_name,
             "type": "core",
@@ -368,37 +376,39 @@ def run_status(args: argparse.Namespace) -> int:
     for r in merged_rules:
         total_chars += len(r["text"])
         rule_name = sanitize_display(str(r["name"]))
+        triggers, score = _core_fitness(rule_name)
         all_rules.append({
             "name": rule_name,
             "type": "core",
-            "score": None,
-            "triggers": trigger_counts.get(rule_name, 0),
+            "score": score,
+            "triggers": triggers,
             "expiry": "∞ (core)",
             "is_core": True,
         })
 
-    for f in adaptive_files:
-        try:
-            content = f.read_text(encoding="utf-8-sig")
-        except Exception:
-            content = ""
-        total_chars += len(content)
-        fm = _parse_frontmatter(str(f))
-        rule_name = sanitize_display(str(fm.get("id") or f.stem))
-        raw_type = str(fm.get("type") or f.parent.name).lower()
-        norm_type = _type_norm.get(raw_type, raw_type)
-        fitness_block = fm.get("fitness", {})
-        score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
-        triggers = trigger_counts.get(rule_name, trigger_counts.get(f.stem, 0))
-        expiry_str = _format_adaptive_expiry(fm.get("created"), fm.get("expiry_days"))
+    for rule in loaded:
+        total_chars += len(rule.raw.decode("utf-8-sig", "replace"))
+        fit = fits[rule.id]
         all_rules.append({
-            "name": rule_name,
-            "type": norm_type,
-            "score": score,
-            "triggers": triggers,
-            "expiry": expiry_str,
+            "name": sanitize_display(rule.id),
+            "type": rule.type,
+            # No verdict yet is not a fitness of zero: show it as unknown.
+            "score": fit.score if fit.verdicts else None,
+            "triggers": fit.triggers,
+            "expiry": "expired" if rule.expired else _format_adaptive_expiry(
+                rule.meta.get("created"), rule.meta.get("expiry_days")),
             "is_core": False,
         })
+    problems = {
+        "rule_errors": [{"path": r.path, "error": r.error} for r in ruleset.errors],
+        "ignored": [{"path": i.path, "reason": i.reason} for i in ruleset.ignored],
+        "stale_rules": stale,
+        "needs_migrate": [{"path": r.path, "keys": list(r.legacy_keys)} for r in ruleset.needs_migrate],
+        "untargeted": [{"id": r.id, "path": r.path} for r in sorted(ruleset.served, key=lambda r: r.id)
+                       if not r.target_paths],
+    }
+    ledger_health = view.health()
+    rc = 1 if (problems["rule_errors"] or inventory_error) else 0
 
     # Context load: total characters / 4
     estimated_tokens = total_chars // CHARS_PER_TOKEN_ESTIMATE
@@ -417,12 +427,16 @@ def run_status(args: argparse.Namespace) -> int:
         import json
         payload = {
             "core_rules": len(core_files) + len(merged_rules),
-            "adaptive_rules": len(adaptive_files),
+            "adaptive_rules": len(loaded),
             "estimated_tokens": estimated_tokens,
             "rules": all_rules,
+            "last_sync": derived.get("synced_at") if derived else None,
+            "inventory_error": inventory_error,
+            "ledger": ledger_health,
+            **problems,
         }
         print(json.dumps(payload, indent=2))
-        return 0
+        return rc
 
     from aegis_cli.ui.table import Table
     from aegis_cli.ui.theme import OutputContext
@@ -436,13 +450,15 @@ def run_status(args: argparse.Namespace) -> int:
     header_title = "🛡️ Aegis Workspace Status" if ui.emoji_enabled else "Aegis Workspace Status"
     print(f"{ui.style(header_title, 'bold', 'cyan')}\n")
     print(f"  {'Core rules:':<16}{len(core_files) + len(merged_rules)} active")
-    print(f"  {'Adaptive rules:':<16}{len(adaptive_files)} (traps/patterns)")
+    print(f"  {'Adaptive rules:':<16}{len(loaded)} (traps/patterns)")
     print(f"  {'Context load:':<16}~{estimated_tokens:,} tokens (pre-JIT max)")
-    print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}\n")
+    print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}")
+    print(f"  {'Last sync:':<16}{derived.get('synced_at') if derived else 'never (run aegis sync)'}\n")
+    _print_problems(inventory_error, problems, view.incomplete)
 
     if not all_rules:
         print("  No rules found. Run 'aegis init' to set up governance rules.")
-        return 0
+        return rc
 
     tbl = Table(ctx=ui)
     tbl.add_column("Rule", no_wrap=True)
@@ -472,7 +488,41 @@ def run_status(args: argparse.Namespace) -> int:
     for line in tbl.render(ui).splitlines():
         print(f"  {line}")
 
-    return 0
+    return rc
+
+
+def _print_problems(inventory_error: str | None, problems: dict, ledger_missing: str | None = None) -> None:
+    """What the scan would refuse, skip or flag, so nothing is excluded unseen."""
+    from aegis_cli.sync import LEDGER_WARNING
+
+    if inventory_error:
+        print(f"  ❌ The rules directory cannot be read safely: {sanitize_display(inventory_error)}")
+    if ledger_missing:
+        print(f"  {LEDGER_WARNING.format(sanitize_display(ledger_missing, 300))}")
+    if problems["rule_errors"]:
+        print(f"  ❌ {len(problems['rule_errors'])} rule file(s) cannot be loaded; aegis scan fails until they are fixed:")
+        for item in problems["rule_errors"]:
+            print(f"     {sanitize_display(item['path'])}: {sanitize_display(item['error'])}")
+    if problems["stale_rules"]:
+        print(f"  ✏️  {len(problems['stale_rules'])} rule(s) changed since the last aegis sync:")
+        for item in problems["stale_rules"]:
+            print(f"     {sanitize_display(str(item['id']))} ({item['change']})")
+    if problems["needs_migrate"]:
+        print(f"  ⚠️  {len(problems['needs_migrate'])} rule file(s) still carry derived counters or retired v3 keys "
+              "(ignored; run aegis migrate --apply to strip them):")
+        for item in problems["needs_migrate"]:
+            print(f"     {sanitize_display(item['path'])}: {', '.join(item['keys'])}")
+    if problems["ignored"]:
+        print(f"  ℹ️  {len(problems['ignored'])} file(s) under .aegis/rules are not rules:")
+        for item in problems["ignored"]:
+            print(f"     {sanitize_display(item['path'])}: {item['reason']}")
+    if problems["untargeted"]:
+        print(f"  ⚠️  {len(problems['untargeted'])} rule(s) apply to no file (no target_paths), "
+              "so scan and check never serve them:")
+        for item in problems["untargeted"]:
+            print(f"     {sanitize_display(str(item['id']))}: {sanitize_display(item['path'])}")
+    if any(problems.values()) or inventory_error or ledger_missing:
+        print()
 
 
 class StatusCommand(AegisCommand):

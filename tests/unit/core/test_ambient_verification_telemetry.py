@@ -15,12 +15,12 @@ from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 
 def _create_cell(workspace: Path, cell_id: str, target_paths: list[str]) -> Path:
-    cells_dir = workspace / ".aegis" / "rules" / "vacuoles"
+    cells_dir = workspace / ".aegis" / "rules" / "traps"
     cells_dir.mkdir(parents=True, exist_ok=True)
     cell_path = cells_dir / f"{cell_id}.md"
     fm = {
         "id": cell_id,
-        "type": "vacuole",
+        "type": "trap",
         "enforcement": "advisory",
         "target_paths": target_paths,
         "hypothesis": f"Hypothesis for {cell_id}",

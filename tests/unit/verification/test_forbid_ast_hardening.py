@@ -308,7 +308,7 @@ _LATIN1_SOURCE = "# -*- coding: latin-1 -*-\nimport pickle\nGREETING = 'café'\n
 
 @pytest.fixture
 def ws(tmp_path: Path) -> Path:
-    rules_dir = tmp_path / ".aegis" / "rules"
+    rules_dir = tmp_path / ".aegis" / "rules" / "invariants"
     rules_dir.mkdir(parents=True)
     (rules_dir / "no-subprocess-run.md").write_text(_RULE, encoding="utf-8")
     (tmp_path / "src").mkdir()
