@@ -53,6 +53,7 @@ class CheckCommand(AegisCommand):
         parser.add_argument(
             "files",
             nargs="*",
+            default=None,  # keeps the contract snapshot identical across argparse versions
             metavar="FILES",
             help="Files to check (default: changed against HEAD, staged, or against the branch base)",
         )

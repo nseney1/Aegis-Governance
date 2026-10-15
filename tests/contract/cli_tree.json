@@ -1,7 +1,6 @@
 {
   "command_resolution": {
     "check": "check",
-    "checkpoint": "check",
     "doctor": "doctor",
     "hook": "hook",
     "init": "init",
@@ -9,8 +8,7 @@
     "rule": "rule",
     "scan": "scan",
     "status": "status",
-    "uninstall": "uninstall",
-    "verify": "check"
+    "uninstall": "uninstall"
   },
   "parser": {
     "arguments": [
@@ -79,10 +77,7 @@
     ],
     "commands": {
       "check": {
-        "aliases": [
-          "verify",
-          "checkpoint"
-        ],
+        "aliases": [],
         "arguments": [
           {
             "default": "==SUPPRESS==",
@@ -130,18 +125,8 @@
           },
           {
             "default": null,
-            "dest": "target_files",
-            "flags": [],
-            "kind": "store",
-            "nargs": "*",
-            "required": false
-          },
-          {
-            "default": null,
             "dest": "files",
-            "flags": [
-              "--files"
-            ],
+            "flags": [],
             "kind": "store",
             "nargs": "*",
             "required": false
@@ -152,85 +137,6 @@
             "dest": "hook",
             "flags": [
               "--hook"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "pre_commit",
-            "flags": [
-              "--pre-commit"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "all_files",
-            "flags": [
-              "--all"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "require_arbitration",
-            "flags": [
-              "--require-arbitration"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "full",
-            "flags": [
-              "--full",
-              "--deep"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "release_gate",
-            "flags": [
-              "--release",
-              "--release-gate"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "layer1_only",
-            "flags": [
-              "--layer1-only"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "no_layer2",
-            "flags": [
-              "--no-layer2"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -250,9 +156,9 @@
           {
             "const": true,
             "default": false,
-            "dest": "dry_run",
+            "dest": "full",
             "flags": [
-              "--dry-run"
+              "--full"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -280,9 +186,9 @@
           },
           {
             "default": null,
-            "dest": "provider",
+            "dest": "llm_cmd",
             "flags": [
-              "--provider"
+              "--llm-cmd"
             ],
             "kind": "store",
             "nargs": null,
@@ -291,20 +197,9 @@
           {
             "const": true,
             "default": false,
-            "dest": "in_band",
+            "dest": "dry_run",
             "flags": [
-              "--in-band"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "checkpoint_only",
-            "flags": [
-              "--checkpoint-only"
+              "--dry-run"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -313,8 +208,7 @@
           {
             "choices": [
               "text",
-              "json",
-              "sarif"
+              "json"
             ],
             "default": "text",
             "dest": "format",
@@ -1628,12 +1522,9 @@
   },
   "registry": [
     {
-      "aliases": [
-        "verify",
-        "checkpoint"
-      ],
+      "aliases": [],
       "category": "Daily Workflow & Verification",
-      "help": "Unified verification gate (checks invariants, rules, and outcomes)",
+      "help": "Verify changes: Layer 1 checks, plus a Layer 2 model review with --full",
       "name": "check"
     },
     {

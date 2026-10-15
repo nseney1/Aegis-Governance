@@ -135,6 +135,28 @@ def test_cli_surface_matches_snapshot():
     )
 
 
+def _star_positionals(node: Dict[str, Any], path: List[str]):
+    for arg in node["arguments"]:
+        if not arg["flags"] and arg["nargs"] in ("*", argparse.REMAINDER):
+            yield path, arg
+    for name, child in node.get("commands", {}).items():
+        yield from _star_positionals(child, path + [name])
+
+
+def test_snapshot_does_not_depend_on_the_python_argparse_version():
+    """CI compares one snapshot on Python 3.9 and 3.12.
+
+    argparse marks a `nargs="*"` positional without an explicit default as required
+    on older Pythons and not on newer ones (CPython gh-72795), so such a positional
+    would make `cli_tree.json` match only one of them. An explicit default pins it.
+    """
+    tree = build_cli_contract()["parser"]
+    unpinned = [
+        " ".join(path + [arg["dest"]]) for path, arg in _star_positionals(tree, []) if arg["required"]
+    ]
+    assert unpinned == [], f"nargs='*' positionals without an explicit default: {unpinned}"
+
+
 def test_installed_git_hook_command_parses_as_check_hook():
     """The argv the git pre-commit hook passes must stay a valid `check --hook` call (H7 floor)."""
     from aegis_cli.cli import _build_parser
