@@ -7,6 +7,8 @@ Repository plane, committed except ``state/``::
       .gitignore         "state/"
       rules/<type>/      rule files
       state/             machine-local, gitignored
+        .gitignore       "*": the directory ignores itself even where .aegis/.gitignore
+                         lacks "state/" (a v3 workspace not yet migrated)
         ledger.jsonl     the outcome ledger (aegis_core.telemetry_engine.ledger)
         derived.json     derived views rebuilt by `aegis sync`
         lock             the one workspace lock (aegis_core.storage.locked)
@@ -99,6 +101,10 @@ class WorkspaceLayout:
     @property
     def state_dir(self) -> Path:
         return self.aegis_dir / "state"
+
+    @property
+    def state_gitignore(self) -> Path:
+        return self.state_dir / ".gitignore"
 
     @property
     def ledger_file(self) -> Path:

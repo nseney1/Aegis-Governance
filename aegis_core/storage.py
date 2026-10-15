@@ -6,16 +6,21 @@ concurrency guarantees live in one place:
 - ``locked(workspace)``: the single workspace lock, ``.aegis/state/lock``. It is
   re-entrant per thread, so nested acquisition never deadlocks, and its wait is
   bounded with an error that names the lock file.
-- ``state_dir(workspace)``: ``.aegis/state``, refused when it (or ``.aegis``) is a
-  symlink or resolves outside the workspace, so machine-local state is never written
-  through a link a commit planted.
+- ``state_dir(workspace)``: ``.aegis/state``, refused when it (or ``.aegis``, or any
+  entry directly inside it: the ledger, the lock, a log, a backup) is a symlink or
+  resolves outside the workspace, so machine-local state is never written through a
+  link a commit planted (a tracked symlink is not hidden by the ``state/`` ignore
+  entry). It also keeps ``state/.gitignore`` ("*"), so state never shows in
+  ``git status`` even where ``.aegis/.gitignore`` lacks ``state/``.
 - ``atomic_write_bytes``/``atomic_write_text``: write a temporary file next to the
   target, fsync it, then replace. An existing file keeps its mode; a new file gets
-  the mode the umask gives (0o644 typically), not mkstemp's 0o600.
-- ``append_jsonl``: one ``O_APPEND`` write and one fsync. A torn trailing line left by
-  a crash is terminated first, so it cannot swallow the new row.
+  the mode the umask gives (0o644 typically), not mkstemp's 0o600; ``mode`` sets it
+  exactly (a private copy stays private).
+- ``append_jsonl``: one ``O_APPEND`` write and one fsync, never through a symlink. A
+  torn trailing line left by a crash is terminated first, so it cannot swallow the
+  new row.
 - ``read_jsonl``: decodes line by line (bytes, utf-8-sig); invalid lines are skipped
-  and counted, never raised.
+  and counted, never raised. It does not follow a symlink.
 """
 from __future__ import annotations
 
@@ -65,6 +70,10 @@ __all__ = [
 
 _O_BINARY = getattr(os, "O_BINARY", 0)
 _O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+# POSIX: the open itself refuses a symlink, so a link swapped in after the lstat check
+# is refused too. Windows has no O_NOFOLLOW; the lstat check is the guard there.
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 # A new file's permission bits before the umask: the kernel applies the umask, so no
 # process-wide os.umask() round trip (which races other threads) is needed.
 _NEW_FILE_MODE = 0o666
@@ -148,29 +157,79 @@ def _within(path: Path, root: Path) -> bool:
     return real == base or real.startswith(base.rstrip(os.sep) + os.sep)
 
 
+def _link_error(path: Path) -> PathTraversalError:
+    return PathTraversalError(
+        f"refusing to use {path}: it is a symlink; aegis keeps workspace state only inside the workspace",
+        path=str(path),
+    )
+
+
+def _outside_error(path: Path) -> PathTraversalError:
+    return PathTraversalError(
+        f"refusing to use {path}: it resolves outside the workspace; aegis keeps workspace "
+        "state only inside the workspace",
+        path=str(path),
+    )
+
+
+_STATE_GITIGNORE = b"# Aegis machine-local state; never committed.\n*\n"
+
+
 def state_dir(workspace: Any) -> Path:
     """The workspace's ``.aegis/state`` directory, created if missing.
 
-    Raises PathTraversalError, and creates nothing, when ``.aegis`` or ``.aegis/state``
-    is a symlink or otherwise resolves outside the workspace: the ledger, the lock and
-    migration backups would land wherever it points (a committed symlink is not matched
-    by the ``state/`` ignore entry).
+    Raises PathTraversalError when ``.aegis`` or ``.aegis/state`` is a symlink or
+    otherwise resolves outside the workspace (nothing is created then), or when an entry
+    directly inside ``.aegis/state`` is a symlink or a directory that resolves outside
+    it: the ledger, the lock, the logs and migration backups would be written wherever
+    it points. Writes ``state/.gitignore`` ("*") when it is missing.
     """
     layout = WorkspaceLayout(Path(os.fspath(workspace)).resolve())
     for path in (layout.aegis_dir, layout.state_dir):
         if path.is_symlink():
-            raise PathTraversalError(
-                f"refusing to use {path}: it is a symlink; aegis keeps workspace state only inside the workspace",
-                path=str(path),
-            )
+            raise _link_error(path)
     if not _within(layout.state_dir, layout.root):  # a Windows junction is not a symlink
-        raise PathTraversalError(
-            f"refusing to use {layout.state_dir}: it resolves outside the workspace; aegis keeps workspace "
-            "state only inside the workspace",
-            path=str(layout.state_dir),
-        )
+        raise _outside_error(layout.state_dir)
     layout.state_dir.mkdir(parents=True, exist_ok=True)
+    with os.scandir(layout.state_dir) as entries:
+        for entry in entries:
+            if entry.is_symlink():
+                raise _link_error(Path(entry.path))
+            if entry.is_dir(follow_symlinks=False) and not _within(Path(entry.path), layout.root):
+                raise _outside_error(Path(entry.path))
+    if not os.path.lexists(layout.state_gitignore):
+        atomic_write_bytes(layout.state_gitignore, _STATE_GITIGNORE)
     return layout.state_dir
+
+
+def _open_regular(path: Path, flags: int) -> int:
+    """``os.open`` that refuses a symlink at ``path`` and anything but a regular file.
+
+    Raises PathTraversalError for a symlink (an existing one, or, on POSIX, one swapped
+    in before the open) and for a FIFO, device or directory. A missing file is created
+    when ``flags`` has O_CREAT.
+    """
+    try:
+        st: Optional[os.stat_result] = os.lstat(path)
+    except FileNotFoundError:
+        st = None
+    if st is not None and stat.S_ISLNK(st.st_mode):
+        raise _link_error(path)
+    if st is not None and not stat.S_ISREG(st.st_mode):
+        raise PathTraversalError(f"refusing to use {path}: it is not a regular file", path=str(path))
+    try:
+        fd = os.open(str(path), flags | _O_NOFOLLOW | _O_BINARY | _O_CLOEXEC, _NEW_FILE_MODE)
+    except OSError as exc:
+        if os.path.islink(path):  # ELOOP (EMLINK on BSD): a link replaced it since the lstat
+            raise _link_error(path) from exc
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise PathTraversalError(f"refusing to use {path}: it is not a regular file", path=str(path))
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 @contextmanager
@@ -184,9 +243,11 @@ def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Pa
     PathTraversalError when the state directory is not confined (``state_dir``).
     """
     layout = WorkspaceLayout(Path(os.fspath(workspace)).resolve())
-    state_dir(layout.root)
+    state = state_dir(layout.root)
     lock_path = layout.lock_file
-    key = os.path.realpath(lock_path)
+    # state_dir() confined the directory; the lock file itself is opened by its own
+    # name, never through what a link named "lock" points at.
+    key = os.path.join(os.path.realpath(state), lock_path.name)
     held = _held()
     depth, fd = held.get(key, (0, None))
     if depth:
@@ -204,7 +265,7 @@ def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Pa
         raise _timeout_error(lock_path, timeout)
     fd = None
     try:
-        fd = os.open(key, os.O_RDWR | os.O_CREAT | _O_BINARY | _O_CLOEXEC, _NEW_FILE_MODE)
+        fd = _open_regular(lock_path, os.O_RDWR | os.O_CREAT)
         interval = LOCK_RETRY_INTERVAL_SECONDS
         while not _try_os_lock(fd):
             if time.monotonic() >= deadline:
@@ -268,24 +329,30 @@ def atomic_write_bytes(
     data: bytes,
     max_retries: int = STORAGE_MAX_RETRIES,
     initial_delay: float = STORAGE_INITIAL_DELAY_SECONDS,
+    mode: Optional[int] = None,
 ) -> None:
     """Replace ``path`` with ``data`` atomically: readers see the old or the new bytes.
 
-    The parent directory is created if missing. An existing file keeps its permission
-    bits; a new one gets ``0o666 & ~umask``. The temporary file is removed on failure.
+    The parent directory is created if missing. ``mode`` sets the permission bits
+    exactly (the umask does not apply); without it an existing file keeps its bits and
+    a new one gets ``0o666 & ~umask``. The temporary file is removed on failure.
     """
     target = Path(path).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        keep_mode: Optional[int] = stat.S_IMODE(os.stat(target).st_mode)
-    except FileNotFoundError:
-        keep_mode = None
+    keep_mode: Optional[int] = None if mode is None else stat.S_IMODE(mode)
+    if keep_mode is None:
+        try:
+            keep_mode = stat.S_IMODE(os.stat(target).st_mode)
+        except FileNotFoundError:
+            pass
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_BINARY | _O_CLOEXEC
+    # A file that ends with set bits starts private, so it is never looser in between.
+    create_mode = _NEW_FILE_MODE if keep_mode is None else 0o600
     while True:
         tmp = str(target.parent / f".{target.name}.{secrets.token_hex(6)}.tmp")
         try:
-            fd = os.open(tmp, flags, _NEW_FILE_MODE)
+            fd = os.open(tmp, flags, create_mode)
             break
         except FileExistsError:
             continue
@@ -356,7 +423,8 @@ def append_jsonl(path: Path | str, rows: Iterable[Dict[str, Any]]) -> int:
     """Append ``rows`` as JSON lines with one ``O_APPEND`` write and one fsync.
 
     Every row is serialized before anything is written, so a row that is not JSON
-    serializable writes nothing (ValueError/TypeError). If the file ends in a torn line
+    serializable writes nothing (ValueError/TypeError). A symlink at ``path``, dangling
+    or not, raises PathTraversalError and nothing is written. If the file ends in a torn line
     (no trailing newline, as a crash mid-write leaves it), a newline is written first:
     the torn bytes stay as one unreadable line and the new rows stay intact. Callers that
     need ordering or deduplication hold ``locked()``. Returns the number of rows written.
@@ -368,7 +436,7 @@ def append_jsonl(path: Path | str, rows: Iterable[Dict[str, Any]]) -> int:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     created = not os.path.lexists(target)
-    fd = os.open(str(target), os.O_RDWR | os.O_APPEND | os.O_CREAT | _O_BINARY | _O_CLOEXEC, _NEW_FILE_MODE)
+    fd = _open_regular(target, os.O_RDWR | os.O_APPEND | os.O_CREAT)
     try:
         size = os.fstat(fd).st_size
         if size:
@@ -404,21 +472,33 @@ class JsonlRead:
         return len(self.skipped_lines)
 
 
-def _parse_line(raw: bytes) -> Optional[Dict[str, Any]]:
+def _parse_line(raw: bytes, errors: str) -> Optional[Dict[str, Any]]:
     try:
-        value = json.loads(raw.decode("utf-8-sig"))
+        value = json.loads(raw.decode("utf-8-sig", errors))
     except (UnicodeDecodeError, ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
 
 
-def read_jsonl(path: Path | str) -> JsonlRead:
-    """Read a JSONL file; never raises for its content. A missing file reads as empty."""
+def read_jsonl(path: Path | str, errors: str = "strict") -> JsonlRead:
+    """Read a JSONL file; never raises for its content. A missing file reads as empty.
+
+    ``errors`` is the UTF-8 error handler: ``"surrogatepass"`` reads what v3 wrote with
+    it (a lone surrogate from a non-UTF-8 file name). A symlink, or anything but a
+    regular file, is not read: ``error`` says why.
+    """
     try:
-        with open(path, "rb") as fh:
-            data = fh.read()
+        # O_NONBLOCK: opening a FIFO for reading would otherwise wait for a writer.
+        fd = _open_regular(Path(path), os.O_RDONLY | _O_NONBLOCK)
     except FileNotFoundError:
         return JsonlRead([], [], [])
+    except PathTraversalError as exc:
+        return JsonlRead([], [], [], error=f"cannot read {path}: {exc}")
+    except OSError as exc:
+        return JsonlRead([], [], [], error=f"cannot read {path}: {exc.strerror or exc}")
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            data = fh.read()
     except OSError as exc:
         return JsonlRead([], [], [], error=f"cannot read {path}: {exc.strerror or exc}")
 
@@ -434,7 +514,7 @@ def read_jsonl(path: Path | str) -> JsonlRead:
         raw = raw.rstrip(b"\r")
         if not raw.strip():
             continue
-        row = _parse_line(raw)
+        row = _parse_line(raw, errors)
         if row is not None:
             rows.append(row)
             numbers.append(index + 1)

@@ -1,13 +1,18 @@
 """`aegis migrate`: v3 workspaces and .soma cells to the v4 layout (D10, D12, D13, D21).
 
-``plan(root)`` reads and decides; it writes nothing. ``apply(plan)`` executes under the
-workspace lock and copies every file it will change or remove to
-``.aegis/state/migrate-backup-<UTC stamp>/`` (same relative paths) before touching it.
-A second run finds nothing to do and writes nothing.
+``plan(root)`` reads and decides; it writes nothing, and records a digest of every file
+it converts. ``apply(plan)`` executes under the workspace lock: it first re-reads those
+files and, if any changed since planning (an editor saved a rule, a v3 process appended a
+row, a rule appeared at a destination), refuses with MigrationRefused and changes
+nothing, so plan-time bytes never overwrite a newer edit. It then copies every file it
+will change or remove to ``.aegis/state/migrate-backup-<UTC stamp>/`` (same relative
+paths, same permission bits, in a 0o700 directory: the copies include keys and receipts)
+before touching it. A second run finds nothing to do and writes nothing.
 
 What a plan converts:
 - **Ledger**: ``.aegis/evidence/signals.jsonl`` and its ``telemetry/`` compaction copy
-  (deduplicated by event id, or by identical row for rows without one) become v2 rows
+  (decoded as v3 wrote them, with ``surrogatepass``; deduplicated by event id, or by
+  identical row for rows without one) become v2 rows
   appended to ``.aegis/state/ledger.jsonl`` with provenance (``from``: v3 file and line),
   followed by one epoch row. Existing rows are never rewritten (v4.3 §10.4).
 - **Config**: ``aegis.conf``/``soma.conf``, ``.aegis/slots.yaml`` and ``.aegis/config.yaml``
@@ -26,8 +31,10 @@ What a plan converts:
   written. An entry that did not match the rule before migrating is left as it is: a
   rule edited outside aegis stays refused, never re-attested (H1).
 - **State**: the v3 runtime files (layout.LEGACY_STATE_ENTRIES) are removed, except
-  files under ``drivers/`` that are not the driver copies `aegis init` staged there, or
-  that a printed driver command names: those are left in place and reported.
+  files under ``drivers/`` that are not the driver copies `aegis init` staged there
+  byte for byte (a copy that differs from every version aegis shipped may hold the
+  user's changes), or that a printed driver command names: those are left in place and
+  reported.
 """
 from __future__ import annotations
 
@@ -41,10 +48,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 from typing import Any, Dict, List, Optional, Tuple
 
-from aegis_core.errors import WorkspaceError
-from aegis_core.storage import atomic_write_bytes, atomic_write_text, locked, read_jsonl
+from aegis_core.errors import PathTraversalError, WorkspaceError
+from aegis_core.storage import atomic_write_bytes, atomic_write_text, locked, read_jsonl, state_dir
 from aegis_core.taxonomy import CANONICAL_RULE_TYPES, RULE_TYPE_DIRS, RULE_TYPE_NORMALIZATION
 from aegis_core.workspace.layout import (
     LEGACY_CONFIG_ENTRIES,
@@ -117,6 +125,14 @@ class _RuleMove:
 
 
 @dataclass
+class _RuleStrip:
+    path: Path
+    keys: List[str]
+    content: str
+    original: bytes  # the bytes the plan read; the manifest re-attests only from these
+
+
+@dataclass
 class _ManifestUpdate:
     path: Path
     data: Dict[str, Any]  # the manifest with the planned entries already updated
@@ -140,7 +156,7 @@ class MigrationPlan:
     user_config: Dict[str, Dict[str, str]] = field(default_factory=dict)
     dropped: List[str] = field(default_factory=list)
     moves: List[_RuleMove] = field(default_factory=list)
-    strips: List[Tuple[Path, List[str], str]] = field(default_factory=list)
+    strips: List[_RuleStrip] = field(default_factory=list)
     unmapped: List[Dict[str, str]] = field(default_factory=list)
     conflicts: List[Dict[str, str]] = field(default_factory=list)
     unreadable: List[str] = field(default_factory=list)
@@ -150,6 +166,9 @@ class MigrationPlan:
     already_moved: List[Path] = field(default_factory=list)
     manifest: Optional[_ManifestUpdate] = None
     refusal: Optional[str] = None
+    # Every file whose bytes the plan converts, rewrites, removes for its content, or
+    # expects absent (a rule destination): repo-relative POSIX path -> _fingerprint.
+    inputs: Dict[str, Optional[str]] = field(default_factory=dict)
 
     @property
     def creates_config(self) -> bool:
@@ -182,7 +201,7 @@ class MigrationPlan:
             "rules": [
                 {"from": self._rel(m.source), "to": self._rel(m.target), "type": m.rule_type} for m in self.moves
             ],
-            "strip": [{"path": self._rel(path), "keys": keys} for path, keys, _ in self.strips],
+            "strip": [{"path": self._rel(strip.path), "keys": strip.keys} for strip in self.strips],
             "unmapped": self.unmapped,
             "conflicts": self.conflicts,
             "unreadable": self.unreadable,
@@ -311,6 +330,25 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _fingerprint(path: Path) -> Optional[str]:
+    """What ``path`` is now: None when absent, "symlink" for a link (never followed),
+    else the SHA-256 of its bytes."""
+    if not os.path.lexists(path):
+        return None
+    if os.path.islink(path):
+        return "symlink"
+    try:
+        return _sha256(path.read_bytes())
+    except OSError as exc:
+        return f"unreadable: {exc.strerror or exc}"
+
+
+def _record(result: "MigrationPlan", path: Path, data: Optional[bytes] = None) -> None:
+    """Note ``path`` as a plan input: ``data`` is the bytes the plan read (taken before
+    any parsing, so a later append is a change), or read now when omitted."""
+    result.inputs[result._rel(path)] = _fingerprint(path) if data is None else _sha256(data)
+
+
 # ── Planning ─────────────────────────────────────────────────────────────────
 
 def _plan_ledger(result: MigrationPlan, layout: WorkspaceLayout) -> None:
@@ -327,7 +365,10 @@ def _plan_ledger(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     for index, source in enumerate(sources):
         rel = result._rel(source)
         result.ledger_sources.append(rel)
-        read = read_jsonl(source)
+        _record(result, source)  # before reading: a row appended meanwhile is a change
+        # v3 wrote these with errors="surrogatepass" (a lone surrogate from a non-UTF-8
+        # file name); strict decoding would drop such a row as unreadable.
+        read = read_jsonl(source, errors="surrogatepass")
         if read.error:
             result.unreadable.append(rel)
         stats["skipped_lines"] += read.skipped
@@ -406,6 +447,7 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
         rel = result._rel(conf)
         result.config_sources.append(rel)
         result.removals.append(rel)
+        _record(result, conf)
         for key, value in _parse_conf(conf).items():
             upper = key.upper()
             if upper == "MAX_JIT_TOKENS" and value.isdigit() and int(value) > 0:
@@ -433,6 +475,7 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     if slots_file.is_file():
         rel = result._rel(slots_file)
         result.config_sources.append(rel)
+        _record(result, slots_file)
         try:
             raw = AegisYAML.parse_text(slots_file.read_text(encoding="utf-8-sig")).get("slots") or {}
         except Exception:
@@ -463,6 +506,7 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
         rel = result._rel(other)
         result.config_sources.append(rel)
         result.removals.append(rel)
+        _record(result, other)
         try:
             keys = sorted((AegisYAML.parse_text(other.read_text(encoding="utf-8-sig")) or {}).keys())
         except Exception:
@@ -493,7 +537,8 @@ def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
                 result.skipped.append({"path": rel, "reason": "a symlink or outside the workspace; not followed"})
                 continue
             try:
-                text = source.read_bytes().decode("utf-8-sig")  # bytes: keep CRLF as it is
+                raw = source.read_bytes()
+                text = raw.decode("utf-8-sig")  # bytes: keep CRLF as it is
             except (OSError, UnicodeError):
                 result.unreadable.append(rel)
                 continue
@@ -511,11 +556,15 @@ def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             if os.path.lexists(target) or target in planned_targets:
                 if _same_text(target, content):
                     result.already_moved.append(source)  # an interrupted apply: only the source is left
+                    _record(result, source, raw)
+                    _record(result, target, content.encode("utf-8"))
                 else:
                     result.conflicts.append({"path": rel, "to": result._rel(target)})
                 continue
             planned_targets.add(target)
             result.moves.append(_RuleMove(source, target, rule_type, content))
+            _record(result, source, raw)
+            result.inputs[result._rel(target)] = None  # must still be absent when applying
 
     if layout.rules_dir.is_dir():
         for path in sorted(layout.rules_dir.rglob("*.md")):
@@ -525,13 +574,15 @@ def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
                 result.skipped.append({"path": result._rel(path), "reason": "a symlink or outside the workspace; not rewritten"})
                 continue
             try:
-                text = path.read_bytes().decode("utf-8")
+                raw = path.read_bytes()
+                text = raw.decode("utf-8")
             except (OSError, UnicodeError):
                 result.unreadable.append(result._rel(path))
                 continue
             new_text, keys = _strip_derived(text)
             if keys:
-                result.strips.append((path, keys, new_text))
+                result.strips.append(_RuleStrip(path, keys, new_text, raw))
+                _record(result, path, raw)
 
 
 def _same_text(path: Path, content: str) -> bool:
@@ -541,10 +592,40 @@ def _same_text(path: Path, content: str) -> bool:
         return False
 
 
+# SHA-256 (LF line endings) of every packaged driver template aegis v1.1 through v3.3
+# shipped, which v3 `aegis init` copied (shutil.copy2) into .aegis/drivers/. Computed
+# from the release tags; the current template is compared at run time as well.
+_SHIPPED_DRIVER_SHA256: Dict[str, frozenset] = {
+    "rust_ast.py": frozenset({"e8fd2ae38db27d78b48f10e64f3386a304f732c2f00c093fc1604d41957c704b"}),
+    "ts_ast.js": frozenset({
+        "59a020774d842d23fb1b5ab2969db0d82e0aeab88f6a3821ca3abf4c68a4d5ed",  # v1.1.0-v1.2.1
+        "358950b81971ea7d6e2029d3e5e429cfaa53050b324e03742cc9fdb2d8aaad2d",  # v1.3.0-v3.3.0
+    }),
+    "go_ast.go": frozenset({"5e671a8f8c4fbd00b89c595c720fad4cf4f3c90b67757ab4625ff5df669680e1"}),
+}
+
+
+def _is_shipped_driver(name: str, data: bytes) -> bool:
+    """True when ``data`` is byte for byte a driver aegis shipped as ``name`` (CRLF from a
+    Windows checkout counts as LF)."""
+    from aegis_core.ast.drivers import templates
+
+    digest = _sha256(data.replace(b"\r\n", b"\n"))
+    if digest in _SHIPPED_DRIVER_SHA256.get(name, frozenset()):
+        return True
+    try:
+        current = (Path(templates.__file__).resolve().parent / name).read_bytes()
+    except OSError:
+        return False
+    return digest == _sha256(current.replace(b"\r\n", b"\n"))
+
+
 def _plan_drivers(result: MigrationPlan, drivers: Path) -> None:
     """v3 `aegis init` staged copies of the packaged drivers in .aegis/drivers/; v4 runs
-    the templates inside aegis. Only those copies go, and only when no printed driver
-    command names them; anything else there is the user's and stays."""
+    the templates inside aegis. Only those copies go: unmodified (byte for byte a version
+    aegis shipped) and named by no printed driver command. Anything else there is the
+    user's and stays; a staged name with other content is reported, since v4 never runs
+    it."""
     from aegis_core.ast.detect import LANGUAGE_DEFINITIONS
 
     if drivers.is_symlink() or not drivers.is_dir():
@@ -554,11 +635,37 @@ def _plan_drivers(result: MigrationPlan, drivers: Path) -> None:
     commands = [str(value).replace("\\", "/") for section in result.user_config.values() for value in section.values()]
     removable: List[str] = []
     kept: List[str] = []
+    customized: List[str] = []
     for item in sorted(p for p in drivers.rglob("*") if p.is_file() or p.is_symlink()):
         rel = result._rel(item)
         named = any(rel in command for command in commands)
-        (removable if item.parent == drivers and item.name in staged and not named else kept).append(rel)
-    if kept:
+        if item.parent != drivers or item.name not in staged or named:
+            kept.append(rel)
+            continue
+        if item.is_symlink():
+            removable.append(rel)  # the link goes; what it points at is never read
+            _record(result, item)
+            continue
+        try:
+            data = item.read_bytes()
+        except OSError:
+            result.unreadable.append(rel)
+            kept.append(rel)
+            continue
+        if _is_shipped_driver(item.name, data):
+            removable.append(rel)
+            _record(result, item, data)
+        else:
+            customized.append(rel)
+            result.skipped.append({
+                "path": rel,
+                "reason": (
+                    f"differs from every {item.name} aegis shipped, so it may hold your changes; left in "
+                    "place. v4 runs only its packaged driver for this selector, never a driver file in the "
+                    "repository (a driver of your own goes in ~/.aegis/config.json drivers)"
+                ),
+            })
+    if kept or customized:
         result.removals.extend(removable)
         result.left_in_place.extend(kept)
     else:
@@ -593,7 +700,8 @@ def _plan_manifest(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     if not path.is_file() or path.is_symlink() or not _inside(layout.root, path):
         return
     try:
-        data = json.loads(path.read_bytes().decode("utf-8-sig"))
+        raw = path.read_bytes()
+        data = json.loads(raw.decode("utf-8-sig"))
     except (OSError, UnicodeError, ValueError, RecursionError):
         data = None
     if not isinstance(data, dict):
@@ -607,11 +715,7 @@ def _plan_manifest(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     rewritten: List[Tuple[Path, Optional[bytes], bytes]] = [
         (move.target, None, move.content.encode("utf-8")) for move in result.moves
     ]
-    for rule, _keys, new_text in result.strips:
-        try:
-            rewritten.append((rule, rule.read_bytes(), new_text.encode("utf-8")))
-        except OSError:
-            continue
+    rewritten += [(strip.path, strip.original, strip.content.encode("utf-8")) for strip in result.strips]
     for rule, old, new in rewritten:
         rel_rules = rule.relative_to(layout.rules_dir).as_posix()
         names = (rel_rules, result._rel(rule), rule.name)
@@ -643,6 +747,7 @@ def _plan_manifest(result: MigrationPlan, layout: WorkspaceLayout) -> None:
         update.updated.sort()
         update.mismatched.sort()
         result.manifest = update
+        _record(result, path, raw)
 
 
 def plan(root: Any) -> MigrationPlan:
@@ -653,6 +758,12 @@ def plan(root: Any) -> MigrationPlan:
         if directory.is_symlink() or not _inside(layout.root, directory):
             why = "is a symlink" if directory.is_symlink() else "resolves outside the workspace"
             result.refusal = f"{result._rel(directory)} {why}; aegis migrate reads and writes only inside the workspace"
+            return result
+    # The lock, the ledger and backups are written in state/; config.json is merged in place.
+    entries = sorted(layout.state_dir.iterdir()) if layout.state_dir.is_dir() else []
+    for path in entries + [layout.config_file]:
+        if path.is_symlink():
+            result.refusal = f"{result._rel(path)} is a symlink; aegis migrate reads and writes only inside the workspace"
             return result
     _plan_ledger(result, layout)
     _plan_config(result, layout)
@@ -666,13 +777,18 @@ def plan(root: Any) -> MigrationPlan:
 # ── Applying ─────────────────────────────────────────────────────────────────
 
 def _backup_dir(layout: WorkspaceLayout) -> Path:
+    """Create a new, empty backup directory, 0o700: it will hold copies of keys and receipts."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    candidate = layout.migrate_backup_dir(stamp)
-    suffix = 1
-    while candidate.exists():
-        candidate = layout.migrate_backup_dir(f"{stamp}-{suffix}")
-        suffix += 1
-    return candidate
+    suffix = 0
+    while True:
+        candidate = layout.migrate_backup_dir(f"{stamp}-{suffix}" if suffix else stamp)
+        try:
+            os.mkdir(candidate, 0o700)
+        except FileExistsError:  # including a dangling link of that name: never reused
+            suffix += 1
+            continue
+        os.chmod(candidate, 0o700)  # mkdir's mode passes through the umask; this is exact
+        return candidate
 
 
 def _backup(root: Path, backup: Path, path: Path) -> None:
@@ -680,7 +796,9 @@ def _backup(root: Path, backup: Path, path: Path) -> None:
     for item in targets:
         if item.is_symlink():
             continue  # the link itself is removed; what it points at is not ours to copy
-        atomic_write_bytes(backup / item.relative_to(root), item.read_bytes())
+        # copy2 semantics for the permission bits: a 0600 key stays 0600 in the backup
+        mode = stat.S_IMODE(os.stat(item).st_mode)
+        atomic_write_bytes(backup / item.relative_to(root), item.read_bytes(), mode=mode)
 
 
 def _remove(path: Path) -> None:
@@ -704,20 +822,40 @@ def apply(migration: MigrationPlan) -> MigrationResult:
         return result
     layout = WorkspaceLayout(migration.root)
     root = layout.root
-    with locked(root):  # creates .aegis/state, refusing one that is not confined
+    try:
+        state_dir(root)  # what locked() checks first: a link planted since planning refuses here
+    except PathTraversalError as exc:
+        raise MigrationRefused(str(exc)) from exc
+    with locked(root):
+        changed = sorted(rel for rel, seen in migration.inputs.items() if _fingerprint(root / rel) != seen)
+        if changed:
+            raise MigrationRefused(
+                f"{', '.join(changed)} changed since the plan was made; nothing was migrated. "
+                "Run `aegis migrate` again to plan from the files as they are now."
+            )
+        writes_config = migration.config is not None and (migration.config_sources or migration.creates_config)
+        if writes_config and layout.config_file.is_symlink():
+            raise MigrationRefused(
+                f"{migration._rel(layout.config_file)} is a symlink; aegis migrate reads and writes only inside the workspace"
+            )
+        gitignore = layout.aegis_dir / ".gitignore"
         backup = _backup_dir(layout)
         touched = [root / rel for rel in migration.removals]
         touched += [move.source for move in migration.moves] + list(migration.already_moved)
-        touched += [path for path, _keys, _text in migration.strips]
+        touched += [strip.path for strip in migration.strips]
         if migration.manifest is not None and migration.manifest.updated:
             touched.append(migration.manifest.path)
+        if writes_config:
+            touched.append(layout.config_file)  # merged in place below
+        if ensure_runtime_gitignore(layout.aegis_dir, dry_run=True) == "dry-run":
+            touched.append(gitignore)  # gains "state/" below
         for path in touched:
             if os.path.lexists(path):
                 _backup(root, backup, path)
         result.backup = backup
 
         ensure_runtime_gitignore(layout.aegis_dir)
-        if migration.config is not None and (migration.config_sources or migration.creates_config):
+        if writes_config:
             changes = migration.config_changes
             update_repo_config(root, lambda data: _merge_missing(data, changes))
             result.written.append(layout.config_file.relative_to(root).as_posix())
@@ -738,15 +876,17 @@ def apply(migration: MigrationPlan) -> MigrationResult:
             save_manifest(root, migration.manifest.data)
             result.written.append(result.plan._rel(migration.manifest.path))
 
+        moved: List[_RuleMove] = []
         for move in migration.moves:
             if os.path.lexists(move.target):
-                continue  # appeared since planning: never overwrite
+                continue  # appeared since the check above: never overwrite, keep the source
             atomic_write_text(move.target, move.content)
-        for path, _keys, new_text in migration.strips:
-            atomic_write_bytes(path, new_text.encode("utf-8"))
+            moved.append(move)
+        for strip in migration.strips:
+            atomic_write_bytes(strip.path, strip.content.encode("utf-8"))
 
-        for move in migration.moves:
-            if move.target.is_file() and os.path.lexists(move.source):
+        for move in moved:
+            if os.path.lexists(move.source):
                 move.source.unlink()
         for source in migration.already_moved:
             if os.path.lexists(source):

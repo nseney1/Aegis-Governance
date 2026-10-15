@@ -9,6 +9,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -260,3 +261,110 @@ def test_the_safety_gate_log_is_not_written_through_a_symlinked_state_dir(tmp_pa
     log_gate_event("rm -rf /", "deny", "destructive", ws)  # logging never fails the gate
 
     assert list(outside.iterdir()) == []
+
+
+# ── Confinement of the files inside .aegis/state (review B2a round 3, F1) ────
+
+def _symlink_file_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+
+def _state_ws(tmp_path: Path) -> Path:
+    ws = tmp_path / "ws"
+    (ws / ".aegis" / "state").mkdir(parents=True)
+    return ws
+
+
+def test_a_symlinked_ledger_is_refused_and_its_target_is_untouched(tmp_path: Path):
+    from aegis_core.errors import PathTraversalError
+    from aegis_core.telemetry_engine import ledger
+
+    ws = _state_ws(tmp_path)
+    victim = tmp_path / "victim" / ".bashrc"
+    victim.parent.mkdir()
+    victim.write_bytes(b"export PATH=/usr/bin\n")
+    _symlink_file_or_skip(ws / ".aegis" / "state" / "ledger.jsonl", victim)
+
+    with pytest.raises(PathTraversalError, match=r"ledger\.jsonl: it is a symlink"):
+        ledger.append(ws, [{"rule": "x$(touch /tmp/pwn)", "outcome": "trigger", "source": "mcp", "key": "k"}])
+
+    assert victim.read_bytes() == b"export PATH=/usr/bin\n"
+
+
+def test_a_dangling_lock_symlink_is_refused_and_creates_nothing(tmp_path: Path):
+    from aegis_core.errors import PathTraversalError
+
+    ws = _state_ws(tmp_path)
+    target = tmp_path / "victim" / "created"
+    target.parent.mkdir()
+    _symlink_file_or_skip(ws / ".aegis" / "state" / "lock", target)
+
+    with pytest.raises(PathTraversalError, match=r"lock: it is a symlink"):
+        with locked(ws):
+            pass
+
+    assert not os.path.lexists(target)
+
+
+@pytest.mark.parametrize("name", ["gate_events.jsonl", "lifecycle.jsonl", "derived.json", "migrate-backup-20261015T120000Z"])
+def test_any_symlink_inside_the_state_dir_is_refused(tmp_path: Path, name: str):
+    from aegis_core.errors import PathTraversalError
+
+    ws = _state_ws(tmp_path)
+    outside = tmp_path / "victim"
+    outside.mkdir()
+    _symlink_file_or_skip(ws / ".aegis" / "state" / name, outside / name)
+
+    with pytest.raises(PathTraversalError, match=f"{name}: it is a symlink"):
+        with locked(ws):
+            pass
+
+    assert list(outside.iterdir()) == []
+
+
+def test_the_safety_gate_log_is_not_written_through_a_symlinked_log_file(tmp_path: Path):
+    from aegis_cli.hooks.safety import log_gate_event
+
+    ws = _state_ws(tmp_path)
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"keep\n")
+    _symlink_file_or_skip(ws / ".aegis" / "state" / "gate_events.jsonl", victim)
+
+    log_gate_event("rm -rf /", "deny", "destructive", ws)  # logging never fails the gate
+
+    assert victim.read_bytes() == b"keep\n"
+
+
+# ── The state dir ignores itself (review B2a round 3, F3) ────────────────────
+
+def _git(repo: Path, *args: str) -> str:
+    env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1")
+    return subprocess.run(
+        ["git", "-c", "user.email=t@example.com", "-c", "user.name=T", *args],
+        cwd=str(repo), check=True, capture_output=True, text=True, env=env,
+    ).stdout
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize("aegis_gitignore", [None, "evidence/\nlocks/\nkeys/\n"])
+def test_state_written_before_any_migration_never_shows_in_git_status(tmp_path: Path, aegis_gitignore):
+    from aegis_core.telemetry_engine import ledger
+
+    repo = tmp_path / "repo"
+    (repo / ".aegis" / "rules").mkdir(parents=True)
+    (repo / ".aegis" / "rules" / "trap-a.md").write_text("---\nid: trap-a\n---\n", encoding="utf-8")
+    if aegis_gitignore is not None:  # what a v3 workspace has: no state/ entry
+        (repo / ".aegis" / ".gitignore").write_text(aegis_gitignore, encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "v3 workspace")
+
+    ledger.append(repo, [{"rule": "trap-a", "outcome": "tp", "source": "mcp", "key": "k", "meta": {"notes": "free text"}}])
+    with locked(repo):
+        pass
+
+    assert (repo / ".aegis" / "state" / "ledger.jsonl").is_file()
+    assert _git(repo, "status", "--porcelain", "--untracked-files=all") == ""

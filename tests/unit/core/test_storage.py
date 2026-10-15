@@ -251,3 +251,80 @@ def test_read_jsonl_reports_an_unreadable_file_without_raising(tmp_path: Path):
     result = read_jsonl(path)
     assert result.rows == []
     assert result.error is not None and str(path) in result.error
+
+
+# ── Never through a link (review B2a round 3, F1) ────────────────────────────
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+
+def test_append_jsonl_never_writes_through_a_symlink(tmp_path: Path):
+    from aegis_core.errors import PathTraversalError
+
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"keep me\n")
+    link = tmp_path / "ledger.jsonl"
+    _symlink_or_skip(link, victim)
+
+    with pytest.raises(PathTraversalError, match=r"ledger\.jsonl: it is a symlink"):
+        append_jsonl(link, [{"rule": "x$(touch /tmp/pwn)"}])
+
+    assert victim.read_bytes() == b"keep me\n"
+    assert link.is_symlink()
+
+
+def test_append_jsonl_never_creates_the_target_of_a_dangling_symlink(tmp_path: Path):
+    from aegis_core.errors import PathTraversalError
+
+    target = tmp_path / "created-by-aegis.txt"
+    link = tmp_path / "gate_events.jsonl"
+    _symlink_or_skip(link, target)
+
+    with pytest.raises(PathTraversalError, match="it is a symlink"):
+        append_jsonl(link, [{"a": 1}])
+
+    assert not os.path.lexists(target)
+
+
+def test_read_jsonl_does_not_follow_a_symlink(tmp_path: Path):
+    victim = tmp_path / "victim.jsonl"
+    victim.write_bytes(b'{"secret": 1}\n')
+    link = tmp_path / "ledger.jsonl"
+    _symlink_or_skip(link, victim)
+
+    result = read_jsonl(link)
+
+    assert result.rows == []
+    assert result.error is not None and "symlink" in result.error and str(link) in result.error
+
+
+# ── Exact modes for private copies (review B2a round 3, F2) ──────────────────
+
+@posix_only
+@pytest.mark.parametrize("mode", [0o600, 0o640, 0o755])
+def test_atomic_write_bytes_can_set_an_exact_mode(tmp_path: Path, umask, mode: int):
+    umask(0o022)
+    target = tmp_path / "copy.key"
+    atomic_write_bytes(target, b"k", mode=mode)
+    assert _mode(target) == mode
+    atomic_write_bytes(target, b"k2", mode=0o600)  # an explicit mode wins over the existing one
+    assert _mode(target) == 0o600
+
+
+# ── Legacy files written with surrogatepass (review B2a round 3, F5) ─────────
+
+def test_read_jsonl_can_decode_like_the_v3_writer(tmp_path: Path):
+    path = tmp_path / "signals.jsonl"
+    row = {"metadata": {"target_files": ["caf\udce9.py"]}}
+    path.write_bytes(json.dumps(row, ensure_ascii=False).encode("utf-8", "surrogatepass") + b"\n")
+
+    strict = read_jsonl(path)
+    assert strict.rows == [] and strict.skipped_lines == [1]
+
+    legacy = read_jsonl(path, errors="surrogatepass")
+    assert legacy.rows == [row]
+    assert legacy.skipped_lines == []

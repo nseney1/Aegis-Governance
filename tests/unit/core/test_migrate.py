@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
+import stat
+import subprocess
 
 import pytest
 
@@ -35,6 +39,12 @@ def _v1(cell, signal, ts, event_id, weight=1.0, with_rule_id=True, **meta):
         "metadata": {"credit_weight": weight, "verdict": "PASS", **meta},
     })
     return row
+
+
+def _packaged_template(name: str) -> bytes:
+    from aegis_core.ast.drivers import templates
+
+    return (Path(templates.__file__).resolve().parent / name).read_bytes()
 
 
 def _write_jsonl(path: Path, rows) -> None:
@@ -99,7 +109,8 @@ def legacy(tmp_path: Path) -> Path:
     (aegis / "jobs_state.json").write_text("{}", encoding="utf-8")
     (aegis / "epoch_generation").write_text("1", encoding="utf-8")
     (aegis / "drivers").mkdir()
-    (aegis / "drivers" / "rust_ast.py").write_text("# staged copy\n", encoding="utf-8")
+    # what v3 `aegis init` staged there: shutil.copy2 of the packaged template
+    (aegis / "drivers" / "rust_ast.py").write_bytes(_packaged_template("rust_ast.py"))
     (aegis / "skills" / "genesis").mkdir(parents=True)  # not ours to remove
     (aegis / "slots.yaml").write_text(
         "# .aegis/slots.yaml — Repository skill & driver slot bindings\n"
@@ -682,3 +693,221 @@ def test_a_staged_copy_a_printed_driver_command_names_is_kept(legacy: Path):
     migrate.apply(plan)
 
     assert (legacy / ".aegis" / "drivers" / "rust_ast.py").is_file()
+
+
+# ── Backups keep private files private (review B2a round 3, F2) ──────────────
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+def test_backups_keep_each_file_mode_and_the_backup_dir_is_private(legacy: Path):
+    private = (".aegis/keys/receipt.key", ".aegis/receipts.jsonl", ".aegis/evidence/signals.jsonl")
+    for rel in private:
+        os.chmod(legacy / rel, 0o600)
+    os.chmod(legacy / "aegis.conf", 0o640)
+    saved = os.umask(0o022)
+    try:
+        result = migrate.apply(migrate.plan(legacy))
+    finally:
+        os.umask(saved)
+
+    def mode(path: Path) -> int:
+        return stat.S_IMODE(path.stat().st_mode)
+
+    assert mode(result.backup) == 0o700
+    for rel in private:
+        assert mode(result.backup / rel) == 0o600, rel
+    assert mode(result.backup / "aegis.conf") == 0o640
+
+
+# ── Nothing planned from stale bytes (review B2a round 3, F4) ────────────────
+
+def _without_state(snapshot: dict) -> dict:
+    return {rel: data for rel, data in snapshot.items() if not rel.startswith(".aegis/state/")}
+
+
+@pytest.mark.parametrize("rel, edit", [
+    (".aegis/rules/traps/trap-existing.md", b"EDITED AFTER PLAN\n"),
+    (".soma/cells/walls/wall-install-uninstall-parity.md", b"EDITED AFTER PLAN\n"),
+    ("aegis.conf", b"MAX_JIT_TOKENS=900\n"),
+    (".aegis/slots.yaml", b"  ast_driver_go: \"go run .aegis/drivers/go_ast.go\"\n"),
+    (".aegis/evidence/signals.jsonl", b"\n" + json.dumps(_v1("trap-late", "tp", TS3, "e7")).encode() + b"\n"),
+])
+def test_a_file_changed_after_planning_refuses_apply_and_changes_nothing(legacy: Path, rel: str, edit: bytes):
+    plan = migrate.plan(legacy)
+    with open(legacy / rel, "ab") as fh:
+        fh.write(edit)
+    before = _snapshot(legacy)
+
+    with pytest.raises(migrate.MigrationRefused, match=re.escape(rel) + " changed since the plan was made"):
+        migrate.apply(plan)
+
+    assert _without_state(_snapshot(legacy)) == before
+    assert not list((legacy / ".aegis" / "state").glob("migrate-backup-*"))
+    assert not (legacy / ".aegis" / "state" / "ledger.jsonl").exists()
+    result = migrate.apply(migrate.plan(legacy))  # a fresh plan works from the edited bytes
+    assert (result.backup / rel).read_bytes().endswith(edit)
+
+
+def test_a_rule_destination_created_after_planning_refuses_apply(legacy: Path):
+    plan = migrate.plan(legacy)
+    target = legacy / ".aegis" / "rules" / "invariants" / "wall-install-uninstall-parity.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("---\nid: someone-elses\n---\nTheirs\n", encoding="utf-8")
+    source = legacy / ".soma" / "cells" / "walls" / "wall-install-uninstall-parity.md"
+    source_bytes = source.read_bytes()
+
+    with pytest.raises(migrate.MigrationRefused, match="wall-install-uninstall-parity.md changed since the plan was made"):
+        migrate.apply(plan)
+
+    assert source.read_bytes() == source_bytes  # never removed while its content went nowhere
+    assert target.read_text(encoding="utf-8") == "---\nid: someone-elses\n---\nTheirs\n"
+
+
+def test_a_manifest_rewritten_after_planning_refuses_apply(legacy: Path):
+    from aegis_core import integrity
+
+    _sign_v3_manifest(legacy)
+    plan = migrate.plan(legacy)
+    _cell(legacy / ".aegis" / "rules" / "traps" / "trap-created-meanwhile.md", "trap")
+    integrity.save_manifest(legacy, integrity.generate_manifest(legacy / ".aegis" / "rules"))
+    manifest = (legacy / ".aegis" / "rules" / "manifest.json").read_bytes()
+
+    with pytest.raises(migrate.MigrationRefused, match=r"\.aegis/rules/manifest\.json changed since the plan was made"):
+        migrate.apply(plan)
+
+    assert (legacy / ".aegis" / "rules" / "manifest.json").read_bytes() == manifest
+
+
+def test_apply_backs_up_the_config_and_gitignore_it_changes(legacy: Path):
+    config = legacy / ".aegis" / "config.json"
+    config.write_bytes(b'{"v": 1, "hosts": ["codex"]}\n')
+    gitignore = legacy / ".aegis" / ".gitignore"
+    gitignore.write_bytes(b"evidence/\nlocks/\n")
+
+    result = migrate.apply(migrate.plan(legacy))
+
+    assert (result.backup / ".aegis" / "config.json").read_bytes() == b'{"v": 1, "hosts": ["codex"]}\n'
+    assert (result.backup / ".aegis" / ".gitignore").read_bytes() == b"evidence/\nlocks/\n"
+    assert json.loads(config.read_text(encoding="utf-8"))["jit"] == {"max_tokens": 1500}
+    assert gitignore.read_text(encoding="utf-8").splitlines()[-1] == "state/"
+
+
+# ── v3 rows written with surrogatepass (review B2a round 3, F5) ──────────────
+
+def test_a_v3_row_holding_a_lone_surrogate_is_migrated(tmp_path: Path):
+    root = tmp_path / "ws"
+    signals = root / ".aegis" / "evidence" / "signals.jsonl"
+    signals.parent.mkdir(parents=True)
+    row = _v1("trap-encoding", "tp", TS1, "s1", target_files=["caf\udce9.py"])
+    # exactly how v3 wrote the ledger: ensure_ascii=False, then surrogatepass
+    signals.write_bytes(json.dumps(row, ensure_ascii=False).encode("utf-8", "surrogatepass") + b"\n")
+
+    plan = migrate.plan(root)
+    assert plan.to_dict()["ledger"]["rows"] == 1
+    assert plan.to_dict()["ledger"]["skipped_lines"] == 0
+    migrate.apply(plan)
+
+    rows = ledger.read(root).rows
+    assert [(r["rule"], r["meta"]["target_files"]) for r in rows] == [("trap-encoding", ["caf\udce9.py"])]
+    (root / ".aegis" / "state" / "ledger.jsonl").read_bytes().decode("utf-8")  # still valid UTF-8
+
+
+# ── Staged drivers are removed only when they are what aegis shipped (F6) ────
+
+def test_a_customized_staged_driver_is_left_in_place_and_reported(legacy: Path):
+    driver = legacy / ".aegis" / "drivers" / "rust_ast.py"
+    custom = _packaged_template("rust_ast.py") + b"\n# our team's tweak\nEXTRA_KEYWORDS = ['unsafe']\n"
+    driver.write_bytes(custom)
+
+    plan = migrate.plan(legacy)
+    report = plan.to_dict()
+    assert not any(path.startswith(".aegis/drivers") for path in report["remove"])
+    reasons = {entry["path"]: entry["reason"] for entry in report["skipped"]}
+    assert "differs from every rust_ast.py aegis shipped" in reasons[".aegis/drivers/rust_ast.py"]
+    migrate.apply(plan)
+
+    assert driver.read_bytes() == custom
+
+
+@pytest.mark.parametrize("name", ["rust_ast.py", "ts_ast.js", "go_ast.go"])
+@pytest.mark.parametrize("eol", [b"\n", b"\r\n"])
+def test_an_unmodified_staged_driver_is_removed(tmp_path: Path, name: str, eol: bytes):
+    root = tmp_path / "ws"
+    driver = root / ".aegis" / "drivers" / name
+    driver.parent.mkdir(parents=True)
+    lf = _packaged_template(name).replace(b"\r\n", b"\n")
+    driver.write_bytes(lf.replace(b"\n", eol))  # what init copied from a Windows (CRLF) checkout
+
+    plan = migrate.plan(root)
+    assert plan.to_dict()["remove"] == [".aegis/drivers"]
+    migrate.apply(plan)
+
+    assert not driver.parent.exists()
+
+
+def test_a_driver_staged_by_v3_3_is_recognized(tmp_path: Path):
+    repo = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
+    try:
+        shipped = subprocess.run(
+            ["git", "show", "v3.3.0:aegis_core/ast/drivers/templates/rust_ast.py"],
+            cwd=str(repo), capture_output=True, check=True, timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip("the v3.3.0 tag is not in this checkout")
+    assert shipped != _packaged_template("rust_ast.py")  # v4 changed the template since
+    root = tmp_path / "ws"
+    driver = root / ".aegis" / "drivers" / "rust_ast.py"
+    driver.parent.mkdir(parents=True)
+    driver.write_bytes(shipped)
+
+    assert migrate.plan(root).to_dict()["remove"] == [".aegis/drivers"]
+
+
+# ── Refused before anything is written ───────────────────────────────────────
+
+@pytest.mark.parametrize("name", ["ledger.jsonl", "lock", "migrate-backup-20261015T120000Z"])
+def test_a_symlink_inside_the_state_dir_refuses_the_migration(legacy: Path, tmp_path: Path, name: str):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (legacy / ".aegis" / "state").mkdir()
+    _symlink_or_skip(legacy / ".aegis" / "state" / name, outside / name)
+    before = _snapshot(legacy)
+
+    plan = migrate.plan(legacy)
+    assert plan.to_dict()["status"] == "refused"
+    assert f".aegis/state/{name} is a symlink" in plan.to_dict()["refusal"]
+    with pytest.raises(migrate.MigrationRefused):
+        migrate.apply(plan)
+
+    assert list(outside.iterdir()) == []
+    assert _snapshot(legacy) == before
+
+
+def test_a_state_dir_link_planted_after_planning_refuses_apply(legacy: Path, tmp_path: Path):
+    plan = migrate.plan(legacy)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (legacy / ".aegis" / "state").mkdir()
+    _symlink_or_skip(legacy / ".aegis" / "state" / "ledger.jsonl", outside / "victim")
+    before = _snapshot(legacy)
+
+    with pytest.raises(migrate.MigrationRefused, match=r"ledger\.jsonl: it is a symlink"):
+        migrate.apply(plan)
+
+    assert list(outside.iterdir()) == []
+    assert _snapshot(legacy) == before
+
+
+def test_a_symlinked_config_json_refuses_the_migration(legacy: Path, tmp_path: Path):
+    victim = tmp_path / "victim.json"
+    victim.write_text('{"v": 1}\n', encoding="utf-8")
+    _symlink_or_skip(legacy / ".aegis" / "config.json", victim)
+    before = _snapshot(legacy)
+
+    plan = migrate.plan(legacy)
+    assert plan.to_dict()["status"] == "refused"
+    assert ".aegis/config.json is a symlink" in plan.to_dict()["refusal"]
+    with pytest.raises(migrate.MigrationRefused):
+        migrate.apply(plan)
+
+    assert victim.read_text(encoding="utf-8") == '{"v": 1}\n'
+    assert _snapshot(legacy) == before

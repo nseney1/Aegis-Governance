@@ -1,8 +1,10 @@
 """aegis migrate: convert a v3 workspace or .soma cells to the v4 layout (dry run by default).
 
 The work is aegis_core.migrate; this module parses flags and prints the plan.
-Exit codes: 0 done (or nothing to do), 1 something was left unmigrated (an unmapped
-type, a destination conflict or an unreadable file), 2 usage error.
+Exit codes: 0 done (or nothing to do), 1 refused (nothing written: an unconfined path,
+the lock held by another process, or files that changed between planning and applying)
+or something was left unmigrated (an unmapped type, a destination conflict, an
+unreadable file, a customized driver), 2 usage error.
 """
 from __future__ import annotations
 
@@ -76,6 +78,7 @@ def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
 def run_migrate(args: argparse.Namespace) -> int:
     """CLI handler for aegis migrate."""
     from aegis_core import migrate
+    from aegis_core.errors import LockTimeoutError
 
     root = Path(getattr(args, "workspace", None) or getattr(args, "_project_root", None) or Path.cwd())
     if not root.is_dir():
@@ -86,7 +89,10 @@ def run_migrate(args: argparse.Namespace) -> int:
     report = plan.to_dict()  # before applying: the report describes what was planned
     backup = None
     if apply_it and not plan.refusal:
-        backup = migrate.apply(plan).backup
+        try:
+            backup = migrate.apply(plan).backup
+        except (migrate.MigrationRefused, LockTimeoutError) as exc:  # raised before anything is written
+            report["status"], report["refusal"] = "refused", str(exc)
     if apply_it and report["status"] == "pending":
         report["status"] = "applied"
     report["backup"] = str(backup) if backup else None
@@ -94,7 +100,7 @@ def run_migrate(args: argparse.Namespace) -> int:
         print(json.dumps(report, indent=2))
     else:
         _print_report(report, apply_it and backup is not None, backup)
-    if plan.refusal:
+    if report["status"] == "refused":
         return 1
     left_behind = report["unmapped"] or report["conflicts"] or report["unreadable"] or report["skipped"]
     return 1 if apply_it and left_behind else 0

@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from aegis_cli.cli import main
 from aegis_core.workspace.discovery import LEGACY_SOMA_UPGRADE_MSG
 
@@ -94,3 +96,53 @@ def test_the_report_says_which_rules_the_manifest_re_attests_and_which_it_still_
         "! .aegis/rules/traps/trap-b.md did not match .aegis/rules/manifest.json before migrating: "
         "not re-attested (the MCP server keeps refusing it)"
     ) in out
+
+
+def test_a_rule_edited_between_plan_and_apply_is_reported_and_nothing_changes(tmp_path: Path, capsys, monkeypatch):
+    from aegis_core import migrate
+
+    root = _soma_workspace(tmp_path)
+    cell = root / ".soma" / "cells" / "vacuoles" / "trap-x.md"
+    real_plan = migrate.plan
+
+    def plan_then_someone_saves(workspace):
+        planned = real_plan(workspace)
+        cell.write_text(cell.read_text(encoding="utf-8") + "Saved by an editor meanwhile.\n", encoding="utf-8")
+        return planned
+
+    monkeypatch.setattr(migrate, "plan", plan_then_someone_saves)
+
+    assert main(["--json", "migrate", "--workspace", str(root), "--apply"]) == 1
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "refused"
+    assert ".soma/cells/vacuoles/trap-x.md changed since the plan was made" in report["refusal"]
+    assert report["backup"] is None
+    assert cell.read_text(encoding="utf-8").endswith("Saved by an editor meanwhile.\n")
+    assert not (root / ".aegis" / "rules").exists()
+
+
+def test_a_refusal_found_only_when_applying_is_a_json_report_and_exit_1(tmp_path: Path, capsys, monkeypatch):
+    from aegis_core import migrate
+
+    root = _soma_workspace(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_plan = migrate.plan
+
+    def plan_then_a_link_is_planted(workspace):
+        planned = real_plan(workspace)
+        (root / ".aegis" / "state").mkdir(parents=True)
+        try:
+            (root / ".aegis" / "state" / "lock").symlink_to(outside / "lock")
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+        return planned
+
+    monkeypatch.setattr(migrate, "plan", plan_then_a_link_is_planted)
+
+    assert main(["--json", "migrate", "--workspace", str(root), "--apply"]) == 1
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "refused" and "lock: it is a symlink" in report["refusal"]
+    assert list(outside.iterdir()) == []
