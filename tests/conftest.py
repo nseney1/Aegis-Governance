@@ -110,6 +110,18 @@ def harness(tmp_path):
     return AegisTestHarness(tmp_path)
 
 
+# Variables the shell that launched pytest may export: AEGIS_WORKSPACE would aim
+# CLI and MCP calls at the developer's real workspace, the others change host
+# identity, the Layer-2 backend and scan budgets. Tests that need one set it.
+_DEVELOPER_ENV = ("AEGIS_WORKSPACE", "AEGIS_CLIENT", "AEGIS_LLM_CMD", "AEGIS_MAX_JIT_TOKENS")
+
+
+@pytest.fixture(autouse=True)
+def _no_developer_aegis_env(monkeypatch):
+    for key in _DEVELOPER_ENV:
+        monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def hermetic_environment_and_mcp_isolation():
     """Restore os.environ and reset MCP server singletons between tests."""
