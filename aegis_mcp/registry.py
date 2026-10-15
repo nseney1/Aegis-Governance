@@ -4,7 +4,9 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
+from aegis_core.evidence import aggregate_signals
 from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
+from aegis_core.scoring import compute_cell_fitness
 from aegis_core.taxonomy import CANONICAL_RULE_TYPES, REVIEW_MODES
 from aegis_core.workspace import Workspace, resolve_workspace
 from aegis_core.yaml import parse_frontmatter
@@ -47,17 +49,34 @@ def _matches_rule_type_filter(rel: str, rule_type: Optional[str] = None) -> bool
     )
 
 
+def _ledger_fitness(counts: dict, rule: dict) -> dict:
+    """A rule's fitness from its outcome-ledger rows (ADR 0005 C7: ledger, not frontmatter)."""
+    entry = next(
+        (counts[key] for key in (rule.get("_name"), rule.get("id")) if isinstance(key, str) and key in counts),
+        {},
+    )
+    triggers, tp, fp = entry.get("triggers", 0), entry.get("tp", 0), entry.get("fp", 0)
+    # A tp/fp row is an observation even when no trigger row was paired with it.
+    observations = max(triggers, tp + fp)
+    score = compute_cell_fitness({
+        "fitness": {"triggers": observations, "true_positives": tp, "false_positives": fp},
+        "impact_weight": rule.get("impact_weight", 1.0),
+    })
+    return {"triggers": triggers, "tp": tp, "fp": fp, "score": score}
+
+
 def list_rules(workspace: Workspace, rule_type: Optional[str] = None) -> Any:
-    """List rules from one byte snapshot of the rules directory.
+    """List rules from one byte snapshot of the rules directory, with ledger fitness.
 
     A file that cannot be read or parsed becomes an ``_error`` record instead of
     disappearing, and an inventory failure (a symlink escape, an unreadable
-    directory) fails the whole call.
+    directory) fails the whole call. Unreadable ledger rows are skipped.
     """
     try:
         inventory = inventory_rules(workspace)
     except RuleInventoryError as exc:
         return {"status": _STATUS_FAIL, "error": str(exc)}
+    counts = aggregate_signals(str(workspace.evidence_dir)).counts
 
     rules = []
     for entry in inventory.entries:
@@ -98,6 +117,7 @@ def list_rules(workspace: Workspace, rule_type: Optional[str] = None) -> Any:
 
         fm["_name"] = os.path.splitext(os.path.basename(rel))[0]
         fm["_path"] = rel
+        fm["fitness"] = _ledger_fitness(counts, fm)
         rules.append(fm)
     return rules
 

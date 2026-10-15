@@ -114,3 +114,12 @@ def test_read_tool_ignores_a_client_chosen_workspace(tmp_path, monkeypatch):
 
     names = {rule.get("_name") for rule in json.loads(response["result"]["content"][0]["text"])}
     assert names == {"rule-canonical"}
+
+
+def test_rule_type_enums_list_only_the_six_canonical_types(initialized):
+    from aegis_core.taxonomy import CANONICAL_RULE_TYPES
+
+    tools = {tool["name"]: tool for tool in _list_tools()["result"]["tools"]}
+    for name in ("aegis_create_rule", "aegis_list_rules"):
+        enum = tools[name]["inputSchema"]["properties"]["rule_type"]["enum"]
+        assert enum == list(CANONICAL_RULE_TYPES) == ["invariant", "trap", "gate", "boundary", "persona", "contract"]
