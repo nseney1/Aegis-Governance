@@ -1,5 +1,5 @@
 from pathlib import Path
-"""BUG-008: soma_mcp and aegis_sdk.telemetry must work where `fcntl` is unavailable.
+"""BUG-008: aegis_mcp and the evidence ledger must work where `fcntl` is unavailable.
 
 `fcntl` is POSIX-only, so on Windows an unconditional import crashed the MCP
 server at startup. Each test runs in a subprocess with `fcntl` blocked
@@ -57,7 +57,7 @@ def test_blocking_fcntl_really_raises_import_error():
 
 def test_mcp_server_modules_import_without_fcntl():
     proc = _run_without_fcntl("""
-        import aegis_mcp.server, aegis_mcp.tools, aegis_sdk.telemetry
+        import aegis_mcp.server, aegis_mcp.tools, aegis_core.telemetry_engine.ledger
         print("ok")
     """)
     assert proc.returncode == 0, proc.stderr
@@ -66,7 +66,7 @@ def test_mcp_server_modules_import_without_fcntl():
 
 def test_append_signal_writes_record_without_fcntl(tmp_path):
     proc = _run_without_fcntl(f"""
-        from aegis_sdk.telemetry import append_signal
+        from aegis_core.telemetry_engine.ledger import append_signal
         append_signal({str(tmp_path)!r}, "trap-example", "tp", "mcp")
     """)
     assert proc.returncode == 0, proc.stderr

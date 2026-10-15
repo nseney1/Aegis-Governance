@@ -1,5 +1,3 @@
-import pytest
-from unittest.mock import patch, MagicMock
 from pathlib import Path
 from aegis_sdk.governance import Governance
 
@@ -96,33 +94,6 @@ def test_record_outcome_in_process(tmp_path):
     assert len(lines) >= 1
     assert lines[-1]["cell"] == "trap-test-trap"
     assert lines[-1]["signal"] == "tp"
-
-
-def test_record_outcome_fp_and_source_validation(tmp_path, monkeypatch):
-    import json
-    _populate_governed_workspace(tmp_path)
-    gov = Governance(project_root=tmp_path)
-
-    # Test failure outcome emits fp
-    res_fp = gov.record_outcome("trap-test-trap", success=False, source="ci")
-    assert isinstance(res_fp, dict)
-    assert res_fp.get("signal") == "fp"
-
-    # Test invalid source raises ValueError
-    with pytest.raises(ValueError, match="Invalid telemetry source"):
-        gov.record_outcome("trap-test-trap", success=True, source="invalid_src")
-
-    # Test fallback guarantees dict return
-    def _raise(*args, **kwargs):
-        raise RuntimeError("simulated telemetry failure")
-
-    monkeypatch.setattr("aegis_core.telemetry.append_signal", _raise)
-    monkeypatch.setattr(gov, "signal", lambda *a, **k: "legacy stdout string")
-    fallback_res = gov.record_outcome("trap-test-trap", success=True)
-    assert isinstance(fallback_res, dict)
-    assert fallback_res["status"] == "fallback_recorded"
-    assert fallback_res["signal"] == "tp"
-    assert fallback_res["raw"] == "legacy stdout string"
 
 
 def test_list_cells_corrupted_isolation(tmp_path):

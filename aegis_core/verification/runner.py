@@ -168,14 +168,6 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
         found = _find_in_tests("test_mcp_handlers.py")
         if found:
             return found
-    if "aegis_core/outcomes/harvest.py" in norm:
-        found = _find_in_tests("test_git_retro_harvest.py")
-        if found:
-            return found
-    if "aegis_core/outcomes/insights.py" in norm:
-        found = _find_in_tests("test_outcomes_insights.py")
-        if found:
-            return found
     if "aegis_core/outcomes/telemetry.py" in norm:
         found = _find_in_tests("test_outcomes_telemetry.py")
         if found:
@@ -188,7 +180,7 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
         found = _find_in_tests("test_slots.py")
         if found:
             return found
-    if "aegis_core/skills" in norm or "aegis_core/schemas/artifacts.py" in norm:
+    if "aegis_core/skills" in norm:
         found = _find_in_tests("test_skills_and_handoff.py")
         if found:
             return found

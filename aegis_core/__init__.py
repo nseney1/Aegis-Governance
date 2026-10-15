@@ -74,7 +74,6 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "yaml": ("aegis_core.yaml", None),
     "storage": ("aegis_core.storage", None),
     "taxonomy": ("aegis_core.taxonomy", None),
-    "telemetry": ("aegis_core.telemetry", None),
     "verification": ("aegis_core.verification", None),
     "workspace": ("aegis_core.workspace", None),
     # Core types & functions
@@ -115,7 +114,6 @@ _EXPORTS: dict[str, tuple[str, str | None]] = {
     "AegisYAML": ("aegis_core.yaml", "AegisYAML"),
     "AegisDocument": ("aegis_core.yaml", "AegisDocument"),
     "AegisYAMLError": ("aegis_core.yaml", "AegisYAMLError"),
-    "append_signal": ("aegis_core.telemetry", "append_signal"),
     "Workspace": ("aegis_core.workspace", "Workspace"),
     "GitWorkspace": ("aegis_core.workspace", "GitWorkspace"),
     "WorkspaceError": ("aegis_core.errors", "WorkspaceError"),

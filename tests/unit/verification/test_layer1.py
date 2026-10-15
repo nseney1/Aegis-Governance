@@ -275,12 +275,6 @@ class TestRunnerCoverageEnhancements:
         mcp_test = _find_test_file("soma_mcp/handlers/governance.py", REPO_ROOT)
         assert mcp_test is not None and mcp_test.endswith("test_mcp_handlers.py")
 
-        harvest_test = _find_test_file("soma_core/outcomes/harvest.py", REPO_ROOT)
-        assert harvest_test is not None and harvest_test.endswith("test_git_retro_harvest.py")
-
-        insights_test = _find_test_file("soma_core/outcomes/insights.py", REPO_ROOT)
-        assert insights_test is not None and insights_test.endswith("test_outcomes_insights.py")
-
         telemetry_test = _find_test_file("soma_core/outcomes/telemetry.py", REPO_ROOT)
         assert telemetry_test is not None and telemetry_test.endswith("test_outcomes_telemetry.py")
 
@@ -292,9 +286,6 @@ class TestRunnerCoverageEnhancements:
 
         slots_test = _find_test_file("soma_core/skills/slots.py", REPO_ROOT)
         assert slots_test is not None and slots_test.endswith("test_slots.py")
-
-        artifacts_test = _find_test_file("soma_core/schemas/artifacts.py", REPO_ROOT)
-        assert artifacts_test is not None and artifacts_test.endswith("test_skills_and_handoff.py")
 
     def test_discover_functions_with_target_lines(self, tmp_path):
         from aegis_core.verification.runner import _discover_functions

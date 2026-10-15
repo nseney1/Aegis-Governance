@@ -28,7 +28,7 @@ def _cell(workspace, cell_id, triggers=0, tp=0, fp=0, score=None):
 
 
 def test_append_signals_conflict_leaves_ledger_byte_identical(tmp_path):
-    from aegis_sdk.telemetry import EventConflictError, append_signal, append_signals
+    from aegis_core.telemetry_engine.ledger import EventConflictError, append_signal, append_signals
 
     append_signal(str(tmp_path), "cell-b", "tp", "mcp", metadata={"v": 1},
                   principal="mcp", idempotency_scope="batch", idempotency_key="same")
@@ -48,7 +48,7 @@ def test_append_signals_conflict_leaves_ledger_byte_identical(tmp_path):
 
 
 def test_report_outcome_batch_failure_then_same_key_retries_once(tmp_path, monkeypatch):
-    import aegis_sdk.telemetry as telemetry
+    import aegis_core.telemetry_engine.ledger as telemetry
     from aegis_mcp.tools import execute_tool
 
     _cell(tmp_path, "cell-a")
@@ -76,19 +76,6 @@ def test_report_outcome_batch_failure_then_same_key_retries_once(tmp_path, monke
     assert execute_tool("aegis_report_outcome", args)["status"] == "recorded"
     assert execute_tool("aegis_report_outcome", args)["status"] == "recorded"
     rows = _rows(ledger)
-    assert sorted(row["cell"] for row in rows) == ["cell-a", "cell-b"]
-    assert len(rows) == 2
-
-
-def test_fitness_updater_retry_completes_every_cell_once(tmp_path):
-    from aegis_core.telemetry import update_fitness
-
-    evidence = tmp_path / ".aegis" / "evidence"
-    cells = [{"cell_id": "cell-a", "matched_files": ["a.py"]}]
-    update_fitness(cells, "transcript-1", evidence)
-    update_fitness(cells + [{"cell_id": "cell-b", "matched_files": ["b.py"]}],
-                   "transcript-1", evidence)
-    rows = _rows(evidence / "signals.jsonl")
     assert sorted(row["cell"] for row in rows) == ["cell-a", "cell-b"]
     assert len(rows) == 2
 

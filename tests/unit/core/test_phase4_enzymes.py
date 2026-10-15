@@ -61,32 +61,3 @@ def test_log_finding(tmp_path):
     assert lines[0]["change"] == "Refactored parser"
 
 
-def test_match_cells_windows_backslash_paths(tmp_path):
-    """Verify that match_cells matches Windows backslash paths against POSIX target_paths."""
-    from aegis_core.telemetry import match_cells
-
-    cells_dir = tmp_path / ".aegis" / "rules"
-    walls_dir = cells_dir / "walls"
-    walls_dir.mkdir(parents=True)
-    (walls_dir / "guard.md").write_text(
-        "---\nid: guard\ntype: wall\ntarget_paths:\n  - 'src/**'\n---\nBody\n",
-        encoding="utf-8",
-    )
-
-    # Simulate Windows paths with backslashes
-    repo_root = r"C:\Users\runneradmin\project"
-    modified_files = {r"C:\Users\runneradmin\project\src\main.py"}
-
-    matched = match_cells(modified_files, cells_dir, repo_root=repo_root)
-    assert len(matched) == 1
-    assert matched[0]["cell_id"] == "guard"
-    assert "src/main.py" in matched[0]["matched_files"]
-
-
-
-
-
-
-
-
-

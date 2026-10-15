@@ -15,7 +15,6 @@ from aegis_core.lifecycle.decay import compute_cells_fitness
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
 from aegis_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
 from aegis_core.lifecycle.selection import run_cell_selection
-from aegis_core.outcomes import harvest_git_history, run_outcome_engine
 from aegis_core.workspace import Workspace
 
 
@@ -123,16 +122,4 @@ class TestLifecycleWorkspaceInteroperability:
         demotions = evaluate_demotions(mock_soma_workspace)
         assert isinstance(demotions, list)
 
-
-class TestOutcomesAndSyncWorkspaceInteroperability:
-    """Verify outcomes, defects, enforcement, and sync accept Workspace directly."""
-
-    def test_harvest_git_history_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        result = harvest_git_history(workspace=mock_soma_workspace, dry_run=True)
-        assert "commits_inspected" in result
-        assert "cells_matched" in result
-
-    def test_run_outcome_engine_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        code = run_outcome_engine(workspace=mock_soma_workspace)
-        assert code in (0, 1)
 

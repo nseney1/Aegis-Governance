@@ -180,7 +180,7 @@ class TestRunVerifyNamespaces:
         from aegis_cli.verify import run_verify
 
         calls = []
-        monkeypatch.setattr("aegis_core.outcomes.record_verification_telemetry", lambda **kw: calls.append(kw))
+        monkeypatch.setattr("aegis_core.outcomes.telemetry.record_verification_telemetry", lambda **kw: calls.append(kw))
         (tmp_path / "core.py").write_text("def main():\n    return 1\n", encoding="utf-8")
         args = argparse.Namespace(files=["core.py"], workspace=str(tmp_path), dry_run=False)
         assert run_verify(args) == 0
@@ -197,7 +197,7 @@ class TestVerifyLayer2Execution:
         telemetry_calls = []
         def mock_record(**kwargs):
             telemetry_calls.append(kwargs)
-        monkeypatch.setattr("aegis_core.outcomes.record_verification_telemetry", mock_record)
+        monkeypatch.setattr("aegis_core.outcomes.telemetry.record_verification_telemetry", mock_record)
 
         fake_llm = tmp_path / "fake_llm.py"
         fake_llm.write_text("import sys\nsys.stdin.read()\nprint('[]')\n", encoding="utf-8")

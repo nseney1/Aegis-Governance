@@ -347,7 +347,7 @@ def run_verify(args: argparse.Namespace) -> int:
     def _record_telemetry(passed: bool, verdict: Any) -> None:
         # Advisory rule-trigger telemetry: it must never change the verdict.
         try:
-            from aegis_core.outcomes import record_verification_telemetry
+            from aegis_core.outcomes.telemetry import record_verification_telemetry
             record_verification_telemetry(
                 workspace=repo_root,
                 target_files=target_files,

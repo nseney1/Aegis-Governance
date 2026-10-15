@@ -21,7 +21,6 @@ from aegis_core.lifecycle.constants import (
 )
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells
 from aegis_core.lifecycle.promotion import promote_cell, demote_cell
-from aegis_core.metrics import compute_token_census
 from aegis_core.workspace import Workspace
 from aegis_mcp.jit_engine import load_genome_rules
 
@@ -174,7 +173,3 @@ def test_parsers_and_jit_isolate_foreign_genome(tmp_path: Path):
     # 3. load_genome_rules should return empty list
     rules = load_genome_rules(str(repo), ["chromosome1.md"])
     assert rules == []
-
-    # 4. compute_token_census should report 0 genome rules
-    census = compute_token_census(ws)
-    assert not any(item["filename"].startswith("genome/") for item in census["files"])

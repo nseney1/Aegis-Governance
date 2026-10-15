@@ -10,7 +10,7 @@ from typing import Any, Optional
 from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
 from aegis_core.taxonomy import ReviewMode, normalize_review_mode
 from aegis_core.yaml import parse_frontmatter
-from aegis_core.telemetry import EventConflictError, StaleGenerationError
+from aegis_core.telemetry_engine.ledger import EventConflictError, StaleGenerationError
 from aegis_core.workspace import Workspace
 
 TYPE_TRANSLATION_MAP: dict[str, str] = {
@@ -187,7 +187,7 @@ class Governance:
         if session_id:
             merged_metric["session_id"] = session_id
         try:
-            from aegis_core.telemetry import append_signal
+            from aegis_core.telemetry_engine.ledger import append_signal
             return append_signal(
                 workspace=str(self.root),
                 cell_name=rule_id,
@@ -268,7 +268,7 @@ class Governance:
         self, cell_name: str, signal_type: str, metric: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any] | str:
         """Send a fitness signal to a cell in-process."""
-        from aegis_core.telemetry import append_signal
+        from aegis_core.telemetry_engine.ledger import append_signal
         return append_signal(
             workspace=str(self.root),
             cell_name=cell_name,
@@ -290,12 +290,12 @@ class Governance:
     
     def coverage_report(self, exclude: Optional[str] = None) -> dict[str, Any]:
         """Get cell coverage report."""
-        from aegis_core.telemetry import calculate_coverage
+        from aegis_core.metrics import calculate_coverage
         return calculate_coverage(workspace=str(self.root), exclude=[exclude] if exclude else None)
     
     def grade(self) -> dict[str, Any]:
         """Get governance report card."""
-        from aegis_core.telemetry import calculate_governance_grade
+        from aegis_core.metrics import calculate_governance_grade
         report = calculate_governance_grade(workspace=str(self.root))
         if report is None:
             return {
@@ -311,15 +311,9 @@ class Governance:
             }
         return report
     
-    def quorum(self, threshold: int = 3, changed_files: Optional[list[str]] = None) -> dict[str, Any]:
-        """Check for quorum (systemic multi-cell triggers)."""
-        from aegis_core.telemetry import evaluate_quorum, _get_changed_files
-        files = changed_files if changed_files is not None else _get_changed_files(str(self.root))
-        return evaluate_quorum(cells_dir=self.cells_dir, changed_files=files, threshold=threshold)
-    
     def scan(self, files: Optional[list[str]] = None) -> list[dict[str, Any]]:
         """Scan current diff against cells."""
-        from aegis_core.telemetry import match_cells_to_changes, _get_changed_files
+        from aegis_core.outcomes.engine import match_cells_to_changes, _get_changed_files
         changed = files if files is not None else _get_changed_files(str(self.root))
         return match_cells_to_changes(str(self.root), changed)
 

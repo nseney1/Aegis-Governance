@@ -9,7 +9,6 @@ Grounded in evidence: the optional-import-guard oracle listed pyyaml as
 This single incorrect table row caused 28 files of buggy guard code.
 """
 
-import os
 import re
 from pathlib import Path
 
@@ -127,12 +126,14 @@ def _collect_target_paths_from_rules():
 
 _literal_paths = _collect_target_paths_from_rules()
 
-# Wave B1b deleted aegis_core/sync.py (D7); the dogfood rule that still names it
-# lives in .aegis/rules, which the b1b-core lane does not own. Strict, so the
-# rule edit (drop the line) must also drop this entry.
+# Wave B1b deleted these modules (D7, the telemetry facade); the dogfood rules
+# that still name them live in .aegis/rules, which the b1b-core lane does not
+# own. Strict, so the rule edit (drop the line) must also drop the entry.
 _DANGLING_PENDING_RULE_EDIT = {
     ("trap-stdout-protocol-corruption.md", "aegis_core/sync.py"):
         "aegis_core/sync.py was deleted in wave B1b; the .aegis/rules edit is deferred to the rules owner",
+    ("contract-mcp-cli-parity.md", "aegis_core/telemetry.py"):
+        "aegis_core/telemetry.py was deleted in wave B1b; the .aegis/rules edit is deferred to the rules owner",
 }
 
 
@@ -276,7 +277,6 @@ def test_cell_subdirs_have_test_coverage():
     This is the testable hypothesis behind trap-schema-test-gap: schema
     test gaps cause frontmatter drift in unmonitored cell types.
     """
-    import ast
 
     cells_dir = (REPO_ROOT / ".aegis" / "rules") if (REPO_ROOT / ".aegis" / "rules").is_dir() else (REPO_ROOT / ".aegis" / "rules")
     if not cells_dir.exists():
