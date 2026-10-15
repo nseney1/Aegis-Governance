@@ -144,7 +144,7 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
 - **Decision**: `WorkspaceBinding{root, source, confidence}`, resolved in this order:
   1. an operator pin (`AEGIS_WORKSPACE` in the registration env), final and strict: the server refuses to start if the pin doesn't resolve;
   2. host-attested candidates: Claude `CLAUDE_PROJECT_DIR` or roots; Codex `_meta` workspaces (verified live); Gemini CLI roots;
-  3. a **user-scope registry** of governed workspaces (`~/.config/aegis/workspaces.json`, written by `aegis init`). A path from a tool call can only *select among* registered workspaces. This is the only route for the Antigravity app, which gives no roots and has a cwd equal to its launch dir (verified live);
+  3. a **user-scope registry** of governed workspaces (`~/.aegis/workspaces.json`, written by `aegis init`). A path from a tool call can only *select among* registered workspaces. This is the only route for the Antigravity app, which gives no roots and has a cwd equal to its launch dir (verified live);
   4. a bounded walk-up from cwd that stops at the git toplevel.
 
   **Never** `$HOME` and never a model-supplied root.
@@ -161,6 +161,7 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
   - **Cost**: none.
   - A repo must be `aegis init`'d once per machine before an Antigravity session can be governed.
 - **Prediction**: in 3 real sessions per host, 100% of scans resolve to the intended repo, with no `$HOME` resolutions.
+- **Amendment [delegated]**: the registry lives at `~/.aegis/workspaces.json`, one user-plane root next to the read-only `~/.aegis/rules` (H8), rather than `~/.config/aegis`.
 
 ### AD-5: Versioned formats and one migration path
 
@@ -251,25 +252,37 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
 - **Local-only telemetry.** "Local" is defined as never leaving the machine except through explicit user commands. New runtime state is git-ignored by `aegis init`.
 - **The Wave-1 YAML and telemetry decomposition** is kept: the independent fuzzing found 0 mismatches over 60k YAML and 40k `forbid_ast` cases. Fix forward; no force-push.
 
-## 5. Cuts, merges and deferrals
+## 5. Cuts, merges and deferrals [delegated]
 
-*(The cut list is filled from the refactor sweep: reachability, duplication, feature value, tests/docs, public surface, each defended adversarially. Pending.)*
+**Evidence**: the 5-lane refactor sweep of HEAD 9e4d976.
+- The lanes were reachability, duplication, feature value, tests/docs and public surface. Each candidate was argued by a keep-advocate, and 51 clusters were defended.
+- Real use behind the sweep: 73 MCP calls across ~690 sessions. Only 5 of 17 tools were ever called. No rule has ever been promoted, demoted or archived, in either governed repo.
+- Measured potential: deleting the 23 feature-value candidates together removed 33% of production LOC, with the CLI and MCP smoke unchanged.
 
-**Already decided or strongly indicated:**
+Every row cites the tenet it rests on (see the status line). The build sheet (`docs/specs/v4-build-sheet.md` §1–1b) holds the binding conditions for each row.
 
-| Item | Action |
-|---|---|
-| Release Gate 4.5 receipts and pre-allocated cycles 37–39 | **CUT** (AD-2) |
-| Signed DiffProposal applier (same-uid HMAC proves nothing) | **CUT** (AD-7) |
-| "Signed" rule packs (no stdlib asymmetric crypto) | **CUT** the signing claim |
-| Synthetic benchmark as efficacy or promotion evidence | **CUT**; keep only as regression fixtures |
-| Day-0 baseline health card | **DEFER** (no observed failure) |
-| AST partition checker, ratchet baseline, built-in packs | **DEFER** until after the soak with a hypothesis box |
-| HostSpec rows for cursor, copilot, kiro, windsurf | **DEFER** until 3 clean runs per host |
-| `aegis rule import` | **SHELVED** |
-| `rule create --body-file` | **ADD** (small; fixes body loss) |
-| Fix the `--workspace` walk-up into `$HOME` | **ADD** |
-| Remove or implement `--from-description` | **ADD** |
+| Area | Decision | Tenets |
+|---|---|---|
+| Release Gate 4.5, arbitration evidence, `check --release`, pre-allocated cycles | **CUT**. Release = CI green on the exact SHA + human merge (pre-tag script) | AD-2, C1 |
+| MCP receipts (`aegis_request_receipt`, `receipt` params, HMAC keys) | **CUT**. Self-reports are advice-tier rows with server-owned `host` | AD-2, C1 |
+| Manifest HMAC signing, keys, auto-sync, tamper exclusion | **CUT**. An unsigned hash index written only by `aegis sync`, used only to show "edited since sync" | AD-1, AD-2 |
+| MCP surface | **17 → 4 tools** (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`). The async job engine (the only daemon thread) is cut | C1, B2 |
+| CLI surface | **12 commands** (`init uninstall doctor check status rule scan sync migrate hook`, plus `team` in v4.1 and `benchmark` in v4.2). `install system detect completion skill handoff agent report verify checkpoint` and every alias are hard-cut with a pointer message | C1, A1, H1 |
+| Unreachable or test-only code | **CUT**: quarantine, resilience, transcript verifier, sweep/sentinels/team-sync, insight pipeline, defect analytics and hot zones, metrics snapshot, proposals/TTC, shadow schemas, rollup/compaction, two-tier packer, shadowed handlers, meta-path redirect, facades | C1, A1, A4 |
+| Bug and claim registries, nested-pytest meta-tests | **CUT** (they re-ran 48% of the suite). A 20-line README overclaim deny-list test survives | C1, A2 |
+| `aegis_sdk` | **SHRINK** to a stable `Governance` facade, because citadel and mapleterm use it. Core never imports it | AD-3, AD-6 |
+| Config | `aegis.conf`, 5 parsers, `config.yaml`, `slots.yaml` and `steering.conf` → **one `.aegis/config.json`**. The repo can't name commands | H5, A1 |
+| Layout | `.aegis/{config.json, .gitignore, rules/, state/}`, with one lock. `aegis migrate` moves existing data | AD-1, AD-3, AD-5 |
+| Layer 2 | **SIMPLIFY**: `check --full` with one zero-dependency `--llm-cmd` backend. Vendor SDKs, keyring, extras and the in-band loop are cut | C1, B1, B3 |
+| `forbid_ast` | **KEEP**, with H2/H3 fixed: it is the gate tier's only deterministic mechanism. JIT `ast_triggers`/`planned_symbols` are cut (0 uses) | C1, AD-8 |
+| Agent-side hook phases | **CUT**. `command_safety` is kept isolated until v4.1 wires it behind native host deny rules | H7, AD-8 |
+| `doctor --fix-path`, `rule clean`/`cleanse.py` | **CUT** (rc-file and global-file mutation). Cleanup goes through backed-up `doctor --fix` | destructive-ops |
+| `branch_coverage`, SARIF | **CUT** (an unsafe template pattern; no consumer) | C1 |
+| Legacy `.soma` workspaces | **MIGRATE** via `aegis migrate`: 11 exist with 160 legacy-typed rules (verified, A4) | A4, AD-5 |
+| TS/Go/Rust AST drivers | **KEEP**: they ship in the wheel and work. The duplicate `install/drivers` copies are cut | C1 |
+| Docs | Rewritten: README plus two story docs (`how-it-works`, `why-aegis`). Research, archive, phylogeny, mechanism design, roadmap, metrics and the guides are deleted (git keeps them) | C1, AD-6 |
+| Day-0 card, ratchet baseline, AST partition check, packs, benchmark, extra hosts | **v4.2**, each with a hypothesis/prune box | C6, A5 |
+| `aegis rule import` | **SHELVED** (its design is reused by v4.2 packs) | A4 |
 
 ## 6. Sequencing
 
@@ -295,8 +308,10 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
    - `${SLOT.*}` rule rewrite;
    - `client.host` attribution.
 4. **Soak (AD-10), then tag v4.0.0** with CI attestation and a human merge.
-5. **v4.1**: AD-7 git-native team, the first per-host hook (Claude scan-before-edit), skills projection.
-6. **v4.2**: only items that bring an incident or metric.
+5. **v4.1**: AD-7 git-native team, per-host hooks (Claude scan-before-edit first), skills projection, gemini-cli row (`docs/specs/v4.1-v4.2.md`).
+6. **v4.2**: day-0 card, ratchet baseline, unsigned packs, benchmark (latency/tokens only), partition check, experimental host rows, worktree-shared ledger, plugin packaging. Each has a prune box (build sheet §3).
+
+**Scope amendment (author, 2026-10-15):** "include in the goal to do all the way up until 4.2.0." v4.1 and v4.2 are *implemented* on the branch now. The AD-10 soak, CI-on-SHA and human-merge gates still apply to each *tag*.
 
 ## 7. Trade-off summary
 
