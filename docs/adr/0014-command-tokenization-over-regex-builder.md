@@ -1,7 +1,9 @@
-# ADR-014: Structured Lexical Command Tokenization Over Regex Builder DSL
+# ADR 0014: Structured Lexical Command Tokenization Over Regex Builder DSL
 
 ## Status
 **Accepted** (v0.97.1 — 2026-10-06; updated for Aegis Guardrails v3.2.0)
+
+**v4 status (2026-10-15): in force.** `aegis_core/command_safety.py` is kept, isolated behind `aegis hook safety-gate --cmd` until host-native deny rules arrive in v4.1 ([ADR 0005](0005-v4-plan-of-record.md) §5, "Agent-side hook phases"). The agent-side hook phases that called it from `aegis_cli/hooks/runtime.py` are cut.
 
 ## Context
 In `aegis_cli/hooks/runtime.py` (`aegis_cli/hooks/`), the pre-execution safety gate (`run_safety_gate()`) enforces protection against destructive commands (e.g. `rm -rf`, raw database drops, non-fast-forward git operations, and secret exposures). Historically, this gate relied on monolithic regular expression chains (`_GIT_CMD_PREFIX`, `_GIT_GLOBAL_OPTS`, `_GIT_CMD`, and a 22-entry `DESTRUCTIVE_PATTERNS` table).
