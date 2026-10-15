@@ -330,6 +330,20 @@ Every row cites the tenet it rests on (see the status line). The build sheet (`d
 
 Every surviving feature gets a Hypothesis / Metric (from the ledger) / Prune-by entry before it merges. The AD predictions above are the first set.
 
+## 8b. Open question, pinned for after v4.2: did this rule actually help?
+
+The author pinned this on 2026-10-15 to explore after v4.2.0 ships. It is out of scope for v4.x.
+
+**The problem.** The v3 loop credited every path-matched rule with the whole run's pass/fail. That is inverted for gates: a gate that blocked 4 bad commits scored 4 FP and 1 TP. v4 makes the ledger the only source and turns promotion into a reviewed action (AD-1, AD-2). It still does not answer per-rule attribution.
+
+**Candidate signals** (none validated):
+- per-rule events: the flagged code changed before commit counts as credit; an override or suppression counts as a debit;
+- holdout scans that withhold a rule, compared on defect and revert rates;
+- external outcomes only: CI on the exact SHA, `git revert` of commits in the rule's paths;
+- correlation with the AD-9 scan-before-edit rate.
+
+Each needs a hypothesis box before any code.
+
 ## 9. Sign-off
 
 - [x] Author approves AD-1 … AD-10 and the §6 sequencing. Signed 2026-10-15: "I otherwise sign off."
