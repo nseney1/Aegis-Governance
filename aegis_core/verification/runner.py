@@ -16,6 +16,92 @@ from . import import_guard
 from . import mutation_tester
 from . import branch_coverage
 
+VerificationResult = ToolEvidence
+
+
+def _matches_rule_patterns(rel_path: str, patterns: list[str]) -> bool:
+    """Check if rel_path matches any rule glob pattern (including **/ globs)."""
+    import fnmatch
+
+    if not patterns:
+        return True
+    norm_rel = rel_path.replace("\\", "/").lstrip("/")
+    base = os.path.basename(norm_rel)
+    for raw_pat in patterns:
+        pat = str(raw_pat).replace("\\", "/").strip()
+        if not pat:
+            continue
+        if norm_rel == pat or fnmatch.fnmatch(norm_rel, pat) or fnmatch.fnmatch(base, pat):
+            return True
+        if pat.startswith("**/"):
+            stripped = pat[3:]
+            if fnmatch.fnmatch(norm_rel, stripped) or fnmatch.fnmatch(base, stripped):
+                return True
+        if "/**/" in pat:
+            collapsed = pat.replace("/**/", "/")
+            if fnmatch.fnmatch(norm_rel, collapsed):
+                return True
+    return False
+
+
+def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str]]]:
+    """Discover workspace rules in rules/ and .aegis/rules/ declaring forbid_ast."""
+    from pathlib import Path
+    from aegis_core.yaml import AegisYAML
+    from aegis_core.workspace import Workspace
+
+    root_path = Path(str(getattr(repo_root, "root", repo_root))).resolve()
+    ws_obj = None
+    try:
+        ws_obj = Workspace(root_path)
+    except Exception:
+        ws_obj = None
+
+    candidate_dirs = [root_path / "rules", root_path / ".aegis" / "rules"]
+    discovered: list[tuple[str, dict, list[str]]] = []
+    seen_ids: set[str] = set()
+
+    for rules_dir in candidate_dirs:
+        if not rules_dir.is_dir():
+            continue
+        for md_file in sorted(rules_dir.rglob("*.md")):
+            if md_file.name == "README.md" or md_file.is_symlink():
+                continue
+            try:
+                rel_md = md_file.relative_to(root_path)
+                if ws_obj is not None:
+                    doc = AegisYAML.parse_file(rel_md, ws_obj)
+                else:
+                    doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
+            except Exception:
+                try:
+                    doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+
+            if doc.get("expired_at"):
+                continue
+            forbid_spec = doc.get("forbid_ast")
+            if not isinstance(forbid_spec, dict) or not forbid_spec:
+                continue
+
+            rule_id = str(doc.get("id") or doc.get("name") or md_file.stem)
+            if rule_id in seen_ids:
+                continue
+            seen_ids.add(rule_id)
+
+            raw_paths = doc.get("target_paths") or doc.get("paths") or doc.get("globs") or []
+            if isinstance(raw_paths, str):
+                patterns = [raw_paths]
+            elif isinstance(raw_paths, (list, tuple, set)):
+                patterns = [str(p) for p in raw_paths if p]
+            else:
+                patterns = []
+
+            discovered.append((rule_id, forbid_spec, patterns))
+
+    return discovered
+
 
 def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
     """Find the test file for a source file by convention.
@@ -201,11 +287,12 @@ def run_layer1(
         List of ToolEvidence results for the Arbiter
     """
     results: list[ToolEvidence] = []
+    repo_root_str = str(getattr(repo_root, "root", repo_root))
 
     def _is_test_or_support(fpath: str) -> bool:
         norm = fpath.replace('\\', '/')
         bname = os.path.basename(fpath)
-        if norm.startswith(('soma_core/', 'soma_cli/', 'soma_sdk/', 'soma_mcp/')) and os.path.isdir(os.path.join(repo_root, 'aegis_core')):
+        if norm.startswith(('soma_core/', 'soma_cli/', 'soma_sdk/', 'soma_mcp/')) and os.path.isdir(os.path.join(repo_root_str, 'aegis_core')):
             return True
         return (
             norm.startswith('tests/')
@@ -218,7 +305,7 @@ def run_layer1(
     # ── Persistence Completeness ──────────────────────────────────────
     if persistence_targets:
         for filepath, dict_name in persistence_targets:
-            full_path = os.path.join(repo_root, filepath)
+            full_path = os.path.join(repo_root_str, filepath)
             if os.path.exists(full_path):
                 results.append(persistence_checker.check(full_path, dict_name))
 
@@ -227,7 +314,7 @@ def run_layer1(
     ast_runner = ASTDriverRunner()
 
     for filepath in changed_files:
-        full_path = os.path.join(repo_root, filepath)
+        full_path = os.path.join(repo_root_str, filepath)
         if not os.path.exists(full_path):
             continue
         if _is_test_or_support(filepath):
@@ -235,13 +322,13 @@ def run_layer1(
         ext = os.path.splitext(filepath)[1].lower()
         if ext == ".py":
             results.append(call_graph.check(
-                full_path, repo_root,
+                full_path, repo_root_str,
                 exclude_names={'main', '_parse_args', 'parse_args'},
                 fast_mode=fast_mode,
             ))
-        elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root):
+        elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str):
             results.append(call_graph.check(
-                full_path, repo_root,
+                full_path, repo_root_str,
                 exclude_names={'main', '_parse_args', 'parse_args'},
                 fast_mode=fast_mode,
                 ast_runner=ast_runner,
@@ -249,18 +336,66 @@ def run_layer1(
 
     # ── Import Guards ─────────────────────────────────────────────────
     for filepath in changed_files:
-        full_path = os.path.join(repo_root, filepath)
+        full_path = os.path.join(repo_root_str, filepath)
         if os.path.exists(full_path) and filepath.endswith('.py'):
             if _is_test_or_support(filepath):
                 continue
-            results.append(import_guard.check(full_path, project_root=repo_root))
+            results.append(import_guard.check(full_path, project_root=repo_root_str))
+
+    # ── Declarative Rule-Level forbid_ast ─────────────────────────────
+    from aegis_core.ast.match import evaluate_forbid_ast, extract_normalized_ast
+
+    forbid_rules = _discover_forbid_ast_rules(repo_root_str)
+    if forbid_rules:
+        ast_cache: dict[str, object] = {}
+        for filepath in changed_files:
+            full_path = filepath if os.path.isabs(filepath) else os.path.join(repo_root_str, filepath)
+            if not os.path.isfile(full_path):
+                continue
+            try:
+                rel_path = os.path.relpath(full_path, repo_root_str).replace("\\", "/")
+            except ValueError:
+                rel_path = filepath.replace("\\", "/")
+            is_test_path = (
+                rel_path.startswith("tests/")
+                or "/tests/" in f"/{rel_path}"
+                or os.path.basename(rel_path).startswith("test_")
+            )
+
+            for rule_id, forbid_spec, patterns in forbid_rules:
+                rule_targets_tests = any(
+                    "tests/" in p.replace("\\", "/") or "test_" in p
+                    for p in patterns
+                )
+                if is_test_path and not rule_targets_tests:
+                    continue
+                if patterns and not _matches_rule_patterns(rel_path, patterns):
+                    continue
+
+                if full_path not in ast_cache:
+                    ast_cache[full_path] = extract_normalized_ast(
+                        full_path, workspace_root=repo_root_str, ast_runner=ast_runner
+                    )
+                norm_ast = ast_cache[full_path]
+                if norm_ast is None:
+                    continue
+                violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                if violations:
+                    results.append(
+                        VerificationResult(
+                            tool=f"forbid_ast:{rule_id}",
+                            target=rel_path,
+                            verdict=False,
+                            detail="; ".join(violations),
+                        )
+                    )
 
     # ── Mutation Testing ───────────────────────────────────────────────
     if not fast_mode:
         if mutation_targets:
             for source, func, test in mutation_targets:
-                src_path = os.path.join(repo_root, source)
-                tst_path = os.path.join(repo_root, test)
+                src_path = os.path.join(repo_root_str, source)
+                tst_path = os.path.join(repo_root_str, test)
                 if os.path.exists(src_path) and os.path.exists(tst_path):
                     results.append(mutation_tester.check(
                         src_path, func, tst_path, max_mutations=max_mutations,
@@ -270,13 +405,13 @@ def run_layer1(
             for filepath in changed_files:
                 if not filepath.endswith('.py') or _is_test_or_support(filepath):
                     continue
-                full_path = os.path.join(repo_root, filepath)
+                full_path = os.path.join(repo_root_str, filepath)
                 if not os.path.exists(full_path):
                     continue
-                test_file = _find_test_file(filepath, repo_root)
+                test_file = _find_test_file(filepath, repo_root_str)
                 if test_file is None:
                     continue
-                mod_lines = _get_modified_lines(filepath, repo_root, diff_base=diff_base)
+                mod_lines = _get_modified_lines(filepath, repo_root_str, diff_base=diff_base)
                 funcs = _discover_functions(full_path, target_lines=mod_lines)
                 for func_name in funcs[:3]:  # Limit auto-discovery to 3 functions
                     results.append(mutation_tester.check(
@@ -289,8 +424,8 @@ def run_layer1(
     if not fast_mode:
         if coverage_targets:
             for source, test in coverage_targets:
-                src_path = os.path.join(repo_root, source)
-                tst_path = os.path.join(repo_root, test)
+                src_path = os.path.join(repo_root_str, source)
+                tst_path = os.path.join(repo_root_str, test)
                 if os.path.exists(src_path) and os.path.exists(tst_path):
                     results.append(branch_coverage.check(src_path, tst_path))
         else:
@@ -298,16 +433,23 @@ def run_layer1(
             for filepath in changed_files:
                 if not filepath.endswith('.py') or _is_test_or_support(filepath):
                     continue
-                full_path = os.path.join(repo_root, filepath)
+                full_path = os.path.join(repo_root_str, filepath)
                 if not os.path.exists(full_path):
                     continue
-                test_file = _find_test_file(filepath, repo_root)
+                test_file = _find_test_file(filepath, repo_root_str)
                 if test_file is None:
                     continue
-                mod_lines = _get_modified_lines(filepath, repo_root, diff_base=diff_base)
+                mod_lines = _get_modified_lines(filepath, repo_root_str, diff_base=diff_base)
                 results.append(branch_coverage.check(full_path, test_file, target_lines=mod_lines))
 
     return results
+
+
+def __getattr__(name: str):
+    if name == "DeterministicVerifier":
+        from .pipeline import DeterministicVerifier
+        return DeterministicVerifier
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ── Layer 2: Adversarial Verification Orchestrator ────────────────────────

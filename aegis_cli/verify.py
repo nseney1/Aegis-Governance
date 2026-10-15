@@ -6,14 +6,16 @@ Maps Verdict outcomes to exit codes: SHIP=0, BLOCK=1, REVISE=1.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 from typing import Any
 
 from aegis_cli.base import CommandCategory, AegisCommand
 
-__all__ = ["run_verify", "VerifyCommand"]
+__all__ = ["run_verify", "VerifyCommand", "format_sarif_report"]
 
 
 # Lazy imports to keep CLI responsive
@@ -411,6 +413,58 @@ def verify_release_gate(repo_root: str) -> tuple[bool, str]:
     return True, f"Release Gate 4.5 PASS: Arbitration cycle {cycle_num} verified with SHIP verdict (tree {recorded_tree[:8]})."
 
 
+# ── SARIF 2.1.0 Formatting ────────────────────────────────────────────
+
+def format_sarif_report(results: list[Any], repo_root: str | Path) -> dict[str, Any]:
+    """Construct a valid SARIF 2.1.0 dictionary from Layer 1 verification results."""
+    seen_rules: dict[str, dict[str, Any]] = {}
+    sarif_results: list[dict[str, Any]] = []
+
+    for r in results or []:
+        tool_id = str(getattr(r, "tool", "aegis-check"))
+        if tool_id not in seen_rules:
+            seen_rules[tool_id] = {
+                "id": tool_id,
+                "shortDescription": {"text": f"Aegis verification check: {tool_id}"},
+            }
+        if not getattr(r, "verdict", True):
+            target_str = str(getattr(r, "target", ""))
+            detail_str = str(getattr(r, "detail", "Verification check failed"))
+            sarif_results.append(
+                {
+                    "ruleId": tool_id,
+                    "level": "error",
+                    "message": {"text": detail_str},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {
+                                    "uri": target_str,
+                                }
+                            }
+                        }
+                    ],
+                }
+            )
+
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "Aegis Guardrails",
+                        "informationUri": "https://github.com/nseney1/Aegis-Guardrails",
+                        "rules": list(seen_rules.values()),
+                    }
+                },
+                "results": sarif_results,
+            }
+        ],
+    }
+
+
 # ── Main Handler ──────────────────────────────────────────────────────
 
 def run_verify(args: argparse.Namespace) -> int:
@@ -438,13 +492,19 @@ def run_verify(args: argparse.Namespace) -> int:
         print(f"Error: repo root does not exist: {repo_root}", file=sys.stderr)
         return 1
 
-    use_json = bool(getattr(args, "json", False) or getattr(args, "format", None) == "json")
+    fmt = str(getattr(args, "format", None) or "text").lower()
+    use_sarif = fmt == "sarif"
+    use_json = bool(getattr(args, "json", False) or fmt == "json")
 
     # ── Release Gate 4.5 Check ────────────────────────────────────────
     if getattr(args, 'release_gate', False):
         passed, msg = verify_release_gate(repo_root)
+        if use_sarif:
+            from types import SimpleNamespace
+            rg_results = [] if passed else [SimpleNamespace(tool="release_gate", target=".", verdict=False, detail=msg)]
+            print(json.dumps(format_sarif_report(rg_results, repo_root), indent=2))
+            return 0 if passed else 1
         if use_json:
-            import json
             print(json.dumps({"release_gate": True, "passed": passed, "message": msg}, indent=2))
             return 0 if passed else 1
         if passed:
@@ -477,8 +537,10 @@ def run_verify(args: argparse.Namespace) -> int:
     # ── Dry Run ───────────────────────────────────────────────────────
     if getattr(args, 'dry_run', False):
         layer_mode = "Layer 1 only" if getattr(args, 'layer1_only', False) else "Layer 1 + Layer 2"
+        if use_sarif:
+            print(json.dumps(format_sarif_report([], repo_root), indent=2))
+            return 0
         if use_json:
-            import json
             print(json.dumps({"dry_run": True, "mode": layer_mode, "repo_root": repo_root, "files": target_files}, indent=2))
             return 0
         print(f"Dry run — {layer_mode}")
@@ -490,8 +552,10 @@ def run_verify(args: argparse.Namespace) -> int:
 
     # ── Clean Repository ──────────────────────────────────────────────
     if not target_files:
+        if use_sarif:
+            print(json.dumps(format_sarif_report([], repo_root), indent=2))
+            return 0
         if use_json:
-            import json
             print(json.dumps({"passed": True, "files": [], "layer1": [], "summary": "Layer 1: 0 files changed (clean repository)"}, indent=2))
             return 0
         print("Layer 1: 0 files changed (clean repository)")
@@ -508,7 +572,7 @@ def run_verify(args: argparse.Namespace) -> int:
 
     layer1_pass = runner.gate_verdict(results)
     summary = runner.format_summary(results)
-    if not use_json:
+    if not use_json and not use_sarif:
         if not layer1_pass:
             for r in results:
                 if not r.verdict:
@@ -531,8 +595,10 @@ def run_verify(args: argparse.Namespace) -> int:
 
     if getattr(args, 'layer1_only', False):
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
+        if use_sarif:
+            print(json.dumps(format_sarif_report(results, repo_root), indent=2))
+            return 0 if layer1_pass else 1
         if use_json:
-            import json
             payload = {
                 "passed": layer1_pass,
                 "files": target_files,
@@ -580,6 +646,8 @@ def run_verify(args: argparse.Namespace) -> int:
     provider = resolve_cli_provider(args, repo_root)
     if provider is None:
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
+        if use_sarif:
+            print(json.dumps(format_sarif_report(results, repo_root), indent=2))
         if not layer1_pass:
             return 1
         print("Notice: No inference provider configured. Layer 2 skipped (Layer 1 deterministic checks passed).",
@@ -592,6 +660,8 @@ def run_verify(args: argparse.Namespace) -> int:
 
     if not task_plan:
         _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
+        if use_sarif:
+            print(json.dumps(format_sarif_report(results, repo_root), indent=2))
         if not layer1_pass:
             return 1
         print("Notice: No task plan provided (--plan or --plan-file). Layer 2 skipped (Layer 1 deterministic checks passed).",
@@ -623,15 +693,18 @@ def run_verify(args: argparse.Namespace) -> int:
         _record_telemetry(False, "BLOCK")
         return 1
 
-    if pipeline_res.arbitration_result:
+    if not use_sarif and pipeline_res.arbitration_result:
         print(format_layer2_summary(pipeline_res.arbitration_result))
 
-    if pipeline_res.evidence_path:
+    if not use_sarif and pipeline_res.evidence_path:
         print(f"Arbitration evidence saved: {pipeline_res.evidence_path}")
     elif getattr(pipeline_res, "persistence_error", None):
         print(f"Error: Could not save arbitration evidence: {pipeline_res.persistence_error}", file=sys.stderr)
         _record_telemetry(False, "BLOCK")
         return 1
+
+    if use_sarif:
+        print(json.dumps(format_sarif_report(results, repo_root), indent=2))
 
     l2_exit = verdict_to_exit_code(pipeline_res.verdict)
     overall_passed = bool(layer1_pass and l2_exit == 0)
@@ -696,6 +769,19 @@ class VerifyCommand(AegisCommand):
             "--release-gate",
             action="store_true",
             help="Check Release Gate 4.5: assert latest arbitration evidence is a valid SHIP receipt",
+        )
+        existing_fmt = parser._option_string_actions.pop("--format", None)
+        if existing_fmt is not None:
+            if existing_fmt in parser._actions:
+                parser._actions.remove(existing_fmt)
+            for group in getattr(parser, "_action_groups", ()):
+                if existing_fmt in group._group_actions:
+                    group._group_actions.remove(existing_fmt)
+        parser.add_argument(
+            "--format",
+            choices=["text", "json", "sarif"],
+            default="text",
+            help="Output format (text, json, sarif)",
         )
 
     def execute(self, args: argparse.Namespace) -> int:

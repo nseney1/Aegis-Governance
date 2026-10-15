@@ -6,9 +6,9 @@ Only the current minor release line receives security fixes. Fixes land on `deve
 
 | Version | Supported |
 |:--------|:---------:|
+| 3.3.x | ✅ |
 | 3.2.x | ✅ |
-| 3.1.x | ✅ |
-| < 3.1 | ❌ |
+| < 3.2 | ❌ |
 
 ## Reporting a Vulnerability
 
@@ -50,7 +50,7 @@ In scope: defects that break one of the security guarantees below.
 - Denial of service against the local stdio server by its own connected client.
 - Releases older than the supported lines.
 
-## Security Model (Aegis v3.2.0)
+## Security Model (Aegis v3.3.0)
 
 1. **Tiered MCP Gateway (`aegis_mcp/server.py`)**:
    - **Read Tier (9 tools, enabled by default)**: `aegis_scan`, `aegis_grade`, `aegis_coverage`, `aegis_request_receipt`, `aegis_audit_security`, `aegis_audit_performance`, `aegis_poll_verification`, `aegis_list_rules`, `aegis_rule_fitness`.

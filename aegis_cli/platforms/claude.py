@@ -125,9 +125,16 @@ class ClaudeAdapter(PlatformAdapter):
                 sections.append(f"## {r.stem}\n\n{content}")
             except Exception:
                 pass
+        platform_map = (
+            "> **Claude Platform Mapping**: When rules reference cross-platform tiers or tools, "
+            "map `flash` / `flash_lite` -> `haiku` (or `sonnet`), `inherit` / `pro` -> `sonnet` / `opus`, "
+            "`invoke_subagent` -> `Task` / `Agent`, `view_file` -> `Read`, `replace_file_content` -> `Edit`, "
+            "and `grep_search` -> `Grep`.\n\n"
+        )
         if sections:
             body = (
                 "# Soma Governance Rules\n\n"
+                + platform_map
                 + "\n\n---\n\n".join(sections)
                 + "\n\nRun `soma doctor` to verify system health.\n"
             )
@@ -135,17 +142,51 @@ class ClaudeAdapter(PlatformAdapter):
             body = (
                 "# Soma Governance Integration\n\n"
                 "This project is governed by Soma. Rules are checked adaptively.\n\n"
-                "Run `soma doctor` to verify system health.\n"
+                + platform_map
+                + "Run `soma doctor` to verify system health.\n"
             )
         return f"{SOMA_MARKER_START}\n{body}\n{SOMA_MARKER_END}\n"
 
     def render_mcp_config(self, local: bool = False) -> dict[str, Any]:
         """Render standard MCP server configuration for Claude."""
+        entry = self.render_mcp_entry(local=local)
         return {
             "mcpServers": {
-                "soma": self.render_mcp_entry(local=local),
+                "aegis": entry,
+                "soma": dict(entry),
             }
         }
+
+    def install_desktop_mcp(self, dry_run: bool = False) -> Path | None:
+        """Merge 'aegis' and 'soma' MCP server entries into ~/.config/Claude/claude_desktop_config.json."""
+        desktop_dir = self.home / ".config" / "Claude"
+        config_path = desktop_dir / "claude_desktop_config.json"
+        if dry_run:
+            return config_path
+
+        try:
+            desktop_dir.mkdir(parents=True, exist_ok=True)
+            data: dict[str, Any] = {}
+            if config_path.is_file():
+                try:
+                    loaded = json.loads(config_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        data = loaded
+                except Exception:
+                    data = {}
+
+            servers = data.get("mcpServers")
+            if not isinstance(servers, dict):
+                servers = {}
+                data["mcpServers"] = servers
+
+            entry = self.render_mcp_entry(local=False)
+            servers["aegis"] = entry
+            servers["soma"] = dict(entry)
+            config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            return config_path
+        except Exception:
+            return None
 
     def install(self, local: bool = False, dry_run: bool = False) -> PlatformInstallResult:
         result = PlatformInstallResult(
@@ -155,6 +196,7 @@ class ClaudeAdapter(PlatformAdapter):
         )
         claude_md, _ = self.get_target_paths(local=local)
         rules_dir = self.workspace / ".claude" if local else self.home / ".claude"
+        skills_dir = rules_dir / "skills"
 
         # 1. Install rule files
         for rule in self.get_source_rules():
@@ -168,6 +210,28 @@ class ClaudeAdapter(PlatformAdapter):
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(rule, dest)
                 result.installed_files.append(dest)
+
+        # 2. Install skills
+        for src_skill_dir in self.get_source_skills():
+            dest_skill_dir = skills_dir / src_skill_dir.name
+            if dry_run:
+                result.installed_files.append(dest_skill_dir / "SKILL.md")
+            else:
+                try:
+                    skills_dir.mkdir(parents=True, exist_ok=True)
+                    if dest_skill_dir.exists():
+                        shutil.rmtree(dest_skill_dir)
+                    shutil.copytree(src_skill_dir, dest_skill_dir)
+                    result.installed_files.append(dest_skill_dir / "SKILL.md")
+                except Exception as exc:
+                    result.errors.append(f"Failed to copy skill {src_skill_dir.name}: {exc}")
+                    result.success = False
+
+        # 3. Install Claude Desktop MCP config when global and ~/.config/Claude exists
+        if not local and (self.home / ".config" / "Claude").is_dir():
+            desktop_cfg = self.install_desktop_mcp(dry_run=dry_run)
+            if desktop_cfg is not None:
+                result.installed_files.append(desktop_cfg)
 
         if dry_run:
             result.installed_files.append(claude_md)
@@ -195,6 +259,7 @@ class ClaudeAdapter(PlatformAdapter):
         )
         claude_md, mcp_json = self.get_target_paths(local=local)
         rules_dir = self.workspace / ".claude" if local else self.home / ".claude"
+        skills_dir = rules_dir / "skills"
 
         # 1. Clean CLAUDE.md
         try:
@@ -223,14 +288,37 @@ class ClaudeAdapter(PlatformAdapter):
                             result.errors.append(f"Failed to remove {rule_file}: {exc}")
                             result.success = False
 
-        # 3. Clean MCP config (check both target mcp_json and workspace .mcp.json)
+        # 3. Clean skills from skills_dir
+        if skills_dir.is_dir():
+            for src_skill_dir in self.get_source_skills():
+                dest_skill_dir = skills_dir / src_skill_dir.name
+                if dest_skill_dir.is_dir():
+                    if dry_run:
+                        result.uninstalled_files.append(dest_skill_dir)
+                    else:
+                        try:
+                            shutil.rmtree(dest_skill_dir)
+                            result.uninstalled_files.append(dest_skill_dir)
+                        except Exception as exc:
+                            result.errors.append(f"Failed to remove {dest_skill_dir}: {exc}")
+                            result.success = False
+
+        # 4. Clean MCP config (check both target mcp_json, workspace .mcp.json, and desktop config)
         mcp_targets = [mcp_json]
         ws_mcp = self.workspace / ".mcp.json"
         if ws_mcp not in mcp_targets and ws_mcp.is_file():
             mcp_targets.append(ws_mcp)
+        if not local:
+            desktop_mcp = self.home / ".config" / "Claude" / "claude_desktop_config.json"
+            if desktop_mcp not in mcp_targets and desktop_mcp.is_file():
+                mcp_targets.append(desktop_mcp)
 
         for target in mcp_targets:
-            if _clean_mcp_config(target, dry_run=dry_run):
+            modified = False
+            for srv in ("soma", "aegis"):
+                if _clean_mcp_config(target, server_name=srv, dry_run=dry_run):
+                    modified = True
+            if modified:
                 result.uninstalled_files.append(target)
 
         action = "[dry-run] Would uninstall" if dry_run else "Uninstalled"
