@@ -79,8 +79,11 @@ class McpAdapter(PlatformAdapter):
             command=command,
         )
 
+        # A project-scoped .mcp.json may be a symlink shipped by the repo; only the
+        # home-scoped one is allowed to point elsewhere (dotfile managers).
+        confine_to = (project_root or self.workspace) if is_local else None
         try:
-            existing = load_mcp_config(target)
+            existing = load_mcp_config(target, confine_to=confine_to)
         except McpConfigError as exc:
             result.errors.append(str(exc))
             result.success = False

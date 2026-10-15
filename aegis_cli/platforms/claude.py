@@ -168,16 +168,18 @@ class ClaudeAdapter(PlatformAdapter):
         Raises McpConfigError when the existing file cannot be parsed (it is left
         untouched) and OSError when the write fails (the old file survives).
         """
-        desktop_dir = self.home / ".config" / "Claude"
-        config_path = desktop_dir / "claude_desktop_config.json"
+        config_path = self._desktop_config_path()
         data = load_mcp_config(config_path)
         if dry_run:
             return config_path
 
         data.setdefault("mcpServers", {})["aegis"] = self.render_mcp_entry(local=False)
-        desktop_dir.mkdir(parents=True, exist_ok=True)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         write_json_atomic(config_path, data)
         return config_path
+
+    def _desktop_config_path(self) -> Path:
+        return self.home / ".config" / "Claude" / "claude_desktop_config.json"
 
     def install(self, local: bool = False, dry_run: bool = False) -> PlatformInstallResult:
         result = PlatformInstallResult(
@@ -188,6 +190,17 @@ class ClaudeAdapter(PlatformAdapter):
         claude_md, _ = self.get_target_paths(local=local)
         rules_dir = self.workspace / ".claude" if local else self.home / ".claude"
         skills_dir = rules_dir / "skills"
+        wants_desktop = not local and self._desktop_config_path().parent.is_dir()
+
+        # 0. Fail fast: a Desktop config we would refuse to merge stops the whole
+        # install, rather than leaving rules installed beside an unconfigured server.
+        if wants_desktop:
+            try:
+                load_mcp_config(self._desktop_config_path())
+            except McpConfigError as exc:
+                result.errors.append(f"{exc} (nothing was installed)")
+                result.success = False
+                return result
 
         # 1. Install rule files
         for rule in self.get_source_rules():
@@ -219,7 +232,7 @@ class ClaudeAdapter(PlatformAdapter):
                     result.success = False
 
         # 3. Install Claude Desktop MCP config when global and ~/.config/Claude exists
-        if not local and (self.home / ".config" / "Claude").is_dir():
+        if wants_desktop:
             try:
                 result.installed_files.append(self.install_desktop_mcp(dry_run=dry_run))
             except McpConfigError as exc:

@@ -275,12 +275,13 @@ def generate_mcp_config(
     """Create or merge .mcp.json for the governed project.
 
     Existing servers and unrelated keys are preserved. Invalid or structurally
-    incompatible JSON raises McpConfigError before the configuration is modified.
+    incompatible JSON, a read-only file, or a symlink leading outside the project
+    raises McpConfigError before the configuration is modified.
     """
     workspace = str(Path(project_root).resolve())
     mcp_file = Path(workspace) / ".mcp.json"
 
-    data = load_mcp_config(mcp_file)
+    data = load_mcp_config(mcp_file, confine_to=workspace)
     if dry_run:
         print(f"  Would create/update: {mcp_file}")
         return
@@ -296,7 +297,9 @@ def generate_mcp_config(
         }
     data.setdefault("mcpServers", {})["aegis"] = entry
     write_json_atomic(mcp_file, data)
-    print(f"  📡 MCP config written to {mcp_file}")
+    resolved = mcp_file.resolve()
+    via = f" (symlink to {resolved})" if resolved != mcp_file else ""
+    print(f"  📡 MCP config written to {mcp_file}{via}")
 
 
 # ── Main flow ───────────────────────────────────────────────────────────────
@@ -369,7 +372,7 @@ def run_init(args: argparse.Namespace) -> int:
     # rewrite a .mcp.json we cannot parse (M3).
     if getattr(args, "mcp", False):
         try:
-            load_mcp_config(Path(project_root) / ".mcp.json")
+            load_mcp_config(Path(project_root) / ".mcp.json", confine_to=project_root)
         except McpConfigError as e:
             print(f"  ❌ {e}", file=sys.stderr)
             return 1

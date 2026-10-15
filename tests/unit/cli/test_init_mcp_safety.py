@@ -164,18 +164,32 @@ class TestMcpAdapterMergesSafely:
 
         assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
-    def test_install_writes_through_symlink(self, project: Path, tmp_path: Path):
+    def test_global_install_writes_through_dotfile_symlink(self, project: Path, home: Path, tmp_path: Path):
         real = tmp_path / "dotfiles" / "mcp.json"
         real.parent.mkdir()
         real.write_text(json.dumps(EXISTING), encoding="utf-8")
-        link = project / ".mcp.json"
+        link = home / ".mcp.json"
         symlink_or_skip(real, link)
 
-        assert McpAdapter(workspace=project).install(local=True).success
+        res = McpAdapter(workspace=project, home=home).install(local=False)
 
+        assert res.success, res.errors
         assert link.is_symlink()
         data = json.loads(real.read_text(encoding="utf-8"))
         assert "aegis" in data["mcpServers"] and "other" in data["mcpServers"]
+
+    def test_local_install_writes_through_symlink_inside_project(self, project: Path):
+        real = project / "config" / "mcp.json"
+        real.parent.mkdir()
+        real.write_text(json.dumps(EXISTING), encoding="utf-8")
+        link = project / ".mcp.json"
+        symlink_or_skip(Path("config") / "mcp.json", link)
+
+        res = McpAdapter(workspace=project).install(local=True)
+
+        assert res.success, res.errors
+        assert link.is_symlink()
+        assert "aegis" in json.loads(real.read_text(encoding="utf-8"))["mcpServers"]
 
     def test_uninstall_failed_commit_leaves_original_intact(self, project: Path, monkeypatch):
         target = project / ".mcp.json"
@@ -319,6 +333,32 @@ class TestOtherWritersRegisterOnlyAegis:
         assert any(str(desktop) in e and "refusing to modify" in e for e in res.errors), res.errors
         assert desktop.read_bytes() == UNMERGEABLE["jsonc_comment"]
 
+    def test_claude_refused_desktop_config_installs_nothing(self, project: Path, home: Path):
+        desktop = home / ".config" / "Claude" / "claude_desktop_config.json"
+        desktop.parent.mkdir(parents=True)
+        desktop.write_bytes(UNMERGEABLE["jsonc_comment"])
+        before = _snapshot(home)
+
+        res = ClaudeAdapter(workspace=project, home=home).install(local=False)
+
+        assert res.success is False
+        assert any(str(desktop) in e and "nothing was installed" in e for e in res.errors), res.errors
+        assert not any(m.startswith("Installed") for m in res.messages), res.messages
+        assert _snapshot(home) == before
+
+    def test_cli_claude_install_fails_fast_on_refused_desktop_config(self, project: Path, home: Path):
+        desktop = home / ".config" / "Claude" / "claude_desktop_config.json"
+        desktop.parent.mkdir(parents=True)
+        desktop.write_bytes(UNMERGEABLE["trailing_comma"])
+
+        proc = _cli(["install", "--platform", "claude"], cwd=project, home=home)
+
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "Installed Claude configuration" not in proc.stdout
+        assert "refusing to modify" in proc.stderr and "nothing was installed" in proc.stderr
+        assert not (home / ".claude").exists()
+        assert desktop.read_bytes() == UNMERGEABLE["trailing_comma"]
+
     def test_claude_uninstall_failed_commit_leaves_original_intact(self, project: Path, home: Path, monkeypatch):
         target = project / ".mcp.json"
         original = json.dumps({"mcpServers": {"aegis": {"command": "aegis-mcp"}, "other": {}}}).encode()
@@ -332,3 +372,213 @@ class TestOtherWritersRegisterOnlyAegis:
 
         assert target.read_bytes() == original
         assert sorted(p.name for p in project.iterdir()) == [".mcp.json"]
+
+
+# ── Files that hold nothing to lose are merged, not refused ──────────────────
+
+# Valid JSON whose server table is null, and files with no JSON at all: there is no
+# user data to destroy, so every writer merges into them instead of refusing.
+NO_DATA = {
+    "null_servers": b'{"unrelated": {"keep": true}, "mcpServers": null}\n',
+    "empty": b"",
+    "whitespace_only": b"  \n\t\n",
+}
+
+
+def _assert_only_aegis_added(target: Path, raw: bytes) -> None:
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert sorted(data["mcpServers"]) == ["aegis"]
+    if b"unrelated" in raw:
+        assert data["unrelated"] == {"keep": True}
+
+
+class TestNoDataConfigsAreMerged:
+    @pytest.mark.parametrize("raw", list(NO_DATA.values()), ids=list(NO_DATA))
+    def test_mcp_adapter_install_merges(self, project: Path, raw: bytes):
+        target = project / ".mcp.json"
+        target.write_bytes(raw)
+
+        res = McpAdapter(workspace=project).install(local=True)
+
+        assert res.success, res.errors
+        _assert_only_aegis_added(target, raw)
+
+    @pytest.mark.parametrize("raw", list(NO_DATA.values()), ids=list(NO_DATA))
+    def test_generate_mcp_config_merges(self, project: Path, raw: bytes):
+        target = project / ".mcp.json"
+        target.write_bytes(raw)
+
+        generate_mcp_config(project)
+
+        _assert_only_aegis_added(target, raw)
+
+    @pytest.mark.parametrize("raw", list(NO_DATA.values()), ids=list(NO_DATA))
+    def test_run_init_succeeds(self, project: Path, home: Path, raw: bytes):
+        target = project / ".mcp.json"
+        target.write_bytes(raw)
+
+        assert run_init(_init_args(project, home)) == 0
+
+        _assert_only_aegis_added(target, raw)
+        assert (project / ".aegis").is_dir()
+
+    @pytest.mark.parametrize("raw", list(NO_DATA.values()), ids=list(NO_DATA))
+    def test_claude_desktop_merges(self, project: Path, home: Path, raw: bytes):
+        desktop = home / ".config" / "Claude" / "claude_desktop_config.json"
+        desktop.parent.mkdir(parents=True)
+        desktop.write_bytes(raw)
+
+        res = ClaudeAdapter(workspace=project, home=home).install(local=False)
+
+        assert res.success, res.errors
+        _assert_only_aegis_added(desktop, raw)
+
+
+# ── Edges of the atomic writer ───────────────────────────────────────────────
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+class TestReadOnlyConfigIsRefused:
+    """A rename replaces a 0444 file without complaint; the owner's read-only bit is intent."""
+
+    def _read_only(self, path: Path, payload: bytes) -> bytes:
+        path.write_bytes(payload)
+        os.chmod(path, 0o444)
+        return payload
+
+    def test_mcp_adapter_install_refuses(self, project: Path):
+        target = project / ".mcp.json"
+        original = self._read_only(target, json.dumps(EXISTING).encode())
+        before = _snapshot(project)
+
+        res = McpAdapter(workspace=project).install(local=True)
+
+        assert res.success is False
+        assert any(str(target) in e and "read-only" in e for e in res.errors), res.errors
+        assert _snapshot(project) == before
+        assert target.read_bytes() == original
+        assert stat.S_IMODE(target.stat().st_mode) == 0o444
+
+    def test_mcp_adapter_uninstall_refuses(self, project: Path):
+        target = project / ".mcp.json"
+        original = self._read_only(
+            target, json.dumps({"mcpServers": {"aegis": {"command": "aegis-mcp"}, "other": {}}}).encode()
+        )
+
+        res = McpAdapter(workspace=project).uninstall(local=True)
+
+        assert res.success is False
+        assert any("read-only" in e for e in res.errors), res.errors
+        assert target.read_bytes() == original
+
+    def test_generate_mcp_config_refuses(self, project: Path):
+        from aegis_cli.platforms.base import McpConfigError
+
+        target = project / ".mcp.json"
+        original = self._read_only(target, json.dumps(EXISTING).encode())
+
+        with pytest.raises(McpConfigError, match="read-only"):
+            generate_mcp_config(project)
+
+        assert target.read_bytes() == original
+
+    def test_run_init_writes_nothing(self, project: Path, home: Path, capsys):
+        target = project / ".mcp.json"
+        self._read_only(target, json.dumps(EXISTING).encode())
+        before = _snapshot(project)
+
+        assert run_init(_init_args(project, home)) == 1
+
+        assert "read-only" in capsys.readouterr().err
+        assert _snapshot(project) == before
+
+
+class TestProjectConfigSymlinkIsConfined:
+    """A cloned repo may ship `.mcp.json` as a symlink; never merge into a file outside it."""
+
+    def _outside_link(self, project: Path, tmp_path: Path) -> tuple[Path, bytes]:
+        victim = tmp_path / "victim.json"
+        original = b'{"theme": "dark"}\n'
+        victim.write_bytes(original)
+        symlink_or_skip(victim, project / ".mcp.json")
+        return victim, original
+
+    def test_generate_refuses_symlink_outside_project(self, project: Path, tmp_path: Path):
+        from aegis_cli.platforms.base import McpConfigError
+
+        victim, original = self._outside_link(project, tmp_path)
+
+        with pytest.raises(McpConfigError) as excinfo:
+            generate_mcp_config(project)
+
+        assert "outside the project" in str(excinfo.value)
+        assert str(victim) in str(excinfo.value)
+        assert victim.read_bytes() == original
+        assert (project / ".mcp.json").is_symlink()
+
+    def test_run_init_refuses_and_writes_nothing(self, project: Path, home: Path, tmp_path: Path, capsys):
+        victim, original = self._outside_link(project, tmp_path)
+        before = _snapshot(project)
+
+        assert run_init(_init_args(project, home)) == 1
+
+        assert "outside the project" in capsys.readouterr().err
+        assert victim.read_bytes() == original
+        assert _snapshot(project) == before
+
+    def test_mcp_adapter_local_install_refuses(self, project: Path, tmp_path: Path):
+        victim, original = self._outside_link(project, tmp_path)
+
+        res = McpAdapter(workspace=project).install(local=True)
+
+        assert res.success is False
+        assert any("outside the project" in e for e in res.errors), res.errors
+        assert victim.read_bytes() == original
+
+    def test_dangling_symlink_outside_project_creates_nothing(self, project: Path, tmp_path: Path):
+        from aegis_cli.platforms.base import McpConfigError
+
+        ghost = tmp_path / "elsewhere" / "ghost.json"
+        ghost.parent.mkdir()
+        symlink_or_skip(ghost, project / ".mcp.json")
+
+        with pytest.raises(McpConfigError, match="outside the project"):
+            generate_mcp_config(project)
+
+        assert not ghost.exists()
+
+    def test_generate_reports_symlink_target_inside_project(self, project: Path, capsys):
+        real = project / "config" / "mcp.json"
+        real.parent.mkdir()
+        real.write_text(json.dumps(EXISTING), encoding="utf-8")
+        symlink_or_skip(Path("config") / "mcp.json", project / ".mcp.json")
+
+        generate_mcp_config(project)
+
+        assert (project / ".mcp.json").is_symlink()
+        assert "aegis" in json.loads(real.read_text(encoding="utf-8"))["mcpServers"]
+        assert str(real.resolve()) in capsys.readouterr().out
+
+
+class TestNonAsciiIsKeptVerbatim:
+    USER = {"mcpServers": {"café": {"command": "ü", "args": ["—"]}}}
+
+    def test_mcp_adapter_install(self, project: Path):
+        target = project / ".mcp.json"
+        target.write_text(json.dumps(self.USER, ensure_ascii=False), encoding="utf-8")
+
+        assert McpAdapter(workspace=project).install(local=True).success
+
+        raw = target.read_bytes()
+        assert "café".encode("utf-8") in raw and "—".encode("utf-8") in raw
+        assert b"\\u" not in raw
+        assert json.loads(raw)["mcpServers"]["café"] == {"command": "ü", "args": ["—"]}
+
+    def test_generate_mcp_config(self, project: Path):
+        target = project / ".mcp.json"
+        target.write_text(json.dumps(self.USER, ensure_ascii=False), encoding="utf-8")
+
+        generate_mcp_config(project)
+
+        raw = target.read_bytes()
+        assert "café".encode("utf-8") in raw and b"\\u" not in raw
