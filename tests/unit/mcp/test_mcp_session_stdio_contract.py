@@ -1,8 +1,9 @@
-"""aegis-mcp stdio contract: ungoverned startup.
+"""aegis-mcp stdio contract: ungoverned startup and malformed-frame handling.
 
 - With no governed workspace (no AEGIS_WORKSPACE and a cwd without .aegis/, or $HOME),
   the server used to either exit 1 or mkdir ~/.aegis/rules and govern $HOME with zero
   rules. It must stay up, create nothing, and answer every tools/call with an error.
+- A valid-JSON line that is not an object (`5`, `[]`, `null`) killed the server.
 """
 from __future__ import annotations
 
@@ -145,3 +146,33 @@ def test_governed_workspace_still_dispatches_tools(
     assert result["isError"] is False
     assert "guard-src" in result["content"][0]["text"]
 
+
+@pytest.mark.parametrize("line", ["5", "[]", "[1, 2]", "null", "true", '"id"', "1.5"])
+def test_non_object_frame_gets_invalid_request_and_server_keeps_serving(
+    tmp_path: Path, home: Path, line: str, monkeypatch, server_state, capsys
+) -> None:
+    monkeypatch.chdir(home)
+
+    rc, frames = _serve(monkeypatch, capsys, [line, _INIT])
+
+    assert rc == 0
+    assert len(frames) == 2, frames
+    assert frames[0]["jsonrpc"] == "2.0"
+    assert frames[0]["id"] is None
+    assert frames[0]["error"]["code"] == -32600
+    assert frames[1]["id"] == 1 and "result" in frames[1]
+
+
+def test_wrong_jsonrpc_version_request_gets_invalid_request(
+    tmp_path: Path, home: Path, monkeypatch, server_state, capsys
+) -> None:
+    """A request object without jsonrpc "2.0" was dropped silently, leaving the client waiting."""
+    monkeypatch.chdir(home)
+    bad = json.dumps({"jsonrpc": "1.0", "id": 7, "method": "initialize"})
+
+    rc, frames = _serve(monkeypatch, capsys, [bad, _INIT])
+
+    assert rc == 0
+    assert frames[0] == {"jsonrpc": "2.0", "id": 7,
+                         "error": {"code": -32600, "message": "Invalid Request"}}
+    assert frames[1]["id"] == 1 and "result" in frames[1]

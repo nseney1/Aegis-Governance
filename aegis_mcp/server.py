@@ -609,11 +609,18 @@ def run_stdio_server():
             except json.JSONDecodeError:
                 send_error(None, -32700, "Parse error")
                 continue
-                
+
+            if not isinstance(request, dict):
+                # Batches are not supported; a scalar or array frame is an Invalid Request.
+                send_error(None, -32600, "Invalid Request")
+                continue
+
             try:
                 if request.get("jsonrpc") != "2.0":
-                    continue # ignore invalid
-                    
+                    if "id" in request:
+                        send_error(request["id"], -32600, "Invalid Request")
+                    continue
+
                 requests_processed += 1
                 if "id" in request:
                     # It's a request
