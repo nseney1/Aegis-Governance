@@ -108,6 +108,7 @@ def create_cell(
     target_dir = ws.rules_dir / type_plural
 
     slug = generate_slug(hypothesis, id_override)
+    _require_servable_id(slug)
     file_path = target_dir / f"{slug}.md"
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -167,6 +168,14 @@ def create_cell(
         atomic_write_text(file_path, content)
 
     return file_path
+
+
+def _require_servable_id(slug: str) -> None:
+    """Refuse an id whose file the loader would never serve (aegis_core.rules)."""
+    if slug.lower() == "readme":
+        raise ValueError(f"Invalid rule id {slug!r}: a README.md under .aegis/rules is documentation, never a rule.")
+    if slug.startswith("."):
+        raise ValueError(f"Invalid rule id {slug!r}: a hidden file under .aegis/rules is never a rule.")
 
 
 def _existing_rule_path(ws: Workspace, slug: str) -> Path | None:

@@ -43,6 +43,8 @@ def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
         print(f"  rule: {move['from']} -> {move['to']} (type {move['type']})")
     for strip in report["strip"]:
         print(f"  strip: {', '.join(strip['keys'])} from {strip['path']}")
+    for entry in report["retype"]:
+        print(f"  type: {entry['from']} -> {entry['to']} in {entry['path']}")
     for path in report["remove"]:
         print(f"  remove (backed up first): {path}")
     for line in report["dropped"]:

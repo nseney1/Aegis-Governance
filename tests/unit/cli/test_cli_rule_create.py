@@ -484,3 +484,46 @@ def test_rule_clean_points_at_manual_cleanup(repo, capsys) -> None:
         "aegis rule clean was removed in v4: no replacement; "
         "remove leaked global rule copies by hand\n"
     )
+
+
+# ── Rules that would never apply ─────────────────────────────────────────
+
+_UNSCOPED = (
+    "Warning: rule 'unscoped' has no target_paths, so it matches no file: aegis scan never "
+    "shows it and aegis check records nothing for it. Pass --target-paths (for example 'src/**/*.py')."
+)
+
+
+def test_create_without_target_paths_warns_that_the_rule_matches_no_file(repo, capsys) -> None:
+    rc = main(["rule", "create", "--hypothesis", "Scope me", "--id", "unscoped"])
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert captured.err.strip() == _UNSCOPED
+    assert _created(repo, "unscoped").is_file()
+
+
+def test_create_json_lists_the_warning(repo, capsys) -> None:
+    rc = main(["rule", "create", "--hypothesis", "Scope me", "--id", "unscoped", "--json"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "created" and payload["id"] == "unscoped"
+    assert payload["warnings"] == [_UNSCOPED[len("Warning: "):]]
+
+
+def test_create_with_target_paths_does_not_warn(repo, capsys) -> None:
+    rc = main(["rule", "create", "--hypothesis", "Scoped", "--id", "scoped", "--target-paths", "src/*.py", "--json"])
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["warnings"] == [] and captured.err == ""
+
+
+@pytest.mark.parametrize("rule_id", ["readme", "README", "ReadMe", ".hidden"])
+def test_create_rejects_an_id_the_loader_would_never_serve(repo, capsys, rule_id: str) -> None:
+    rc = main(["rule", "create", "--hypothesis", "h", "--id", rule_id, "--target-paths", "src/*.py"])
+
+    assert rc == 1
+    assert f"Error: Invalid rule id {rule_id!r}: " in capsys.readouterr().err
+    assert list((repo / ".aegis" / "rules").rglob("*.md")) == []

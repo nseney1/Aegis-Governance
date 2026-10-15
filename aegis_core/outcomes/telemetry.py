@@ -19,19 +19,18 @@ def record_verification_telemetry(
     source: str = "session",
     run_id: Optional[str] = None,
 ) -> bool:
-    """Append ambient verification evidence (triggers and outcomes) for matched cells to the ledger."""
+    """Append ambient verification evidence (triggers and outcomes) for the matched rules to the ledger."""
     if not workspace or not target_files:
         return False
 
     ws = literal_workspace(workspace)
-    cells_dir = ws.rules_dir
-    if not cells_dir.is_dir():
+    if not ws.rules_dir.is_dir():
         return False
 
     from aegis_core.match import credit_weights
-    from aegis_core.outcomes.engine import match_rules_to_changes
+    from aegis_core.outcomes.engine import matched_rules
 
-    matched = match_rules_to_changes(ws, target_files)
+    matched = matched_rules(ws, target_files)
     if not matched:
         return False
 
@@ -40,14 +39,15 @@ def record_verification_telemetry(
     if run_id is None:
         run_id = secrets.token_hex(16)
 
+    # The patterns the matcher used (Rule.target_paths), over the files they matched.
     weights = credit_weights(
-        {rule["_name"]: rule.get("target_paths") for rule in matched},
-        [f for rule in matched for f in rule["_matched_files"]],
+        {rule.id: rule.target_paths for rule, _files in matched},
+        [f for _rule, files in matched for f in files],
     )
     verdict_text = str(verdict) if verdict is not None else ("PASS" if passed else "FAIL")
     events = []
-    for rule in matched:
-        rule_id = rule["_name"]
+    for rule, _files in matched:
+        rule_id = rule.id
         weight = max(0.0, min(1.0, float(weights.get(rule_id, 0.0))))
         # One row per rule and run: a v2 outcome row is also the rule's trigger (#15).
         events.append({

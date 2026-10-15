@@ -420,17 +420,30 @@ def _run_create(args: argparse.Namespace) -> int:
         except _BodyFileError as exc:
             return _emit_error(args, str(exc))
     rule_id = getattr(args, "id", None) or getattr(args, "cell_id", None) or None
+    target_paths = _split_csv_arg(getattr(args, "target_paths", None))
     try:
         created = create_cell(
             cell_type=cell_type, hypothesis=hypothesis, prediction=getattr(args, "prediction", "") or "",
             falsification=getattr(args, "falsification", "") or "",
             tags=_split_csv_arg(getattr(args, "tags", None)), id_override=rule_id,
-            target_paths=_split_csv_arg(getattr(args, "target_paths", None)), domain=getattr(args, "domain", "correctness") or "correctness",
+            target_paths=target_paths, domain=getattr(args, "domain", "correctness") or "correctness",
             workspace=root, enforcement=getattr(args, "enforcement", None), body=body,
         )
     except Exception as exc:
         return _emit_error(args, str(exc))
-    print(json.dumps({"status": "created", "path": str(created), "id": created.stem}, indent=2) if getattr(args, "json", False) else f"Created rule: {created}")
+    warnings = []
+    if not any(isinstance(p, str) and p.strip() for p in target_paths or []):
+        # Created as asked, but a rule without target_paths applies to no file (aegis_core.match).
+        warnings.append(
+            f"rule {created.stem!r} has no target_paths, so it matches no file: aegis scan never shows it "
+            "and aegis check records nothing for it. Pass --target-paths (for example 'src/**/*.py')."
+        )
+    if getattr(args, "json", False):
+        print(json.dumps({"status": "created", "path": str(created), "id": created.stem, "warnings": warnings}, indent=2))
+    else:
+        print(f"Created rule: {created}")
+        for warning in warnings:
+            print(f"Warning: {warning}", file=sys.stderr)
     return 0
 
 

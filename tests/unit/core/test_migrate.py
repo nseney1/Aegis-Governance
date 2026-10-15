@@ -887,3 +887,108 @@ def test_a_symlinked_config_json_refuses_the_migration(legacy: Path, tmp_path: P
 
     assert victim.read_text(encoding="utf-8") == '{"v": 1}\n'
     assert _snapshot(legacy) == before
+
+
+# ── v3 rule layouts inside .aegis/rules ─────────────────────────────────────
+
+def test_rules_in_a_v3_type_directory_move_to_their_canonical_one_and_are_served(tmp_path: Path):
+    """v3.1-v3.3 `aegis insight` and the sentinels wrote invariants to .aegis/rules/walls/;
+    the v4 loader serves only the six type directories, so migrate moves them."""
+    from aegis_core.rules import load_rules
+    from aegis_core.scan import RULE_CACHE, scan
+
+    root = tmp_path / "ws"
+    rules = root / ".aegis" / "rules"
+    walls = rules / "walls"
+    walls.mkdir(parents=True)
+    # what v3.3 insights.py wrote: type wall, a context_files list, no hypothesis
+    (walls / "wall-insight-1.md").write_text(
+        "---\nid: wall-insight-1\ntype: wall\nenforcement: gate\ndomain: security\ndescription: d\n"
+        "context_files:\n  - src/a.py\ntarget_paths:\n  - 'src/*.py'\n---\n# wall-insight-1\n",
+        encoding="utf-8",
+    )
+    (walls / "wall-typed.md").write_text("---\nid: wall-typed\ntype: invariant\nenforcement: gate\n---\nB\n", encoding="utf-8")
+    (rules / "membranes").mkdir()
+    (rules / "membranes" / "m.md").write_text("---\nid: m\nhypothesis: h\nfitness:\n  triggers: 3\n---\nB\n", encoding="utf-8")
+    (walls / "notes.md").write_text("# Why these walls exist\n", encoding="utf-8")  # not a rule
+    (walls / "README.md").write_text("# Walls\n", encoding="utf-8")
+
+    plan = migrate.plan(root)
+
+    assert {m["from"]: (m["to"], m["type"]) for m in plan.to_dict()["rules"]} == {
+        ".aegis/rules/walls/wall-insight-1.md": (".aegis/rules/invariants/wall-insight-1.md", "invariant"),
+        ".aegis/rules/walls/wall-typed.md": (".aegis/rules/invariants/wall-typed.md", "invariant"),
+        ".aegis/rules/membranes/m.md": (".aegis/rules/boundaries/m.md", "boundary"),
+    }
+    assert plan.to_dict()["strip"] == []  # a moved rule is stripped on the way, not in place
+    migrate.apply(plan)
+
+    rs = load_rules(root)
+    assert sorted((r.path, r.type) for r in rs.served) == [
+        (".aegis/rules/boundaries/m.md", "boundary"),
+        (".aegis/rules/invariants/wall-insight-1.md", "invariant"),
+        (".aegis/rules/invariants/wall-typed.md", "invariant"),
+    ]
+    assert rs.errors == () and rs.needs_migrate == ()
+    moved = parse_frontmatter((rules / "invariants" / "wall-insight-1.md").read_text(encoding="utf-8"))
+    assert moved["type"] == "invariant" and moved["context_files"] == ["src/a.py"]
+    assert not (walls / "wall-insight-1.md").exists() and not (rules / "membranes" / "m.md").exists()
+    assert (walls / "notes.md").is_file() and (walls / "README.md").is_file()
+    RULE_CACHE.invalidate()
+    assert [r["name"] for r in scan(root, ["src/a.py"])["relevant_rules"]] == ["wall-insight-1"]
+    assert migrate.plan(root).to_dict()["status"] == "up_to_date"
+
+
+def test_a_v3_type_name_in_a_canonical_directory_is_rewritten(tmp_path: Path):
+    """v3.3 accepted `type: wall` in invariants/ and `type: membrane` in boundaries/."""
+    from aegis_core.rules import load_rules
+
+    root = tmp_path / "ws"
+    rules = root / ".aegis" / "rules"
+    for name in ("invariants", "boundaries", "traps"):
+        (rules / name).mkdir(parents=True)
+    (rules / "invariants" / "w.md").write_bytes(
+        b"---\r\nid: w\r\ntype: wall\r\nenforcement: gate\r\nhypothesis: h\r\n---\r\nBody\r\n"
+    )
+    (rules / "boundaries" / "m.md").write_text("---\nid: m\ntype: Membrane\n---\nB\n", encoding="utf-8")
+    (rules / "traps" / "odd.md").write_text("---\nid: odd\ntype: wall\n---\nB\n", encoding="utf-8")
+
+    plan = migrate.plan(root)
+
+    # a wall in traps/ names a type its directory contradicts: reported by the loader, not guessed
+    assert plan.to_dict()["retype"] == [
+        {"path": ".aegis/rules/boundaries/m.md", "from": "Membrane", "to": "boundary"},
+        {"path": ".aegis/rules/invariants/w.md", "from": "wall", "to": "invariant"},
+    ]
+    migrate.apply(plan)
+
+    assert (rules / "invariants" / "w.md").read_bytes() == (
+        b"---\r\nid: w\r\ntype: invariant\r\nenforcement: gate\r\nhypothesis: h\r\n---\r\nBody\r\n"
+    )
+    rs = load_rules(root)
+    assert {r.id for r in rs.served} == {"w", "m"}
+    assert [r.id for r in rs.errors] == ["odd"]
+    assert migrate.plan(root).to_dict()["status"] == "up_to_date"
+
+
+def test_the_v3_enforcement_artifact_key_is_stripped(tmp_path: Path):
+    """v3 tier escalation wrote enforcement_artifact into gate rules; v4 never reads it."""
+    from aegis_core.rules import load_rules
+
+    root = tmp_path / "ws"
+    rule = root / ".aegis" / "rules" / "gates" / "g.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text(
+        "---\nid: g\ntype: gate\nenforcement: gate\nenforcement_artifact: .aegis/enforcement/g.py\n"
+        "fitness:\n  triggers: 3\nhypothesis: h\n---\nB\n",
+        encoding="utf-8",
+    )
+
+    plan = migrate.plan(root)
+    assert {s["path"]: s["keys"] for s in plan.to_dict()["strip"]} == {
+        ".aegis/rules/gates/g.md": ["enforcement_artifact", "fitness"],
+    }
+    migrate.apply(plan)
+
+    assert rule.read_text(encoding="utf-8") == "---\nid: g\ntype: gate\nenforcement: gate\nhypothesis: h\n---\nB\n"
+    assert load_rules(root).needs_migrate == ()

@@ -351,7 +351,8 @@ def run_layer1(
                 )
                 if test_file and not rule_targets_tests:
                     continue
-                if patterns and first_match(patterns, rel_path) is None:
+                # Rule.target_paths: a forbid_ast rule without target_paths is "**".
+                if first_match(patterns, rel_path) is None:
                     continue
 
                 try:

@@ -159,6 +159,141 @@ def test_descriptive_keys_are_not_enforcement_keys(tmp_path: Path) -> None:
     assert load_rules(tmp_path).get("x") is not None
 
 
+@pytest.mark.parametrize(
+    ("key", "hint"),
+    [
+        ("paths: ['src/*.py']", "'paths' (use target_paths)"),
+        ("globs: '*.py'", "'globs' (use target_paths)"),
+        ("applyTo: '**/*.ts'", "'applyTo' (use target_paths)"),
+        ("targetPaths: ['src/*.py']", "'targetPaths' (use target_paths)"),
+        ("Target-Paths: ['src/*.py']", "'Target-Paths' (use target_paths)"),
+        ("target_globs: ['src/*.py']", "'target_globs' (use target_paths)"),
+        ("enforce: gate", "'enforce' (use enforcement)"),
+        ("Enforcement: gate", "'Enforcement' (use enforcement)"),
+        ("forbid-ast: {calls: [eval]}", "'forbid-ast' (use forbid_ast)"),
+        ("forbidden: {calls: [eval]}", "'forbidden' (use forbid_ast)"),
+        ("expired: true", "'expired' (use expired_at)"),
+        ("planned_symbols: [eval]", "'planned_symbols' (no longer read"),
+    ],
+)
+def test_an_alias_or_misspelling_of_an_enforcement_key_is_an_error(tmp_path: Path, key: str, hint: str) -> None:
+    """A rule whose scope or enforcement is spelled in a way v4 does not read would
+    apply in the wrong place; each known alias is named with the key to use instead."""
+    _write(tmp_path, "traps/x.md", f"---\nid: x\ntype: trap\n{key}\n---\nb\n")
+
+    (rule,) = load_rules(tmp_path).rules
+
+    assert not rule.ok
+    assert f"unknown enforcement-relevant key(s) {hint}" in rule.error
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "target_audience: developers",
+        "source_path: tools/gen.py",
+        "related_paths: [docs/a.md]",
+        "global: true",
+        "global_note: x",
+        "context_files: [src/a.py]",
+        "path_note: see docs",
+        "enforcement_notes: reviewed",
+        "forbidden_words_note: none",
+        "_path: .aegis/rules/traps/x.md",
+    ],
+)
+def test_descriptive_keys_that_merely_mention_paths_or_enforcement_load(tmp_path: Path, key: str) -> None:
+    """Only the known aliases are errors: a descriptive key is rule content, not a typo."""
+    _write(tmp_path, "traps/x.md", _rule("x", extra=f"{key}\n"))
+
+    rule = load_rules(tmp_path).get("x")
+
+    assert rule is not None and rule.served
+
+
+def test_a_key_v3_tooling_wrote_is_ignored_and_reported_for_migrate(tmp_path: Path) -> None:
+    """v3 tier escalation wrote enforcement_artifact into gate rules; v4 never reads it.
+    Such a rule is served, and aegis status/migrate name the key."""
+    _write(tmp_path, "gates/g.md", _rule("g", "gate", extra="enforcement_artifact: .aegis/enforcement/g.py\n"))
+
+    rs = load_rules(tmp_path)
+
+    rule = rs.get("g")
+    assert rule is not None and rule.served
+    assert "enforcement_artifact" not in rule.meta
+    assert rule.legacy_keys == ("enforcement_artifact",)
+    assert [r.id for r in rs.needs_migrate] == ["g"]
+
+
+def test_any_rule_file_in_a_v3_type_directory_is_an_error_naming_migrate(tmp_path: Path) -> None:
+    """v3 served every file with frontmatter in membranes/ as a boundary, type key or not."""
+    _write(tmp_path, "membranes/m.md", "---\nid: m\nhypothesis: h\n---\nB\n")
+    _write(tmp_path, "membranes/notes.md", "# notes, no frontmatter\n")
+
+    rs = load_rules(tmp_path)
+
+    (rule,) = rs.rules
+    assert rule.path == ".aegis/rules/membranes/m.md" and not rule.ok
+    assert rule.error == (
+        "not served: membranes/ is not a rule type directory "
+        "(a v3 type directory: aegis migrate moves its rules to .aegis/rules/boundaries/)"
+    )
+    assert [i.path for i in rs.ignored] == [".aegis/rules/membranes/notes.md"]
+
+
+def test_a_v3_type_name_in_its_canonical_directory_points_at_migrate(tmp_path: Path) -> None:
+    """v3.3 accepted `type: wall` in invariants/; v4 knows only the six types."""
+    _write(tmp_path, "invariants/w.md", _rule("w", "wall"))
+
+    (rule,) = load_rules(tmp_path).rules
+
+    assert not rule.ok
+    assert "type 'wall' does not match its directory 'invariants' (invariant)" in rule.error
+    assert "aegis migrate" in rule.error
+
+
+def test_a_forbid_ast_rule_without_target_paths_applies_to_every_file(tmp_path: Path) -> None:
+    """aegis check has always enforced such a rule on every file, so every surface that
+    asks where a rule applies (scan, telemetry, coverage) sees the same scope."""
+    _write(tmp_path, "invariants/no-eval.md", "---\nid: no-eval\nforbid_ast:\n  calls: [eval]\n---\nb\n")
+    _write(tmp_path, "invariants/no-exec.md", "---\nid: no-exec\ntarget_paths: []\nforbid_ast:\n  calls: [exec]\n---\nb\n")
+    _write(tmp_path, "traps/scoped.md", "---\nid: scoped\n---\nb\n")
+
+    rs = load_rules(tmp_path)
+
+    assert rs.get("no-eval").target_paths == ("**",)
+    assert rs.get("no-exec").target_paths == ("**",)
+    assert rs.get("scoped").target_paths == ()  # a rule without forbid_ast and without scope matches nothing
+
+
+@pytest.mark.parametrize("name", ["readme.md", "README.md", "ReadMe.md", ".draft.md", "upper.MD", "mixed.Md"])
+def test_a_rule_hidden_by_its_file_name_is_an_error(tmp_path: Path, name: str) -> None:
+    """A README, a hidden file or a non-.md extension is never served; when it holds a
+    rule, that must not go unseen."""
+    rule_id = name.rsplit(".", 1)[0]
+    _write(tmp_path, f"traps/{name}", _rule(rule_id))
+    _write(tmp_path, "traps/kept.md", _rule("kept"))
+
+    rs = load_rules(tmp_path)
+
+    (broken,) = rs.errors
+    assert broken.path == f".aegis/rules/traps/{name}"
+    assert broken.error.startswith("not served: ")
+    assert [r.id for r in rs.served] == ["kept"]
+
+
+def test_non_rule_files_hidden_by_name_are_reported_as_ignored_except_readmes(tmp_path: Path) -> None:
+    _write(tmp_path, "traps/README.md", "# Traps\n")
+    _write(tmp_path, "traps/.notes.md", "# my notes\n")
+    _write(tmp_path, "traps/NOTES.MD", "# more notes\n")
+
+    rs = load_rules(tmp_path)
+
+    assert rs.rules == ()
+    assert sorted(i.path for i in rs.ignored) == [".aegis/rules/traps/.notes.md", ".aegis/rules/traps/NOTES.MD"]
+    assert all(i.reason.startswith("not a rule: ") for i in rs.ignored)
+
+
 def test_two_rules_with_one_id_are_both_errors(tmp_path: Path) -> None:
     _write(tmp_path, "traps/same.md", _rule("same"))
     _write(tmp_path, "invariants/same.md", _rule("same", "invariant"))
@@ -181,10 +316,10 @@ def test_derived_counters_are_ignored_and_reported_for_migrate(tmp_path: Path) -
     rs = load_rules(tmp_path)
 
     x, y = rs.get("x"), rs.get("y")
-    assert x.legacy_counters == ("fitness", "last_trigger_date")
+    assert x.legacy_keys == ("fitness", "last_trigger_date")
     assert "fitness" not in x.meta and "last_trigger_date" not in x.meta
     assert x.meta["triggers"] == ["documentation_edit"]  # a keyword list is rule content
-    assert y.legacy_counters == ("triggers", "true_positives")
+    assert y.legacy_keys == ("triggers", "true_positives")
     assert {r.id for r in rs.needs_migrate} == {"x", "y"}
 
 

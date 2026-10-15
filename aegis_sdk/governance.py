@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+from aegis_core.errors import RuleParseError
 from aegis_core.fitness import wilson_interval
 from aegis_core.metrics import calculate_coverage, calculate_governance_grade
 from aegis_core.outcomes.engine import _get_changed_files, match_rules_to_changes
@@ -84,9 +85,17 @@ class Governance:
         return calculate_coverage(workspace=str(self.root), exclude=[exclude] if exclude else None)
 
     def grade(self) -> dict[str, Any]:
-        """Governance report card; a fixed all-F report when there are no rules."""
+        """Governance report card; a fixed all-F report when no rule can be graded.
+
+        ``rule_errors`` counts the rule files that cannot be loaded (they are not graded);
+        when no rule loads because of them, the fallback's status is FAIL.
+        """
         report = calculate_governance_grade(workspace=str(self.root))
         if report is None:
+            errors = len(load_rules(self.root).errors)
+            note = "No rules found to grade"
+            if errors:
+                note = f"No rule could be graded: {errors} rule file(s) cannot be loaded (aegis status lists them)"
             return {
                 "coverage": {"pct": 0.0, "grade": "F"},
                 "avg_fitness": {"pct": 0.0, "grade": "F", "score": 0.0},
@@ -95,15 +104,31 @@ class Governance:
                 "invariant_integrity": {"pct": 0.0, "grade": "F"},
                 "tiers": {},
                 "overall": {"pct": 0.0, "grade": "F"},
-                "status": "PASS",
-                "note": "No rules found to grade",
+                "status": "FAIL" if errors else "PASS",
+                "note": note,
+                "rule_errors": errors,
             }
         return report
 
     def scan(self, files: Optional[list[str]] = None) -> list[dict[str, Any]]:
-        """Rules whose target_paths match ``files`` (default: the files git reports changed)."""
+        """Rules whose target_paths match ``files`` (default: the files git reports changed).
+
+        Like aegis scan, it never presents a partial rule set as the rules for these
+        files: if any rule file cannot be loaded it raises RuleParseError (an AegisError)
+        naming them, with ``rule_errors`` [{path, error}].
+        """
+        ruleset = load_rules(self.root)
+        if ruleset.errors:
+            errors = [{"path": r.path, "error": r.error or ""} for r in ruleset.errors]
+            listed = "; ".join(f"{e['path']}: {e['error']}" for e in errors[:5])
+            more = f" (and {len(errors) - 5} more)" if len(errors) > 5 else ""
+            raise RuleParseError(
+                f"{len(errors)} rule file(s) cannot be served, so no partial rule set is returned: {listed}{more}",
+                code="RULES_UNSERVABLE",
+                rule_errors=errors,
+            )
         changed = files if files is not None else _get_changed_files(str(self.root))
-        return match_rules_to_changes(self.root, changed)
+        return match_rules_to_changes(self.root, changed, ruleset)
 
     def entropy(self) -> dict[str, Any]:
         """Rule population and the Shannon entropy (bits) of its type distribution."""

@@ -21,8 +21,11 @@ POSIX paths:
 from __future__ import annotations
 
 import functools
+import os
+from pathlib import Path
+import posixpath
 import re
-from typing import Dict, Iterable, List, Mapping, Optional, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 
 __all__ = [
     "credit_weights",
@@ -31,6 +34,7 @@ __all__ = [
     "matches",
     "matching_files",
     "normalize_path",
+    "workspace_files",
 ]
 
 Patterns = Union[str, Iterable[object], None]
@@ -133,10 +137,43 @@ def first_match(patterns: Patterns, path: str) -> Optional[str]:
     return None
 
 
+def _unique(files: Iterable[str]) -> List[str]:
+    """``files`` normalized, in order, each once: ``./src/a.py`` and ``src/a.py`` are one file."""
+    return list(dict.fromkeys(normalize_path(f) for f in files if isinstance(f, str)))
+
+
+def workspace_files(root: Any, files: Iterable[str]) -> List[str]:
+    """``files`` as the workspace-relative POSIX paths rules are matched against, each once.
+
+    An absolute path inside ``root`` is made relative to it (both resolved, so a
+    symlinked temp dir or a Windows drive spelling compares equal). A path outside the
+    workspace, absolute or climbing out with ``..``, is no workspace file: no rule
+    applies to it, so it is dropped.
+    """
+    base: Optional[Path] = None
+    out: List[str] = []
+    for raw in files:
+        if not isinstance(raw, str) or not raw:
+            continue
+        if os.path.isabs(raw):
+            if base is None:
+                base = Path(os.fspath(root)).resolve()
+            try:
+                rel = Path(raw).resolve().relative_to(base).as_posix()
+            except (ValueError, OSError):
+                continue
+        else:
+            rel = posixpath.normpath(normalize_path(raw))
+        if rel in ("", ".") or rel == ".." or rel.startswith("../"):
+            continue
+        out.append(rel)
+    return _unique(out)
+
+
 def matching_files(patterns: Patterns, files: Iterable[str]) -> List[str]:
-    """The ``files`` some pattern matches, in order and without duplicates."""
+    """The ``files`` some pattern matches, normalized, in order and without duplicates."""
     pats = _as_list(patterns)
-    return [f for f in dict.fromkeys(files) if first_match(pats, f) is not None]
+    return [f for f in _unique(files) if first_match(pats, f) is not None]
 
 
 def credit_weights(rules: Mapping[str, Patterns], files: Iterable[str]) -> Dict[str, float]:
@@ -149,7 +186,7 @@ def credit_weights(rules: Mapping[str, Patterns], files: Iterable[str]) -> Dict[
     """
     patterns = {rule: _as_list(pats) for rule, pats in rules.items()}
     weights = {rule: 0.0 for rule in patterns}
-    for path in dict.fromkeys(files):
+    for path in _unique(files):
         hits = [rule for rule, pats in patterns.items() if first_match(pats, path) is not None]
         for rule in hits:
             weights[rule] += 1.0 / len(hits)

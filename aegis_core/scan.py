@@ -25,9 +25,9 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from aegis_core.fitness import Fitness, for_rules
-from aegis_core.match import first_match, normalize_path
+from aegis_core.match import matching_files, normalize_path, workspace_files
 from aegis_core.rule_inventory import RuleInventoryError
-from aegis_core.rules import Rule, RuleCache, RuleSet
+from aegis_core.rules import Rule, RuleCache, RuleSet, workspace_root
 from aegis_core.taxonomy import (
     JIT_DEFAULT_MAX_TOKENS,
     JIT_DEFAULT_RULE_COUNT_BUDGET,
@@ -112,7 +112,7 @@ class _Match:
 
 def _match(rule: Rule, files: List[str], fitness: Fitness) -> Optional[_Match]:
     patterns = rule.target_paths
-    matched = tuple(f for f in files if first_match(patterns, f) is not None)
+    matched = tuple(matching_files(patterns, files))
     if not matched:
         return None
     exact = any(normalize_path(p) == normalize_path(f) for p in patterns for f in matched)
@@ -308,7 +308,8 @@ def scan(
     if ruleset.errors:
         return _broken(ruleset)
 
-    files = list(changed_files) if changed_files else _git_changed_files(workspace)
+    # Workspace-relative, each file once, as every other surface matches them.
+    files = workspace_files(workspace_root(workspace), changed_files if changed_files else _git_changed_files(workspace))
     served = list(ruleset.served)
     stale = stale_rules(ruleset, read_derived(workspace))
     warnings = [_ignored_warning(ruleset)] if ruleset.ignored else []

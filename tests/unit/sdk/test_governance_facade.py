@@ -167,6 +167,32 @@ def test_grade_of_a_workspace_without_rules_is_the_documented_fallback(tmp_path:
     assert report["overall"] == {"pct": 0.0, "grade": "F"}
     assert report["status"] == "PASS"
     assert report["note"] == "No rules found to grade"
+    assert report["rule_errors"] == 0
+
+
+def test_grade_of_a_workspace_whose_rules_cannot_be_loaded_says_so(tmp_path: Path) -> None:
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    (traps / "broken.md").write_text("---\nid: [unclosed\n---\n", encoding="utf-8")
+
+    report = Governance(tmp_path).grade()
+
+    assert report["overall"] == {"pct": 0.0, "grade": "F"}
+    assert report["status"] == "FAIL" and report["rule_errors"] == 1
+    assert report["note"] == "No rule could be graded: 1 rule file(s) cannot be loaded (aegis status lists them)"
+
+
+def test_scan_refuses_a_rule_set_with_a_broken_rule(ws: Path) -> None:
+    """A partial rule set is never returned as the rules for these files (defense #19)."""
+    (ws / ".aegis" / "rules" / "traps" / "trap-src-drift-copy.md").write_text(
+        "---\nid: trap-src-drift-copy\npaths: ['src/*.py']\n---\nB\n", encoding="utf-8"
+    )
+
+    with pytest.raises(RuleParseError, match="1 rule file\\(s\\) cannot be served") as raised:
+        Governance(ws).scan(["src/app.py"])
+
+    assert raised.value.rule_errors[0]["path"] == ".aegis/rules/traps/trap-src-drift-copy.md"
+    assert isinstance(raised.value, AegisError)
 
 
 def test_coverage_report_maps_files_to_rules(ws: Path) -> None:

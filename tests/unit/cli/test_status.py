@@ -85,6 +85,17 @@ class TestStatus:
         assert run_status(argparse.Namespace(_root=tmp_path)) == 0
         assert "run aegis migrate --apply to strip them" in capsys.readouterr().out
 
+    def test_status_names_rules_that_still_carry_a_retired_v3_key(self, tmp_path, capsys):
+        """v3 tier escalation wrote enforcement_artifact; v4 serves the rule and ignores the key."""
+        rules = tmp_path / ".aegis" / "rules" / "gates"
+        rules.mkdir(parents=True)
+        (rules / "g.md").write_text("---\nid: g\nenforcement: gate\nenforcement_artifact: .aegis/enforcement/g.py\n---\n")
+
+        assert run_status(argparse.Namespace(_root=tmp_path, json=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["needs_migrate"] == [{"path": ".aegis/rules/gates/g.md", "keys": ["enforcement_artifact"]}]
+        assert payload["rule_errors"] == [] and [r["name"] for r in payload["rules"]] == ["g"]
+
     def test_status_reports_rules_edited_since_the_last_sync(self, tmp_path, capsys):
         from aegis_core.sync import sync
 

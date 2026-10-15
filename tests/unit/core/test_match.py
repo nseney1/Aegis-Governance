@@ -11,7 +11,15 @@ import random
 
 import pytest
 
-from aegis_core.match import credit_weights, first_match, is_test_path, matches, matching_files, normalize_path
+from aegis_core.match import (
+    credit_weights,
+    first_match,
+    is_test_path,
+    matches,
+    matching_files,
+    normalize_path,
+    workspace_files,
+)
 
 
 @pytest.mark.parametrize(
@@ -89,6 +97,22 @@ def test_matching_files_keeps_order_and_drops_duplicates() -> None:
     assert matching_files([], files) == []
 
 
+def test_matching_files_counts_one_file_once_however_it_is_spelled() -> None:
+    files = ["src/a.py", "./src/a.py", "src\\a.py", "/src/a.py", "src/b.py"]
+    assert matching_files(["src/*.py"], files) == ["src/a.py", "src/b.py"]
+
+
+def test_workspace_files_makes_paths_workspace_relative_once_each(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    inside = str(tmp_path / "src" / "a.py")
+    outside = str(tmp_path.parent / "elsewhere.py")
+
+    files = workspace_files(tmp_path, [inside, "./src/a.py", "src/b/../a.py", "", "docs/x.md", outside, "../up.py"])
+
+    # A path outside the workspace is no workspace file: no rule can apply to it.
+    assert files == ["src/a.py", "docs/x.md"]
+
+
 # ── Properties (seeded, stdlib only) ─────────────────────────────────────────
 
 _ALPHABET = ["a", "b", "/", "*", "?", ".", "**/", "[ab]"]
@@ -163,6 +187,11 @@ def test_a_rule_matching_two_files_sums_its_share_of_each() -> None:
 
 def test_credit_with_no_files_is_zero_for_every_rule() -> None:
     assert credit_weights({"a": ["*"]}, []) == {"a": 0.0}
+
+
+def test_one_file_spelled_two_ways_is_credited_once() -> None:
+    weights = credit_weights({"a": ["src/*.py"], "b": ["docs/*"]}, ["src/x.py", "./src/x.py", "docs/y.md"])
+    assert weights == {"a": 1.0, "b": 1.0}
 
 
 # ── Test-file classification (one predicate, #25) ────────────────────────────

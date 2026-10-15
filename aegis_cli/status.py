@@ -400,7 +400,7 @@ def run_status(args: argparse.Namespace) -> int:
         "rule_errors": [{"path": r.path, "error": r.error} for r in ruleset.errors],
         "ignored": [{"path": i.path, "reason": i.reason} for i in ruleset.ignored],
         "stale_rules": stale,
-        "needs_migrate": [{"path": r.path, "keys": list(r.legacy_counters)} for r in ruleset.needs_migrate],
+        "needs_migrate": [{"path": r.path, "keys": list(r.legacy_keys)} for r in ruleset.needs_migrate],
     }
     rc = 1 if (problems["rule_errors"] or inventory_error) else 0
 
@@ -497,7 +497,7 @@ def _print_problems(inventory_error: str | None, problems: dict) -> None:
         for item in problems["stale_rules"]:
             print(f"     {sanitize_display(str(item['id']))} ({item['change']})")
     if problems["needs_migrate"]:
-        print(f"  ⚠️  {len(problems['needs_migrate'])} rule file(s) still carry derived counters "
+        print(f"  ⚠️  {len(problems['needs_migrate'])} rule file(s) still carry derived counters or retired v3 keys "
               "(ignored; run aegis migrate --apply to strip them):")
         for item in problems["needs_migrate"]:
             print(f"     {sanitize_display(item['path'])}: {', '.join(item['keys'])}")

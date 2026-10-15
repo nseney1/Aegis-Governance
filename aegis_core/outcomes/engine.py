@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 from aegis_core import gitsafe
-from aegis_core.match import matching_files
-from aegis_core.rules import load_rules
+from aegis_core.match import matching_files, workspace_files
+from aegis_core.rules import Rule, RuleSet, load_rules
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import literal_workspace
 
-__all__ = ["match_rules_to_changes"]
+__all__ = ["match_rules_to_changes", "matched_rules"]
 
 
 def _get_changed_files(workspace: str) -> list[str]:
@@ -24,27 +25,34 @@ def _get_changed_files(workspace: str) -> list[str]:
     return list(dict.fromkeys(uncommitted + untracked))
 
 
-def _relative(root: Path, path: str) -> str:
-    """Rule patterns are workspace-relative: an absolute path inside the workspace is made so."""
-    candidate = Path(path)
-    if candidate.is_absolute():
-        try:
-            return candidate.resolve().relative_to(Path(root).resolve()).as_posix()
-        except (ValueError, OSError):
-            return path
-    return path
+def matched_rules(
+    workspace: Workspace | Path | str, changed_files: List[str], ruleset: Optional[RuleSet] = None,
+) -> List[Tuple[Rule, List[str]]]:
+    """Each served rule whose target_paths match ``changed_files``, with the files it
+    matches (workspace-relative, each once). One loader, one matcher (aegis_core.rules,
+    aegis_core.match), the same inputs aegis scan matches.
 
-
-def match_rules_to_changes(workspace: Workspace | Path | str, changed_files: list[str]) -> list[dict]:
-    """The served rules whose target_paths match ``changed_files``, as ``Rule.as_dict()``
-    plus ``_matched_files``. One loader, one matcher (aegis_core.rules, aegis_core.match)."""
+    Rules that cannot be loaded are not served, so they match nothing here; a caller
+    that serves rules (the SDK scan) refuses ``ruleset.errors`` first.
+    """
     ws = literal_workspace(workspace)
-    files = [_relative(ws.root, f) for f in changed_files if f]
+    rules = ruleset if ruleset is not None else load_rules(ws)
+    files = workspace_files(ws.root, changed_files)
     out = []
-    for rule in load_rules(ws).served:
+    for rule in rules.served:
         matched = matching_files(rule.target_paths, files)
         if matched:
-            data = rule.as_dict()
-            data["_matched_files"] = matched
-            out.append(data)
+            out.append((rule, matched))
+    return out
+
+
+def match_rules_to_changes(
+    workspace: Workspace | Path | str, changed_files: List[str], ruleset: Optional[RuleSet] = None,
+) -> List[dict]:
+    """``matched_rules`` as ``Rule.as_dict()`` plus ``_matched_files``."""
+    out = []
+    for rule, matched in matched_rules(workspace, changed_files, ruleset):
+        data = rule.as_dict()
+        data["_matched_files"] = matched
+        out.append(data)
     return out

@@ -146,7 +146,7 @@ def _read_stable_file(path: str, before: os.stat_result) -> bytes:
 
 
 def _empty_inventory() -> RuleInventory:
-    digest = hashlib.sha256(b"soma-cell-inventory-v1\0").hexdigest()
+    digest = hashlib.sha256(b"aegis-rule-inventory-v1\0").hexdigest()
     return RuleInventory(entries=(), fingerprint=digest)
 
 
@@ -207,7 +207,9 @@ def inventory_rules(workspace: str) -> RuleInventory:
                     raise RuleInventoryError("validate", child, "expected a directory")
 
             for filename in sorted(filenames):
-                if filename.endswith(".md"):
+                # Any case of the extension: the loader reports a rule named x.MD instead
+                # of letting it go unseen.
+                if filename.lower().endswith(".md"):
                     cell_paths.append(os.path.join(dirpath, filename))
     except RuleInventoryError:
         raise
@@ -238,7 +240,7 @@ def inventory_rules(workspace: str) -> RuleInventory:
         if _stat_signature(current) != expected:
             raise RuleInventoryError("list", path, "directory changed during inventory")
 
-    aggregate = hashlib.sha256(b"soma-cell-inventory-v1\0")
+    aggregate = hashlib.sha256(b"aegis-rule-inventory-v1\0")
     for entry in entries:
         aggregate.update(entry.relative_path.encode("utf-8") + b"\0")
         aggregate.update(bytes.fromhex(entry.digest))

@@ -25,10 +25,12 @@ def _list_workspace_files(workspace: str) -> list[str]:
     return files
 
 
-def _served_rules(workspace: str) -> list:
+def _rules(workspace: str):
+    """The workspace's rule set. Coverage and the grade use the served rules and report
+    how many rule files could not be loaded (``rule_errors``) instead of dropping them unseen."""
     from aegis_core.rules import load_rules
 
-    return list(load_rules(workspace).served)
+    return load_rules(workspace)
 
 
 def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] = None) -> dict:
@@ -42,9 +44,10 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
             EXCLUDE_PATTERNS.extend(exclude)
     all_files = [f for f in all_files if not any(p in f for p in EXCLUDE_PATTERNS)]
 
+    ruleset = _rules(workspace)
     cell_patterns = [
         {'name': rule.id, 'patterns': list(rule.target_paths), 'type': rule.type, 'enforcement': rule.enforcement}
-        for rule in _served_rules(workspace)
+        for rule in ruleset.served
     ]
 
     covered_files = set()
@@ -88,6 +91,7 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
         'coverage_pct': round(pct, 1),
         'by_directory': coverage_map,
         'uncovered_files': sorted(uncovered_files),
+        'rule_errors': len(ruleset.errors),
     }
 
 
@@ -108,10 +112,12 @@ def letter_grade(pct: float) -> str:
 
 
 def calculate_governance_grade(workspace: str) -> Optional[dict]:
-    """Calculate complete governance report card (fitness from the ledger)."""
+    """The governance report card over the served rules (fitness from the ledger), with
+    ``rule_errors``: how many rule files could not be loaded. None when no rule is served."""
     from aegis_core.fitness import for_rules
 
-    rules = _served_rules(workspace)
+    ruleset = _rules(workspace)
+    rules = list(ruleset.served)
     if not rules:
         return None
     fits = for_rules(workspace, rules)
@@ -171,6 +177,7 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
         'overall': {'pct': round(overall_pct, 1), 'grade': letter_grade(overall_pct)},
         'top_improvement': f'Add rules for {top_gap[0]}/ ({top_gap[1]} uncovered files)',
         'top_gap_count': top_gap[1],
+        'rule_errors': len(ruleset.errors),
         'details': {
             'total_rules': len(rules),
             'invariants': len(invariants),
