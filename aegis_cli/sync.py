@@ -15,6 +15,7 @@ import os
 import sys
 from typing import Any, Dict, List
 
+from aegis_cli import sanitize_display
 from aegis_cli.base import AegisCommand, CommandCategory
 from aegis_core.errors import AegisError
 
@@ -51,18 +52,18 @@ def _print_text(args: argparse.Namespace, result: Any, rel_path: str) -> None:
             tbl.add_column(column, no_wrap=True)
         for row in rows:
             tbl.add_row(
-                str(row["id"]), ui.color_rule_type(str(row["type"])), f"{row['fitness']:.2f}",
+                sanitize_display(str(row["id"])), ui.color_rule_type(str(row["type"])), f"{row['fitness']:.2f}",
                 str(row["triggers"]), f"{row['tp']:g}", f"{row['fp']:g}", row["suggestion"] or "—",
             )
         for line in tbl.render(ui).splitlines():
             print(f"  {line}")
     for error in result.derived["errors"]:
-        print(f"  ❌ {error['path']}: {error['error']}")
+        print(f"  ❌ {sanitize_display(error['path'])}: {sanitize_display(error['error'], 300)}")
     for ignored in result.derived["ignored"]:
-        print(f"  ⚠️  {ignored['path']}: {ignored['reason']}")
+        print(f"  ⚠️  {sanitize_display(ignored['path'])}: {ignored['reason']}")
     for action in result.applied:
         detail = f" ({action['from_type']} -> {action['to_type']})" if action.get("to_type") else ""
-        print(f"  {action['action']} {action['rule']}: {action['status']}{detail}")
+        print(f"  {action['action']} {sanitize_display(action['rule'])}: {action['status']}{detail}")
     if result.refused:
         print(f"  ❌ {result.refused}")
     pending = sum(1 for row in rows if row["suggestion"])

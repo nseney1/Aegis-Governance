@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from aegis_cli import sanitize_display
 from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.config import env_workspace
 from aegis_core.errors import WorkspaceNotFoundError
@@ -154,13 +155,17 @@ def collect_workspace_rules(
     """The workspace's rules (one loader) with their ledger fitness, filtered.
 
     A rule file that cannot be loaded is listed with its ``error``; it has no fitness.
+    A rule edited or added since the last ``aegis sync`` carries ``stale`` (``edited``
+    or ``new``); it is listed like any other.
     """
     from aegis_core.fitness import for_rules
     from aegis_core.rules import load_rules
+    from aegis_core.sync import read_derived, stale_rules
 
     ruleset = load_rules(root)
     selected = [r for r in ruleset.rules if not rule_type_filter or r.type == rule_type_filter]
     fits = for_rules(root, [r for r in selected if r.ok])
+    stale = {s["id"]: s["change"] for s in stale_rules(ruleset, read_derived(root))}
     rules: list[dict[str, Any]] = []
     for rule in selected:
         fit = fits.get(rule.id) if rule.ok else None
@@ -180,6 +185,8 @@ def collect_workspace_rules(
             entry["error"] = rule.error
         if rule.expired:
             entry["expired"] = True
+        if rule.id in stale and rule.ok:
+            entry["stale"] = stale[rule.id]
         rules.append(entry)
     return rules
 
@@ -218,11 +225,14 @@ def _run_list(args: argparse.Namespace) -> int:
         score_str = ui.color_fitness(float(r["score"])) if isinstance(r.get("score"), (int, float)) else "—"
         if r.get("error"):
             score_str = "error"
-        tbl.add_row(str(r["id"]), ui.color_rule_type(str(r["type"])), str(r["enforcement"]), score_str)
+        tbl.add_row(sanitize_display(str(r["id"])), ui.color_rule_type(str(r["type"])), str(r["enforcement"]), score_str)
 
     print(f"Active Rules ({len(rules)} found):")
     for line in tbl.render(ui).splitlines():
         print(f"  {line}")
+    stale = [f"{sanitize_display(str(r['id']))} ({r['stale']})" for r in rules if r.get("stale")]
+    if stale:
+        print(f"  {len(stale)} rule(s) changed since the last aegis sync: {', '.join(stale)}")
     return 0
 
 

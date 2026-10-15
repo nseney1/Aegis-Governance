@@ -77,6 +77,48 @@ def test_rule_list_with_rules(tmp_path, capsys):
     assert "inv-young" not in out  # no verdicts yet: below --min-fitness 0.9
 
 
+def test_rule_list_flags_rules_edited_since_the_last_sync(tmp_path, capsys):
+    """The CLI twin of aegis_list_rules' stale_rules: listed, never excluded."""
+    from aegis_core.sync import sync
+
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    (traps / "edited.md").write_text("---\nid: edited\n---\nBefore\n", encoding="utf-8")
+    (traps / "steady.md").write_text("---\nid: steady\n---\nSame\n", encoding="utf-8")
+    sync(tmp_path)
+    (traps / "edited.md").write_text("---\nid: edited\n---\nAfter\n", encoding="utf-8")
+    (traps / "added.md").write_text("---\nid: added\n---\nNew\n", encoding="utf-8")
+
+    def listed(use_json):
+        args = argparse.Namespace(rule_action="list", workspace=str(tmp_path), json=use_json, type=None, min_fitness=None)
+        assert run_rule(args) == 0
+        return capsys.readouterr().out
+
+    rows = {r["id"]: r for r in json.loads(listed(True))}
+    assert set(rows) == {"added", "edited", "steady"}
+    assert (rows["edited"]["stale"], rows["added"]["stale"]) == ("edited", "new")
+    assert "stale" not in rows["steady"]
+
+    out = listed(False)
+    assert "2 rule(s) changed since the last aegis sync: added (new), edited (edited)" in out
+
+
+def test_rule_list_text_never_prints_terminal_escapes_from_rule_names(tmp_path, capsys):
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    try:
+        (traps / "evil\x1b]0;pwned\x07.md").write_text("---\ntype: trap\n---\n", encoding="utf-8")
+    except (OSError, ValueError):
+        pytest.skip("this filesystem refuses control characters in file names")
+
+    args = argparse.Namespace(rule_action="list", workspace=str(tmp_path), json=False, type=None, min_fitness=None, plain=True)
+    assert run_rule(args) == 0
+
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\x07" not in out
+    assert "evil" in out
+
+
 def test_rule_promote_and_force_promote(tmp_path, capsys):
     with patch("aegis_cli.rule.promote_cell", return_value={"status": "already_terminal", "current_type": "invariant"}):
         args = argparse.Namespace(

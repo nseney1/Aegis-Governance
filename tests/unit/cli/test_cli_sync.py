@@ -117,3 +117,18 @@ def test_outside_an_aegis_workspace_sync_exits_2(tmp_path, monkeypatch, capsys):
 
     assert rc == 2
     assert "not an Aegis workspace" in capsys.readouterr().err
+
+
+def test_sync_text_never_prints_terminal_escapes_from_rule_files(ws, capsys):
+    traps = ws / ".aegis" / "rules" / "traps"
+    try:
+        (traps / "evil\x1b]0;pwned\x07.md").write_text("---\ntype: trap\n---\n", encoding="utf-8")
+    except (OSError, ValueError):
+        pytest.skip("this filesystem refuses control characters in file names")
+    (traps / "broken.md").write_text("---\nid: [x\n---\n", encoding="utf-8")
+
+    assert main(["sync"]) == 1
+
+    out = capsys.readouterr().out
+    assert "\x1b]" not in out and "\x07" not in out
+    assert "evil" in out and "broken.md" in out
