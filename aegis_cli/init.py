@@ -310,7 +310,8 @@ def generate_mcp_config(
 
 def run_init(args: argparse.Namespace) -> int:
     """Main init flow. Returns exit code."""
-    from aegis_core.config import update_repo_config
+    from aegis_core.config import ConfigError, update_repo_config
+    from aegis_core.errors import PathTraversalError
     from aegis_core.workspace.base import Workspace
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
@@ -413,7 +414,13 @@ def run_init(args: argparse.Namespace) -> int:
     pre_existing = {p.stem for p in rules_dir.glob("*.md")} if rules_dir.is_dir() else set()
     ws.scaffold(minimal=(preset == "minimal"), dry_run=dry_run)
     if not dry_run:
-        update_repo_config(project_root, lambda _config: None)  # .aegis/config.json, v1
+        try:
+            update_repo_config(project_root, lambda _config: None)  # .aegis/config.json, v1
+        except PathTraversalError as exc:
+            print(f"  ❌ {exc}", file=sys.stderr)
+            return 1
+        except ConfigError as exc:
+            print(f"  ⚠️  {exc}; left unchanged. Fix it, then rerun aegis init.", file=sys.stderr)
     gitignore_status = ensure_runtime_gitignore(ws.aegis_dir, dry_run=dry_run)
     if gitignore_status == "symlink":
         print("  ⚠️  .aegis/.gitignore is a symlink; not modified. Add Aegis runtime state to it yourself.")
@@ -432,7 +439,11 @@ def run_init(args: argparse.Namespace) -> int:
             print(f"    ✅ {name}")
 
     # 6.5. Zero-touch AST driver provisioning
-    slots, _written = provision_ast_driver_slots(project_root, detected_langs, dry_run=dry_run)
+    try:
+        slots, _written = provision_ast_driver_slots(project_root, detected_langs, dry_run=dry_run)
+    except PathTraversalError as exc:
+        print(f"  ❌ {exc}", file=sys.stderr)
+        return 1
     if slots:
         action = "Would configure" if dry_run else "Configured"
         for slot_k, slot_cmd in sorted(slots.items()):

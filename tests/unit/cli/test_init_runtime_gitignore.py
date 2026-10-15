@@ -198,3 +198,31 @@ class TestLineEndingsAreKept:
 
         assert gi.read_bytes().startswith(original)
         assert _ignored(repo, ".aegis/state/ledger.jsonl")
+
+
+class TestInitConfigJson:
+    """`aegis init` writes .aegis/config.json (D12) and never writes it through a link."""
+
+    def test_init_writes_a_v1_config(self, repo: Path, home: Path):
+        assert run_init(_init_args(repo, home)) == 0
+        assert (repo / ".aegis" / "config.json").read_text(encoding="utf-8") == '{\n  "v": 1\n}\n'
+
+    def test_symlinked_config_is_refused_and_not_written_through(self, repo: Path, home: Path, tmp_path: Path, capsys):
+        user_config = tmp_path / "user-config.json"
+        (repo / ".aegis").mkdir()
+        symlink_or_skip(user_config, repo / ".aegis" / "config.json")
+
+        assert run_init(_init_args(repo, home)) == 1
+
+        assert not user_config.exists()
+        assert "is a symlink" in capsys.readouterr().err
+
+    def test_unreadable_config_is_kept_and_reported(self, repo: Path, home: Path, capsys):
+        config = repo / ".aegis" / "config.json"
+        config.parent.mkdir()
+        config.write_text("{hand-edited", encoding="utf-8")
+
+        assert run_init(_init_args(repo, home)) == 0
+
+        assert config.read_text(encoding="utf-8") == "{hand-edited"
+        assert ".aegis/config.json is not valid JSON" in capsys.readouterr().err
