@@ -126,6 +126,12 @@ class AegisParser(argparse.ArgumentParser):
 
     def parse_args(self, args=None, namespace=None):
         ns = super().parse_args(args=args, namespace=namespace)
+        if not hasattr(ns, "json"):
+            ns.json = False
+        # Only `check` keeps --format; its json value must reach code (and the
+        # OutputContext below) that reads args.json alone.
+        if getattr(ns, "format", None) == "json":
+            ns.json = True
         if not hasattr(ns, "plain"):
             ns.plain = False
         if not hasattr(ns, "workspace"):
@@ -137,7 +143,10 @@ class AegisParser(argparse.ArgumentParser):
 
 def _build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
-    common_parser.add_argument("--json", action="store_true", default=False,
+    # SUPPRESS, not False: a subparser writes its defaults over the namespace
+    # the top-level parser filled, so a False default here drops a `--json`
+    # given before the command. parse_args sets the False fallback once.
+    common_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                                help="Emit machine-readable JSON output")
     common_parser.add_argument("--plain", action="store_true", default=argparse.SUPPRESS,
                                help="Strip ANSI styling and emoji")
@@ -214,9 +223,6 @@ def main(argv: Optional[List[str]] = None, prog: str = PROG) -> int:
     parser = _build_parser(prog=prog)
     args = parser.parse_args(argv)
     args.prog = prog
-    # `check --format json` must reach code that only reads args.json.
-    if getattr(args, "format", None) == "json":
-        args.json = True
     if args.command is None:
         parser.print_help()
         return 0

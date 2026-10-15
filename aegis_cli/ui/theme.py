@@ -54,7 +54,7 @@ class OutputContext:
         tty = isatty if isatty is not None else bool(getattr(sys.stdout, "isatty", lambda: False)())
 
         plain = bool(getattr(args, "plain", False))
-        json_mode = bool(getattr(args, "json", False)) or getattr(args, "format", "text") == "json"
+        json_mode = bool(getattr(args, "json", False))
 
         no_color_env = bool(env.get("NO_COLOR", ""))
         term_dumb = env.get("TERM", "").lower() == "dumb"

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Union
 
 from aegis_cli.base import CommandCategory, AegisCommand
 

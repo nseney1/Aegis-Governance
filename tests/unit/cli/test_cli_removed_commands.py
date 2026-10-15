@@ -6,6 +6,7 @@ the next step instead of a generic argparse error.
 """
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -107,10 +108,47 @@ def test_removed_global_flags_are_usage_errors(argv, capsys):
 
 
 @pytest.mark.parametrize("argv", [["--json", "status"], ["--plain", "status"], ["status", "--json"]])
-def test_surviving_global_flags_still_parse(argv, tmp_path, monkeypatch):
+def test_surviving_global_flags_still_parse(argv, tmp_path, monkeypatch, capsys):
     (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
     assert main(argv) == 0
+    if "--json" in argv:
+        json.loads(capsys.readouterr().out)
+
+
+# A subparser's own default for a shared flag overwrites the value the
+# top-level parser already set, so `--json` before the command was silently
+# dropped. Every position must reach the command.
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--json", "scan", "a.py"],
+        ["scan", "--json", "a.py"],
+        ["--json", "rule", "list"],
+        ["rule", "--json", "list"],
+        ["rule", "list", "--json"],
+        ["--json", "hook", "status"],
+        ["hook", "--json", "status"],
+    ],
+)
+def test_json_flag_is_honoured_before_or_after_the_command(argv, tmp_path, monkeypatch, capsys):
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    main(argv)
+    out = capsys.readouterr().out
+    json.loads(out)
+
+
+@pytest.mark.parametrize("argv", [["status"], ["scan", "a.py"], ["rule", "list"], ["hook", "status"]])
+def test_json_defaults_to_false_when_absent(argv):
+    assert _build_parser().parse_args(argv).json is False
+
+
+def test_check_format_json_is_json_mode_once_parsed():
+    """Only `check` keeps --format; its json value is the one place that implies --json."""
+    ns = _build_parser().parse_args(["check", "--format", "json"])
+    assert ns.json is True
+    assert ns.ui.json_mode is True
 
 
 # Every `aegis <command> [--flag]` a pointer sends people to, as an argv that

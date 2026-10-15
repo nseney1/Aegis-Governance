@@ -27,7 +27,7 @@
       },
       {
         "const": true,
-        "default": false,
+        "default": "==SUPPRESS==",
         "dest": "json",
         "flags": [
           "--json"
@@ -97,7 +97,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
@@ -343,7 +343,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
@@ -414,7 +414,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
@@ -471,7 +471,7 @@
               },
               {
                 "const": true,
-                "default": false,
+                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
@@ -542,7 +542,7 @@
               },
               {
                 "const": true,
-                "default": false,
+                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
@@ -602,7 +602,7 @@
               },
               {
                 "const": true,
-                "default": false,
+                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
@@ -651,7 +651,7 @@
               },
               {
                 "const": true,
-                "default": false,
+                "default": "==SUPPRESS==",
                 "dest": "json",
                 "flags": [
                   "--json"
@@ -724,7 +724,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
@@ -872,7 +872,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
@@ -932,7 +932,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
@@ -1434,7 +1434,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
@@ -1491,7 +1491,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
@@ -1540,7 +1540,7 @@
           },
           {
             "const": true,
-            "default": false,
+            "default": "==SUPPRESS==",
             "dest": "json",
             "flags": [
               "--json"
