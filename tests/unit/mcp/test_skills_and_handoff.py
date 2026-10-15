@@ -1,6 +1,7 @@
 """Skill graph discovery and the ${SLOT.*} registry used by aegis_scan.
 
-(The swarm handoff router and its typed artifacts were removed in v4.)
+The swarm handoff router and its typed artifacts were removed in v4. The file
+keeps its name because the Layer-1 runner maps aegis_core/skills/* to it.
 """
 from __future__ import annotations
 
