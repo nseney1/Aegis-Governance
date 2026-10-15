@@ -135,6 +135,19 @@ class TestMultiPlatformDetectionAndPortableMcp:
             "kiro",
         ]
 
+    def test_detect_platforms_reads_home_markers_under_path_home(self, tmp_path: Path, monkeypatch):
+        # Path.home() is USERPROFILE on Windows; a different HOME must not be scanned instead.
+        profile = tmp_path / "profile"
+        (profile / ".kiro").mkdir(parents=True)
+        (tmp_path / "elsewhere" / ".cursor").mkdir(parents=True)
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("pathlib.Path.home", lambda: profile)
+        monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+
+        assert detect_platforms() == ["kiro"]
+
     def test_generate_mcp_config_portable_vs_legacy(self, tmp_path: Path):
         generate_mcp_config(tmp_path, portable=True)
         mcp_file = tmp_path / ".mcp.json"

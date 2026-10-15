@@ -64,12 +64,26 @@ class CommandBackend:
         return proc.stdout
 
 
+def _split_command(raw: str) -> List[str]:
+    # POSIX shlex reads every backslash as an escape, so a native Windows path
+    # (C:\tools\llm.exe) lost them. On Windows split without escapes; the quotes
+    # that grouped a token (a path with spaces) are syntax, so they are dropped.
+    if os.name != "nt":
+        return shlex.split(raw)
+    parts = []
+    for part in shlex.split(raw, posix=False):
+        if len(part) >= 2 and part[0] == part[-1] and part[0] in "\"'":
+            part = part[1:-1]
+        parts.append(part)
+    return parts
+
+
 def resolve_backend(flag: Optional[str], environ: Optional[Mapping[str, str]] = None) -> Optional[CommandBackend]:
     """The backend named by ``--llm-cmd`` (first) or ``AEGIS_LLM_CMD``; None when neither is set."""
     raw = flag if flag and flag.strip() else (os.environ if environ is None else environ).get(ENV_VAR, "")
     if not raw.strip():
         return None
     try:
-        return CommandBackend(shlex.split(raw))
+        return CommandBackend(_split_command(raw))
     except ValueError as exc:
         raise LLMCommandError(f"cannot parse --llm-cmd / {ENV_VAR} {raw!r}: {exc}") from None
