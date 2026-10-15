@@ -263,30 +263,25 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
 def test_run_doctor_drivers_flag(tmp_path):
     with patch("aegis_cli.doctor._check_ast_drivers") as mock_check:
         mock_check.return_value = True
-        args = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=False, fix_path=False, yes=False)
+        args = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=False)
         assert run_doctor(args) == 0
         mock_check.assert_called_with(tmp_path, fix=False)
 
         mock_check.return_value = False
-        args_fail = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=True, fix_path=False, yes=False)
+        args_fail = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=True)
         assert run_doctor(args_fail) == 1
         mock_check.assert_called_with(tmp_path, fix=True)
 
 
-def test_doctor_command_contract():
-    from aegis_cli.doctor import DoctorCommand
-    cmd = DoctorCommand()
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-    parsed = parser.parse_args(["--fix", "--drivers", "--fix-path", "--yes"])
-    assert parsed.fix is True
-    assert parsed.drivers is True
-    assert parsed.fix_path is True
-    assert parsed.yes is True
+@pytest.mark.parametrize("flag", ["--fix-path", "--yes", "-y"])
+def test_doctor_rejects_cut_fix_path_flags(flag, capsys):
+    """D17: doctor never edits shell rc files; the PATH hint stays advisory."""
+    from aegis_cli.cli import main
 
-    with patch("aegis_cli.doctor.run_doctor", return_value=0) as mock_run:
-        assert cmd.execute(parsed) == 0
-        mock_run.assert_called_once_with(parsed)
+    with pytest.raises(SystemExit) as exc:
+        main(["doctor", flag])
+    assert exc.value.code == 2
+    assert f"unrecognized arguments: {flag}" in capsys.readouterr().err
 
 
 def _rust_project_with_python3_slot(tmp_path, monkeypatch):

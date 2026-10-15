@@ -395,29 +395,6 @@
             "kind": "store_true",
             "nargs": 0,
             "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "fix_path",
-            "flags": [
-              "--fix-path"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "yes",
-            "flags": [
-              "--yes",
-              "-y"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
           }
         ]
       },
@@ -1044,101 +1021,11 @@
                 "type": "str"
               },
               {
-                "default": null,
-                "dest": "rule_id",
-                "flags": [],
-                "kind": "store",
-                "nargs": "?",
-                "required": false
-              },
-              {
                 "const": true,
                 "default": false,
                 "dest": "dry_run",
                 "flags": [
                   "--dry-run"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": true,
-                "dest": "apply",
-                "flags": [
-                  "--apply"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              }
-            ]
-          },
-          "clean": {
-            "aliases": [],
-            "arguments": [
-              {
-                "default": "==SUPPRESS==",
-                "dest": "help",
-                "flags": [
-                  "-h",
-                  "--help"
-                ],
-                "kind": "help",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "plain",
-                "flags": [
-                  "--plain"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": "==SUPPRESS==",
-                "dest": "json",
-                "flags": [
-                  "--json"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "default": "==SUPPRESS==",
-                "dest": "workspace",
-                "flags": [
-                  "--workspace"
-                ],
-                "kind": "_WorkspaceArg",
-                "nargs": null,
-                "required": false,
-                "type": "str"
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "dry_run",
-                "flags": [
-                  "--dry-run"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "apply",
-                "flags": [
-                  "--apply"
                 ],
                 "kind": "store_true",
                 "nargs": 0,
@@ -1291,72 +1178,6 @@
                 "required": false
               },
               {
-                "default": 1.0,
-                "dest": "weight",
-                "flags": [
-                  "-w",
-                  "--weight"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "float"
-              },
-              {
-                "default": 15,
-                "dest": "expiry_sessions",
-                "flags": [
-                  "--expiry-sessions"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "int"
-              },
-              {
-                "default": 60,
-                "dest": "expiry_days",
-                "flags": [
-                  "--expiry-days"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false,
-                "type": "int"
-              },
-              {
-                "default": "",
-                "dest": "minimum_mode",
-                "flags": [
-                  "--minimum-mode"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "effector",
-                "flags": [
-                  "--effector"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "memory",
-                "flags": [
-                  "--memory"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
-                "required": false
-              },
-              {
                 "default": null,
                 "dest": "body_file",
                 "flags": [
@@ -1421,37 +1242,6 @@
                 "flags": [],
                 "kind": "store",
                 "nargs": "?",
-                "required": false
-              },
-              {
-                "default": null,
-                "dest": "rule",
-                "flags": [
-                  "--rule"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "default": null,
-                "dest": "reason",
-                "flags": [
-                  "--reason"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "force",
-                "flags": [
-                  "--force"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
                 "required": false
               },
               {
@@ -1600,37 +1390,6 @@
                 "flags": [],
                 "kind": "store",
                 "nargs": "?",
-                "required": false
-              },
-              {
-                "default": null,
-                "dest": "rule",
-                "flags": [
-                  "--rule"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "default": null,
-                "dest": "reason",
-                "flags": [
-                  "--reason"
-                ],
-                "kind": "store",
-                "nargs": null,
-                "required": false
-              },
-              {
-                "const": true,
-                "default": false,
-                "dest": "force",
-                "flags": [
-                  "--force"
-                ],
-                "kind": "store_true",
-                "nargs": 0,
                 "required": false
               },
               {
@@ -1904,7 +1663,7 @@
     {
       "aliases": [],
       "category": "Rule Evolution & Intelligence",
-      "help": "Manage rule lifecycle (list, create, promote, demote, archive, clean)",
+      "help": "Manage rule lifecycle (list, create, promote, demote, archive)",
       "name": "rule"
     },
     {
@@ -1946,6 +1705,7 @@
     "install": "use aegis init --host",
     "languages": "use aegis doctor",
     "report": "aegis status shows rule trigger counts; outcomes are recorded with the MCP tool aegis_report_outcome",
+    "rule clean": "no replacement; remove leaked global rule copies by hand",
     "rules": "use aegis status",
     "skill": "no replacement",
     "sys": "use aegis doctor",

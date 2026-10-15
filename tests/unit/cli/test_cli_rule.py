@@ -18,44 +18,6 @@ from aegis_cli.rule import (
 )
 
 
-def test_rule_command_contract():
-    cmd = RuleCommand()
-    assert cmd.name == "rule"
-    assert cmd.aliases == ()
-
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-
-    # Test list
-    args_list = parser.parse_args(["list", "--type", "invariant", "--min-fitness", "0.8"])
-    assert args_list.rule_action == "list"
-    assert args_list.type == "invariant"
-    assert args_list.min_fitness == 0.8
-
-    # Test promote
-    args_prom = parser.parse_args(["promote", "test-rule", "--force", "--dry-run"])
-    assert args_prom.rule_action == "promote"
-    assert args_prom.rule_id == "test-rule"
-    assert args_prom.force is True
-    assert args_prom.dry_run is True
-
-    # Test demote
-    args_dem = parser.parse_args(["demote", "bad-rule", "--dry-run"])
-    assert args_dem.rule_action == "demote"
-    assert args_dem.rule_id == "bad-rule"
-    assert args_dem.dry_run is True
-
-    # Test archive
-    args_arch = parser.parse_args(["archive", "--dry-run"])
-    assert args_arch.rule_action == "archive"
-    assert args_arch.dry_run is True
-
-    # Test clean
-    args_clean = parser.parse_args(["clean", "--apply"])
-    assert args_clean.rule_action == "clean"
-    assert args_clean.apply is True
-
-
 def test_demote_core_rule_fails(tmp_path, capsys):
     """BUG-067: demoting a protected core rule must fail closed."""
     args = argparse.Namespace(
@@ -151,30 +113,10 @@ def test_rule_archive(tmp_path):
             rule_action="archive",
             workspace=str(tmp_path),
             dry_run=False,
-            apply=True,
         )
         rc = run_rule(args)
         assert rc == 0
         mock_prune.assert_called_once_with(workspace=tmp_path, execute=True)
-
-
-def test_rule_clean(tmp_path):
-    mock_res = {
-        "dry_run": True,
-        "purged_rules": ["leaked.md"],
-        "retained_rules": ["kept.md"],
-        "quarantine_dir": str(tmp_path / "q"),
-    }
-    with patch("aegis_cli.rule.clean_global_rules", return_value=mock_res) as mock_clean:
-        args = argparse.Namespace(
-            rule_action="clean",
-            workspace=str(tmp_path),
-            dry_run=True,
-            apply=False,
-        )
-        rc = run_rule(args)
-        assert rc == 0
-        mock_clean.assert_called_once_with(dry_run=True, force=False, quarantine_dir=None)
 
 
 def test_rule_list_long_id_not_truncated_and_colored(tmp_path, capsys):

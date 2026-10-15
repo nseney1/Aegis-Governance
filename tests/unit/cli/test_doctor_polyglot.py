@@ -52,8 +52,6 @@ def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch):
         project_root=tmp_path,
         _project_root=tmp_path,
         fix=True,
-        fix_path=False,
-        yes=True,
     )
 
     monkeypatch.chdir(tmp_path)

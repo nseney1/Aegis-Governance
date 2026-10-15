@@ -1,9 +1,7 @@
-"""soma doctor — System health check.
+"""aegis doctor — workspace and environment health check.
 
-`soma doctor --fix-path [--yes]` is the opt-in PATH fixer: the installers
-never edit dotfiles, and this command only does so after --yes or an
-interactive confirmation. Every line it appends is recorded in
-~/.soma/manifest.json (`path_lines`) so install/uninstall.sh can remove it.
+When the aegis command is not on PATH it prints the one line to add to the
+shell startup file (aegis_cli/pathcheck.py); it never edits dotfiles.
 """
 from __future__ import annotations
 
@@ -11,19 +9,14 @@ import argparse
 import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
-from typing import Callable, Iterable, Mapping, TextIO
 
 from aegis_cli.base import CommandCategory, AegisCommand
 
 __all__ = ["run_doctor", "DoctorCommand"]
 
-FIX_PATH_MARKER = "# added by soma doctor --fix-path"
-_EDITABLE_SHELLS = ("zsh", "bash", "fish")
 
 
 def _check_python_version() -> bool:
@@ -320,220 +313,8 @@ def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
     return False
 
 
-# ── --fix-path ───────────────────────────────────────────────────────────────
-
-def _under(base: str, path: str) -> bool:
-    try:
-        return os.path.commonpath([base, path]) == base
-    except ValueError:
-        return False
-
-
-def _umask_mode(mode: int = 0o666) -> int:
-    current = os.umask(0)
-    os.umask(current)
-    return mode & ~current
-
-
-def _atomic_write(path: str, data: bytes, mode: int) -> None:
-    """Exclusive temp in the same directory, given mode, os.replace."""
-    fd, tmp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.soma-",
-                               suffix=".tmp", dir=os.path.dirname(path) or ".")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.chmod(tmp, mode)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
-        raise
-
-
-def _write_preserving_mode(path: str, data: bytes) -> None:
-    real = os.path.realpath(path)
-    mode = stat.S_IMODE(os.stat(real).st_mode) if os.path.exists(real) else _umask_mode()
-    _atomic_write(real, data, mode)
-
-
-def _confined_rc(rc_path: str, home: str) -> tuple[str | None, str]:
-    """(real path to write, "") or (None, reason). Must resolve inside HOME."""
-    if not os.path.isabs(rc_path):
-        return None, f"{rc_path} is not an absolute path"
-    home_real = os.path.realpath(home)
-    real = os.path.realpath(rc_path)
-    if real == home_real or not _under(home_real, real):
-        if os.path.islink(rc_path):
-            return None, f"{rc_path} is a symlink to {real}, outside your home directory"
-        return None, f"{rc_path} resolves outside your home directory ({real})"
-    if os.path.lexists(real) and not os.path.isfile(real):
-        return None, f"{real} exists but is not a regular file"
-    return real, ""
-
-
-def _load_manifest(path: str) -> dict:
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    if not isinstance(data, dict):
-        raise ValueError("manifest is not a JSON object")
-    if not isinstance(data.get("path_lines", []), list):
-        raise ValueError("manifest field path_lines is not a list")
-    return data
-
-
-def _expand_home(path: str, home: str) -> str:
-    if path == "~" or path.startswith("~/"):
-        path = os.path.join(home, path[2:])
-    return os.path.normpath(path)
-
-
-def fix_path(yes: bool = False, *,
-             env: Mapping[str, str] | None = None,
-             home: str | None = None,
-             candidates: Iterable[str] | None = None,
-             which: Callable[..., str | None] | None = None,
-             platform: str | None = None,
-             os_name: str | None = None,
-             stdin: TextIO | None = None) -> int:
-    """Append the pathcheck PATH line to the shell rc file (opt-in).
-
-    Dry run unless `yes` or an interactive y. Returns a process exit code.
-    """
-    from aegis_cli import pathcheck
-
-    env = os.environ if env is None else env
-    home = os.path.expanduser("~") if home is None else home
-    which = shutil.which if which is None else which
-    platform = sys.platform if platform is None else platform
-    os_name = os.name if os_name is None else os_name
-    stdin = sys.stdin if stdin is None else stdin
-    path_env = env.get("PATH", "")
-    py = "python" if os_name == "nt" else "python3"
-
-    found = which("soma", path=path_env)
-    if found:
-        print(f"✅ soma is already on PATH ({found}). Nothing to change.")
-        return 0
-    directory = pathcheck.scripts_dir(
-        candidates if candidates is not None else pathcheck.default_candidates())
-    if directory is None:
-        print("❌ The 'soma' command is not installed for this Python, so there is no\n"
-              f"   directory to add to PATH. Install it with: {py} -m pip install soma-governance")
-        return 1
-    sep = ";" if os_name == "nt" else ":"
-    if pathcheck.on_path(directory, path_env, sep=sep, casefold=os_name == "nt"):
-        print(f"✅ {directory} is already on PATH. Nothing to change.\n"
-              "   Open a new terminal (or run `hash -r` / `rehash`) so the shell picks it up.")
-        return 0
-    venv = pathcheck._active_venv_prefix()
-    if venv and pathcheck._home_relative(directory, venv, casefold=os_name == "nt") is not None:
-        print(f"❌ soma is installed in the virtual environment {venv}. --fix-path will not\n"
-              "   put a virtualenv's bin directory in a global startup file; activate it instead.")
-        return 1
-
-    shell = pathcheck.detect_shell(env, os_name=os_name)
-    line = pathcheck.remedy(shell, directory, home, os_name=os_name)
-    if shell not in _EDITABLE_SHELLS:
-        if shell == "pwsh":
-            print("ℹ️  soma doctor --fix-path never edits PowerShell's $PROFILE: it runs on every\n"
-                  "   PowerShell start, may be signed or governed by an execution policy, and on\n"
-                  "   Windows the persistent user Path (not the profile) is where PATH belongs.\n"
-                  "   Run this yourself, then open a new terminal:")
-        else:
-            print(f"ℹ️  Unrecognised shell ({env.get('SHELL') or 'SHELL unset'}). --fix-path only edits\n"
-                  "   zsh, bash and fish startup files. Add the equivalent of this line to yours:")
-        print(f"      {line}")
-        return 0
-
-    rc_path = _expand_home(pathcheck.rc_file(shell, env=env, platform=platform) or "", home)
-    marked = f"{line}  {FIX_PATH_MARKER}"
-    real, why = _confined_rc(rc_path, home)
-    if real is None:
-        print(f"❌ Refusing to edit {rc_path}: {why}.\n"
-              "   Nothing was changed. Add this line yourself if you want it:\n"
-              f"      {marked}")
-        return 1
-
-    marked_b = marked.encode("utf-8", "surrogateescape")
-    existing = None
-    if os.path.isfile(real):
-        with open(real, "rb") as fh:
-            existing = fh.read()
-        if any(raw.rstrip(b"\r\n") == marked_b for raw in existing.splitlines(True)):
-            print(f"✅ {rc_path} already contains the soma PATH line. Nothing to change.")
-            return 0
-
-    print(f"soma doctor --fix-path will append this line to {rc_path}:\n      {marked}")
-    if not yes:
-        if not stdin.isatty():
-            print("Dry run: nothing was changed. Re-run with --yes to apply "
-                  "(or run it in a terminal to confirm).")
-            return 0
-        print("Append it? [y/N] ", end="", flush=True)
-        if stdin.readline().strip().lower() not in ("y", "yes"):
-            print("Not changed.")
-            return 0
-
-    manifest_path = os.path.join(home, ".aegis", "manifest.json")
-    try:
-        old_manifest = None
-        if os.path.exists(manifest_path):
-            with open(manifest_path, "rb") as fh:
-                old_manifest = fh.read()
-        data = _load_manifest(manifest_path)
-    except (OSError, ValueError) as exc:
-        print(f"❌ Cannot record the change in {manifest_path}: {exc}\n"
-              "   Nothing was changed (uninstall could not remove an unrecorded line).")
-        return 1
-
-    created = existing is None
-    existing = existing or b""
-    nl = b"\r\n" if b"\r\n" in existing else b"\n"
-    prefix = bool(existing) and not existing.endswith(b"\n")
-    entry = {"file": rc_path, "line": marked, "created": created, "prefix_newline": prefix}
-    entries = [e for e in data.get("path_lines", [])
-               if not (isinstance(e, dict) and e.get("file") == rc_path and e.get("line") == marked)]
-    data["path_lines"] = entries + [entry]
-
-    # Record first: an entry without its line is harmless (uninstall warns);
-    # a line without its entry could never be removed by uninstall.
-    try:
-        os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
-        _write_preserving_mode(manifest_path, (json.dumps(data, indent=2) + "\n").encode("utf-8"))
-    except OSError as exc:
-        print(f"❌ Cannot write {manifest_path}: {exc}. Nothing was changed.")
-        return 1
-    try:
-        os.makedirs(os.path.dirname(real), exist_ok=True)
-        mode = _umask_mode() if created else stat.S_IMODE(os.stat(real).st_mode)
-        _atomic_write(real, existing + (nl if prefix else b"") + marked_b + nl, mode)
-    except OSError as exc:
-        try:
-            if old_manifest is None:
-                os.unlink(manifest_path)
-            else:
-                _write_preserving_mode(manifest_path, old_manifest)
-        except OSError:
-            pass
-        print(f"❌ Could not write {rc_path}: {exc}. Nothing was changed.")
-        return 1
-    print(f"✅ Added to {rc_path} (recorded in {manifest_path} for uninstall).\n"
-          f"   Open a new terminal, or run: source {rc_path}")
-    return 0
-
-
 def run_doctor(args: argparse.Namespace) -> int:
     """Run all health checks. Returns 0 if all pass, 1 otherwise."""
-    if getattr(args, "fix_path", False):
-        return fix_path(yes=getattr(args, "yes", False))
-    if getattr(args, "yes", False):
-        print("--yes only applies to --fix-path", file=sys.stderr)
     import contextlib
     import io
     from aegis_cli.ui.theme import strip_ansi
@@ -619,18 +400,6 @@ class DoctorCommand(AegisCommand):
             "--drivers",
             action="store_true",
             help="Run only AST driver and language detection health check",
-        )
-        parser.add_argument(
-            "--fix-path",
-            action="store_true",
-            help="Add soma's scripts directory to your shell startup file "
-                 "(dry run unless confirmed or --yes; zsh/bash/fish only)",
-        )
-        parser.add_argument(
-            "--yes",
-            "-y",
-            action="store_true",
-            help="With --fix-path: apply without asking",
         )
 
     def execute(self, args: argparse.Namespace) -> int:

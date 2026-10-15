@@ -48,6 +48,7 @@ REMOVED_COMMANDS: Dict[str, str] = {
     "handoff": "no replacement",
     "verify": "use aegis check",
     "checkpoint": "use aegis check",
+    "rule clean": "no replacement; remove leaked global rule copies by hand",
     "hook pre-commit": "use aegis check --hook",
     "hook pre-invocation": _HOST_HOOK,
     "hook governance-monitor": _HOST_HOOK,

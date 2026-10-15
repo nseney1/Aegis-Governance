@@ -344,14 +344,6 @@ def test_build_hint_windows_uses_python_not_python3(tmp_path):
 
 # ── module entry points ──────────────────────────────────────────────────────
 
-def test_pathcheck_module_hint_exits_zero():
-    proc = subprocess.run([sys.executable, "-m", "aegis_cli.pathcheck", "--hint"],
-                          cwd=str(REPO), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
-    assert proc.returncode == 0, proc.stderr
-    assert "Traceback" not in proc.stderr
-
-
 def test_python_m_soma_cli_runs():
     proc = subprocess.run([sys.executable, "-m", "aegis_cli", "--help"],
                           cwd=str(REPO), capture_output=True, text=True,

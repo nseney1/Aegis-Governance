@@ -407,3 +407,81 @@ def test_from_description_ghost_flag_is_removed(repo, capsys) -> None:
     assert exc.value.code == 2
     assert "unrecognized arguments: --from-description" in capsys.readouterr().err
     assert list((repo / ".aegis" / "rules").rglob("*.md")) == []
+
+
+# ── v4 flag diet (D17): never-read flags are rejected, not silently ignored ──
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        ["--weight", "2.0"], ["-w", "2.0"],
+        ["--expiry-sessions", "3"], ["--expiry-days", "9"],
+        ["--minimum-mode", "sweep"], ["--effector"], ["--memory"],
+    ],
+    ids=lambda f: f[0],
+)
+def test_rule_create_rejects_cut_flags(repo, capsys, flag) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["rule", "create", "--hypothesis", "h", "--id", "cut-flag", *flag])
+
+    assert exc.value.code == 2
+    assert f"unrecognized arguments: {flag[0]}" in capsys.readouterr().err
+    assert not _created(repo, "cut-flag").exists()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["promote", "--rule", "x"], ["demote", "--rule", "x"],
+        ["promote", "x", "--force"], ["demote", "x", "--force"],
+        ["promote", "x", "--reason", "why"], ["demote", "x", "--reason", "why"],
+        ["archive", "--apply"], ["archive", "some-rule"],
+    ],
+    ids=lambda a: "-".join(a),
+)
+def test_lifecycle_actions_reject_cut_arguments(repo, capsys, argv) -> None:
+    """promote/demote take the rule only as a positional; archive has no --apply or rule id."""
+    with pytest.raises(SystemExit) as exc:
+        main(["rule", *argv])
+
+    assert exc.value.code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def _extinct(repo: Path, rule_id: str) -> Path:
+    path = repo / ".aegis" / "rules" / "traps" / f"{rule_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\nid: {rule_id}\ntype: trap\nhypothesis: h\n"
+        "fitness:\n  triggers: 10\n  true_positives: 0\n  false_positives: 0\n---\nBody\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_rule_archive_dry_run_moves_nothing(repo) -> None:
+    rule = _extinct(repo, "extinct-trap")
+
+    assert main(["rule", "archive", "--dry-run"]) == 0
+
+    assert rule.is_file()
+    assert not (repo / ".aegis" / "rules" / ".archive" / "extinct-trap.md").exists()
+
+
+def test_rule_archive_applies_by_default(repo) -> None:
+    rule = _extinct(repo, "extinct-trap")
+
+    assert main(["rule", "archive"]) == 0
+
+    assert not rule.exists()
+    assert (repo / ".aegis" / "rules" / ".archive" / "extinct-trap.md").is_file()
+
+
+def test_rule_clean_points_at_manual_cleanup(repo, capsys) -> None:
+    assert main(["rule", "clean", "--apply"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "aegis rule clean was removed in v4: no replacement; "
+        "remove leaked global rule copies by hand\n"
+    )

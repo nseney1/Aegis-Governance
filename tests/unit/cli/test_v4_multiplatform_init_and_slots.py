@@ -2,7 +2,6 @@
 - Cross-model SlotRegistry.for_platform() and resolve_text_for_platform()
 - Multi-platform detect_platforms() and portable MCP configuration
 - Workspace SSOT rule seeding + manifest signing in aegis init
-- Extracted formatters (sarif, release_gate) and lifecycle cleanse module
 """
 from __future__ import annotations
 
@@ -10,15 +9,8 @@ import argparse
 import json
 from pathlib import Path
 
-from aegis_cli.formatters import format_sarif_report, verify_release_gate
 from aegis_cli.init import generate_mcp_config, run_init, seed_workspace_rules
 from aegis_cli.platforms import McpAdapter, detect_platform, detect_platforms
-from aegis_core.lifecycle.cleanse import (
-    AEGIS_INTERNAL_PURGE_STEMS,
-    UNIVERSAL_TENETS,
-    clean_global_rules,
-    is_purge_candidate,
-)
 from aegis_core.rule_inventory import inventory_rules
 from aegis_core.skills.slots import (
     DEFAULT_SLOTS,
@@ -211,18 +203,3 @@ class TestInitSeedsWorkspaceRulesSSOT:
         rule_ids = {r.get("id") or r.get("_name") for r in cached_rules}
         assert "providence" in rule_ids
         assert "destructive-ops" in rule_ids
-
-
-class TestExtractedFormattersAndCleanseReExports:
-    """Verify extracted formatters and cleanse helpers remain importable from verify.py and rule.py."""
-
-    def test_verify_and_rule_reexports(self):
-        from aegis_cli import rule as rule_mod
-        from aegis_cli import verify as verify_mod
-
-        assert verify_mod.format_sarif_report is format_sarif_report
-        assert verify_mod.verify_release_gate is verify_release_gate
-        assert rule_mod.clean_global_rules is clean_global_rules
-        assert rule_mod.is_purge_candidate is is_purge_candidate
-        assert rule_mod.UNIVERSAL_TENETS is UNIVERSAL_TENETS
-        assert rule_mod.AEGIS_INTERNAL_PURGE_STEMS is AEGIS_INTERNAL_PURGE_STEMS

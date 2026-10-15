@@ -1,18 +1,15 @@
-"""Shell-aware PATH guidance for the soma console script (BUG-041).
+"""Shell-aware PATH guidance for the aegis console script (BUG-041).
 
 `pip install --user` puts `soma` in the user scripts directory, which is often
 not on PATH. zsh in particular never reads ~/.profile, where Debian/Ubuntu add
 ~/.local/bin. This module finds where the script actually is and prints the
 one line the user needs, in their shell's syntax and for the right rc file.
 
-It only reports. It never edits dotfiles; `soma doctor --fix-path` is the
-opt-in command that appends this line (aegis_cli/doctor.py).
-
-Usage: python3 -m aegis_cli.pathcheck --hint [--shell zsh|bash|fish|pwsh]
+It only reports and never edits dotfiles; `aegis doctor` and the end of
+`aegis init` print its hint.
 """
 from __future__ import annotations
 
-import argparse
 import os
 import shlex
 import shutil
@@ -248,25 +245,3 @@ def build_hint(env: Mapping[str, str] | None = None,
     lines.append(f"      {line}")
     lines.append(fallback)
     return "\n".join(lines)
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python3 -m aegis_cli.pathcheck",
-                                     description="Explain how to put the soma CLI on PATH.")
-    parser.add_argument("--hint", action="store_true",
-                        help="Print a remedy if 'soma' does not resolve (default action)")
-    parser.add_argument("--shell", choices=KNOWN_SHELLS,
-                        help="Override shell detection")
-    args = parser.parse_args(argv)
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="replace")  # emoji on cp1252 (BUG-012)
-    text = build_hint(shell=args.shell)
-    if text:
-        print(text)
-    return 0  # advisory only: never fail an install over PATH guidance
-
-
-if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="replace")
-    sys.exit(main())
