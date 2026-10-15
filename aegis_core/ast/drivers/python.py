@@ -6,10 +6,12 @@ ast module. Operates purely in-process with zero external dependencies.
 from __future__ import annotations
 
 import ast
+import functools
+import io
 import os
 from pathlib import Path
 import tokenize
-from typing import Any, List, Optional, Set, Tuple, Union
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 from aegis_core.ast.schema import (
     CallSiteNode,
@@ -17,36 +19,75 @@ from aegis_core.ast.schema import (
     ImportNode,
     MutationPoint,
     NormalizedAST,
+    _add_binding,
 )
 
 
-# Calls whose literal first argument names the module they import.
-_DYNAMIC_IMPORTERS = frozenset({"__import__", "importlib.import_module"})
+# Callables that import the module named by their literal first argument (or ``name=``).
+# "module": returns that module; "package" (the __import__ family): returns its top-level
+# package, or the module itself when a fromlist is passed.
+_DYNAMIC_IMPORTERS = {
+    "importlib.import_module": "module",
+    "__import__": "package",
+    "builtins.__import__": "package",
+    "importlib.__import__": "package",
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _decodes_ascii_as_itself(encoding: str) -> bool:
+    """True when every ASCII byte decodes to itself in any context under ``encoding``.
+
+    Every two-byte ASCII sequence is probed, so a stateful codec's shift sequence
+    (utf-7 ``+``, hz ``~{``, iso2022 ESC, unicode_escape ``\\``) shows up as a change,
+    plus an IDNA A-label: idna is the one stdlib codec whose trigger is longer than two
+    bytes. A codec that fails the probe in any way counts as not transparent (fail closed).
+    """
+    probe = bytes(b for hi in range(128) for lo in range(128) for b in (hi, lo)) + b".xn--ls8h."
+    try:
+        return probe.decode(encoding) == probe.decode("ascii")
+    except (LookupError, ValueError, TypeError):
+        return False
 
 
 def read_python_source(path: Union[str, Path]) -> str:
-    """Read a Python source file the way CPython decodes it.
+    """Decode a Python source file with the encoding CPython chooses for it.
 
-    Honours a UTF-8 BOM and a PEP 263 coding cookie (e.g. latin-1). Raises
-    SyntaxError for an unknown or conflicting declaration and UnicodeDecodeError
-    for bytes the declared encoding cannot decode; both mean CPython would refuse
-    the file too.
+    Honours a UTF-8 BOM and a PEP 263 coding cookie on line 1 or 2. Line endings are
+    normalised before the cookie search because CPython counts ``\\r`` and ``\\r\\n`` as
+    line breaks there; ``tokenize.open`` splits on ``\\n`` only, so it would honour a cookie
+    CPython ignores (a CR-only file whose fourth line declares utf-7) and decode different
+    code than CPython runs. Raises SyntaxError for an unknown or conflicting declaration,
+    UnicodeDecodeError for bytes the encoding cannot decode, and UnicodeError for an
+    encoding that does not decode ASCII to itself (utf-7, hz, iso2022, unicode_escape,
+    utf-16, EBCDIC): there the code's meaning depends on the decoder, so it is refused.
     """
-    with tokenize.open(str(path)) as handle:
-        return handle.read()
+    data = Path(path).read_bytes()
+    universal = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(universal).readline)
+    if encoding not in ("utf-8", "utf-8-sig") and not _decodes_ascii_as_itself(encoding):
+        raise UnicodeError(f"source encoding {encoding!r} does not decode ASCII to itself")
+    return data.decode(encoding)
 
 
-def _resolve_attribute_chain(node: ast.AST) -> Optional[str]:
-    """Recursively resolve dot-separated attribute chain (e.g. os.path.join)."""
-    parts = []
-    current = node
-    while isinstance(current, ast.Attribute):
-        parts.append(current.attr)
-        current = current.value
-    if isinstance(current, ast.Name):
-        parts.append(current.id)
-        return ".".join(reversed(parts))
-    return None
+def _import_bindings(tree: ast.AST) -> Dict[str, Tuple[str, ...]]:
+    """Every qualified name each imported name is bound to, file-wide (any scope or order).
+
+    ``import importlib as il`` -> il: importlib; ``from importlib import import_module``
+    -> import_module: importlib.import_module. Multi-valued like the policy maps, so a
+    rebinding can add a meaning but never hide one.
+    """
+    table: Dict[str, List[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    _add_binding(table, a.asname, a.name)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for a in node.names:
+                if a.name != "*":
+                    _add_binding(table, a.asname or a.name, f"{node.module}.{a.name}")
+    return {name: tuple(quals) for name, quals in table.items()}
 
 
 def _alias_pairs(names: List[ast.alias]) -> Tuple[Tuple[str, str], ...]:
@@ -55,8 +96,10 @@ def _alias_pairs(names: List[ast.alias]) -> Tuple[Tuple[str, str], ...]:
 
 
 class _PythonASTVisitor(ast.NodeVisitor):
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, bindings: Optional[Dict[str, Tuple[str, ...]]] = None):
         self.file_path = file_path
+        self.bindings = bindings or {}
+        self._dynamic_cache: Dict[int, Optional[Tuple[str, FrozenSet[str]]]] = {}
         self.dunder_all: Optional[Set[str]] = None
         self.scope_stack: List[str] = []
         self.class_stack: List[str] = []
@@ -155,20 +198,60 @@ class _PythonASTVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         self._visit_func(node)
 
+    def _qualified(self, target: str) -> List[str]:
+        """``target`` plus each spelling it has through the file's import bindings."""
+        head, dot, tail = target.partition(".")
+        return [target, *(f"{qual}{dot}{tail}" for qual in self.bindings.get(head, ()))]
+
+    def _call_targets(self, func: ast.AST) -> List[str]:
+        """Dotted call targets; a chain on a dynamic import resolves to the imported module."""
+        parts: List[str] = []
+        current = func
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        tail = ".".join(reversed(parts))
+        if isinstance(current, ast.Name):
+            return [f"{current.id}.{tail}" if tail else current.id]
+        if isinstance(current, ast.Call) and tail:
+            return [f"{module}.{tail}" for module in self._modules_returned(current)]
+        return []
+
+    def _dynamic_import(self, call: ast.Call) -> Optional[Tuple[str, FrozenSet[str]]]:
+        """(module name, importer kinds) when ``call`` imports a literal module name."""
+        key = id(call)
+        if key not in self._dynamic_cache:
+            kinds = frozenset(
+                _DYNAMIC_IMPORTERS[qual]
+                for target in self._call_targets(call.func)
+                for qual in self._qualified(target)
+                if qual in _DYNAMIC_IMPORTERS
+            )
+            arg = call.args[0] if call.args else next((k.value for k in call.keywords if k.arg == "name"), None)
+            name = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else ""
+            self._dynamic_cache[key] = (name, kinds) if kinds and name else None
+        return self._dynamic_cache[key]
+
+    def _modules_returned(self, call: ast.Call) -> List[str]:
+        """Modules a dynamic import call evaluates to (both candidates when unsure)."""
+        found = self._dynamic_import(call)
+        if not found:
+            return []
+        name, kinds = found
+        modules = [name] if "module" in kinds else []
+        if "package" in kinds:
+            modules.append(name.split(".")[0])
+            if len(call.args) > 3 or any(k.arg == "fromlist" for k in call.keywords):
+                modules.append(name)
+        return list(dict.fromkeys(modules))
+
     def visit_Call(self, node: ast.Call):
-        target = None
-        if isinstance(node.func, ast.Name):
-            target = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            target = _resolve_attribute_chain(node.func)
+        found = self._dynamic_import(node)
+        if found:
+            self.imports.append(ImportNode(source=found[0], line=node.lineno))
 
-        if target in _DYNAMIC_IMPORTERS and node.args:
-            first = node.args[0]
-            if isinstance(first, ast.Constant) and isinstance(first.value, str) and first.value:
-                self.imports.append(ImportNode(source=first.value, line=node.lineno))
-
-        if target:
-            caller_scope = self.scope_stack[-1] if self.scope_stack else None
+        caller_scope = self.scope_stack[-1] if self.scope_stack else None
+        for target in self._call_targets(node.func):
             self.call_sites.append(
                 CallSiteNode(
                     target=target,
@@ -250,7 +333,7 @@ def parse_python_ast(
     except SyntaxError as exc:
         raise ValueError(f"Failed to parse Python AST for {resolved_path}: {exc}") from exc
 
-    visitor = _PythonASTVisitor(file_path=resolved_path)
+    visitor = _PythonASTVisitor(file_path=resolved_path, bindings=_import_bindings(tree))
     visitor.visit(tree)
 
     return NormalizedAST(

@@ -4,15 +4,19 @@ from __future__ import annotations
 import ast
 import os
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Tuple, Union
+from typing import Any, Iterable, Mapping, Optional, Union
 
 from aegis_core.errors import AegisError
 from aegis_core.ast.schema import (
     CallSiteNode,
     ImportNode,
     NormalizedAST,
+    _add_binding,
+    _as_names,
+    _extract_import_tuple,
     _extract_python_decorators_from_file,
     _extract_python_decorators_from_tree,
+    _import_aliases,
     _normalize_ast_token,
 )
 
@@ -34,33 +38,12 @@ class ASTExtractionError(AegisError):
         super().__init__(f"cannot verify {path}: {reason}", code="AST_UNVERIFIABLE", path=path, reason=reason)
 
 
-def _import_aliases(imp: Any) -> dict[str, str]:
-    """Map each name an import binds via ``as`` to the name it aliases."""
-    raw = imp.get("aliases") if isinstance(imp, Mapping) else getattr(imp, "aliases", None)
-    pairs = raw.items() if isinstance(raw, Mapping) else (raw or ())
-    return {_normalize_ast_token(str(a)): _normalize_ast_token(str(o)) for a, o in pairs if a and o}
-
-
-def _dealias(target: str, aliases: Optional[Mapping[str, str]]) -> Optional[str]:
-    """Rewrite a reference through an alias to its plain form (``sp.run`` -> ``subprocess.run``)."""
+def _dealias(target: str, aliases: Optional[Mapping[str, Any]]) -> list[str]:
+    """Rewrite a reference through each alias of its head to plain form (``sp.run`` -> ``subprocess.run``)."""
     head, dot, tail = target.partition(".")
-    return f"{aliases[head]}{dot}{tail}" if aliases and head in aliases else None
-
-
-def _extract_import_tuple(imp: Any) -> Tuple[str, Tuple[str, ...]]:
-    """(source, symbols) of an import in its plain form: aliased names map back to originals."""
-    if isinstance(imp, tuple) and len(imp) == 2 and isinstance(imp[0], str):
-        return imp[0], tuple(imp[1])
-    if isinstance(imp, str):
-        return _normalize_ast_token(imp), ()
-    if isinstance(imp, Mapping):
-        src = _normalize_ast_token(str(imp.get("source") or imp.get("module") or ""))
-        raw_syms = imp.get("imported_symbols") or imp.get("imported_names") or ()
-    else:
-        src = _normalize_ast_token(str(getattr(imp, "source", "") or getattr(imp, "module", "") or ""))
-        raw_syms = getattr(imp, "imported_symbols", ()) or getattr(imp, "imported_names", ()) or ()
-    aliases = _import_aliases(imp)
-    return src, tuple(aliases.get(t, t) for t in (_normalize_ast_token(str(s)) for s in raw_syms if s))
+    if not aliases or head not in aliases:
+        return []
+    return [f"{orig}{dot}{tail}" for orig in _as_names(aliases[head])]
 
 
 def _match_ImportNode_against_pattern(imp: Any, pattern: str) -> bool:
@@ -84,10 +67,13 @@ def _match_ImportNode_against_pattern(imp: Any, pattern: str) -> bool:
 def _match_call_against_pattern(
     call_item: Any,
     pattern: str,
-    imported_qual_map: Optional[Mapping[str, str]] = None,
-    aliases: Optional[Mapping[str, str]] = None,
+    imported_qual_map: Optional[Mapping[str, Any]] = None,
+    aliases: Optional[Mapping[str, Any]] = None,
 ) -> bool:
-    """Return True if a CallSiteNode or call target matches a forbidden call pattern."""
+    """Return True if a CallSiteNode or call target matches a forbidden call pattern.
+
+    Map values may be one name or a sequence of names (every binding of the key).
+    """
     call = _normalize_ast_token(pattern)
     if not call:
         return False
@@ -101,15 +87,15 @@ def _match_call_against_pattern(
         return False
 
     candidates: list[str] = []
-    for ref in filter(None, (target, _dealias(target, aliases))):
+    for ref in [target, *_dealias(target, aliases)]:
         candidates.append(ref)
         if imported_qual_map:
             if ref in imported_qual_map:
-                candidates.append(imported_qual_map[ref])
+                candidates.extend(_as_names(imported_qual_map[ref]))
             elif "." in ref:
                 head, tail = ref.split(".", 1)
                 if head in imported_qual_map:
-                    candidates.append(f"{imported_qual_map[head]}.{tail}")
+                    candidates.extend(f"{qual}.{tail}" for qual in _as_names(imported_qual_map[head]))
 
     return any(cand == call or cand.endswith(f".{call}") for cand in candidates)
 
@@ -117,10 +103,10 @@ def _match_call_against_pattern(
 def _match_decorator_against_pattern(
     decorator_item: Any,
     pattern: str,
-    imported_qual_map: Optional[Mapping[str, str]] = None,
-    aliases: Optional[Mapping[str, str]] = None,
+    imported_qual_map: Optional[Mapping[str, Any]] = None,
+    aliases: Optional[Mapping[str, Any]] = None,
 ) -> bool:
-    """Return True if a decorator matches a forbidden decorator pattern."""
+    """Return True if a decorator matches a forbidden decorator pattern (map values as for calls)."""
     dec = _normalize_ast_token(pattern).split("(", 1)[0].strip()
     if not dec:
         return False
@@ -136,10 +122,10 @@ def _match_decorator_against_pattern(
         return False
 
     candidates: list[str] = []
-    for ref in filter(None, (norm_d, _dealias(norm_d, aliases))):
+    for ref in [norm_d, *_dealias(norm_d, aliases)]:
         candidates.append(ref)
         if imported_qual_map and ref in imported_qual_map:
-            candidates.append(imported_qual_map[ref])
+            candidates.extend(_as_names(imported_qual_map[ref]))
 
     return any(cand == dec or cand.endswith(f".{dec}") for cand in candidates)
 
@@ -151,9 +137,12 @@ def evaluate_forbid_ast(
     """Evaluate a NormalizedAST against declarative forbid_ast constraints.
 
     Aliased imports are judged as their plain form (``sp.run()`` after ``import subprocess as
-    sp`` as ``subprocess.run()``) plus the literal alias text. Syntactic only, so out of scope:
-    computed module names (a literal ``__import__("x")``/``importlib.import_module("x")`` does
-    count), ``getattr``/``globals`` access, ``f = subprocess.run`` rebinding, ``from x import *``.
+    sp`` as ``subprocess.run()``) plus the literal alias text, against every binding of a name
+    in the file. A literal name passed to ``__import__``/``importlib.import_module`` (however
+    imported, positional or ``name=``) is an import, and ``__import__("os").system()`` a call.
+    Syntactic only, so out of scope: computed module names, ``getattr``/``globals`` access,
+    ``f = subprocess.run`` rebinding by assignment, a function passed as a value
+    (``map(subprocess.run, ...)``), ``from x import *``.
     """
     if normalized_ast is None or not forbid_spec or not isinstance(forbid_spec, dict):
         return []
@@ -162,17 +151,22 @@ def evaluate_forbid_ast(
 
     raw_ast_imports = getattr(normalized_ast, "imports", ()) or ()
     parsed_imports: list[tuple[str, tuple[str, ...]]] = []
-    imported_qual_map: dict[str, str] = {}
-    aliases: dict[str, str] = {}
+    # File-global and multi-valued: every binding of a name counts, whatever its scope or
+    # order, so rebinding a name (``import json as sp`` after ``import subprocess as sp``)
+    # can only add candidates, never hide one.
+    imported_qual_map: dict[str, list[str]] = {}
+    aliases: dict[str, list[str]] = {}
 
     for imp in raw_ast_imports:
         src, syms = _extract_import_tuple(imp)
-        aliases.update(_import_aliases(imp))
+        for name, originals in _import_aliases(imp).items():
+            for orig in originals:
+                _add_binding(aliases, name, orig)
         parsed_imports.append((src, syms))
         if src:
             for sym in syms:
                 if sym and sym != src:
-                    imported_qual_map[sym] = f"{src}.{sym}"
+                    _add_binding(imported_qual_map, sym, f"{src}.{sym}")
 
     forbidden_imports = forbid_spec.get("imports")
     if isinstance(forbidden_imports, (list, tuple, set)):

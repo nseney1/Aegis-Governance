@@ -448,3 +448,257 @@ class TestExtractionContract:
         target = tmp_path / "notes.md"
         target.write_text("# notes\n", encoding="utf-8")
         assert extract_normalized_ast(target, workspace_root=tmp_path) is None
+
+
+# ── Review round 2, finding 1: a later binding of the same name must not hide one ──
+
+class TestRebindingDoesNotHideAlias:
+    """Import maps are file-global and every binding of a name counts.
+
+    A name bound by more than one import (in one statement, a later statement or another
+    function) is judged against every API it may refer to, so reusing a bound name can
+    only add violations, never remove one.
+    """
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import subprocess as sp\nsp.run(['ls'])\nimport json as sp\n",
+            "def f():\n    import subprocess as sp\n    sp.run(['ls'])\n\ndef g():\n    import json as sp\n    return sp\n",
+            "from subprocess import run as r\nr(['ls'])\nfrom mylib import other as r\n",
+            "from subprocess import run\nrun(['ls'])\nfrom mylib import run\n",
+            "import json as sp\nimport subprocess as sp\nsp.run(['ls'])\n",
+        ],
+        ids=["alias-rebound-later", "alias-rebound-in-other-function", "from-alias-rebound", "from-import-rebound", "alias-bound-earlier"],
+    )
+    def test_shadowing_binding_does_not_hide_forbidden_call(self, code):
+        assert _violations(code, {"calls": ["subprocess.run"]}) == [
+            "Forbidden call 'subprocess.run' matched rule forbid_ast.calls"
+        ]
+
+    def test_duplicate_bound_name_in_one_statement_keeps_every_original(self):
+        code = "from subprocess import run as x, Popen as x\nx(['ls'])\n"
+        spec = {"imports": ["subprocess.run", "subprocess.Popen"], "calls": ["subprocess.run", "subprocess.Popen"]}
+        assert _violations(code, spec) == [
+            "Forbidden import 'subprocess.run' matched rule forbid_ast.imports",
+            "Forbidden import 'subprocess.Popen' matched rule forbid_ast.imports",
+            "Forbidden call 'subprocess.run' matched rule forbid_ast.calls",
+            "Forbidden call 'subprocess.Popen' matched rule forbid_ast.calls",
+        ]
+
+    def test_name_bound_both_plain_and_aliased_in_one_statement_keeps_plain_binding(self):
+        """``from m import a as b, b`` binds ``b`` twice; the plain ``b`` must not be lost."""
+        code = "from subprocess import Popen as run, run\nrun(['ls'])\n"
+        assert _violations(code, {"imports": ["subprocess.run"], "calls": ["subprocess.run"]}) == [
+            "Forbidden import 'subprocess.run' matched rule forbid_ast.imports",
+            "Forbidden call 'subprocess.run' matched rule forbid_ast.calls",
+        ]
+
+    def test_rebound_decorator_alias_still_matches(self):
+        code = "import functools as ft\n@ft.lru_cache\ndef f():\n    pass\nimport json as ft\n"
+        assert _violations(code, {"decorators": ["functools.lru_cache"]}) == [
+            "Forbidden decorator 'functools.lru_cache' matched rule forbid_ast.decorators"
+        ]
+
+    def test_matchers_accept_single_valued_maps(self):
+        """Callers that pass the original ``{name: str}`` maps keep working."""
+        from aegis_core.ast.policy import _match_call_against_pattern, _match_decorator_against_pattern
+
+        assert _match_call_against_pattern("sp.run", "subprocess.run", aliases={"sp": "subprocess"}) is True
+        assert _match_call_against_pattern("r", "subprocess.run", imported_qual_map={"r": "subprocess.run"}) is True
+        assert _match_decorator_against_pattern("lc", "functools.lru_cache", aliases={"lc": "functools.lru_cache"}) is True
+
+
+# ── Review round 2, finding 2: encoding detection must split lines like CPython ──
+
+# CPython treats \r and \r\n as line breaks when it looks for a PEP 263 cookie in the first
+# two lines, so the utf-7 cookie on line 4 below is ignored and the payload runs as UTF-8.
+# Splitting on \n only would honour it and decode `+ACM-` into `#`, hiding the call.
+CR_COOKIE_ATTACKS = [
+    pytest.param(
+        b"#\r\r\r# coding: utf-7\rACM = 5; b = (1) +ACM-1; import subprocess; subprocess.run(['echo','X'])\r",
+        id="cr-only",
+    ),
+    pytest.param(
+        b"#\r\r\r# coding: utf-7\nACM = 5; b = (1) +ACM-1; import subprocess; subprocess.run(['echo','X'])\n",
+        id="mixed-cr-lf",
+    ),
+    pytest.param(
+        b"#\r\n\r\n\r\n# coding: utf-7\r\nACM = 5; b = (1) +ACM-1; import subprocess; subprocess.run(['echo','X'])\r\n",
+        id="crlf",
+    ),
+]
+
+_SUBPROCESS_SPEC = {"calls": ["subprocess.run"], "imports": ["subprocess"]}
+_SUBPROCESS_VIOLATIONS = [
+    "Forbidden import 'subprocess' matched rule forbid_ast.imports",
+    "Forbidden call 'subprocess.run' matched rule forbid_ast.calls",
+]
+
+
+def _cpython_bytes_violations(raw: bytes, spec: dict) -> list[str]:
+    """Violations for the AST CPython itself builds from the raw bytes (its own decoder)."""
+    import ast as _ast
+
+    _ast.parse(raw)  # CPython accepts the file
+    return evaluate_forbid_ast(parse_python_ast(_ast.unparse(_ast.parse(raw)), file_path="cpython.py"), spec)
+
+
+class TestLineEndingsInCookieDetection:
+    @pytest.mark.parametrize("raw", CR_COOKIE_ATTACKS)
+    def test_cookie_beyond_line_two_is_ignored_like_cpython(self, tmp_path: Path, raw: bytes):
+        target = tmp_path / "payload.py"
+        target.write_bytes(raw)
+        assert _cpython_bytes_violations(raw, _SUBPROCESS_SPEC) == _SUBPROCESS_VIOLATIONS
+        assert evaluate_forbid_ast(extract_normalized_ast(target), _SUBPROCESS_SPEC) == _SUBPROCESS_VIOLATIONS
+
+    @pytest.mark.parametrize("raw", CR_COOKIE_ATTACKS)
+    def test_layer1_blocks_cr_cookie_payload(self, ws: Path, raw: bytes):
+        (ws / "src" / "payload.py").write_bytes(raw)
+        evidence, results = _forbid_results(ws, "src/payload.py")
+        assert [(r.target, r.verdict, r.detail) for r in results] == [
+            ("src/payload.py", False, "Forbidden call 'subprocess.run' matched rule forbid_ast.calls")
+        ]
+        assert gate_verdict(evidence) is False
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            b"# -*- coding: latin-1 -*-\rimport pickle\rS = '\xe9'\r",
+            b"#!/usr/bin/env python\r# -*- coding: latin-1 -*-\rimport pickle\rS = '\xe9'\r",
+            b"# -*- coding: latin-1 -*-\r\nimport pickle\r\nS = '\xe9'\r\n",
+        ],
+        ids=["cr-line1", "cr-line2", "crlf-line1"],
+    )
+    def test_cookie_on_first_two_cr_lines_is_honoured(self, tmp_path: Path, raw: bytes):
+        from aegis_core.ast.drivers.python import read_python_source
+
+        target = tmp_path / "legacy.py"
+        target.write_bytes(raw)
+        assert "S = 'é'" in read_python_source(target)
+        assert evaluate_forbid_ast(extract_normalized_ast(target), {"imports": ["pickle"]}) == [
+            "Forbidden import 'pickle' matched rule forbid_ast.imports"
+        ]
+
+
+class TestDecoderDependentEncodingsFailClosed:
+    """A codec that can decode ASCII bytes into something else makes the code's meaning
+    depend on which decoder reads it, so forbid_ast refuses to judge such a file."""
+
+    @pytest.mark.parametrize("codec", ["utf-7", "hz", "iso2022_jp", "unicode_escape", "utf-16", "cp037", "idna"])
+    def test_non_ascii_transparent_cookie_raises_extraction_error(self, tmp_path: Path, codec: str):
+        from aegis_core.ast.policy import ASTExtractionError
+
+        target = tmp_path / "odd.py"
+        target.write_bytes(f"# coding: {codec}\nimport json\n".encode("ascii"))
+        with pytest.raises(ASTExtractionError) as excinfo:
+            extract_normalized_ast(target)
+        assert excinfo.value.reason == f"UnicodeError: source encoding {codec!r} does not decode ASCII to itself"
+
+    def test_utf7_line1_payload_is_unverifiable_in_layer1(self, ws: Path):
+        (ws / "src" / "u7.py").write_bytes(b"# coding: utf-7\n# +AAo-import os; os.system('echo X')\n")
+        evidence, results = _forbid_results(ws, "src/u7.py")
+        assert [(r.verdict, r.detail) for r in results] == [
+            (False, "forbid_ast: cannot verify src/u7.py: UnicodeError: source encoding 'utf-7' does not decode ASCII to itself")
+        ]
+        assert gate_verdict(evidence) is False
+
+    @pytest.mark.parametrize(
+        "codec, text",
+        [
+            ("cp1252", "café €"),
+            ("iso-8859-15", "café €"),
+            ("koi8-r", "привет"),
+            ("shift_jis", "日本語"),
+            ("euc-jp", "日本語"),
+            ("gbk", "中文"),
+            ("big5", "中文"),
+            ("euc-kr", "한국어"),
+            ("mac-roman", "café"),
+        ],
+    )
+    def test_ascii_transparent_legacy_codecs_are_parsed(self, tmp_path: Path, codec: str, text: str):
+        target = tmp_path / "legacy.py"
+        target.write_bytes(f"# -*- coding: {codec} -*-\nimport pickle\nS = '{text}'\n".encode(codec))
+        assert evaluate_forbid_ast(extract_normalized_ast(target), {"imports": ["pickle"]}) == [
+            "Forbidden import 'pickle' matched rule forbid_ast.imports"
+        ]
+
+
+# ── Review round 2, finding 3: dynamic imports through aliases and chains ─────
+
+class TestDynamicImportResolution:
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import importlib as il\nil.import_module('subprocess')\n",
+            "from importlib import import_module\nimport_module('subprocess')\n",
+            "from importlib import import_module as im\nim('subprocess')\n",
+            "import builtins\nbuiltins.__import__('subprocess')\n",
+            "from builtins import __import__ as imp\nimp('subprocess')\n",
+            "import importlib\nimportlib.__import__('subprocess')\n",
+            "__import__(name='subprocess')\n",
+            "import importlib\nimportlib.import_module(name='subprocess')\n",
+            "def f():\n    return import_module('subprocess')\nfrom importlib import import_module\n",
+            "__import__('importlib').import_module('subprocess')\n",
+        ],
+        ids=[
+            "importlib-alias", "from-importlib-import_module", "import_module-alias", "builtins.__import__",
+            "from-builtins-__import__-alias", "importlib.__import__", "__import__-name-kw",
+            "import_module-name-kw", "import-after-use", "chained-importer",
+        ],
+    )
+    def test_dynamic_import_spelling_is_reported_as_import(self, code):
+        assert _violations(code, {"imports": ["subprocess"]}) == [
+            "Forbidden import 'subprocess' matched rule forbid_ast.imports"
+        ]
+
+    @pytest.mark.parametrize(
+        "code, call",
+        [
+            ("__import__('os').system('ls')\n", "os.system"),
+            ("import importlib\nimportlib.import_module('subprocess').run(['ls'])\n", "subprocess.run"),
+            ("import importlib as il\nil.import_module('subprocess').run(['ls'])\n", "subprocess.run"),
+            ("__import__('os').path.join('a', 'b')\n", "os.path.join"),
+            ("__import__('os.path').path.join('a', 'b')\n", "os.path.join"),
+            ("__import__('os.path', fromlist=['join']).join('a', 'b')\n", "os.path.join"),
+            ("import importlib\nimportlib.import_module('os.path').join('a', 'b')\n", "os.path.join"),
+            ("__import__(name='os').system('ls')\n", "os.system"),
+        ],
+        ids=[
+            "__import__-attr", "import_module-attr", "import_module-alias-attr", "__import__-deep-attr",
+            "__import__-dotted-returns-top-package", "__import__-fromlist-returns-submodule",
+            "import_module-dotted", "__import__-name-kw-attr",
+        ],
+    )
+    def test_call_on_dynamically_imported_module_matches_calls_rule(self, code, call):
+        assert _violations(code, {"calls": [call]}) == [f"Forbidden call '{call}' matched rule forbid_ast.calls"]
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from mylib import import_module\nimport_module('subprocess')\n",
+            "def import_module(name):\n    return name\nimport_module('subprocess')\n",
+            "loader.import_module('subprocess')\n",
+        ],
+        ids=["foreign-import_module", "local-import_module", "method-named-import_module"],
+    )
+    def test_unrelated_function_named_import_module_is_not_an_import(self, code):
+        assert _violations(code, {"imports": ["subprocess"]}) == []
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "i = __import__\ni('subprocess')\n",
+            "__import__(f'sub{1}process')\n",
+            "import importlib\ngetattr(importlib, 'import_module')('subprocess')\n",
+        ],
+        ids=["rebound-by-assignment", "computed-name", "getattr"],
+    )
+    def test_documented_blind_spots_stay_out_of_scope(self, code):
+        """Rebinding by assignment, computed names and getattr are listed as out of scope
+        in evaluate_forbid_ast's docstring; a syntactic check cannot see through them."""
+        assert _violations(code, {"imports": ["subprocess"]}) == []
+        doc = evaluate_forbid_ast.__doc__
+        for phrase in ("computed module names", "getattr", "rebinding"):
+            assert phrase in doc

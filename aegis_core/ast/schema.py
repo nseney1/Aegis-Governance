@@ -65,6 +65,66 @@ def _extract_python_decorators_from_file(file_path: str) -> Tuple[str, ...]:
         return ()
 
 
+# ── Import bindings: the plain form of an import, shared by policy checks ─────
+
+def _as_names(value: Any) -> Tuple[str, ...]:
+    """Every name a map value stands for: maps may hold one name or a sequence of them."""
+    return (value,) if isinstance(value, str) else tuple(value or ())
+
+
+def _add_binding(table: Dict[str, List[str]], name: str, original: str) -> None:
+    bound = table.setdefault(name, [])
+    if original not in bound:
+        bound.append(original)
+
+
+def _import_aliases(imp: Any) -> Dict[str, Tuple[str, ...]]:
+    """Map each name an import binds via ``as`` to every name it aliases.
+
+    Multi-valued because one statement may bind a name twice
+    (``from m import a as x, b as x``); keeping only one original would hide the other.
+    """
+    raw = imp.get("aliases") if isinstance(imp, Mapping) else getattr(imp, "aliases", None)
+    pairs = raw.items() if isinstance(raw, Mapping) else (raw or ())
+    table: Dict[str, List[str]] = {}
+    for a, o in pairs:
+        if a and o:
+            _add_binding(table, _normalize_ast_token(str(a)), _normalize_ast_token(str(o)))
+    return {name: tuple(originals) for name, originals in table.items()}
+
+
+def _extract_import_tuple(imp: Any) -> Tuple[str, Tuple[str, ...]]:
+    """(source, symbols) of an import in its plain form: aliased names map back to originals."""
+    if isinstance(imp, tuple) and len(imp) == 2 and isinstance(imp[0], str):
+        return imp[0], tuple(imp[1])
+    if isinstance(imp, str):
+        return _normalize_ast_token(imp), ()
+    if isinstance(imp, Mapping):
+        src = _normalize_ast_token(str(imp.get("source") or imp.get("module") or ""))
+        raw_syms = imp.get("imported_symbols") or imp.get("imported_names") or ()
+    else:
+        src = _normalize_ast_token(str(getattr(imp, "source", "") or getattr(imp, "module", "") or ""))
+        raw_syms = getattr(imp, "imported_symbols", ()) or getattr(imp, "imported_names", ()) or ()
+    aliases = _import_aliases(imp)
+    syms = [_normalize_ast_token(str(s)) for s in raw_syms if s]
+    out: List[str] = []
+    expanded: set = set()
+    for sym in syms:
+        originals = aliases.get(sym)
+        if not originals:
+            out.append(sym)
+            continue
+        if sym in expanded:
+            continue
+        expanded.add(sym)
+        out.extend(originals)
+        # One bound name per alias pair; a surplus occurrence is a plain binding of the
+        # same name in this statement (``from m import a as b, b``) and must be kept.
+        if syms.count(sym) > len(originals):
+            out.append(sym)
+    return src, tuple(out)
+
+
 @dataclass(frozen=True)
 class DefinitionNode:
     """Represents a declared symbol (function, method, class, or constant)."""
