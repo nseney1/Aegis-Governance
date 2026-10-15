@@ -63,6 +63,7 @@ class _DriverPlan:
     label: str
     argv: Tuple[str, ...] = ()
     cwd: Optional[str] = None  # None: the workspace root
+    isolated_cwd: bool = False  # run in a fresh empty directory instead of ``cwd``
     in_process_rust: bool = False
     go_template: Optional[str] = None  # packaged Go source, compiled before running
     unavailable: Optional[str] = None  # why the chosen driver cannot run here
@@ -140,10 +141,12 @@ def _packaged_plan(ext: str, ws_root: Path) -> Optional[_DriverPlan]:
 def _user_command_plan(command: str, ext: str, ws_root: Path) -> Optional[_DriverPlan]:
     """Plan for a command from ~/.aegis/slots.yaml.
 
-    The text is trusted but the process runs with cwd = workspace, so an executable or
-    path argument that lands inside the repo would let repo content pick the code that
-    runs. A provisioned selector such as 'node .aegis/drivers/ts_ast.js' means the
-    packaged driver, never the repo's copy.
+    The text is trusted, but an executable or path argument (including the value of a
+    '--flag=path' argument) inside the repo would let repo content pick the code that
+    runs, so such commands are refused. The process runs in a fresh empty directory, not
+    the workspace: 'python -m mod', 'node --require ./x.js' and similar lookups resolve
+    against the cwd. A provisioned selector such as 'node .aegis/drivers/ts_ast.js'
+    means the packaged driver, never the repo's copy.
     """
     from aegis_core.ast.detect import names_packaged_driver, packaged_driver_for_extension
 
@@ -174,9 +177,10 @@ def _user_command_plan(command: str, ext: str, ws_root: Path) -> Optional[_Drive
                 )
             argv[0] = trusted
     for arg in argv[1:]:
-        if arg and not arg.startswith("-") and os.path.lexists(ws_root / arg) and _inside_workspace(ws_root / arg, ws_root):
-            return replace(plan, unavailable=f"{where} passes {arg}, which is inside the workspace")
-    return replace(plan, argv=tuple(argv))
+        value = arg.split("=", 1)[1] if arg.startswith("-") and "=" in arg else arg
+        if value and not value.startswith("-") and os.path.lexists(ws_root / value) and _inside_workspace(ws_root / value, ws_root):
+            return replace(plan, unavailable=f"{where} passes {value}, which is inside the workspace")
+    return replace(plan, argv=tuple(argv), isolated_cwd=True)
 
 
 class ASTDriverRegistry:
@@ -341,16 +345,12 @@ class ASTDriverRunner:
 
         if not plan.argv:
             raise ASTDriverError(f"Empty driver command for extension '{ext}'")
-        cwd = plan.cwd or str(ws_root)
 
-        if plan.go_template:
-            # Not 'go run': it takes every leading *.go argument, the target included, as a source file.
-            with tempfile.TemporaryDirectory(prefix="aegis-go-ast-") as tmp:
-                exe = os.path.join(tmp, "go_ast.exe" if os.name == "nt" else "go_ast")
-                _run_driver([plan.argv[0], "build", "-o", exe, plan.go_template], cwd, timeout, plan.label, target_path.name)
-                stdout = _run_driver([exe, str(target_path)], cwd, timeout, plan.label, target_path.name)
+        if plan.isolated_cwd:
+            with tempfile.TemporaryDirectory(prefix="aegis-ast-cwd-") as neutral:
+                stdout = _run_plan(plan, neutral, timeout, target_path)
         else:
-            stdout = _run_driver(list(plan.argv) + [str(target_path)], cwd, timeout, plan.label, target_path.name)
+            stdout = _run_plan(plan, plan.cwd or str(ws_root), timeout, target_path)
 
         try:
             return NormalizedAST.from_json(stdout)
@@ -358,6 +358,16 @@ class ASTDriverRunner:
             raise ASTDriverError(
                 f"AST driver '{plan.label}' returned invalid NormalizedAST JSON: {exc}\nOutput: {stdout[:300]}"
             ) from exc
+
+
+def _run_plan(plan: _DriverPlan, cwd: str, timeout: float, target_path: Path) -> str:
+    if plan.go_template:
+        # Not 'go run': it takes every leading *.go argument, the target included, as a source file.
+        with tempfile.TemporaryDirectory(prefix="aegis-go-ast-") as tmp:
+            exe = os.path.join(tmp, "go_ast.exe" if os.name == "nt" else "go_ast")
+            _run_driver([plan.argv[0], "build", "-o", exe, plan.go_template], cwd, timeout, plan.label, target_path.name)
+            return _run_driver([exe, str(target_path)], cwd, timeout, plan.label, target_path.name)
+    return _run_driver(list(plan.argv) + [str(target_path)], cwd, timeout, plan.label, target_path.name)
 
 
 def _run_driver(argv: List[str], cwd: str, timeout: float, label: str, target_name: str) -> str:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+import stat
 import unicodedata
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -27,6 +28,7 @@ __all__ = [
     "sanitize_slot_value",
     "user_slots_path",
     "MAX_SLOT_VALUE_LEN",
+    "MAX_SLOTS_FILE_BYTES",
 ]
 
 SLOT_REF_PATTERN = re.compile(r"\$\{(?:SLOT|RULE)\.([A-Za-z0-9_\-]+)\}|\$\{([A-Za-z0-9_\-]+)\}")
@@ -91,9 +93,12 @@ DEFAULT_SLOTS: dict[str, str] = {
 
 
 MAX_SLOT_VALUE_LEN = 80
+MAX_SLOTS_FILE_BYTES = 64 * 1024
 _CAPABILITY_PREFIXES = ("TOOL_", "MODEL_")
 _CAPABILITY_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/@+\-]*")
-_DISPLAY_KEY = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
+_KNOWN_CAPABILITY_KEYS = frozenset(_GENERIC_PROFILE)
+_LISTABLE_DRIVER_KEY = re.compile(r"ast_driver(?:_[a-z0-9]{1,8})?")
+_MAX_LISTED_KEYS = 5
 # Cc: C0/C1 controls incl. newlines; Cf: bidi overrides, zero-width chars; Zl/Zp: U+2028/U+2029.
 _UNSAFE_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
@@ -114,29 +119,77 @@ def sanitize_slot_value(key: str, value: str) -> Optional[str]:
     return text[:MAX_SLOT_VALUE_LEN] or None
 
 
-def user_slots_path() -> Path:
-    """Path of the user-scope slot file (~/.aegis/slots.yaml)."""
-    return Path.home() / ".aegis" / "slots.yaml"
+def user_slots_path() -> Optional[Path]:
+    """Path of the user-scope slot file (~/.aegis/slots.yaml), or None if no home directory resolves."""
+    try:
+        return Path.home() / ".aegis" / "slots.yaml"
+    except (RuntimeError, KeyError, OSError):  # 3.10+: RuntimeError; 3.9: KeyError from pwd
+        return None
 
 
-def _display_key(key: str) -> str:
-    # Keys are repo-controlled and warnings reach the agent, so never echo arbitrary text.
-    return repr(key) if _DISPLAY_KEY.fullmatch(key) else "<unprintable key>"
+def _keys_summary(keys: Sequence[str]) -> str:
+    """'N slot(s) (names)' for a warning.
+
+    Keys are repo-chosen and warnings reach the agent, so only key names aegis itself
+    defines are listed, at most _MAX_LISTED_KEYS of them; the rest are only counted.
+    """
+    listed = [k for k in keys if k in _KNOWN_CAPABILITY_KEYS or _LISTABLE_DRIVER_KEY.fullmatch(k)]
+    listed = listed[:_MAX_LISTED_KEYS]
+    names = ", ".join(repr(k) for k in listed)
+    rest = len(keys) - len(listed)
+    if rest:
+        names = f"{names} and {rest} more" if names else "names not shown"
+    return f"{len(keys)} {'slot' if len(keys) == 1 else 'slots'} ({names})"
 
 
 def _is_within(path: Path, root: Path) -> bool:
+    # realpath, not Path.resolve(): it never raises (3.9 resolve raises RuntimeError on loops).
     try:
-        path.resolve().relative_to(root.resolve())
+        Path(os.path.realpath(path)).relative_to(os.path.realpath(root))
         return True
     except ValueError:
         return False
 
 
+def _read_capped(fd: int, limit: int) -> bytes:
+    data = b""
+    while len(data) <= limit:
+        chunk = os.read(fd, limit + 1 - len(data))
+        if not chunk:
+            break
+        data += chunk
+    return data
+
+
 def _read_slots_file(path: Path, label: str) -> Dict[str, str]:
-    if not path.exists():
-        return {}
+    """Return the ``slots`` mapping of a slot file, or {} if there is none.
+
+    Raises SlotResolutionError when the file cannot be read, is not a regular file
+    (a FIFO blocks, /dev/zero never ends), exceeds MAX_SLOTS_FILE_BYTES or does not
+    parse. Read errors name only ``label``, never the path the file resolves to.
+    """
+    # O_NONBLOCK: opening a FIFO for reading would otherwise wait for a writer. The type
+    # check runs on the opened descriptor, so a swap after the check cannot bypass it.
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
-        doc = AegisYAML.parse_text(path.read_text(encoding="utf-8"))
+        fd = os.open(path, flags)
+    except (FileNotFoundError, NotADirectoryError):
+        return {}
+    except OSError as exc:
+        raise SlotResolutionError(f"Cannot read {label}") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise SlotResolutionError(f"{label} is not a regular file")
+        data = _read_capped(fd, MAX_SLOTS_FILE_BYTES)
+    except OSError as exc:
+        raise SlotResolutionError(f"Cannot read {label}") from exc
+    finally:
+        os.close(fd)
+    if len(data) > MAX_SLOTS_FILE_BYTES:
+        raise SlotResolutionError(f"{label} is larger than {MAX_SLOTS_FILE_BYTES // 1024} KiB")
+    try:
+        text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        doc = AegisYAML.parse_text(text)
         raw = doc.get("slots", {})
     except Exception as exc:
         raise SlotResolutionError(f"Failed to parse {label}: {exc}") from exc
@@ -146,18 +199,19 @@ def _read_slots_file(path: Path, label: str) -> Dict[str, str]:
 
 
 def _filter_workspace_slots(raw: Mapping[str, str]) -> Tuple[Dict[str, str], List[str]]:
-    """Drop keys a repo file may not set; keep ast_driver_<ext> only as a packaged-driver opt-in."""
+    """Drop keys a repo file may not set; keep ast_driver_<ext> only as a packaged-driver opt-in.
+
+    Returns at most one warning per reason, however many keys the file holds.
+    """
     from aegis_core.ast.detect import names_packaged_driver, packaged_driver_for_extension
 
     kept: Dict[str, str] = {}
-    warnings: List[str] = []
+    capability: List[str] = []
+    no_driver: List[str] = []
+    custom: List[str] = []
     for key, value in raw.items():
-        shown = _display_key(key)
         if key.startswith(_CAPABILITY_PREFIXES):
-            warnings.append(
-                f"ignored workspace slot {shown} in .aegis/slots.yaml: TOOL_*/MODEL_* slots "
-                "come only from the host profile or ~/.aegis/slots.yaml"
-            )
+            capability.append(key)
             continue
         if not key.strip().lower().startswith("ast_driver"):
             kept[key] = value
@@ -165,19 +219,29 @@ def _filter_workspace_slots(raw: Mapping[str, str]) -> Tuple[Dict[str, str], Lis
         ext = key[len("ast_driver_"):] if key.startswith("ast_driver_") else ""
         config = packaged_driver_for_extension(ext) if ext else None
         if config is None:
-            warnings.append(
-                f"ignored workspace slot {shown} in .aegis/slots.yaml: repository files cannot "
-                "define AST driver commands; set it in ~/.aegis/slots.yaml"
-            )
+            no_driver.append(key)
             continue
-        if names_packaged_driver(value, config):
-            kept[key] = value
-            continue
+        if not names_packaged_driver(value, config):
+            custom.append(key)
+            value = config["default_command"]
+        kept[key] = value
+
+    warnings: List[str] = []
+    if capability:
         warnings.append(
-            f"workspace slot {shown} names a custom command, which is not executed; "
-            "the packaged AST driver is used instead"
+            f"ignored {_keys_summary(capability)} in .aegis/slots.yaml: TOOL_*/MODEL_* slots "
+            "come only from the host profile or ~/.aegis/slots.yaml"
         )
-        kept[key] = config["default_command"]
+    if no_driver:
+        warnings.append(
+            f"ignored {_keys_summary(no_driver)} in .aegis/slots.yaml: repository files cannot "
+            "define AST driver commands; set them in ~/.aegis/slots.yaml"
+        )
+    if custom:
+        warnings.append(
+            f"{_keys_summary(custom)} in .aegis/slots.yaml name a custom AST driver command, "
+            "which is not executed; the packaged driver is used instead"
+        )
     return kept, warnings
 
 
@@ -214,18 +278,31 @@ class SlotRegistry:
 
     @classmethod
     def load(cls, workspace_root: Path | str) -> SlotRegistry:
-        """Load the repo's .aegis/slots.yaml as untrusted input; disallowed keys go to ``warnings``."""
-        raw = _read_slots_file(Path(workspace_root) / ".aegis" / "slots.yaml", ".aegis/slots.yaml")
+        """Load the repo's .aegis/slots.yaml as untrusted input; disallowed keys go to ``warnings``.
+
+        Raises SlotResolutionError if the file cannot be read or parsed (see _read_slots_file).
+        """
+        root = Path(workspace_root)
+        path = root / ".aegis" / "slots.yaml"
+        if os.path.lexists(path) and not _is_within(path, root):
+            # A committed symlink could point the read at any file the user can open.
+            return cls({}, warnings=[
+                "ignored .aegis/slots.yaml: it resolves to a path outside the workspace"
+            ])
+        raw = _read_slots_file(path, ".aegis/slots.yaml")
         kept, warnings = _filter_workspace_slots(raw)
         return cls(kept, warnings=warnings)
 
     @classmethod
     def load_user(cls, workspace_root: Path | str | None = None) -> SlotRegistry:
-        """Load the trusted user-scope ~/.aegis/slots.yaml, unless it lies inside the workspace."""
+        """Load the trusted user-scope ~/.aegis/slots.yaml, unless it lies inside the workspace.
+
+        Raises SlotResolutionError if the file exists but cannot be read or parsed.
+        """
         path = user_slots_path()
-        if not path.exists():
+        if path is None:
             return cls({})
-        if workspace_root is not None and _is_within(path, Path(workspace_root)):
+        if workspace_root is not None and os.path.lexists(path) and _is_within(path, Path(workspace_root)):
             return cls({}, warnings=[
                 "ignored ~/.aegis/slots.yaml as user scope: it lies inside the workspace, "
                 "so it is treated as repository content"
@@ -241,17 +318,20 @@ class SlotRegistry:
         merged.update(profile)
         user_reg = cls.load_user(workspace)
         warnings = user_reg.warnings
+        invalid: List[str] = []
         for key, value in user_reg.to_dict().items():
             if key.startswith(_CAPABILITY_PREFIXES):
                 clean = sanitize_slot_value(key, value)
                 if clean is None:
-                    warnings.append(
-                        f"ignored user slot {_display_key(key)} in ~/.aegis/slots.yaml: tool/model "
-                        f"names may use only letters, digits and _.:/@+- (max {MAX_SLOT_VALUE_LEN})"
-                    )
+                    invalid.append(key)
                     continue
                 value = clean
             merged[key] = value
+        if invalid:
+            warnings.append(
+                f"ignored {_keys_summary(invalid)} in ~/.aegis/slots.yaml: tool/model names "
+                f"may use only letters, digits and _.:/@+- (max {MAX_SLOT_VALUE_LEN})"
+            )
         if workspace is not None:
             ws_reg = cls.load(workspace)
             warnings.extend(ws_reg.warnings)

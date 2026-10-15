@@ -18,6 +18,14 @@ from aegis_core.ast.schema import NormalizedAST
 from aegis_core.skills.slots import SlotRegistry
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """parse_file consults ~/.aegis/slots.yaml; a developer's own driver config must not run here."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+
 def test_native_python_fast_path(tmp_path):
     py_file = tmp_path / "hello.py"
     py_file.write_text("def greet(): return 'hi'", encoding="utf-8")

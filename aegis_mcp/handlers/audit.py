@@ -107,10 +107,11 @@ def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
 
     try:
         loaded = SlotRegistry.for_platform(platform, workspace=str(workspace))
-    except SlotResolutionError:
-        # The parser error can quote file content, so report a fixed message instead.
+    except (SlotResolutionError, OSError, RuntimeError):
+        # Slot loading must never cost the agent its guidance. The error can quote file
+        # content or paths, so report a fixed message instead.
         _add_scan_warnings(res, [
-            "slot files (.aegis/slots.yaml or ~/.aegis/slots.yaml) could not be parsed; "
+            "slot files (.aegis/slots.yaml or ~/.aegis/slots.yaml) could not be read or parsed; "
             "${SLOT.*} placeholders were left unresolved"
         ])
         return res
