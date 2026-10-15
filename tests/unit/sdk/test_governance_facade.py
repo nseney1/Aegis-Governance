@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 import aegis_sdk
+from aegis_core import _version
 from aegis_core.errors import AegisError, RuleNotFoundError, RuleParseError
 from aegis_sdk import Governance, parse_rule_file
 
@@ -96,7 +97,8 @@ def ws(tmp_path: Path) -> Path:
 
 def test_sdk_exports_only_the_facade() -> None:
     assert sorted(aegis_sdk.__all__) == ["Governance", "parse_rule_file"]
-    assert aegis_sdk.__version__ == "3.3.0"
+    # External callers read it (defense #8); it is the one version (D18).
+    assert aegis_sdk.__version__ == _version.__version__
 
 
 def test_governance_has_no_alias_or_writer_methods() -> None:

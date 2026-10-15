@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from aegis_cli.registry import get_default_registry
+from aegis_core._version import __version__
 from aegis_core.workspace.layout import LEGACY_SOMA_DIRNAME, is_aegis_workspace
 
 __all__ = ["main", "AegisParser", "REMOVED_COMMANDS"]
@@ -61,26 +62,6 @@ REMOVED_COMMANDS: Dict[str, str] = {
 
 # Global options that take a value, so the removed-name scan can skip it.
 _VALUE_OPTIONS = ("--workspace",)
-
-
-def _version() -> str:
-    version_file = Path(__file__).resolve().parent.parent / "VERSION"
-    if version_file.is_file():
-        try:
-            val = version_file.read_text(encoding="utf-8").strip()
-            if val:
-                return val
-        except OSError:
-            pass
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-        try:
-            return version("aegis-guardrails")
-        except PackageNotFoundError:
-            pass
-    except ImportError:
-        pass
-    return "unknown"
 
 
 def _positionals(argv: List[str]) -> List[str]:
@@ -159,7 +140,7 @@ def _build_parser(prog: str = PROG) -> argparse.ArgumentParser:
         description="Aegis Governance — make AI coding agents trustworthy",
         parents=[common_parser],
     )
-    parser.add_argument("--version", action="version", version=f"{prog} {_version()}")
+    parser.add_argument("--version", action="version", version=f"{prog} {__version__}")
 
     sub = parser.add_subparsers(dest="command", parser_class=AegisParser)
     get_default_registry().populate_subparsers(sub, common_parser=common_parser)

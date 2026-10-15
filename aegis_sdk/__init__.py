@@ -3,8 +3,8 @@
 External callers (citadel fleet telemetry, mapleterm) use Governance and
 parse_rule_file; nothing inside Aegis imports this package.
 """
+from aegis_core._version import __version__
 from aegis_core.yaml_engine.frontmatter import parse_rule_file
 from aegis_sdk.governance import Governance
 
-__version__ = "3.3.0"
 __all__ = ["Governance", "parse_rule_file"]

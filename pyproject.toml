@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis-guardrails"
-version = "3.3.0"
+dynamic = ["version"]
 description = "Governance framework that makes AI coding agents trustworthy"
 
 readme = "README.md"
@@ -54,6 +54,10 @@ include = [
 
 [tool.setuptools]
 include-package-data = true
+
+[tool.setuptools.dynamic]
+# The one version source (D18). setuptools reads the assignment without importing aegis_core.
+version = {attr = "aegis_core._version.__version__"}
 
 [tool.setuptools.package-data]
 aegis_sdk = ["py.typed"]

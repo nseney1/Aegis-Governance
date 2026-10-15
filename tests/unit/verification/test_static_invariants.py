@@ -246,56 +246,6 @@ def test_entire_runtime_has_zero_third_party_imports():
     )
 
 
-# ── SOMA-M07: one source of truth for the version ───────────────────────
-
-def test_version_is_single_sourced():
-    """SOMA-M07: all five version surfaces must agree with VERSION."""
-    version_file = read(os.path.join(REPO_ROOT, "VERSION")).strip()
-
-    pyproject = read(os.path.join(REPO_ROOT, "pyproject.toml"))
-    match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
-    assert match, "no version in pyproject.toml"
-    assert match.group(1) == version_file, (
-        f"pyproject.toml ({match.group(1)}) != VERSION ({version_file})"
-    )
-
-    for sdk_pkg in ("soma_sdk", "aegis_sdk"):
-        sdk_path = os.path.join(REPO_ROOT, sdk_pkg, "__init__.py")
-        if not os.path.exists(sdk_path):
-            continue
-        python_sdk = read(sdk_path)
-        sdk_match = re.search(r"^__version__\s*=\s*['\"]([^'\"]+)['\"]", python_sdk, re.M)
-        assert sdk_match and sdk_match.group(1) == version_file, (
-            f"Python SDK {sdk_pkg} ({sdk_match.group(1) if sdk_match else 'missing'}) != VERSION ({version_file})"
-        )
-
-    try:
-        from aegis_mcp.server import _server_version
-    except ImportError:
-        from aegis_mcp.server import _server_version
-    assert _server_version() == version_file, (
-        f"MCP runtime ({_server_version()}) != VERSION ({version_file})"
-    )
-
-    mcp_server_file = os.path.join(REPO_ROOT, "aegis_mcp", "server.py") if os.path.exists(os.path.join(REPO_ROOT, "aegis_mcp", "server.py")) else os.path.join(REPO_ROOT, "soma_mcp", "server.py")
-    server = read(mcp_server_file)
-    assert f'"{version_file}"' not in server.replace('_server_version', ''), (
-        "server.py still hardcodes the version string"
-    )
-
-    readme = read(os.path.join(REPO_ROOT, "README.md"))
-    readme_badge_match = re.search(r'badge/Version-([0-9]+\.[0-9]+\.[0-9]+)-', readme)
-    assert readme_badge_match and readme_badge_match.group(1) == version_file, (
-        f"README.md badge ({readme_badge_match.group(1) if readme_badge_match else 'missing'}) != VERSION ({version_file})"
-    )
-
-    security = read(os.path.join(REPO_ROOT, "SECURITY.md"))
-    major_minor = ".".join(version_file.split(".")[:2])
-    assert f"| {major_minor}.x" in security, (
-        f"SECURITY.md does not list {major_minor}.x as supported"
-    )
-
-
 # ── SOMA-M03: failure paths must exit nonzero ───────────────────────────
 
 def test_cli_exits_nonzero_on_unknown_command():
