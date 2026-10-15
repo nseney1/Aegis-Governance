@@ -12,7 +12,10 @@ import sys
 from typing import Optional
 
 from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter
+from aegis_core.locking import workspace_lock
+from aegis_core.storage import atomic_write_text
 from aegis_core.workspace import Workspace, resolve_workspace
+from aegis_core.workspace.layout import LockResource
 from .constants import (
     EXTINCTION_THRESHOLD,
 )
@@ -23,10 +26,17 @@ from .parsers import (
 )
 
 __all__ = [
+    "PARKED_RULE_DIRS",
     "run_cell_selection",
     "select_cell",
     "prune_cells",
 ]
+
+
+# Selection moves rules out of the active set into these directories. Their
+# contents belong to the archive and to the last-gasp sentinel; selection
+# never classifies them again.
+PARKED_RULE_DIRS = frozenset({".archive", ".last_gasp_queue"})
 
 
 def run_cell_selection(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
@@ -48,82 +58,136 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
     if execute:
         archive_dir.mkdir(parents=True, exist_ok=True)
 
-    for root_str, _dirs, files in os.walk(cells_dir):
-        if ".archive" in root_str:
+    # The rule list is taken up front, so a rule parked during this pass is
+    # not visited again.
+    for fpath in _active_rule_files(cells_dir):
+        content = _read_text(fpath)
+        if content is None:
             continue
-        for f in files:
-            if not f.endswith(".md") or f == "README.md":
-                continue
-            fpath = Path(root_str) / f
-            try:
-                content = fpath.read_text(encoding="utf-8")
-            except Exception:
-                continue
+        verdict = _classify(content)
+        if verdict is None:
+            continue
+        category, score, _meta, dormant = verdict
+        print(f"[{category}] {fpath.name} (Score: {score:.2f})")
+        if not execute or _action_for(category, dormant) is None:
+            continue
 
-            meta = parse_frontmatter(content)
-            if not meta:
-                continue
-            fitness = meta.get("fitness") if isinstance(meta.get("fitness"), dict) else {}
-
-            def get_val(key: str, default: float = 0.0) -> float:
-                raw = fitness.get(key, meta.get(key))
-                if raw is not None and str(raw) != "null":
-                    try:
-                        return float(raw)
-                    except (ValueError, TypeError):
-                        return default
-                return default
-
-            triggers = get_val("triggers", 0.0)
-            tp = get_val("true_positives", 0.0)
-            fp = get_val("false_positives", 0.0)
-            cell_type = str(meta.get("type", ""))
-            dormant = "dormant_since" in meta or "dormant_since" in fitness
-
-            if triggers == 0:
-                category = "DORMANT"
-                score = 0.0
-            else:
-                score = tp / triggers
-                if fp > 0 and tp > 0 and fp > 2 * tp:
-                    category = "APOPTOSIS_WARNING" if cell_type in ("wall", "invariant") else "APOPTOSIS"
-                elif score > 0.7:
-                    category = "SURVIVE"
-                elif score >= EXTINCTION_THRESHOLD:
-                    category = "ADAPT"
-                else:
-                    category = "EXTINCT"
-
-            print(f"[{category}] {f} (Score: {score:.2f})")
-
-            if execute:
-                action = None
-                if category in ("EXTINCT", "APOPTOSIS"):
-                    if category == "APOPTOSIS":
-                        last_gasp_dir = cells_dir / ".last_gasp_queue"
-                        last_gasp_dir.mkdir(parents=True, exist_ok=True)
-                        dest = last_gasp_dir / f
-                        shutil.move(str(fpath), str(dest))
-                        action = "last_gasp_requested"
-                    else:
-                        dest = archive_dir / f
-                        shutil.move(str(fpath), str(dest))
-                        action = "moved_to_archive"
-                elif category == "DORMANT" and not dormant:
-                    timestamp = datetime.now(timezone.utc).isoformat() + "Z"
-                    meta["dormant_since"] = timestamp
-                    body = _get_body(content).lstrip()
-                    fpath.write_text(dump_frontmatter(meta, body=body), encoding="utf-8")
-                    action = "marked_dormant"
-
-                if action:
-                    with open(fitness_log, "a", encoding="utf-8") as log:
-                        log.write(json.dumps({
-                            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
-                            "cell": f,
-                            "action": action,
-                        }) + "\n")
+        # Classified unlocked, changed under the lock one rule at a time (as
+        # the tier pass does): a pass over hundreds of rules must not starve
+        # concurrent create/promote into LockTimeoutError.
+        with workspace_lock(ws.root, LockResource.RULES):
+            action = _apply_locked(fpath, cells_dir, archive_dir)
+        if action:
+            with open(fitness_log, "a", encoding="utf-8") as log:
+                log.write(json.dumps({
+                    "timestamp": _utc_timestamp(),
+                    "cell": fpath.name,
+                    "action": action,
+                }) + "\n")
     return 0
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _active_rule_files(cells_dir: Path) -> list[Path]:
+    found: list[Path] = []
+    for root_str, dirs, files in os.walk(cells_dir):
+        dirs[:] = sorted(d for d in dirs if d not in PARKED_RULE_DIRS)
+        found.extend(
+            Path(root_str) / f for f in sorted(files) if f.endswith(".md") and f != "README.md"
+        )
+    return found
+
+
+def _read_text(fpath: Path) -> Optional[str]:
+    try:
+        return fpath.read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+
+def _classify(content: str) -> Optional[tuple[str, float, dict, bool]]:
+    """Return ``(category, score, metadata, already_dormant)``, or None if unparseable."""
+    meta = parse_frontmatter(content)
+    if not meta:
+        return None
+    fitness = meta.get("fitness") if isinstance(meta.get("fitness"), dict) else {}
+
+    def get_val(key: str, default: float = 0.0) -> float:
+        raw = fitness.get(key, meta.get(key))
+        if raw is not None and str(raw) != "null":
+            try:
+                return float(raw)
+            except (ValueError, TypeError):
+                return default
+        return default
+
+    triggers = get_val("triggers", 0.0)
+    tp = get_val("true_positives", 0.0)
+    fp = get_val("false_positives", 0.0)
+    cell_type = str(meta.get("type", ""))
+    dormant = "dormant_since" in meta or "dormant_since" in fitness
+
+    if triggers == 0:
+        return "DORMANT", 0.0, meta, dormant
+    score = tp / triggers
+    if fp > 0 and tp > 0 and fp > 2 * tp:
+        category = "APOPTOSIS_WARNING" if cell_type in ("wall", "invariant") else "APOPTOSIS"
+    elif score > 0.7:
+        category = "SURVIVE"
+    elif score >= EXTINCTION_THRESHOLD:
+        category = "ADAPT"
+    else:
+        category = "EXTINCT"
+    return category, score, meta, dormant
+
+
+def _action_for(category: str, dormant: bool) -> Optional[str]:
+    if category == "APOPTOSIS":
+        return "last_gasp_requested"
+    if category == "EXTINCT":
+        return "moved_to_archive"
+    if category == "DORMANT" and not dormant:
+        return "marked_dormant"
+    return None
+
+
+def _apply_locked(fpath: Path, cells_dir: Path, archive_dir: Path) -> Optional[str]:
+    """Re-read and re-classify ``fpath`` under the rules lock, then act on what is on disk.
+
+    A rule moved or deleted since it was classified is skipped; one edited
+    since is judged by its new content.
+    """
+    content = _read_text(fpath)
+    if content is None:
+        return None
+    verdict = _classify(content)
+    if verdict is None:
+        return None
+    category, _score, meta, dormant = verdict
+    action = _action_for(category, dormant)
+    if action == "last_gasp_requested":
+        _park(fpath, cells_dir / ".last_gasp_queue")
+    elif action == "moved_to_archive":
+        _park(fpath, archive_dir)
+    elif action == "marked_dormant":
+        meta["dormant_since"] = _utc_timestamp()
+        atomic_write_text(fpath, dump_frontmatter(meta, body=_get_body(content).lstrip()))
+    return action
+
+
+def _park(fpath: Path, dest_dir: Path) -> Path:
+    """Move a rule into ``dest_dir`` without replacing a rule already parked there."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / fpath.name
+    n = 1
+    while os.path.lexists(dest):
+        dest = dest_dir / f"{fpath.stem}.{n}{fpath.suffix}"
+        n += 1
+    shutil.move(str(fpath), str(dest))
+    return dest
 
 
 def prune_cells(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:

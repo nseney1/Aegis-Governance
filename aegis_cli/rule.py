@@ -2,6 +2,7 @@
 
 Subcommands:
   aegis rule list                 List active workspace rules and fitness scores
+  aegis rule create               Create a rule (--hypothesis, optional --body-file)
   aegis rule promote <rule_id>    Promote a rule up lifecycle tiers
   aegis rule demote <rule_id>     Demote a rule down lifecycle tiers
   aegis rule archive [rule_id]    Archive decayed, extinct, or quarantined rules
@@ -17,8 +18,11 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from aegis_cli.base import CommandCategory, AegisCommand
+from aegis_core.errors import WorkspaceNotFoundError
+from aegis_core.lifecycle.creation import MAX_RULE_BODY_BYTES, validate_rule_body
 from aegis_core.taxonomy import RULE_TYPE_DIRS
 from aegis_core.workspace import Workspace
+from aegis_core.workspace.discovery import _is_workspace_dir
 from aegis_core.workspace.layout import WorkspaceLayout
 from aegis_core.lifecycle import (
     promote_cell, demote_cell, prune_cells, find_cell_file,
@@ -46,15 +50,132 @@ def run_rule(args: argparse.Namespace) -> int:
     if action not in handlers:
         print(f"Unknown rule subcommand: {action}", file=sys.stderr)
         return 1
-    return handlers[action](args)
+    try:
+        return handlers[action](args)
+    except WorkspaceNotFoundError as exc:
+        return _emit_error(args, str(exc))
 
 
-def _resolve_workspace_root(args: argparse.Namespace) -> Path:
-    ws_obj = getattr(args, "ws", None)
-    if ws_obj is not None:
-        return ws_obj.root
-    raw = getattr(args, "workspace", None) or getattr(args, "_project_root", None) or getattr(args, "_root", None)
-    return Path(raw).resolve() if raw else Workspace.resolve().root
+def _emit_error(args: argparse.Namespace, msg: str) -> int:
+    if getattr(args, "json", False):
+        print(json.dumps({"status": "error", "error": msg}))
+    else:
+        print(f"Error: {msg}", file=sys.stderr)
+    return 1
+
+
+_REGENERATE = "regenerate it with the aegis_generate_manifest MCP tool."
+
+
+def _warn_if_manifest_stale(root: Path) -> None:
+    """Say so on stderr when ``.aegis/rules/manifest.json`` no longer matches the rules.
+
+    Lifecycle writes never re-attest the manifest (H1: that laundered tampered
+    rules), so after a mutation it is stale until the operator regenerates it.
+    With an HMAC key, the MCP rule cache refuses added or removed rules until
+    then (aegis_mcp/rule_cache.py).
+    """
+    from aegis_core.integrity import load_key, load_manifest, verify_manifest
+
+    manifest = load_manifest(root)
+    if manifest is None:
+        return
+    try:
+        issues = verify_manifest(WorkspaceLayout(root).rules_dir, manifest)
+    except ValueError:
+        print(f"Warning: .aegis/rules/manifest.json is not a valid manifest; {_REGENERATE}", file=sys.stderr)
+        return
+    if not issues:
+        return
+    msg = f"Warning: .aegis/rules/manifest.json is out of date ({len(issues)} rule file(s) changed); {_REGENERATE}"
+    if load_key(root) is not None and any(i.get("type") != "modified" for i in issues):
+        msg += " With an HMAC key configured, the MCP server will not load rules until then."
+    print(msg, file=sys.stderr)
+
+
+class _WorkspaceArg(argparse.Action):
+    """Keep the operator's ``--workspace`` verbatim.
+
+    ``cli.main`` replaces ``args.workspace`` with its own walked-up resolution
+    before dispatch, which is how ``rule create`` once landed in ``$HOME``.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[override]
+        setattr(namespace, self.dest, values)
+        setattr(namespace, "_rule_workspace_arg", values)
+
+
+def _git_toplevel(start: Path) -> Path | None:
+    for d in (start, *start.parents):
+        if (d / ".git").exists():
+            return d
+    return None
+
+
+def _home() -> Path | None:
+    try:
+        return Path.home().resolve()
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
+def _not_a_workspace(directory: Path) -> WorkspaceNotFoundError:
+    return WorkspaceNotFoundError(f"not an Aegis workspace (no .aegis/ in {directory}); run aegis init")
+
+
+def _walk_up_to_workspace(start: Path) -> Path:
+    """Discovery's start-path walk without its AEGIS_WORKSPACE/AEGIS_ROOT override:
+    an explicit --workspace beats the environment, as it already does for create."""
+    for d in (start, *start.parents):
+        if _is_workspace_dir(str(d)):
+            return d
+    return start
+
+
+def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = False) -> Path:
+    """Resolve the rule workspace. Never ``$HOME``, never above the git toplevel (H8).
+
+    An explicit ``--workspace DIR`` is the start point, whichever position it
+    was given in (``_workspace_arg`` is the raw global flag, when ``cli.main``
+    keeps it). ``rule create`` (``require_aegis``) uses exactly DIR; the other
+    actions walk up from DIR like cwd discovery does. Without DIR the root comes
+    from ``cli.main``'s cwd discovery. Either way the root is then bounded by
+    the start point's git toplevel, since discovery itself walks up without bounds.
+    """
+    explicit = getattr(args, "_rule_workspace_arg", None) or getattr(args, "_workspace_arg", None)
+    if explicit:
+        start = Path(explicit).expanduser().resolve()
+        root = start if require_aegis else _walk_up_to_workspace(start)
+    else:
+        ws_obj = getattr(args, "ws", None)
+        raw = getattr(args, "workspace", None) or getattr(args, "_project_root", None) or getattr(args, "_root", None)
+        if ws_obj is None and raw:
+            root = start = Path(raw).resolve()
+        else:
+            root = Path(ws_obj.root if ws_obj is not None else Workspace.resolve().root).resolve()
+            start = Path.cwd().resolve()
+
+    home = _home()
+    if home is not None and root == home:
+        if start == home:
+            raise WorkspaceNotFoundError(
+                f"not an Aegis workspace ({home} is the home directory; ~/.aegis is the user rule layer); "
+                "run aegis init in a project"
+            )
+        raise _not_a_workspace(start)
+
+    pinned = any(
+        os.environ.get(var) and Path(os.environ[var]).resolve() == root
+        for var in ("AEGIS_WORKSPACE", "AEGIS_ROOT")
+    )
+    if not pinned and root != start and root in start.parents:
+        top = _git_toplevel(start)
+        if top is not None and root in top.parents:
+            raise _not_a_workspace(start)
+
+    if require_aegis and not (root / ".aegis").is_dir():
+        raise _not_a_workspace(root)
+    return root
 
 
 def _run_list(args: argparse.Namespace) -> int:
@@ -114,6 +235,8 @@ def _run_promote(args: argparse.Namespace) -> int:
 
     if getattr(args, "tier_check", False):
         res = evaluate_cell_tiers(root, execute=not dry_run)
+        if not dry_run:
+            _warn_if_manifest_stale(root)
         if use_json:
             print(json.dumps(res, indent=2))
         else:
@@ -146,13 +269,14 @@ def _run_promote(args: argparse.Namespace) -> int:
     if status == "already_terminal":
         msg = f"Rule '{rule_id}' is already at terminal tier ('{res.get('current_type')}')"
         return _emit_status(use_json, {"info": msg}, f"  ℹ️  {msg}", 0)
-    if status == "target_exists":
-        msg = res.get("message", "Target already exists")
+    if status not in ("promoted", "dry_run"):
+        msg = res.get("message") or f"Promotion of '{rule_id}' failed ({status})"
         return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
 
     from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:
         return _emit_status(use_json, {"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}, f"  🔍 Would promote: {rule_id}: {from_t} → {to_t}", 0)
+    _warn_if_manifest_stale(root)
     return _emit_status(use_json, {"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Promoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
@@ -195,10 +319,14 @@ def _run_demote(args: argparse.Namespace) -> int:
     if status == "already_base":
         msg = f"Rule '{rule_id}' is already at base tier ('{res.get('current_type')}')"
         return _emit_status(use_json, {"error": msg}, f"  ⚠️  {msg}", 1)
+    if status not in ("demoted", "dry_run"):
+        msg = res.get("message") or f"Demotion of '{rule_id}' failed ({status})"
+        return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
 
     from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:
         return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}, f"  🔍 Would demote: {rule_id}: {from_t} → {to_t}", 0)
+    _warn_if_manifest_stale(root)
     return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Demoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
@@ -218,7 +346,10 @@ def _run_archive(args: argparse.Namespace) -> int:
     """Archive extinct or decayed rules."""
     root = _resolve_workspace_root(args)
     execute = not getattr(args, "dry_run", False) and getattr(args, "apply", True)
-    return prune_cells(workspace=root, execute=execute)
+    rc = prune_cells(workspace=root, execute=execute)
+    if execute:
+        _warn_if_manifest_stale(root)
+    return rc
 
 
 def _run_clean(args: argparse.Namespace) -> int:
@@ -243,15 +374,51 @@ def _split_csv_arg(raw: Any) -> list[str] | None:
     return None
 
 
+class _BodyFileError(Exception):
+    pass
+
+
+def _read_body_file(raw: str) -> str:
+    """Read a rule body from PATH or stdin (``-``), never more than the size cap + 1 byte."""
+    label = "<stdin>" if raw == "-" else raw
+    limit = MAX_RULE_BODY_BYTES + 1
+    try:
+        if raw == "-":
+            stream = getattr(sys.stdin, "buffer", None)
+            data = stream.read(limit) if stream is not None else sys.stdin.read(limit).encode("utf-8")
+        else:
+            with open(raw, "rb") as fh:
+                data = fh.read(limit)
+    except OSError as exc:
+        raise _BodyFileError(f"--body-file {label}: cannot read file ({exc.strerror or exc})") from exc
+    if len(data) > MAX_RULE_BODY_BYTES:
+        raise _BodyFileError(f"--body-file {label}: rule body exceeds 64 KiB ({MAX_RULE_BODY_BYTES} bytes)")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _BodyFileError(f"--body-file {label}: rule body is not valid UTF-8") from exc
+    try:
+        return validate_rule_body(text)
+    except ValueError as exc:
+        raise _BodyFileError(f"--body-file {label}: {exc}") from exc
+
+
 def _run_create(args: argparse.Namespace) -> int:
     """Create a new governance rule in the workspace."""
     from aegis_core.lifecycle.creation import create_cell
-    root = _resolve_workspace_root(args)
     cell_type = getattr(args, "type", None) or getattr(args, "cell_type", None) or "trap"
-    hypothesis = getattr(args, "hypothesis", "") or getattr(args, "description", "")
+    hypothesis = getattr(args, "hypothesis", "")
     if not hypothesis:
         print("Error: --hypothesis is required to create a rule.", file=sys.stderr)
         return 1
+    root = _resolve_workspace_root(args, require_aegis=True)
+    body = None
+    body_file = getattr(args, "body_file", None)
+    if body_file is not None:
+        try:
+            body = _read_body_file(body_file)
+        except _BodyFileError as exc:
+            return _emit_error(args, str(exc))
     rule_id = getattr(args, "id", None) or getattr(args, "cell_id", None) or None
     try:
         created = create_cell(
@@ -261,12 +428,12 @@ def _run_create(args: argparse.Namespace) -> int:
             expiry_days=getattr(args, "expiry_days", 60), minimum_mode=getattr(args, "minimum_mode", "") or "",
             id_override=rule_id, effector=bool(getattr(args, "effector", False)), memory=bool(getattr(args, "memory", False)),
             target_paths=_split_csv_arg(getattr(args, "target_paths", None)), domain=getattr(args, "domain", "correctness") or "correctness",
-            workspace=root, enforcement=getattr(args, "enforcement", None),
+            workspace=root, enforcement=getattr(args, "enforcement", None), body=body,
         )
     except Exception as exc:
-        print(json.dumps({"error": str(exc), "status": "error"}) if getattr(args, "json", False) else f"Error: {exc}", file=sys.stdout if getattr(args, "json", False) else sys.stderr)
-        return 1
+        return _emit_error(args, str(exc))
     print(json.dumps({"status": "created", "path": str(created), "id": created.stem}, indent=2) if getattr(args, "json", False) else f"Created rule: {created}")
+    _warn_if_manifest_stale(root)
     return 0
 
 
@@ -285,7 +452,7 @@ class RuleCommand(AegisCommand):
         common.add_argument("--format", choices=["text", "json", "mermaid"], default=argparse.SUPPRESS)
         common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
         common.add_argument("-q", "--quiet", action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("--workspace", type=str, default=argparse.SUPPRESS)
+        common.add_argument("--workspace", type=str, default=argparse.SUPPRESS, action=_WorkspaceArg)
         sub = parser.add_subparsers(dest="rule_action", metavar="ACTION")
 
         p_list = sub.add_parser("list", parents=[common], help="List active rules and fitness metrics")
@@ -308,7 +475,8 @@ class RuleCommand(AegisCommand):
         p_create.add_argument("--minimum-mode", dest="minimum_mode", default="", help="Minimum review mode")
         p_create.add_argument("--effector", action="store_true", default=False, help="Create as effector cell")
         p_create.add_argument("--memory", action="store_true", default=False, help="Create as memory cell")
-        p_create.add_argument("--from-description", dest="description", default="", help="Create from description")
+        p_create.add_argument("--body-file", dest="body_file", default=None, metavar="PATH",
+                              help="Rule body (markdown after the frontmatter) from PATH, or '-' for stdin; max 64 KiB")
 
         p_prom = sub.add_parser("promote", parents=[common], help="Promote a rule up lifecycle tiers")
         p_prom.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to promote")
