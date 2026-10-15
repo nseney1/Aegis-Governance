@@ -83,26 +83,25 @@ def _check_rules(platform: str | None, project_root: Path | None = None) -> bool
     return False
 
 
-def _check_evidence_dir(project_root: Path | None = None) -> bool:
-    """Check .aegis/evidence/ exists and is writable (read-only check)."""
-    base = project_root or Path.cwd()
-    evidence = base / ".aegis" / "evidence"
-    if evidence.is_dir():
-        if os.access(str(evidence), os.W_OK):
-            print(f"  ✅ Evidence directory writable ({evidence})")
+def _check_state_dir(project_root: Path | None = None) -> bool:
+    """Check .aegis/state/ (ledger, lock) exists and is writable, or can be created (read-only check)."""
+    from aegis_core.workspace.layout import WorkspaceLayout
+
+    state = WorkspaceLayout(Path(project_root or Path.cwd()).resolve()).state_dir
+    if state.is_dir():
+        if os.access(str(state), os.W_OK):
+            print(f"  ✅ State directory writable ({state})")
             return True
-        print(f"  ❌ Evidence directory not writable ({evidence})")
-        print(f"    Fix: Verify write permissions on {evidence}.")
+        print(f"  ❌ State directory not writable ({state})")
+        print(f"    Fix: Verify write permissions on {state}.")
         return False
-    # Directory doesn't exist — check if parent is writable
-    parent = evidence.parent
+    parent = state.parent
     if parent.is_dir() and os.access(str(parent), os.W_OK):
-        print(f"  ✅ Evidence directory can be created ({evidence})")
+        print(f"  ✅ State directory can be created ({state})")
         return True
-    print(f"  ❌ Evidence directory does not exist ({evidence})")
+    print(f"  ❌ State directory does not exist ({state})")
     print("    Fix: Run 'aegis init' to create workspace directories.")
     return False
-
 
 
 def _check_cli_resolvable() -> bool:
@@ -202,67 +201,56 @@ def _check_mcp_launcher(path_env: str | None = None) -> bool:
 
 
 def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> bool:
-    """Check configured AST drivers in .aegis/slots.yaml and verify their binaries."""
+    """Check the AST drivers this workspace uses and that their executables resolve.
+
+    A repository opts in to a packaged driver in .aegis/config.json; driver commands
+    come only from ~/.aegis/config.json (D10).
+    """
     import shlex
-    from aegis_core.skills.slots import SlotRegistry
+    from aegis_core.errors import PathTraversalError
+    from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
     from aegis_core.ast.detect import detect_project_languages, provision_ast_driver_slots
     from aegis_core.ast.runner import resolve_driver_executable
 
     ws_root = Path(project_root or Path.cwd())
-    slots_path = ws_root / ".aegis" / "slots.yaml"
-
     detected_langs = detect_project_languages(ws_root)
     non_py_langs = {k: v for k, v in detected_langs.items() if k != "python"}
 
-    if not slots_path.is_file():
-        if non_py_langs:
-            if fix:
-                new_slots, created = provision_ast_driver_slots(ws_root, detected_langs, copy_drivers=True)
-                if created:
-                    print(f"  ✅ Fixed: Auto-provisioned AST drivers in .aegis/slots.yaml for {', '.join(k.title() for k in sorted(non_py_langs))}")
-            else:
-                missing_exts = sorted(set().union(*(d.get("extensions", []) for d in non_py_langs.values())))
-                ext_str = ", ".join(missing_exts) if missing_exts else ", ".join(non_py_langs.keys())
-                print(f"  ⚠️  AST drivers: unconfigured driver for detected source language(s): {ext_str}. Run 'aegis doctor --fix' to provision.")
-                return False
-        if not slots_path.is_file():
-            print("  ✅ AST drivers: native Python stdlib (in-process)")
-            return True
+    def _configured() -> dict[str, str]:
+        drivers: dict[str, str] = {}
+        for registry in (SlotRegistry.load(ws_root), SlotRegistry.load_user(ws_root)):
+            for slot_name, slot_val in registry.to_dict().items():
+                if slot_name == "ast_driver":
+                    drivers["default"] = str(slot_val)
+                elif slot_name.startswith("ast_driver_"):
+                    drivers[f".{slot_name[len('ast_driver_'):]}"] = str(slot_val)
+        return drivers
 
     try:
-        registry = SlotRegistry.load(ws_root)
-    except Exception as exc:
-        print(f"  ❌ AST drivers: failed to load slots.yaml: {exc}")
+        ast_drivers = _configured()
+    except SlotResolutionError as exc:
+        print(f"  ❌ AST drivers: {exc}")
         return False
 
-    ast_drivers: dict[str, str] = {}
-    for slot_name, slot_val in registry.to_dict().items():
-        if slot_name == "ast_driver":
-            ast_drivers["default"] = str(slot_val)
-        elif slot_name.startswith("ast_driver_"):
-            ext = slot_name[len("ast_driver_"):]
-            ast_drivers[f".{ext}"] = str(slot_val)
-
-    missing: list[str] = []
-    for lang, l_info in non_py_langs.items():
-        for ext in l_info.get("extensions", []):
-            if ext not in ast_drivers and "default" not in ast_drivers:
-                missing.append(ext)
-
+    missing = sorted({
+        ext
+        for l_info in non_py_langs.values()
+        for ext in l_info.get("extensions", [])
+        if ext not in ast_drivers and "default" not in ast_drivers
+    })
     if missing:
         if fix:
-            new_slots, created = provision_ast_driver_slots(ws_root, detected_langs, copy_drivers=True)
-            if created:
-                print(f"  ✅ Fixed: Auto-provisioned missing AST driver slots in .aegis/slots.yaml: {', '.join(missing)}")
-                registry = SlotRegistry.load(ws_root)
-                for slot_name, slot_val in registry.to_dict().items():
-                    if slot_name.startswith("ast_driver_"):
-                        ext = slot_name[len("ast_driver_"):]
-                        ast_drivers[f".{ext}"] = str(slot_val)
+            try:
+                _slots, written = provision_ast_driver_slots(ws_root, detected_langs)
+            except PathTraversalError as exc:
+                print(f"  ❌ AST drivers: {exc}")
+                return False
+            if written:
+                print(f"  ✅ Fixed: enabled the packaged AST drivers in .aegis/config.json for {', '.join(missing)}")
+                ast_drivers = _configured()
         else:
             print(f"  ⚠️  AST drivers: unconfigured driver for detected source extension(s): {', '.join(missing)}. Run 'aegis doctor --fix' to provision.")
             return False
-
 
     if not ast_drivers:
         print("  ✅ AST drivers: native Python stdlib (in-process)")
@@ -347,7 +335,7 @@ def run_doctor(args: argparse.Namespace) -> int:
         platform = _check_platform(ws)
         results.append(platform is not None)
         results.append(_check_rules(platform, ws))
-        results.append(_check_evidence_dir(ws))
+        results.append(_check_state_dir(ws))
         results.append(_check_cli_resolvable())
         hook_ok = _check_precommit_hook(ws)
         if hook_ok is not None:

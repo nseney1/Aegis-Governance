@@ -1,7 +1,7 @@
 """Tests for Verifier OOP Architecture and Pipeline (Phase 20).
 
 Verifies:
-- DeterministicVerifier Layer 1 orchestration & GitWorkspace integration
+- DeterministicVerifier Layer 1 orchestration and git change discovery (gitsafe)
 - AdversarialVerifier backend contract: a callable or an object with .generate()
   (the CLI passes aegis_core.inference_provider.CommandBackend), and no backend
   is an error rather than a silent skip (D14)
@@ -16,12 +16,11 @@ import pytest
 from aegis_core.inference_provider import MISSING_BACKEND
 from aegis_core.verification.pipeline import AdversarialVerifier, DeterministicVerifier, VerificationPipeline
 from aegis_core.verification import RiskCategory, ToolEvidence, Verdict
-from aegis_core.workspace.git import GitWorkspace
 from aegis_core.workspace.base import Workspace
 
 
 class TestDeterministicVerifier:
-    """Verifies DeterministicVerifier execution and GitWorkspace auto-discovery."""
+    """Verifies DeterministicVerifier execution and git change auto-discovery."""
 
     def test_verify_explicit_files(self, tmp_path):
         src = tmp_path / "calc.py"
@@ -35,7 +34,8 @@ class TestDeterministicVerifier:
         assert isinstance(evidence, list)
         assert all(isinstance(e, ToolEvidence) for e in evidence)
 
-    def test_verify_git_workspace_auto_discovers_changed_files(self, tmp_path):
+    @staticmethod
+    def _repo(tmp_path):
         import subprocess
 
         repo = tmp_path / "repo"
@@ -43,20 +43,37 @@ class TestDeterministicVerifier:
         subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(repo), check=True)
         subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(repo), check=True)
-
-        tracked = repo / "module.py"
-        tracked.write_text("def fn():\n    return 1\n", encoding="utf-8")
+        (repo / "module.py").write_text("def fn():\n    return 1\n", encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=str(repo), check=True)
         subprocess.run(["git", "commit", "-m", "Init"], cwd=str(repo), check=True, capture_output=True)
+        return repo
 
-        tracked.write_text("def fn():\n    return 2\n", encoding="utf-8")
+    def test_verify_auto_discovers_unstaged_changes(self, tmp_path, monkeypatch):
+        from aegis_core.verification import runner
 
-        ws = GitWorkspace(root=repo)
-        assert "module.py" in ws.get_changed_files()
+        repo = self._repo(tmp_path)
+        (repo / "module.py").write_text("def fn():\n    return 2\n", encoding="utf-8")
+        seen = {}
+        real = runner.run_layer1
+        monkeypatch.setattr(runner, "run_layer1", lambda changed_files, **kw: seen.setdefault("files", changed_files) and real(changed_files, **kw))
 
-        verifier = DeterministicVerifier()
-        evidence = verifier.verify(changed_files=None, workspace=ws)
+        evidence = DeterministicVerifier().verify(changed_files=None, workspace=Workspace(root=repo))
         assert isinstance(evidence, list)
+        assert seen["files"] == ["module.py"]
+
+    def test_verify_auto_discovers_staged_only_changes(self, tmp_path, monkeypatch):
+        """#27: v3 asked `git diff` (unstaged only), so a staged-only change was never checked."""
+        import subprocess
+        from aegis_core.verification import runner
+
+        repo = self._repo(tmp_path)
+        (repo / "staged.py").write_text("def g():\n    return 3\n", encoding="utf-8")
+        subprocess.run(["git", "add", "staged.py"], cwd=str(repo), check=True)
+        seen = {}
+        monkeypatch.setattr(runner, "run_layer1", lambda changed_files, **kw: seen.setdefault("files", changed_files) and [])
+
+        DeterministicVerifier().verify(changed_files=None, workspace=Workspace(root=repo))
+        assert seen["files"] == ["staged.py"]
 
 
 class TestAdversarialVerifierBackend:

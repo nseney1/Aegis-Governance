@@ -7,10 +7,11 @@ import errno
 import json
 import os
 from pathlib import Path
-import shutil
 import stat
 import tempfile
-from typing import Any, Optional
+from typing import Any
+
+from aegis_core.config import ENV_WORKSPACE
 
 
 __all__ = [
@@ -334,7 +335,7 @@ class PlatformAdapter(ABC):
             "args": [],
         }
         if local:
-            entry["env"] = {"AEGIS_WORKSPACE": str(self.workspace)}
+            entry["env"] = {ENV_WORKSPACE: str(self.workspace)}
         return entry
 
     def render_mcp_config(self, local: bool = False) -> dict[str, Any]:

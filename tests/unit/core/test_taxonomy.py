@@ -16,7 +16,6 @@ from aegis_core.taxonomy import (
     REVIEW_MODES,
     REVIEW_MODE_RANKS,
     REVIEW_PRONGS,
-    RULE_EXPIRY_DAYS,
     RULE_TYPE_DIRS,
     RULE_TYPE_DISPLAY_ORDER,
     RULE_TYPE_NORMALIZATION,
@@ -79,7 +78,6 @@ def test_rule_types_and_directory_mappings():
 
 
 def test_statistical_and_operational_constants():
-    assert RULE_EXPIRY_DAYS == 90
     assert 0.90 in WILSON_CONFIDENCE_Z_SCORES
     assert 0.95 in WILSON_CONFIDENCE_Z_SCORES
     assert 0.99 in WILSON_CONFIDENCE_Z_SCORES

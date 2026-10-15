@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from aegis_cli.registry import get_default_registry
+from aegis_core.workspace.layout import LEGACY_SOMA_DIRNAME, is_aegis_workspace
 
 __all__ = ["main", "AegisParser", "REMOVED_COMMANDS"]
 
@@ -183,7 +184,7 @@ def _attach_workspace(args: argparse.Namespace) -> None:
         target_root = start_dir
         curr = start_dir
         while curr != curr.parent:
-            if (curr / ".aegis").is_dir() or (curr / ".soma").is_dir():
+            if is_aegis_workspace(curr) or (curr / LEGACY_SOMA_DIRNAME).is_dir():
                 target_root = curr
                 break
             curr = curr.parent

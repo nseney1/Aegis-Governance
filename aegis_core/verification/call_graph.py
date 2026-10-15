@@ -245,7 +245,7 @@ def _resolve_searchable_extensions(
 ) -> set[str]:
     """Dynamically determine allowed source extensions for the workspace.
 
-    Discovers extensions from configured workspace slots (.soma/slots.yaml),
+    Discovers extensions from the configured AST drivers (aegis_core.config),
     active AST runner registry, the target file extension, and its language definition.
     Zero hardcoded extension lists.
     """
@@ -310,29 +310,19 @@ def _get_searchable_source_files(
 
     Uses Git to respect .gitignore automatically. Falls back to os.walk for non-git trees.
     """
-    from aegis_core.workspace import as_workspace
-    from aegis_core.workspace.git import GitWorkspace
+    from aegis_core import gitsafe
 
     clean_exts = {e if e.startswith(".") else f".{e}" for e in allowed_extensions}
 
-    try:
-        ws = as_workspace(repo_root)
-        if isinstance(ws, GitWorkspace) and ws.is_git:
-            res = ws._run_git(["git", "ls-files", "--cached", "--others", "--exclude-standard"])
-            if res.returncode == 0:
-                files = []
-                for line in res.stdout.splitlines():
-                    f = line.strip()
-                    if not f:
-                        continue
-                    ext = os.path.splitext(f)[1].lower()
-                    if ext in clean_exts:
-                        full_p = os.path.join(repo_root, f)
-                        if _is_safe_source_file(full_p):
-                            files.append(full_p)
-                return files
-    except Exception:
-        pass
+    listed = gitsafe.list_files(repo_root)  # tracked and untracked, .gitignore respected
+    if listed is not None:
+        files = []
+        for f in listed:
+            if os.path.splitext(f)[1].lower() in clean_exts:
+                full_p = os.path.join(repo_root, f)
+                if _is_safe_source_file(full_p):
+                    files.append(full_p)
+        return files
 
     # Fallback for non-git directories
     matched = []

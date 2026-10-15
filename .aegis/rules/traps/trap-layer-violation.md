@@ -23,13 +23,6 @@ tags:
   - architecture
   - coupling
   - layer-violation
-fitness:
-  score: 0.6
-  impact_weight: 1.0
-  triggers: 80
-  true_positives: 24.4353
-  false_positives: 17.423
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Citadel C5 incident: `aegis_mcp/tools.py` imported `_check_test_coverage`,

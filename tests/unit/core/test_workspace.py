@@ -32,7 +32,6 @@ class TestWorkspaceCore:
 
     def test_resolve_workspace_walkup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
-        monkeypatch.delenv("AEGIS_ROOT", raising=False)
 
         ws = tmp_path / "root"
         (ws / ".aegis" / "rules").mkdir(parents=True)
@@ -50,8 +49,7 @@ class TestWorkspaceCore:
         ws = Workspace(root=tmp_path / "repo")
         assert ws.aegis_dir == tmp_path / "repo" / ".aegis"
         assert ws.rules_dir == tmp_path / "repo" / ".aegis" / "rules"
-        assert ws.metrics_dir == tmp_path / "repo" / ".aegis" / "metrics"
-        assert ws.signals_file == tmp_path / "repo" / ".aegis" / "evidence" / "signals.jsonl"
+        assert ws.layout.ledger_file == tmp_path / "repo" / ".aegis" / "state" / "ledger.jsonl"
 
     def test_confine_workspace(self, tmp_path: Path):
         ws = tmp_path / "valid"
@@ -63,7 +61,6 @@ class TestWorkspaceCore:
 
     def test_legacy_soma_workspace_raises_upgrade_sentinel(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
-        monkeypatch.delenv("AEGIS_ROOT", raising=False)
         legacy_ws = tmp_path / "legacy_project"
         (legacy_ws / ".soma" / "cells").mkdir(parents=True)
 

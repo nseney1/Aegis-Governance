@@ -20,7 +20,7 @@ from aegis_core.skills.slots import SlotRegistry
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path_factory, monkeypatch):
-    """parse_file consults ~/.aegis/slots.yaml; a developer's own driver config must not run here."""
+    """parse_file consults ~/.aegis/config.json; a developer's own driver config must not run here."""
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
@@ -111,16 +111,16 @@ def test_no_driver_configured_raises_expected_error(tmp_path):
         runner.parse_file(target_rs, workspace_root=tmp_path)
 
 
-def test_workspace_driver_slots_only_select_packaged_drivers(tmp_path):
-    """A repo slots.yaml cannot name driver commands (H5): a key for an extension with a
-    packaged driver opts in to that driver; any other driver key is dropped."""
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.parent.mkdir(parents=True)
-    slots_file.write_text("""
-slots:
-  ast_driver_go: "go run ./ast_parser.go"
-  ast_driver: "generic-driver"
-""", encoding="utf-8")
+def test_workspace_config_only_selects_packaged_drivers(tmp_path):
+    """A repo .aegis/config.json cannot name driver commands (H5, D10): it can only opt
+    in to an extension's packaged driver; any driver command it names is dropped."""
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        '{"v": 1, "ast": {"packaged_drivers": ["go"]}, '
+        '"drivers": {"go": "go run ./ast_parser.go"}, "ast_driver": "generic-driver"}',
+        encoding="utf-8",
+    )
 
     slot_reg = SlotRegistry.load(tmp_path)
     assert slot_reg.get_ast_driver(".go") == "go run .aegis/drivers/go_ast.go"

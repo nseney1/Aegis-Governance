@@ -1,12 +1,11 @@
 """Ambient verification evidence: `aegis check` records rule triggers and outcomes in the ledger."""
 from __future__ import annotations
 
-from pathlib import Path
 import secrets
 import sys
 from typing import Any, Optional
 
-from aegis_core.workspace.base import Workspace
+from aegis_core.workspace import literal_workspace
 
 __all__ = ["record_verification_telemetry"]
 
@@ -24,9 +23,7 @@ def record_verification_telemetry(
     if not workspace or not target_files:
         return False
 
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
     cells_dir = ws.rules_dir
     if not cells_dir.is_dir():
         return False
@@ -38,58 +35,39 @@ def record_verification_telemetry(
     if not matched:
         return False
 
-    from aegis_core.telemetry_engine.ledger import append_signals
+    from aegis_core.telemetry_engine import ledger
 
     if run_id is None:
         run_id = secrets.token_hex(16)
 
     credit_weights = compute_credit_weights(matched, target_files)
+    verdict_text = str(verdict) if verdict is not None else ("PASS" if passed else "FAIL")
     events = []
-    sig_type = "tp" if passed else "fp"
-
     for cell in matched:
         cell_id = cell.get("_name") or cell.get("id")
         if not cell_id:
             continue
-        weight = float(credit_weights.get(cell_id, 1.0))
-        weight = max(0.0, min(1.0, weight))
-
-        # 1. Trigger event
+        weight = max(0.0, min(1.0, float(credit_weights.get(cell_id, 1.0))))
+        # One row per rule and run: a v2 outcome row is also the rule's trigger (#15).
         events.append({
-            "cell_name": cell_id,
-            "signal_type": "trigger",
+            "rule": cell_id,
+            "outcome": "tp" if passed else "fp",
             "source": source,
-            "metadata": {
-                "credit_weight": 1.0,
-                "verdict": str(verdict) if verdict is not None else ("PASS" if passed else "FAIL"),
-                "target_files": target_files[:20],
-            },
-            "principal": "verification",
-            "idempotency_scope": "run",
-            "idempotency_key": f"{run_id}:trig:{cell_id}",
-        })
-
-        # 2. Outcome event
-        events.append({
-            "cell_name": cell_id,
-            "signal_type": sig_type,
-            "source": source,
-            "metadata": {
-                "credit_weight": weight,
-                "verdict": str(verdict) if verdict is not None else ("PASS" if passed else "FAIL"),
+            "key": run_id,
+            "weight": weight,
+            "meta": {
+                "verdict": verdict_text,
                 "passed": passed,
                 "evidence_checks": len(layer1_evidence) if layer1_evidence else 0,
+                "target_files": target_files[:20],
             },
-            "principal": "verification",
-            "idempotency_scope": "run",
-            "idempotency_key": f"{run_id}:out:{cell_id}",
         })
 
     # Ledger only: rule files are never rewritten at runtime (ADR 0005 AD-1/H6). Bumping
     # frontmatter here dirtied tracked .aegis/rules on every `aegis check --hook` and
     # broke the committed manifest.
     try:
-        append_signals(workspace, events)
+        ledger.append(ws.root, events)
         return True
     except Exception as exc:
         print(f"    ! failed to record ambient verification telemetry: {exc}", file=sys.stderr)

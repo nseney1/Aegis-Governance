@@ -6,22 +6,22 @@ import glob
 import math
 import os
 from pathlib import Path
-import subprocess
 import sys
 from typing import List, Optional, Union
 
+from aegis_core import gitsafe
+from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, WorkspaceLayout
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 
 def _resolve_rules_dir(workspace: str | Path) -> str:
-    ws = Path(workspace)
-    return str(ws / ".aegis" / "rules")
+    return str(WorkspaceLayout(Path(workspace).resolve()).rules_dir)
 
 
 def _list_workspace_files(workspace: str) -> list[str]:
-    result = subprocess.run(['git', 'ls-files'], capture_output=True, text=True, cwd=workspace)
-    if result.returncode == 0 and result.stdout.strip():
-        return [f for f in result.stdout.strip().split('\n') if f]
+    tracked = gitsafe.list_files(workspace, untracked=False)
+    if tracked:
+        return tracked
     ws_path = Path(workspace)
     files: list[str] = []
     if ws_path.is_dir():
@@ -36,7 +36,7 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
     """Calculate cell coverage mapping and directory tier breakdown."""
     cells_dir = _resolve_rules_dir(workspace)
     all_files = _list_workspace_files(workspace)
-    EXCLUDE_PATTERNS = ['.aegis/', '.soma/', 'vendor/', '.git/', 'node_modules/']
+    EXCLUDE_PATTERNS = [f'{AEGIS_DIRNAME}/', f'{LEGACY_SOMA_DIRNAME}/', 'vendor/', '.git/', 'node_modules/']
     if exclude:
         if isinstance(exclude, str):
             EXCLUDE_PATTERNS.append(exclude)
@@ -156,7 +156,7 @@ def calculate_governance_grade(workspace: str) -> Optional[dict]:
         return None
 
     all_files = _list_workspace_files(workspace)
-    exclude = ['.aegis/', '.soma/', 'vendor/', '.git/', 'node_modules/']
+    exclude = [f'{AEGIS_DIRNAME}/', f'{LEGACY_SOMA_DIRNAME}/', 'vendor/', '.git/', 'node_modules/']
     all_files = [f for f in all_files if not any(p in f for p in exclude)]
 
     all_patterns = []

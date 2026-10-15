@@ -1,13 +1,15 @@
 """Rule files are read-only to every runtime path (ADR 0005 AD-1 / H6).
 
-Fitness lives in the ledger (.aegis/evidence/signals.jsonl), never in rule
+Fitness lives in the ledger (.aegis/state/ledger.jsonl), never in rule
 frontmatter. `aegis check` used to bump triggers/true_positives/last_trigger_date
 in every rule matching the changed files, which dirtied tracked .aegis/rules/**
 on each pre-commit run and broke the committed manifest (PR #173 CI failure).
 
 Each test below drives one runtime entry point against a temp git repo whose
 rules match the changed file, then asserts every byte under .aegis/rules is
-unchanged and `git status` reports nothing there.
+unchanged, `git status` reports nothing there, and no derived counter key
+(fitness, triggers, true_positives, ...) appears in a rule that had none
+(v4.3 spec §10.2).
 """
 from __future__ import annotations
 
@@ -19,7 +21,8 @@ import pytest
 
 from aegis_cli.cli import main
 from aegis_core.integrity import generate_manifest, save_manifest
-from aegis_core.telemetry_engine.ledger import read_signals
+from aegis_core.telemetry_engine import ledger
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_mcp.tools import execute_tool
 
 TRAP = (
@@ -72,7 +75,13 @@ def _rule_bytes(repo: Path) -> dict:
 
 
 def _ledger_rows(repo: Path) -> list:
-    return list(read_signals(str(repo)))
+    return ledger.read(repo).rows
+
+
+DERIVED_KEYS = {
+    "fitness", "triggers", "true_positives", "false_positives", "last_trigger_date",
+    "score", "tp", "fp", "tp_rate", "fp_rate",
+}
 
 
 @pytest.fixture
@@ -104,6 +113,8 @@ def repo(tmp_path, monkeypatch):
 def _assert_rules_untouched(repo: Path, before: dict) -> None:
     assert _rule_bytes(repo) == before
     assert _git(repo, "status", "--porcelain", "--", ".aegis/rules") == ""
+    invariant = (repo / ".aegis" / "rules" / "invariants" / "invariant-app-pure.md").read_text(encoding="utf-8")
+    assert not DERIVED_KEYS & set(parse_frontmatter(invariant) or {})
 
 
 @pytest.mark.parametrize("argv", [["check"], ["check", "--hook"], ["check", "--hook", "--json"]])
@@ -117,7 +128,7 @@ def test_check_records_triggers_in_the_ledger_and_never_rewrites_rules(repo, arg
     assert "Layer 1" in out or '"passed"' in out
     _assert_rules_untouched(repo, before)
     # The telemetry path did run: the matched rules reached the ledger instead.
-    triggered = {r.get("rule_id") for r in _ledger_rows(repo) if r.get("signal") == "trigger"}
+    triggered = {r["rule"] for r in _ledger_rows(repo) if r["source"] == "session"}
     assert set(RULE_IDS) <= triggered
 
 
@@ -159,7 +170,7 @@ def test_mcp_report_outcome_appends_to_the_ledger_and_never_rewrites_rules(repo,
     )
 
     assert result.get("status") == "recorded", result
-    assert {r.get("rule_id") for r in _ledger_rows(repo) if r.get("source") == "mcp"} == set(RULE_IDS)
+    assert {r["rule"] for r in _ledger_rows(repo) if r["source"] == "mcp"} == set(RULE_IDS)
     _assert_rules_untouched(repo, before)
 
 

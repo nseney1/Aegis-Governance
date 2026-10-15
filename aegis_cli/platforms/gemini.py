@@ -7,6 +7,7 @@ import shutil
 from typing import Any
 
 from aegis_cli.platforms.base import PlatformAdapter, PlatformInstallResult
+from aegis_core.workspace.layout import WorkspaceLayout
 
 
 class GeminiAdapter(PlatformAdapter):
@@ -17,7 +18,7 @@ class GeminiAdapter(PlatformAdapter):
     def get_target_dirs(self, local: bool = False) -> tuple[Path, Path, Path]:
         """Return (rules_dir, skills_dir, hooks_dir)."""
         if local:
-            base = self.workspace / ".aegis"
+            base = WorkspaceLayout(Path(self.workspace)).aegis_dir
             return base / "rules", base / "skills", base / "plugins" / "governance"
         base = self.home / ".gemini" / "config"
         return base / "rules", base / "skills", base / "plugins" / "governance"

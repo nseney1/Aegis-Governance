@@ -36,7 +36,7 @@ def _workspace_with_rule(root: Path, rule: str = "trap-x") -> Path:
 
 
 def _rows(ws: Path) -> list:
-    path = ws / ".aegis" / "evidence" / "signals.jsonl"
+    path = ws / ".aegis" / "state" / "ledger.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -70,9 +70,9 @@ def test_row_records_source_host_and_server_session(served):
     response, payload = _call({"outcome": "success", "rules_used": ["trap-x"], "idempotency_key": "r-1"})
     assert response["result"]["isError"] is False, payload
     row, = _rows(served)
-    assert (row["cell"], row["signal"], row["source"]) == ("trap-x", "tp", "mcp")
-    assert row["metadata"]["host"] == "claude"
-    assert row["metadata"]["session"] == server._session_id
+    assert (row["rule"], row["outcome"], row["source"]) == ("trap-x", "tp", "mcp")
+    assert row["host"] == "claude"
+    assert row["session"] == server._session_id
     assert len(server._session_id) == 32
 
 
@@ -92,8 +92,8 @@ def test_tool_arguments_cannot_choose_host_session_source_or_workspace(served, t
     assert response["result"]["isError"] is False, payload
     row, = _rows(served)
     assert row["source"] == "mcp"
-    assert row["metadata"]["host"] == "claude"
-    assert row["metadata"]["session"] == server._session_id
+    assert row["host"] == "claude"
+    assert row["session"] == server._session_id
     assert _rows(other) == []
 
 
@@ -137,15 +137,15 @@ def test_legacy_argument_names_are_rejected(served, alias):
     assert _rows(served) == []
 
 
-@pytest.mark.parametrize("outcome,signal", [
+@pytest.mark.parametrize("outcome,ledger_outcome", [
     ("success", "tp"), ("tp", "tp"), ("pass", "tp"),
     ("failure", "fp"), ("fp", "fp"), ("fail", "fp"),
     ("partial", "trigger"),
 ])
-def test_outcome_maps_to_ledger_signal(served, outcome, signal):
+def test_outcome_maps_to_ledger_outcome(served, outcome, ledger_outcome):
     _call({"outcome": outcome, "rules_used": ["trap-x"], "idempotency_key": f"k-{outcome}"})
     row, = _rows(served)
-    assert row["signal"] == signal
+    assert (row["v"], row["outcome"], row["key"]) == (2, ledger_outcome, f"k-{outcome}")
 
 
 def test_invalid_outcome_is_rejected(served):
@@ -178,8 +178,8 @@ def test_in_process_call_without_a_server_is_attributed_to_no_host(tmp_path):
     assert result["status"] == "recorded"
     row, = _rows(ws)
     assert row["source"] == "mcp"
-    assert row["metadata"]["host"] is None
-    assert row["metadata"]["session"] is None
+    assert row["host"] is None
+    assert row["session"] is None
 
 
 def test_rate_limit_still_applies_to_report_outcome(served):
@@ -212,7 +212,7 @@ def test_retry_from_a_new_session_returns_the_original_record(served):
     assert response["result"]["isError"] is False, payload
     assert payload == first
     row, = _rows(served)
-    assert row["metadata"]["session"] == first_session
+    assert row["session"] == first_session
 
 
 @pytest.mark.parametrize("reconnect", [False, True])
@@ -230,7 +230,7 @@ def test_reusing_a_key_for_a_different_report_is_refused(served, reconnect):
                  "send a new key for each new report.",
     }
     row, = _rows(served)
-    assert row["signal"] == "tp"
+    assert row["outcome"] == "tp"
 
 
 @pytest.mark.parametrize("arguments", [
@@ -263,4 +263,4 @@ def test_row_host_names_the_client_and_an_unknown_client_is_generic(served, clie
     response, payload = _call({"outcome": "tp", "rules_used": ["trap-x"], "idempotency_key": f"h-{client_name}"})
     assert response["result"]["isError"] is False, payload
     row, = _rows(served)
-    assert row["metadata"]["host"] == host
+    assert row["host"] == host

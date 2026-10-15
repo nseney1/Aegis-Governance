@@ -24,7 +24,7 @@ class TestDomainErrors:
 
     def test_lock_timeout_error(self):
         """LockTimeoutError inherits from TimeoutError."""
-        err = LockTimeoutError("Could not acquire lock", resource="cells")
+        err = LockTimeoutError("Could not acquire lock", path="/w/.aegis/state/lock")
         assert isinstance(err, AegisError)
         assert isinstance(err, TimeoutError)
-        assert err.resource == "cells"
+        assert err.path == "/w/.aegis/state/lock"

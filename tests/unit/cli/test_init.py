@@ -393,7 +393,7 @@ class TestPolyglotInit:
 
         registry = SlotRegistry.load(tmp_path)
         assert registry.get_ast_driver(".rs") is not None
-        assert (tmp_path / ".aegis" / "drivers" / "rust_ast.py").is_file()
+        assert not (tmp_path / ".aegis" / "drivers").exists()
 
     def test_init_polyglot_dry_run(self, tmp_path, capsys):
         from aegis_cli.init import run_init
@@ -412,7 +412,7 @@ class TestPolyglotInit:
         assert result == 0
         out = capsys.readouterr().out
         assert "Would configure AST driver (.rs):" in out
-        assert not (tmp_path / ".aegis" / "slots.yaml").exists()
+        assert not (tmp_path / ".aegis" / "config.json").exists()
 
     def test_init_detected_project_type_fallback(self, tmp_path, capsys):
         from aegis_cli.init import run_init

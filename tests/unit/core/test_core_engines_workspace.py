@@ -24,9 +24,7 @@ def mock_soma_workspace(tmp_path: Path) -> Workspace:
     cells_dir = tmp_path / ".aegis" / "rules"
     traps_dir = cells_dir / "traps"
     walls_dir = cells_dir / "invariants"
-    metrics_dir = tmp_path / ".aegis" / "metrics"
-    evidence_dir = tmp_path / ".aegis" / "evidence"
-    for d in (traps_dir, walls_dir, metrics_dir, evidence_dir):
+    for d in (traps_dir, walls_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     # Add a sample cell
@@ -52,18 +50,11 @@ def mock_soma_workspace(tmp_path: Path) -> Workspace:
         encoding="utf-8",
     )
 
-    signals_file = evidence_dir / "signals.jsonl"
-    signals_file.write_text(
-        json.dumps({
-            "cell": "test-rule",
-            "signal_type": "trigger",
-            "timestamp": "2026-01-02T00:00:00Z",
-        }) + "\n" +
-        json.dumps({
-            "cell": "test-rule",
-            "signal_type": "tp",
-            "timestamp": "2026-01-02T00:00:00Z",
-        }) + "\n",
+    ledger_file = tmp_path / ".aegis" / "state" / "ledger.jsonl"
+    ledger_file.parent.mkdir(parents=True)
+    ledger_file.write_text(
+        json.dumps({"v": 2, "seq": 1, "ts": "2026-01-02T00:00:00Z", "rule": "test-rule",
+                    "outcome": "tp", "source": "manual"}) + "\n",
         encoding="utf-8",
     )
 

@@ -20,13 +20,6 @@ tags:
   - portability
   - cross-platform
   - anti-pattern
-fitness:
-  score: 0.6667
-  impact_weight: 1.0
-  triggers: 81
-  true_positives: 25.9439
-  false_positives: 18.0668
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Scripts should use AEGIS_PLATFORM and resolve_home() to determine paths dynamically,

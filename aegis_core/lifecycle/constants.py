@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from aegis_core.taxonomy import (
     DIR_TO_PRIMARY_RULE_TYPE,
-    RULE_EXPIRY_DAYS,
     RULE_TYPE_DIRS,
 )
 
@@ -12,8 +11,6 @@ VALID_TYPES = dict(RULE_TYPE_DIRS)
 TYPE_TO_DIR = dict(RULE_TYPE_DIRS)
 
 DIR_TO_TYPE = dict(DIR_TO_PRIMARY_RULE_TYPE)
-
-CELL_TELOMERE_DAYS = RULE_EXPIRY_DAYS
 
 STATUS_NEW = "NEW"
 STATUS_SURVIVE = "SURVIVE"

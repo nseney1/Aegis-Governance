@@ -26,13 +26,6 @@ tags:
   - drift
   - roadmap
   - process
-fitness:
-  score: null
-  impact_weight: 1.0
-  triggers: 34
-  true_positives: 21
-  false_positives: 7.5
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 v0.81 origin: Phase 4 features (Quorum Sensing, Gate Enforcement) shipped in v0.80

@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
 from aegis_cli.base import CommandCategory, AegisCommand
+from aegis_core.config import env_workspace
 from aegis_core.errors import WorkspaceNotFoundError
 from aegis_core.lifecycle.creation import MAX_RULE_BODY_BYTES, validate_rule_body
 from aegis_core.taxonomy import RULE_TYPE_DIRS
@@ -32,6 +32,7 @@ from aegis_core.lifecycle.promotion import (
 )
 from aegis_core.lifecycle.selection import prune_cells
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
+from aegis_core.workspace.layout import is_aegis_workspace
 
 __all__ = [
     "run_rule", "RuleCommand", "run_promote", "run_demote", "_force_promote",
@@ -125,7 +126,7 @@ def _not_a_workspace(directory: Path) -> WorkspaceNotFoundError:
 
 
 def _walk_up_to_workspace(start: Path) -> Path:
-    """Discovery's start-path walk without its AEGIS_WORKSPACE/AEGIS_ROOT override:
+    """Discovery's start-path walk without its AEGIS_WORKSPACE override:
     an explicit --workspace beats the environment, as it already does for create."""
     for d in (start, *start.parents):
         if _is_workspace_dir(str(d)):
@@ -165,16 +166,14 @@ def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = Fals
             )
         raise _not_a_workspace(start)
 
-    pinned = any(
-        os.environ.get(var) and Path(os.environ[var]).resolve() == root
-        for var in ("AEGIS_WORKSPACE", "AEGIS_ROOT")
-    )
+    pin = env_workspace()
+    pinned = bool(pin) and Path(pin).resolve() == root
     if not pinned and root != start and root in start.parents:
         top = _git_toplevel(start)
         if top is not None and root in top.parents:
             raise _not_a_workspace(start)
 
-    if require_aegis and not (root / ".aegis").is_dir():
+    if require_aegis and not is_aegis_workspace(root):
         raise _not_a_workspace(root)
     return root
 

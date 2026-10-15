@@ -6,7 +6,9 @@ The output feeds directly into the Arbiter as Layer 1 evidence.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import sys
+from aegis_core.workspace.layout import RULES_RELDIR, WorkspaceLayout
 from typing import Optional
 
 from . import ToolEvidence
@@ -87,7 +89,7 @@ def _discover_forbid_ast_rules(
     except Exception:
         ws_obj = None
 
-    candidate_dirs = [root_path / "rules", root_path / ".aegis" / "rules"]
+    candidate_dirs = [root_path / "rules", WorkspaceLayout(root_path).rules_dir]
     discovered: list[tuple[str, dict, list[str]]] = []
     broken: list[tuple[str, str]] = []
     seen_ids: set[str] = set()
@@ -242,55 +244,54 @@ def _discover_functions(filepath: str, target_lines: Optional[set[int]] = None) 
 
 
 def _get_modified_lines(filepath: str, repo_root: str, diff_base: Optional[str] = None) -> Optional[set[int]]:
-    """Extract line numbers of additions/modifications in filepath via git diff."""
-    import re
-    import subprocess
-    lines: set[int] = set()
-    found_hunks = False
+    """1-based lines of ``filepath``'s working copy that are new or changed against a base.
 
-    diff_targets = []
+    Bases, in order: ``diff_base`` (``REF...HEAD`` means its merge base with HEAD), HEAD,
+    the merge base with the pull request's base branch, then HEAD~1. The first base the
+    file differs from wins. Returns None when no base shows a change or git cannot answer.
+    Old contents come from ``gitsafe.read_blob``; the comparison is done here, so no
+    porcelain diff (and no repository fsmonitor or diff driver) is involved.
+    """
+    import difflib
+
+    from aegis_core import gitsafe
+
+    try:
+        current = (Path(repo_root) / filepath).read_bytes().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    rel = Path(os.path.relpath(Path(repo_root) / filepath, repo_root)).as_posix()
+
+    bases: list[Optional[str]] = []
     if diff_base:
-        diff_targets.extend([
-            ["git", "diff", "-U0", diff_base, "--", filepath],
-            ["git", "diff", "-U0", f"{diff_base}...HEAD", "--", filepath],
-        ])
-    diff_targets.extend([
-        ["git", "diff", "-U0", "HEAD", "--", filepath],
-        ["git", "diff", "-U0", "--cached", "--", filepath],
-    ])
-    base_ref = os.environ.get("GITHUB_BASE_REF")
-    if base_ref:
-        diff_targets.extend([
-            ["git", "diff", "-U0", f"origin/{base_ref}...HEAD", "--", filepath],
-            ["git", "diff", "-U0", f"{base_ref}...HEAD", "--", filepath],
-        ])
-    diff_targets.extend([
-        ["git", "diff", "-U0", "origin/develop...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "develop...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "origin/main...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "main...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "HEAD~1...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "HEAD~1", "--", filepath],
-    ])
-    for cmd in diff_targets:
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_root, timeout=5)
-            if res.returncode == 0 and res.stdout.strip():
-                for line in res.stdout.splitlines():
-                    if line.startswith("@@"):
-                        found_hunks = True
-                        m = re.search(r"\+(\d+)(?:,(\d+))?", line)
-                        if m:
-                            start = int(m.group(1))
-                            count = int(m.group(2)) if m.group(2) is not None else 1
-                            if count > 0:
-                                lines.update(range(start, start + count))
-                if found_hunks:
-                    break
-        except Exception:
-            pass
-    return lines if found_hunks else None
+        if diff_base.endswith("...HEAD"):
+            bases.append(gitsafe.merge_base(repo_root, diff_base[: -len("...HEAD")]))
+        else:
+            bases.append(gitsafe.resolve_commit(repo_root, diff_base))
+    bases.append(gitsafe.head_commit(repo_root))
+    pr_base = gitsafe.resolve_base_ref(repo_root)
+    if pr_base:
+        bases.append(gitsafe.merge_base(repo_root, pr_base))
+    bases.append(gitsafe.resolve_commit(repo_root, "HEAD~1"))
 
+    seen: set[str] = set()
+    for base in bases:
+        if not base or base in seen:
+            continue
+        seen.add(base)
+        try:
+            old = gitsafe.read_blob(repo_root, base, rel)
+        except gitsafe.GitError:
+            return None
+        before = old.decode("utf-8", "replace").splitlines() if old is not None else []
+        lines: set[int] = set()
+        matcher = difflib.SequenceMatcher(None, before, current, autojunk=False)
+        for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+            if tag in ("replace", "insert"):
+                lines.update(range(j1 + 1, j2 + 1))
+        if lines:
+            return lines
+    return None
 
 
 def _tool_failure(tool: str, target: str, exc: Exception) -> ToolEvidence:
@@ -398,7 +399,7 @@ def run_layer1(
         forbid_rules, broken_rules = [], []
         results.append(ToolEvidence(
             tool="forbid_ast",
-            target=".aegis/rules",
+            target=RULES_RELDIR,
             verdict=False,
             detail=f"forbid_ast: cannot load rules: {type(exc).__name__}: {exc}",
         ))

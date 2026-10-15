@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import threading
 from typing import Any, Iterable, Optional
 
 from aegis_core import rule_inventory
 from aegis_core.rule_inventory import RuleInventoryEntry, RuleInventoryError
+from aegis_core.workspace.layout import RULES_RELDIR, WorkspaceLayout
 
+
+_RULES_PREFIX = f"{RULES_RELDIR}/"
 
 class RuleCacheError(RuntimeError):
     """Rule loading failed; cached or partial results were not returned."""
@@ -48,7 +52,7 @@ class RuleCache:
         from aegis_core.integrity import _manifest_path, _key_path
         h = hashlib.sha256()
         manifest_path = _manifest_path(workspace)
-        root_manifest_path = os.path.join(workspace, ".aegis", "manifest.json")
+        root_manifest_path = str(WorkspaceLayout(Path(workspace)).legacy("manifest.json"))
         found_any = False
         for mpath in (manifest_path, root_manifest_path):
             if os.path.isfile(mpath):
@@ -82,7 +86,7 @@ class RuleCache:
         expected: dict[str, str] = {}
         candidate_paths = (
             _manifest_path(workspace),
-            os.path.join(workspace, ".aegis", "manifest.json"),
+            str(WorkspaceLayout(Path(workspace)).legacy("manifest.json")),
         )
         for mpath in candidate_paths:
             if not os.path.isfile(mpath):
@@ -128,17 +132,17 @@ class RuleCache:
 
                     norm_p = str(raw_path).replace("\\", "/").lstrip("./")
                     expected[norm_p] = digest_norm
-                    if norm_p.startswith(".aegis/rules/"):
-                        short_p = norm_p[len(".aegis/rules/"):]
+                    if norm_p.startswith(_RULES_PREFIX):
+                        short_p = norm_p[len(_RULES_PREFIX):]
                         expected[short_p] = digest_norm
                         expected[os.path.basename(short_p)] = digest_norm
                     elif norm_p.startswith("rules/"):
                         short_p = norm_p[len("rules/"):]
                         expected[short_p] = digest_norm
-                        expected[f".aegis/rules/{short_p}"] = digest_norm
+                        expected[f"{_RULES_PREFIX}{short_p}"] = digest_norm
                         expected[os.path.basename(short_p)] = digest_norm
                     else:
-                        expected[f".aegis/rules/{norm_p}"] = digest_norm
+                        expected[f"{_RULES_PREFIX}{norm_p}"] = digest_norm
                         expected[os.path.basename(norm_p)] = digest_norm
         return expected
 
@@ -196,8 +200,8 @@ class RuleCache:
             if expected_hashes:
                 rel_ws = entry.relative_path.replace("\\", "/").lstrip("./")
                 rel_rules = (
-                    rel_ws[len(".aegis/rules/"):]
-                    if rel_ws.startswith(".aegis/rules/")
+                    rel_ws[len(_RULES_PREFIX):]
+                    if rel_ws.startswith(_RULES_PREFIX)
                     else rel_ws
                 )
                 bname = os.path.basename(rel_ws)

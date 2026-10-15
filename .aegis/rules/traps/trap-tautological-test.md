@@ -23,13 +23,6 @@ tags:
   - testing
   - false-confidence
   - verification
-fitness:
-  score: 0.7143
-  impact_weight: 1.0
-  triggers: 77
-  true_positives: 29.0137
-  false_positives: 19.5173
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Tests must exercise the function-under-test with inputs that DISTINGUISH

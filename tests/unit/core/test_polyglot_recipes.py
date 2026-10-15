@@ -157,17 +157,3 @@ class TestPolyglotRecipes:
         assert "encoding/json" in content
 
 
-@pytest.mark.parametrize("filename", ["ts_ast.js", "go_ast.go", "rust_ast.py"])
-def test_driver_templates_come_from_the_package(filename):
-    """Provisioning copies the recipe shipped in aegis_core, never a repo-local copy."""
-    from aegis_core.ast.detect import _find_driver_template
-
-    found = _find_driver_template(filename)
-    packaged = Path(__file__).resolve().parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / filename
-    assert found is not None and found.resolve() == packaged.resolve()
-
-
-def test_unknown_driver_template_is_none():
-    from aegis_core.ast.detect import _find_driver_template
-
-    assert _find_driver_template("no_such_driver.js") is None

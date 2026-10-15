@@ -33,9 +33,9 @@ def _clean_workspace(root: Path) -> Path:
         "from src.math_utils import multiply\n\n\ndef test_multiply():\n    assert multiply(2, 3) == 6\n",
         encoding="utf-8",
     )
-    evidence = root / ".aegis" / "evidence"
-    evidence.mkdir(parents=True, exist_ok=True)
-    (evidence / "signals.jsonl").write_text(
+    state = root / ".aegis" / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "ledger.jsonl").write_text(
         "\n".join(
             json.dumps({"cell": "math-rule", "signal": s, "timestamp": "2026-09-30T12:00:00Z"})
             for s in ("trigger", "tp")
@@ -122,8 +122,7 @@ class TestRunCheckpoint:
 
     def test_unhealthy_rule_fitness_is_flagged_from_the_ledger(self, tmp_path):
         _clean_workspace(tmp_path)
-        evidence = tmp_path / ".aegis" / "evidence"
-        (evidence / "signals.jsonl").write_text(
+        (tmp_path / ".aegis" / "state" / "ledger.jsonl").write_text(
             "\n".join(
                 json.dumps({"cell": "noisy-rule", "signal": s, "timestamp": f"2026-09-30T10:0{i}:00Z"})
                 for i, s in enumerate(("trigger", "trigger", "trigger", "fp", "fp", "fp"))
@@ -132,6 +131,8 @@ class TestRunCheckpoint:
             encoding="utf-8",
         )
         # Legacy outcomes would make the FP rate exactly 50% if read; only the ledger counts.
+        evidence = tmp_path / ".aegis" / "evidence"
+        evidence.mkdir(parents=True, exist_ok=True)
         (evidence / "outcomes.jsonl").write_text(
             "\n".join(json.dumps({"cell_id": "noisy-rule", "outcome": "tp"}) for _ in range(3)) + "\n",
             encoding="utf-8",

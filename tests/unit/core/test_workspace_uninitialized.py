@@ -1,7 +1,6 @@
 """Tests for uninitialized workspace bootstrapping and scaffolding (Phase 18)."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -9,7 +8,6 @@ import pytest
 from conftest import symlink_or_skip
 from aegis_core.errors import WorkspaceBareRepoError, WorkspaceError
 from aegis_core.workspace.base import Workspace
-from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
 
 class TestWorkspaceForInit:
@@ -52,7 +50,7 @@ class TestWorkspaceForInit:
 
 class TestWorkspaceScaffold:
     def test_scaffold_default(self, tmp_path: Path):
-        """ws.scaffold creates standard rule tiers and evidence/metrics dirs."""
+        """ws.scaffold creates the standard rule tiers and the state dir (D12)."""
         blank_dir = tmp_path / "new_project"
         blank_dir.mkdir()
         ws = Workspace.for_init(blank_dir)
@@ -61,9 +59,9 @@ class TestWorkspaceScaffold:
         assert (ws.root / ".aegis" / "rules" / "traps").is_dir()
         assert (ws.root / ".aegis" / "rules" / "invariants").is_dir()
         assert (ws.root / ".aegis" / "rules" / "gates").is_dir()
-        assert (ws.root / ".aegis" / "evidence").is_dir()
-        assert (ws.root / ".aegis" / "metrics").is_dir()
-        assert len(created) >= 4
+        assert (ws.root / ".aegis" / "state").is_dir()
+        assert sorted(p.name for p in (ws.root / ".aegis").iterdir()) == ["rules", "state"]
+        assert len(created) == 4
 
     def test_scaffold_minimal(self, tmp_path: Path):
         """ws.scaffold with minimal=True creates minimal directory set."""
@@ -73,7 +71,7 @@ class TestWorkspaceScaffold:
 
         created = ws.scaffold(minimal=True, dry_run=False)
         assert (ws.root / ".aegis" / "rules" / "invariants").is_dir()
-        assert (ws.root / ".aegis" / "evidence").is_dir()
+        assert (ws.root / ".aegis" / "state").is_dir()
         assert not (ws.root / ".aegis" / "rules" / "traps").exists()
 
     def test_scaffold_dry_run(self, tmp_path: Path):
@@ -83,7 +81,7 @@ class TestWorkspaceScaffold:
         ws = Workspace.for_init(blank_dir)
 
         created = ws.scaffold(minimal=False, dry_run=True)
-        assert len(created) >= 4
+        assert len(created) == 4
         assert not (ws.root / ".aegis").exists()
 
     def test_scaffold_bare_git_repo_rejected(self, tmp_path: Path):

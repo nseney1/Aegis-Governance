@@ -17,12 +17,6 @@ tags:
   - paths
   - correctness
 created: 2026-09-28
-fitness:
-  triggers: 52
-  true_positives: 5.6327
-  false_positives: 4.5289
-  score: 0.5
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Trap: Install Paths Divergence

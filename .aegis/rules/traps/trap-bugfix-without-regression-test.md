@@ -25,13 +25,6 @@ tags:
   - regression
   - quality
   - process
-fitness:
-  score: null
-  impact_weight: 1.2
-  triggers: 78
-  true_positives: 25.6929
-  false_positives: 19.2032
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 v0.81 origin: Bugs 1-3 in telemetry.py and sync.py were fixed without

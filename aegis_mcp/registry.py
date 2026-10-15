@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-from aegis_core.evidence import aggregate_signals
+from aegis_core.telemetry_engine import ledger
 from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
 from aegis_core.scoring import compute_cell_fitness
 from aegis_core.taxonomy import CANONICAL_RULE_TYPES, REVIEW_MODES
@@ -57,11 +57,10 @@ def _ledger_fitness(counts: dict, rule: dict) -> dict:
         (counts[key] for key in (rule.get("_name"), rule.get("id")) if isinstance(key, str) and key in counts),
         {},
     )
+    # Every v2 outcome row is also a trigger (#15), so triggers already counts tp + fp.
     triggers, tp, fp = entry.get("triggers", 0), entry.get("tp", 0), entry.get("fp", 0)
-    # A tp/fp row is an observation even when no trigger row was paired with it.
-    observations = max(triggers, tp + fp)
     score = compute_cell_fitness({
-        "fitness": {"triggers": observations, "true_positives": tp, "false_positives": fp},
+        "fitness": {"triggers": triggers, "true_positives": tp, "false_positives": fp},
         "impact_weight": rule.get("impact_weight", 1.0),
     })
     return {"triggers": triggers, "tp": tp, "fp": fp, "score": score}
@@ -78,7 +77,7 @@ def list_rules(workspace: Workspace, rule_type: Optional[str] = None) -> Any:
         inventory = inventory_rules(workspace)
     except RuleInventoryError as exc:
         return {"status": _STATUS_FAIL, "error": str(exc)}
-    counts = aggregate_signals(str(workspace.evidence_dir)).counts
+    counts = ledger.aggregate(workspace.root)
 
     rules = []
     for entry in inventory.entries:

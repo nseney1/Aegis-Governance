@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from aegis_core import gitsafe
 from aegis_core.inference_provider import MISSING_BACKEND
-from aegis_core.workspace.git import GitWorkspace
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import as_workspace
 
@@ -74,18 +74,15 @@ class DeterministicVerifier(BaseVerifier):
     ) -> list[ToolEvidence]:
         """Run Layer 1 checks.
 
-        If changed_files is not provided and workspace is a GitWorkspace,
-        automatically queries changed files from git.
+        Without ``changed_files``, checks what git reports as changed against HEAD,
+        staged or not (``gitsafe.changed_files(..., "working")``); outside git, nothing.
         """
         ws = as_workspace(workspace)
         repo_root = str(ws.root)
 
         files = changed_files
         if files is None:
-            if isinstance(ws, GitWorkspace):
-                files = ws.get_changed_files()
-            else:
-                files = []
+            files = gitsafe.changed_files(ws.root, "working") or []
 
         is_fast = self.fast_mode if fast_mode is None else fast_mode
         return runner.run_layer1(
@@ -132,7 +129,7 @@ class AdversarialVerifier(BaseVerifier):
     def extract_target_data(
         self,
         changed_files: list[str],
-        workspace: Workspace | GitWorkspace | str | Path,
+        workspace: Workspace | str | Path,
     ) -> tuple[list[str], str]:
         """Extract signatures and implementation text from changed Python files."""
         ws = as_workspace(workspace)
@@ -160,7 +157,7 @@ class AdversarialVerifier(BaseVerifier):
     def verify(
         self,
         changed_files: list[str],
-        workspace: Workspace | GitWorkspace | str | Path,
+        workspace: Workspace | str | Path,
         task_plan: str,
         layer1_evidence: list[ToolEvidence],
         backend: Backend = None,
@@ -284,10 +281,7 @@ class VerificationPipeline:
         ws = as_workspace(workspace)
         files = changed_files
         if files is None:
-            if isinstance(ws, GitWorkspace):
-                files = ws.get_changed_files()
-            else:
-                files = []
+            files = gitsafe.changed_files(ws.root, "working") or []
 
         wants_layer2 = bool(files) and not layer1_only
         if wants_layer2:

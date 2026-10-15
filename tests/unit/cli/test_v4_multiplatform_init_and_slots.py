@@ -88,23 +88,30 @@ class TestCrossModelSlotRegistry:
         assert SlotRegistry.for_platform("claude-code").get("TOOL_SUBAGENT") == "Task"
         assert SlotRegistry.for_platform("antigravity").get("TOOL_SUBAGENT") == "invoke_subagent"
 
-    def test_workspace_overrides_repo_slots_but_not_platform_slots(self, tmp_path: Path):
-        # H5: repo-writable slots.yaml may set repo slots (TEST_RUNNER) but not the
-        # host's TOOL_*/MODEL_* capability slots.
-        aegis_dir = tmp_path / ".aegis"
-        aegis_dir.mkdir()
-        (aegis_dir / "slots.yaml").write_text(
-            "slots:\n  MODEL_FAST: custom-haiku-override\n  TEST_RUNNER: cargo test\n",
+    def test_user_config_sets_slots_but_the_repo_config_cannot(self, tmp_path: Path, monkeypatch):
+        # H5/D10: the repo-writable config.json cannot set any slot; ~/.aegis/config.json
+        # may set repo-style slots (TEST_RUNNER) and valid TOOL_*/MODEL_* names.
+        home = tmp_path / "home"
+        (home / ".aegis").mkdir(parents=True)
+        (home / ".aegis" / "config.json").write_text(
+            '{"v": 1, "slots": {"TEST_RUNNER": "cargo test"}}', encoding="utf-8"
+        )
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        ws = tmp_path / "ws"
+        (ws / ".aegis").mkdir(parents=True)
+        (ws / ".aegis" / "config.json").write_text(
+            '{"v": 1, "slots": {"MODEL_FAST": "custom-haiku-override", "TEST_RUNNER": "make evil"}}',
             encoding="utf-8",
         )
 
-        reg = SlotRegistry.for_platform("claude", workspace=tmp_path)
+        reg = SlotRegistry.for_platform("claude", workspace=ws)
         assert reg.get("MODEL_FAST") == "haiku"
         assert reg.get("TEST_RUNNER") == "cargo test"
         assert reg.get("TOOL_READ") == "Read"
 
         text = "Use ${SLOT.TOOL_READ} with ${SLOT.MODEL_FAST} via ${SLOT.TEST_RUNNER} and ${SLOT.UNKNOWN_KEEP}"
-        resolved = SlotRegistry.for_platform("claude", workspace=tmp_path).sanitized().resolve(text, strict=False)
+        resolved = SlotRegistry.for_platform("claude", workspace=ws).sanitized().resolve(text, strict=False)
         assert resolved == "Use Read with haiku via cargo test and ${SLOT.UNKNOWN_KEEP}"
 
 

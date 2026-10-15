@@ -13,6 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from aegis_core.config import env_workspace
 from aegis_core.taxonomy import MCP_DEFAULT_RATE_LIMITS
 from aegis_core.workspace.base import Workspace
 
@@ -203,7 +204,7 @@ def _resolve_workspace() -> tuple[Optional[Workspace], str]:
     created ~/.aegis/rules there, so that directory existing proves nothing.
     """
     try:
-        candidate = os.environ.get("AEGIS_WORKSPACE") or os.getcwd()
+        candidate = env_workspace() or os.getcwd()
         if Path(candidate).resolve() == Path.home().resolve():
             return None, f"{candidate} is the home directory"
         return Workspace.confine(candidate), ""

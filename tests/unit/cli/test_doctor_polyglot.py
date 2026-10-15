@@ -9,7 +9,7 @@ from aegis_core.skills.slots import SlotRegistry
 
 
 def test_doctor_detects_unconfigured_polyglot_language(tmp_path: Path):
-    # Setup Rust project without slots.yaml
+    # Setup Rust project without .aegis/config.json
     (tmp_path / "Cargo.toml").write_text("[package]\nname = 'app'\n", encoding="utf-8")
     src = tmp_path / "src"
     src.mkdir()
@@ -30,10 +30,10 @@ def test_doctor_fix_provisions_missing_drivers(tmp_path: Path):
     ok = _check_ast_drivers(tmp_path, fix=True)
     assert ok is True
 
-    # Verify slots.yaml now has ast_driver_rs
+    # The repo now opts in to the packaged rust driver; nothing is staged
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".rs") is not None
-    assert (tmp_path / ".aegis" / "drivers" / "rust_ast.py").is_file()
+    assert not (tmp_path / ".aegis" / "drivers").exists()
 
 
 from unittest.mock import patch

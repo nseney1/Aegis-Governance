@@ -1,43 +1,62 @@
-"""Unit tests for aegis_core.workspace.layout (WorkspaceLayout and LockResource)."""
+"""aegis_core.workspace.layout: the one module that spells Aegis paths (build-sheet D12)."""
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 from pathlib import Path
-import pytest
 
-from aegis_core.workspace.layout import LockResource, WorkspaceLayout
+from aegis_core.workspace.layout import GITIGNORE_ENTRIES, UserLayout, WorkspaceLayout
 
 
-def test_workspace_layout_paths_and_immutability(tmp_path: Path):
+def test_repository_plane_paths(tmp_path: Path):
     layout = WorkspaceLayout(root=str(tmp_path))
-    assert isinstance(layout.root, Path)
+    aegis = tmp_path.resolve() / ".aegis"
     assert layout.root == tmp_path.resolve()
-
-    assert layout.aegis_dir == layout.root / ".aegis"
-    assert layout.rules_dir == layout.root / ".aegis" / "rules"
-    assert layout.evidence_dir == layout.root / ".aegis" / "evidence"
-    assert layout.locks_dir == layout.root / ".aegis" / "locks"
-    assert layout.keys_dir == layout.root / ".aegis" / "keys"
-    assert layout.metrics_dir == layout.root / ".aegis" / "metrics"
-    assert layout.skills_dir == layout.root / ".aegis" / "skills"
-
-    assert layout.signals_file == layout.evidence_dir / "signals.jsonl"
-    assert layout.manifest_file == layout.rules_dir / "manifest.json"
-    assert layout.manifest_key_file == layout.keys_dir / "manifest.key"
-
-    with pytest.raises(FrozenInstanceError):
-        layout.root = tmp_path / "other"  # type: ignore[misc]
+    assert layout.aegis_dir == aegis
+    assert layout.config_file == aegis / "config.json"
+    assert layout.rules_dir == aegis / "rules"
+    assert layout.state_dir == aegis / "state"
+    assert layout.ledger_file == aegis / "state" / "ledger.jsonl"
+    assert layout.derived_file == aegis / "state" / "derived.json"
+    assert layout.lock_file == aegis / "state" / "lock"
+    assert layout.migrate_backup_dir("20261015T120000Z") == aegis / "state" / "migrate-backup-20261015T120000Z"
 
 
-def test_lock_resource_constants_and_lock_file_resolution(tmp_path: Path):
-    layout = WorkspaceLayout(root=tmp_path)
-    for resource in (
-        LockResource.RULES,
-        LockResource.EVIDENCE,
-        LockResource.SIGNALS,
-        LockResource.FITNESS,
-        LockResource.RECEIPTS,
-        LockResource.MIGRATION,
-    ):
-        lock_path = layout.lock_file(resource)
-        assert lock_path == layout.locks_dir / f"{resource}.lock"
+def test_every_machine_local_file_lives_under_state(tmp_path: Path):
+    layout = WorkspaceLayout(tmp_path)
+    for path in (layout.ledger_file, layout.derived_file, layout.lock_file, layout.lifecycle_log, layout.gate_log):
+        assert layout.state_dir in path.parents
+    assert GITIGNORE_ENTRIES == ("state/",)
+
+
+def test_user_plane_paths(tmp_path: Path):
+    user = UserLayout(tmp_path)
+    assert user.aegis_dir == tmp_path / ".aegis"
+    assert user.rules_dir == tmp_path / ".aegis" / "rules"
+    assert user.workspaces_file == tmp_path / ".aegis" / "workspaces.json"
+    assert user.config_file == tmp_path / ".aegis" / "config.json"
+    assert user.backups_dir == tmp_path / ".aegis" / "backups"
+
+
+def test_user_plane_of_the_running_user(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    assert UserLayout.current() == UserLayout(tmp_path)
+
+
+def test_this_repository_never_tracks_machine_local_state():
+    """D13 L1: the v3 outcome ledgers were wiped and untracked; the v4 state dir stays out of git."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    repo = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
+    if shutil.which("git") is None or not (repo / ".git").exists():
+        pytest.skip("needs a git checkout of the repository")
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+
+    for rel in (".aegis/state/ledger.jsonl", ".aegis/state/lock", ".aegis/evidence/outcomes.jsonl"):
+        assert git("check-ignore", "-q", "--no-index", rel).returncode == 0, f"{rel} is not git-ignored"
+    tracked = git("ls-files", "--", ".aegis/state", ".aegis/evidence")
+    assert tracked.returncode == 0 and tracked.stdout.strip() == ""

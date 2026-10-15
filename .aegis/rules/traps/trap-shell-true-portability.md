@@ -21,13 +21,6 @@ tags:
   - portability
   - windows
   - subprocess
-fitness:
-  score: 0.6
-  impact_weight: 1.0
-  triggers: 84
-  true_positives: 37.3628
-  false_positives: 28.9993
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Citadel C6 incident: `jit_engine.py` used

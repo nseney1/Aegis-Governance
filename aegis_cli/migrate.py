@@ -1,4 +1,11 @@
-"""aegis migrate — Upgrade Sentinel diagnostic for legacy .soma workspaces in v3.0+."""
+"""aegis migrate: convert a v3 workspace or .soma cells to the v4 layout (dry run by default).
+
+The work is aegis_core.migrate; this module parses flags and prints the plan.
+Exit codes: 0 done (or nothing to do), 1 refused (nothing written: an unconfined path,
+the lock held by another process, or files that changed between planning and applying)
+or something was left unmigrated (an unmapped type, a destination conflict, an
+unreadable file, a customized driver), 2 usage error.
+"""
 from __future__ import annotations
 
 import argparse
@@ -8,83 +15,118 @@ import sys
 from typing import Any, Dict
 
 from aegis_cli.base import AegisCommand, CommandCategory
-from aegis_core.workspace.discovery import LEGACY_SOMA_UPGRADE_MSG
 
-__all__ = [
-    "run_migrate",
-    "MigrateCommand",
-    "migrate_workspace",
-]
+__all__ = ["MigrateCommand", "run_migrate"]
 
 
-def migrate_workspace(
-    workspace_root: str | Path,
-    dry_run: bool = False,
-) -> Dict[str, Any]:
-    """Check workspace migration state and emit the Upgrade Sentinel diagnostic for .soma/."""
-    root = Path(workspace_root).resolve()
-    soma_dir = root / ".soma"
-    aegis_dir = root / ".aegis"
-
-    if aegis_dir.exists() and not soma_dir.exists():
-        return {
-            "status": "already_migrated",
-            "message": f"Workspace is already using .aegis/ ({aegis_dir})",
-            "root": str(root),
-            "changes": [],
-        }
-
-    if soma_dir.exists():
-        return {
-            "status": "legacy_detected",
-            "message": LEGACY_SOMA_UPGRADE_MSG.format(path=root),
-            "root": str(root),
-            "changes": [],
-        }
-
-    return {
-        "status": "not_found",
-        "message": f"No .aegis/ or .soma/ directory found in {root}",
-        "root": str(root),
-        "changes": [],
-    }
-
-
-def run_migrate(args: argparse.Namespace | str | Path, dry_run: bool = False) -> int:
-    """CLI handler for aegis migrate."""
-    if isinstance(args, (str, Path)):
-        raw_ws = args
-        use_json = False
+def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
+    root = report["root"]
+    if report["status"] == "refused":
+        print(f"aegis migrate: {root}: refused: {report['refusal']}")
+        return
+    if report["status"] == "up_to_date":
+        print(f"aegis migrate: {root} is already on the v4 layout; nothing to do.")
+    elif applied:
+        print(f"aegis migrate: migrated {root} (backup: {backup})")
     else:
-        raw_ws = getattr(args, "workspace", None) or getattr(args, "_project_root", None) or Path.cwd()
-        dry_run = getattr(args, "dry_run", dry_run)
-        use_json = getattr(args, "json", False)
+        print(f"aegis migrate: {root} (dry run: nothing written; rerun with --apply)")
+    ledger = report["ledger"]
+    if ledger:
+        print(
+            f"  ledger: {ledger['rows']} v2 row(s) from {', '.join(ledger['sources'])} "
+            f"({ledger['duplicates']} duplicate, {ledger['unusable_rows']} unusable, "
+            f"{ledger['skipped_lines']} unreadable line(s))"
+        )
+    if report["config_sources"]:
+        print(f"  config: .aegis/config.json from {', '.join(report['config_sources'])}")
+    for move in report["rules"]:
+        print(f"  rule: {move['from']} -> {move['to']} (type {move['type']})")
+    for strip in report["strip"]:
+        print(f"  strip: {', '.join(strip['keys'])} from {strip['path']}")
+    manifest = report["manifest"]
+    if manifest and manifest["update"]:
+        print(
+            f"  manifest: {manifest['path']}: re-attest {len(manifest['update'])} rule(s) this migration "
+            "rewrites or moves in (backed up first)"
+        )
+    for path in (manifest or {}).get("mismatched", []):
+        print(
+            f"  ! {path} did not match {manifest['path']} before migrating: "
+            "not re-attested (the MCP server keeps refusing it)"
+        )
+    for path in report["remove"]:
+        print(f"  remove (backed up first): {path}")
+    for line in report["dropped"]:
+        print(f"  dropped: {line}")
+    for entry in report["unmapped"]:
+        print(f"  ! unmapped type {entry['type']!r}: {entry['path']} left in place (no canonical type; not guessed)")
+    for entry in report["conflicts"]:
+        print(f"  ! {entry['to']} already exists: {entry['path']} left in place")
+    for path in report["unreadable"]:
+        print(f"  ! cannot read {path}: left in place")
+    for entry in report["skipped"]:
+        print(f"  ! {entry['path']}: {entry['reason']}")
+    for path in report["already_moved"]:
+        print(f"  remove (already converted, backed up first): {path}")
+    for path in report["left_in_place"]:
+        print(f"  note: {path} is not part of the v4 layout; left in place")
+    if report["user_config"]:
+        print("  For ~/.aegis/config.json (not written: a repository cannot name commands or set slots):")
+        print("    " + json.dumps(report["user_config"], indent=2).replace("\n", "\n    "))
 
-    res = migrate_workspace(raw_ws, dry_run=dry_run)
 
-    if use_json:
-        print(json.dumps(res, indent=2))
-        return 0 if res["status"] == "already_migrated" else 1
+def run_migrate(args: argparse.Namespace) -> int:
+    """CLI handler for aegis migrate."""
+    from aegis_core import migrate
+    from aegis_core.errors import LockTimeoutError
 
-    if res["status"] == "already_migrated":
-        print(f"  [PASS] {res['message']}")
-        return 0
-
-    print(f"Error: {res['message']}", file=sys.stderr)
-    return 1
+    root = Path(getattr(args, "workspace", None) or getattr(args, "_project_root", None) or Path.cwd())
+    if not root.is_dir():
+        print(f"Error: workspace path does not exist: {root}", file=sys.stderr)
+        return 2
+    plan = migrate.plan(root)
+    apply_it = bool(getattr(args, "apply", False))
+    report = plan.to_dict()  # before applying: the report describes what was planned
+    backup = None
+    if apply_it and not plan.refusal:
+        try:
+            backup = migrate.apply(plan).backup
+        except (migrate.MigrationRefused, LockTimeoutError) as exc:  # raised before anything is written
+            report["status"], report["refusal"] = "refused", str(exc)
+    if apply_it and report["status"] == "pending":
+        report["status"] = "applied"
+    report["backup"] = str(backup) if backup else None
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2))
+    else:
+        _print_report(report, apply_it and backup is not None, backup)
+    if report["status"] == "refused":
+        return 1
+    left_behind = report["unmapped"] or report["conflicts"] or report["unreadable"] or report["skipped"]
+    return 1 if apply_it and left_behind else 0
 
 
 class MigrateCommand(AegisCommand):
-    """Diagnostic sentinel directing legacy .soma users to migrate via v2.1.x."""
+    """Convert a v3 workspace or legacy .soma cells to the v4 layout."""
 
     name = "migrate"
     aliases = ()
     category = CommandCategory.SETUP
-    help = "Verify .aegis workspace migration status"
-    description = "Check workspace migration status and provide upgrade guidance for legacy .soma workspaces."
+    help = "Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply)"
+    description = (
+        "Plan, then with --apply perform, the move to the v4 layout: the v3 ledger becomes "
+        ".aegis/state/ledger.jsonl (v2 rows), aegis.conf/slots.yaml/config.yaml become "
+        ".aegis/config.json, .soma cells move to .aegis/rules/<type>/, derived counters leave "
+        "rule frontmatter and v3 runtime state is removed. Every changed file is backed up to "
+        ".aegis/state/migrate-backup-<time>/ first; running it again changes nothing."
+    )
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--dry-run", action="store_true", help="Check migration status without modifying files")
+        parser.add_argument("--apply", action="store_true", help="Perform the migration (default: dry run)")
+        parser.add_argument("--dry-run", action="store_true", help="Only report what would change (the default)")
 
     def execute(self, args: argparse.Namespace) -> int:
+        if getattr(args, "apply", False) and getattr(args, "dry_run", False):
+            print("Error: --apply and --dry-run are mutually exclusive", file=sys.stderr)
+            return 2
         return run_migrate(args)

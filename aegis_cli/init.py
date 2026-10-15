@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.resources
-import shutil
 import sys
 from pathlib import Path
 
@@ -54,6 +53,9 @@ def _get_starter_rule_path(name: str) -> Path | None:
 
 from aegis_cli.platforms import detect_platform, get_rules_dir
 from aegis_cli.platforms.base import McpConfigError, load_mcp_config, write_json_atomic
+from aegis_core.config import ENV_WORKSPACE
+from aegis_core.storage import atomic_write_bytes
+from aegis_core.workspace.layout import WorkspaceLayout
 
 
 def detect_project_type(project_root: Path) -> str:
@@ -97,7 +99,9 @@ _hook_block = generate_hook_block
 
 def check_existing_install(project_root: Path) -> bool:
     """Check if Aegis is already installed in this project."""
-    return (Path(project_root) / ".aegis").is_dir()
+    from aegis_core.workspace.layout import is_aegis_workspace
+
+    return is_aegis_workspace(project_root)
 
 
 def _get_soma_root() -> Path:
@@ -197,8 +201,7 @@ def _install_named_rules(
             continue
 
         if not dry_run:
-            rules_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, dest)
+            atomic_write_bytes(dest, source.read_bytes())
         installed.append(name)
 
     return installed
@@ -223,8 +226,7 @@ def _copy_rule_files(
             continue
 
         if not dry_run:
-            rules_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
+            atomic_write_bytes(dest, src.read_bytes())
         installed.append(src.stem)
 
     return installed
@@ -258,7 +260,7 @@ def seed_workspace_rules(
 ) -> list[str]:
     """Seed <project_root>/.aegis/rules/ with preset rules and generate manifest.json."""
     root = Path(project_root).resolve()
-    ws_rules_dir = root / ".aegis" / "rules"
+    ws_rules_dir = WorkspaceLayout(root).rules_dir
     seeded = install_rules(ws_rules_dir, preset=preset, dry_run=dry_run, force=force)
     if not dry_run and ws_rules_dir.is_dir():
         from aegis_core.integrity import generate_manifest, save_manifest
@@ -295,7 +297,7 @@ def generate_mcp_config(
             "command": "python3",
             "args": ["-m", "aegis_mcp"],
             "cwd": workspace,
-            "env": {"AEGIS_WORKSPACE": workspace},
+            "env": {ENV_WORKSPACE: workspace},
         }
     data.setdefault("mcpServers", {})["aegis"] = entry
     write_json_atomic(mcp_file, data)
@@ -308,6 +310,8 @@ def generate_mcp_config(
 
 def run_init(args: argparse.Namespace) -> int:
     """Main init flow. Returns exit code."""
+    from aegis_core.config import ConfigError, update_repo_config
+    from aegis_core.errors import PathTraversalError
     from aegis_core.workspace.base import Workspace
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
@@ -409,6 +413,14 @@ def run_init(args: argparse.Namespace) -> int:
 
     pre_existing = {p.stem for p in rules_dir.glob("*.md")} if rules_dir.is_dir() else set()
     ws.scaffold(minimal=(preset == "minimal"), dry_run=dry_run)
+    if not dry_run:
+        try:
+            update_repo_config(project_root, lambda _config: None)  # .aegis/config.json, v1
+        except PathTraversalError as exc:
+            print(f"  ❌ {exc}", file=sys.stderr)
+            return 1
+        except ConfigError as exc:
+            print(f"  ⚠️  {exc}; left unchanged. Fix it, then rerun aegis init.", file=sys.stderr)
     gitignore_status = ensure_runtime_gitignore(ws.aegis_dir, dry_run=dry_run)
     if gitignore_status == "symlink":
         print("  ⚠️  .aegis/.gitignore is a symlink; not modified. Add Aegis runtime state to it yourself.")
@@ -427,9 +439,11 @@ def run_init(args: argparse.Namespace) -> int:
             print(f"    ✅ {name}")
 
     # 6.5. Zero-touch AST driver provisioning
-    slots, created_drivers = provision_ast_driver_slots(
-        project_root, detected_langs, copy_drivers=not dry_run, dry_run=dry_run
-    )
+    try:
+        slots, _written = provision_ast_driver_slots(project_root, detected_langs, dry_run=dry_run)
+    except PathTraversalError as exc:
+        print(f"  ❌ {exc}", file=sys.stderr)
+        return 1
     if slots:
         action = "Would configure" if dry_run else "Configured"
         for slot_k, slot_cmd in sorted(slots.items()):

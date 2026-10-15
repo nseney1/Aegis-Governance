@@ -19,7 +19,6 @@ import fnmatch
 import glob
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,12 +27,12 @@ from aegis_core.scoring import compute_cell_fitness, compute_salience
 from aegis_core.taxonomy import (
     JIT_DEFAULT_MAX_TOKENS,
     JIT_DEFAULT_RULE_COUNT_BUDGET,
-    SUBPROCESS_DEFAULT_TIMEOUT_SECONDS,
     WORDS_TO_TOKENS_FACTOR,
 )
 from aegis_core.workspace.layout import WorkspaceLayout
 from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
 from aegis_mcp.rule_cache import CellCache
+from aegis_core.workspace.layout import has_rules_dir
 
 # Module-level singleton — persists across MCP tool invocations
 _cell_cache = CellCache()
@@ -79,55 +78,22 @@ def estimate_tokens(text: object | None) -> int:
 
 
 def resolve_token_budget(workspace: str | None, max_tokens: int | None = None) -> int:
-    """Resolve JIT context token budget with precedence: arg > env > config > default(2000)."""
+    """JIT context token budget: argument > AEGIS_MAX_JIT_TOKENS > .aegis/config.json jit.max_tokens > default."""
     if max_tokens is not None:
         try:
             return int(max_tokens)
         except (ValueError, TypeError):
             pass
+    from aegis_core.config import jit_max_tokens
 
-    env_val = os.environ.get("AEGIS_MAX_JIT_TOKENS")
-    if env_val:
-        try:
-            return int(env_val.strip())
-        except (ValueError, TypeError):
-            pass
-
-    if workspace:
-        conf_path = os.path.join(workspace, "aegis.conf")
-        if os.path.isfile(conf_path):
-            try:
-                with open(conf_path, encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith("#"):
-                            continue
-                        lowered = line.lower()
-                        if lowered.startswith("max_jit_tokens=") or lowered.startswith("max_jit_tokens:"):
-                            sep = "=" if "=" in line else ":"
-                            val = line.split(sep, 1)[1].strip().strip('"').strip("'")
-                            return int(val)
-            except Exception:
-                pass
-
-    return JIT_DEFAULT_MAX_TOKENS
+    return jit_max_tokens(workspace, JIT_DEFAULT_MAX_TOKENS)
 
 
 def get_git_diff_files(workspace: str) -> list[str]:
-    """Get files changed in the current working tree + staged."""
-    files = set()
-    for cmd in [['git', 'diff', '--name-only'],
-                ['git', 'diff', '--name-only', '--cached']]:
-        try:
-            output = subprocess.check_output(
-                cmd, cwd=workspace, text=True, stderr=subprocess.DEVNULL,
-                timeout=SUBPROCESS_DEFAULT_TIMEOUT_SECONDS,
-            ).strip()
-            if output:
-                files.update(f for f in output.splitlines() if f)
-        except Exception:
-            pass
-    return list(files)
+    """Files changed in the working tree or the index (``git diff`` plus ``git diff --cached``)."""
+    from aegis_core import gitsafe
+
+    return gitsafe.changed_files(workspace, "working") or []
 
 
 def load_all_cells(workspace: str) -> list[dict[str, object]]:
@@ -383,7 +349,7 @@ def _load_rules(workspace: str) -> list[dict[str, Any]]:
     """Rules from .aegis/rules/, or from a top-level rules/ dir when there is no .aegis/rules/."""
     all_cells = list(_cell_cache.get_cells(workspace))
     top_rules_dir = os.path.join(str(workspace), "rules")
-    if not os.path.isdir(top_rules_dir) or os.path.isdir(os.path.join(str(workspace), ".aegis", "rules")):
+    if not os.path.isdir(top_rules_dir) or has_rules_dir(str(workspace)):
         return all_cells
     seen_names = {c.get("_name") for c in all_cells}
     for rule_file in sorted(glob.glob(os.path.join(top_rules_dir, "**", "*.md"), recursive=True)):

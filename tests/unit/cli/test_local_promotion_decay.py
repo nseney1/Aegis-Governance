@@ -4,13 +4,8 @@ from pathlib import Path
 Verifies that the --local promotion path also applies exponential decay
 before evaluating candidates, consistent with the --tier-check path.
 """
-import json
 import os
-import subprocess
 import sys
-import pytest
-from aegis_core.yaml_engine.serializer import dump_frontmatter
-from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
@@ -50,7 +45,7 @@ class TestPromotionZeroTriggerGuard:
         evidence_dir.mkdir(parents=True)
 
         make_cell(str(cells_dir), "high-cell", cell_type="trap", created_days_ago=60)
-        write_evidence(str(evidence_dir), "high-cell", triggers=50, tp=48, fp=1)
+        write_evidence(evidence_dir.parent.parent, "high-cell", triggers=50, tp=48, fp=1)
 
         candidates = evaluate_promotions(str(tmp_path))
         promoted_ids = [c["cell_id"] for c in candidates]

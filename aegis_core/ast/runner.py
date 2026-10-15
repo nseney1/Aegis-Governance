@@ -1,8 +1,9 @@
 """AST Driver Runner and Registry for polyglot NormalizedAST execution.
 
-Driver argv never comes from repository content (H5). It comes from drivers
-registered in code, from the user-scope ~/.aegis/slots.yaml, or from the packaged
-templates in aegis_core/ast/drivers/templates, which a repo slot can only opt in to.
+Driver argv never comes from repository content (H5, D10). It comes from drivers
+registered in code, from the user-scope ~/.aegis/config.json, or from the packaged
+templates in aegis_core/ast/drivers/templates, which a repo can only opt in to
+(.aegis/config.json ``ast.packaged_drivers``).
 A driver that is configured but cannot run safely here is "unavailable": parse_file
 raises with the reason, so verification fails closed instead of skipping the file.
 """
@@ -17,11 +18,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Dict, List, Mapping, Optional, Tuple, Union
 
 from aegis_core.ast.drivers.python import parse_python_ast
 from aegis_core.ast.schema import NormalizedAST
-from aegis_core.errors import AegisError, AegisValidationError
+from aegis_core.errors import AegisError
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import as_workspace
 
@@ -140,7 +141,7 @@ def _packaged_plan(ext: str, ws_root: Path) -> Optional[_DriverPlan]:
 
 
 def _user_command_plan(command: str, ext: str, ws_root: Path) -> Optional[_DriverPlan]:
-    """Plan for a command from ~/.aegis/slots.yaml.
+    """Plan for a command from ~/.aegis/config.json ``drivers``.
 
     The text is trusted, but an executable or path argument (including the value of a
     '--flag=path' argument) inside the repo would let repo content pick the code that
@@ -158,7 +159,7 @@ def _user_command_plan(command: str, ext: str, ws_root: Path) -> Optional[_Drive
     plan = _command_plan(command, ext)
     if plan.in_process_rust or plan.unavailable or not plan.argv:
         return plan
-    where = f"the ~/.aegis/slots.yaml driver for '{ext}'"
+    where = f"the ~/.aegis/config.json driver for '{ext}'"
     argv = list(plan.argv)
     first = _split_command(command)[0]
     if not _is_python_name(first):  # python names already resolved to sys.executable, which runs aegis itself
@@ -217,7 +218,7 @@ class ASTDriverRegistry:
         user_cmd = SlotRegistry.load_user(ws_root).get_ast_driver(clean_ext)
         if user_cmd:
             return _user_command_plan(user_cmd, clean_ext, ws_root)
-        # A repo slot only opts in; its value is never run (see SlotRegistry.load).
+        # A repo opt-in selects the packaged driver; nothing from the repo is run.
         if SlotRegistry.load(ws_root).get_ast_driver(clean_ext):
             return _packaged_plan(clean_ext, ws_root)
         return None

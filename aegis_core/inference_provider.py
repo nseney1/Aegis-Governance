@@ -21,7 +21,9 @@ import subprocess
 import tempfile
 from typing import List, Mapping, Optional, Sequence
 
-ENV_VAR = "AEGIS_LLM_CMD"
+from aegis_core.config import ENV_LLM_CMD, env_llm_cmd
+
+ENV_VAR = ENV_LLM_CMD
 MISSING_BACKEND = f"Layer 2 needs --llm-cmd or {ENV_VAR}"
 DEFAULT_TIMEOUT = 600.0
 
@@ -80,7 +82,7 @@ def _split_command(raw: str) -> List[str]:
 
 def resolve_backend(flag: Optional[str], environ: Optional[Mapping[str, str]] = None) -> Optional[CommandBackend]:
     """The backend named by ``--llm-cmd`` (first) or ``AEGIS_LLM_CMD``; None when neither is set."""
-    raw = flag if flag and flag.strip() else (os.environ if environ is None else environ).get(ENV_VAR, "")
+    raw = flag if flag and flag.strip() else (env_llm_cmd(environ) or "")
     if not raw.strip():
         return None
     try:

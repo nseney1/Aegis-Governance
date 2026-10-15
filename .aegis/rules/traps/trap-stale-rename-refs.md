@@ -23,13 +23,6 @@ tags:
   - migration
   - anti-pattern
   - high-value
-fitness:
-  score: 0.5
-  impact_weight: 1.0
-  triggers: 84
-  true_positives: 34.5235
-  false_positives: 26.3697
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 After the Phase 22 repository rename, multiple stale references survived:

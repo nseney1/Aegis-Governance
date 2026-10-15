@@ -1,4 +1,4 @@
-"""Tests for aegis migrate command and migrate_workspace utility."""
+"""`aegis migrate` from the command line: dry run by default, --apply, --json, exit codes."""
 from __future__ import annotations
 
 import json
@@ -7,49 +7,142 @@ from pathlib import Path
 import pytest
 
 from aegis_cli.cli import main
-from aegis_cli.migrate import migrate_workspace, run_migrate
+from aegis_core.workspace.discovery import LEGACY_SOMA_UPGRADE_MSG
 
 
-def test_migrate_already_migrated(tmp_path: Path):
-    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-    res = migrate_workspace(tmp_path)
-    assert res["status"] == "already_migrated"
+def _soma_workspace(root: Path) -> Path:
+    cell = root / ".soma" / "cells" / "vacuoles" / "trap-x.md"
+    cell.parent.mkdir(parents=True)
+    cell.write_text("---\ntype: vacuole\nfitness:\n  triggers: 2\n---\nBody\n", encoding="utf-8")
+    odd = root / ".soma" / "cells" / "ribosomes" / "ribosome-y.md"
+    odd.parent.mkdir(parents=True)
+    odd.write_text("---\ntype: ribosome\n---\nBody\n", encoding="utf-8")
+    return root
 
 
-def test_migrate_not_found(tmp_path: Path):
-    res = migrate_workspace(tmp_path)
-    assert res["status"] == "not_found"
+def _tree(root: Path) -> dict:
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
-def test_migrate_dry_run(tmp_path: Path):
-    soma_cells = tmp_path / ".soma" / "cells"
-    soma_cells.mkdir(parents=True)
-    res = migrate_workspace(tmp_path, dry_run=True)
-    assert res["status"] == "legacy_detected"
-    assert "aegis migrate" in res["message"]
-    assert "v2.1" in res["message"]
-    assert (tmp_path / ".soma").is_dir()
-    assert not (tmp_path / ".aegis").exists()
+def test_dry_run_is_the_default_and_writes_nothing(tmp_path: Path, capsys):
+    root = _soma_workspace(tmp_path)
+    before = _tree(root)
+
+    assert main(["migrate", "--workspace", str(root)]) == 0
+
+    out = capsys.readouterr().out
+    assert "dry run: nothing written; rerun with --apply" in out
+    assert "rule: .soma/cells/vacuoles/trap-x.md -> .aegis/rules/traps/trap-x.md (type trap)" in out
+    assert "unmapped type 'ribosome': .soma/cells/ribosomes/ribosome-y.md left in place" in out
+    assert _tree(root) == before
+    assert main(["migrate", "--workspace", str(root), "--dry-run"]) == 0
 
 
-def test_migrate_full_cutover(tmp_path: Path):
-    """In v3.0.0+, unmigrated .soma workspaces trigger the Upgrade Sentinel directing users to v2.1.x."""
-    soma_dir = tmp_path / ".soma" / "cells"
-    soma_dir.mkdir(parents=True)
+def test_apply_converts_and_exits_1_when_something_was_left_behind(tmp_path: Path, capsys):
+    root = _soma_workspace(tmp_path)
 
-    res = migrate_workspace(tmp_path, dry_run=False)
-    assert res["status"] == "legacy_detected"
-    assert "aegis migrate" in res["message"]
-    assert "v2.1" in res["message"]
+    assert main(["migrate", "--workspace", str(root), "--apply"]) == 1
+
+    out = capsys.readouterr().out
+    assert "migrated" in out and "backup:" in out
+    assert (root / ".aegis" / "rules" / "traps" / "trap-x.md").read_text(encoding="utf-8") == "---\ntype: trap\n---\nBody\n"
+    assert (root / ".soma" / "cells" / "ribosomes" / "ribosome-y.md").is_file()
 
 
-def test_cli_migrate_invocation(tmp_path: Path, capsys):
-    soma_dir = tmp_path / ".soma" / "cells"
-    soma_dir.mkdir(parents=True)
+def test_json_report_and_idempotent_second_apply(tmp_path: Path, capsys):
+    root = tmp_path / "ws"
+    cell = root / ".soma" / "cells" / "walls" / "wall-a.md"
+    cell.parent.mkdir(parents=True)
+    cell.write_text("---\ntype: wall\n---\nBody\n", encoding="utf-8")
 
-    code = main(["migrate", "--workspace", str(tmp_path)])
-    assert code == 1
-    captured = capsys.readouterr()
-    combined = captured.out + captured.err
-    assert "aegis migrate" in combined
-    assert "v2.1" in combined
+    assert main(["--json", "migrate", "--workspace", str(root), "--apply"]) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert first["status"] == "applied"
+    assert first["rules"] == [{"from": ".soma/cells/walls/wall-a.md", "to": ".aegis/rules/invariants/wall-a.md",
+                               "type": "invariant"}]
+    assert "migrate-backup-" in first["backup"]
+    assert first["config"] == {"v": 1}  # the report describes what the apply wrote
+
+    assert main(["--json", "migrate", "--workspace", str(root), "--apply"]) == 0
+    second = json.loads(capsys.readouterr().out)
+    assert second["status"] == "up_to_date" and second["backup"] is None
+
+
+def test_apply_and_dry_run_together_is_a_usage_error(tmp_path: Path, capsys):
+    assert main(["migrate", "--workspace", str(tmp_path), "--apply", "--dry-run"]) == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_the_legacy_sentinel_points_at_migrate(tmp_path: Path):
+    assert "aegis migrate --apply" in LEGACY_SOMA_UPGRADE_MSG
+
+
+def test_the_report_says_which_rules_the_manifest_re_attests_and_which_it_still_refuses(tmp_path: Path, capsys):
+    from aegis_core import integrity
+
+    root = tmp_path / "ws"
+    rules = root / ".aegis" / "rules" / "traps"
+    rules.mkdir(parents=True)
+    for name in ("trap-a", "trap-b"):
+        (rules / f"{name}.md").write_text(f"---\nid: {name}\nfitness:\n  triggers: 2\n---\nBody\n", encoding="utf-8")
+    integrity.save_manifest(root, integrity.generate_manifest(root / ".aegis" / "rules"))
+    (rules / "trap-b.md").write_text("---\nid: trap-b\nfitness:\n  triggers: 2\n---\nEdited\n", encoding="utf-8")
+
+    assert main(["migrate", "--workspace", str(root)]) == 0
+
+    out = capsys.readouterr().out
+    assert "manifest: .aegis/rules/manifest.json: re-attest 1 rule(s) this migration rewrites or moves in" in out
+    assert (
+        "! .aegis/rules/traps/trap-b.md did not match .aegis/rules/manifest.json before migrating: "
+        "not re-attested (the MCP server keeps refusing it)"
+    ) in out
+
+
+def test_a_rule_edited_between_plan_and_apply_is_reported_and_nothing_changes(tmp_path: Path, capsys, monkeypatch):
+    from aegis_core import migrate
+
+    root = _soma_workspace(tmp_path)
+    cell = root / ".soma" / "cells" / "vacuoles" / "trap-x.md"
+    real_plan = migrate.plan
+
+    def plan_then_someone_saves(workspace):
+        planned = real_plan(workspace)
+        cell.write_text(cell.read_text(encoding="utf-8") + "Saved by an editor meanwhile.\n", encoding="utf-8")
+        return planned
+
+    monkeypatch.setattr(migrate, "plan", plan_then_someone_saves)
+
+    assert main(["--json", "migrate", "--workspace", str(root), "--apply"]) == 1
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "refused"
+    assert ".soma/cells/vacuoles/trap-x.md changed since the plan was made" in report["refusal"]
+    assert report["backup"] is None
+    assert cell.read_text(encoding="utf-8").endswith("Saved by an editor meanwhile.\n")
+    assert not (root / ".aegis" / "rules").exists()
+
+
+def test_a_refusal_found_only_when_applying_is_a_json_report_and_exit_1(tmp_path: Path, capsys, monkeypatch):
+    from aegis_core import migrate
+
+    root = _soma_workspace(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_plan = migrate.plan
+
+    def plan_then_a_link_is_planted(workspace):
+        planned = real_plan(workspace)
+        (root / ".aegis" / "state").mkdir(parents=True)
+        try:
+            (root / ".aegis" / "state" / "lock").symlink_to(outside / "lock")
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+        return planned
+
+    monkeypatch.setattr(migrate, "plan", plan_then_a_link_is_planted)
+
+    assert main(["--json", "migrate", "--workspace", str(root), "--apply"]) == 1
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "refused" and "lock: it is a symlink" in report["refusal"]
+    assert list(outside.iterdir()) == []

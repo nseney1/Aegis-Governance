@@ -7,13 +7,13 @@ import stat
 from pathlib import Path
 from typing import List
 
-from aegis_core.evidence import aggregate_signals
 from aegis_core.taxonomy import DIR_TO_ALLOWED_RULE_TYPES as DIR_TO_TYPE
+from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, RULES_RELDIR, WorkspaceLayout
 
 
 HARDCODED_PATH_RE = re.compile(r'''(?:"|')(/home/|/Users/|/tmp/)''')
 SKIP_DIRS = {
-    "__pycache__", ".git", ".soma", ".aegis", "node_modules", ".venv", "venv",
+    "__pycache__", ".git", LEGACY_SOMA_DIRNAME, AEGIS_DIRNAME, "node_modules", ".venv", "venv",
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", "egg-info",
 }
 
@@ -222,8 +222,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_hooks_lifecycle.py")
     if stem == "errors":
         candidates.append(test_dir / "test_domain_errors.py")
-    if stem == "evidence":
-        candidates.append(test_dir / "test_canonical_evidence_readers.py")
     if stem == "frontmatter":
         candidates.append(test_dir / "test_core_lifecycle.py")
     if stem == "rule_inventory":
@@ -409,22 +407,27 @@ def check_assertion_density(root: Path) -> list[dict]:
 
 
 def check_cell_fitness(root: Path) -> list[dict]:
-    issues = []  # type: List[dict]
-    evidence_dir = root / ".aegis" / "evidence"
-    aggregation = aggregate_signals(evidence_dir)
+    from aegis_core.telemetry_engine import ledger
 
-    for error in aggregation.errors:
-        error_path = Path(error.get("file") or evidence_dir / "signals.jsonl")
-        rel = _relative(root, error_path)
-        line = error.get("line")
-        location = f" line {line}" if line is not None else ""
+    issues = []  # type: List[dict]
+    view = ledger.read(root)
+    rel = _relative(root, Path(view.path)) if view.path is not None else "ledger"
+    if view.error:
+        issues.append({"check": "cell_fitness", "file": rel, "message": f"{rel}: {view.error}"})
+    for line in view.skipped_lines:
         issues.append({
             "check": "cell_fitness",
             "file": rel,
-            "message": f"{rel}:{location} {error.get('error', 'signal aggregation failed')}",
+            "message": f"{rel}: line {line} is not a JSON object row",
+        })
+    if view.unusable_rows:
+        issues.append({
+            "check": "cell_fitness",
+            "file": rel,
+            "message": f"{rel}: {view.unusable_rows} row(s) lack a rule, a valid outcome or a valid weight",
         })
 
-    for cell_id, counts in aggregation.counts.items():
+    for cell_id, counts in ledger.aggregate_rows(view.rows).items():
         tp = counts["tp"]
         fp = counts["fp"]
         total = tp + fp
@@ -461,7 +464,7 @@ def check_cell_conventions(root: Path) -> list[dict]:
         if os.path.basename(entry.relative_path) == "README.md":
             continue
         parts = entry.relative_path.split("/")
-        if len(parts) < 4 or parts[:2] != [".aegis", "rules"]:
+        if len(parts) < 4 or "/".join(parts[:2]) != RULES_RELDIR:
             continue
         type_dir_name = parts[2]
         allowed_types = DIR_TO_TYPE.get(type_dir_name)
@@ -566,9 +569,10 @@ def check_cell_conventions(root: Path) -> list[dict]:
 def check_paper_walls(root: Path) -> list[dict]:
     """Verify that all wall cells have 'gate' enforcement and valid frontmatter."""
     issues = []
-    walls_dir = root / ".aegis" / "rules" / "invariants"
+    rules_dir = WorkspaceLayout(Path(root).resolve()).rules_dir
+    walls_dir = rules_dir / "invariants"
     if not walls_dir.is_dir():
-        walls_dir = root / ".aegis" / "rules" / "walls"
+        walls_dir = rules_dir / "walls"
     if not walls_dir.is_dir():
         return issues
 

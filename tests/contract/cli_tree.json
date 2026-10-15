@@ -800,6 +800,17 @@
           {
             "const": true,
             "default": false,
+            "dest": "apply",
+            "flags": [
+              "--apply"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
             "dest": "dry_run",
             "flags": [
               "--dry-run"
@@ -1548,7 +1559,7 @@
     {
       "aliases": [],
       "category": "Setup & Environment",
-      "help": "Verify .aegis workspace migration status",
+      "help": "Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply)",
       "name": "migrate"
     },
     {

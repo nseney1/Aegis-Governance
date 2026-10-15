@@ -19,13 +19,6 @@ tags:
   - uninstall
   - parity
   - lifecycle
-fitness:
-  score: null
-  impact_weight: 1.0
-  triggers: 62
-  true_positives: 3.0457
-  false_positives: 1.8187
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 The install and uninstall scripts must support the same set of platforms. When adding

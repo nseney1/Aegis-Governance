@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import subprocess
 
+from aegis_core import gitsafe
 from aegis_core.rule_inventory import find_matching_cells
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import as_workspace
@@ -12,34 +12,15 @@ __all__ = ["match_cells_to_changes"]
 
 
 def _get_changed_files(workspace: str) -> list[str]:
-    try:
-        out = subprocess.check_output(
-            ["git", "diff", "--name-only", "HEAD~1"],
-            cwd=workspace, text=True, stderr=subprocess.DEVNULL
-        )
-        files = [f.strip() for f in out.splitlines() if f.strip()]
+    """What the session changed: the last commit plus uncommitted edits (``git diff HEAD~1``);
+    in a repository with one commit, the uncommitted and untracked files (``git status``)."""
+    uncommitted = gitsafe.changed_files(workspace, "working") or []
+    if gitsafe.resolve_commit(workspace, "HEAD~1"):
+        files = list(dict.fromkeys((gitsafe.changed_files(workspace, "head") or []) + uncommitted))
         if files:
             return files
-    except Exception:
-        pass
-
-    try:
-        out = subprocess.check_output(
-            ["git", "status", "--porcelain"],
-            cwd=workspace, text=True, stderr=subprocess.DEVNULL
-        )
-        files = []
-        for line in out.splitlines():
-            # "XY path": the status is exactly 2 columns plus a space, and X is a
-            # space for unstaged edits, so the line must not be stripped first.
-            path = line[3:].strip()
-            if " -> " in path:
-                path = path.split(" -> ", 1)[1]
-            if path:
-                files.append(path)
-        return files
-    except Exception:
-        return []
+    untracked = gitsafe.list_files(workspace, tracked=False) or []
+    return list(dict.fromkeys(uncommitted + untracked))
 
 
 def match_cells_to_changes(workspace: Workspace | Path | str, changed_files: list[str]) -> list[dict]:

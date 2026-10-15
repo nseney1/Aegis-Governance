@@ -35,7 +35,7 @@ def ws(tmp_path: Path) -> Path:
 
 
 def _rows(ws: Path) -> list:
-    path = ws / ".aegis" / "evidence" / "signals.jsonl"
+    path = ws / ".aegis" / "state" / "ledger.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -116,7 +116,7 @@ def test_values_within_the_schema_are_recorded_as_sent(ws):
     result = _report(ws, rework_count=2, tests_passed=False, notes="fine")
     assert result["status"] == "recorded", result
     row, = _rows(ws)
-    assert (row["metadata"]["rework_count"], row["metadata"]["tests_passed"], row["metadata"]["notes"]) == (
+    assert (row["meta"]["rework_count"], row["meta"]["tests_passed"], row["meta"]["notes"]) == (
         2, False, "fine",
     )
 

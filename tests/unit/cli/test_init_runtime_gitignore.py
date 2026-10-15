@@ -1,7 +1,7 @@
-"""`aegis init` keeps machine-local runtime state out of git via `.aegis/.gitignore`.
+"""`aegis init` keeps machine-local state out of git via `.aegis/.gitignore` ("state/").
 
-Rules and config under `.aegis/` must stay committable; the ledger, locks, keys,
-receipts, cursors and other runtime files written by the current layout must not.
+Rules and config under `.aegis/` must stay committable; the ledger, the lock and
+every other machine-local file of the D12 layout live under `.aegis/state/` and must not.
 """
 from __future__ import annotations
 
@@ -58,40 +58,27 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _runtime_paths(repo: Path) -> list[str]:
-    """Runtime state the current and earlier layouts write, as repo-relative paths."""
+    """Machine-local files the D12 layout writes, as repo-relative paths."""
     layout = WorkspaceLayout(repo)
     paths = [
-        layout.signals_file,                         # evidence/ ledger
-        layout.evidence_dir / ".signals.lock",
-        layout.evidence_dir / "outcomes.jsonl",
-        layout.evidence_dir / "checkpoint_rollup.json",
-        layout.aegis_dir / "telemetry" / "checkpoint_rollup.json",
-        layout.lock_file("signals"),                 # locks/
-        layout.manifest_key_file,                    # keys/
-        layout.keys_dir / "receipt.key",
-        layout.aegis_dir / "receipt_key",            # legacy HMAC key still read
-        layout.aegis_dir / "receipts.jsonl",
-        layout.metrics_dir / "escaped_defects.jsonl",
-        layout.aegis_dir / "governance" / "gate_events.jsonl",
-        layout.aegis_dir / "quarantine" / "quarantine_log.jsonl",
-        layout.aegis_dir / "swarm" / "leases.json",
-        layout.aegis_dir / "swarm" / "handoffs" / "t1_review.json",
-        layout.aegis_dir / "handoffs" / "t1_review.json",
-        layout.aegis_dir / "human_insights.jsonl",
-        layout.aegis_dir / "insight_cursor",
-        layout.aegis_dir / ".insight_cursor.abc123.tmp",
-        layout.aegis_dir / "jobs_state.json",
-        layout.aegis_dir / "epoch_generation",
-        layout.aegis_dir / "migration.lock",
+        layout.ledger_file,
+        layout.derived_file,
+        layout.lock_file,
+        layout.lifecycle_log,
+        layout.gate_log,
+        layout.migrate_backup_dir("20261015T000000Z") / "evidence" / "signals.jsonl",
+        layout.state_dir / ".ledger.jsonl.abc123.tmp",
     ]
-    return [p.relative_to(repo).as_posix() for p in paths]
+    return [p.relative_to(layout.root).as_posix() for p in paths]
 
 
 COMMITTABLE = [
+    ".aegis/config.json",
     ".aegis/rules/invariants/providence.md",
+
     ".aegis/rules/manifest.json",
     ".aegis/rules/traps/evidence/notes.md",   # a dir named like runtime state, deeper down
-    ".aegis/slots.yaml",
+    ".aegis/legacy-notes.md",
     ".aegis/config.yaml",
     ".aegis/.gitignore",
 ]
@@ -123,20 +110,25 @@ class TestInitWritesRuntimeGitignore:
     def test_user_lines_are_kept_and_missing_entries_appended(self, repo: Path, home: Path):
         gi = repo / ".aegis" / ".gitignore"
         gi.parent.mkdir()
-        user = "# mine\nscratch-notes.txt\n/evidence/\n!/keys/"  # no trailing newline
+        user = "# mine\nscratch-notes.txt\n/evidence/"  # no trailing newline
         gi.write_text(user, encoding="utf-8")
 
         assert run_init(_init_args(repo, home)) == 0
 
         text = gi.read_text(encoding="utf-8")
         assert text.startswith(user + "\n")
-        lines = text.splitlines()
-        assert lines.count("/evidence/") == 1
-        # The user's own negation wins: we never re-add an entry they negated.
-        assert "/keys/" not in lines
-        assert not _ignored(repo, ".aegis/keys/manifest.key")
+        assert text.splitlines().count("state/") == 1
         assert _ignored(repo, ".aegis/scratch-notes.txt")
-        assert _ignored(repo, ".aegis/receipts.jsonl")
+        assert _ignored(repo, ".aegis/state/ledger.jsonl")
+
+    def test_a_negated_entry_is_not_added_again(self, repo: Path, home: Path):
+        gi = repo / ".aegis" / ".gitignore"
+        gi.parent.mkdir()
+        gi.write_text("!state/\n", encoding="utf-8")
+
+        assert run_init(_init_args(repo, home)) == 0
+
+        assert gi.read_text(encoding="utf-8") == "!state/\n"
 
     def test_dry_run_writes_nothing(self, repo: Path, home: Path):
         assert run_init(_init_args(repo, home, dry_run=True)) == 0
@@ -175,7 +167,7 @@ class TestLineEndingsAreKept:
         appended = out[len(original):]
         assert appended and appended.endswith(b"\r\n")
         assert appended.count(b"\n") == appended.count(b"\r\n")
-        assert _ignored(repo, ".aegis/receipts.jsonl")
+        assert _ignored(repo, ".aegis/state/ledger.jsonl")
         assert _ignored(repo, ".aegis/keep-me")
 
     def test_crlf_file_without_final_newline(self, repo: Path, home: Path):
@@ -205,4 +197,32 @@ class TestLineEndingsAreKept:
         assert run_init(_init_args(repo, home)) == 0
 
         assert gi.read_bytes().startswith(original)
-        assert _ignored(repo, ".aegis/receipts.jsonl")
+        assert _ignored(repo, ".aegis/state/ledger.jsonl")
+
+
+class TestInitConfigJson:
+    """`aegis init` writes .aegis/config.json (D12) and never writes it through a link."""
+
+    def test_init_writes_a_v1_config(self, repo: Path, home: Path):
+        assert run_init(_init_args(repo, home)) == 0
+        assert (repo / ".aegis" / "config.json").read_text(encoding="utf-8") == '{\n  "v": 1\n}\n'
+
+    def test_symlinked_config_is_refused_and_not_written_through(self, repo: Path, home: Path, tmp_path: Path, capsys):
+        user_config = tmp_path / "user-config.json"
+        (repo / ".aegis").mkdir()
+        symlink_or_skip(user_config, repo / ".aegis" / "config.json")
+
+        assert run_init(_init_args(repo, home)) == 1
+
+        assert not user_config.exists()
+        assert "is a symlink" in capsys.readouterr().err
+
+    def test_unreadable_config_is_kept_and_reported(self, repo: Path, home: Path, capsys):
+        config = repo / ".aegis" / "config.json"
+        config.parent.mkdir()
+        config.write_text("{hand-edited", encoding="utf-8")
+
+        assert run_init(_init_args(repo, home)) == 0
+
+        assert config.read_text(encoding="utf-8") == "{hand-edited"
+        assert ".aegis/config.json is not valid JSON" in capsys.readouterr().err

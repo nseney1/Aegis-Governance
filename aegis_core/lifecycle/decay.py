@@ -10,17 +10,12 @@ from typing import Any, Optional
 
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.scoring import bayesian_posterior, bayesian_score, calculate_snr
-from aegis_core.taxonomy import RULE_EXPIRY_DAYS
+from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
-from .constants import (
-    CELL_TELOMERE_DAYS,
-    DECAY_FACTOR,
-)
+from .constants import DECAY_FACTOR
 from .quorum import calculate_fitness_status
 
 __all__ = [
-    "CELL_TELOMERE_DAYS",
-    "RULE_EXPIRY_DAYS",
     "apply_decay",
     "bayesian_fitness",
     "compute_cells_fitness",
@@ -120,20 +115,15 @@ def compute_cells_fitness(
     promote: bool = False,
 ) -> list[dict]:
     """Compute fitness of immune cells in workspace."""
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
+    ws = literal_workspace(workspace)
 
     total_sessions = 30
-    conf_path = ws.root / "aegis.conf"
-    if conf_path.is_file():
-        try:
-            with open(conf_path, encoding="utf-8") as f:
-                for line in f:
-                    if line.startswith("TOTAL_SESSIONS="):
-                        total_sessions = int(line.strip().split("=", 1)[1])
-        except Exception:
-            pass
+    from aegis_core.config import ConfigError, RepoConfig
+
+    try:
+        repo_config = RepoConfig.load(ws.root)
+    except ConfigError:
+        repo_config = RepoConfig()
 
     cells_dir = ws.rules_dir
     cell_files = glob.glob(os.path.join(str(cells_dir), "**", "*.md"), recursive=True)
@@ -183,17 +173,11 @@ def compute_cells_fitness(
             except Exception:
                 pass
 
-        hl_val = (
-            os.environ.get(f"RULE_EXPIRY_{cell_type.upper()}")
-            or os.environ.get(f"CELL_TELOMERE_{cell_type.upper()}")
-            or os.environ.get("RULE_EXPIRY_DAYS")
-            or os.environ.get("CELL_TELOMERE_DAYS", "30")
-        )
-        if hl_val == "null":
+        half_life = repo_config.expiry_for(cell_type)  # .aegis/config.json expiry (D10)
+        if half_life is None:
             dec_score = score
         else:
-            telomere_days = int(hl_val)
-            dec_score = decayed_fitness(score, last_trigger_date, telomere_days)
+            dec_score = decayed_fitness(score, last_trigger_date, half_life)
 
         expiry_days = metadata.get("expiry_days")
         created_str = metadata.get("created")
