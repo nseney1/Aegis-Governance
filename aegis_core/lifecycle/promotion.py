@@ -282,6 +282,8 @@ def promote_cell(
         content = cell_path.read_text(encoding="utf-8")
         new_content = _transform_frontmatter_type(content, next_type)
         _atomic_write_and_unlink(cell_path, target_path, new_content)
+        from aegis_core.integrity import sync_manifest_if_present
+        sync_manifest_if_present(ws.root)
 
     return {
         "status": "promoted",
@@ -350,6 +352,8 @@ def demote_cell(
         content = cell_path.read_text(encoding="utf-8")
         new_content = _transform_frontmatter_type(content, next_type)
         _atomic_write_and_unlink(cell_path, target_path, new_content)
+        from aegis_core.integrity import sync_manifest_if_present
+        sync_manifest_if_present(ws.root)
 
         if current_type in ("wall", "invariant") and next_type == "trap":
             for pfx in ("check-", "gate-"):

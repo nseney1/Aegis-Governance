@@ -187,8 +187,10 @@ lineage:
     if read_back.count("---") < 2:
         raise ValueError(f"Cell frontmatter is malformed (missing closing '---'): {file_path}")
     from aegis_core.yaml import AegisYAML
+    from aegis_core.integrity import sync_manifest_if_present
 
     AegisYAML.parse_text(read_back)
+    sync_manifest_if_present(ws.root)
 
     return file_path
 
