@@ -23,25 +23,6 @@ def run_check(args: argparse.Namespace) -> int:
     return run_verify(args)
 
 
-def _drop_inherited_option(parser: argparse.ArgumentParser, option: str) -> None:
-    """Remove *option* inherited from a parent parser so this command can define its own.
-
-    The global parser still defines `--format text|json|mermaid` until the CLI lane
-    removes it (D5); `check` owns `--format text|json`. The parent's action object is
-    shared by every subcommand, so it is unlinked here rather than modified.
-    """
-    action = parser._option_string_actions.get(option)
-    if action is None:
-        return
-    for opt in action.option_strings:
-        parser._option_string_actions.pop(opt, None)
-    if action in parser._actions:
-        parser._actions.remove(action)
-    for group in parser._action_groups:
-        if action in group._group_actions:
-            group._group_actions.remove(action)
-
-
 class CheckCommand(AegisCommand):
     """Unified verification gate for AI coding agent changes."""
 
@@ -90,7 +71,6 @@ class CheckCommand(AegisCommand):
             action="store_true",
             help="Show what would be checked without running anything",
         )
-        _drop_inherited_option(parser, "--format")
         parser.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
 
     def execute(self, args: argparse.Namespace) -> int:
