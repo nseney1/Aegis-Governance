@@ -504,15 +504,6 @@ class TestRebindingDoesNotHideAlias:
             "Forbidden decorator 'functools.lru_cache' matched rule forbid_ast.decorators"
         ]
 
-    def test_matchers_accept_single_valued_maps(self):
-        """Callers that pass the original ``{name: str}`` maps keep working."""
-        from aegis_core.ast.policy import _match_call_against_pattern, _match_decorator_against_pattern
-
-        assert _match_call_against_pattern("sp.run", "subprocess.run", aliases={"sp": "subprocess"}) is True
-        assert _match_call_against_pattern("r", "subprocess.run", imported_qual_map={"r": "subprocess.run"}) is True
-        assert _match_decorator_against_pattern("lc", "functools.lru_cache", aliases={"lc": "functools.lru_cache"}) is True
-
-
 # ── Review round 2, finding 2: encoding detection must split lines like CPython ──
 
 # CPython treats \r and \r\n as line breaks when it looks for a PEP 263 cookie in the first

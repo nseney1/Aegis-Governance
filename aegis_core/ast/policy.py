@@ -4,12 +4,10 @@ from __future__ import annotations
 import ast
 import os
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Union
+from typing import Any, Optional, Union
 
 from aegis_core.errors import AegisError
 from aegis_core.ast.schema import (
-    CallSiteNode,
-    ImportNode,
     NormalizedAST,
     _SpellingIndex,
     _add_binding,
@@ -21,18 +19,13 @@ from aegis_core.ast.schema import (
     _extract_python_decorators_from_tree,
     _import_aliases,
     _normalize_ast_token,
-    _spellings,
-    _suffix_match,
 )
 
 __all__ = [
     "ASTExtractionError",
     "_match_ImportNode_against_pattern",
-    "_match_call_against_pattern",
-    "_match_decorator_against_pattern",
     "evaluate_forbid_ast",
     "extract_normalized_ast",
-    "synthesize_planned_ast",
 ]
 
 
@@ -59,37 +52,6 @@ def _match_ImportNode_against_pattern(imp: Any, pattern: str) -> bool:
             if full == mod or full.startswith(f"{mod}."):
                 return True
     return False
-
-
-def _match_call_against_pattern(
-    call_item: Any,
-    pattern: str,
-    imported_qual_map: Optional[Mapping[str, Any]] = None,
-    aliases: Optional[Mapping[str, Any]] = None,
-) -> bool:
-    """Return True if a CallSiteNode or call target matches a forbidden call pattern.
-
-    Map values may be one name or a sequence of names (every binding of the key).
-    """
-    call = _normalize_ast_token(pattern)
-    target = _call_target(call_item)
-    if not call or not target:
-        return False
-    return any(_suffix_match(s, call) for s in _spellings(target, imported_qual_map, aliases, qualify_heads=True))
-
-
-def _match_decorator_against_pattern(
-    decorator_item: Any,
-    pattern: str,
-    imported_qual_map: Optional[Mapping[str, Any]] = None,
-    aliases: Optional[Mapping[str, Any]] = None,
-) -> bool:
-    """Return True if a decorator matches a forbidden decorator pattern (map values as for calls)."""
-    dec = _decorator_pattern(pattern)
-    norm_d = _decorator_name(decorator_item)
-    if not dec or not norm_d:
-        return False
-    return any(_suffix_match(s, dec) for s in _spellings(norm_d, imported_qual_map, aliases, qualify_heads=False))
 
 
 def evaluate_forbid_ast(
@@ -207,36 +169,6 @@ def evaluate_forbid_ast(
             violations.append(f"Forbidden decorator '{dec}' matched rule forbid_ast.decorators")
 
     return violations
-
-
-def synthesize_planned_ast(planned_symbols: Iterable[str]) -> NormalizedAST:
-    """Synthesize a virtual NormalizedAST from pre-edit planned symbols."""
-    imports: list[ImportNode] = []
-    call_sites: list[CallSiteNode] = []
-    decorators: list[str] = []
-
-    for raw in planned_symbols or ():
-        if not isinstance(raw, str):
-            continue
-        sym = _normalize_ast_token(raw).split("(", 1)[0].strip()
-        if not sym:
-            continue
-        imports.append(ImportNode(source=sym, imported_symbols=(sym.split(".")[-1],)))
-        if "." in sym:
-            head, tail = sym.split(".", 1)
-            imports.append(ImportNode(source=head, imported_symbols=(tail,)))
-        call_sites.append(CallSiteNode(target=sym))
-        decorators.append(sym)
-
-    return NormalizedAST(
-        file_path="<planned_symbols>",
-        language="python",
-        definitions=(),
-        call_sites=tuple(call_sites),
-        imports=tuple(imports),
-        mutation_points=(),
-        metadata={"parser": "planned_symbols", "decorators": decorators},
-    )
 
 
 def extract_normalized_ast(

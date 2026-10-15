@@ -389,8 +389,7 @@ def run_layer1(
                 results.append(_tool_failure("import_guard", filepath, exc))
 
     # ── Declarative Rule-Level forbid_ast ─────────────────────────────
-    from aegis_core.ast.match import evaluate_forbid_ast, extract_normalized_ast
-    from aegis_core.ast.policy import ASTExtractionError
+    from aegis_core.ast.policy import ASTExtractionError, evaluate_forbid_ast, extract_normalized_ast
 
     try:
         forbid_rules, broken_rules = _discover_forbid_ast_rules(repo_root_str)

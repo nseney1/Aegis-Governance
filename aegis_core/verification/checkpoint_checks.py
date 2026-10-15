@@ -242,8 +242,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "unit" / "mcp" / "test_manifest_hmac.py")
     if stem == "adversarial_verify":
         candidates.append(test_dir / "unit" / "verification" / "test_adversarial_verify.py")
-    if stem in ("match", "ast_match"):
-        candidates.append(test_dir / "unit" / "core" / "test_ast_grep_upgrade.py")
     if stem in ("taxonomy", "operations", "layout", "discovery"):
         candidates.append(test_dir / "unit" / "core" / "test_v3_zero_legacy_invariants.py")
         candidates.append(test_dir / "unit" / "core" / "test_storage.py")

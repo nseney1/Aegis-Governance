@@ -11,9 +11,6 @@ __version__ = "3.1.0"
 
 _LEGACY_MODULE_REDIRECTS: dict[str, str] = {
     "aegis_core.verification.immune_verify": "aegis_core.verification.adversarial_verify",
-    "aegis_core.ast.triggers": "aegis_core.ast.match",
-    "aegis_core.ast_match": "aegis_core.ast.match",
-    "aegis_core.ast_triggers": "aegis_core.ast.match",
 }
 
 
@@ -54,7 +51,6 @@ if not any(isinstance(f, _LegacyModuleRedirectFinder) for f in sys.meta_path):
 # Explicit mapping of exported symbol name -> (module_name, attribute_name)
 _EXPORTS: dict[str, tuple[str, str | None]] = {
     # Submodules
-    "ast_match": ("aegis_core.ast.match", None),
     "proposals": ("aegis_core.proposals", None),
     "rule_inventory": ("aegis_core.rule_inventory", None),
     "command_safety": ("aegis_core.command_safety", None),
