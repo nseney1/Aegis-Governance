@@ -61,6 +61,7 @@
           },
           "idempotency_key": {
             "type": "string",
+            "maxLength": 256,
             "description": "Unique key for this report. Retrying with the same key never records twice."
           },
           "rules_used": {
@@ -79,7 +80,8 @@
             "default": 0
           },
           "notes": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 4096
           },
           "view": {
             "type": "string",

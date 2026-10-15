@@ -242,6 +242,7 @@ TOOL_DEFINITIONS = [
                 "outcome": {"type": "string", "enum": list(_VALID_OUTCOMES), "description": "Verification outcome."},
                 "idempotency_key": {
                     "type": "string",
+                    "maxLength": 256,
                     "description": "Unique key for this report. Retrying with the same key never records twice.",
                 },
                 "rules_used": {
@@ -252,7 +253,7 @@ TOOL_DEFINITIONS = [
                 },
                 "tests_passed": {"type": "boolean"},
                 "rework_count": {"type": "integer", "default": 0},
-                "notes": {"type": "string"},
+                "notes": {"type": "string", "maxLength": 4096},
                 "view": _VIEW_PROPERTY,
             },
             "required": ["outcome", "rules_used", "idempotency_key"],

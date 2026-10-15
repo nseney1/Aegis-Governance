@@ -104,11 +104,18 @@ def test_missing_idempotency_key_is_rejected_and_records_nothing(served):
     assert _rows(served) == []
 
 
-@pytest.mark.parametrize("key", ["", None, 7])
-def test_blank_or_non_string_idempotency_key_is_rejected(served, key):
+@pytest.mark.parametrize("key, error", [
+    ("", KEY_REQUIRED),
+    ("   ", KEY_REQUIRED),
+    (None, KEY_REQUIRED),
+    # A value of the wrong type breaks the published schema and is named as such.
+    (7, "Invalid 'idempotency_key': 7. Expected a string."),
+])
+def test_blank_or_non_string_idempotency_key_is_rejected(served, key, error):
     response, payload = _call({"outcome": "success", "rules_used": ["trap-x"], "idempotency_key": key})
     assert response["result"]["isError"] is True
-    assert payload == {"status": "FAIL", "error": KEY_REQUIRED}
+    assert payload == {"status": "FAIL", "error": error}
+    assert _rows(served) == []
 
 
 def test_retry_with_the_same_key_is_recorded_once(served):
