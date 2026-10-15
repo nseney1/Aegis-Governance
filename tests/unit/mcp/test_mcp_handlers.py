@@ -93,9 +93,14 @@ def test_list_rules_rejects_bad_workspace():
     assert handle_list_rules({"workspace": BAD_WORKSPACE})["status"] == "FAIL"
 
 
-def test_report_outcome_with_no_rules_records_nothing(mcp_workspace: Path):
+def test_report_outcome_without_rules_is_rejected(mcp_workspace: Path):
     res = handle_report_outcome({"workspace": str(mcp_workspace), "outcome": "success", "idempotency_key": "k"})
-    assert res == {"status": "recorded", "records": []}
+    assert res == {
+        "status": "FAIL",
+        "error": "'rules_used' must name at least one rule from aegis_scan: "
+                 "an outcome with no rule has nothing to credit.",
+    }
+    assert not (mcp_workspace / ".aegis" / "evidence" / "signals.jsonl").exists()
 
 
 def test_report_outcome_rejects_bad_workspace():

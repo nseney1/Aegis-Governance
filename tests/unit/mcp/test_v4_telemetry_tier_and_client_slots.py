@@ -94,6 +94,22 @@ def test_initialize_detects_client_platform_and_interpolates_slots_in_scan(tmp_p
     assert server_module._client_platform == "gemini"
 
 
+def test_unknown_client_gets_the_generic_slot_table_not_another_vendors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _make_workspace_with_rule(tmp_path, "invariant-tdd")
+    monkeypatch.setattr(server_module, "_canonical_workspace", str(ws))
+    monkeypatch.setattr(server_module, "_session_id", None)
+    monkeypatch.setattr(server_module, "_client_platform", server_module._client_platform)
+    handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"clientInfo": {"name": "some-new-agent"}}})
+
+    scan_resp = handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                "params": {"name": "aegis_scan", "arguments": {"files": ["src/app.py"]}}})
+
+    guidance = json.loads(scan_resp["result"]["content"][0]["text"])["guidance"]
+    assert "read_file" in guidance and "fast-tier" in guidance
+    assert "view_file" not in guidance and "flash" not in guidance
+
+
 def test_repo_root_aegis_scan_loads_cleanly_without_integrity_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AEGIS_WORKSPACE", str(REPO_ROOT))
     err_buf = io.StringIO()

@@ -13,8 +13,9 @@ from aegis_core.yaml import parse_frontmatter
 from aegis_mcp.jit_engine import warn
 
 _STATUS_FAIL = "FAIL"
-# Hosts whose clientInfo names none of the known clients get this slot table.
-DEFAULT_CLIENT_PLATFORM = "gemini"
+# A client whose clientInfo names no known host: its ledger rows say "generic" and its
+# scans get the generic slot table, never another vendor's (host-matrix §3.5).
+DEFAULT_CLIENT_PLATFORM = "generic"
 _VALID_OUTCOMES = ("success", "partial", "failure", "tp", "fp", "pass", "fail")
 
 
@@ -243,13 +244,18 @@ TOOL_DEFINITIONS = [
                     "type": "string",
                     "description": "Unique key for this report. Retrying with the same key never records twice.",
                 },
-                "rules_used": {"type": "array", "items": {"type": "string"}, "description": "Names of the rules this outcome is about."},
+                "rules_used": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": "Names of the rules this outcome is about, as aegis_scan returned them.",
+                },
                 "tests_passed": {"type": "boolean"},
                 "rework_count": {"type": "integer", "default": 0},
                 "notes": {"type": "string"},
                 "view": _VIEW_PROPERTY,
             },
-            "required": ["outcome", "idempotency_key"],
+            "required": ["outcome", "rules_used", "idempotency_key"],
             "additionalProperties": False,
         },
     },

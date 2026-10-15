@@ -104,12 +104,25 @@ def send_error(id: Any, code: int, message: str):
     send_response(_error(id, code, message))
 
 
+# clientInfo.name substring -> host. Antigravity keeps the gemini slot table it always had.
+# Wave C replaces this with the exact host-matrix §2 table and AEGIS_CLIENT.
+_CLIENT_MARKERS = (
+    ("claude", "claude"),
+    ("cursor", "cursor"),
+    ("copilot", "copilot"),
+    ("kiro", "kiro"),
+    ("antigravity", "gemini"),
+    ("gemini", "gemini"),
+    ("codex", "codex"),
+)
+
+
 def _detect_client_platform(params: Any) -> str:
     client_info = params.get("clientInfo", {}) if isinstance(params, dict) else {}
     client_name = str(client_info.get("name", "")).lower() if isinstance(client_info, dict) else ""
-    for marker in ("claude", "cursor", "copilot", "kiro"):
+    for marker, platform in _CLIENT_MARKERS:
         if marker in client_name:
-            return marker
+            return platform
     return DEFAULT_CLIENT_PLATFORM
 
 

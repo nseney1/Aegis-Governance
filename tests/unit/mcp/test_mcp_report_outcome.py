@@ -2,7 +2,9 @@
 
 A row records ``source: "mcp"`` plus the client host and the server session, both
 owned by the server: nothing in the tool arguments can choose them. A report needs
-an idempotency key, so a retried call is recorded once.
+an idempotency key, so a retried call is recorded once, even when the retry comes
+from a new session after a reconnect. A report names at least one rule: an outcome
+with no rule has nothing to credit.
 """
 from __future__ import annotations
 
@@ -16,6 +18,10 @@ from aegis_mcp.tools import execute_tool
 
 KEY_REQUIRED = (
     "'idempotency_key' is required: send a unique key per report so a retry is never recorded twice."
+)
+RULES_REQUIRED = (
+    "'rules_used' must name at least one rule from aegis_scan: "
+    "an outcome with no rule has nothing to credit."
 )
 
 
@@ -182,15 +188,72 @@ def test_rate_limit_still_applies_to_report_outcome(served):
     assert response["error"]["message"].startswith("Rate limit exceeded for 'aegis_report_outcome'")
 
 
-def test_same_key_from_a_new_session_is_refused_not_recorded_twice(served):
+def _reconnect(client_name="claude-code", req_id=5):
+    server.handle_request({"jsonrpc": "2.0", "id": req_id, "method": "initialize",
+                           "params": {"clientInfo": {"name": client_name}}})
+
+
+def test_retry_from_a_new_session_returns_the_original_record(served):
     args = {"outcome": "tp", "rules_used": ["trap-x"], "idempotency_key": "cross-session"}
-    _call(args)
-    server.handle_request({"jsonrpc": "2.0", "id": 5, "method": "initialize",
-                           "params": {"clientInfo": {"name": "claude-code"}}})
+    _, first = _call(args)
+    first_session = server._session_id
+    _reconnect()
+    assert server._session_id != first_session
 
     response, payload = _call(args, req_id=6)
 
+    assert response["result"]["isError"] is False, payload
+    assert payload == first
+    row, = _rows(served)
+    assert row["metadata"]["session"] == first_session
+
+
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_reusing_a_key_for_a_different_report_is_refused(served, reconnect):
+    _call({"outcome": "tp", "rules_used": ["trap-x"], "idempotency_key": "reused"})
+    if reconnect:
+        _reconnect()
+
+    response, payload = _call({"outcome": "fp", "rules_used": ["trap-x"], "idempotency_key": "reused"}, req_id=6)
+
     assert response["result"]["isError"] is True
-    assert payload["error"].startswith("Failed to record outcome: event ")
-    assert payload["error"].endswith("already recorded with a different payload")
-    assert len(_rows(served)) == 1
+    assert payload == {
+        "status": "FAIL",
+        "error": "'idempotency_key' 'reused' was already used for a different report: "
+                 "send a new key for each new report.",
+    }
+    row, = _rows(served)
+    assert row["signal"] == "tp"
+
+
+@pytest.mark.parametrize("arguments", [
+    {"outcome": "tp", "idempotency_key": "no-rules"},
+    {"outcome": "tp", "idempotency_key": "no-rules", "rules_used": []},
+])
+def test_a_report_without_rules_is_rejected_and_records_nothing(served, arguments):
+    response, payload = _call(arguments)
+    assert response["result"]["isError"] is True
+    assert payload == {"status": "FAIL", "error": RULES_REQUIRED}
+    assert _rows(served) == []
+
+
+def test_schema_requires_a_key_and_at_least_one_rule():
+    tool = next(t for t in server.TOOL_DEFINITIONS if t["name"] == "aegis_report_outcome")
+    schema = tool["inputSchema"]
+    assert sorted(schema["required"]) == ["idempotency_key", "outcome", "rules_used"]
+    assert schema["properties"]["rules_used"]["minItems"] == 1
+
+
+@pytest.mark.parametrize("client_name,host", [
+    ("claude-code", "claude"),
+    ("antigravity-client", "gemini"),
+    ("codex-mcp-client", "codex"),
+    ("some-new-agent", "generic"),
+    ("", "generic"),
+])
+def test_row_host_names_the_client_and_an_unknown_client_is_generic(served, client_name, host):
+    _reconnect(client_name)
+    response, payload = _call({"outcome": "tp", "rules_used": ["trap-x"], "idempotency_key": f"h-{client_name}"})
+    assert response["result"]["isError"] is False, payload
+    row, = _rows(served)
+    assert row["metadata"]["host"] == host

@@ -68,7 +68,8 @@
             "items": {
               "type": "string"
             },
-            "description": "Names of the rules this outcome is about."
+            "minItems": 1,
+            "description": "Names of the rules this outcome is about, as aegis_scan returned them."
           },
           "tests_passed": {
             "type": "boolean"
@@ -92,6 +93,7 @@
         },
         "required": [
           "outcome",
+          "rules_used",
           "idempotency_key"
         ],
         "additionalProperties": false
