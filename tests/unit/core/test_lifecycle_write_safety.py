@@ -9,17 +9,25 @@ Invariants under test (docs/adr/0005-evidence-review.md M1):
 - once a demotion has moved the rule out of the gate tier, the old tier's
   enforcement artifacts are removed even if the write step reports an error
   afterwards;
-- persisted lifecycle timestamps are one valid UTC ISO-8601 form.
+- persisted lifecycle timestamps are one valid UTC ISO-8601 form;
+- the existence checks that promote/demote/metamorphose run before taking the
+  lock are repeated under it, so a rival create or move that lands in between
+  is never overwritten and never crashes the second mover;
+- the tier pass rewrites only the rules whose content changes and holds the
+  rules lock per rewrite, not for the whole pass.
 """
 from __future__ import annotations
 
+import builtins
 import errno
 import hashlib
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +42,7 @@ from aegis_core.lifecycle import (
     demote_cell,
     evaluate_cell_tiers,
     metamorphose_cell,
+    promote_cell,
     run_cell_selection,
     transfer_cell,
 )
@@ -94,6 +103,13 @@ def _scenario_tiers(tmp_path: Path):
     return ws, lambda: evaluate_cell_tiers(ws, execute=True)
 
 
+def _scenario_tier_escalation(tmp_path: Path):
+    ws = _ws(tmp_path)
+    # 30 -> 28 triggers after decay: still >= 20, so advisory escalates to mechanical.
+    _rule(ws / ".aegis" / "rules" / "traps" / "proven.md", "proven", "trap", triggers=30, tp=30)
+    return ws, lambda: evaluate_cell_tiers(ws, execute=True)
+
+
 def _scenario_metamorphose(tmp_path: Path):
     ws = _ws(tmp_path)
     _rule(ws / ".aegis" / "rules" / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
@@ -111,6 +127,7 @@ _SCENARIOS = {
     "transfer": _scenario_transfer,
     "selection": _scenario_selection,
     "tiers": _scenario_tiers,
+    "tier_escalation": _scenario_tier_escalation,
     "metamorphose": _scenario_metamorphose,
     "adapt": _scenario_adapt,
 }
@@ -180,6 +197,44 @@ def test_failed_final_write_leaves_rules_untouched(
     monkeypatch.undo()
 
     assert _snapshot(rules_dir) == before
+
+
+@pytest.mark.parametrize("scenario", sorted(_SCENARIOS))
+def test_rule_files_are_never_rewritten_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str
+) -> None:
+    """A plain open(..., "w") on a rule truncates it first; a crash then leaves a broken rule."""
+    locked_ws, operation = _SCENARIOS[scenario](tmp_path)
+    rules_dir = (locked_ws / ".aegis" / "rules").resolve()
+    in_place: list[tuple[str, str]] = []
+    real_open = builtins.open
+
+    def spy(file, mode="r", *args, **kwargs):
+        if isinstance(file, (str, os.PathLike)) and any(flag in mode for flag in "wax+"):
+            target = Path(os.fspath(file)).resolve()
+            if rules_dir in target.parents:
+                in_place.append((target.relative_to(rules_dir).as_posix(), mode))
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", spy)
+    monkeypatch.setattr(io, "open", spy)
+    operation()
+    monkeypatch.undo()
+
+    assert in_place == []
+
+
+def test_tier_escalation_records_its_enforcement_artifact(tmp_path: Path) -> None:
+    ws, operation = _scenario_tier_escalation(tmp_path)
+
+    res = operation()
+
+    assert [(c["cell"], c["old_tier"], c["new_tier"]) for c in res["changes"]] == [("proven.md", "advisory", "mechanical")]
+    meta = parse_frontmatter((ws / ".aegis" / "rules" / "traps" / "proven.md").read_text(encoding="utf-8")) or {}
+    assert meta["enforcement"] == "mechanical"
+    assert meta["enforcement_artifact"] == ".aegis/enforcement/check-proven.sh"
+    artifact = ws / ".aegis" / "enforcement" / "check-proven.sh"
+    assert artifact.is_file() and os.access(artifact, os.X_OK)
 
 
 # ── Demotion artifact cleanup across a post-move failure ────────────────
@@ -263,3 +318,185 @@ def test_metamorphose_writes_valid_utc_timestamp(tmp_path: Path) -> None:
     moved = ws / ".aegis" / "rules" / "invariants" / "mature.md"
     meta = parse_frontmatter(moved.read_text(encoding="utf-8")) or {}
     _assert_utc(meta.get("metamorphosis_date"))
+
+
+# ── Interleavings: a rival lands between the unlocked checks and the lock ──
+
+def _rival_on_first_lock(monkeypatch: pytest.MonkeyPatch, rival) -> None:
+    """Run ``rival`` just before the lifecycle engine's first rules-lock acquisition.
+
+    This is the window a concurrent process gets between promote/demote's
+    unlocked existence checks and their locked move.
+    """
+    real_lock = promotion.workspace_lock
+    pending = [rival]
+
+    @contextmanager
+    def lock_after_rival(*args, **kwargs):
+        if pending:
+            pending.pop()()
+        with real_lock(*args, **kwargs) as held:
+            yield held
+
+    monkeypatch.setattr(promotion, "workspace_lock", lock_after_rival)
+
+
+def _rules(ws: Path) -> Path:
+    return ws / ".aegis" / "rules"
+
+
+def test_promote_never_overwrites_a_rule_created_in_the_target_tier_meanwhile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _ws(tmp_path)
+    source = _rule(_rules(ws) / "traps" / "shared-id.md", "shared-id", "trap")
+    _rival_on_first_lock(
+        monkeypatch, lambda: create_cell("invariant", "Rival invariant", id_override="shared-id", workspace=ws)
+    )
+
+    res = promote_cell(ws, "shared-id", force=True)
+
+    assert res["status"] == "target_exists"
+    assert "Rival invariant" in (_rules(ws) / "invariants" / "shared-id.md").read_text(encoding="utf-8")
+    assert source.is_file()
+
+
+def test_concurrent_promotes_of_one_rule_promote_it_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _ws(tmp_path)
+    _rule(_rules(ws) / "traps" / "once.md", "once", "trap")
+    rival: list[dict] = []
+    _rival_on_first_lock(monkeypatch, lambda: rival.append(promote_cell(ws, "once", force=True)))
+
+    res = promote_cell(ws, "once", force=True)
+
+    assert rival[0]["status"] == "promoted"
+    assert res["status"] == "not_found"
+    assert (_rules(ws) / "invariants" / "once.md").is_file()
+    assert not (_rules(ws) / "gates" / "once.md").exists()
+
+
+def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _ws(tmp_path)
+    source, artifacts = _invariant_with_artifacts(ws)
+    _rival_on_first_lock(monkeypatch, lambda: create_cell("trap", "Rival trap", id_override="guarded", workspace=ws))
+
+    res = demote_cell(ws, "guarded")
+
+    assert res["status"] == "target_exists"
+    assert "Rival trap" in (_rules(ws) / "traps" / "guarded.md").read_text(encoding="utf-8")
+    assert source.is_file()
+    assert all(a.exists() for a in artifacts), "the invariant did not move; its gate artifacts must stay"
+
+
+def test_concurrent_demotes_of_one_rule_demote_it_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _ws(tmp_path)
+    _invariant_with_artifacts(ws)
+    rival: list[dict] = []
+    _rival_on_first_lock(monkeypatch, lambda: rival.append(demote_cell(ws, "guarded")))
+
+    res = demote_cell(ws, "guarded")
+
+    assert rival[0]["status"] == "demoted"
+    assert res["status"] == "not_found"
+    assert (_rules(ws) / "traps" / "guarded.md").is_file()
+
+
+def test_metamorphose_never_overwrites_a_rule_created_in_the_target_tier_meanwhile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _ws(tmp_path)
+    source = _rule(_rules(ws) / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
+    _rival_on_first_lock(
+        monkeypatch, lambda: create_cell("invariant", "Rival invariant", id_override="mature", workspace=ws)
+    )
+
+    res = metamorphose_cell(ws, "mature")
+
+    assert res["status"] == "target_exists"
+    assert "Rival invariant" in (_rules(ws) / "invariants" / "mature.md").read_text(encoding="utf-8")
+    assert source.is_file()
+
+
+def test_metamorphose_of_a_rule_moved_meanwhile_reports_not_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _ws(tmp_path)
+    _rule(_rules(ws) / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
+    _rival_on_first_lock(monkeypatch, lambda: promote_cell(ws, "mature", force=True))
+
+    res = metamorphose_cell(ws, "mature")
+
+    assert res["status"] == "not_found"
+    assert (_rules(ws) / "invariants" / "mature.md").is_file()
+
+
+# ── Tier pass: rewrite only what changes, lock only while rewriting ─────
+
+_LOCK_HOLDER_UNTIL_EOF = r"""
+import sys
+from pathlib import Path
+from aegis_core.locking import workspace_lock
+from aegis_core.workspace.layout import LockResource
+
+with workspace_lock(Path(sys.argv[1]), LockResource.RULES):
+    print("locked", flush=True)
+    sys.stdin.read()
+"""
+
+
+def test_tier_pass_does_not_rewrite_unchanged_rules(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    rules = [_rule(_rules(ws) / "traps" / f"steady-{i}.md", f"steady-{i}", "trap") for i in range(3)]
+    evaluate_cell_tiers(ws, execute=True)
+    stamps = [(p.stat().st_ino, p.stat().st_mtime_ns) for p in rules]
+
+    res = evaluate_cell_tiers(ws, execute=True)
+
+    assert res == {"evaluated": 3, "changes": []}
+    assert [(p.stat().st_ino, p.stat().st_mtime_ns) for p in rules] == stamps
+
+
+def test_tier_pass_with_nothing_to_change_does_not_wait_for_the_rules_lock(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    _rule(_rules(ws) / "traps" / "steady.md", "steady", "trap")
+    evaluate_cell_tiers(ws, execute=True)
+    before = _snapshot(_rules(ws))
+    env = dict(os.environ, PYTHONPATH=REPO_ROOT, HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"))
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER_UNTIL_EOF, str(ws)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked", holder.stderr.read()
+        # Needing the lock here would raise LockTimeoutError after 5 s.
+        res = evaluate_cell_tiers(ws, execute=True)
+    finally:
+        holder.stdin.close()
+        try:
+            holder.wait(timeout=15)
+        finally:
+            if holder.poll() is None:
+                holder.kill()
+                holder.wait()
+
+    assert res == {"evaluated": 1, "changes": []}
+    assert _snapshot(_rules(ws)) == before
+
+
+def test_tier_pass_keeps_a_concurrent_edit_to_the_rule_it_rewrites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rules are read before the lock; the rewrite must start from what is on disk under it."""
+    ws = _ws(tmp_path)
+    rule = _rule(_rules(ws) / "traps" / "edited.md", "edited", "trap")
+
+    def edit() -> None:
+        rule.write_text(rule.read_text(encoding="utf-8").replace("Body text.", "Edited concurrently."), encoding="utf-8")
+
+    _rival_on_first_lock(monkeypatch, edit)
+
+    evaluate_cell_tiers(ws, execute=True)
+
+    text = rule.read_text(encoding="utf-8")
+    assert "Edited concurrently." in text
+    assert "last_decay_epoch" in ((parse_frontmatter(text) or {}).get("fitness") or {})
