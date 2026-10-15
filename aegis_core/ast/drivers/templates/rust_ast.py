@@ -107,6 +107,9 @@ def _compute_line_col(source: str, offset: int) -> Tuple[int, int]:
     return line, col
 
 
+_USE_MEMBER_AS = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$")
+
+
 def parse_rust_source(source: str, file_path: str) -> Dict[str, Any]:
     """Extract NormalizedAST from Rust source code."""
     masked, _ = _strip_comments_and_strings(source)
@@ -122,31 +125,43 @@ def parse_rust_source(source: str, file_path: str) -> Dict[str, Any]:
         use_expr = m.group(1).strip()
         line, _ = _compute_line_col(source, m.start())
         alias = None
-        if " as " in use_expr:
-            parts = use_expr.split(" as ")
-            use_expr = parts[0].strip()
-            alias = parts[1].strip()
-
-        is_wildcard = use_expr.endswith("::*")
-        module_name = use_expr
-        imported_names = []
+        aliases: List[List[str]] = []
 
         if "::{" in use_expr and use_expr.endswith("}"):
+            # `use a::b::{C as D, e};` renames members one by one: each `as` belongs to
+            # its member, so it becomes a [bound, original] pair, never the whole use's alias.
             base_mod, symbols = use_expr.split("::{", 1)
-            symbols = symbols.rstrip("}")
             module_name = base_mod.strip()
-            imported_names = [s.strip() for s in symbols.split(",") if s.strip()]
+            is_wildcard = False
+            imported_names = []
+            for member in (part.strip() for part in symbols[:-1].split(",")):
+                renamed = _USE_MEMBER_AS.match(member)
+                if renamed:
+                    original, bound = renamed.groups()
+                    if original == "self":
+                        original = module_name.split("::")[-1]
+                    imported_names.append(bound)
+                    aliases.append([bound, original])
+                elif member:
+                    imported_names.append(member)
         else:
+            if " as " in use_expr:
+                use_expr, alias = (part.strip() for part in use_expr.split(" as ", 1))
+            is_wildcard = use_expr.endswith("::*")
+            module_name = use_expr
             last_part = use_expr.split("::")[-1].strip()
             imported_names = [last_part] if not is_wildcard else []
 
-        imports.append({
+        record: Dict[str, Any] = {
             "module": module_name,
             "imported_names": imported_names,
             "alias": alias,
             "is_wildcard": is_wildcard,
             "line": line,
-        })
+        }
+        if aliases:
+            record["aliases"] = aliases
+        imports.append(record)
 
     # 2. Impl blocks tracking for methods
     impl_blocks: List[Tuple[int, int, str]] = []  # (start, end, type_name)
