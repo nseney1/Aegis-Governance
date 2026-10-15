@@ -2,7 +2,7 @@
 
 1. Every write of Aegis state or rule files goes through aegis_core.storage: no
    ``open(..., "w"|"a"|"x")``, ``write_text``, ``write_bytes`` or ``shutil.copy*``
-   anywhere else in aegis_core/aegis_cli/aegis_mcp, except the writers listed below,
+   anywhere else in aegis_core/aegis_cli/aegis_mcp/aegis_sdk, except the writers listed below,
    which write files outside ``.aegis/``.
 2. aegis_core/workspace/layout.py is the only module that spells an ``.aegis`` path.
    User-facing sentences may mention one; a string literal that *is* a path may not.
@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
-PACKAGES = ("aegis_core", "aegis_cli", "aegis_mcp")
+PACKAGES = ("aegis_core", "aegis_cli", "aegis_mcp", "aegis_sdk")
 
 # (file, enclosing function) -> what it writes. Adding an entry is a reviewed decision.
 NON_AEGIS_WRITERS = {
