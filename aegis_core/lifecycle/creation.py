@@ -54,12 +54,12 @@ def create_cell(
     tags: list[str] | None = None,
     expiry_sessions: int | None = 15,
     expiry_days: int | None = 60,
-    minimum_mode: str = "",
+    minimum_mode: str | None = "",
     id_override: str | None = None,
     effector: bool = False,
     memory: bool = False,
     target_paths: list[str] | None = None,
-    domain: str = "correctness",
+    domain: str | None = "correctness",
     workspace: Workspace | Path | str | None = None,
     enforcement: str | None = None,
     body: str | None = None,
@@ -96,6 +96,9 @@ def create_cell(
     if effector and memory:
         raise ValueError("--effector and --memory are mutually exclusive.")
 
+    # Programmatic callers pass None for "not given".
+    domain = "correctness" if domain is None else domain
+    minimum_mode = minimum_mode or ""
     if minimum_mode:
         minimum_mode = normalize_review_mode(minimum_mode, default=minimum_mode.strip().lower())
 

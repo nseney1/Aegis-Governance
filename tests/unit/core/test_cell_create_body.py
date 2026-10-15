@@ -107,3 +107,12 @@ def test_multiline_unquoted_frontmatter_values_are_rejected(ws: Path, field: str
     with pytest.raises(ValueError, match=rf"^Invalid {field} .*: must be a single line\.$"):
         create_cell("trap", "Injected", id_override="injected", workspace=ws, **{field: "patrol\nactivation: dormant"})
     assert _rule_files(ws) == []
+
+
+def test_none_domain_and_minimum_mode_fall_back_to_defaults(ws: Path) -> None:
+    """Programmatic callers pass None for "not given"; that must not crash the newline guard."""
+    path = create_cell("trap", "Defaults", id_override="defaults", workspace=ws, domain=None, minimum_mode=None)
+
+    meta = parse_frontmatter(path.read_text(encoding="utf-8")) or {}
+    assert meta["domain"] == "correctness"
+    assert "minimum_mode" not in meta
