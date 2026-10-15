@@ -225,6 +225,7 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
         if args.command == "completion":
             args.ws = None
         elif args.command == "init":
+            args._allow_home_fallback = True
             raw_ws = getattr(args, "workspace", None) or Path.cwd()
             args.ws = Workspace.for_init(raw_ws)
         else:
