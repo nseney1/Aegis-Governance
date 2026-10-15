@@ -4,7 +4,7 @@
 [![Core Rules](https://img.shields.io/badge/Core_Rules-18-green?style=flat-square)](#-core-rules)
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-15-purple?style=flat-square)](#-agent-skills)
 [![Architecture](https://img.shields.io/badge/Architecture-Pure_Python-blue?style=flat-square)](#-core-architecture)
-[![Version](https://img.shields.io/badge/Version-3.1.0-informational?style=flat-square)](docs/project/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-3.2.0-informational?style=flat-square)](docs/project/CHANGELOG.md)
 [![Zero Runtime Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen?style=flat-square)](#)
 [![Blog Post](https://img.shields.io/badge/Blog-dev.to-black?style=flat-square&logo=devdotto)](https://dev.to/nseney1/your-ai-agents-rules-file-is-a-gentlemans-agreement-heres-what-happens-when-you-build-2dml)
 [![M8ven Score](https://m8ven.ai/badge/mcp/nseney1-Aegis-Guardrails)](https://m8ven.ai/mcp/nseney1/Aegis-Guardrails?s=readme)
@@ -33,7 +33,7 @@ Explore deep-dive guides for production architecture, workflows, and specificati
 |:------|:------------|:----------|
 | [**MCP Gateway**](docs/guides/mcp_gateway.md) | Dual-Plane Gateway Architecture | Control vs Execution Plane, receipt security, opt-in projection |
 | [**Verification Pipeline**](docs/guides/verification_pipeline.md) | Two-Layer Verification Engine | Layer 1 AST checks, Layer 2 Adversarial Rebuttal, Gate 4.5 |
-| [**Rule Lifecycle**](docs/guides/cell_lifecycle.md) | Evolutionary Rule Management | 5 rule types, Wilson scoring, promotion/demotion, zero-touch decay |
+| [**Rule Lifecycle**](docs/guides/rule_lifecycle.md) | Evolutionary Rule Management | 4 rule types, Wilson scoring, promotion/demotion, zero-touch decay |
 | [**Skill Graph**](docs/guides/skill_graph.md) | Horizontal Agent Collaboration | 15 skills, typed envelopes (<150 tokens), file-buffered handoffs |
 | [**Compatibility**](docs/project/COMPATIBILITY.md) | SemVer 2.0 Guarantee | Formal backwards compatibility contracts starting at v1.0.0 |
 | [**Security Policy**](SECURITY.md) | Vulnerability Reporting & Scopes | Security tiering, isolation, and responsible disclosure |
@@ -130,7 +130,7 @@ The system's foundational rules — 18 inherited behavioral defaults:
 
 ## 📋 Adaptive Rules & Verification
 
-Adaptive rules live in `.aegis/rules/` (`invariant`, `boundary`, `trap`, `persona`, `contract`). Rules evolve using Wilson-bounded fitness intervals and decay to zero when unreinforced. See the [Rule Lifecycle Guide](docs/guides/cell_lifecycle.md).
+Adaptive rules live in `.aegis/rules/` (`invariant`, `trap`, `gate`, `method`). Rules evolve using Wilson-bounded fitness intervals and decay to zero when unreinforced. See the [Rule Lifecycle Guide](docs/guides/rule_lifecycle.md).
 
 All changes are gated by `aegis check`:
 - **Layer 1**: Deterministic AST analysis (call graph reachability, mutation testing, import guards, branch coverage).

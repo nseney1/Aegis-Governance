@@ -182,14 +182,29 @@ def compute_event_id(principal: str, idempotency_scope: str, idempotency_key: st
     return hashlib.sha256(identity.encode('utf-8', errors='surrogatepass')).hexdigest()
 
 
+_SIGNALS_CACHE: dict[str, tuple[tuple[int, int, int], bytes, dict[str, dict]]] = {}
+
+
 def _read_existing_events(log_path: str) -> tuple[bytes, dict[str, dict]]:
+    try:
+        st = os.stat(log_path)
+    except FileNotFoundError:
+        _SIGNALS_CACHE.pop(log_path, None)
+        return b'', {}
+
+    fingerprint = (st.st_ino, st.st_mtime_ns, st.st_size)
+    cached = _SIGNALS_CACHE.get(log_path)
+    if cached is not None and cached[0] == fingerprint:
+        return cached[1], dict(cached[2])
+
     try:
         with open(log_path, 'rb') as f:
             raw = f.read()
     except FileNotFoundError:
+        _SIGNALS_CACHE.pop(log_path, None)
         return b'', {}
 
-    by_id = {}
+    by_id: dict[str, dict] = {}
     for line in raw.splitlines():
         try:
             record = json.loads(line.decode('utf-8', errors='surrogatepass'))
@@ -197,6 +212,7 @@ def _read_existing_events(log_path: str) -> tuple[bytes, dict[str, dict]]:
             continue
         if isinstance(record, dict) and record.get('event_id'):
             by_id.setdefault(record['event_id'], record)
+    _SIGNALS_CACHE[log_path] = (fingerprint, raw, dict(by_id))
     return raw, by_id
 
 
@@ -358,7 +374,17 @@ def append_signals(workspace: str, events: list[dict], expected_generation: Opti
                 (json.dumps(record, ensure_ascii=False) + '\n').encode('utf-8', errors='surrogatepass')
                 for record in new_records
             )
-            _atomic_replace_bytes(log_path, prefix + payload)
+            new_bytes = prefix + payload
+            _atomic_replace_bytes(log_path, new_bytes)
+            try:
+                st = os.stat(log_path)
+                _SIGNALS_CACHE[log_path] = (
+                    (st.st_ino, st.st_mtime_ns, st.st_size),
+                    new_bytes,
+                    dict(planned_by_id),
+                )
+            except OSError:
+                _SIGNALS_CACHE.pop(log_path, None)
         return results
 
 

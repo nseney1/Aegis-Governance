@@ -1,6 +1,12 @@
 ---
+id: visual-analyst
 name: Visual Analyst
 description: Analyzes screenshots, game frames, and UI captures to extract visual state, coordinates, and regressions.
+kind: skill
+tier: scout
+consumes: [InspectionReceipt]
+produces: [InspectionReceipt]
+handoff_targets: [incident-debug, spec-synthesizer]
 trigger: user_request
 ---
 

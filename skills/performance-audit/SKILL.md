@@ -1,6 +1,12 @@
 ---
+id: performance-audit
 name: performance-audit
 description: Profiles and analyzes hot-path allocations, algorithmic complexity, GC pressure, and resource utilization.
+kind: skill
+tier: auditor
+consumes: [DiffProposal, InspectionReceipt]
+produces: [InspectionReceipt, DiffProposal]
+handoff_targets: [spec-synthesizer, refactoring-pilot]
 ---
 
 # Senior Performance Engineer

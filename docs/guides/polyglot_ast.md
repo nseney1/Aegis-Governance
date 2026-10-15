@@ -1,49 +1,60 @@
 # Polyglot AST Analysis Guide
 
-Soma v1.1.0 introduces the **Normalized AST Driver (NAD) Protocol**, enabling deterministic Layer 1 verification (call graph reachability, orphan detection, and mutation testing) across polyglot codebases without adding third-party dependencies or bundling large grammar binaries into the core distribution.
+> Language-agnostic Layer 1 static analysis via `NormalizedAST` (`aegis_core/ast/schema.py`) and `ASTDriverRunner` (`aegis_core/ast/runner.py`).
 
 ---
 
-## 1. How It Works
+## 1. Architecture Overview
 
-1. **Native Python Fast-Path (In-Process)**:
-   All `.py` files are parsed in-process using Python's standard library `ast` module. This fast-path has zero overhead, executes in sub-millisecond time, and requires no external tooling.
+Aegis Guardrails v3.2.0 decouples Layer 1 deterministic verification (call graph reachability, orphan symbol detection, import guards, and mutation testing) from Python-specific AST traversal using the **Normalized AST Driver (NAD) Protocol**:
 
-2. **Host-Native Process Drivers (External)**:
-   When Soma encounters non-Python files (e.g. `.ts`, `.js`, `.go`, `.rs`), it delegates AST extraction to a lightweight external driver configured in `.soma/slots.yaml`. The driver parses the source file and emits standard JSON conforming to the `NormalizedAST` schema to `stdout`.
-
-3. **Strict Confinement & Timeouts**:
-   All external drivers execute with `shell=False`, argument confinement to prevent path traversal outside the workspace, and an enforced strict 3.0-second timeout.
+1. **In-Process Python Fast-Path (`aegis_core/ast/drivers/python.py`)**:
+   - All `.py` files are parsed in-process via `parse_python_ast()` using Python's standard library `ast` module.
+   - Executes in sub-millisecond time with zero subprocess overhead.
+2. **External Host-Native Drivers (`ASTDriverRunner` in `aegis_core/ast/runner.py`)**:
+   - When Aegis analyzes non-Python source files (`.rs`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`), `ASTDriverRunner` resolves the configured driver via `ASTDriverRegistry` and `.aegis/slots.yaml`.
+   - Drivers execute as isolated subprocesses (`shell=False`), confined to the workspace root via `confine_path_internal`, with a strict 3.0-second timeout (`ASTDriverTimeoutError`).
+   - Each driver parses the target file and emits a `NormalizedAST` JSON payload to `stdout`.
 
 ---
 
-## 2. Configuration via `.soma/slots.yaml`
+## 2. Auto-Detection & Provisioning (`aegis detect --fix`)
 
-To enable polyglot AST verification in your workspace, configure drivers in `.soma/slots.yaml` using extension-specific keys (`ast_driver_{ext}`) or a global fallback key (`ast_driver`):
+Aegis can automatically detect languages in your repository, provision reference AST drivers into `.aegis/drivers/`, and bind them in `.aegis/slots.yaml`:
 
-```yaml
-# .soma/slots.yaml
+```bash
+# Scan workspace languages and preview recommended AST drivers
+aegis detect
 
-# Extension-specific drivers
-ast_driver_ts: "node install/drivers/ts_ast.js"
-ast_driver_js: "node install/drivers/ts_ast.js"
-ast_driver_go: "go run install/drivers/go_ast.go"
-
-# Optional global fallback driver
-# ast_driver: "my-universal-ast-cli"
+# Provision .aegis/drivers/{rust_ast.py,ts_ast.js,go_ast.go} and update .aegis/slots.yaml
+aegis detect --fix
 ```
 
-If no driver is configured for a file extension, Soma gracefully bypasses external AST checks for that file without raising false-positive pipeline errors.
+### `.aegis/slots.yaml` Driver Configuration
+
+`SlotRegistry` (`aegis_core/skills/slots.py`) and `ASTDriverRegistry` (`aegis_core/ast/runner.py`) resolve extension-specific keys (`ast_driver_<ext>`) or a global fallback (`ast_driver`) from `.aegis/slots.yaml`:
+
+```yaml
+# .aegis/slots.yaml
+slots:
+  ast_driver_rs: "python3 .aegis/drivers/rust_ast.py"
+  ast_driver_ts: "node .aegis/drivers/ts_ast.js"
+  ast_driver_tsx: "node .aegis/drivers/ts_ast.js"
+  ast_driver_js: "node .aegis/drivers/ts_ast.js"
+  ast_driver_go: "go run .aegis/drivers/go_ast.go"
+```
+
+If no driver is configured for a file extension, `ASTDriverRunner` raises `NoDriverConfiguredError` internally and Layer 1 gracefully skips external AST checks for that extension without false-positive failures.
 
 ---
 
-## 3. The Normalized AST JSON Contract (v1.0)
+## 3. `NormalizedAST` Schema (`aegis_core/ast/schema.py`)
 
-External drivers must accept the target file path as an argument:
+External drivers accept the target source file path as their final argument:
 ```bash
 <driver_command> <path/to/source/file>
 ```
-and output a valid JSON object to `stdout` matching the following schema:
+and emit a JSON object deserialized by `NormalizedAST.from_dict()` (`aegis_core/ast/schema.py`):
 
 ```json
 {
@@ -55,19 +66,14 @@ and output a valid JSON object to `stdout` matching the following schema:
       "name": "calculateTax",
       "kind": "function",
       "line": 10,
-      "column": 0,
-      "end_line": 25,
       "is_exported": true,
-      "is_method": false,
-      "class_name": null,
-      "docstring": null
+      "class_name": null
     }
   ],
   "call_sites": [
     {
       "target": "helperFunction",
       "line": 15,
-      "column": 4,
       "caller_scope": "calculateTax"
     }
   ],
@@ -93,62 +99,39 @@ and output a valid JSON object to `stdout` matching the following schema:
 }
 ```
 
-### Schema Nodes
+### Dataclass Contracts in `aegis_core/ast/schema.py`
 
-| Node | Field | Type | Description |
-|:---|:---|:---|:---|
-| **DefinitionNode** | `name` | string | Identifier of the function, method, class, or type |
-| | `kind` | string | `"function"`, `"method"`, `"class"`, `"type"`, or `"interface"` |
-| | `line` | integer | 1-indexed starting line number |
-| | `is_exported` | boolean | `true` if public/exported outside the module; `false` otherwise |
-| | `is_method` | boolean | `true` if defined within a class/struct |
-| | `class_name` | string / null | Enclosing class or receiver type name |
-| **CallSiteNode** | `target` | string | Target function/method name being invoked |
-| | `line` | integer | 1-indexed call site line number |
-| | `caller_scope` | string / null | Enclosing function/method name, if known |
-| **ImportNode** | `source` | string | Module specifier (e.g. `./utils`, `fmt`) |
-| | `imported_symbols` | array[string] | Imported function/symbol names |
-| | `line` | integer | 1-indexed import statement line number |
-| **MutationPoint** | `line` | integer | 1-indexed line of candidate operator |
-| | `col` | integer | 0-indexed column of candidate operator |
-| | `original_op` | string | Operator to mutate (e.g. `===`, `&&`, `+`) |
-| | `replacement_op` | string | Mutated operator replacement (e.g. `!==`, `\|\|`, `-`) |
-| | `mutation_type` | string | `"cmpop"`, `"boolop"`, or `"binop"` |
-| | `byte_offset` | integer / null | Exact 0-indexed byte offset in file (enables fast replacement) |
+| Dataclass | Fields | Purpose |
+|:----------|:-------|:--------|
+| **`NormalizedAST`** | `file_path`, `language`, `definitions`, `call_sites`, `imports`, `mutation_points`, `version` | Root container returned by `ASTDriverRunner.run()` |
+| **`DefinitionNode`** | `name`, `kind` (`function`/`method`/`class`/`constant`), `line`, `is_exported`, `class_name` | Symbol declaration used by call graph and reachability analyzers |
+| **`CallSiteNode`** | `target`, `line`, `caller_scope` | Function/method invocation edges for call graph construction |
+| **`ImportNode`** | `source`, `imported_symbols`, `line`, `is_type_only` | Module dependency edges inspected by `import_guard` |
+| **`MutationPoint`** | `line`, `col`, `original_op`, `replacement_op`, `mutation_type`, `function_scope`, `byte_offset` | Candidate operators mutated by `mymut` mutation testing |
 
 ---
 
-## 4. Built-in Reference Recipes
+## 4. Reference Drivers (`.aegis/drivers/`)
 
-Soma provides zero-dependency reference recipe scripts in the `install/drivers/` directory:
+When provisioned via `aegis detect --fix`, Aegis installs zero-dependency reference drivers into `.aegis/drivers/`:
 
-### Node.js / TypeScript Driver (`install/drivers/ts_ast.js`)
-- Requires Node.js (≥ 18) installed on the host.
-- Automatically leverages the official `typescript` compiler API if installed in the workspace's `node_modules` or globally.
-- Automatically falls back to a deterministic, zero-dependency built-in regex lexer when running in bare environments without `node_modules`.
-
-### Go Driver (`install/drivers/go_ast.go`)
-- Requires Go (≥ 1.18) installed on the host.
-- Uses Go's standard library packages (`go/parser`, `go/token`, `go/ast`, `encoding/json`).
-- Has zero external third-party dependencies.
+- **Rust Driver (`.aegis/drivers/rust_ast.py`)**:
+  - Pure Python 3.10+ recursive-descent / token-stream extractor for `.rs` files (`fn`, `pub fn`, `struct`, `impl`, `trait`, `use`, call sites, and comparison/arithmetic mutation points).
+- **TypeScript / JavaScript Driver (`.aegis/drivers/ts_ast.js`)**:
+  - Uses the official `typescript` compiler API if present in `node_modules`, automatically falling back to a deterministic zero-dependency lexer in bare Node.js environments.
+- **Go Driver (`.aegis/drivers/go_ast.go`)**:
+  - Uses Go's standard library (`go/parser`, `go/token`, `go/ast`, `encoding/json`) with zero external module dependencies.
 
 ---
 
 ## 5. Diagnostics & Verification
 
-Run `soma doctor` to verify that your configured AST drivers are resolvable on your system:
+Verify driver health and run polyglot Layer 1 checks from the CLI:
 
 ```bash
-soma doctor
-```
+# Verify configured AST driver executables and .aegis/slots.yaml bindings
+aegis system doctor
 
-Output:
-```text
-  ✅ AST driver (.ts): node resolvable (/usr/bin/node)
-  ✅ AST driver (.go): go resolvable (/usr/bin/go)
-```
-
-Run Layer 1 verification across your repository:
-```bash
-soma verify --layer 1
+# Run Layer 1 deterministic AST verification across Python and polyglot files
+aegis check
 ```

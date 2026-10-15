@@ -26,10 +26,11 @@ class Operations:
         return self.layout.root
 
     def resolve_path(self, path: str | Path) -> Path:
-        p = Path(path)
-        if p.is_absolute():
-            return p
-        return (self.layout.root / p).resolve()
+        if not str(path).strip() or str(path).strip() == ".":
+            return self.layout.root
+        from aegis_core.workspace.confinement import confine_path_internal
+
+        return Path(confine_path_internal(self.layout.root, path)[0])
 
     def read_text(self, path: str | Path, default: str = "") -> str:
         from aegis_core.storage import read_text_utf8

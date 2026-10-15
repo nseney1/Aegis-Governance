@@ -80,10 +80,16 @@ class AegisDocument(collections.abc.Mapping):
         self._kind: str = self._resolve_kind(kind)
         self._apply_defaults()
 
+    @property
+    def _data(self) -> Dict[str, Any]:
+        return self._metadata
+
     def _resolve_kind(self, explicit_kind: Optional[str]) -> str:
         if explicit_kind:
             return explicit_kind.strip().lower()
-        if "kind" in self._metadata:
+        if str(self._data.get("kind", "")).lower() == "skill":
+            return "skill"
+        if "kind" in self._metadata and self._metadata["kind"]:
             return str(self._metadata["kind"]).strip().lower()
 
         # Auto-Inference for Active Cells, Rules, and Skills

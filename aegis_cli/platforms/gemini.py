@@ -161,7 +161,7 @@ class GeminiAdapter(PlatformAdapter):
                 "PreInvocation": [
                     {
                         "type": "command",
-                        "command": "soma hook pre-invocation",
+                        "command": "aegis hook pre-invocation",
                         "timeout": 15,
                     }
                 ]
@@ -173,7 +173,7 @@ class GeminiAdapter(PlatformAdapter):
                         "hooks": [
                             {
                                 "type": "command",
-                                "command": "soma hook safety-gate",
+                                "command": "aegis hook safety-gate",
                                 "timeout": 5,
                             }
                         ],
@@ -184,7 +184,7 @@ class GeminiAdapter(PlatformAdapter):
                 "Stop": [
                     {
                         "type": "command",
-                        "command": "soma hook session-close",
+                        "command": "aegis hook session-close",
                         "timeout": 30,
                     }
                 ]

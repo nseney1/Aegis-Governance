@@ -119,8 +119,18 @@ def _check_cli_resolvable() -> bool:
         print(f"  ✅ aegis CLI resolvable ({path})")
         return True
     print("  ❌ aegis CLI not found on PATH")
-    from aegis_cli.pathcheck import build_hint
-    hint = build_hint()
+    from aegis_cli.pathcheck import build_hint, scripts_dir
+    sdir = scripts_dir()
+    only_soma = bool(
+        sdir
+        and not os.path.isfile(os.path.join(sdir, "aegis"))
+        and not os.path.isfile(os.path.join(sdir, "aegis.exe"))
+        and (os.path.isfile(os.path.join(sdir, "soma")) or os.path.isfile(os.path.join(sdir, "soma.exe")))
+    )
+    try:
+        hint = build_hint(cmd_name="soma" if only_soma else "aegis")
+    except TypeError:
+        hint = build_hint()
     if hint:
         print("\n".join("    " + line for line in hint.splitlines()))
     return False

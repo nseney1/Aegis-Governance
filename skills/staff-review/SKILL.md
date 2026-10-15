@@ -1,6 +1,12 @@
 ---
+id: staff-review
 name: Staff Review Protocol
 description: Multi-lens review fan-out with staff-level synthesis across six modes from Patrol to Citadel.
+kind: skill
+tier: guardrail
+consumes: [InspectionReceipt, DiffProposal, TestVerdict]
+produces: [ChargeSheet, ArbitrationEvidence, InspectionReceipt]
+handoff_targets: [spec-synthesizer, refactoring-pilot, incident-debug, post-mortem]
 trigger: user_request
 aliases: ["review this code", "code review", "PR review"]
 ---
