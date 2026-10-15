@@ -83,10 +83,6 @@ class WorkspaceLayout:
         return self.aegis_dir / "config.json"
 
     @property
-    def gitignore_file(self) -> Path:
-        return self.aegis_dir / ".gitignore"
-
-    @property
     def rules_dir(self) -> Path:
         return self.aegis_dir / "rules"
 
@@ -133,10 +129,6 @@ class WorkspaceLayout:
     def legacy(self, relative: str) -> Path:
         """A v3 path under .aegis/ named by one of the LEGACY_* entries."""
         return self.aegis_dir / relative.rstrip("/")
-
-    @property
-    def legacy_repo_conf(self) -> Path:
-        return self.root / LEGACY_REPO_CONF
 
     @property
     def legacy_soma_dir(self) -> Path:

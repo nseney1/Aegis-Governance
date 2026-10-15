@@ -73,3 +73,24 @@ def test_apply_and_dry_run_together_is_a_usage_error(tmp_path: Path, capsys):
 
 def test_the_legacy_sentinel_points_at_migrate(tmp_path: Path):
     assert "aegis migrate --apply" in LEGACY_SOMA_UPGRADE_MSG
+
+
+def test_the_report_says_which_rules_the_manifest_re_attests_and_which_it_still_refuses(tmp_path: Path, capsys):
+    from aegis_core import integrity
+
+    root = tmp_path / "ws"
+    rules = root / ".aegis" / "rules" / "traps"
+    rules.mkdir(parents=True)
+    for name in ("trap-a", "trap-b"):
+        (rules / f"{name}.md").write_text(f"---\nid: {name}\nfitness:\n  triggers: 2\n---\nBody\n", encoding="utf-8")
+    integrity.save_manifest(root, integrity.generate_manifest(root / ".aegis" / "rules"))
+    (rules / "trap-b.md").write_text("---\nid: trap-b\nfitness:\n  triggers: 2\n---\nEdited\n", encoding="utf-8")
+
+    assert main(["migrate", "--workspace", str(root)]) == 0
+
+    out = capsys.readouterr().out
+    assert "manifest: .aegis/rules/manifest.json: re-attest 1 rule(s) this migration rewrites or moves in" in out
+    assert (
+        "! .aegis/rules/traps/trap-b.md did not match .aegis/rules/manifest.json before migrating: "
+        "not re-attested (the MCP server keeps refusing it)"
+    ) in out

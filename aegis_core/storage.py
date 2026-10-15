@@ -6,6 +6,9 @@ concurrency guarantees live in one place:
 - ``locked(workspace)``: the single workspace lock, ``.aegis/state/lock``. It is
   re-entrant per thread, so nested acquisition never deadlocks, and its wait is
   bounded with an error that names the lock file.
+- ``state_dir(workspace)``: ``.aegis/state``, refused when it (or ``.aegis``) is a
+  symlink or resolves outside the workspace, so machine-local state is never written
+  through a link a commit planted.
 - ``atomic_write_bytes``/``atomic_write_text``: write a temporary file next to the
   target, fsync it, then replace. An existing file keeps its mode; a new file gets
   the mode the umask gives (0o644 typically), not mkstemp's 0o600.
@@ -27,7 +30,7 @@ import threading
 import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
-from aegis_core.errors import LockTimeoutError
+from aegis_core.errors import LockTimeoutError, PathTraversalError
 from aegis_core.taxonomy import (
     LOCK_MAX_BACKOFF_SECONDS,
     LOCK_RETRY_INTERVAL_SECONDS,
@@ -57,6 +60,7 @@ __all__ = [
     "fsync_dir",
     "locked",
     "read_jsonl",
+    "state_dir",
 ]
 
 _O_BINARY = getattr(os, "O_BINARY", 0)
@@ -137,6 +141,38 @@ def _timeout_error(path: Path, timeout: float) -> LockTimeoutError:
     )
 
 
+def _within(path: Path, root: Path) -> bool:
+    # realpath, not Path.resolve(): it never raises (3.9 resolve raises RuntimeError on
+    # loops) and it resolves Windows junctions, which is_symlink() misses before 3.12.
+    real, base = os.path.realpath(path), os.path.realpath(root)
+    return real == base or real.startswith(base.rstrip(os.sep) + os.sep)
+
+
+def state_dir(workspace: Any) -> Path:
+    """The workspace's ``.aegis/state`` directory, created if missing.
+
+    Raises PathTraversalError, and creates nothing, when ``.aegis`` or ``.aegis/state``
+    is a symlink or otherwise resolves outside the workspace: the ledger, the lock and
+    migration backups would land wherever it points (a committed symlink is not matched
+    by the ``state/`` ignore entry).
+    """
+    layout = WorkspaceLayout(Path(os.fspath(workspace)).resolve())
+    for path in (layout.aegis_dir, layout.state_dir):
+        if path.is_symlink():
+            raise PathTraversalError(
+                f"refusing to use {path}: it is a symlink; aegis keeps workspace state only inside the workspace",
+                path=str(path),
+            )
+    if not _within(layout.state_dir, layout.root):  # a Windows junction is not a symlink
+        raise PathTraversalError(
+            f"refusing to use {layout.state_dir}: it resolves outside the workspace; aegis keeps workspace "
+            "state only inside the workspace",
+            path=str(layout.state_dir),
+        )
+    layout.state_dir.mkdir(parents=True, exist_ok=True)
+    return layout.state_dir
+
+
 @contextmanager
 def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Path]:
     """Hold the workspace lock (``.aegis/state/lock``) for the duration of the block.
@@ -144,10 +180,12 @@ def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Pa
     ``workspace`` is a Workspace, a path or a string; every spelling of one root shares
     one lock. Re-entrant per thread: a nested ``locked()`` in the thread that holds it
     returns immediately. Raises LockTimeoutError, naming the lock file, when another
-    thread or process holds it for longer than ``timeout`` seconds.
+    thread or process holds it for longer than ``timeout`` seconds, and
+    PathTraversalError when the state directory is not confined (``state_dir``).
     """
-    lock_path = WorkspaceLayout(Path(os.fspath(workspace)).resolve()).lock_file
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    layout = WorkspaceLayout(Path(os.fspath(workspace)).resolve())
+    state_dir(layout.root)
+    lock_path = layout.lock_file
     key = os.path.realpath(lock_path)
     held = _held()
     depth, fd = held.get(key, (0, None))

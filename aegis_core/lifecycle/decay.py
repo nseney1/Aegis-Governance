@@ -10,18 +10,12 @@ from typing import Any, Optional
 
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 from aegis_core.scoring import bayesian_posterior, bayesian_score, calculate_snr
-from aegis_core.taxonomy import RULE_EXPIRY_DAYS
 from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
-from .constants import (
-    CELL_TELOMERE_DAYS,
-    DECAY_FACTOR,
-)
+from .constants import DECAY_FACTOR
 from .quorum import calculate_fitness_status
 
 __all__ = [
-    "CELL_TELOMERE_DAYS",
-    "RULE_EXPIRY_DAYS",
     "apply_decay",
     "bayesian_fitness",
     "compute_cells_fitness",

@@ -8,7 +8,7 @@ import shlex
 from typing import Any
 
 from aegis_cli.hooks.redaction import redact_secrets
-from aegis_core.storage import append_jsonl
+from aegis_core.storage import append_jsonl, state_dir
 from aegis_core.workspace.layout import WorkspaceLayout
 
 SAFE_COMMAND_PREFIXES: tuple[str, ...] = (
@@ -56,6 +56,7 @@ def log_gate_event(cmd: str, decision: str, reason: str, workspace: Path) -> Non
     if reason:
         record["reason"] = reason
     try:
+        state_dir(layout.root)  # PathTraversalError (a ValueError) through a symlinked state dir
         append_jsonl(layout.gate_log, [record])
     except (OSError, ValueError):
         pass

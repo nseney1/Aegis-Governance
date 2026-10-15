@@ -185,19 +185,23 @@ def provision_ast_driver_slots(
     except ConfigError:
         return dict(recommended), []
     merged = current + [ext for ext in wanted if ext not in current]
+    config_path = WorkspaceLayout(root).config_file
+    written: List[str] = []
+    if not dry_run and merged and (merged != current or not config_path.is_file()):
+
+        def _enable(data: Dict[str, Any]) -> None:
+            # Merge into the file as it is under the lock, not as it was read above:
+            # another writer may have listed drivers since.
+            listed = list(RepoConfig.parse(data).packaged_drivers)
+            ast = data.get("ast") if isinstance(data.get("ast"), dict) else {}
+            ast["packaged_drivers"] = listed + [ext for ext in wanted if ext not in listed]
+            data["ast"] = ast
+
+        merged = list(RepoConfig.parse(update_repo_config(root, _enable)).packaged_drivers)
+        written = [str(config_path)]
     slots = {
         f"ast_driver_{ext}": packaged["default_command"]
         for ext, packaged in ((ext, packaged_driver_for_extension(ext)) for ext in merged)
         if packaged is not None
     }
-    config_path = WorkspaceLayout(root).config_file
-    if dry_run or (merged == current and config_path.is_file()) or not merged:
-        return slots, []
-
-    def _enable(data: Dict[str, Any]) -> None:
-        ast = data.get("ast") if isinstance(data.get("ast"), dict) else {}
-        ast["packaged_drivers"] = merged
-        data["ast"] = ast
-
-    update_repo_config(root, _enable)
-    return slots, [str(config_path)]
+    return slots, written

@@ -1,7 +1,6 @@
 """Tests for polyglot language detection and zero-touch AST driver provisioning."""
 import json
 from pathlib import Path
-import pytest
 
 from aegis_core.ast.detect import (
     detect_project_languages,
@@ -144,3 +143,24 @@ def test_provision_tolerates_an_unknown_extension_already_listed(tmp_path: Path)
 
     assert slots == {"ast_driver_rs": "{python} .aegis/drivers/rust_ast.py"}
     assert json.loads(config.read_text(encoding="utf-8"))["ast"]["packaged_drivers"] == ["md", "rs"]
+
+
+def test_provision_merges_into_a_config_written_after_it_was_read(tmp_path: Path, monkeypatch):
+    """Lost update (review B2a-6): another writer lands between the read and the locked write."""
+    from aegis_core import config as config_mod
+
+    (tmp_path / "Cargo.toml").write_text("[package]\nname = 'x'\n", encoding="utf-8")
+    real_load = config_mod.RepoConfig.load
+
+    def load_then_someone_else_writes(cls, root):
+        loaded = real_load(root)
+        config_mod.update_repo_config(root, lambda data: data.update(ast={"packaged_drivers": ["go"]}))
+        return loaded
+
+    monkeypatch.setattr(config_mod.RepoConfig, "load", classmethod(load_then_someone_else_writes))
+    slots, written = provision_ast_driver_slots(tmp_path)
+
+    data = json.loads((tmp_path / ".aegis" / "config.json").read_text(encoding="utf-8"))
+    assert data["ast"]["packaged_drivers"] == ["go", "rs"]
+    assert set(slots) == {"ast_driver_go", "ast_driver_rs"}
+    assert written

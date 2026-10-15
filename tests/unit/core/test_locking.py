@@ -214,3 +214,49 @@ def test_lock_works_where_fcntl_is_unavailable(tmp_path: Path):
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "ok"
+
+
+# ── Confinement (review B2a-4): state never lands outside the workspace ──────
+
+def _symlink_dir_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+
+@pytest.mark.parametrize("linked", [".aegis/state", ".aegis"])
+def test_a_symlinked_state_dir_is_refused_and_nothing_is_written_outside(tmp_path: Path, linked: str):
+    from aegis_core.errors import PathTraversalError
+    from aegis_core.telemetry_engine import ledger
+
+    ws = tmp_path / "ws"
+    (ws / ".aegis").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = ws / linked
+    if link.exists():
+        link.rmdir()
+    _symlink_dir_or_skip(link, outside)
+
+    with pytest.raises(PathTraversalError, match=r"is a symlink; aegis keeps workspace state only inside the workspace"):
+        with locked(ws):
+            pass
+    with pytest.raises(PathTraversalError):
+        ledger.append(ws, [{"rule": "trap-x", "outcome": "tp", "source": "mcp"}])
+
+    assert sorted(p.relative_to(outside).as_posix() for p in outside.rglob("*")) == []
+
+
+def test_the_safety_gate_log_is_not_written_through_a_symlinked_state_dir(tmp_path: Path):
+    from aegis_cli.hooks.safety import log_gate_event
+
+    ws = tmp_path / "ws"
+    (ws / ".aegis").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _symlink_dir_or_skip(ws / ".aegis" / "state", outside)
+
+    log_gate_event("rm -rf /", "deny", "destructive", ws)  # logging never fails the gate
+
+    assert list(outside.iterdir()) == []

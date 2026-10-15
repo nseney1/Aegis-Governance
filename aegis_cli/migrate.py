@@ -41,6 +41,17 @@ def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
         print(f"  rule: {move['from']} -> {move['to']} (type {move['type']})")
     for strip in report["strip"]:
         print(f"  strip: {', '.join(strip['keys'])} from {strip['path']}")
+    manifest = report["manifest"]
+    if manifest and manifest["update"]:
+        print(
+            f"  manifest: {manifest['path']}: re-attest {len(manifest['update'])} rule(s) this migration "
+            "rewrites or moves in (backed up first)"
+        )
+    for path in (manifest or {}).get("mismatched", []):
+        print(
+            f"  ! {path} did not match {manifest['path']} before migrating: "
+            "not re-attested (the MCP server keeps refusing it)"
+        )
     for path in report["remove"]:
         print(f"  remove (backed up first): {path}")
     for line in report["dropped"]:

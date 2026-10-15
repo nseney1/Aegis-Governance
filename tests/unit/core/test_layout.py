@@ -12,7 +12,6 @@ def test_repository_plane_paths(tmp_path: Path):
     assert layout.root == tmp_path.resolve()
     assert layout.aegis_dir == aegis
     assert layout.config_file == aegis / "config.json"
-    assert layout.gitignore_file == aegis / ".gitignore"
     assert layout.rules_dir == aegis / "rules"
     assert layout.state_dir == aegis / "state"
     assert layout.ledger_file == aegis / "state" / "ledger.jsonl"

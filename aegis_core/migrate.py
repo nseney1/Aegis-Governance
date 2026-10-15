@@ -20,11 +20,19 @@ What a plan converts:
   never guessed. Derived counters (``fitness``,
   ``triggers``, ``score``…) are stripped from every rule's frontmatter, line by line, so
   every other byte stays (v4.3 §10.2).
-- **State**: the v3 runtime files (layout.LEGACY_STATE_ENTRIES) are removed.
+- **Manifest**: a v3 ``.aegis/rules/manifest.json`` still excludes any rule whose digest
+  it does not list (RuleCache, until D3 replaces it in B2b), so the entries of the rules
+  this migration rewrites or moves in are updated to the new bytes, before any rule is
+  written. An entry that did not match the rule before migrating is left as it is: a
+  rule edited outside aegis stays refused, never re-attested (H1).
+- **State**: the v3 runtime files (layout.LEGACY_STATE_ENTRIES) are removed, except
+  files under ``drivers/`` that are not the driver copies `aegis init` staged there, or
+  that a printed driver command names: those are left in place and reported.
 """
 from __future__ import annotations
 
 from collections import Counter
+import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
@@ -109,6 +117,14 @@ class _RuleMove:
 
 
 @dataclass
+class _ManifestUpdate:
+    path: Path
+    data: Dict[str, Any]  # the manifest with the planned entries already updated
+    updated: List[str] = field(default_factory=list)
+    mismatched: List[str] = field(default_factory=list)
+
+
+@dataclass
 class MigrationPlan:
     """What ``apply`` will do. ``to_dict()`` is the machine-readable report."""
 
@@ -118,6 +134,9 @@ class MigrationPlan:
     ledger_stats: Dict[str, Any] = field(default_factory=dict)
     config_sources: List[str] = field(default_factory=list)
     config: Optional[Dict[str, Any]] = None
+    # Only what the legacy files contribute: apply() merges it into config.json as it is
+    # then (a value already there wins), so a write since planning is never lost.
+    config_changes: Dict[str, Any] = field(default_factory=dict)
     user_config: Dict[str, Dict[str, str]] = field(default_factory=dict)
     dropped: List[str] = field(default_factory=list)
     moves: List[_RuleMove] = field(default_factory=list)
@@ -129,6 +148,7 @@ class MigrationPlan:
     left_in_place: List[str] = field(default_factory=list)
     skipped: List[Dict[str, str]] = field(default_factory=list)
     already_moved: List[Path] = field(default_factory=list)
+    manifest: Optional[_ManifestUpdate] = None
     refusal: Optional[str] = None
 
     @property
@@ -168,6 +188,11 @@ class MigrationPlan:
             "unreadable": self.unreadable,
             "skipped": self.skipped,
             "already_moved": [self._rel(path) for path in self.already_moved],
+            "manifest": None if self.manifest is None else {
+                "path": self._rel(self.manifest.path),
+                "update": self.manifest.updated,
+                "mismatched": self.manifest.mismatched,
+            },
             "remove": self.removals,
             "left_in_place": self.left_in_place,
         }
@@ -270,6 +295,22 @@ def _canonical_type(raw: Any) -> Optional[str]:
     return mapped if mapped in CANONICAL_RULE_TYPES else None
 
 
+def _merge_missing(current: Dict[str, Any], changes: Dict[str, Any]) -> None:
+    """Add to ``current`` what ``changes`` has and it lacks: a value already in
+    ``current`` wins, nested objects merge, and lists gain only the items they lack."""
+    for key, value in changes.items():
+        if key not in current:
+            current[key] = copy.deepcopy(value)
+        elif isinstance(current[key], dict) and isinstance(value, dict):
+            _merge_missing(current[key], value)
+        elif isinstance(current[key], list) and isinstance(value, list):
+            current[key] = current[key] + [item for item in value if item not in current[key]]
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 # ── Planning ─────────────────────────────────────────────────────────────────
 
 def _plan_ledger(result: MigrationPlan, layout: WorkspaceLayout) -> None:
@@ -344,12 +385,13 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             result.unreadable.append(result._rel(layout.config_file))
     if existing:
         config.update(existing)
+    changes: Dict[str, Any] = {}
     drivers: Dict[str, str] = {}
     slots: Dict[str, str] = {}
 
     def setting(path: Tuple[str, ...], value: Any) -> None:
-        # setdefault: a value already in config.json wins over the legacy file's
-        node = config
+        # setdefault: the first legacy file to set a value wins (config.json wins at merge)
+        node = changes
         for part in path[:-1]:
             child = node.get(part)
             if not isinstance(child, dict):
@@ -398,8 +440,7 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             result.unreadable.append(rel)
         if raw is not None:
             result.removals.append(rel)
-        ast_config = config.get("ast") if isinstance(config.get("ast"), dict) else {}
-        packaged: List[str] = list(ast_config.get("packaged_drivers") or [])
+        packaged: List[str] = []
         for key, value in (raw or {}).items():
             key, value = str(key), str(value)
             if key.startswith("ast_driver_"):
@@ -415,7 +456,7 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             else:
                 slots[key] = value
         if packaged:
-            config["ast"] = dict(ast_config, packaged_drivers=packaged)
+            changes.setdefault("ast", {})["packaged_drivers"] = packaged
 
     other = layout.legacy("config.yaml")
     if other.is_file():
@@ -429,7 +470,9 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
         for key in keys:
             result.dropped.append(f"{rel}: {key} (no v4 setting)")
 
+    _merge_missing(config, changes)
     result.config = config
+    result.config_changes = changes
     if drivers:
         result.user_config["drivers"] = drivers
     if slots:
@@ -498,6 +541,30 @@ def _same_text(path: Path, content: str) -> bool:
         return False
 
 
+def _plan_drivers(result: MigrationPlan, drivers: Path) -> None:
+    """v3 `aegis init` staged copies of the packaged drivers in .aegis/drivers/; v4 runs
+    the templates inside aegis. Only those copies go, and only when no printed driver
+    command names them; anything else there is the user's and stays."""
+    from aegis_core.ast.detect import LANGUAGE_DEFINITIONS
+
+    if drivers.is_symlink() or not drivers.is_dir():
+        result.removals.append(result._rel(drivers))  # a link is removed, never followed
+        return
+    staged = {c["driver_filename"] for c in LANGUAGE_DEFINITIONS.values() if c.get("driver_filename")}
+    commands = [str(value).replace("\\", "/") for section in result.user_config.values() for value in section.values()]
+    removable: List[str] = []
+    kept: List[str] = []
+    for item in sorted(p for p in drivers.rglob("*") if p.is_file() or p.is_symlink()):
+        rel = result._rel(item)
+        named = any(rel in command for command in commands)
+        (removable if item.parent == drivers and item.name in staged and not named else kept).append(rel)
+    if kept:
+        result.removals.extend(removable)
+        result.left_in_place.extend(kept)
+    else:
+        result.removals.append(result._rel(drivers))
+
+
 def _plan_state(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     if not layout.aegis_dir.is_dir():
         return
@@ -505,7 +572,11 @@ def _plan_state(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     for entry in LEGACY_STATE_ENTRIES:
         name = entry.rstrip("/")
         known.add(name)
-        if os.path.lexists(layout.legacy(name)):
+        if not os.path.lexists(layout.legacy(name)):
+            continue
+        if name == "drivers":
+            _plan_drivers(result, layout.legacy(name))
+        else:
             result.removals.append(result._rel(layout.legacy(name)))
     known |= set(LEGACY_CONFIG_ENTRIES)
     for child in sorted(layout.aegis_dir.iterdir()):
@@ -513,19 +584,80 @@ def _plan_state(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             result.left_in_place.append(result._rel(child))
 
 
+_MANIFEST_MAPPINGS = ("files", "cells", "rules")
+_MANIFEST_COUNTS = {"cell_count": "cells", "rule_count": "rules"}
+
+
+def _plan_manifest(result: MigrationPlan, layout: WorkspaceLayout) -> None:
+    path = layout.manifest_file
+    if not path.is_file() or path.is_symlink() or not _inside(layout.root, path):
+        return
+    try:
+        data = json.loads(path.read_bytes().decode("utf-8-sig"))
+    except (OSError, UnicodeError, ValueError, RecursionError):
+        data = None
+    if not isinstance(data, dict):
+        result.unreadable.append(result._rel(path))
+        return
+    mappings = [data[name] for name in _MANIFEST_MAPPINGS if isinstance(data.get(name), dict)]
+    if not mappings:
+        return
+    update = _ManifestUpdate(path=path, data=data)
+    # (rule path, its bytes now or None for a rule moved in, its bytes after migrating)
+    rewritten: List[Tuple[Path, Optional[bytes], bytes]] = [
+        (move.target, None, move.content.encode("utf-8")) for move in result.moves
+    ]
+    for rule, _keys, new_text in result.strips:
+        try:
+            rewritten.append((rule, rule.read_bytes(), new_text.encode("utf-8")))
+        except OSError:
+            continue
+    for rule, old, new in rewritten:
+        rel_rules = rule.relative_to(layout.rules_dir).as_posix()
+        names = (rel_rules, result._rel(rule), rule.name)
+        current = {_sha256(new), _sha256(new.replace(b"\r\n", b"\n"))}
+        before = set() if old is None else {_sha256(old), _sha256(old.replace(b"\r\n", b"\n"))}
+        outcome = None
+        for mapping in mappings:
+            entries = [name for name in names if name in mapping]
+            if not entries and old is None:
+                entries = [rel_rules]  # a rule this migration moves in, from the workspace's own .soma
+            for name in entries:
+                value = mapping.get(name)
+                digest = value.strip().lower() if isinstance(value, str) else ""
+                digest = digest[len("sha256:"):] if digest.startswith("sha256:") else digest
+                if digest in current:
+                    continue
+                if old is not None and digest not in before:
+                    outcome = "mismatched"
+                    continue
+                prefix = "" if isinstance(value, str) and not value.strip().lower().startswith("sha256:") else "sha256:"
+                mapping[name] = prefix + _sha256(new)
+                outcome = outcome or "updated"
+        if outcome:
+            getattr(update, outcome).append(result._rel(rule))
+    if update.updated or update.mismatched:
+        for count, name in _MANIFEST_COUNTS.items():
+            if count in data and isinstance(data.get(name), dict):
+                data[count] = len(data[name])
+        update.updated.sort()
+        update.mismatched.sort()
+        result.manifest = update
+
+
 def plan(root: Any) -> MigrationPlan:
     """Read the workspace at ``root`` and decide what ``apply`` would do. Writes nothing."""
     layout = WorkspaceLayout(Path(os.fspath(root)).resolve())
     result = MigrationPlan(root=layout.root)
-    for directory in (layout.aegis_dir, layout.legacy_soma_dir):
-        if directory.is_symlink():
-            result.refusal = (
-                f"{directory.name} is a symlink; aegis migrate reads and writes only inside the workspace"
-            )
+    for directory in (layout.aegis_dir, layout.legacy_soma_dir, layout.state_dir):
+        if directory.is_symlink() or not _inside(layout.root, directory):
+            why = "is a symlink" if directory.is_symlink() else "resolves outside the workspace"
+            result.refusal = f"{result._rel(directory)} {why}; aegis migrate reads and writes only inside the workspace"
             return result
     _plan_ledger(result, layout)
     _plan_config(result, layout)
     _plan_rules(result, layout)
+    _plan_manifest(result, layout)
     _plan_state(result, layout)
     result.removals = sorted(set(result.removals))
     return result
@@ -561,6 +693,7 @@ def _remove(path: Path) -> None:
 def apply(migration: MigrationPlan) -> MigrationResult:
     """Execute a plan: back up, write the v4 files, then remove what was converted."""
     from aegis_core.config import update_repo_config
+    from aegis_core.integrity import save_manifest
     from aegis_core.telemetry_engine import ledger
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
@@ -571,12 +704,13 @@ def apply(migration: MigrationPlan) -> MigrationResult:
         return result
     layout = WorkspaceLayout(migration.root)
     root = layout.root
-    layout.state_dir.mkdir(parents=True, exist_ok=True)
-    with locked(root):
+    with locked(root):  # creates .aegis/state, refusing one that is not confined
         backup = _backup_dir(layout)
         touched = [root / rel for rel in migration.removals]
         touched += [move.source for move in migration.moves] + list(migration.already_moved)
         touched += [path for path, _keys, _text in migration.strips]
+        if migration.manifest is not None and migration.manifest.updated:
+            touched.append(migration.manifest.path)
         for path in touched:
             if os.path.lexists(path):
                 _backup(root, backup, path)
@@ -584,8 +718,8 @@ def apply(migration: MigrationPlan) -> MigrationResult:
 
         ensure_runtime_gitignore(layout.aegis_dir)
         if migration.config is not None and (migration.config_sources or migration.creates_config):
-            config = migration.config  # planned from the file as it was, plus the legacy values
-            update_repo_config(root, lambda data: data.update(config))
+            changes = migration.config_changes
+            update_repo_config(root, lambda data: _merge_missing(data, changes))
             result.written.append(layout.config_file.relative_to(root).as_posix())
 
         if migration.ledger_rows or migration.ledger_sources:
@@ -596,6 +730,13 @@ def apply(migration: MigrationPlan) -> MigrationResult:
                 "rows": len(written),
                 "backup": backup.relative_to(root).as_posix(),
             })
+
+        if migration.manifest is not None and migration.manifest.updated:
+            # Before any rule is written: a crash in between leaves rules the manifest
+            # refuses until the rerun writes them, never a rule it was not meant to admit.
+            # Signed with the v3 key while it still exists; the key goes with keys/ below.
+            save_manifest(root, migration.manifest.data)
+            result.written.append(result.plan._rel(migration.manifest.path))
 
         for move in migration.moves:
             if os.path.lexists(move.target):

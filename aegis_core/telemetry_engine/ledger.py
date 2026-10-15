@@ -242,12 +242,19 @@ def _payload_digest(row: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=True).encode("ascii")).hexdigest()
 
 
+# How many indexed bytes before the offset are re-read to confirm the cached index still
+# describes this file: (device, inode) alone passes a ledger deleted and recreated on a
+# reused inode, or rewritten in place, as long as it is at least as large as before.
+_TAIL_CHECK_BYTES = 256
+
+
 @dataclass
 class _Index:
     """What appends need from the ledger: the next seq and the (key, rule) identities.
 
     Cached per ledger file and refreshed from the bytes appended since the last look,
-    so an append in a long-lived process reads only the new tail.
+    so an append in a long-lived process reads only the new tail. ``tail`` holds the
+    last indexed bytes (up to _TAIL_CHECK_BYTES before ``offset``).
     """
 
     device: int = -1
@@ -255,6 +262,7 @@ class _Index:
     offset: int = 0
     last_seq: int = 0
     keyed: Dict[Tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
+    tail: bytes = b""
 
     def absorb(self, raw_rows: Iterable[Dict[str, Any]]) -> None:
         for raw in raw_rows:
@@ -287,8 +295,31 @@ def _parse_tail(data: bytes) -> List[Dict[str, Any]]:
     return rows
 
 
+def _unread(path: Path, index: Optional[_Index], st: os.stat_result) -> Tuple[_Index, bytes]:
+    """The cached index if it still describes ``path``, else a new one; plus the bytes
+    after its offset."""
+    with open(path, "rb") as fh:
+        if (
+            index is not None
+            and (index.device, index.inode) == (st.st_dev, st.st_ino)
+            and st.st_size >= index.offset
+        ):
+            fh.seek(index.offset - len(index.tail))
+            data = fh.read()
+            if data.startswith(index.tail):
+                return index, data[len(index.tail):]
+            fh.seek(0)
+        return _Index(device=st.st_dev, inode=st.st_ino), fh.read()
+
+
 def _current_index(path: Path) -> _Index:
-    """The index of ``path`` as it is on disk now. Call with the workspace lock held."""
+    """The index of ``path`` as it is on disk now. Call with the workspace lock held.
+
+    A final line without a newline is read on every call and never cached: a torn
+    write is skipped, while a complete row (the crash cut only its newline, which
+    read_jsonl and aggregate() count as a row) is part of the returned index, so its
+    seq and (key, rule) are never written twice. The next append terminates it.
+    """
     key = str(path)
     with _INDEX_GUARD:
         index = _INDEXES.get(key)
@@ -299,18 +330,20 @@ def _current_index(path: Path) -> _Index:
         with _INDEX_GUARD:
             _INDEXES[key] = index
         return index
-    if index is None or (index.device, index.inode) != (st.st_dev, st.st_ino) or st.st_size < index.offset:
-        index = _Index(device=st.st_dev, inode=st.st_ino)
-    if st.st_size > index.offset:
-        with open(path, "rb") as fh:
-            fh.seek(index.offset)
-            data = fh.read(st.st_size - index.offset)
-        complete = data.rfind(b"\n") + 1  # a torn tail is read again once it is terminated
+    index, data = _unread(path, index, st)
+    complete = data.rfind(b"\n") + 1
+    if complete:
         index.absorb(_parse_tail(data[:complete]))
         index.offset += complete
+        index.tail = (index.tail + data[:complete])[-_TAIL_CHECK_BYTES:]
     with _INDEX_GUARD:
         _INDEXES[key] = index
-    return index
+    unterminated = _parse_tail(data[complete:])
+    if not unterminated:
+        return index
+    view = _Index(index.device, index.inode, index.offset, index.last_seq, dict(index.keyed), index.tail)
+    view.absorb(unterminated)
+    return view
 
 
 def _write(path: Path, rows: List[Dict[str, Any]]) -> None:

@@ -215,9 +215,7 @@ SENTINEL_BOUNDARY_SUBDIRS: tuple[str, ...] = (
 
 
 # ── 4. Timeouts, TTLs, Retries & Rate Limits ────────────────────────────────
-DEFAULT_RECEIPT_TTL_SECONDS: float = 3600.0
-INTERACTIVE_SESSION_TTL_SECONDS: float = 300.0
-RULE_EXPIRY_DAYS: int = 90
+# Rule expiry is a repository setting with its default in aegis_core.config (D10).
 
 # One lock guards rules and the ledger (AD-3), so its wait covers the slowest holder.
 LOCK_TIMEOUT_SECONDS: float = 10.0
@@ -285,9 +283,6 @@ __all__ = [
     "RULE_TYPE_DISPLAY_ORDER",
     "RULE_TYPE_THEME_STYLES",
     "SENTINEL_BOUNDARY_SUBDIRS",
-    "DEFAULT_RECEIPT_TTL_SECONDS",
-    "INTERACTIVE_SESSION_TTL_SECONDS",
-    "RULE_EXPIRY_DAYS",
     "LOCK_TIMEOUT_SECONDS",
     "LOCK_RETRY_INTERVAL_SECONDS",
     "LOCK_MAX_BACKOFF_SECONDS",

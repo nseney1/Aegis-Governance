@@ -194,6 +194,70 @@ def test_unreadable_lines_are_skipped_and_counted(tmp_path: Path):
     assert view.unusable_rows == 1
 
 
+def _append_unterminated(ws: Path, row: dict) -> None:
+    """A complete row whose newline never reached the disk (a crash cut the write there)."""
+    with open(_path(ws), "ab") as fh:
+        fh.write(json.dumps(row, separators=(",", ":")).encode("ascii"))
+
+
+_UNTERMINATED = {"v": 2, "seq": 2, "ts": "2026-10-15T00:00:00Z", "rule": "trap-x", "outcome": "tp",
+                 "source": "mcp", "host": None, "session": None, "key": "kk"}
+
+
+def test_a_complete_last_row_without_a_newline_counts_for_a_warm_index(tmp_path: Path):
+    ledger.append(tmp_path, [_event(key="k1")])  # this process now indexes up to the end of row 1
+    _append_unterminated(tmp_path, _UNTERMINATED)
+
+    returned = ledger.append(tmp_path, [_event(key="kk"), _event(key="k3")])
+    assert [r["seq"] for r in returned] == [2, 3]  # kk is the stored row, not a second copy
+    assert ledger.append(tmp_path, [_event(key="kk")])[0]["seq"] == 2
+
+    assert [(r["key"], r["seq"]) for r in _rows(tmp_path)] == [("k1", 1), ("kk", 2), ("k3", 3)]
+    assert ledger.aggregate(tmp_path, "trap-x")["tp"] == 3
+
+
+def test_a_complete_last_row_without_a_newline_counts_in_a_new_process(tmp_path: Path):
+    ledger.append(tmp_path, [_event(key="k1")])
+    _append_unterminated(tmp_path, _UNTERMINATED)
+    code = textwrap.dedent("""
+        import json, sys
+        from aegis_core.telemetry_engine import ledger
+        events = [{"rule": "trap-x", "outcome": "tp", "source": "mcp", "key": k} for k in ("kk", "k3")]
+        print(json.dumps([r["seq"] for r in ledger.append(sys.argv[1], events)]))
+    """)
+    proc = subprocess.run([sys.executable, "-c", code, str(tmp_path)], capture_output=True, text=True,
+                          env=_child_env(), cwd=REPO_ROOT, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == [2, 3]
+    assert [(r["key"], r["seq"]) for r in _rows(tmp_path)] == [("k1", 1), ("kk", 2), ("k3", 3)]
+
+
+@pytest.mark.parametrize("how", ["rewritten in place", "deleted and recreated"])
+def test_a_ledger_replaced_under_a_warm_index_is_read_again(tmp_path: Path, how: str):
+    """A long-lived process (the MCP server) must not trust its index for a different file."""
+    ledger.append(tmp_path, [_event(key=f"old-{i}") for i in range(3)])
+    path = _path(tmp_path)
+    replacement = "".join(
+        json.dumps({"v": 2, "seq": i + 1, "ts": "2026-10-15T00:00:00Z", "rule": "trap-y", "outcome": "fp",
+                    "source": "ci", "key": f"new-{i}"}) + "\n"
+        for i in range(10)
+    ).encode("ascii")
+    assert len(replacement) > path.stat().st_size
+    if how == "rewritten in place":  # same inode, at least as large as what was indexed
+        with open(path, "r+b") as fh:
+            fh.truncate(0)
+            fh.write(replacement)
+    else:  # the filesystem may hand the new file the old inode
+        path.unlink()
+        path.write_bytes(replacement)
+
+    returned = ledger.append(tmp_path, [_event(key="old-1")])
+
+    assert returned[0]["seq"] == 11
+    rows = _rows(tmp_path)
+    assert len(rows) == 11 and rows[-1]["key"] == "old-1"
+
+
 # ── Aggregation (#15: every outcome row is a trigger) ────────────────────────
 
 def test_aggregate_counts_every_outcome_row_as_a_trigger(tmp_path: Path):
