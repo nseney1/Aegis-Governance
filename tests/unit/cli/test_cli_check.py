@@ -1,18 +1,23 @@
-"""Unit tests for aegis check command (aegis_cli/check.py)."""
+"""`aegis check`: the v4 verification gate, driven through the real CLI entry point.
+
+Interface: aegis check [FILES...] [--hook] [--strict] [--full]
+           [--plan TEXT | --plan-file PATH] [--llm-cmd CMD] [--dry-run] [--format text|json]
+
+Layer 1 (default) = the workspace checkpoint checks plus call_graph, import_guard
+and forbid_ast on the target files. Layer 2 (--full, or a plan) adds the adversarial
+review, run by one external command (--llm-cmd / AEGIS_LLM_CMD).
+"""
 from __future__ import annotations
 
-import argparse
 import json
 import shlex
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aegis_cli.check import CheckCommand, run_check
 from aegis_cli.cli import main
 
 CLEAN = "def compute(a: int, b: int) -> int:\n    return a + b\n\n\ndef main():\n    return compute(1, 2)\n"
@@ -79,137 +84,189 @@ def _git_repo(root: Path) -> Path:
     return root
 
 
+# ── Flag diet ───────────────────────────────────────────────────────────────
 
-
-def test_check_command_contract():
-    cmd = CheckCommand()
-    assert cmd.name == "check"
-    assert "verify" in cmd.aliases
-    assert "checkpoint" in cmd.aliases
-
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-
-    # Test argument parsing
-    args = parser.parse_args(["foo.py", "--hook"])
-    assert args.target_files == ["foo.py"]
-    assert args.hook is True
-
-
-def test_check_default_runs_layer1():
-    args = argparse.Namespace(
-        target_files=["foo.py"],
-        files=None,
-        hook=False,
-        full=False,
-        release=False,
-        release_gate=False,
-        checkpoint_only=False,
-        plan=None,
-        plan_file=None,
+class TestInterface:
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            ["--no-layer2"], ["--all"], ["--files", "a.py"], ["--pre-commit"], ["--checkpoint-only"],
+            ["--layer1-only"], ["--deep"], ["--release"], ["--release-gate"], ["--require-arbitration"],
+            ["--in-band"], ["--provider", "gemini"], ["--format", "sarif"],
+        ],
+        ids=lambda f: f[0] if len(f) == 1 else " ".join(f),
     )
-    with patch("aegis_cli.check.run_verify", return_value=0) as mock_verify:
-        rc = run_check(args)
-        assert rc == 0
-        assert args.files == ["foo.py"]
-        assert args.layer1_only is True
-        mock_verify.assert_called_once_with(args)
+    def test_removed_flags_are_usage_errors(self, ws, capsys, flag):
+        assert _exit_code(["check", "--workspace", str(ws), *flag]) == 2
+        err = capsys.readouterr().err
+        assert "unrecognized arguments" in err or "invalid choice" in err
+
+    @pytest.mark.parametrize("name", ["verify", "checkpoint"])
+    def test_verify_and_checkpoint_are_no_longer_check_aliases(self, ws, name):
+        assert _exit_code([name, "--workspace", str(ws)]) == 2
+
+    def test_plan_and_plan_file_are_mutually_exclusive(self, ws, capsys):
+        assert _exit_code(["check", "--workspace", str(ws), "--plan", "x", "--plan-file", "p.md"]) == 2
+        assert "not allowed with argument" in capsys.readouterr().err
+
+    def test_help_lists_exactly_the_v4_interface(self, capsys):
+        assert _exit_code(["check", "--help"]) == 0
+        out = capsys.readouterr().out
+        for flag in ("--hook", "--strict", "--full", "--plan", "--plan-file", "--llm-cmd", "--dry-run", "--format"):
+            assert flag in out
+        assert "sarif" not in out
+        assert "--provider" not in out
 
 
-def test_check_full_runs_full_verification():
-    args = argparse.Namespace(
-        target_files=None,
-        files=["a.py"],
-        hook=False,
-        full=True,
-        release=False,
-        release_gate=False,
-        checkpoint_only=False,
-    )
-    with patch("aegis_cli.check.run_verify", return_value=0) as mock_verify:
-        rc = run_check(args)
-        assert rc == 0
-        assert args.layer1_only is False
-        mock_verify.assert_called_once_with(args)
+# ── Layer 1 (default) ───────────────────────────────────────────────────────
+
+class TestLayer1:
+    def test_clean_file_passes(self, ws, capsys):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "clean.py"]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1:" in out and "PASSED" in out
+        assert "Layer 2" not in out
+
+    def test_unguarded_third_party_import_fails(self, ws, capsys):
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "bad.py"]) == 1
+        assert "import_guard" in capsys.readouterr().out
+
+    def test_only_the_named_files_are_checked(self, ws):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "clean.py"]) == 0
+        assert _exit_code(["check", "--workspace", str(ws), "clean.py", "bad.py"]) == 1
+
+    def test_missing_file_is_an_error(self, ws, capsys):
+        assert _exit_code(["check", "--workspace", str(ws), "nope.py"]) == 1
+        assert "file not found: nope.py" in capsys.readouterr().err
+
+    def test_out_of_tree_files_are_refused(self, ws, capsys):
+        assert _exit_code(["check", "--workspace", str(ws), "../../etc/passwd"]) == 1
+        assert "outside the repository" in capsys.readouterr().err
+
+    def test_no_changed_files_is_a_clean_pass(self, ws, capsys):
+        assert _exit_code(["check", "--workspace", str(ws)]) == 0
+        assert "0 files changed" in capsys.readouterr().out
+
+    def test_changed_files_come_from_git_when_none_are_named(self, ws, capsys):
+        _git_repo(ws)
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        _git(ws, "add", "bad.py")
+        assert _exit_code(["check", "--workspace", str(ws)]) == 1
+        assert "bad.py" in capsys.readouterr().out
+
+    def test_dry_run_lists_files_and_runs_nothing(self, ws, capsys):
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--dry-run", "bad.py"]) == 0
+        out = capsys.readouterr().out
+        assert "Dry run" in out and "bad.py" in out and "Layer 1" in out
+        assert "import_guard" not in out
+
+    def test_json_is_one_document_with_layer1_and_checkpoint(self, ws, capsys):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--format", "json", "clean.py"]) == 0
+        raw = capsys.readouterr().out
+        assert "\x1b[" not in raw
+        payload = json.loads(raw)
+        assert payload["passed"] is True
+        assert payload["files"] == ["clean.py"]
+        assert {r["tool"] for r in payload["layer1"]} >= {"call_graph", "import_guard"}
+        assert isinstance(payload["checkpoint_issues"], list)
+        assert "layer2" not in payload
+
+    def test_global_json_flag_matches_format_json(self, ws, capsys):
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--json", "bad.py"]) == 1
+        assert json.loads(capsys.readouterr().out)["passed"] is False
 
 
-def test_check_hook_mode():
-    args = argparse.Namespace(
-        target_files=None,
-        files=None,
-        hook=True,
-        full=False,
-        release=False,
-        release_gate=False,
-        checkpoint_only=False,
-    )
-    with patch("aegis_cli.check.run_checkpoint", return_value=0) as mock_cp, \
-         patch("aegis_cli.check.run_verify", return_value=0) as mock_verify:
-        rc = run_check(args)
-        assert rc == 0
-        assert args.hook is False
-        assert args.layer1_only is True
-        assert args.pre_commit is True
-        mock_cp.assert_called_once_with(args)
-        mock_verify.assert_called_once_with(args)
+# ── --strict and the workspace checkpoint ───────────────────────────────────
+
+class TestStrict:
+    def _missing_test_and_hardcoded_path(self, ws: Path) -> None:
+        (ws / "src").mkdir()
+        (ws / "src" / "svc.py").write_text('CACHE = "/home/alice/cache"\n', encoding="utf-8")
+
+    def test_checkpoint_issues_warn_by_default(self, ws, capsys):
+        self._missing_test_and_hardcoded_path(ws)
+        assert _exit_code(["check", "--workspace", str(ws)]) == 0
+        out = capsys.readouterr().out
+        assert "[WARN] Missing test file for svc.py" in out
+        assert "[WARN] Hardcoded absolute path found in svc.py:1" in out
+
+    def test_strict_fails_on_checkpoint_issues(self, ws, capsys):
+        # #12: `check --strict` must not be a passing no-op on a failing workspace.
+        self._missing_test_and_hardcoded_path(ws)
+        assert _exit_code(["check", "--workspace", str(ws), "--strict"]) == 1
+        out = capsys.readouterr().out
+        assert "[FAIL] Missing test file for svc.py" in out
+        assert "[FAIL] Hardcoded absolute path found in svc.py:1" in out
+
+    def test_strict_passes_a_clean_workspace(self, ws):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        (ws / "tests").mkdir()
+        (ws / "tests" / "test_clean.py").write_text(
+            "from clean import compute\n\n\ndef test_compute():\n    assert compute(1, 2) == 3\n", encoding="utf-8"
+        )
+        assert _exit_code(["check", "--workspace", str(ws), "--strict", "clean.py"]) == 0
+
+    def test_json_reports_checkpoint_issues(self, ws, capsys):
+        self._missing_test_and_hardcoded_path(ws)
+        assert _exit_code(["check", "--workspace", str(ws), "--strict", "--format", "json"]) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["passed"] is False
+        assert {i["check"] for i in payload["checkpoint_issues"]} == {"test_coverage", "hardcoded_paths"}
 
 
-def test_check_checkpoint_only_mode():
-    args = argparse.Namespace(
-        target_files=None,
-        files=None,
-        hook=False,
-        full=False,
-        release=False,
-        release_gate=False,
-        checkpoint_only=True,
-    )
-    with patch("aegis_cli.check.run_checkpoint", return_value=0) as mock_cp:
-        rc = run_check(args)
-        assert rc == 0
-        mock_cp.assert_called_once_with(args)
+# ── --hook (git pre-commit) ─────────────────────────────────────────────────
 
+class TestHook:
+    def test_staged_clean_file_passes(self, ws):
+        _git_repo(ws)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        _git(ws, "add", "clean.py")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook"]) == 0
 
-def test_check_supports_deep_and_all_flags():
-    """v3.0.0: check supports --deep (alias for --full) and --all flags."""
-    cmd = CheckCommand()
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-    parsed = parser.parse_args(["--deep", "--all"])
-    assert parsed.full is True
-    assert parsed.all_files is True
+    def test_staged_unguarded_import_blocks(self, ws, capsys):
+        _git_repo(ws)
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        _git(ws, "add", "bad.py")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook"]) == 1
+        assert "import_guard: bad.py" in capsys.readouterr().out
 
+    @pytest.mark.parametrize("extra", [["--full"], ["--plan", "x"], ["--plan-file", "plan.md"]])
+    def test_hook_never_runs_layer2(self, ws, capsys, llm, extra):
+        assert _exit_code(["check", "--workspace", str(ws), "--hook", "--llm-cmd", llm("ship"), *extra]) == 2
+        assert "--hook runs Layer 1 only" in capsys.readouterr().err
 
-def test_check_json_mode_emits_valid_json_without_ansi(tmp_path, capsys):
-    """v3.0.0: aegis check --json emits valid machine-parseable JSON with zero ANSI codes."""
-    import json
+    @pytest.mark.parametrize("strict", [[], ["--strict"]])
+    def test_hook_fails_when_layer1_cannot_run(self, ws, monkeypatch, capsys, strict):
+        from aegis_core.verification import runner
 
-    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-    target = tmp_path / "sample.py"
-    target.write_text("def add(a: int, b: int) -> int:\n    return a + b\n", encoding="utf-8")
+        def boom(**_kwargs):
+            raise RuntimeError("driver registry exploded")
 
-    args = argparse.Namespace(
-        target_files=["sample.py"],
-        files=None,
-        hook=False,
-        full=False,
-        release=False,
-        release_gate=False,
-        checkpoint_only=False,
-        plan=None,
-        plan_file=None,
-        workspace=str(tmp_path),
-        json=True,
-        format="json",
-    )
-    rc = run_check(args)
-    assert rc == 0
-    raw = capsys.readouterr().out
-    assert "\x1b[" not in raw
-    payload = json.loads(raw)
-    assert payload["passed"] is True
-    assert payload["files"] == ["sample.py"]
-    assert isinstance(payload["layer1"], list)
+        monkeypatch.setattr(runner, "run_layer1", boom)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook", *strict, "clean.py"]) == 1
+        assert "Layer 1 could not run: driver registry exploded" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("strict", [[], ["--strict"]])
+    def test_hook_fails_when_a_layer1_tool_raises(self, ws, monkeypatch, capsys, strict):
+        from aegis_core.verification import call_graph
+
+        def boom(*_args, **_kwargs):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(call_graph, "check", boom)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook", *strict, "clean.py"]) == 1
+        out = capsys.readouterr().out
+        assert "call_graph: clean.py" in out
+        assert "RecursionError: maximum recursion depth exceeded" in out
 
 
 # ── Layer 2 (--full / --plan) ───────────────────────────────────────────────

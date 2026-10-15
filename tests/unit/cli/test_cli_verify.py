@@ -1,297 +1,29 @@
-"""Tests for soma verify CLI command — TDD Gate 1.
+"""Tests for aegis_cli/verify.py, the engine behind `aegis check`.
 
-Verifies the soma verify command interface, parsing, flags, execution modes,
-exit code mappings, and file target resolution:
-- CLI parsing: subparser registered with --files, --layer1-only, --dry-run, --repo-root
-- --layer1-only: runs only deterministic Layer 1 checks and returns appropriate exit code
-- --dry-run: reports planned verification targets without executing verification
-- Exit code mapping: SHIP=0, BLOCK=1, REVISE=1
-- --files flag: passes explicit file list, defaulting to git staged/changed files
-- Importability: run_verify(args) importable from aegis_cli.verify and wired to CLI
+The command-line behavior of `aegis check` is tested in test_cli_check.py. This
+module covers the helpers and the direct run_verify(args) entry point:
+- verdict_to_exit_code: SHIP=0, BLOCK/REVISE (and anything unknown) = 1
+- run_verify on parsed `check` arguments and on the bare namespaces older callers build
+- resolve_target_files: explicit files, out-of-tree refusal, git and branch fallbacks
+- resolve_task_plan: --plan, --plan-file, docs/plan.md
+- telemetry on Layer 1 and Layer 2 runs
 """
 import argparse
-import inspect
-import json
-import os
 import sys
 import textwrap
 from pathlib import Path
 
-import pytest
 
 # Ensure repo root is on sys.path
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_core.verification import (
-    ArbitrationResult,
-    Claim,
-    Divergence,
-    Prediction,
-    RiskCategory,
-    Severity,
-    ToolEvidence,
-    Verdict,
-)
-from aegis_cli.cli import _build_parser, main
-
-
-class TestVerifyImport:
-    """Requirement 6: Test that run_verify(args) is importable from aegis_cli.verify."""
-
-    def test_run_verify_importable(self):
-        """run_verify must be importable from aegis_cli.verify and be callable."""
-        from aegis_cli.verify import run_verify
-        assert callable(run_verify), "aegis_cli.verify.run_verify must be a callable function"
-
-    def test_run_verify_accepts_args_parameter(self):
-        """run_verify must accept an args parameter (argparse.Namespace)."""
-        from aegis_cli.verify import run_verify
-        sig = inspect.signature(run_verify)
-        assert len(sig.parameters) >= 1, "run_verify must accept at least one argument (args)"
-        first_param = next(iter(sig.parameters.values()))
-        assert first_param.name in ("args", "argv", "options"), (
-            f"Expected first parameter to be 'args', got '{first_param.name}'"
-        )
-
-    def test_cli_registers_verify_in_commands(self):
-        """aegis_cli.cli.COMMANDS dict must register the 'verify' command handler."""
-        from aegis_cli.cli import COMMANDS
-        assert "verify" in COMMANDS, "COMMANDS dictionary in aegis_cli.cli must contain 'verify'"
-        assert callable(COMMANDS["verify"]), "COMMANDS['verify'] must be a callable handler"
-
-    def test_cli_cmd_verify_handler_exists(self):
-        """aegis_cli.cli must define cmd_verify handler function."""
-        import aegis_cli.cli as cli_mod
-        assert hasattr(cli_mod, "cmd_verify"), "aegis_cli.cli must have cmd_verify function"
-        assert callable(cli_mod.cmd_verify), "aegis_cli.cli.cmd_verify must be callable"
-
-
-class TestVerifyParsing:
-    """Requirement 1: Test CLI parsing — soma verify adds the right subparser with correct flags."""
-
-    def test_verify_subparser_registered(self):
-        """verify subparser must be registered in soma CLI."""
-        parser = _build_parser()
-        subparsers_action = next(
-            (action for action in parser._actions if isinstance(action, argparse._SubParsersAction)),
-            None,
-        )
-        assert subparsers_action is not None, "Parser must contain a subparsers action"
-        assert "verify" in subparsers_action.choices, "Subparsers must include 'verify'"
-
-    def test_verify_default_arguments(self):
-        """soma verify defaults: layer1_only=False, dry_run=False, files=None, repo_root=None."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify"])
-        assert args.command == "verify"
-        assert args.layer1_only is False, "Default --layer1-only must be False"
-        assert args.dry_run is False, "Default --dry-run must be False"
-        assert args.files is None or args.files == [], "Default --files must be None or empty"
-        assert getattr(args, "workspace", None) is None, "Default --workspace must be None"
-
-    def test_verify_layer1_only_flag(self):
-        """--layer1-only flag sets args.layer1_only to True."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify", "--layer1-only"])
-        assert args.layer1_only is True
-
-    def test_verify_dry_run_flag(self):
-        """--dry-run flag sets args.dry_run to True."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify", "--dry-run"])
-        assert args.dry_run is True
-
-    def test_verify_workspace_flag(self):
-        """--workspace flag sets args.workspace to specified path string."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify", "--workspace", "/custom/repo/path"])
-        assert args.workspace == "/custom/repo/path"
-
-    def test_verify_files_flag_single_file(self):
-        """--files flag accepts a single file path."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify", "--files", "aegis_cli/verify.py"])
-        assert args.files == ["aegis_cli/verify.py"]
-
-    def test_verify_files_flag_multiple_files(self):
-        """--files flag accepts multiple file paths as a list."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify", "--files", "file_a.py", "file_b.py", "file_c.py"])
-        assert args.files == ["file_a.py", "file_b.py", "file_c.py"]
-
-    def test_verify_combined_flags(self):
-        """All flags can be combined and parsed together."""
-        parser = _build_parser()
-        args = parser.parse_args([
-            "verify",
-            "--layer1-only",
-            "--dry-run",
-            "--workspace", "/workspace/project",
-            "--files", "pkg/mod1.py", "pkg/mod2.py",
-        ])
-        assert args.command == "verify"
-        assert args.layer1_only is True
-        assert args.dry_run is True
-        assert args.workspace == "/workspace/project"
-        assert args.files == ["pkg/mod1.py", "pkg/mod2.py"]
-
-    def test_verify_help_exits_zero(self):
-        """soma verify --help prints help and exits with status code 0."""
-        with pytest.raises(SystemExit) as exc_info:
-            main(["verify", "--help"])
-        assert exc_info.value.code == 0
-
-    def test_verify_unrecognized_argument_fails(self):
-        """Unrecognized flags raise SystemExit(2)."""
-        with pytest.raises(SystemExit) as exc_info:
-            main(["verify", "--nonexistent-option"])
-        assert exc_info.value.code == 2
-
-
-class TestVerifyLayer1Only:
-    """Requirement 2: Test --layer1-only runs only Layer 1 and returns appropriate exit code."""
-
-    def test_layer1_only_clean_file_returns_zero(self, tmp_path):
-        """Happy path: clean file with no Layer 1 violations returns exit code 0."""
-        clean_file = tmp_path / "valid_module.py"
-        clean_file.write_text(textwrap.dedent("""\
-            def compute_total(a: int, b: int) -> int:
-                return a + b
-
-            def main():
-                return compute_total(10, 20)
-        """))
-
-        exit_code = main([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "valid_module.py",
-        ])
-        assert exit_code == 0, f"Expected exit code 0 on clean code, got {exit_code}"
-
-    def test_layer1_only_defective_file_returns_one(self, tmp_path):
-        """Sad path: file with Layer 1 violations (e.g., unguarded forbidden import) returns exit code 1."""
-        defective_file = tmp_path / "broken_module.py"
-        defective_file.write_text(textwrap.dedent("""\
-            import unapproved_forbidden_third_party_package_xyz
-
-            def orphaned_work():
-                return 42
-        """))
-
-        exit_code = main([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "broken_module.py",
-        ])
-        assert exit_code == 1, f"Expected exit code 1 on Layer 1 failure, got {exit_code}"
-
-    def test_layer1_only_skips_layer2(self, tmp_path, capsys):
-        """Edge case: Layer 1-only does not invoke Layer 2 agents or require LLM credentials."""
-        clean_file = tmp_path / "fast_module.py"
-        clean_file.write_text(textwrap.dedent("""\
-            def run():
-                return True
-
-            def main():
-                return run()
-        """))
-
-        exit_code = main([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "fast_module.py",
-        ])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        # Layer 1 only output should not mention Spec Agent or Code Agent prompt calls
-        assert "Spec Agent" not in captured.out
-        assert "Code Agent" not in captured.out
-
-    def test_layer1_only_outputs_tool_evidence_summary(self, tmp_path, capsys):
-        """Output should summarize Layer 1 tool evidence (e.g. call_graph, import_guard)."""
-        target = tmp_path / "inspected.py"
-        target.write_text(textwrap.dedent("""\
-            def work():
-                return "ok"
-
-            def main():
-                return work()
-        """))
-
-        exit_code = main([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "inspected.py",
-        ])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Layer 1" in captured.out or "PASSED" in captured.out, (
-            f"Expected Layer 1 summary in stdout, got:\n{captured.out}"
-        )
-
-
-class TestVerifyDryRun:
-    """Requirement 3: Test --dry-run produces output without running verification."""
-
-    def test_dry_run_exits_zero(self, capsys):
-        """--dry-run produces output and exits with code 0."""
-        exit_code = main(["verify", "--dry-run", "--files", "aegis_cli/cli.py"])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert len(captured.out) > 0, "--dry-run must print output to stdout"
-
-    def test_dry_run_lists_files_to_be_verified(self, capsys):
-        """--dry-run output explicitly mentions the target files that would be checked."""
-        exit_code = main([
-            "verify",
-            "--dry-run",
-            "--files", "aegis_cli/cli.py", "aegis_cli/doctor.py",
-        ])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "aegis_cli/cli.py" in captured.out
-        assert "aegis_cli/doctor.py" in captured.out
-
-    def test_dry_run_does_not_fail_on_defective_files(self, tmp_path, capsys):
-        """--dry-run must exit 0 without failing verification even on files with defects."""
-        broken_file = tmp_path / "failing_sample.py"
-        broken_file.write_text(textwrap.dedent("""\
-            import invalid_pkg_that_does_not_exist
-            def dead_func():
-                pass
-        """))
-
-        exit_code = main([
-            "verify",
-            "--dry-run",
-            "--workspace", str(tmp_path),
-            "--files", "failing_sample.py",
-        ])
-        assert exit_code == 0, f"--dry-run must exit 0 even if targets have defects, got {exit_code}"
-        captured = capsys.readouterr()
-        assert "failing_sample.py" in captured.out
-
-    def test_dry_run_with_layer1_only_indicates_layer1(self, capsys):
-        """--dry-run with --layer1-only mentions Layer 1 checks to be run."""
-        exit_code = main([
-            "verify",
-            "--dry-run",
-            "--layer1-only",
-            "--files", "aegis_cli/cli.py",
-        ])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Layer 1" in captured.out or "layer1" in captured.out.lower()
+from aegis_core.verification import Verdict
+from aegis_cli.cli import _build_parser
 
 
 class TestVerifyExitCodes:
-    """Requirement 4: Test exit code mapping: SHIP=0, BLOCK=1, REVISE=1."""
+    """Exit code mapping: SHIP=0, BLOCK=1, REVISE=1, anything else 1 (fail closed)."""
 
     def test_verdict_to_exit_code_ship_returns_zero(self):
         """Verdict.SHIP maps to exit code 0."""
@@ -308,13 +40,11 @@ class TestVerifyExitCodes:
         from aegis_cli.verify import verdict_to_exit_code
         assert verdict_to_exit_code(Verdict.REVISE) == 1
 
-    def test_verdict_exit_codes_dict_mapping(self):
-        """VERDICT_EXIT_CODES dictionary defines exact mappings for all Verdict members."""
-        from aegis_cli.verify import VERDICT_EXIT_CODES
-        assert VERDICT_EXIT_CODES[Verdict.SHIP] == 0
-        assert VERDICT_EXIT_CODES[Verdict.BLOCK] == 1
-        assert VERDICT_EXIT_CODES[Verdict.REVISE] == 1
-        assert len(VERDICT_EXIT_CODES) == 3
+    def test_verdict_to_exit_code_unknown_fails_closed(self):
+        """A value that is not a Verdict never maps to success."""
+        from aegis_cli.verify import verdict_to_exit_code
+        assert verdict_to_exit_code("ship") == 1
+        assert verdict_to_exit_code(None) == 1
 
     def test_run_verify_returns_zero_on_ship_verdict(self, tmp_path):
         """Direct call to run_verify returning SHIP verdict yields exit code 0."""
@@ -330,12 +60,7 @@ class TestVerifyExitCodes:
         """))
 
         parser = _build_parser()
-        args = parser.parse_args([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "healthy.py",
-        ])
+        args = parser.parse_args(["check", "--workspace", str(tmp_path), "healthy.py"])
         exit_code = run_verify(args)
         assert exit_code == 0
 
@@ -349,85 +74,31 @@ class TestVerifyExitCodes:
         """))
 
         parser = _build_parser()
-        args = parser.parse_args([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "blocked.py",
-        ])
+        args = parser.parse_args(["check", "--workspace", str(tmp_path), "blocked.py"])
         exit_code = run_verify(args)
         assert exit_code == 1
 
 
-class TestVerifyFilesFlag:
-    """Requirement 5: Test --files flag passes file list through and defaults appropriately."""
-
-    def test_files_flag_targets_only_specified_files(self, tmp_path):
-        """Passing --files ensures only specified files are verified, ignoring other broken files."""
-        clean_file = tmp_path / "clean_target.py"
-        clean_file.write_text(textwrap.dedent("""\
-            def answer():
-                return 42
-
-            def main():
-                return answer()
-        """))
-
-        # Broken file in the same directory, but NOT in --files
-        broken_file = tmp_path / "ignored_broken.py"
-        broken_file.write_text("import broken_forbidden_package_abc\n")
-
-        exit_code = main([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "clean_target.py",
-        ])
-        assert exit_code == 0, f"clean_target.py should pass verification; got {exit_code}"
-
-    def test_files_flag_multiple_files_fails_if_any_file_fails(self, tmp_path):
-        """When multiple files are passed, verification fails if any file is defective."""
-        good_file = tmp_path / "good.py"
-        good_file.write_text("def main(): return 1\n")
-
-        bad_file = tmp_path / "bad.py"
-        bad_file.write_text("import missing_forbidden_pkg\n")
-
-        exit_code = main([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "good.py", "bad.py",
-        ])
-        assert exit_code == 1, f"Expected exit code 1 when one of multiple files fails; got {exit_code}"
+class TestResolveTargetFiles:
+    """Positional FILES pass through; without them git supplies the changed files."""
 
     def test_resolve_target_files_uses_explicit_files(self):
-        """resolve_target_files returns explicit files list when --files is provided."""
+        """resolve_target_files returns the explicit files when FILES are given."""
         from aegis_cli.verify import resolve_target_files
 
         parser = _build_parser()
-        args = parser.parse_args(["verify", "--files", "src/foo.py", "src/bar.py"])
+        args = parser.parse_args(["check", "src/foo.py", "src/bar.py"])
         resolved = resolve_target_files(args)
         assert resolved == ["src/foo.py", "src/bar.py"]
 
     def test_resolve_target_files_defaults_to_git_changes_when_no_files_flag(self):
-        """When --files is omitted, resolve_target_files queries git staged/changed files."""
+        """Without FILES, resolve_target_files queries git staged/changed files."""
         from aegis_cli.verify import resolve_target_files
 
         parser = _build_parser()
-        args = parser.parse_args(["verify"])
+        args = parser.parse_args(["check"])
         resolved = resolve_target_files(args)
         assert isinstance(resolved, list), "resolve_target_files must return a list of file paths"
-
-    def test_files_flag_nonexistent_file_returns_error(self, tmp_path):
-        """Passing a nonexistent file to --files returns exit code 1."""
-        exit_code = main([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(tmp_path),
-            "--files", "nonexistent_file_xyz.py",
-        ])
-        assert exit_code == 1
 
     def test_resolve_rejects_out_of_tree_paths(self, tmp_path):
         """Files outside repo_root should be skipped with warning."""
@@ -438,78 +109,12 @@ class TestVerifyFilesFlag:
         repo.mkdir()
 
         parser = _build_parser()
-        args = parser.parse_args([
-            "verify",
-            "--workspace", str(repo),
-            "--files", "../../etc/passwd", "good.py",
-        ])
+        args = parser.parse_args(["check", "--workspace", str(repo), "../../etc/passwd", "good.py"])
         resolved = resolve_target_files(args)
         # The traversal path should be filtered out
         assert "../../etc/passwd" not in resolved
         # The in-tree file should remain
         assert "good.py" in resolved
-
-    def test_all_out_of_tree_files_exits_one(self, tmp_path):
-        """When ALL --files are out-of-tree, should exit 1."""
-        repo = tmp_path / "myrepo"
-        repo.mkdir()
-
-        exit_code = main([
-            "verify",
-            "--workspace", str(repo),
-            "--files", "../../etc/passwd", "../../../tmp/evil.py",
-        ])
-        assert exit_code == 1
-
-
-class TestVerifyRepoRoot:
-    """Test --repo-root parameter resolution and override behavior."""
-
-    def test_repo_root_override_resolves_files_correctly(self, tmp_path):
-        """--repo-root allows verifying files inside an arbitrary project root."""
-        src_dir = tmp_path / "subproject"
-        src_dir.mkdir()
-        code_file = src_dir / "app.py"
-        code_file.write_text(textwrap.dedent("""\
-            def calculate():
-                return 100
-
-            def main():
-                return calculate()
-        """))
-
-        exit_code = main([
-            "verify",
-            "--layer1-only",
-            "--workspace", str(src_dir),
-            "--files", "app.py",
-        ])
-        assert exit_code == 0
-
-    def test_repo_root_invalid_directory_returns_error(self):
-        """Passing an invalid/nonexistent --repo-root returns exit code 1."""
-        exit_code = main([
-            "verify",
-            "--workspace", "/nonexistent/directory/path/that/does/not/exist",
-            "--files", "app.py",
-        ])
-        assert exit_code == 1
-
-
-class TestVerifyPlanParsing:
-    """Test CLI parsing for --plan and --plan-file."""
-
-    def test_verify_accepts_plan_flag(self):
-        """--plan flag accepts a natural language plan string."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify", "--plan", "Refactor authentication layer"])
-        assert args.plan == "Refactor authentication layer"
-
-    def test_verify_accepts_plan_file_flag(self):
-        """--plan-file flag accepts a path to a plan file."""
-        parser = _build_parser()
-        args = parser.parse_args(["verify", "--plan-file", "docs/plan.md"])
-        assert args.plan_file == "docs/plan.md"
 
 class TestVerifyPlanResolution:
     """Test plan resolution logic in aegis_cli.verify."""
@@ -538,6 +143,42 @@ class TestVerifyPlanResolution:
         assert plan is None
         captured = capsys.readouterr()
         assert "plan file not found" in captured.err.lower()
+
+    def test_resolve_task_plan_falls_back_to_docs_plan_md(self, tmp_path):
+        """Without --plan/--plan-file, a non-empty docs/plan.md is the plan."""
+        from aegis_cli.verify import resolve_task_plan
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "plan.md").write_text("  Ship the ledger  \n", encoding="utf-8")
+        args = argparse.Namespace(plan=None, plan_file=None)
+        assert resolve_task_plan(args, str(tmp_path)) == "Ship the ledger"
+
+
+class TestRunVerifyNamespaces:
+    """run_verify accepts the bare namespaces older callers build."""
+
+    def test_namespace_without_full_runs_layer1_only(self, tmp_path, monkeypatch):
+        """No --full and no plan: the model command is never consulted, even if configured."""
+        from aegis_cli.verify import run_verify
+
+        marker = tmp_path / "llm-ran"
+        monkeypatch.setenv("AEGIS_LLM_CMD", f"{sys.executable} -c \"open({str(marker)!r}, 'w')\"")
+        (tmp_path / "core.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        args = argparse.Namespace(
+            files=["core.py"], layer1_only=True, dry_run=False, repo_root=str(tmp_path),
+            workspace=str(tmp_path), plan=None, plan_file=None,
+        )
+        assert run_verify(args) == 0
+        assert not marker.exists()
+
+    def test_layer1_run_records_telemetry(self, tmp_path, monkeypatch):
+        from aegis_cli.verify import run_verify
+
+        calls = []
+        monkeypatch.setattr("aegis_core.outcomes.record_verification_telemetry", lambda **kw: calls.append(kw))
+        (tmp_path / "core.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        args = argparse.Namespace(files=["core.py"], workspace=str(tmp_path), dry_run=False)
+        assert run_verify(args) == 0
+        assert [(c["target_files"], c["passed"], c["verdict"]) for c in calls] == [(["core.py"], True, "PASS")]
 
 
 class TestVerifyLayer2Execution:
@@ -576,24 +217,6 @@ class TestVerifyLayer2Execution:
         assert len(telemetry_calls) >= 1
         assert telemetry_calls[-1]["passed"] is True
         assert telemetry_calls[-1]["verdict"] == Verdict.SHIP
-
-class TestVerifyCleanRepository:
-    """Test verify behavior when repository has no changed files."""
-
-    def test_verify_clean_repo_layer1_only_exits_zero(self, tmp_path, capsys):
-        """When no files are changed/staged, verify --layer1-only exits 0."""
-        exit_code = main(["verify", "--layer1-only", "--workspace", str(tmp_path)])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "clean" in captured.out.lower() or "0 files" in captured.out.lower()
-
-    def test_verify_clean_repo_full_verify_exits_zero(self, tmp_path, capsys):
-        """When no files are changed/staged, full verify exits 0."""
-        exit_code = main(["verify", "--workspace", str(tmp_path)])
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "clean" in captured.out.lower() or "0 files" in captured.out.lower()
-
 
 class TestResolveTargetFilesFallbacks:
     """resolve_target_files falls back from the working tree to branch diffs."""
@@ -693,7 +316,7 @@ class TestResolveTargetFilesFallbacks:
         assert files == ["core/last_commit_file.py"]
         assert getattr(args, "_diff_base", None) == "HEAD~1"
 
-    def test_resolve_target_files_github_base_ref(self, tmp_path, monkeypatch):
+    def test_resolve_target_files_custom_github_base_ref(self, tmp_path, monkeypatch):
         """resolve_target_files honors GITHUB_BASE_REF when present in environment."""
         from aegis_cli.verify import resolve_target_files
         import subprocess
@@ -727,50 +350,4 @@ class TestResolveTargetFilesFallbacks:
         args = argparse.Namespace(files=None, workspace=str(tmp_path))
         files = resolve_target_files(args)
         assert files == ["aegis_core/local.py"]
-
-def test_verify_command_contract():
-    import argparse
-    from unittest.mock import patch
-    from aegis_cli.verify import VerifyCommand
-    cmd = VerifyCommand()
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-    parsed = parser.parse_args([
-        "--files", "foo.py", "--layer1-only", "--dry-run",
-        "--plan", "task", "--plan-file", "p.md",
-    ])
-    assert parsed.files == ["foo.py"]
-    assert parsed.layer1_only is True
-    assert parsed.dry_run is True
-    assert parsed.plan == "task"
-    assert parsed.plan_file == "p.md"
-
-    with patch("aegis_cli.verify.run_verify", return_value=0) as mock_run:
-        assert cmd.execute(parsed) == 0
-        mock_run.assert_called_once_with(parsed)
-
-
-def test_verify_command_hook_mode():
-    import argparse
-    from unittest.mock import patch
-    from aegis_cli.verify import VerifyCommand, run_verify
-
-    cmd = VerifyCommand()
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-    parsed = parser.parse_args(["--hook"])
-    assert parsed.hook is True
-
-    with patch("aegis_cli.check.run_check", return_value=0) as mock_check:
-        rc = run_verify(parsed)
-        assert rc == 0
-        mock_check.assert_called_once_with(parsed)
-
-
-
-
-
-
-
-
 

@@ -1,7 +1,11 @@
-"""soma verify — run verification on changed files.
+"""The engine behind `aegis check`: target files, Layer 1 and the opt-in Layer 2.
 
-Supports Layer 1 (deterministic tools) and Layer 2 (adversarial LLM pair).
-Maps Verdict outcomes to exit codes: SHIP=0, BLOCK=1, REVISE=1.
+Layer 1 is the workspace checkpoint (aegis_cli.checkpoint) plus call_graph,
+import_guard and forbid_ast on the target files. Layer 2 (--full, or a plan)
+adds the adversarial Spec/Code agent pair and the deterministic Arbiter, run
+by one model command (--llm-cmd or AEGIS_LLM_CMD).
+
+Exit codes: 0 pass, 1 findings or a failed run, 2 usage error.
 """
 from __future__ import annotations
 
@@ -13,66 +17,27 @@ import subprocess
 import sys
 from typing import Any
 
-from aegis_cli.base import CommandCategory, AegisCommand
-from aegis_cli.formatters import (
+from aegis_cli.checkpoint import is_blocking, run_checkpoint
+from aegis_cli.formatters.report import (
     format_layer1_json_payload,
     format_layer2_json,
     format_layer2_summary,
 )
 
 __all__ = [
+    "discover_test_evidence",
+    "resolve_target_files",
+    "resolve_task_plan",
     "run_verify",
-    "VerifyCommand",
-    "format_layer2_summary",
+    "verdict_to_exit_code",
 ]
 
 
-def _get_verification():
-    from aegis_core.verification import runner, Verdict
-    return runner, Verdict
-
-
-def _lazy_verdict():
+def verdict_to_exit_code(verdict: Any) -> int:
+    """SHIP is 0; BLOCK, REVISE and anything else are 1 (fail closed)."""
     from aegis_core.verification import Verdict
-    return Verdict
 
-
-class _VerdictExitCodesProxy(dict):
-    """Lazy dict proxy for VERDICT_EXIT_CODES."""
-    _loaded = False
-
-    def _ensure(self):
-        if not self._loaded:
-            V = _lazy_verdict()
-            super().__setitem__(V.SHIP, 0)
-            super().__setitem__(V.BLOCK, 1)
-            super().__setitem__(V.REVISE, 1)
-            self._loaded = True
-
-    def __getitem__(self, key):
-        self._ensure()
-        return super().__getitem__(key)
-
-    def __contains__(self, key):
-        self._ensure()
-        return super().__contains__(key)
-
-    def __len__(self):
-        self._ensure()
-        return super().__len__()
-
-    def __iter__(self):
-        self._ensure()
-        return super().__iter__()
-
-
-VERDICT_EXIT_CODES = _VerdictExitCodesProxy()
-
-
-def verdict_to_exit_code(verdict) -> int:
-    """Map a Verdict enum to an exit code."""
-    VERDICT_EXIT_CODES._ensure()
-    return VERDICT_EXIT_CODES[verdict]
+    return 0 if verdict == Verdict.SHIP else 1
 
 
 def _resolve_git_cwd(args: argparse.Namespace) -> str:
@@ -181,18 +146,25 @@ def _usage_error(message: str) -> int:
     return 2
 
 
-def run_verify(args: argparse.Namespace) -> int:
-    """Run verification on target files.
+def _print_checkpoint(issues: list[dict], strict: bool) -> None:
+    if not issues:
+        print("checkpoint: all checks passed")
+    for issue in issues:
+        label = "[FAIL]" if is_blocking(issue, strict) else "[WARN]"
+        print(f"{label} {issue['message']}")
 
-    Returns 0 for SHIP, 1 for BLOCK/REVISE or a failed run, 2 for a usage error.
-    """
-    runner, Verdict = _get_verification()
+
+def run_verify(args: argparse.Namespace) -> int:
+    """Run `aegis check` for *args*. Returns 0, 1 or 2 (see the module docstring)."""
     from aegis_core.inference_provider import MISSING_BACKEND, LLMCommandError, resolve_backend
+    from aegis_core.verification import VerificationPipeline, runner
     from aegis_core.workspace import Workspace
 
-    layer2 = bool(
-        getattr(args, "full", False) or getattr(args, "plan", None) or getattr(args, "plan_file", None)
-    ) and not getattr(args, "layer1_only", False)
+    hook = bool(getattr(args, "hook", False))
+    layer2 = bool(getattr(args, "full", False) or getattr(args, "plan", None) or getattr(args, "plan_file", None))
+    if hook and layer2:
+        return _usage_error("--hook runs Layer 1 only; drop --full, --plan and --plan-file")
+
     backend = None
     if layer2:
         # Fail before any work: a Layer 2 run without a model must never pass as Layer 1 only.
@@ -203,19 +175,24 @@ def run_verify(args: argparse.Namespace) -> int:
         if backend is None:
             return _usage_error(MISSING_BACKEND)
 
-    ws_obj = getattr(args, "ws", None) or Workspace.resolve(
+    raw_ws = (
         getattr(args, "workspace", None)
         or getattr(args, "repo_root", None)
         or getattr(args, "_project_root", None)
         or getattr(args, "_root", None)
     )
+    if getattr(args, "ws", None) is None and raw_ws and not os.path.isdir(str(raw_ws)):
+        # Workspace.resolve walks up to an existing parent; checking that instead fails open.
+        print(f"Error: workspace does not exist: {raw_ws}", file=sys.stderr)
+        return 1
+    ws_obj = getattr(args, "ws", None) or Workspace.resolve(raw_ws)
     repo_root = str(ws_obj.root)
     if not os.path.isdir(repo_root):
         print(f"Error: repo root does not exist: {repo_root}", file=sys.stderr)
         return 1
 
     task_plan = None
-    if backend is not None:
+    if layer2:
         task_plan = resolve_task_plan(args, repo_root)
         if getattr(args, "plan_file", None) and task_plan is None:
             return 1
@@ -224,15 +201,12 @@ def run_verify(args: argparse.Namespace) -> int:
 
     fmt = str(getattr(args, "format", None) or "text").lower()
     use_json = bool(getattr(args, "json", False) or fmt == "json")
-
-    if getattr(args, "hook", False):
-        from aegis_cli.check import run_check
-        return run_check(args)
+    strict = bool(getattr(args, "strict", False))
+    mode = "Layer 1 + Layer 2" if layer2 else "Layer 1"
 
     target_files = resolve_target_files(args)
     if getattr(args, "files", None) and not target_files:
         return 1
-
     if getattr(args, "files", None) and not getattr(args, "dry_run", False):
         missing = [f for f in target_files if not os.path.exists(os.path.join(repo_root, f))]
         if missing:
@@ -241,40 +215,52 @@ def run_verify(args: argparse.Namespace) -> int:
             return 1
 
     if getattr(args, "dry_run", False):
-        layer_mode = "Layer 1 + Layer 2" if layer2 else "Layer 1 only"
         if use_json:
-            print(json.dumps({"dry_run": True, "mode": layer_mode, "repo_root": repo_root, "files": target_files}, indent=2))
+            print(json.dumps({"dry_run": True, "mode": mode, "repo_root": repo_root, "files": target_files}, indent=2))
             return 0
-        print(f"Dry run — {layer_mode}\nRepo root: {repo_root}\nFiles to verify ({len(target_files)}):")
+        print(f"Dry run — {mode}\nRepo root: {repo_root}\nFiles to verify ({len(target_files)}):")
         for f in target_files:
             print(f"  {f}")
         return 0
 
+    # ── Layer 1: workspace checkpoint, then the per-file tools ────────────
+    issues, blocking = run_checkpoint(Path(repo_root), strict=strict)
+    if not use_json:
+        _print_checkpoint(issues, strict)
+
     if not target_files:
+        summary = "Layer 1: 0 files changed (clean repository)"
         if use_json:
-            print(json.dumps({"passed": True, "files": [], "layer1": [], "summary": "Layer 1: 0 files changed (clean repository)"}, indent=2))
-            return 0
-        print("Layer 1: 0 files changed (clean repository)")
-        return 0
+            payload = format_layer1_json_payload(not blocking, [], [], summary)
+            payload["checkpoint_issues"] = issues
+            print(json.dumps(payload, indent=2))
+        else:
+            print(summary)
+        return 1 if blocking else 0
 
-    fast_mode = getattr(args, "fast", False) or getattr(args, "fast_mode", False) or getattr(args, "hook", False)
-    results = runner.run_layer1(
-        changed_files=target_files,
-        repo_root=repo_root,
-        fast_mode=fast_mode,
-        diff_base=getattr(args, "_diff_base", None),
-    )
+    try:
+        # Mutation testing is slow; it runs only behind --full (fast_mode otherwise).
+        results = runner.run_layer1(
+            changed_files=target_files,
+            repo_root=repo_root,
+            fast_mode=not layer2,
+            diff_base=getattr(args, "_diff_base", None),
+        )
+    except Exception as exc:
+        print(f"Error: Layer 1 could not run: {exc}", file=sys.stderr)
+        return 1
 
-    layer1_pass = runner.gate_verdict(results)
+    tools_pass = runner.gate_verdict(results)
+    layer1_pass = tools_pass and not blocking
     summary = runner.format_summary(results)
     if not use_json:
-        if not layer1_pass:
-            for r in results:
-                if not r.verdict:
-                    print(f"🔴 {r.tool}: {r.target} — {r.detail}")
+        for r in results:
+            if not r.verdict:
+                print(f"🔴 {r.tool}: {r.target} — {r.detail}")
         print(summary)
 
-    def _record_telemetry(passed: bool, verdict: Any):
+    def _record_telemetry(passed: bool, verdict: Any) -> None:
+        # Advisory rule-trigger telemetry: it must never change the verdict.
         try:
             from aegis_core.outcomes import record_verification_telemetry
             record_verification_telemetry(
@@ -288,12 +274,20 @@ def run_verify(args: argparse.Namespace) -> int:
         except Exception:
             pass
 
+    def _emit_json(passed: bool, layer2_result: Any = None) -> None:
+        payload = format_layer1_json_payload(passed, target_files, results, summary)
+        payload["checkpoint_issues"] = issues
+        if layer2_result is not None:
+            payload["layer2"] = format_layer2_json(layer2_result.arbitration_result, layer2_result.verdict)
+        print(json.dumps(payload, indent=2))
+
     if not layer2:
-        _record_telemetry(layer1_pass, "PASS" if layer1_pass else "FAIL")
+        _record_telemetry(tools_pass, "PASS" if tools_pass else "FAIL")
         if use_json:
-            print(json.dumps(format_layer1_json_payload(layer1_pass, target_files, results, summary), indent=2))
+            _emit_json(layer1_pass)
         return 0 if layer1_pass else 1
 
+    # ── Layer 2: adversarial pair + Arbiter ───────────────────────────────
     try:
         test_names, test_results = discover_test_evidence(target_files, repo_root)
     except Exception as e:
@@ -301,10 +295,8 @@ def run_verify(args: argparse.Namespace) -> int:
         _record_telemetry(False, "BLOCK")
         return 1
 
-    from aegis_core.verification import VerificationPipeline
-    pipeline = VerificationPipeline()
     try:
-        pipeline_res = pipeline.run(
+        pipeline_res = VerificationPipeline().run(
             changed_files=target_files,
             workspace=ws_obj,
             task_plan=task_plan,
@@ -318,50 +310,10 @@ def run_verify(args: argparse.Namespace) -> int:
         _record_telemetry(False, "BLOCK")
         return 1
 
+    passed = layer1_pass and verdict_to_exit_code(pipeline_res.verdict) == 0
+    _record_telemetry(tools_pass and pipeline_res.passed, pipeline_res.verdict)
     if use_json:
-        payload = format_layer1_json_payload(layer1_pass, target_files, results, summary)
-        payload["layer2"] = format_layer2_json(pipeline_res.arbitration_result, pipeline_res.verdict)
-        payload["passed"] = bool(pipeline_res.passed)
-        print(json.dumps(payload, indent=2))
+        _emit_json(passed, pipeline_res)
     elif pipeline_res.arbitration_result:
         print(format_layer2_summary(pipeline_res.arbitration_result))
-
-    l2_exit = verdict_to_exit_code(pipeline_res.verdict)
-    overall_passed = bool(layer1_pass and l2_exit == 0)
-    _record_telemetry(overall_passed, pipeline_res.verdict)
-    return 0 if (layer1_pass and l2_exit == 0) else 1
-
-
-class VerifyCommand(AegisCommand):
-    """Command to run verification on changed files."""
-
-    name = "verify"
-    aliases = ("check",)
-    category = CommandCategory.WORKFLOW
-    help = "Run verification on changed files"
-
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--files", nargs="*", default=None, help="Explicit list of files to verify")
-        parser.add_argument("--hook", action="store_true", help="Run pre-commit fast gate (used by git pre-commit hook)")
-        parser.add_argument("--layer1-only", action="store_true", help="Skip Layer 2 (fast deterministic checks only)")
-        parser.add_argument("--dry-run", action="store_true", help="Show what would be checked without running")
-        parser.add_argument("--plan", default=None, help="Task plan or prompt context for Layer 2 adversarial verification")
-        parser.add_argument("--plan-file", default=None, help="Path to file containing task plan or prompt context")
-        existing_fmt = parser._option_string_actions.pop("--format", None)
-        if existing_fmt is not None:
-            if existing_fmt in parser._actions:
-                parser._actions.remove(existing_fmt)
-            for group in getattr(parser, "_action_groups", ()):
-                if existing_fmt in group._group_actions:
-                    group._group_actions.remove(existing_fmt)
-        parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format (text, json)")
-
-    def execute(self, args: argparse.Namespace) -> int:
-        return run_verify(args)
-
-
-if __name__ == "__main__":  # pragma: no cover
-    from aegis_cli.cli import main
-    sys.exit(main(["verify"] + sys.argv[1:]))
-
-
+    return 0 if passed else 1

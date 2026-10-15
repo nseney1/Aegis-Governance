@@ -1,5 +1,4 @@
 """Fail-closed and read-only regression tests for CLI/MCP checkpoint."""
-import argparse
 import os
 from pathlib import Path
 
@@ -102,11 +101,9 @@ def test_malformed_cell_frontmatter_is_an_issue(tmp_path, content, expected):
 
 
 def _run_cli(root):
-    from aegis_cli.checkpoint import run_checkpoint
+    from aegis_cli.cli import main
 
-    return run_checkpoint(argparse.Namespace(
-        workspace=str(root), pre_commit=False, strict=True, json=False,
-    ))
+    return main(['check', '--workspace', str(root), '--strict'])
 
 
 @pytest.mark.parametrize('malformed', [False, True], ids=['pass', 'fail'])
