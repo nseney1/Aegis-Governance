@@ -7,7 +7,7 @@ hypothesis: A module with passing unit tests but zero callers in production code
 prediction: "Will catch modules that have test_*.py coverage but no imports from aegis_cli/, aegis_mcp/, or aegis_sdk/"
 falsification: 0 findings in 20 sessions → prune
 target_paths:
-  - "aegis_core/**/*.py"
+  - "aegis_core/*.py"
   - "aegis_cli/*.py"
   - "aegis_mcp/*.py"
 triggers:

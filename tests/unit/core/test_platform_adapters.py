@@ -309,32 +309,29 @@ def test_claude_adapter_dry_run_wording(tmp_path):
     assert (claude_dir / "CLAUDE.md").is_file()
 
 
-def test_gemini_adapter_installs_meta_and_all_gate_rules(tmp_path: Path):
-    """GeminiAdapter.install() must include META.md and all gate rules in installed rule files."""
+# The shipped rule set (D16): the author's dogfood rules live in this repo's
+# .aegis/rules and desktop-automation is not shipped.
+SHIPPED_RULES = {"META.md", "cost-optimization.md", "destructive-ops.md", "providence.md",
+                 "subagent-delegation.md"}
+SHIPPED_ORACLES = {"architectural-tenets.md", "atomic-workstream-protocol.md", "documentation.md",
+                   "feature-specs.md", "git-workflow.md", "polyglot-standards.md",
+                   "tdd-protocol.md", "testing.md"}
+
+
+def test_gemini_adapter_installs_exactly_the_shipped_rules(tmp_path: Path):
+    """GeminiAdapter.install() installs META.md and every shipped rule, and nothing else."""
     repo_root = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
     home = tmp_path / "home"
     home.mkdir()
     adapter = GeminiAdapter(workspace=repo_root, home=home)
 
-    source_names = {p.name for p in adapter.get_source_rules()}
-    assert "META.md" in source_names
-    assert "gitflow-review-gate.md" in source_names
-    assert "core-change-protocol.md" in source_names
-    assert "ci-green-before-release.md" in source_names
-    assert "no-pre-existing-excuse.md" in source_names
+    assert {p.name for p in adapter.get_source_rules()} == SHIPPED_RULES | SHIPPED_ORACLES
 
     res = adapter.install(local=False, dry_run=False)
     assert res.success
     installed_rules_dir = home / ".gemini" / "config" / "rules"
-    for expected in (
-        "META.md",
-        "gitflow-review-gate.md",
-        "core-change-protocol.md",
-        "ci-green-before-release.md",
-        "no-pre-existing-excuse.md",
-        "providence.md",
-    ):
-        assert (installed_rules_dir / expected).is_file(), f"Missing installed rule: {expected}"
+    assert {p.name for p in installed_rules_dir.glob("*.md")} == SHIPPED_RULES
+    assert {p.name for p in (installed_rules_dir / ".oracles").glob("*.md")} == SHIPPED_ORACLES
 
 
 def test_gemini_adapter_local_target_dirs_prefers_aegis_workspace(tmp_path: Path):

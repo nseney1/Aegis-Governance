@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 
 def _create_cell(workspace: Path, cell_id: str, target_paths: list[str]) -> Path:
@@ -44,7 +42,7 @@ def test_workspace(tmp_path: Path) -> Path:
 
 def test_record_verification_telemetry_appends_signals(test_workspace: Path):
     """record_verification_telemetry should match cells and append trigger + outcome signals."""
-    from aegis_core.outcomes import record_verification_telemetry
+    from aegis_core.outcomes.telemetry import record_verification_telemetry
     from aegis_core.evidence import aggregate_signals
 
     _create_cell(test_workspace, "cell-math", ["math_*.py", "calc.py"])
@@ -82,7 +80,7 @@ def test_record_verification_telemetry_appends_signals(test_workspace: Path):
 
 def test_record_verification_telemetry_handles_failure(test_workspace: Path):
     """When verification fails, record_verification_telemetry should emit fp signal."""
-    from aegis_core.outcomes import record_verification_telemetry
+    from aegis_core.outcomes.telemetry import record_verification_telemetry
     from aegis_core.evidence import aggregate_signals
 
     _create_cell(test_workspace, "cell-auth", ["auth.py"])

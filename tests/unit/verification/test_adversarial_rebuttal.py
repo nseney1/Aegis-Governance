@@ -10,12 +10,9 @@ Tests prove:
 import inspect
 import json
 
-from aegis_core.verification import (
-    RiskCategory,
-    ToolEvidence,
-    Verdict,
-)
-from aegis_core.verification import VerificationPipeline, adversarial_verify
+from aegis_core.verification import RiskCategory, ToolEvidence, Verdict
+from aegis_core.verification.pipeline import VerificationPipeline
+from aegis_core.verification import adversarial_verify
 
 
 class TestAdversarialRebuttalPrompt:

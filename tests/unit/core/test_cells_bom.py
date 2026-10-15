@@ -1,5 +1,5 @@
-"""aegis_sdk.rules.parse_rule_file must tolerate a UTF-8 BOM (PowerShell 5.1)."""
-from aegis_sdk.rules import parse_rule_file
+"""aegis_sdk.parse_rule_file must tolerate a UTF-8 BOM (PowerShell 5.1)."""
+from aegis_sdk import parse_rule_file
 
 
 def test_bom_prefixed_cell_parses(tmp_path):
@@ -17,22 +17,4 @@ def test_bomless_cell_unchanged(tmp_path):
     assert fm["id"] == "plain"
     assert "# Body" in body
 
-
-def test_stdlib_parse_frontmatter_nested(monkeypatch):
-    import pytest
-    import aegis_sdk.rules as sdk_cells
-    monkeypatch.setattr(sdk_cells, "yaml", None)
-    yaml_text = "id: test\ntags:\n  - a\n  - b\nfitness:\n  tp: 1\n"
-    res = sdk_cells._stdlib_parse_frontmatter(yaml_text)
-    assert res["id"] == "test"
-    assert res["tags"] == ["a", "b"]
-    assert res["fitness"] == {"tp": 1}
-
-
-def test_stdlib_parse_frontmatter_invalid(monkeypatch):
-    import pytest
-    import aegis_sdk.rules as sdk_cells
-    monkeypatch.setattr(sdk_cells, "yaml", None)
-    with pytest.raises(sdk_cells.RuleParseError):
-        sdk_cells._stdlib_parse_frontmatter("\tkey: invalid tab")
 

@@ -3,41 +3,10 @@
 Verifies age gate fail-closed behavior, created_date attribute loading,
 terminal promotion handling, and rollback on failed atomic moves.
 """
-from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
 
-from aegis_sdk.rules import Rule, RuleFitness, load_rule
-from aegis_cli.rule import _force_promote, _force_demote, run_promote
-
-
-def test_is_promotable_with_age_fails_closed_on_invalid_date():
-    """Unparseable or invalid created_date MUST return False, not True."""
-    c = Rule(name="test", type="vacuole", fitness=RuleFitness(triggers=20, true_positives=19))
-    
-    # Unparseable string date
-    c.created_date = "invalid-date-format"
-    assert c.is_promotable_with_age(min_age_days=30) is False
-
-    # None created_date
-    c.created_date = None
-    assert c.is_promotable_with_age(min_age_days=30) is False
-
-
-def test_load_cell_populates_created_date(tmp_path):
-    """load_rule must populate created_date on the loaded Rule instance."""
-    cells_dir = tmp_path / ".aegis" / "rules" / "traps"
-    cells_dir.mkdir(parents=True)
-    cell_file = cells_dir / "test-cell.md"
-    cell_file.write_text(
-        "---\nname: test-cell\ntype: trap\ncreated_date: '2026-01-01T00:00:00Z'\n---\nHypothesis\n",
-        encoding="utf-8"
-    )
-
-    cell = load_rule("test-cell", cells_dir=str(tmp_path / ".aegis" / "rules"))
-    assert hasattr(cell, "created_date")
-    assert cell.created_date is not None
-    assert isinstance(cell.created_date, (datetime, str))
+from aegis_cli.rule import _force_promote
 
 
 def test_force_promote_handles_genome_cells(tmp_path, capsys):

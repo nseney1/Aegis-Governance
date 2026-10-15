@@ -22,7 +22,7 @@ from aegis_core.ast.drivers.python import parse_python_ast
 from aegis_core.ast.policy import evaluate_forbid_ast, extract_normalized_ast
 from aegis_core.ast.runner import ASTDriverError
 from aegis_core.ast.schema import CallSiteNode, ImportNode, NormalizedAST
-from aegis_core.verification import DeterministicVerifier
+from aegis_core.verification.pipeline import DeterministicVerifier
 from aegis_core.verification.runner import gate_verdict
 
 
@@ -503,15 +503,6 @@ class TestRebindingDoesNotHideAlias:
         assert _violations(code, {"decorators": ["functools.lru_cache"]}) == [
             "Forbidden decorator 'functools.lru_cache' matched rule forbid_ast.decorators"
         ]
-
-    def test_matchers_accept_single_valued_maps(self):
-        """Callers that pass the original ``{name: str}`` maps keep working."""
-        from aegis_core.ast.policy import _match_call_against_pattern, _match_decorator_against_pattern
-
-        assert _match_call_against_pattern("sp.run", "subprocess.run", aliases={"sp": "subprocess"}) is True
-        assert _match_call_against_pattern("r", "subprocess.run", imported_qual_map={"r": "subprocess.run"}) is True
-        assert _match_decorator_against_pattern("lc", "functools.lru_cache", aliases={"lc": "functools.lru_cache"}) is True
-
 
 # ── Review round 2, finding 2: encoding detection must split lines like CPython ──
 

@@ -1,15 +1,12 @@
 """Tests for aegis_core.lifecycle — canonical cell state transitions, scoring, and operations."""
 from __future__ import annotations
 
-import os
-import shutil
 import time
 from pathlib import Path
 
 import pytest
 
-from aegis_core.lifecycle import (
-    PROTECTED_RULES,
+from aegis_core.lifecycle.constants import (
     STATUS_ADAPT,
     STATUS_APOPTOSIS,
     STATUS_APOPTOSIS_WARNING,
@@ -17,14 +14,11 @@ from aegis_core.lifecycle import (
     STATUS_EXTINCT,
     STATUS_NEW,
     STATUS_SURVIVE,
-    apply_exponential_decay,
-    calculate_fitness_status,
-    demote_cell,
-    find_cell_file,
-    is_extinct,
-    is_promotable,
-    promote_cell,
 )
+from aegis_core.lifecycle.decay import apply_decay
+from aegis_core.lifecycle.quorum import calculate_fitness_status, is_promotable
+from aegis_core.lifecycle.promotion import demote_cell, promote_cell
+from aegis_core.lifecycle.parsers import find_cell_file
 
 
 @pytest.fixture
@@ -119,15 +113,8 @@ class TestPromotableAndExtinct:
         # Perfect score but only 10 triggers
         assert is_promotable(tp=10, triggers=10) is False
 
-    def test_is_extinct_at_or_below_threshold(self):
-        # tp=0, triggers=10 -> (0+1)/(10+2) = 0.083 <= 0.15
-        assert is_extinct(tp=0, triggers=10) is True
-        # tp=2, triggers=10 -> (2+1)/(10+2) = 0.25 > 0.15
-        assert is_extinct(tp=2, triggers=10) is False
-
     def test_zero_triggers_neither(self):
         assert is_promotable(tp=0, triggers=0) is False
-        assert is_extinct(tp=0, triggers=0) is False
 
 
 class TestDecay:
@@ -140,7 +127,7 @@ class TestDecay:
             "false_positives": 10,
             "last_decay_epoch": 0,
         }
-        decayed = apply_exponential_decay(fitness, decay_factor=0.95, min_interval_seconds=0)
+        decayed = apply_decay({"fitness": fitness})["fitness"]
         assert decayed["triggers"] == 95
         assert decayed["true_positives"] == 85
         assert decayed["false_positives"] == 9
@@ -154,8 +141,16 @@ class TestDecay:
             "false_positives": 10,
             "last_decay_epoch": now - 60,  # 1 min ago (< 3600s)
         }
-        decayed = apply_exponential_decay(fitness, decay_factor=0.95, min_interval_seconds=3600)
+        decayed = apply_decay({"fitness": fitness})["fitness"]
         assert decayed["triggers"] == 100  # unchanged
+
+
+@pytest.mark.parametrize("stress, multiplier", [(0, 1.0), (1, 1.05), (5, 1.25), (10, 1.5), (100, 1.5)])
+def test_antifragile_bonus_is_five_percent_per_survived_review_capped_at_ten(stress, multiplier):
+    from aegis_core.lifecycle.decay import antifragile_bonus
+
+    assert antifragile_bonus({"fitness": {"stress_survived": stress}}) == pytest.approx(multiplier)
+    assert antifragile_bonus({}) == 1.0
 
 
 class TestCellPromoteAndDemote:
@@ -242,32 +237,4 @@ class TestCellPromoteAndDemote:
         # dec_score == 0.15 should be EXTINCT, matching is_extinct
         status = calculate_fitness_status("vacuole", tp=1, fp=1, triggers=2, dec_score=0.15)
         assert status == STATUS_EXTINCT
-
-    def test_demote_wall_cleans_enforcement_artifacts(self, workspace: Path):
-        wall = _create_cell_file(
-            workspace / ".aegis" / "rules" / "invariants" / "guarded-cell.md",
-            "guarded-cell", "invariant"
-        )
-        # Create gate enforcement artifact
-        enf_dir = workspace / ".aegis" / "enforcement"
-        enf_dir.mkdir(parents=True)
-        gate_script = enf_dir / "gate-guarded-cell.sh"
-        gate_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-
-        res = demote_cell(workspace, "guarded-cell")
-        assert res["status"] == "demoted"
-        assert not gate_script.exists()
-
-    def test_lifecycle_frontmatter_and_storage_consolidation(self):
-        """Ensure lifecycle, sync, and telemetry delegate frontmatter and fsync/atomic storage to yaml.py and storage.py."""
-        import inspect
-        from aegis_core import storage, sync, telemetry
-        from aegis_core.lifecycle import creation, parsers, promotion, selection
-
-        assert hasattr(storage, "atomic_write_and_unlink")
-        for mod in (creation, parsers, promotion, selection, sync, telemetry):
-            src = inspect.getsource(mod)
-            assert 'find("---", 3)' not in src, f"{mod.__name__} still uses naive find('---', 3)"
-            assert "def _fsync_dir" not in src, f"{mod.__name__} still defines duplicate _fsync_dir"
-            assert "def _atomic_write_and_unlink" not in src, f"{mod.__name__} still defines duplicate _atomic_write_and_unlink"
 

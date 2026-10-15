@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 from aegis_core.yaml_engine.document import AegisDocument
 from aegis_core.yaml_engine.parser import (
@@ -12,7 +12,6 @@ from aegis_core.yaml_engine.parser import (
     _CLOSING_DELIM_RE,
     parse_yaml_subset,
 )
-from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 
 def _get_body(content: str) -> str:
@@ -91,6 +90,22 @@ def parse_rule_frontmatter(content_or_path: str) -> Tuple[Dict[str, Any], str]:
     return data, body
 
 
+def parse_rule_file(filepath: str) -> Tuple[Dict[str, Any], str]:
+    """Parse the rule file at ``filepath`` into (frontmatter_dict, body).
+
+    Raises RuleNotFoundError if it is not a file and RuleParseError if its
+    frontmatter is missing or malformed. Public through ``aegis_sdk``.
+    """
+    from aegis_core.errors import RuleNotFoundError, RuleParseError
+
+    if not os.path.isfile(filepath):
+        raise RuleNotFoundError(f"Rule file not found: {filepath}")
+    try:
+        return parse_rule_frontmatter(filepath)
+    except ValueError as exc:
+        raise RuleParseError(f"Error parsing rule {filepath}: {exc}") from exc
+
+
 class AegisYAML:
     """Primary zero-dependency AegisYAML engine."""
 
@@ -146,18 +161,10 @@ class AegisYAML:
         doc._source_path = str(resolved_abs)
         return doc
 
-    @staticmethod
-    def dump(doc: Union[AegisDocument, Dict[str, Any]], body: Optional[str] = None) -> str:
-        """Serialize document to YAML frontmatter string."""
-        if isinstance(doc, AegisDocument):
-            target_body = body if body is not None else doc.body
-            return dump_frontmatter(doc.metadata, body=target_body if target_body else None)
-        return dump_frontmatter(doc, body=body)
-
-
 __all__ = [
     "AegisYAML",
     "_get_body",
     "parse_frontmatter",
+    "parse_rule_file",
     "parse_rule_frontmatter",
 ]

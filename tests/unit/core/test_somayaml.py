@@ -1,27 +1,23 @@
 """Tests for aegis_core.yaml — Pure-Python AegisYAML engine & unified domain model."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import pytest
 
 from conftest import symlink_or_skip
-from aegis_core.yaml import (
-    AegisYAML,
-    AegisDocument,
+from aegis_core.yaml_engine.frontmatter import AegisYAML, parse_frontmatter, parse_rule_frontmatter, _get_body
+from aegis_core.yaml_engine.document import AegisDocument
+from aegis_core.yaml_engine.parser import (
     AegisYAMLError,
     FrontmatterError,
-    dump_frontmatter,
-    parse_frontmatter,
-    parse_rule_frontmatter,
     parse_yaml_subset,
-    _get_body,
     MAX_DOC_BYTES,
     MAX_SCALAR_CHARS,
     MAX_LINES,
     MAX_DEPTH,
 )
-from aegis_core.workspace import Workspace
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.workspace.base import Workspace
 
 
 class TestSomaYAMLCoreParsing:
@@ -326,8 +322,6 @@ class TestBackwardCompatibilityParity:
             parse_yaml_subset("key: 'unclosed")
 
 
-from tests.unit.core.test_frontmatter_engine import TestFrontmatterParser, TestFrontmatterDumper
-from aegis_core.yaml import write_frontmatter
 import datetime
 
 
@@ -369,7 +363,7 @@ class TestSomaYAMLBranchHardening:
         doc_explicit = AegisDocument(metadata={"id": "e1"}, kind="custom_kind")
         assert doc_explicit.kind == "custom_kind"
 
-    def test_somayaml_parse_text_and_dump(self):
+    def test_somayaml_parse_text(self):
         # parse_text with frontmatter and body
         doc = AegisYAML.parse_text("---\nid: cell-abc\nkind: skill\n---\n# Markdown Body\nHello world")
         assert doc.id == "cell-abc"
@@ -386,16 +380,6 @@ class TestSomaYAMLBranchHardening:
 
         with pytest.raises(FrontmatterError, match="Expected YAML mapping at document root"):
             AegisYAML.parse_text("- item 1\n- item 2\n")
-
-        # dump AegisDocument
-        dumped1 = AegisYAML.dump(doc)
-        assert "id: cell-abc" in dumped1
-        assert "Hello world" in dumped1
-
-        # dump dict with body
-        dumped2 = AegisYAML.dump({"id": "d1"}, body="Body from dict")
-        assert "id: d1" in dumped2
-        assert "Body from dict" in dumped2
 
     def test_somayaml_parse_file_and_write_frontmatter(self, tmp_path: Path):
         # workspace without confine_path raises AegisYAMLError
@@ -424,14 +408,6 @@ class TestSomaYAMLBranchHardening:
                 return str(real_file.resolve())
         doc_str = AegisYAML.parse_file("target.md", StringWS())
         assert doc_str.id == "sym-target"
-
-        # write_frontmatter
-        out_file = tmp_path / "written.md"
-        write_frontmatter(out_file, {"id": "written-id"}, "Written body")
-        assert out_file.exists()
-        doc_written = AegisYAML.parse_file("written.md", ws)
-        assert doc_written.id == "written-id"
-        assert doc_written.body == "Written body"
 
     def test_parse_file_rejects_symlinks_branch_hardening(self, tmp_path: Path):
         ws = Workspace(tmp_path)
@@ -593,7 +569,7 @@ items:
             parse_yaml_subset(f"key: {deep_flow}")
 
         # Unterminated / mismatched quote scalar in _parse_scalar
-        from aegis_core.yaml import _parse_scalar
+        from aegis_core.yaml_engine.parser import _parse_scalar
         with pytest.raises(FrontmatterError, match="unterminated quoted scalar"):
             _parse_scalar("\"mismatched'")
 
@@ -602,11 +578,11 @@ items:
         assert res_bad_big_u["key"] == "U000000ZZ"
 
         # CRLF line continuation
-        from aegis_core.yaml import _unescape_double
+        from aegis_core.yaml_engine.parser import _unescape_double
         assert _unescape_double("line1\\\r\n  line2") == "line1  line2"
 
         # _strip_comment quote escaping
-        from aegis_core.yaml import _strip_comment, _is_quote_closed, _parse_flow
+        from aegis_core.yaml_engine.parser import _strip_comment, _is_quote_closed, _parse_flow
         assert _strip_comment(r'key: "val \"with\" quotes" # c') == r'key: "val \"with\" quotes" '
         assert _strip_comment("key: 'it''s awesome' # c") == "key: 'it''s awesome' "
 
@@ -663,7 +639,7 @@ items:
             parse_yaml_subset("items:\n  - \"unclosed\n  - sibling")
 
         # Depth limits on helper functions directly
-        from aegis_core.yaml import _parse_flow_map, _parse_block_map, _parse_block_seq
+        from aegis_core.yaml_engine.parser import _parse_flow_map, _parse_block_map, _parse_block_seq
         with pytest.raises(AegisYAMLError, match="nesting depth"):
             _parse_flow("a", 0, depth=35)
         with pytest.raises(AegisYAMLError, match="nesting depth"):

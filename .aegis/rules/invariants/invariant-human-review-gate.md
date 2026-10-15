@@ -10,7 +10,7 @@ target_paths:
   - aegis_core/command_safety.py
   - "aegis_cli/hooks/**"
   - docs/project/RELEASE_WORKFLOW.md
-  - rules/gitflow-review-gate.md
+  - .aegis/rules/invariants/invariant-gitflow-review-gate.md
 expiry_sessions: 100
 impact_weight: 1.0
 minimum_mode: bulwark
@@ -30,6 +30,6 @@ fitness:
 
 # Invariant: Human Review Gate Enforcement
 
-Target: `aegis_core/command_safety.py`, `aegis_cli/hooks.py`
+Target: `aegis_core/command_safety.py`, `aegis_cli/hooks/`
 
 Description: Enforces non-bypassable structural separation between code generation and release authorization. Agents are strictly prohibited from executing `gh pr merge` or direct pushes to `main`. Merge authority on `main` is reserved exclusively for human maintainers.

@@ -28,7 +28,7 @@ from aegis_core.ast.runner import (
 )
 from aegis_core.errors import PathTraversalError
 from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 from aegis_mcp.handlers.core import handle_scan
 
 LANE_ROOT = Path(__file__).resolve().parents[3]

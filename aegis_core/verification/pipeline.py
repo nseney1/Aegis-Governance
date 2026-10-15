@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from aegis_core.inference_provider import MISSING_BACKEND
-from aegis_core.workspace import GitWorkspace, Workspace, as_workspace
+from aegis_core.workspace.git import GitWorkspace
+from aegis_core.workspace.base import Workspace
+from aegis_core.workspace import as_workspace
 
 from . import (
     ArbitrationResult,

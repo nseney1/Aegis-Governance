@@ -7,20 +7,15 @@ legacy standalone getters emit DeprecationWarning while preserving backward comp
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import pytest
-import warnings
 
-from aegis_core.defects import audit_expiry, load_registry
-from aegis_core.lifecycle.creation import create_cell, transfer_cell
+from aegis_core.lifecycle.creation import create_cell
 from aegis_core.lifecycle.decay import compute_cells_fitness
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
 from aegis_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
 from aegis_core.lifecycle.selection import run_cell_selection
-from aegis_core.outcomes import harvest_git_history, run_outcome_engine
-from aegis_core.sync import load_soma_config, run_post_session_hook
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 
 @pytest.fixture
@@ -75,16 +70,6 @@ def mock_soma_workspace(tmp_path: Path) -> Workspace:
     return Workspace(root=tmp_path)
 
 
-class TestPurgedLegacyGetters:
-    """Verify that legacy standalone path getters have been permanently purged in v0.120.0."""
-
-    def test_legacy_getters_purged_from_workspace_module(self):
-        import aegis_core.workspace as scw
-        for getter in ("get_cells_dir", "get_metrics_dir", "get_signals_file", "get_outcomes_file"):
-            assert not hasattr(scw, getter), f"{getter} must be purged from aegis_core.workspace"
-            assert getter not in scw.__all__, f"{getter} must not be in aegis_core.workspace.__all__"
-
-
 class TestLifecycleWorkspaceInteroperability:
     """Verify lifecycle subsystem functions accept Workspace directly."""
 
@@ -97,19 +82,6 @@ class TestLifecycleWorkspaceInteroperability:
         assert isinstance(created, Path)
         assert created.is_file()
         assert str(mock_soma_workspace.rules_dir) in str(created)
-
-    def test_transfer_cell_with_workspace_instance(self, mock_soma_workspace: Workspace, tmp_path: Path):
-        dest_dir = tmp_path / "dest_repo"
-        (dest_dir / ".aegis" / "rules").mkdir(parents=True)
-
-        res = transfer_cell(
-            cell_id="test-rule",
-            target_dir_str=str(dest_dir),
-            source_workspace=mock_soma_workspace,
-        )
-        assert res == 0
-        dest_cell = dest_dir / ".aegis" / "rules" / "traps" / "test-rule.md"
-        assert dest_cell.is_file()
 
     def test_compute_cells_fitness_with_workspace_instance(self, mock_soma_workspace: Workspace):
         fitness_list = compute_cells_fitness(workspace=mock_soma_workspace)
@@ -141,42 +113,3 @@ class TestLifecycleWorkspaceInteroperability:
         assert isinstance(demotions, list)
 
 
-class TestOutcomesAndSyncWorkspaceInteroperability:
-    """Verify outcomes, defects, enforcement, and sync accept Workspace directly."""
-
-    def test_harvest_git_history_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        result = harvest_git_history(workspace=mock_soma_workspace, dry_run=True)
-        assert "commits_inspected" in result
-        assert "cells_matched" in result
-
-    def test_run_outcome_engine_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        code = run_outcome_engine(workspace=mock_soma_workspace)
-        assert code in (0, 1)
-
-    def test_defects_and_enforcement_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        # Create dummy bug registry
-        reg_dir = mock_soma_workspace.root / "docs" / "project"
-        reg_dir.mkdir(parents=True, exist_ok=True)
-        reg_file = reg_dir / "BUG_REGISTRY.json"
-        reg_file.write_text(json.dumps({"bugs": []}), encoding="utf-8")
-
-        reg = load_registry(mock_soma_workspace)
-        assert reg == {"bugs": []}
-
-        audit = audit_expiry(mock_soma_workspace)
-        assert isinstance(audit, list)
-
-    def test_sync_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        # Create a dummy aegis.conf
-        conf_file = mock_soma_workspace.root / "aegis.conf"
-        conf_file.write_text("TEAM_REPO=/tmp/team\n", encoding="utf-8")
-        cfg = load_soma_config(repo_dir=mock_soma_workspace)
-        assert cfg.get("TEAM_REPO") == "/tmp/team"
-
-        dummy_transcript = mock_soma_workspace.root / "transcript.jsonl"
-        dummy_transcript.write_text("{}\n", encoding="utf-8")
-        res = run_post_session_hook(
-            transcript_path=dummy_transcript,
-            repo_root=mock_soma_workspace,
-        )
-        assert res in (0, 1)

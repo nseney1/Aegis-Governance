@@ -11,9 +11,7 @@ import os
 import subprocess
 import sys
 import textwrap
-import time
 
-import pytest
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 
@@ -47,7 +45,7 @@ def _rows(ws):
 def test_idempotent_append_dedupes_across_processes(tmp_path):
     ws = str(tmp_path)
     code = f"""
-        from aegis_sdk.telemetry import append_signal
+        from aegis_core.telemetry_engine.ledger import append_signal
         for _ in range(20):
             append_signal({ws!r}, "cell-a", "tp", "ci", principal="p",
                           idempotency_scope="run", idempotency_key="op-1")
@@ -65,7 +63,7 @@ def test_idempotency_and_fence_without_fcntl(tmp_path):
     ws = str(tmp_path)
     code = f"""
         import json
-        from aegis_sdk.telemetry import (append_signal, EventConflictError,
+        from aegis_core.telemetry_engine.ledger import (append_signal, EventConflictError,
                                         StaleGenerationError)
         a = append_signal({ws!r}, "cell-a", "tp", "mcp", idempotency_key="k")
         b = append_signal({ws!r}, "cell-a", "tp", "mcp", idempotency_key="k")

@@ -11,7 +11,7 @@ target_paths:
   - aegis_cli/check.py
   - aegis_cli/verify.py
   - aegis_cli/scan.py
-  - aegis_core/telemetry.py
+  - aegis_core/telemetry_engine/ledger.py
 expiry_sessions: 15
 expiry_days: 60
 created: 2026-09-28
@@ -33,6 +33,5 @@ fitness:
 The MCP server (aegis_mcp/tools.py) is the API contract for external agents.
 When a new CLI command is added or an existing command gains new features, the
 corresponding MCP tool should be updated to maintain feature parity.
-Current MCP tools: aegis_create_rule, aegis_scan, aegis_grade, aegis_coverage,
-aegis_rule_fitness, aegis_list_rules, aegis_report_outcome, aegis_propose_change,
-aegis_verify_changes, aegis_checkpoint.
+Current MCP tools (v4.0, D4): aegis_scan, aegis_report_outcome, aegis_create_rule,
+aegis_list_rules.

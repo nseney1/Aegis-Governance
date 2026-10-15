@@ -6,7 +6,6 @@ from decimal import Decimal
 import hashlib
 import json
 import os
-import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -14,7 +13,6 @@ from typing import Any, Optional
 
 from aegis_core.locking import _acquire_os_lock, _get_thread_lock, _release_os_lock
 from aegis_core.taxonomy import TELEMETRY_LOCK_TIMEOUT_SECONDS
-from aegis_core.workspace import resolve_workspace
 from aegis_core.workspace.layout import LockResource, WorkspaceLayout
 
 VALID_SIGNAL_TYPES = frozenset({"tp", "fp", "fn", "trigger"})
@@ -33,18 +31,6 @@ class StaleGenerationError(RuntimeError):
 
 _lock_tls = threading.local()
 _SIGNALS_CACHE: dict[str, tuple[tuple[int, int, int], bytes, dict[str, dict]]] = {}
-
-def _cfg_signals_filename() -> str:
-    return str(getattr(sys.modules.get("aegis_core.telemetry"), "SIGNALS_FILENAME", SIGNALS_FILENAME))
-
-def _cfg_lock_filename() -> str:
-    return str(getattr(sys.modules.get("aegis_core.telemetry"), "LOCK_FILENAME", LOCK_FILENAME))
-
-def _cfg_epoch_filename() -> str:
-    return str(getattr(sys.modules.get("aegis_core.telemetry"), "EPOCH_FILENAME", EPOCH_FILENAME))
-
-def invalidate_signals_cache() -> None:
-    _SIGNALS_CACHE.clear()
 
 def _resolve_evidence_dir(workspace: str) -> str:
     ws = str(workspace)
@@ -74,7 +60,7 @@ def evidence_lock(workspace: str):
     """Context manager acquiring both the per-process thread lock and the OS file lock."""
     evidence_dir = _resolve_evidence_dir(workspace)
     os.makedirs(evidence_dir, exist_ok=True)
-    legacy_lock_path = os.path.join(evidence_dir, _cfg_lock_filename())
+    legacy_lock_path = os.path.join(evidence_dir, LOCK_FILENAME)
     try:
         if not os.path.exists(legacy_lock_path):
             with open(legacy_lock_path, "a", encoding="utf-8"):
@@ -112,7 +98,7 @@ def evidence_lock(workspace: str):
                         _lock_tls.held.pop(lock_path, None)
 
 def read_generation(workspace: str) -> int:
-    gen_path = os.path.join(str(workspace), ".aegis", _cfg_epoch_filename())
+    gen_path = os.path.join(str(workspace), ".aegis", EPOCH_FILENAME)
     if not os.path.isfile(gen_path):
         return DEFAULT_GENERATION
     try:
@@ -122,23 +108,8 @@ def read_generation(workspace: str) -> int:
     except (OSError, ValueError):
         return DEFAULT_GENERATION
 
-def current_generation(workspace: str) -> int:
-    return read_generation(workspace)
-
-def increment_generation(workspace: str) -> int:
-    ws = str(workspace)
-    with evidence_lock(ws):
-        gen = read_generation(ws) + 1
-        epoch_file = os.path.join(ws, ".aegis", _cfg_epoch_filename())
-        os.makedirs(os.path.dirname(epoch_file), exist_ok=True)
-        _atomic_replace_bytes(epoch_file, f"{gen}\n".encode("utf-8"))
-        return gen
-
 def get_signals_path(workspace: str) -> str:
-    return os.path.join(_resolve_evidence_dir(workspace), _cfg_signals_filename())
-
-def get_lock_path(workspace: str) -> str:
-    return str(WorkspaceLayout(Path(str(workspace))).lock_file(LockResource.SIGNALS))
+    return os.path.join(_resolve_evidence_dir(workspace), SIGNALS_FILENAME)
 
 def _normalize_signal_record(record: dict) -> dict:
     rule_id = record.get("rule_id") or record.get("cell")
@@ -148,13 +119,9 @@ def _normalize_signal_record(record: dict) -> dict:
     return record
 
 def read_signals(workspace: str) -> list[dict]:
-    ws, sig_fname = str(workspace), _cfg_signals_filename()
-    path = get_signals_path(ws)
+    path = get_signals_path(str(workspace))
     if not os.path.isfile(path):
-        alt_path = os.path.join(ws, ".aegis", "telemetry", sig_fname)
-        if not os.path.isfile(alt_path):
-            return []
-        path = alt_path
+        return []
     records = []
     with open(path, "r", encoding="utf-8", errors="surrogatepass") as f:
         for line in f:
@@ -167,9 +134,6 @@ def read_signals(workspace: str) -> list[dict]:
                 except Exception:
                     pass
     return records
-
-def load_signals(workspace: Path | str | None = None) -> list[dict]:
-    return read_signals(str(workspace) if workspace is not None else str(resolve_workspace()))
 
 def compute_payload_digest(cell_name: str, signal_type: str, source: str, metadata: Any) -> str:
     normalized = json.dumps(

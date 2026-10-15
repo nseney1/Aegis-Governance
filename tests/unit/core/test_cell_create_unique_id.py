@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from aegis_core.lifecycle import cli_cell_create, create_cell
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.lifecycle.creation import create_cell
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 
 @pytest.fixture
@@ -114,17 +114,3 @@ def test_an_archived_rule_does_not_block_re_creation(ws: Path) -> None:
     assert archived.read_text(encoding="utf-8") == "---\nid: revived\ntype: trap\n---\nOld.\n"
 
 
-def test_legacy_cli_cell_create_reports_a_duplicate_as_an_error(
-    ws: Path, monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
-    monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
-    monkeypatch.delenv("AEGIS_ROOT", raising=False)
-    monkeypatch.chdir(ws)
-    existing = _proven_trap(ws, "dup")
-    before = _snapshot(_rules(ws))
-
-    rc = cli_cell_create(["--type", "trap", "--hypothesis", "Again", "--id", "dup"])
-
-    assert rc == 1
-    assert capsys.readouterr().err == f"Error: rule 'dup' already exists: {existing}\n"
-    assert _snapshot(_rules(ws)) == before

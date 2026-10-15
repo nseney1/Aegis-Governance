@@ -64,7 +64,7 @@ Before making a technical assertion or implementing a change, verify the followi
   - *Data migrations*: verify source data exists (`ls`, `find`, ask user).
   - *External APIs*: confirm expected behavior (one test call, screenshot, or doc link).
   - *Library features*: verify the feature exists in the installed version.
-  - *Desktop/GUI automation*: verify bindings and coordinates via direct UI screenshots or settings menus; guessing controls or UI coordinates is strictly prohibited (see `desktop-automation.md`).
+  - *Desktop/GUI automation*: verify bindings and coordinates via direct UI screenshots or settings menus; guessing controls or UI coordinates is strictly prohibited.
 - **Data Ingestion Guard**: When ingesting external data directories, verify file dimensions/sizes before bulk processing; filter out metadata, thumbnails, and system files.
 - **One-Step Probes**: Validation must be achievable in 1–3 steps; longer indicates validating too late.
 

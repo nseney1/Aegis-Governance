@@ -189,11 +189,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
     elif top_dir in ("aegis_sdk", "soma_sdk"):
         candidates.append(test_dir / f"test_sdk_{stem}.py")
 
-    if stem == "compat":
-        candidates.append(test_dir / "test_compat_aliases.py")
-        candidates.append(test_dir / "unit" / "core" / "test_compat_aliases.py")
-        candidates.append(test_dir / "test_canary_dual_brand.py")
-        candidates.append(test_dir / "unit" / "core" / "test_canary_dual_brand.py")
     if "ast" in parts:
         candidates.append(test_dir / f"test_ast_{stem}.py")
         candidates.append(test_dir / "unit" / "core" / f"test_ast_{stem}.py")
@@ -217,14 +212,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "unit" / "core" / "test_ast_rust.py")
         candidates.append(test_dir / "test_rust_ast_driver.py")
         candidates.append(test_dir / "unit" / "core" / "test_rust_ast_driver.py")
-    if stem == "rules":
-        candidates.append(test_dir / "unit" / "sdk" / "test_cells.py")
-        candidates.append(test_dir / "sdk" / "test_cells.py")
-        candidates.append(test_dir / "test_cells.py")
-        candidates.append(test_dir / "unit" / "sdk" / "test_sdk_behavioral.py")
-        candidates.append(test_dir / "test_rule_content.py")
-    if stem.startswith("genesis_"):
-        candidates.append(test_dir / "test_genesis.py")
     if stem == "checkpoint_checks":
         candidates.append(test_dir / "test_checkpoint_fail_closed.py")
     if stem in ("call_graph", "persistence_checker", "runner"):
@@ -235,34 +222,19 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_hooks_lifecycle.py")
     if stem == "errors":
         candidates.append(test_dir / "test_domain_errors.py")
-        candidates.append(test_dir / "test_sdk_behavioral.py")
     if stem == "evidence":
         candidates.append(test_dir / "test_canonical_evidence_readers.py")
     if stem == "frontmatter":
         candidates.append(test_dir / "test_core_lifecycle.py")
-    if stem in ("verification_jobs", "jobs"):
-        candidates.append(test_dir / "test_mcp_async_verify.py")
-        candidates.append(test_dir / "test_worker_lifecycle.py")
-    if stem in ("arbitration", "proposals"):
-        candidates.append(test_dir / "test_arbitration.py")
-        candidates.append(test_dir / "test_proposals.py")
-    if stem in ("cell_inventory", "rule_inventory"):
-        candidates.append(test_dir / "test_cell_inventory.py")
+    if stem == "rule_inventory":
         candidates.append(test_dir / "test_rule_inventory.py")
-    if stem in ("cell_cache", "rule_cache"):
-        candidates.append(test_dir / "test_cell_cache.py")
+    if stem == "rule_cache":
         candidates.append(test_dir / "test_rule_cache.py")
     if stem == "integrity":
         candidates.append(test_dir / "test_evidence_integrity.py")
         candidates.append(test_dir / "unit" / "mcp" / "test_manifest_hmac.py")
-    if stem in ("resilience", "homeostasis"):
-        candidates.append(test_dir / "test_resilience.py")
-        candidates.append(test_dir / "test_homeostasis.py")
-    if stem in ("adversarial_verify", "immune_verify"):
+    if stem == "adversarial_verify":
         candidates.append(test_dir / "unit" / "verification" / "test_adversarial_verify.py")
-        candidates.append(test_dir / "unit" / "verification" / "test_immune_verify.py")
-    if stem in ("match", "ast_match"):
-        candidates.append(test_dir / "unit" / "core" / "test_ast_grep_upgrade.py")
     if stem in ("taxonomy", "operations", "layout", "discovery"):
         candidates.append(test_dir / "unit" / "core" / "test_v3_zero_legacy_invariants.py")
         candidates.append(test_dir / "unit" / "core" / "test_storage.py")
@@ -271,12 +243,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_mcp_dispatch.py")
     if stem == "tools":
         candidates.append(test_dir / "test_mcp_tools_contract.py")
-    if stem == "analysis":
-        candidates.append(test_dir / "test_sdk_analysis.py")
-    if stem == "cells":
-        candidates.append(test_dir / "test_rule_content.py")
-    if stem == "invariants":
-        candidates.append(test_dir / "test_enforcement_ladder.py")
     if parent_name == "skills" or stem in ("graph", "handoff", "slots", "skills", "artifacts"):
         candidates.append(test_dir / "test_skills_and_handoff.py")
     if parent_name == "handlers" or stem in ("registry", "projection"):
@@ -288,9 +254,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_outcomes.py")
     if parent_name == "hooks":
         candidates.append(test_dir / "test_hooks_lifecycle.py")
-    if stem in ("somayaml", "yaml"):
-        candidates.append(test_dir / "test_somayaml.py")
-        candidates.append(test_dir / "test_yaml.py")
 
     # 4. Flat root candidates
     candidates.append(test_dir / f"test_{stem}.py")
@@ -612,7 +575,7 @@ def check_paper_walls(root: Path) -> list[dict]:
     for wall_file in sorted(walls_dir.glob("*.md")):
         try:
             content = wall_file.read_text(encoding="utf-8")
-            from aegis_core.yaml import parse_frontmatter
+            from aegis_core.yaml_engine.frontmatter import parse_frontmatter
             meta = parse_frontmatter(content)
             if not isinstance(meta, dict):
                 issues.append({

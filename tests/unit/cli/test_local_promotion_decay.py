@@ -9,7 +9,8 @@ import os
 import subprocess
 import sys
 import pytest
-from aegis_core.yaml import dump_frontmatter, parse_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
@@ -24,7 +25,7 @@ class TestPromotionZeroTriggerGuard:
 
     def test_normalize_fitness_zero_triggers_not_promoted(self, tmp_path):
         """A cell with 0 triggers must not be promotable via lifecycle evaluation."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
         from tests.helpers_rule import make_cell
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"
@@ -40,7 +41,7 @@ class TestPromotionZeroTriggerGuard:
 
     def test_normalize_fitness_high_triggers_preserves_data(self, tmp_path):
         """A high-quality cell with 50 triggers (48 TP, 1 FP) must be promoted."""
-        from aegis_core.lifecycle import evaluate_promotions
+        from aegis_core.lifecycle.promotion import evaluate_promotions
         from tests.helpers_rule import make_cell, write_evidence
 
         cells_dir = tmp_path / ".aegis" / "rules" / "traps"

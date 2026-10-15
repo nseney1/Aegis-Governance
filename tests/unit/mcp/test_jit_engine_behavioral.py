@@ -8,7 +8,7 @@ import os
 import sys
 import time
 import pytest
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 if REPO_ROOT not in sys.path:
@@ -23,7 +23,7 @@ from aegis_mcp.jit_engine import (
     load_all_cells,
     parse_frontmatter,
 )
-from aegis_core.yaml import parse_yaml_subset
+from aegis_core.yaml_engine.parser import parse_yaml_subset
 
 
 def _make_cell(workspace, cell_id, cell_type='vacuole', target_paths=None,
@@ -299,7 +299,7 @@ class TestModernRuleTypeExecution:
 
     def test_express_stages_invariant_rule_and_emits_pre_edit_warning(self, tmp_path):
         """A rule with type: invariant must be staged as mandatory and emit a Pre-Edit Invariants warning."""
-        from aegis_core.yaml import dump_frontmatter
+        from aegis_core.yaml_engine.serializer import dump_frontmatter
         from aegis_mcp.jit_engine import express
 
         inv_dir = tmp_path / ".aegis" / "rules" / "invariants"

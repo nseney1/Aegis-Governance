@@ -1,42 +1,37 @@
 """Selection pressure, cell crossover, and hypothesis merging."""
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-import re
 import shutil
-import sys
 from typing import Optional
 
-from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter
+from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 from aegis_core.locking import workspace_lock
 from aegis_core.storage import atomic_write_text
-from aegis_core.workspace import Workspace, resolve_workspace
+from aegis_core.workspace.base import Workspace
 from aegis_core.workspace.layout import LockResource
 from .constants import (
     EXTINCTION_THRESHOLD,
-)
-from .parsers import (
-    find_cell,
-    get_type_plural,
-    parse_cell,
 )
 
 __all__ = [
     "PARKED_RULE_DIRS",
     "run_cell_selection",
-    "select_cell",
     "prune_cells",
 ]
 
 
-# Selection moves rules out of the active set into these directories. Their
-# contents belong to the archive and to the last-gasp sentinel; selection
-# never classifies them again.
+# Rules parked out of the active set; selection never classifies them again.
+# Only .archive is still written. v3 selection also parked apoptotic rules in
+# .last_gasp_queue for a sentinel that never ran (defense #4); rules already
+# there stay parked until `aegis migrate` (wave B2) decides what to do with them.
 PARKED_RULE_DIRS = frozenset({".archive", ".last_gasp_queue"})
+
+_ARCHIVE_CANDIDATE_NOTE = "archive candidate: false positives exceed 2x true positives; left in place"
 
 
 def run_cell_selection(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
@@ -68,7 +63,8 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
         if verdict is None:
             continue
         category, score, _meta, dormant = verdict
-        print(f"[{category}] {fpath.name} (Score: {score:.2f})")
+        note = f" {_ARCHIVE_CANDIDATE_NOTE}" if category == "APOPTOSIS" else ""
+        print(f"[{category}] {fpath.name} (Score: {score:.2f}){note}")
         if not execute or _action_for(category, dormant) is None:
             continue
 
@@ -145,8 +141,6 @@ def _classify(content: str) -> Optional[tuple[str, float, dict, bool]]:
 
 
 def _action_for(category: str, dormant: bool) -> Optional[str]:
-    if category == "APOPTOSIS":
-        return "last_gasp_requested"
     if category == "EXTINCT":
         return "moved_to_archive"
     if category == "DORMANT" and not dormant:
@@ -168,9 +162,7 @@ def _apply_locked(fpath: Path, cells_dir: Path, archive_dir: Path) -> Optional[s
         return None
     category, _score, meta, dormant = verdict
     action = _action_for(category, dormant)
-    if action == "last_gasp_requested":
-        _park(fpath, cells_dir / ".last_gasp_queue")
-    elif action == "moved_to_archive":
+    if action == "moved_to_archive":
         _park(fpath, archive_dir)
     elif action == "marked_dormant":
         meta["dormant_since"] = _utc_timestamp()
@@ -193,11 +185,5 @@ def _park(fpath: Path, dest_dir: Path) -> Path:
 def prune_cells(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
     """Evaluate and prune extinct or apoptotic rules."""
     return run_cell_selection(workspace=workspace, execute=execute)
-
-
-select_cell = run_cell_selection
-prune_rules = prune_cells
-
-
 
 

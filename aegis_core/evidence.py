@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
 import os
-from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
 
@@ -155,68 +154,8 @@ def aggregate_signals(evidence_dir: str) -> SignalAggregation:
     return SignalAggregation(counts, errors, trigger_events)
 
 
-def log_finding(
-    severity: str,
-    rule: str,
-    change: str,
-    source: str,
-    logs_dir: Path | None = None,
-) -> int:
-    """Log a governance finding to audit trail."""
-    from datetime import datetime, timezone
-    from pathlib import Path
-    import sys
-
-    severity_lower = severity.lower()
-    if severity_lower not in ("critical", "warning", "nit", "info"):
-        print(f"Warning: Unknown severity '{severity}', defaulting to warning", file=sys.stderr)
-
-    resolved_home = Path.home()
-    if logs_dir:
-        base_logs = Path(logs_dir)
-    elif os.environ.get("AEGIS_LOGS_DIR"):
-        base_logs = Path(os.environ["AEGIS_LOGS_DIR"])
-    else:
-        base_logs = resolved_home / ".gemini" / "antigravity" / "scratch" / "ai-conversation-logs"
-
-    gov_dir = base_logs / "governance"
-    gov_dir.mkdir(parents=True, exist_ok=True)
-
-    auto_log = gov_dir / "auto_applied_log.jsonl"
-    critical_file = gov_dir / "pending_critical.md"
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    record = {
-        "timestamp": timestamp,
-        "severity": severity_lower,
-        "rule": rule,
-        "change": change,
-        "source": source,
-    }
-
-    try:
-        with open(auto_log, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-    except Exception as e:
-        print(f"Error writing to audit log {auto_log}: {e}", file=sys.stderr)
-        return 1
-
-    if severity_lower == "critical":
-        try:
-            entry = f"\n### 🔴 CRITICAL: {rule} ({timestamp})\n- **Change**: {change}\n- **Source**: {source}\n"
-            with open(critical_file, "a", encoding="utf-8") as f:
-                f.write(entry)
-        except Exception as e:
-            print(f"Error writing to critical findings file {critical_file}: {e}", file=sys.stderr)
-            return 1
-
-    print(f"✅ Logged {severity_lower} finding for {rule}")
-    return 0
-
-
 __all__ = [
     "SignalAggregation",
     "aggregate_signals",
-    "log_finding",
 ]
 

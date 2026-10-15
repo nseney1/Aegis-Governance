@@ -16,11 +16,8 @@ import sys
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_core.verification import (
-    Claim, Prediction, RiskCategory,
-    Severity, ToolEvidence, Verdict,
-)
-from aegis_core.verification.arbiter import arbitrate, format_report
+from aegis_core.verification import Claim, Prediction, RiskCategory, Severity, ToolEvidence, Verdict
+from aegis_core.verification.arbiter import arbitrate
 
 
 # ── Arbiter: Core Set Logic ───────────────────────────────────────────────
@@ -236,30 +233,6 @@ class TestArbiterV030GroundTruth:
 
 
 # ── Report Formatting ─────────────────────────────────────────────────────
-
-class TestReportFormatting:
-    """Verify the report is human-readable and contains key information."""
-
-    def test_report_contains_verdict(self):
-        predictions = []
-        claims = []
-        evidence = [
-            ToolEvidence("persistence_checker", "test", True, "OK"),
-        ]
-        result = arbitrate(predictions, claims, evidence)
-        report = format_report(result)
-        assert "SHIP" in report
-
-    def test_report_contains_divergences(self):
-        predictions = [
-            Prediction(RiskCategory.PERSISTENCE_GAP, Severity.CRITICAL,
-                       "Epoch gap", "mechanism", "apply_decay")
-        ]
-        result = arbitrate(predictions, [], [])
-        report = format_report(result)
-        assert "unmatched_prediction" in report
-        assert "persistence_gap" in report
-
 
 # ── Arbiter: Fail-Closed on Spec Agent Failure ────────────────────────────
 

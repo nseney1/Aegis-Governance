@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import aegis_mcp.handlers.telemetry as telemetry_handlers
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 from aegis_mcp.handlers.core import handle_scan
 from aegis_mcp.handlers.governance import handle_create_rule, handle_list_rules
 from aegis_mcp.handlers.telemetry import handle_report_outcome

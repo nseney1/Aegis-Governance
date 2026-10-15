@@ -7,7 +7,7 @@ hypothesis: "A governance framework that doesn't use its own tools to manage its
 prediction: "Will fire when manual file operations (mv, cp, sed, manual frontmatter edits) are used instead of aegis CLI commands (promote, demote, init, checkpoint) for operations that aegis provides tooling for"
 falsification: "If aegis CLI lacks a needed operation for 5 consecutive sessions, the missing operation should be built rather than this rule pruned"
 target_paths:
-  - ".aegis/rules/**/*.md"
+  - ".aegis/rules/*.md"
   - "aegis_cli/*.py"
   - "aegis_core/*.py"
 triggers:

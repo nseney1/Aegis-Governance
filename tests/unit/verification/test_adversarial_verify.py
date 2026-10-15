@@ -19,8 +19,15 @@ REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproj
 sys.path.insert(0, REPO_ROOT)
 
 from aegis_core.verification import (
-    RiskCategory, Severity, Prediction, Claim, ArbitrationResult, Verdict,
-    ToolEvidence, PREDICTION_SCHEMA, CLAIM_SCHEMA,
+    RiskCategory,
+    Severity,
+    Prediction,
+    Claim,
+    ArbitrationResult,
+    Verdict,
+    ToolEvidence,
+    PREDICTION_SCHEMA,
+    CLAIM_SCHEMA,
 )
 
 

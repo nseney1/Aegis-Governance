@@ -62,16 +62,8 @@ class WorkspaceLayout:
         return self.aegis_dir / "evidence"
 
     @property
-    def evidence_archive_dir(self) -> Path:
-        return self.evidence_dir / "archive"
-
-    @property
     def locks_dir(self) -> Path:
         return self.aegis_dir / "locks"
-
-    @property
-    def governance_dir(self) -> Path:
-        return self.aegis_dir / "governance"
 
     @property
     def keys_dir(self) -> Path:
@@ -82,57 +74,13 @@ class WorkspaceLayout:
         return self.aegis_dir / "metrics"
 
     @property
-    def quarantine_dir(self) -> Path:
-        return self.aegis_dir / "quarantine"
-
-    @property
     def skills_dir(self) -> Path:
         return self.aegis_dir / "skills"
-
-    @property
-    def swarm_dir(self) -> Path:
-        return self.aegis_dir / "swarm"
-
-    @property
-    def handoffs_dir(self) -> Path:
-        return self.swarm_dir / "handoffs"
 
     # Canonical files
     @property
     def signals_file(self) -> Path:
         return self.evidence_dir / "signals.jsonl"
-
-    @property
-    def checkpoint_rollup_file(self) -> Path:
-        return self.evidence_dir / "checkpoint_rollup.json"
-
-    @property
-    def evidence_outcomes_file(self) -> Path:
-        return self.evidence_dir / "outcomes.jsonl"
-
-    @property
-    def outcomes_file(self) -> Path:
-        return self.aegis_dir / "outcomes.jsonl"
-
-    @property
-    def receipts_file(self) -> Path:
-        return self.aegis_dir / "receipts.jsonl"
-
-    @property
-    def leases_file(self) -> Path:
-        return self.swarm_dir / "leases.json"
-
-    @property
-    def gate_events_file(self) -> Path:
-        return self.governance_dir / "gate_events.jsonl"
-
-    @property
-    def human_insights_file(self) -> Path:
-        return self.aegis_dir / "human_insights.jsonl"
-
-    @property
-    def debrief_queue_file(self) -> Path:
-        return self.root / "governance" / "debrief_queue.jsonl"
 
     @property
     def manifest_file(self) -> Path:
@@ -141,10 +89,6 @@ class WorkspaceLayout:
     @property
     def manifest_key_file(self) -> Path:
         return self.keys_dir / "manifest.key"
-
-    @property
-    def slots_file(self) -> Path:
-        return self.aegis_dir / "slots.yaml"
 
     def lock_file(self, resource: str) -> Path:
         return self.locks_dir / f"{resource}.lock"

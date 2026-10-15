@@ -25,7 +25,7 @@ STATUS_APOPTOSIS_WARNING = "APOPTOSIS_WARNING"
 STATUS_RETIRED_WARNING = STATUS_APOPTOSIS_WARNING
 STATUS_DORMANT = "DORMANT"
 
-# The 11 protected core genome rules that must never be demoted
+# The protected shipped rules that must never be demoted
 PROTECTED_RULES = frozenset({
     "providence",
     "cost-optimization",
@@ -37,7 +37,6 @@ PROTECTED_RULES = frozenset({
     "documentation",
     "destructive-ops",
     "git-workflow",
-    "desktop-automation",
 })
 
 GLOBAL_PROMOTION_PATH = {"trap": "invariant", "invariant": "genome", "wall": "genome"}

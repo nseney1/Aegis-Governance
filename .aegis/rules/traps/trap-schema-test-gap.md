@@ -6,12 +6,12 @@ enforcement: advisory
 promotion_threshold: 0.85
 demotion_threshold: 0.3
 hypothesis: New rule types or core rule categories committed without corresponding parametrized schema test coverage regress toward incomplete frontmatter
-prediction: Will flag when a new rule subdirectory exists but has no dedicated test coverage in test_rule_metadata.py
+prediction: Will flag when a new rule subdirectory or rule type exists but has no row in the WORKSPACE schema table of test_rule_lint.py
 falsification: 0 findings in 10 sessions → prune
 target_paths:
-  - ".aegis/rules/**/*.md"
+  - ".aegis/rules/*.md"
   - "rules/*.md"
-  - tests/unit/core/test_rule_metadata.py
+  - tests/unit/core/test_rule_lint.py
 triggers:
   - rule_creation
   - rule_type_addition
@@ -34,8 +34,10 @@ fitness:
 ---
 
 Every rule subdirectory under `.aegis/rules/` (traps, invariants, boundaries,
-personas, contracts) must have corresponding parametrized content
-coherence tests in `tests/unit/core/test_rule_metadata.py`.
+personas, contracts) must have a row in the `WORKSPACE` schema table of the
+table-driven lint, `tests/unit/core/test_rule_lint.py` (defense #41). The lint
+fails any workspace rule outside a listed type dir, so a new rule type needs its
+row (type and required fields) before its first rule lands.
 
 Evidence: Session 2026-09-30 added content coherence tests that immediately
 caught 23 schema gaps in existing rules — missing `enforcement`,

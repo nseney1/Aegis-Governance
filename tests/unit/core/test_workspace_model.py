@@ -13,12 +13,10 @@ from aegis_core.errors import (
     WorkspaceError,
     WorkspaceNotFoundError,
 )
+from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import (
-    Workspace,
     confine_path,
-    confine_workspace,
     resolve_workspace,
-    resolve_workspace_path,
     validate_rule_names,
 )
 
@@ -173,11 +171,11 @@ class TestWorkspaceBackwardCompatibilityFacades:
         assert isinstance(root_str, str)
         assert root_str == str(aegis_ws.resolve())
 
-        root_path = resolve_workspace_path(aegis_ws)
+        root_path = Workspace.resolve(aegis_ws).root
         assert isinstance(root_path, Path)
         assert root_path == aegis_ws.resolve()
 
-        confined = confine_workspace(str(aegis_ws))
+        confined = str(Workspace.confine(str(aegis_ws)).root)
         assert confined == str(aegis_ws.resolve())
 
         missing = validate_rule_names(["invariant-test", "ghost"], aegis_ws)

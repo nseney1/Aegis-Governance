@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timedelta
 
 import pytest
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 __all__ = [
     "make_cell",

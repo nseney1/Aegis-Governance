@@ -5,8 +5,6 @@ TDD Phase: Tests written BEFORE implementation (Phase 2.0).
 Expected: Some tests will fail against v0.73 (red phase) because Wilson
 interval is not yet implemented. They will pass after Phase 2.2.
 """
-import math
-import os
 import sys
 
 import pytest
@@ -14,7 +12,7 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_sdk.scoring import _wilson_interval, bayesian_posterior, laplace_score
+from aegis_core.scoring import _wilson_interval, bayesian_posterior, laplace_score
 
 
 class TestWilsonInterval:
@@ -200,7 +198,7 @@ class TestBayesianScoreParity:
     def test_cell_fitness_agrees_with_shared_module(self):
         """bayesian_fitness and bayesian_score agree on directionality."""
         from aegis_core.scoring import bayesian_score
-        from aegis_core.lifecycle import bayesian_fitness
+        from aegis_core.lifecycle.decay import bayesian_fitness
         # Non-trivial data: tp=3, fp=1 (triggers=4 for bayesian_score)
         # bayesian_score: Laplace — (3+1)/(4+2) = 4/6 ≈ 0.6667
         shared = bayesian_score(3, 4)
@@ -214,7 +212,7 @@ class TestBayesianScoreParity:
 
     def test_cell_promote_normalize_fitness_callable(self):
         """normalize_fitness must extract and preserve fitness fields."""
-        from aegis_core.lifecycle import normalize_fitness
+        from aegis_core.lifecycle.decay import normalize_fitness
         meta = {'fitness': {'triggers': 5, 'true_positives': 3, 'false_positives': 1}}
         result = normalize_fitness(meta)
         assert isinstance(result, dict)
@@ -224,7 +222,7 @@ class TestBayesianScoreParity:
 
     def test_cell_promote_normalizes_scalar_fitness(self):
         """normalize_fitness handles scalar fitness values."""
-        from aegis_core.lifecycle import normalize_fitness
+        from aegis_core.lifecycle.decay import normalize_fitness
         # Scalar fitness (1.0) should become {'score': 1.0}
         meta = {'fitness': 1.0}
         result = normalize_fitness(meta)

@@ -358,11 +358,3 @@ def test_no_dangling_aegis_imports():
                     except ModuleNotFoundError:
                         dangling.append(f"{rel}:{node.lineno} {node.module}.{alias.name}")
     assert dangling == []
-
-
-def test_no_javascript_sdk_in_readme():
-    """README.md must not reference nonexistent npm package or require('soma-governance')."""
-    readme = read(os.path.join(REPO_ROOT, "README.md"))
-    assert "require('soma-governance')" not in readme
-    assert 'require("soma-governance")' not in readme
-

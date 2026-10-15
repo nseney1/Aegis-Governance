@@ -16,7 +16,7 @@ import unicodedata
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from aegis_core.errors import AegisValidationError
-from aegis_core.yaml import AegisYAML
+from aegis_core.yaml_engine.frontmatter import AegisYAML
 
 __all__ = [
     "SlotResolutionError",
@@ -24,7 +24,6 @@ __all__ = [
     "SLOT_REF_PATTERN",
     "PLATFORM_SLOT_PROFILES",
     "DEFAULT_SLOTS",
-    "resolve_text_for_platform",
     "sanitize_slot_value",
     "user_slots_path",
     "MAX_SLOT_VALUE_LEN",
@@ -385,13 +384,4 @@ class SlotRegistry:
                     exts.add(f".{ext}" if not ext.startswith(".") else ext)
         return exts
 
-
-def resolve_text_for_platform(
-    text: str,
-    platform: str,
-    workspace: str | Path | None = None,
-) -> str:
-    """Resolve ${SLOT.*} placeholders for a target platform without raising on unknown slots."""
-    registry = SlotRegistry.for_platform(platform, workspace=workspace).sanitized()
-    return registry.resolve(text, strict=False)
 

@@ -453,7 +453,7 @@ class TestPolyglotInit:
     def test_init_claude_uses_home_directory_not_project_root(self, tmp_path, monkeypatch):
         """BUG-089 (#143): soma init --platform claude must install to ~/.claude, not <project>/.claude."""
         from aegis_cli.init import run_init
-        from aegis_core.workspace import Workspace
+        from aegis_core.workspace.base import Workspace
 
         project_dir = tmp_path / "project"
         project_dir.mkdir()
@@ -484,7 +484,7 @@ class TestPolyglotInit:
     def test_init_claude_local_installs_to_project_root(self, tmp_path, monkeypatch):
         """BUG-092: soma init --platform claude --local installs to <project>/.claude and <project>/CLAUDE.md."""
         from aegis_cli.init import run_init
-        from aegis_core.workspace import Workspace
+        from aegis_core.workspace.base import Workspace
 
         project_dir = tmp_path / "project"
         project_dir.mkdir()

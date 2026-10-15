@@ -48,7 +48,7 @@ def test_sdk_and_mcp_direct_list_reject_symlinked_directory(tmp_path, monkeypatc
     workspace = _symlinked_cell_directory(tmp_path)
 
     with pytest.raises(RuntimeError, match="cell inventory.*symlink"):
-        Governance(project_root=workspace).list_cells()
+        Governance(project_root=workspace).list_rules()
 
     monkeypatch.chdir(workspace)
     result = tools.execute_tool("aegis_list_rules", {})
@@ -82,7 +82,7 @@ def test_same_size_restored_mtime_edit_is_visible_to_sdk_and_mcp(tmp_path, monke
 
     cell_path = _write_cell(tmp_path, "alpha", "first")
     governance = Governance(project_root=tmp_path)
-    assert governance.list_cells()[0]["id"] == "alpha"
+    assert governance.list_rules()[0]["id"] == "alpha"
 
     monkeypatch.chdir(tmp_path)
     assert tools.execute_tool("aegis_list_rules", {})[0]["id"] == "alpha"
@@ -94,7 +94,7 @@ def test_same_size_restored_mtime_edit_is_visible_to_sdk_and_mcp(tmp_path, monke
     cell_path.write_text(changed, encoding="utf-8")
     os.utime(cell_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
 
-    assert governance.list_cells()[0]["id"] == "bravo"
+    assert governance.list_rules()[0]["id"] == "bravo"
     assert tools.execute_tool("aegis_list_rules", {})[0]["id"] == "bravo"
 
 
@@ -106,7 +106,7 @@ def test_invalid_utf8_is_exposed_as_diagnostic_by_sdk_and_mcp(tmp_path, monkeypa
     bad_path.parent.mkdir(parents=True)
     bad_path.write_bytes(b"---\nid: bad\n---\n\xff\n")
 
-    sdk_records = Governance(project_root=tmp_path).list_cells()
+    sdk_records = Governance(project_root=tmp_path).list_rules()
     assert len(sdk_records) == 1
     assert sdk_records[0]["_name"] == "bad"
     assert sdk_records[0]["_path"] == ".aegis/rules/walls/bad.md"

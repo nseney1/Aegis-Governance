@@ -19,8 +19,8 @@ import pytest
 
 from aegis_cli.cli import main
 from aegis_cli.rule import run_rule
-from aegis_core.workspace import Workspace
-from aegis_core.yaml import _get_body, parse_frontmatter
+from aegis_core.workspace.base import Workspace
+from aegis_core.yaml_engine.frontmatter import _get_body, parse_frontmatter
 
 MAX_BODY = 64 * 1024
 

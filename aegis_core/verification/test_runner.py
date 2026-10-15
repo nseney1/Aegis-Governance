@@ -81,36 +81,6 @@ def resolve_pytest_cmd(
     return []
 
 
-def resolve_pytest_python(workspace: Any = None) -> str:
-    """Resolve the Python executable associated with the discovered pytest runner."""
-    cmd = resolve_pytest_cmd(workspace=workspace)
-    if not cmd:
-        return sys.executable
-    if len(cmd) >= 3 and cmd[1] == "-m" and cmd[2] == "pytest":
-        return cmd[0]
-
-    pytest_bin = cmd[0]
-    # Check shebang line if it is a python script
-    try:
-        with open(pytest_bin, "r", encoding="utf-8", errors="ignore") as f:
-            first_line = f.readline().strip()
-            if first_line.startswith("#!"):
-                py = first_line[2:].strip()
-                if os.path.isfile(py) and (os.name == "nt" or os.access(py, os.X_OK)):
-                    return py
-    except Exception:
-        pass
-
-    # Check parent directory (e.g. venv/bin/python)
-    parent_dir = os.path.dirname(pytest_bin)
-    for cand in ("python3", "python", "python.exe"):
-        cand_path = os.path.join(parent_dir, cand)
-        if os.path.isfile(cand_path) and (os.name == "nt" or os.access(cand_path, os.X_OK)):
-            return cand_path
-
-    return sys.executable
-
-
 def discover_test_evidence(target_files: list[str], repo_root: str) -> tuple[list[str], str]:
     """Discover matching test files, parse test names via AST, and execute tests.
 
@@ -204,6 +174,5 @@ def discover_test_evidence(target_files: list[str], repo_root: str) -> tuple[lis
 __all__ = [
     "NoTestRunnerFoundError",
     "resolve_pytest_cmd",
-    "resolve_pytest_python",
     "discover_test_evidence",
 ]

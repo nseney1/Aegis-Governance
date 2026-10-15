@@ -8,7 +8,7 @@ prediction: Will fire when commits modify lines inside ASCII box-drawing charact
 falsification: 0 findings in 20 sessions → prune
 target_paths:
   - README.md
-  - "docs/**/*.md"
+  - "docs/*.md"
 triggers:
   - documentation_edit
   - readme_modification

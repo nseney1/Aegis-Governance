@@ -21,13 +21,8 @@ import textwrap
 import pytest
 
 from aegis_core.inference_provider import MISSING_BACKEND
-from aegis_core.verification import (
-    ArbitrationResult,
-    RiskCategory,
-    ToolEvidence,
-    Verdict,
-    VerificationPipeline,
-)
+from aegis_core.verification import ArbitrationResult, RiskCategory, ToolEvidence, Verdict
+from aegis_core.verification.pipeline import VerificationPipeline
 
 
 def _layer2(changed_files, repo_root, task_plan, layer1_evidence, llm_backend, test_names=None, test_results=None):

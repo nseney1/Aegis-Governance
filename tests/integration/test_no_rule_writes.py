@@ -171,3 +171,35 @@ def test_hook_status_and_safety_gate_never_rewrite_rules(repo, capsys):
 
     capsys.readouterr()
     _assert_rules_untouched(repo, before)
+
+
+@pytest.mark.parametrize("argv", [["status"], ["status", "--json"], ["doctor"], ["doctor", "--json"]])
+def test_status_and_doctor_never_rewrite_rules(repo, argv, capsys):
+    before = _rule_bytes(repo)
+
+    rc = main(argv)
+
+    out = capsys.readouterr().out
+    assert rc in (0, 1), out
+    _assert_rules_untouched(repo, before)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["rule", "promote", "--tier-check", "--dry-run"],
+        ["rule", "promote"],
+        ["rule", "demote"],
+        ["rule", "archive", "--dry-run"],
+        ["rule", "list"],
+    ],
+)
+def test_rule_reports_and_dry_runs_never_rewrite_rules(repo, argv, capsys):
+    """Listing candidates and dry runs only report; applying a transition is the explicit write."""
+    before = _rule_bytes(repo)
+
+    rc = main(argv)
+
+    out = capsys.readouterr().out
+    assert rc in (0, 1), out
+    _assert_rules_untouched(repo, before)

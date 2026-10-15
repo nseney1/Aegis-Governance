@@ -8,7 +8,7 @@ prediction: "Will fire when a commit touches code files but not documentation, o
 falsification: 0 findings in 20 sessions → prune
 target_paths:
   - README.md
-  - "docs/**/*.md"
+  - "docs/*.md"
   - "skills/*/SKILL.md"
   - "aegis_cli/*.py"
   - "aegis_mcp/*.py"

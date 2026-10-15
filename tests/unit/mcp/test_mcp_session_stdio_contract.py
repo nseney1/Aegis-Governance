@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 import aegis_mcp.server as server
-from aegis_core.yaml import dump_frontmatter
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 NOT_GOVERNED = 'not an Aegis workspace: run "aegis init" in your repository'
 

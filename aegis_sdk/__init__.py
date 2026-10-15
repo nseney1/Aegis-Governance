@@ -1,19 +1,10 @@
-"""Aegis SDK — Adaptive governance for AI coding assistants."""
-from aegis_sdk.governance import Governance
-from aegis_sdk.rules import Rule, RuleFitness, parse_rule_file
-from aegis_sdk.errors import RuleNotFoundError, RuleParseError, AegisError
-from aegis_core.scoring import wilson_lower_bound
-from aegis_core.lifecycle import bayesian_fitness
+"""aegis_sdk: the stable external facade over aegis_core (ADR 0005 D9).
 
-__version__ = '3.3.0'
-__all__ = [
-    'Governance',
-    'Rule',
-    'RuleFitness',
-    'AegisError',
-    'RuleNotFoundError',
-    'RuleParseError',
-    'parse_rule_file',
-    'wilson_lower_bound',
-    'bayesian_fitness',
-]
+External callers (citadel fleet telemetry, mapleterm) use Governance and
+parse_rule_file; nothing inside Aegis imports this package.
+"""
+from aegis_core.yaml_engine.frontmatter import parse_rule_file
+from aegis_sdk.governance import Governance
+
+__version__ = "3.3.0"
+__all__ = ["Governance", "parse_rule_file"]

@@ -21,7 +21,8 @@ from aegis_core.integrity import (
     verify_manifest,
     verify_signature,
 )
-from aegis_core.lifecycle import create_cell, demote_cell, promote_cell
+from aegis_core.lifecycle.creation import create_cell
+from aegis_core.lifecycle.promotion import demote_cell, promote_cell
 
 
 def _rule(path: Path, rule_id: str, rule_type: str) -> Path:

@@ -275,12 +275,6 @@ class TestRunnerCoverageEnhancements:
         mcp_test = _find_test_file("soma_mcp/handlers/governance.py", REPO_ROOT)
         assert mcp_test is not None and mcp_test.endswith("test_mcp_handlers.py")
 
-        harvest_test = _find_test_file("soma_core/outcomes/harvest.py", REPO_ROOT)
-        assert harvest_test is not None and harvest_test.endswith("test_git_retro_harvest.py")
-
-        insights_test = _find_test_file("soma_core/outcomes/insights.py", REPO_ROOT)
-        assert insights_test is not None and insights_test.endswith("test_outcomes_insights.py")
-
         telemetry_test = _find_test_file("soma_core/outcomes/telemetry.py", REPO_ROOT)
         assert telemetry_test is not None and telemetry_test.endswith("test_outcomes_telemetry.py")
 
@@ -292,9 +286,6 @@ class TestRunnerCoverageEnhancements:
 
         slots_test = _find_test_file("soma_core/skills/slots.py", REPO_ROOT)
         assert slots_test is not None and slots_test.endswith("test_slots.py")
-
-        artifacts_test = _find_test_file("soma_core/schemas/artifacts.py", REPO_ROOT)
-        assert artifacts_test is not None and artifacts_test.endswith("test_skills_and_handoff.py")
 
     def test_discover_functions_with_target_lines(self, tmp_path):
         from aegis_core.verification.runner import _discover_functions
@@ -390,7 +381,7 @@ class TestLayer1FailsClosed:
         assert runner.gate_verdict(results) is False
 
     def test_forbid_ast_exception_becomes_a_failing_result(self, ws, monkeypatch):
-        import aegis_core.ast.match as match
+        import aegis_core.ast.policy as policy
 
         rules = ws / ".aegis" / "rules"
         rules.mkdir(parents=True)
@@ -402,7 +393,7 @@ class TestLayer1FailsClosed:
         def boom(*_args, **_kwargs):
             raise MemoryError("ast too large")
 
-        monkeypatch.setattr(match, "evaluate_forbid_ast", boom)
+        monkeypatch.setattr(policy, "evaluate_forbid_ast", boom)
         results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(ws), fast_mode=True)
         failed = [r for r in results if r.tool == "forbid_ast:no-eval"]
         assert [(r.target, r.verdict, r.detail) for r in failed] == [

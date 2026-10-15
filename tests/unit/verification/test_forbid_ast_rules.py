@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aegis_core.ast.match import evaluate_forbid_ast
+from aegis_core.ast.policy import evaluate_forbid_ast
 from aegis_core.ast.schema import CallSiteNode, ImportNode, NormalizedAST
-from aegis_core.verification import DeterministicVerifier
+from aegis_core.verification.pipeline import DeterministicVerifier
 from aegis_core.verification.runner import gate_verdict
 
 

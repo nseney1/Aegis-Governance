@@ -33,7 +33,7 @@ def _workspace_relative(raw: str, root: Path) -> str:
 
 
 def run_scan(args: argparse.Namespace) -> int:
-    from aegis_core.workspace import Workspace
+    from aegis_core.workspace.base import Workspace
 
     raw_ws = getattr(args, "workspace", None)
     # Discovery walks up from a missing path, so its error would name a parent.

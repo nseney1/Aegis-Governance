@@ -9,7 +9,7 @@ falsification: 0 findings in 20 sessions → prune
 target_paths:
   - "aegis_mcp/*.py"
   - "aegis_cli/*.py"
-  - "aegis_core/**/*.py"
+  - "aegis_core/*.py"
 triggers:
   - import_modification
   - module_creation

@@ -7,7 +7,7 @@ hypothesis: "When numeric thresholds are documented in docstrings with > but imp
 prediction: "Will catch threshold comparisons where the operator doesn't match the documented behavior"
 falsification: 0 findings in 20 sessions → prune
 target_paths:
-  - "aegis_core/**/*.py"
+  - "aegis_core/*.py"
   - "aegis_cli/*.py"
 triggers:
   - threshold_modification

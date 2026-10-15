@@ -6,11 +6,9 @@ Invariants under test (docs/adr/0005-evidence-review.md M1):
 - every rule-file write is atomic: when the filesystem refuses the final
   write, the rules directory is byte-identical to before (no truncated rule,
   no stray temp file, no half-finished move);
-- once a demotion has moved the rule out of the gate tier, the old tier's
-  enforcement artifacts are removed even if the write step reports an error
-  afterwards;
+- a tier change is metadata only: no generated enforcement artifact;
 - persisted lifecycle timestamps are one valid UTC ISO-8601 form;
-- the existence checks that promote/demote/metamorphose run before taking the
+- the existence checks that promote/demote run before taking the
   lock are repeated under it, so a rival create or move that lands in between
   is never overwritten and never crashes the second mover;
 - the tier pass and the selection pass change only the rules that need it
@@ -39,17 +37,10 @@ from conftest import REPO_ROOT
 
 import aegis_core.lifecycle.promotion as promotion
 import aegis_core.lifecycle.selection as selection
-from aegis_core.lifecycle import (
-    adapt_cell,
-    create_cell,
-    demote_cell,
-    evaluate_cell_tiers,
-    metamorphose_cell,
-    promote_cell,
-    run_cell_selection,
-    transfer_cell,
-)
-from aegis_core.yaml import parse_frontmatter
+from aegis_core.lifecycle.creation import create_cell
+from aegis_core.lifecycle.promotion import demote_cell, evaluate_cell_tiers, promote_cell
+from aegis_core.lifecycle.selection import run_cell_selection
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 _UTC_TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
@@ -87,13 +78,6 @@ def _scenario_create(tmp_path: Path):
     return ws, lambda: create_cell("trap", "Locked create", id_override="locked-create", workspace=ws)
 
 
-def _scenario_transfer(tmp_path: Path):
-    src = _ws(tmp_path, "src")
-    _rule(src / ".aegis" / "rules" / "traps" / "moving.md", "moving", "trap")
-    dest = _ws(tmp_path, "dest")
-    return dest, lambda: transfer_cell("moving", str(dest), source_workspace=src)
-
-
 def _scenario_selection(tmp_path: Path):
     ws = _ws(tmp_path)
     _rule(ws / ".aegis" / "rules" / "traps" / "quiet.md", "quiet", "trap")
@@ -113,26 +97,11 @@ def _scenario_tier_escalation(tmp_path: Path):
     return ws, lambda: evaluate_cell_tiers(ws, execute=True)
 
 
-def _scenario_metamorphose(tmp_path: Path):
-    ws = _ws(tmp_path)
-    _rule(ws / ".aegis" / "rules" / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
-    return ws, lambda: metamorphose_cell(ws, "mature")
-
-
-def _scenario_adapt(tmp_path: Path):
-    ws = _ws(tmp_path)
-    _rule(ws / ".aegis" / "rules" / "traps" / "middling.md", "middling", "trap", triggers=10, tp=5, fp=5)
-    return ws, lambda: adapt_cell(ws, generate=True)
-
-
 _SCENARIOS = {
     "create": _scenario_create,
-    "transfer": _scenario_transfer,
     "selection": _scenario_selection,
     "tiers": _scenario_tiers,
     "tier_escalation": _scenario_tier_escalation,
-    "metamorphose": _scenario_metamorphose,
-    "adapt": _scenario_adapt,
 }
 
 _LOCK_HOLDER = r"""
@@ -227,7 +196,11 @@ def test_rule_files_are_never_rewritten_in_place(
     assert in_place == []
 
 
-def test_tier_escalation_records_its_enforcement_artifact(tmp_path: Path) -> None:
+def test_tier_escalation_is_metadata_only(tmp_path: Path) -> None:
+    """The enforcement tier is rule metadata; forbid_ast is the gate mechanism (defense #21).
+
+    No generated check/gate script is written and none is recorded on the rule.
+    """
     ws, operation = _scenario_tier_escalation(tmp_path)
 
     res = operation()
@@ -235,60 +208,8 @@ def test_tier_escalation_records_its_enforcement_artifact(tmp_path: Path) -> Non
     assert [(c["cell"], c["old_tier"], c["new_tier"]) for c in res["changes"]] == [("proven.md", "advisory", "mechanical")]
     meta = parse_frontmatter((ws / ".aegis" / "rules" / "traps" / "proven.md").read_text(encoding="utf-8")) or {}
     assert meta["enforcement"] == "mechanical"
-    assert meta["enforcement_artifact"] == ".aegis/enforcement/check-proven.sh"
-    artifact = ws / ".aegis" / "enforcement" / "check-proven.sh"
-    assert artifact.is_file() and os.access(artifact, os.X_OK)
-
-
-# ── Demotion artifact cleanup across a post-move failure ────────────────
-
-def _invariant_with_artifacts(ws: Path) -> tuple[Path, list[Path]]:
-    source = _rule(ws / ".aegis" / "rules" / "invariants" / "guarded.md", "guarded", "invariant")
-    enf = ws / ".aegis" / "enforcement"
-    enf.mkdir(parents=True)
-    artifacts = [enf / "gate-guarded.py", enf / "check-guarded.sh"]
-    for art in artifacts:
-        art.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    return source, artifacts
-
-
-def test_demote_cleans_artifacts_when_writer_fails_after_the_move(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ws = _ws(tmp_path)
-    source, artifacts = _invariant_with_artifacts(ws)
-    real_writer = promotion._atomic_write_and_unlink
-
-    def move_then_fail(src, dst, content):
-        real_writer(src, dst, content)
-        raise RuntimeError("post-move failure")
-
-    monkeypatch.setattr(promotion, "_atomic_write_and_unlink", move_then_fail)
-    with pytest.raises(RuntimeError, match="post-move failure"):
-        demote_cell(ws, "guarded")
-
-    assert not source.exists()
-    assert (ws / ".aegis" / "rules" / "traps" / "guarded.md").is_file()
-    assert [a.name for a in artifacts if a.exists()] == []
-
-
-def test_demote_keeps_artifacts_when_writer_fails_before_the_move(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ws = _ws(tmp_path)
-    source, artifacts = _invariant_with_artifacts(ws)
-
-    def fail_before_move(src, dst, content):
-        raise RuntimeError("pre-move failure")
-
-    monkeypatch.setattr(promotion, "_atomic_write_and_unlink", fail_before_move)
-    with pytest.raises(RuntimeError, match="pre-move failure"):
-        demote_cell(ws, "guarded")
-
-    assert source.is_file()
-    assert not (ws / ".aegis" / "rules" / "traps" / "guarded.md").exists()
-    assert all(a.exists() for a in artifacts), "rule is still an invariant; its gate artifacts must stay"
-
+    assert "enforcement_artifact" not in meta
+    assert not (ws / ".aegis" / "enforcement").exists()
 
 # ── Timestamps ─────────────────────────────────────────────────────────
 
@@ -309,18 +230,6 @@ def test_selection_writes_valid_utc_timestamps(tmp_path: Path) -> None:
     entry = json.loads(log_lines[-1])
     assert entry["action"] == "marked_dormant"
     _assert_utc(entry["timestamp"])
-
-
-def test_metamorphose_writes_valid_utc_timestamp(tmp_path: Path) -> None:
-    ws = _ws(tmp_path)
-    _rule(ws / ".aegis" / "rules" / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
-
-    res = metamorphose_cell(ws, "mature")
-
-    assert res["status"] == "metamorphosed"
-    moved = ws / ".aegis" / "rules" / "invariants" / "mature.md"
-    meta = parse_frontmatter(moved.read_text(encoding="utf-8")) or {}
-    _assert_utc(meta.get("metamorphosis_date"))
 
 
 # ── Interleavings: a rival lands between the unlocked checks and the lock ──
@@ -388,7 +297,7 @@ def test_concurrent_promotes_of_one_rule_promote_it_once(tmp_path: Path, monkeyp
 
 def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _ws(tmp_path)
-    source, artifacts = _invariant_with_artifacts(ws)
+    source = _rule(ws / ".aegis" / "rules" / "invariants" / "guarded.md", "guarded", "invariant")
     _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "traps" / "guarded.md", "Rival trap"))
 
     res = demote_cell(ws, "guarded")
@@ -396,12 +305,11 @@ def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkey
     assert res["status"] == "target_exists"
     assert "Rival trap" in (_rules(ws) / "traps" / "guarded.md").read_text(encoding="utf-8")
     assert source.is_file()
-    assert all(a.exists() for a in artifacts), "the invariant did not move; its gate artifacts must stay"
 
 
 def test_concurrent_demotes_of_one_rule_demote_it_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _ws(tmp_path)
-    _invariant_with_artifacts(ws)
+    _rule(ws / ".aegis" / "rules" / "invariants" / "guarded.md", "guarded", "invariant")
     rival: list[dict] = []
     _rival_on_first_lock(monkeypatch, lambda: rival.append(demote_cell(ws, "guarded")))
 
@@ -410,33 +318,6 @@ def test_concurrent_demotes_of_one_rule_demote_it_once(tmp_path: Path, monkeypat
     assert rival[0]["status"] == "demoted"
     assert res["status"] == "not_found"
     assert (_rules(ws) / "traps" / "guarded.md").is_file()
-
-
-def test_metamorphose_never_overwrites_a_rule_created_in_the_target_tier_meanwhile(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ws = _ws(tmp_path)
-    source = _rule(_rules(ws) / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
-    _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "invariants" / "mature.md", "Rival invariant"))
-
-    res = metamorphose_cell(ws, "mature")
-
-    assert res["status"] == "target_exists"
-    assert "Rival invariant" in (_rules(ws) / "invariants" / "mature.md").read_text(encoding="utf-8")
-    assert source.is_file()
-
-
-def test_metamorphose_of_a_rule_moved_meanwhile_reports_not_found(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ws = _ws(tmp_path)
-    _rule(_rules(ws) / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
-    _rival_on_first_lock(monkeypatch, lambda: promote_cell(ws, "mature", force=True))
-
-    res = metamorphose_cell(ws, "mature")
-
-    assert res["status"] == "not_found"
-    assert (_rules(ws) / "invariants" / "mature.md").is_file()
 
 
 # ── Tier pass: rewrite only what changes, lock only while rewriting ─────
@@ -618,46 +499,52 @@ def test_selection_skips_a_rule_moved_away_meanwhile(tmp_path: Path, monkeypatch
     assert _log_actions(ws) == []
 
 
-def test_selection_never_revisits_the_last_gasp_queue(tmp_path: Path, capsys) -> None:
+def test_selection_leaves_an_apoptotic_rule_in_place_and_reports_it(tmp_path: Path, capsys) -> None:
+    """FP > 2x TP makes a rule an archive candidate, never silently parked (defense #4)."""
     ws = _ws(tmp_path)
-    _rule(_rules(ws) / "traps" / "noisy.md", "noisy", "trap", triggers=10, tp=1, fp=5)
-    queue = _rules(ws) / ".last_gasp_queue"
-    waiting = _rule(queue / "waiting.md", "waiting", "trap", triggers=10, tp=0)
+    noisy = _rule(_rules(ws) / "traps" / "noisy.md", "noisy", "trap", triggers=10, tp=1, fp=5)
+    before = noisy.read_bytes()
 
-    run_cell_selection(ws, execute=True)
-    queued = _snapshot(queue)
-    run_cell_selection(ws, execute=True)
+    assert run_cell_selection(ws, execute=True) == 0
 
     out = capsys.readouterr().out
-    assert _log_actions(ws) == [("noisy.md", "last_gasp_requested")]
-    assert _snapshot(queue) == queued
-    assert waiting.is_file(), "queued rules belong to the last-gasp sentinel, not to selection"
-    assert out.count("noisy.md") == 1
-    assert "waiting.md" not in out
+    assert noisy.is_file(), "an apoptotic rule must stay active, not be parked"
+    assert noisy.read_bytes() == before
+    assert not (_rules(ws) / ".last_gasp_queue").exists()
+    assert _log_actions(ws) == []
+    line = next(ln for ln in out.splitlines() if "noisy.md" in ln)
+    assert "archive candidate" in line
 
 
-@pytest.mark.parametrize(
-    "fitness, queue, action",
-    [((10, 0, 0), ".archive", "moved_to_archive"), ((10, 1, 5), ".last_gasp_queue", "last_gasp_requested")],
-    ids=["archive", "last_gasp"],
-)
-def test_selection_never_overwrites_a_rule_already_parked_under_the_same_name(
-    tmp_path: Path, fitness: tuple[int, int, int], queue: str, action: str
-) -> None:
+def test_selection_never_revisits_a_legacy_last_gasp_queue(tmp_path: Path, capsys) -> None:
+    """Rules a v3 selection pass parked in .last_gasp_queue are left alone."""
     ws = _ws(tmp_path)
-    earlier = _rules(ws) / queue / "reused.md"
+    queue = _rules(ws) / ".last_gasp_queue"
+    waiting = _rule(queue / "waiting.md", "waiting", "trap", triggers=10, tp=0)
+    queued = _snapshot(queue)
+
+    run_cell_selection(ws, execute=True)
+
+    assert _snapshot(queue) == queued
+    assert waiting.is_file()
+    assert _log_actions(ws) == []
+    assert "waiting.md" not in capsys.readouterr().out
+
+
+def test_selection_never_overwrites_a_rule_already_archived_under_the_same_name(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    earlier = _rules(ws) / ".archive" / "reused.md"
     earlier.parent.mkdir(parents=True)
     earlier.write_text("---\nid: reused\ntype: trap\n---\nThe earlier rule.\n", encoding="utf-8")
-    triggers, tp, fp = fitness
-    current = _rule(_rules(ws) / "traps" / "reused.md", "reused", "trap", triggers=triggers, tp=tp, fp=fp)
+    current = _rule(_rules(ws) / "traps" / "reused.md", "reused", "trap", triggers=10, tp=0, fp=0)
     current_text = current.read_text(encoding="utf-8")
 
     run_cell_selection(ws, execute=True)
 
     assert not current.exists()
     assert earlier.read_text(encoding="utf-8") == "---\nid: reused\ntype: trap\n---\nThe earlier rule.\n"
-    assert (_rules(ws) / queue / "reused.1.md").read_text(encoding="utf-8") == current_text
-    assert _log_actions(ws) == [("reused.md", action)]
+    assert (_rules(ws) / ".archive" / "reused.1.md").read_text(encoding="utf-8") == current_text
+    assert _log_actions(ws) == [("reused.md", "moved_to_archive")]
 
 
 def test_selection_runs_in_a_workspace_whose_path_contains_archive(tmp_path: Path) -> None:

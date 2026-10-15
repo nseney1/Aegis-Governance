@@ -32,7 +32,7 @@ def _check_python_version() -> bool:
 
 def _check_zero_dependencies() -> bool:
     """Verify that the frontmatter engine is operational with zero dependencies."""
-    from aegis_core.yaml import parse_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
     test_fm = "---\nid: test\ntype: wall\n---\n"
     ok = parse_frontmatter(test_fm) == {"id": "test", "type": "wall"}
@@ -321,7 +321,7 @@ def run_doctor(args: argparse.Namespace) -> int:
     import contextlib
     import io
     from aegis_cli.ui.theme import strip_ansi
-    from aegis_core.workspace import Workspace
+    from aegis_core.workspace.base import Workspace
 
     ws_obj = getattr(args, "ws", None) or Workspace.resolve(
         getattr(args, "workspace", None) or getattr(args, "_project_root", None)

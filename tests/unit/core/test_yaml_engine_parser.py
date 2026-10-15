@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from aegis_core.yaml_engine import AegisYAML, AegisYAMLError, parse_yaml_subset
+from aegis_core.yaml_engine.frontmatter import AegisYAML
+from aegis_core.yaml_engine.parser import AegisYAMLError, parse_yaml_subset
 
 
 class TestParserBackslashZero:

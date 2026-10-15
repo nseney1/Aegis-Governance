@@ -8,7 +8,7 @@ prediction: "Will fire when a test asserts isinstance/type checks without behavi
 falsification: 0 findings in 10 sessions → prune
 target_paths:
   - "tests/*.py"
-  - "tests/**/*.py"
+  - "tests/*.py"
 triggers:
   - test_creation
   - test_modification

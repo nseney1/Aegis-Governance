@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 import pytest
-from aegis_core.yaml import (
-    FrontmatterError,
-    dump_frontmatter,
-    parse_rule_frontmatter,
-    parse_frontmatter,
-    parse_yaml_subset,
-)
+from aegis_core.yaml_engine.parser import FrontmatterError, parse_yaml_subset
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_rule_frontmatter, parse_frontmatter
 
 
 class TestFrontmatterParser:

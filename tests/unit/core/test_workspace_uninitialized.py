@@ -8,7 +8,8 @@ import pytest
 
 from conftest import symlink_or_skip
 from aegis_core.errors import WorkspaceBareRepoError, WorkspaceError
-from aegis_core.workspace import Workspace, resolve_git_hooks_dir
+from aegis_core.workspace.base import Workspace
+from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
 
 class TestWorkspaceForInit:
