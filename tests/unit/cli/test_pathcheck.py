@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from aegis_cli import pathcheck
 from aegis_cli.pathcheck import (
     build_hint,
     detect_shell,
@@ -194,7 +193,7 @@ def test_build_hint_zsh_names_zshrc_and_fallback(tmp_path):
     assert "zsh" in text
     assert "~/.zshrc" in text
     assert 'export PATH="$HOME/.local/bin:$PATH"' in text
-    assert "python3 -m soma_cli" in text
+    assert "python3 -m aegis_cli" in text
 
 
 def test_build_hint_on_path_but_shell_not_refreshed(tmp_path):
@@ -215,6 +214,16 @@ def test_build_hint_not_installed(tmp_path):
                       home=str(tmp_path), platform="linux", os_name="posix")
     assert text is not None
     assert "pip install" in text
+
+
+def test_build_hint_defaults_to_the_aegis_package(tmp_path):
+    """The default names aegis-guardrails, never the v3 soma-governance package."""
+    env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin", "HOME": str(tmp_path)}
+    text = build_hint(env=env, candidates=[str(tmp_path)], which=lambda *_a, **_k: None,
+                      home=str(tmp_path), platform="linux", os_name="posix")
+    assert text == ("ℹ️  The 'aegis' command is not installed for this Python.\n"
+                    "    Install it with: python3 -m pip install aegis-guardrails\n"
+                    "    (or pipx install aegis-guardrails)")
 
 
 def test_build_hint_unknown_shell_gives_generic_advice(tmp_path):
@@ -338,7 +347,7 @@ def test_build_hint_windows_uses_python_not_python3(tmp_path):
     text = build_hint(env=env, candidates=[str(tmp_path)], which=lambda *_a, **_k: None,
                       home=str(home), platform="win32", os_name="nt")
     assert text is not None
-    assert "python -m soma_cli" in text
+    assert "python -m aegis_cli" in text
     assert "python3 -m" not in text
 
 

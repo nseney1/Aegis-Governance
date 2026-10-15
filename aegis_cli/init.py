@@ -483,10 +483,7 @@ def run_init(args: argparse.Namespace) -> int:
         try:
             from aegis_cli.pathcheck import build_hint
 
-            try:
-                hint = build_hint(cmd_name="aegis")
-            except TypeError:
-                hint = build_hint()
+            hint = build_hint()
             if hint:
                 print(hint)
                 print()

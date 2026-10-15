@@ -120,10 +120,7 @@ def _check_cli_resolvable() -> bool:
         and not os.path.isfile(os.path.join(sdir, "aegis.exe"))
         and (os.path.isfile(os.path.join(sdir, "soma")) or os.path.isfile(os.path.join(sdir, "soma.exe")))
     )
-    try:
-        hint = build_hint(cmd_name="soma" if only_soma else "aegis")
-    except TypeError:
-        hint = build_hint()
+    hint = build_hint(cmd_name="soma" if only_soma else "aegis")
     if hint:
         print("\n".join("    " + line for line in hint.splitlines()))
     return False

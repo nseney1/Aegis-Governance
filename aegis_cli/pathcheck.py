@@ -181,7 +181,7 @@ def build_hint(env: Mapping[str, str] | None = None,
                os_name: str | None = None,
                shell: str | None = None,
                venv_prefix: object = _UNSET,
-               cmd_name: str = "soma") -> str | None:
+               cmd_name: str = "aegis") -> str | None:
     """Human-readable remedy, or None when `aegis` or `soma` already resolves."""
     env = os.environ if env is None else env
     which = shutil.which if which is None else which
