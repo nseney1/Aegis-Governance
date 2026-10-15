@@ -6,16 +6,15 @@ import glob
 import os
 from pathlib import Path
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from aegis_core.yaml import parse_frontmatter
-from aegis_core.scoring import bayesian_posterior, bayesian_score, calculate_snr, laplace_score
+from aegis_core.scoring import bayesian_posterior, bayesian_score, calculate_snr
 from aegis_core.taxonomy import RULE_EXPIRY_DAYS
-from aegis_core.workspace import Workspace, resolve_workspace
+from aegis_core.workspace import Workspace
 from .constants import (
     CELL_TELOMERE_DAYS,
     DECAY_FACTOR,
-    DEFAULT_DECAY_FACTOR,
 )
 from .quorum import calculate_fitness_status
 
@@ -23,45 +22,12 @@ __all__ = [
     "CELL_TELOMERE_DAYS",
     "RULE_EXPIRY_DAYS",
     "apply_decay",
-    "apply_exponential_decay",
     "bayesian_fitness",
     "compute_cells_fitness",
     "decayed_fitness",
-    "format_snr",
     "normalize_fitness",
     "antifragile_bonus",
 ]
-
-
-def apply_exponential_decay(
-    fitness: Dict[str, Any],
-    decay_factor: float = DEFAULT_DECAY_FACTOR,
-    min_interval_seconds: int = 3600,
-) -> Dict[str, Any]:
-    """Decay historical fitness data so recent signals carry greater weight."""
-    if not isinstance(fitness, dict):
-        return {}
-
-    now = int(time.time())
-    last_decay = fitness.get("last_decay_epoch", 0)
-    if min_interval_seconds > 0 and (now - last_decay < min_interval_seconds):
-        return fitness
-
-    triggers = fitness.get("triggers", 0)
-    tp = fitness.get("true_positives", 0)
-    fp = fitness.get("false_positives", 0)
-
-    updated = dict(fitness)
-    if triggers <= 0:
-        updated["last_decay_epoch"] = now
-        return updated
-
-    updated["triggers"] = max(1, int(triggers * decay_factor))
-    updated["true_positives"] = max(0, int(tp * decay_factor))
-    updated["false_positives"] = max(0, int(fp * decay_factor))
-    updated["last_decay_epoch"] = now
-    updated["score"] = round(laplace_score(updated["true_positives"], updated["triggers"]), 4)
-    return updated
 
 
 def apply_decay(meta: dict) -> dict:
@@ -129,16 +95,6 @@ def antifragile_bonus(metadata: dict) -> float:
     """Cells gain +5% fitness per survived high-intensity review."""
     stress_events = metadata.get("fitness", {}).get("stress_survived", 0)
     return 1.0 + (0.05 * min(stress_events, 10))
-
-
-def format_snr(value: Any) -> str:
-    """Render an SNR value for human-readable table output."""
-    if value is None:
-        return "\u221e"
-    try:
-        return f"{float(value):.1f}"
-    except (TypeError, ValueError):
-        return str(value)
 
 
 def decayed_fitness(raw_score: Optional[float], last_trigger_date: Any, telomere_days: float = 30) -> Optional[float]:

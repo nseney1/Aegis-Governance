@@ -1,36 +1,28 @@
 """Promotion, demotion, tier evaluation, adaptation, and metamorphosis."""
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timezone
 import glob
 import os
 from pathlib import Path
-import sys
 from typing import Any, Dict, Optional
 
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 from aegis_core.locking import workspace_lock
-from aegis_core.storage import atomic_write_text
-from aegis_core.workspace import Workspace, resolve_workspace
+from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink, atomic_write_text
+from aegis_core.workspace import Workspace
 from aegis_core.workspace.layout import LockResource
 from .constants import (
-    DEMOTION_PATH,
     DORMANT_DAYS_THRESHOLD,
     MAX_FP_RATE_FOR_DEMOTION,
-    METAMORPHOSIS_PATHS,
     MIN_AGE_DAYS_FOR_PROMOTION,
     MIN_TP_RATE_FOR_PROMOTION,
     MIN_TRIGGERS_FOR_PROMOTION,
     MODERN_DEMOTION_PATH,
     MODERN_GLOBAL_PROMOTION_PATH,
     MODERN_LOCAL_PROMOTION_PATH,
-    PROMOTION_PATH,
-    PROMOTION_TRANSITIONS,
     PROTECTED_RULES,
     TYPE_TO_DIR,
-    VALID_METAMORPHOSIS_TARGETS,
-    VALID_PROMOTION_TARGETS,
     get_demotion_path,
     get_promotion_path,
 )
@@ -39,7 +31,6 @@ from .decay import (
     normalize_fitness,
 )
 from .parsers import (
-    _atomic_write_and_unlink,
     _cell_age_days,
     _load_cells,
     _load_evidence,
@@ -50,13 +41,10 @@ from .parsers import (
 from .quorum import is_promotable
 
 __all__ = [
-    "adapt_cell",
-    "cli_cell_promote",
     "demote_cell",
     "evaluate_cell_tiers",
     "evaluate_demotions",
     "evaluate_promotions",
-    "metamorphose_cell",
     "promote_cell",
 ]
 
@@ -494,157 +482,3 @@ def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute
     return {"evaluated": evaluated, "changes": changes}
 
 
-def cli_cell_promote(argv: list[str] | None = None, workspace: Optional[str] = None) -> int:
-    """CLI wrapper for cell promotion and tier evaluation."""
-    parser = argparse.ArgumentParser(description="Promote cells to global rules.")
-    parser.add_argument("--local", action="store_true", help="Single-repo mode")
-    parser.add_argument("--execute", action="store_true", help="Create rule file / apply tier updates")
-    parser.add_argument("--tier-check", action="store_true", help="Check cells for enforcement tier promotion/demotion")
-    parser.add_argument("--enforce", action="store_true", help="Alias for --tier-check")
-    parser.add_argument("--dry-run", action="store_true", help="Dry run")
-    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
-
-    ws = str(workspace or resolve_workspace())
-    execute = bool(args.execute and not args.dry_run)
-    res = evaluate_cell_tiers(ws, execute=execute)
-    for change in res.get("changes", []):
-        print(f"Tier update {change['cell']}: {change['old_tier']} -> {change['new_tier']} ({change['reason']})")
-    return 0
-
-
-def metamorphose_cell(workspace: Workspace | Path | str, cell_id: str | Path) -> dict:
-    """Transforms cell between types based on maturity criteria."""
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    cells_dir = ws.rules_dir
-    clean_id = cell_id.stem if isinstance(cell_id, Path) else str(cell_id)
-    if clean_id.endswith(".md"):
-        clean_id = clean_id[:-3]
-    matches = list(cells_dir.rglob(f"*{clean_id}*.md"))
-    if not matches:
-        return {"status": "not_found", "message": f"Cell '{cell_id}' not found"}
-
-    # Read, decide and move under one lock so a concurrent promote/demote
-    # cannot move the source between our read and our rewrite.
-    with workspace_lock(ws.root, LockResource.RULES):
-        return _metamorphose_locked(ws, cells_dir, matches[0])
-
-
-def _metamorphose_locked(ws: Workspace, cells_dir: Path, cell_path: Path) -> dict:
-    if not cell_path.is_file():
-        return {"status": "not_found", "message": f"Cell '{cell_path.stem}' was moved or removed before the rules lock was acquired"}
-    content = cell_path.read_text(encoding="utf-8")
-    meta = parse_frontmatter(content) or {}
-    current_type = meta.get("type")
-    if not current_type or current_type not in PROMOTION_TRANSITIONS:
-        return {"status": "no_paths", "type": current_type}
-
-    fitness = meta.get("fitness") or {}
-    triggers = fitness.get("triggers", 0)
-    tp = fitness.get("true_positives", 0)
-    score = fitness.get("score") or (tp / triggers if triggers > 0 else 0)
-
-    best_path = None
-    for p in PROMOTION_TRANSITIONS[current_type]:
-        if score >= p["min_fitness"] and triggers >= p["min_sessions"]:
-            best_path = p
-            break
-
-    if not best_path:
-        return {"status": "not_mature", "score": score, "triggers": triggers}
-
-    new_type = best_path["target"]
-    meta["type"] = new_type
-    meta["metamorphosed_from"] = current_type
-    meta["metamorphosis_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    if new_type == "rule":
-        if ws.is_aegis_repo:
-            target_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
-            target_path = target_dir / f"rule-{cell_path.name}"
-        else:
-            target_dir = cells_dir / "gates"
-            target_path = target_dir / cell_path.name
-            new_type = "gate"
-            meta["type"] = "gate"
-    else:
-        target_dir = cells_dir / f"{new_type}s"
-        target_path = target_dir / cell_path.name
-
-    conflict = _recheck_move_locked(cell_path.stem, cell_path, target_path)
-    if conflict is not None:
-        return conflict
-    target_dir.mkdir(parents=True, exist_ok=True)
-    from aegis_core.yaml import _get_body
-    nfm = dump_frontmatter(meta)
-    body = _get_body(content).lstrip()
-    new_content = f"---\n{nfm.strip()}\n---\n\n{body}\n" if body else f"---\n{nfm.strip()}\n---\n"
-    _atomic_write_and_unlink(cell_path, target_path, new_content)
-
-    return {
-        "status": "metamorphosed",
-        "cell": cell_path.name,
-        "from_type": current_type,
-        "to_type": new_type,
-        "fitness_score": score,
-        "triggers": triggers,
-    }
-
-
-def adapt_cell(workspace: Workspace | Path | str, generate: bool = False) -> list[dict]:
-    """Scan and adapt cells with middling fitness scores."""
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    cells_dir = ws.rules_dir
-    results = []
-
-    for fpath in cells_dir.rglob("*.md"):
-        if fpath.name == "README.md":
-            continue
-        try:
-            content = fpath.read_text(encoding="utf-8")
-            meta = parse_frontmatter(content) or {}
-        except Exception:
-            continue
-
-        fitness = meta.get("fitness") or {}
-        triggers = fitness.get("triggers", 0)
-        tp = fitness.get("true_positives", 0)
-        fp = fitness.get("false_positives", 0)
-        impact = meta.get("impact_weight", 1.0)
-        if triggers == 0:
-            continue
-        score = (tp / triggers) * impact
-
-        if 0.3 <= score <= 0.7:
-            suggestion = "narrowing the hypothesis scope" if fp > tp * 1.5 else (
-                "broadening the trigger conditions" if triggers < 5 else "splitting into two more specific cells"
-            )
-            item = {
-                "cell": fpath.name,
-                "score": score,
-                "tp": tp,
-                "fp": fp,
-                "suggestion": suggestion,
-            }
-            results.append(item)
-
-            if generate:
-                from aegis_core.yaml import _get_body
-                v2_name = f"{fpath.stem}_v2.md"
-                v2_path = fpath.parent / v2_name
-                meta_v2 = dict(meta)
-                meta_v2["hypothesis"] = meta_v2.get("hypothesis", "") + " (Refined)"
-                meta_v2["fitness"] = {"triggers": 0, "true_positives": 0, "false_positives": 0, "score": None}
-                meta_v2["lineage"] = [fpath.name]
-                meta_v2["created"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                nfm = dump_frontmatter(meta_v2)
-                body = _get_body(content).lstrip()
-                v2_content = f"---\n{nfm.strip()}\n---\n\n{body}\n" if body else f"---\n{nfm.strip()}\n---\n"
-                with workspace_lock(ws.root, LockResource.RULES):
-                    atomic_write_text(v2_path, v2_content)
-                item["generated"] = str(v2_path)
-
-    return results

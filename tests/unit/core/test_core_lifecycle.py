@@ -14,11 +14,10 @@ from aegis_core.lifecycle import (
     STATUS_EXTINCT,
     STATUS_NEW,
     STATUS_SURVIVE,
-    apply_exponential_decay,
+    apply_decay,
     calculate_fitness_status,
     demote_cell,
     find_cell_file,
-    is_extinct,
     is_promotable,
     promote_cell,
 )
@@ -116,15 +115,8 @@ class TestPromotableAndExtinct:
         # Perfect score but only 10 triggers
         assert is_promotable(tp=10, triggers=10) is False
 
-    def test_is_extinct_at_or_below_threshold(self):
-        # tp=0, triggers=10 -> (0+1)/(10+2) = 0.083 <= 0.15
-        assert is_extinct(tp=0, triggers=10) is True
-        # tp=2, triggers=10 -> (2+1)/(10+2) = 0.25 > 0.15
-        assert is_extinct(tp=2, triggers=10) is False
-
     def test_zero_triggers_neither(self):
         assert is_promotable(tp=0, triggers=0) is False
-        assert is_extinct(tp=0, triggers=0) is False
 
 
 class TestDecay:
@@ -137,7 +129,7 @@ class TestDecay:
             "false_positives": 10,
             "last_decay_epoch": 0,
         }
-        decayed = apply_exponential_decay(fitness, decay_factor=0.95, min_interval_seconds=0)
+        decayed = apply_decay({"fitness": fitness})["fitness"]
         assert decayed["triggers"] == 95
         assert decayed["true_positives"] == 85
         assert decayed["false_positives"] == 9
@@ -151,7 +143,7 @@ class TestDecay:
             "false_positives": 10,
             "last_decay_epoch": now - 60,  # 1 min ago (< 3600s)
         }
-        decayed = apply_exponential_decay(fitness, decay_factor=0.95, min_interval_seconds=3600)
+        decayed = apply_decay({"fitness": fitness})["fitness"]
         assert decayed["triggers"] == 100  # unchanged
 
 

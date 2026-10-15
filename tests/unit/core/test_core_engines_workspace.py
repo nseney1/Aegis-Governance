@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import pytest
 
-from aegis_core.lifecycle.creation import create_cell, transfer_cell
+from aegis_core.lifecycle.creation import create_cell
 from aegis_core.lifecycle.decay import compute_cells_fitness
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells, _load_evidence
 from aegis_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
@@ -93,19 +93,6 @@ class TestLifecycleWorkspaceInteroperability:
         assert isinstance(created, Path)
         assert created.is_file()
         assert str(mock_soma_workspace.rules_dir) in str(created)
-
-    def test_transfer_cell_with_workspace_instance(self, mock_soma_workspace: Workspace, tmp_path: Path):
-        dest_dir = tmp_path / "dest_repo"
-        (dest_dir / ".aegis" / "rules").mkdir(parents=True)
-
-        res = transfer_cell(
-            cell_id="test-rule",
-            target_dir_str=str(dest_dir),
-            source_workspace=mock_soma_workspace,
-        )
-        assert res == 0
-        dest_cell = dest_dir / ".aegis" / "rules" / "traps" / "test-rule.md"
-        assert dest_cell.is_file()
 
     def test_compute_cells_fitness_with_workspace_instance(self, mock_soma_workspace: Workspace):
         fitness_list = compute_cells_fitness(workspace=mock_soma_workspace)

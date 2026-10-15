@@ -8,9 +8,7 @@ Verifies:
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
-import pytest
 
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 from aegis_core.lifecycle.constants import (
@@ -22,7 +20,7 @@ from aegis_core.lifecycle.constants import (
     get_demotion_path,
 )
 from aegis_core.lifecycle.parsers import find_cell_file, _load_cells
-from aegis_core.lifecycle.promotion import promote_cell, demote_cell, metamorphose_cell
+from aegis_core.lifecycle.promotion import promote_cell, demote_cell
 from aegis_core.metrics import compute_token_census
 from aegis_core.workspace import Workspace
 from aegis_mcp.jit_engine import load_genome_rules
@@ -147,29 +145,6 @@ def test_foreign_repo_local_demotion(tmp_path: Path):
     trap_file = repo / ".aegis" / "rules" / "traps" / "strict-check.md"
     assert trap_file.exists()
     assert not inv_file.exists()
-
-
-def test_foreign_repo_metamorphose_cell(tmp_path: Path):
-    """Foreign repositories metamorphose rules to gates instead of genome/."""
-    repo = tmp_path / "app"
-    repo.mkdir()
-    walls_dir = repo / ".aegis" / "rules" / "walls"
-    walls_dir.mkdir(parents=True)
-
-    cell_file = walls_dir / "meta-check.md"
-    cell_meta = {
-        "id": "meta-check",
-        "type": "wall",
-        "fitness": {"triggers": 30, "true_positives": 28, "false_positives": 2, "score": 0.93},
-    }
-    cell_file.write_text(dump_frontmatter(cell_meta, body="# Meta Check\n"), encoding="utf-8")
-
-    ws = Workspace(root=repo)
-    res = metamorphose_cell(ws, cell_file)
-    assert res["status"] == "metamorphosed"
-    assert not (repo / "genome").exists()
-    gate_file = repo / ".aegis" / "rules" / "gates" / "meta-check.md"
-    assert gate_file.exists()
 
 
 def test_parsers_and_jit_isolate_foreign_genome(tmp_path: Path):

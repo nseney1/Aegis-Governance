@@ -1,8 +1,6 @@
 """Property-based tests verifying mathematical invariants across Soma scoring engines."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import pytest
 
@@ -13,7 +11,6 @@ from aegis_sdk.scoring import laplace_score, wilson_lower_bound, bayesian_poster
 from aegis_sdk.rules import RuleFitness
 from aegis_core.lifecycle import (
     calculate_fitness_status,
-    apply_exponential_decay,
     STATUS_NEW,
     STATUS_SURVIVE,
     STATUS_ADAPT,

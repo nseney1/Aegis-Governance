@@ -10,7 +10,6 @@ from .constants import (
     MIN_PROMOTION_TRIGGERS,
     PROMOTION_THRESHOLD,
     STATUS_ADAPT,
-    STATUS_APOPTOSIS,
     STATUS_APOPTOSIS_WARNING,
     STATUS_DORMANT,
     STATUS_EXTINCT,
@@ -70,13 +69,3 @@ def is_promotable(
     return score > threshold
 
 
-def is_extinct(
-    tp: int,
-    triggers: int,
-    threshold: float = EXTINCTION_THRESHOLD,
-) -> bool:
-    """Determine if cell metrics fall at or below extinction boundary."""
-    if triggers <= 0:
-        return False
-    score = laplace_score(tp, triggers)
-    return score <= threshold

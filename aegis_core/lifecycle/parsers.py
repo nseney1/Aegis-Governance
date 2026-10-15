@@ -6,24 +6,17 @@ import glob
 import os
 from pathlib import Path
 import re
-import shutil
 from typing import Any, Optional, Tuple
 
-from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink
-from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter, parse_rule_frontmatter
+from aegis_core.yaml import dump_frontmatter, parse_frontmatter, parse_rule_frontmatter
 from aegis_core.workspace import Workspace
 from .constants import (
     TYPE_TO_DIR,
-    VALID_TYPES,
 )
 
 __all__ = [
-    "find_cell",
     "find_cell_file",
     "generate_slug",
-    "get_type_plural",
-    "parse_cell",
-    "resolve_metrics_dir",
     "sanitize_cell_id",
     "validate_cell_id",
 ]
@@ -88,35 +81,6 @@ def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Opt
             return candidate, "genome"
 
     return None, None
-
-
-def find_cell(workspace: Workspace | Path | str, cell_id: str) -> Optional[str]:
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    for cand_dir in (ws.rules_dir,):
-        if not cand_dir.is_dir():
-            continue
-        matches = glob.glob(os.path.join(str(cand_dir), "**", f"*{cell_id}*"), recursive=True)
-        matches = [m for m in matches if os.path.isfile(m) and m.endswith(".md")]
-        if matches:
-            return matches[0]
-    return None
-
-
-def parse_cell(file_path: Path | str) -> tuple[Optional[dict], str]:
-    try:
-        content = Path(file_path).read_text(encoding="utf-8")
-        meta = parse_frontmatter(content)
-        body = _get_body(content).lstrip()
-        return meta, body
-    except Exception:
-        return None, ""
-
-
-def get_type_plural(cell_type: str) -> str:
-    cell_type = cell_type.lower()
-    return VALID_TYPES.get(cell_type, "traps")
 
 
 def _naive_utc(timestamp: Any) -> Optional[datetime]:
@@ -236,6 +200,3 @@ def _transform_frontmatter_type(content: str, new_type: str) -> str:
     return dump_frontmatter(meta, body=body)
 
 
-def resolve_metrics_dir(workspace: Path | str) -> Path:
-    from aegis_core.telemetry import resolve_metrics_dir as _res_metrics
-    return _res_metrics(workspace)

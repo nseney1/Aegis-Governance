@@ -35,43 +35,31 @@ from .constants import (
     VALID_TYPES,
 )
 from .creation import (
-    cli_cell_create,
     create_cell,
-    transfer_cell,
 )
 from .decay import (
     antifragile_bonus,
     apply_decay,
-    apply_exponential_decay,
     bayesian_fitness,
     compute_cells_fitness,
     decayed_fitness,
-    format_snr,
     normalize_fitness,
 )
 from .parsers import (
-    find_cell,
     find_cell_file,
     generate_slug,
-    get_type_plural,
-    parse_cell,
-    resolve_metrics_dir,
     sanitize_cell_id,
     validate_cell_id,
 )
 from .promotion import (
-    adapt_cell,
-    cli_cell_promote,
     demote_cell,
     evaluate_cell_tiers,
     evaluate_demotions,
     evaluate_promotions,
-    metamorphose_cell,
     promote_cell,
 )
 from .quorum import (
     calculate_fitness_status,
-    is_extinct,
     is_promotable,
 )
 from .selection import (
@@ -108,8 +96,6 @@ __all__ = [
     "METAMORPHOSIS_PATHS",
     "calculate_fitness_status",
     "is_promotable",
-    "is_extinct",
-    "apply_exponential_decay",
     "sanitize_cell_id",
     "find_cell_file",
     "promote_cell",
@@ -119,23 +105,13 @@ __all__ = [
     "validate_cell_id",
     "generate_slug",
     "create_cell",
-    "cli_cell_create",
-    "transfer_cell",
     "apply_decay",
     "normalize_fitness",
-    "resolve_metrics_dir",
     "evaluate_cell_tiers",
-    "cli_cell_promote",
-    "metamorphose_cell",
-    "adapt_cell",
     "run_cell_selection",
     "prune_cells",
-    "find_cell",
-    "parse_cell",
-    "get_type_plural",
     "bayesian_fitness",
     "antifragile_bonus",
-    "format_snr",
     "decayed_fitness",
     "compute_cells_fitness",
 ]
