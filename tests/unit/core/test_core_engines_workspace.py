@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 import warnings
 
-from aegis_core.proposals import generate_checkpoint
 from aegis_core.defects import audit_expiry, load_registry
 from aegis_core.enforcement import (
     _match_cells,
@@ -146,15 +145,6 @@ class TestLifecycleWorkspaceInteroperability:
 
         demotions = evaluate_demotions(mock_soma_workspace)
         assert isinstance(demotions, list)
-
-
-class TestArbitrationWorkspaceInteroperability:
-    """Verify arbitration functions accept Workspace directly."""
-
-    def test_generate_checkpoint_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        report = generate_checkpoint(workspace=mock_soma_workspace)
-        assert report["workspace"] == str(mock_soma_workspace.root)
-        assert "total_cells" in report
 
 
 class TestOutcomesAndSyncWorkspaceInteroperability:

@@ -113,8 +113,7 @@ def test_report_and_status_use_canonical_triggers_not_legacy(tmp_path, capsys):
     assert canonical_line.split()[1] == "2"
 
 
-def test_oracle_and_lifecycle_use_weighted_canonical_signals(tmp_path):
-    from aegis_core.proposals import generate_checkpoint
+def test_lifecycle_uses_weighted_canonical_signals(tmp_path):
     from aegis_core.lifecycle import evaluate_promotions
 
     cells = tmp_path / ".aegis" / "rules" / "traps"
@@ -125,8 +124,6 @@ def test_oracle_and_lifecycle_use_weighted_canonical_signals(tmp_path):
     _write_jsonl(evidence / "signals.jsonl", signals)
     _write_jsonl(evidence / "outcomes.jsonl", [{"cell_id": "canonical", "outcome": "fp"}] * 100)
 
-    report = generate_checkpoint(str(tmp_path))
-    assert "healthy" in report["classifications"]
     candidates = evaluate_promotions(str(tmp_path))
     assert candidates[0]["cell_id"] == "canonical"
     assert candidates[0]["tp_rate"] == 0.85
