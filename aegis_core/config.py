@@ -74,6 +74,7 @@ _COMMAND_KEYS = frozenset({
 })
 _MAX_LISTED = 5
 _LISTABLE_DRIVER_KEY = re.compile(r"ast_driver(?:_[a-z0-9]{1,8})?")
+_EXTENSION = re.compile(r"[a-z0-9]{1,8}")
 
 
 class ConfigError(AegisValidationError):
@@ -280,19 +281,19 @@ class RepoConfig:
         packaged: List[str] = []
         ast = raw.get("ast", {})
         if isinstance(ast, dict):
-            from aegis_core.ast.detect import packaged_driver_for_extension
-
+            # Only the shape is checked here (L0); aegis_core.skills.slots drops an extension
+            # with no driver shipped inside aegis, with a warning.
             wanted = ast.get("packaged_drivers", [])
             if isinstance(wanted, list):
                 for ext in wanted:
                     clean = ext.strip().lower().lstrip(".") if isinstance(ext, str) else ""
-                    if clean and packaged_driver_for_extension(clean) is not None:
+                    if _EXTENSION.fullmatch(clean):
                         if clean not in packaged:
                             packaged.append(clean)
                     else:
                         warnings.append(
-                            f"ignored an 'ast.packaged_drivers' entry in {REPO_LABEL}: only extensions "
-                            "with a driver that ships inside aegis can be enabled"
+                            f"ignored an 'ast.packaged_drivers' entry in {REPO_LABEL}: entries are "
+                            "file extensions such as \"rs\""
                         )
                         break
             else:

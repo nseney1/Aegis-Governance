@@ -95,7 +95,7 @@ def test_unknown_keys_are_counted_never_echoed(ws: Path):
     ({"jit": {"max_tokens": True}}, "'jit.max_tokens'"),
     ({"expiry": {"days": "soon"}}, "'expiry.days'"),
     ({"expiry": {"per_type": {"wall": 3}}}, "'expiry.per_type'"),
-    ({"ast": {"packaged_drivers": ["md"]}}, "'ast.packaged_drivers'"),
+    ({"ast": {"packaged_drivers": ["../x"]}}, "'ast.packaged_drivers'"),
     ({"ast": []}, "'ast'"),
 ])
 def test_invalid_values_are_ignored_with_a_warning(ws: Path, data: dict, needle: str):

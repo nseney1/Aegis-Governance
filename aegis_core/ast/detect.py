@@ -185,7 +185,11 @@ def provision_ast_driver_slots(
     except ConfigError:
         return dict(recommended), []
     merged = current + [ext for ext in wanted if ext not in current]
-    slots = {f"ast_driver_{ext}": packaged_driver_for_extension(ext)["default_command"] for ext in merged}
+    slots = {
+        f"ast_driver_{ext}": packaged["default_command"]
+        for ext, packaged in ((ext, packaged_driver_for_extension(ext)) for ext in merged)
+        if packaged is not None
+    }
     config_path = WorkspaceLayout(root).config_file
     if dry_run or (merged == current and config_path.is_file()) or not merged:
         return slots, []

@@ -168,11 +168,20 @@ class SlotRegistry:
         except ConfigError as exc:
             raise SlotResolutionError(str(exc)) from exc
         slots = {}
+        warnings = list(repo.warnings)
+        unknown = 0
         for ext in repo.packaged_drivers:
             config = packaged_driver_for_extension(ext)
             if config is not None:
                 slots[f"ast_driver_{ext}"] = config["default_command"]
-        return cls(slots, warnings=repo.warnings)
+            else:
+                unknown += 1
+        if unknown:
+            warnings.append(
+                f"ignored {unknown} 'ast.packaged_drivers' entr{'y' if unknown == 1 else 'ies'} in "
+                ".aegis/config.json: only extensions with a driver that ships inside aegis can be enabled"
+            )
+        return cls(slots, warnings=warnings)
 
     @classmethod
     def load_user(cls, workspace_root: Path | str | None = None) -> SlotRegistry:

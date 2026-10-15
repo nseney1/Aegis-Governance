@@ -132,3 +132,15 @@ def test_provision_dry_run_writes_nothing(tmp_path: Path):
     assert slots == {"ast_driver_go": "go run .aegis/drivers/go_ast.go"}
     assert created_files == []
     assert not (tmp_path / ".aegis").exists()
+
+
+def test_provision_tolerates_an_unknown_extension_already_listed(tmp_path: Path):
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='foo'\n", encoding="utf-8")
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"v": 1, "ast": {"packaged_drivers": ["md"]}}), encoding="utf-8")
+
+    slots, _ = provision_ast_driver_slots(tmp_path)
+
+    assert slots == {"ast_driver_rs": "{python} .aegis/drivers/rust_ast.py"}
+    assert json.loads(config.read_text(encoding="utf-8"))["ast"]["packaged_drivers"] == ["md", "rs"]

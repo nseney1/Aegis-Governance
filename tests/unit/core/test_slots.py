@@ -35,6 +35,20 @@ def test_slot_registry_load_reads_packaged_driver_opt_ins(tmp_path):
     assert reg.to_dict() == {"ast_driver_rs": "{python} .aegis/drivers/rust_ast.py"}
 
 
+def test_an_extension_without_a_packaged_driver_is_ignored_with_a_warning(tmp_path):
+    (tmp_path / ".aegis").mkdir()
+    (tmp_path / ".aegis" / "config.json").write_text(
+        json.dumps({"v": 1, "ast": {"packaged_drivers": ["md", "rs"]}}), encoding="utf-8"
+    )
+
+    reg = SlotRegistry.load(tmp_path)
+    assert reg.to_dict() == {"ast_driver_rs": "{python} .aegis/drivers/rust_ast.py"}
+    assert reg.warnings == [
+        "ignored 1 'ast.packaged_drivers' entry in .aegis/config.json: "
+        "only extensions with a driver that ships inside aegis can be enabled"
+    ]
+
+
 def test_slot_registry_load_invalid_json(tmp_path):
     (tmp_path / ".aegis").mkdir()
     (tmp_path / ".aegis" / "config.json").write_text(": : invalid", encoding="utf-8")
