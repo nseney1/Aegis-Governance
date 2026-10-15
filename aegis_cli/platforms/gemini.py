@@ -155,17 +155,12 @@ class GeminiAdapter(PlatformAdapter):
         return True
 
     def render_config(self) -> dict[str, Any]:
-        """Render standard Gemini/Antigravity hooks configuration."""
+        """Render the Gemini/Antigravity hooks configuration.
+
+        v4 cut the agent-side lifecycle phases (D15); only the safety gate
+        remains, so a hooks.json written now never calls a removed command.
+        """
         return {
-            "governance-monitor": {
-                "PreInvocation": [
-                    {
-                        "type": "command",
-                        "command": "aegis hook pre-invocation",
-                        "timeout": 15,
-                    }
-                ]
-            },
             "safety-gate": {
                 "PreToolUse": [
                     {
@@ -177,15 +172,6 @@ class GeminiAdapter(PlatformAdapter):
                                 "timeout": 5,
                             }
                         ],
-                    }
-                ]
-            },
-            "session-close": {
-                "Stop": [
-                    {
-                        "type": "command",
-                        "command": "aegis hook session-close",
-                        "timeout": 30,
                     }
                 ]
             },

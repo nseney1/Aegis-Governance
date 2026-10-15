@@ -578,7 +578,7 @@ class TestRuleDiscovery:
         assert init_mod.get_rules_dir is platforms_mod.get_rules_dir
 
     def test_init_branded_aegis_header_and_dry_run_badges(self, tmp_path, capsys):
-        """v3.0.0: init prints Aegis Guardrails header, aegis report, and [DRY-RUN]/[SKIP] badges."""
+        """init prints the Aegis Guardrails header, points at aegis status (v4: report is gone), and [DRY-RUN]/[SKIP] badges."""
         from aegis_cli.init import run_init
 
         (tmp_path / ".gemini").mkdir()
@@ -595,6 +595,7 @@ class TestRuleDiscovery:
         out_dry = capsys.readouterr().out
         assert "Aegis Guardrails — Workspace Setup" in out_dry
         assert "Soma Governance" not in out_dry
-        assert "aegis report" in out_dry
+        assert "After a session, run: aegis status" in out_dry
+        assert "aegis report" not in out_dry
         assert "[DRY-RUN] providence" in out_dry
         assert "✅ providence" not in out_dry

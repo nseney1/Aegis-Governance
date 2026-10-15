@@ -6,17 +6,28 @@ from pathlib import Path
 from aegis_cli.platforms import GeminiAdapter, get_adapter
 
 
-def test_gemini_adapter_render_config_uses_aegis_hooks(tmp_path: Path) -> None:
+def _hook_commands(cfg):
+    for event_map in cfg.values():
+        for entries in event_map.values():
+            for entry in entries:
+                for hook in entry.get("hooks", [entry]):
+                    yield hook["command"]
+
+
+def test_gemini_adapter_hooks_only_call_live_aegis_commands(tmp_path: Path) -> None:
+    """A hooks.json written today must not call a hook phase v4 removed (D15)."""
+    import shlex
+
+    from aegis_cli.cli import _build_parser, removed_command_pointer
+
     adapter = GeminiAdapter(workspace=tmp_path, home=tmp_path)
-    cfg = adapter.render_config()
-
-    pre_inv = cfg["governance-monitor"]["PreInvocation"][0]["command"]
-    safety = cfg["safety-gate"]["PreToolUse"][0]["hooks"][0]["command"]
-    stop = cfg["session-close"]["Stop"][0]["command"]
-
-    assert pre_inv == "aegis hook pre-invocation"
-    assert safety == "aegis hook safety-gate"
-    assert stop == "aegis hook session-close"
+    commands = list(_hook_commands(adapter.render_config()))
+    assert commands == ["aegis hook safety-gate"]
+    for command in commands:
+        argv = shlex.split(command)[1:]
+        assert removed_command_pointer(argv) is None
+        ns = _build_parser().parse_args(argv)
+        assert (ns.command, ns.hook_action) == ("hook", "safety-gate")
 
 
 def test_base_adapter_render_mcp_entry_defaults_to_aegis_mcp(tmp_path: Path) -> None:

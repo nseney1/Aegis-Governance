@@ -5,8 +5,7 @@ Subcommands:
   aegis rule create               Create a rule (--hypothesis, optional --body-file)
   aegis rule promote <rule_id>    Promote a rule up lifecycle tiers
   aegis rule demote <rule_id>     Demote a rule down lifecycle tiers
-  aegis rule archive [rule_id]    Archive decayed, extinct, or quarantined rules
-  aegis rule clean                Prune leaked or redundant rules
+  aegis rule archive [--dry-run]  Archive extinct rules (applies unless --dry-run)
 """
 from __future__ import annotations
 
@@ -15,7 +14,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_core.errors import WorkspaceNotFoundError
@@ -25,18 +24,13 @@ from aegis_core.workspace import Workspace
 from aegis_core.workspace.discovery import _is_workspace_dir
 from aegis_core.workspace.layout import WorkspaceLayout
 from aegis_core.lifecycle import (
-    promote_cell, demote_cell, prune_cells, find_cell_file,
-    evaluate_promotions, evaluate_demotions, evaluate_cell_tiers,
+    promote_cell, demote_cell, prune_cells, evaluate_promotions, evaluate_demotions, evaluate_cell_tiers,
 )
-from aegis_core.lifecycle.cleanse import (
-    AEGIS_INTERNAL_PURGE_STEMS, UNIVERSAL_TENETS, _clean_claude_sections,
-    clean_global_rules, collect_workspace_rules, format_cleanse_report, is_purge_candidate,
-)
+from aegis_core.yaml import parse_frontmatter
 
 __all__ = [
     "run_rule", "RuleCommand", "run_promote", "run_demote", "_force_promote",
-    "_force_demote", "clean_global_rules", "run_clean_rules", "UNIVERSAL_TENETS",
-    "AEGIS_INTERNAL_PURGE_STEMS", "is_purge_candidate", "_clean_claude_sections",
+    "_force_demote", "collect_workspace_rules",
 ]
 
 
@@ -45,7 +39,7 @@ def run_rule(args: argparse.Namespace) -> int:
     action = getattr(args, "rule_action", None) or "list"
     handlers = {
         "list": _run_list, "create": _run_create, "promote": _run_promote,
-        "demote": _run_demote, "archive": _run_archive, "clean": _run_clean,
+        "demote": _run_demote, "archive": _run_archive,
     }
     if action not in handlers:
         print(f"Unknown rule subcommand: {action}", file=sys.stderr)
@@ -64,7 +58,9 @@ def _emit_error(args: argparse.Namespace, msg: str) -> int:
     return 1
 
 
-_REGENERATE = "regenerate it with the aegis_generate_manifest MCP tool."
+# init re-seeds and re-signs the manifest from the rules on disk: an explicit
+# operator step, unlike the lifecycle writes. `aegis sync` replaces it (D3, B2b).
+_REGENERATE = "re-run aegis init to regenerate it."
 
 
 def _warn_if_manifest_stale(root: Path) -> None:
@@ -178,6 +174,42 @@ def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = Fals
     return root
 
 
+def collect_workspace_rules(
+    root: Path,
+    rules_dir: Path,
+    rule_type_filter: str | None = None,
+    min_fitness: float | None = None,
+) -> list[dict[str, Any]]:
+    """Scan the workspace rules directory and return filtered rule metadata dicts."""
+    rules: list[dict[str, Any]] = []
+    for md_file in sorted(rules_dir.rglob("*.md")):
+        if md_file.name == "README.md":
+            continue
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            fm = parse_frontmatter(content) or {}
+            r_type = fm.get("type", md_file.parent.name.rstrip("s"))
+            if rule_type_filter and r_type != rule_type_filter:
+                continue
+
+            fitness_block = fm.get("fitness", {})
+            score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
+            if min_fitness is not None and score is not None and score < min_fitness:
+                continue
+
+            rules.append({
+                "id": fm.get("id", md_file.stem),
+                "type": r_type,
+                "domain": fm.get("domain", "general"),
+                "enforcement": fm.get("enforcement", "advisory"),
+                "score": score,
+                "path": str(md_file.relative_to(root)),
+            })
+        except Exception:
+            continue
+    return rules
+
+
 def _run_list(args: argparse.Namespace) -> int:
     """List active rules and fitness metrics."""
     root = _resolve_workspace_root(args)
@@ -221,7 +253,7 @@ def _emit_status(use_json: bool, payload: dict[str, Any], text: str, rc: int) ->
 
 
 def _resolve_rule_id(args: argparse.Namespace) -> str | None:
-    return getattr(args, "rule", None) or getattr(args, "rule_id", None) or getattr(args, "cell", None) or getattr(args, "cell_id", None)
+    return getattr(args, "rule_id", None)
 
 
 def _run_promote(args: argparse.Namespace) -> int:
@@ -343,27 +375,13 @@ run_demote = _run_demote
 
 
 def _run_archive(args: argparse.Namespace) -> int:
-    """Archive extinct or decayed rules."""
+    """Archive extinct rules; --dry-run only reports what would move."""
     root = _resolve_workspace_root(args)
-    execute = not getattr(args, "dry_run", False) and getattr(args, "apply", True)
+    execute = not getattr(args, "dry_run", False)
     rc = prune_cells(workspace=root, execute=execute)
     if execute:
         _warn_if_manifest_stale(root)
     return rc
-
-
-def _run_clean(args: argparse.Namespace) -> int:
-    """Clean redundant or leaked global rules."""
-    dry_run = getattr(args, "dry_run", False)
-    apply = getattr(args, "apply", False) or getattr(args, "force", False)
-    force = apply and not dry_run
-    q_dir = getattr(args, "quarantine_dir", "") or None
-    res = clean_global_rules(dry_run=not force, force=force, quarantine_dir=q_dir)
-    print(format_cleanse_report(res))
-    return 0
-
-
-run_clean_rules = _run_clean
 
 
 def _split_csv_arg(raw: Any) -> list[str] | None:
@@ -423,10 +441,8 @@ def _run_create(args: argparse.Namespace) -> int:
     try:
         created = create_cell(
             cell_type=cell_type, hypothesis=hypothesis, prediction=getattr(args, "prediction", "") or "",
-            falsification=getattr(args, "falsification", "") or "", weight=float(getattr(args, "weight", 1.0) or 1.0),
-            tags=_split_csv_arg(getattr(args, "tags", None)), expiry_sessions=getattr(args, "expiry_sessions", 15),
-            expiry_days=getattr(args, "expiry_days", 60), minimum_mode=getattr(args, "minimum_mode", "") or "",
-            id_override=rule_id, effector=bool(getattr(args, "effector", False)), memory=bool(getattr(args, "memory", False)),
+            falsification=getattr(args, "falsification", "") or "",
+            tags=_split_csv_arg(getattr(args, "tags", None)), id_override=rule_id,
             target_paths=_split_csv_arg(getattr(args, "target_paths", None)), domain=getattr(args, "domain", "correctness") or "correctness",
             workspace=root, enforcement=getattr(args, "enforcement", None), body=body,
         )
@@ -443,15 +459,12 @@ class RuleCommand(AegisCommand):
     name = "rule"
     aliases = ()
     category = CommandCategory.LIFECYCLE
-    help = "Manage rule lifecycle (list, create, promote, demote, archive, clean)"
+    help = "Manage rule lifecycle (list, create, promote, demote, archive)"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         common = argparse.ArgumentParser(add_help=False)
-        for flag in ("--plain", "--no-emoji", "--json"):
+        for flag in ("--plain", "--json"):
             common.add_argument(flag, action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("--format", choices=["text", "json", "mermaid"], default=argparse.SUPPRESS)
-        common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("-q", "--quiet", action="store_true", default=argparse.SUPPRESS)
         common.add_argument("--workspace", type=str, default=argparse.SUPPRESS, action=_WorkspaceArg)
         sub = parser.add_subparsers(dest="rule_action", metavar="ACTION")
 
@@ -469,38 +482,20 @@ class RuleCommand(AegisCommand):
         p_create.add_argument("-n", "--name", "--id", dest="id", default=None, help="Explicit rule ID stem")
         p_create.add_argument("--target-paths", dest="target_paths", default="", help="Comma-separated target path globs")
         p_create.add_argument("--tags", default="", help="Comma-separated tags")
-        p_create.add_argument("-w", "--weight", type=float, default=1.0, help="Impact weight")
-        p_create.add_argument("--expiry-sessions", dest="expiry_sessions", type=int, default=15, help="Session expiry")
-        p_create.add_argument("--expiry-days", dest="expiry_days", type=int, default=60, help="Day expiry")
-        p_create.add_argument("--minimum-mode", dest="minimum_mode", default="", help="Minimum review mode")
-        p_create.add_argument("--effector", action="store_true", default=False, help="Create as effector cell")
-        p_create.add_argument("--memory", action="store_true", default=False, help="Create as memory cell")
         p_create.add_argument("--body-file", dest="body_file", default=None, metavar="PATH",
                               help="Rule body (markdown after the frontmatter) from PATH, or '-' for stdin; max 64 KiB")
 
-        p_prom = sub.add_parser("promote", parents=[common], help="Promote a rule up lifecycle tiers")
-        p_prom.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to promote")
-        p_prom.add_argument("--rule", default=None, help="Rule identifier to promote")
-        p_prom.add_argument("--reason", help="Audit explanation for promotion")
-        p_prom.add_argument("--force", action="store_true", help="Bypass evidence threshold checks")
+        p_prom = sub.add_parser("promote", parents=[common], help="Promote a rule up lifecycle tiers (no RULE_ID: list candidates)")
+        p_prom.add_argument("rule_id", nargs="?", default=None, metavar="RULE_ID", help="Rule identifier to promote")
         p_prom.add_argument("--tier-check", action="store_true", help="Evaluate enforcement tier transitions")
         p_prom.add_argument("--dry-run", action="store_true", help="Preview promotion without moving files")
 
-        p_dem = sub.add_parser("demote", parents=[common], help="Demote a rule down lifecycle tiers")
-        p_dem.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to demote")
-        p_dem.add_argument("--rule", default=None, help="Rule identifier to demote")
-        p_dem.add_argument("--reason", help="Audit explanation for demotion")
-        p_dem.add_argument("--force", action="store_true", help="Force demotion")
+        p_dem = sub.add_parser("demote", parents=[common], help="Demote a rule down lifecycle tiers (no RULE_ID: list candidates)")
+        p_dem.add_argument("rule_id", nargs="?", default=None, metavar="RULE_ID", help="Rule identifier to demote")
         p_dem.add_argument("--dry-run", action="store_true", help="Preview demotion without moving files")
 
-        p_arch = sub.add_parser("archive", parents=[common], help="Archive decayed or extinct rules")
-        p_arch.add_argument("rule_id", nargs="?", help="Specific rule ID to archive")
-        p_arch.add_argument("--dry-run", action="store_true", help="Preview rules to archive")
-        p_arch.add_argument("--apply", action="store_true", default=True, help="Apply archive movements")
-
-        p_clean = sub.add_parser("clean", parents=[common], help="Clean redundant or leaked rules")
-        p_clean.add_argument("--dry-run", action="store_true", help="Show purge candidates without deleting")
-        p_clean.add_argument("--apply", action="store_true", help="Apply cleanup deletions")
+        p_arch = sub.add_parser("archive", parents=[common], help="Archive extinct rules")
+        p_arch.add_argument("--dry-run", action="store_true", help="Report the rules that would be archived; move nothing")
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_rule(args)

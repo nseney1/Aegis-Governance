@@ -32,8 +32,6 @@ def test_workspace_layout_paths_and_immutability(tmp_path: Path):
     assert layout.manifest_file == layout.rules_dir / "manifest.json"
     assert layout.manifest_key_file == layout.keys_dir / "manifest.key"
     assert layout.slots_file == layout.aegis_dir / "slots.yaml"
-    assert layout.bug_registry_file == layout.root / "docs" / "project" / "BUG_REGISTRY.json"
-    assert layout.claim_registry_file == layout.root / "docs" / "project" / "CLAIM_REGISTRY.json"
 
     with pytest.raises(FrozenInstanceError):
         layout.root = tmp_path / "other"  # type: ignore[misc]

@@ -1,6 +1,6 @@
 """MCP config writers must never destroy a user's config (M3) and register only `aegis`.
 
-Covers `aegis init --mcp` (init.generate_mcp_config), `aegis install --platform mcp`
+Covers `aegis init --mcp` (init.generate_mcp_config), the MCP platform adapter
 (McpAdapter) and the Claude Desktop writer (ClaudeAdapter.install_desktop_mcp).
 """
 from __future__ import annotations
@@ -82,7 +82,7 @@ def home(tmp_path: Path) -> Path:
     return h
 
 
-# ── McpAdapter.install (aegis install --platform mcp) ────────────────────────
+# ── McpAdapter.install ───────────────────────────────────────────────────────
 
 
 class TestMcpAdapterRefusesUnmergeableConfig:
@@ -98,18 +98,6 @@ class TestMcpAdapterRefusesUnmergeableConfig:
         assert any(str(target) in e and "refusing to modify" in e for e in res.errors), res.errors
         assert not any(m.startswith("Configured") for m in res.messages), res.messages
         assert _snapshot(project) == before
-
-    def test_cli_install_exits_nonzero_with_clear_error(self, project: Path, home: Path):
-        target = project / ".mcp.json"
-        target.write_bytes(UNMERGEABLE["jsonc_comment"])
-
-        proc = _cli(["install", "--platform", "mcp", "--local"], cwd=project, home=home)
-
-        assert proc.returncode == 1, proc.stdout + proc.stderr
-        assert "refusing to modify" in proc.stderr
-        assert str(target) in proc.stderr
-        assert target.read_bytes() == UNMERGEABLE["jsonc_comment"]
-
 
 class TestMcpAdapterMergesSafely:
     def test_install_preserves_unrelated_keys_and_servers(self, project: Path):
@@ -345,19 +333,6 @@ class TestOtherWritersRegisterOnlyAegis:
         assert any(str(desktop) in e and "nothing was installed" in e for e in res.errors), res.errors
         assert not any(m.startswith("Installed") for m in res.messages), res.messages
         assert _snapshot(home) == before
-
-    def test_cli_claude_install_fails_fast_on_refused_desktop_config(self, project: Path, home: Path):
-        desktop = home / ".config" / "Claude" / "claude_desktop_config.json"
-        desktop.parent.mkdir(parents=True)
-        desktop.write_bytes(UNMERGEABLE["trailing_comma"])
-
-        proc = _cli(["install", "--platform", "claude"], cwd=project, home=home)
-
-        assert proc.returncode == 1, proc.stdout + proc.stderr
-        assert "Installed Claude configuration" not in proc.stdout
-        assert "refusing to modify" in proc.stderr and "nothing was installed" in proc.stderr
-        assert not (home / ".claude").exists()
-        assert desktop.read_bytes() == UNMERGEABLE["trailing_comma"]
 
     def test_claude_uninstall_failed_commit_leaves_original_intact(self, project: Path, home: Path, monkeypatch):
         target = project / ".mcp.json"

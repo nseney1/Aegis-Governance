@@ -146,14 +146,6 @@ class WorkspaceLayout:
     def slots_file(self) -> Path:
         return self.aegis_dir / "slots.yaml"
 
-    @property
-    def bug_registry_file(self) -> Path:
-        return self.root / "docs" / "project" / "BUG_REGISTRY.json"
-
-    @property
-    def claim_registry_file(self) -> Path:
-        return self.root / "docs" / "project" / "CLAIM_REGISTRY.json"
-
     def lock_file(self, resource: str) -> Path:
         return self.locks_dir / f"{resource}.lock"
 

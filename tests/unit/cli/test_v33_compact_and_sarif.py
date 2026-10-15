@@ -12,7 +12,6 @@ from unittest.mock import patch
 import pytest
 
 from aegis_cli.check import CheckCommand, run_check
-from aegis_cli.system import SystemCommand, run_system
 from aegis_cli.verify import VerifyCommand, format_sarif_report, run_verify
 from aegis_core.telemetry import (
     compact_signals,
@@ -126,35 +125,6 @@ class TestSegmentedTelemetryCompaction:
         assert res["retained_count"] == 0
         assert len(load_signals(tmp_path)) == 1
         assert not (tmp_path / ".aegis" / "telemetry" / "checkpoint_rollup.json").exists()
-
-
-class TestSystemCompactCLI:
-    """Verify `aegis system compact [--days 30] [--dry-run] [--json]` CLI execution."""
-
-    def test_system_compact_json_cli(self, tmp_path: Path, capsys):
-        old_ts = (datetime.now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        recent_ts = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        signals_file = tmp_path / ".aegis" / "telemetry" / "signals.jsonl"
-        _write_jsonl(
-            signals_file,
-            [
-                {"timestamp": old_ts, "cell": "rule-cli", "signal": "tp", "source": "session"},
-                {"timestamp": recent_ts, "cell": "rule-cli", "signal": "fp", "source": "session"},
-            ],
-        )
-
-        cmd = SystemCommand()
-        parser = argparse.ArgumentParser()
-        cmd.configure_parser(parser)
-        args = parser.parse_args(["compact", "--days", "30", "--json", "--workspace", str(tmp_path)])
-        rc = cmd.execute(args)
-        assert rc == 0
-
-        out = capsys.readouterr().out
-        payload = json.loads(out)
-        assert payload["expired_count"] == 1
-        assert payload["retained_count"] == 1
-        assert payload["rollup"]["rules"]["rule-cli"]["helped"] == 1
 
 
 class TestSarifOutput:

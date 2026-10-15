@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -50,7 +49,6 @@ def test_doctor_returns_zero_in_valid_env(tmp_path, monkeypatch):
 
     # Mock get_rules_dir to return our fake rules dir
     with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"):
-        from aegis_cli.init import get_rules_dir as _orig  # noqa: F811
         with patch(
             "aegis_cli.init.get_rules_dir",
             return_value=rules_dir,
@@ -253,7 +251,7 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
     with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/node"), \
          patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
         args = argparse.Namespace()
-        res = run_doctor(args)
+        run_doctor(args)
     assert not (tmp_path / ".aegis" / "slots.yaml").exists()
     out = capsys.readouterr().out
     assert "Run 'aegis doctor --fix' to provision" in out
@@ -263,30 +261,25 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
 def test_run_doctor_drivers_flag(tmp_path):
     with patch("aegis_cli.doctor._check_ast_drivers") as mock_check:
         mock_check.return_value = True
-        args = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=False, fix_path=False, yes=False)
+        args = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=False)
         assert run_doctor(args) == 0
         mock_check.assert_called_with(tmp_path, fix=False)
 
         mock_check.return_value = False
-        args_fail = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=True, fix_path=False, yes=False)
+        args_fail = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=True)
         assert run_doctor(args_fail) == 1
         mock_check.assert_called_with(tmp_path, fix=True)
 
 
-def test_doctor_command_contract():
-    from aegis_cli.doctor import DoctorCommand
-    cmd = DoctorCommand()
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-    parsed = parser.parse_args(["--fix", "--drivers", "--fix-path", "--yes"])
-    assert parsed.fix is True
-    assert parsed.drivers is True
-    assert parsed.fix_path is True
-    assert parsed.yes is True
+@pytest.mark.parametrize("flag", ["--fix-path", "--yes", "-y"])
+def test_doctor_rejects_cut_fix_path_flags(flag, capsys):
+    """D17: doctor never edits shell rc files; the PATH hint stays advisory."""
+    from aegis_cli.cli import main
 
-    with patch("aegis_cli.doctor.run_doctor", return_value=0) as mock_run:
-        assert cmd.execute(parsed) == 0
-        mock_run.assert_called_once_with(parsed)
+    with pytest.raises(SystemExit) as exc:
+        main(["doctor", flag])
+    assert exc.value.code == 2
+    assert f"unrecognized arguments: {flag}" in capsys.readouterr().err
 
 
 def _rust_project_with_python3_slot(tmp_path, monkeypatch):
@@ -332,9 +325,15 @@ def test_check_precommit_hook_all_branches(tmp_path, capsys):
     assert _check_precommit_hook(tmp_path) is None
 
     # 2. Current hook
-    hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\n# aegis-hook-format: 4\naegis check --hook\n", encoding="utf-8")
+    from aegis_cli.hooks.management import generate_hook_block
+    hook_file.write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
     assert _check_precommit_hook(tmp_path) is True
     assert "Pre-commit hook is current" in capsys.readouterr().out
+
+    # 2b. Format 4 resolved aegis through PATH and the repo: outdated now
+    hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\n# aegis-hook-format: 4\naegis check --hook\n# <<< aegis pre-commit <<<\n", encoding="utf-8")
+    assert _check_precommit_hook(tmp_path) is False
+    assert "Pre-commit hook uses an old block" in capsys.readouterr().out
 
     # 3. Old hook format
     hook_file.write_text("#!/bin/sh\n# >>> aegis pre-commit >>>\nsoma checkpoint --pre-commit\n# <<< aegis pre-commit <<<\n", encoding="utf-8")

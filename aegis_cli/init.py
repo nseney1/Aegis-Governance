@@ -1,4 +1,4 @@
-"""soma init — Set up governance for this project.
+"""aegis init — set up governance for this project.
 
 Detects platform and project type, installs starter rules.
 """
@@ -77,7 +77,8 @@ def detect_project_type(project_root: Path) -> str:
 
 # ── Pre-commit Hook (Delegated to aegis_cli.hooks) ───────────────────────────
 
-from aegis_cli.hooks import (
+# Re-exported for tests/unit/core/test_worktree_hooks.py until wave B1b retires this facade.
+from aegis_cli.hooks import (  # noqa: F401
     _AEGIS_HOOK_END,
     _AEGIS_HOOK_START,
     _SOMA_HOOK_END,
@@ -88,6 +89,7 @@ from aegis_cli.hooks import (
     generate_hook_block,
     install_hook,
 )
+from aegis_cli.hooks.management import hook_status, work_tree_warning
 _hook_block = generate_hook_block
 
 
@@ -454,7 +456,10 @@ def run_init(args: argparse.Namespace) -> int:
     if not no_hooks:
         hook_result = install_hook(project_root, dry_run=dry_run)
         if hook_result and not dry_run:
-            print("    🪝 Pre-commit hook installed (.git/hooks/pre-commit)")
+            st = hook_status(project_root)
+            print(f"    🪝 Pre-commit hook installed ({st['hook_file']})")
+            if st["hooks_dir_in_work_tree"]:
+                print(work_tree_warning(st["hook_file"]), file=sys.stderr)
         elif hook_result and dry_run:
             print("    🪝 Would install pre-commit hook")
 
@@ -474,7 +479,7 @@ def run_init(args: argparse.Namespace) -> int:
         print(f"  Rules installed to: {rules_dir}")
 
     print()
-    print("  After a session, run: aegis report")
+    print("  After a session, run: aegis status")
     print()
 
 
@@ -483,10 +488,7 @@ def run_init(args: argparse.Namespace) -> int:
         try:
             from aegis_cli.pathcheck import build_hint
 
-            try:
-                hint = build_hint(cmd_name="aegis")
-            except TypeError:
-                hint = build_hint()
+            hint = build_hint()
             if hint:
                 print(hint)
                 print()

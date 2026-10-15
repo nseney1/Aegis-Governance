@@ -89,8 +89,7 @@ def test_sync_fails_on_malformed_complete_signal_row(tmp_path, monkeypatch, caps
     assert output["errors"][0]["line"] == 1
 
 
-def test_report_and_status_use_canonical_triggers_not_legacy(tmp_path, capsys):
-    from aegis_cli.report import run_report
+def test_status_uses_canonical_triggers_not_legacy(tmp_path, capsys):
     from aegis_cli.status import run_status
 
     (tmp_path / "genome").mkdir()
@@ -101,11 +100,6 @@ def test_report_and_status_use_canonical_triggers_not_legacy(tmp_path, capsys):
         _signal("canonical", "trigger", "2026-01-01T00:01:00Z"),
     ])
     _write_jsonl(evidence / "fitness.jsonl", [{"cell_id": "legacy", "triggered_at": "2026-01-01T00:00:00Z"}])
-
-    assert run_report(argparse.Namespace(session=-1, _root=tmp_path)) == 0
-    report_output = capsys.readouterr().out
-    assert "canonical" in report_output and "2 fires" in report_output
-    assert "legacy" not in report_output
 
     assert run_status(argparse.Namespace(_root=tmp_path)) == 0
     status_output = capsys.readouterr().out

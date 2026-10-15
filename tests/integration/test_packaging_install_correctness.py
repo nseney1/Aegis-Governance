@@ -43,10 +43,10 @@ def test_python_init_invalid_mcp_json_is_unchanged(tmp_path):
     assert config.read_bytes() == invalid
 
 
-def test_packaging_excludes_private_soma_state_and_includes_genome_package():
+def test_packaging_excludes_private_state_and_includes_rules_package():
     manifest = read(os.path.join(REPO_ROOT, "MANIFEST.in"))
     assert "recursive-include .soma" not in manifest
-    assert "prune .soma" in manifest
+    assert "prune .aegis" in manifest
     assert ".aegis/evidence" not in manifest
     assert ".aegis/dreams" not in manifest
 
@@ -55,3 +55,19 @@ def test_packaging_excludes_private_soma_state_and_includes_genome_package():
     assert re.search(r"(?m)^(rules|genome)\s*=\s*\[", pyproject)
     assert '"*.md"' in pyproject and '".oracles/*.md"' in pyproject
     assert os.path.isfile(os.path.join(REPO_ROOT, "rules", "__init__.py")) or os.path.isfile(os.path.join(REPO_ROOT, "genome", "__init__.py"))
+
+
+def test_manifest_ships_no_bytecode_and_no_stale_trees():
+    lines = [ln.strip() for ln in read(os.path.join(REPO_ROOT, "MANIFEST.in")).splitlines()]
+    assert "global-exclude __pycache__" in lines
+    assert "global-exclude *.py[cod]" in lines
+    for stale in ("genome", "organs", "soma_cli", "soma_core", "install"):
+        assert not any(re.search(rf"\b{stale}\b", ln) for ln in lines if not ln.startswith("#")), stale
+
+
+def test_runtime_has_no_dependencies_and_only_a_dev_extra():
+    pyproject = read(os.path.join(REPO_ROOT, "pyproject.toml"))
+    assert re.search(r"(?m)^dependencies = \[\]$", pyproject)
+    extras = re.search(r"(?ms)^\[project\.optional-dependencies\]\n(.*?)^\[", pyproject).group(1)
+    names = re.findall(r"(?m)^([A-Za-z0-9_-]+)\s*=", extras)
+    assert names == ["dev"]

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 __version__ = "3.1.0"
 
-
 import re
 from pathlib import Path
 
@@ -19,24 +18,6 @@ def resolve_root(args, default=None):
     return default if default is not None else Path.cwd()
 
 
-EMOJI_REPLACEMENTS = {
-    "🧱": "[WALL]",
-    "🧫": "[TRAP]",
-    "🔬": "[GATE]",
-    "🌿": "[PRACTICE]",
-    "🔗": "[CONTRACT]",
-    "📋": "[RULE]",
-    "✅": "[PASS]",
-    "❌": "[FAIL]",
-    "⚠️": "[WARN]",
-    "🔍": "[*]",
-    "🛡️": "[GUARD]",
-    "🛡": "[GUARD]",
-    "⚡": "[FAST]",
-    "⏳": "[WAIT]",
-}
-
-
 def sanitize_display(text: str, max_len: int = 80) -> str:
     """Strip ANSI escapes, C1 control chars, and DCS/OSC sequences for safe terminal display."""
     text = re.sub(r'\x1b(?:\[[0-9;?]*[a-zA-Z]|\].*?(?:\x07|\x1b\\)|P.*?(?:\x1b\\|\x07)|[=><NOM78c])', '', text)
@@ -49,19 +30,7 @@ def sanitize_display(text: str, max_len: int = 80) -> str:
     return text
 
 
-def format_plain(text: str) -> str:
-    """Convert emojis to plain bracketed text and strip remaining Unicode emoji glyphs."""
-    for emoji, token in EMOJI_REPLACEMENTS.items():
-        if emoji in text:
-            text = text.replace(emoji, token)
-    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
-    text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
-    text = re.sub(r'[\u2600-\u27bf]', '', text)
-    return text
-
-
 __all__ = [
-    "format_plain",
     "resolve_root",
     "sanitize_display",
 ]

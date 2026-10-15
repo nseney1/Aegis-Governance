@@ -141,7 +141,7 @@ def test_split_command_windows(monkeypatch):
         assert parts2 == [r"C:\Python312\python.exe", r"D:\driver.py"]
 
 
-RUST_DRIVER = Path(__file__).resolve().parents[3] / "install" / "drivers" / "rust_ast.py"
+RUST_DRIVER = Path(__file__).resolve().parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / "rust_ast.py"
 
 
 @pytest.mark.parametrize("interpreter", ["python3", "python"])

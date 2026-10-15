@@ -14,8 +14,8 @@ authors = [
     {name = "Aegis Contributors"}
 ]
 keywords = [
-    "ai-governance", "agent-alignment", "evolutionary-rules",
-    "code-review", "ai-coding-assistant", "token-optimization"
+    "ai-coding-agents", "guardrails", "mcp", "agents-md",
+    "claude-code", "codex", "gemini", "governance"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -35,12 +35,9 @@ aegis = "aegis_cli.cli:main"
 aegis-mcp = "aegis_mcp.server:main"
 
 [project.optional-dependencies]
-ai = ["google-genai>=1.0"]
-gemini = ["google-genai>=1.0"]
-anthropic = ["anthropic>=0.30"]
-openai = ["openai>=1.0"]
-keyring = ["keyring>=23.0.0"]
-dev = ["pytest", "pytest-xdist>=3.5.0", "ruff", "hypothesis>=6.100.0", "coverage", "pyyaml", "anyio"]
+# Layer 2 runs any model through --llm-cmd / AEGIS_LLM_CMD, so there are no
+# vendor SDK extras. Runtime dependencies stay empty.
+dev = ["pytest", "pytest-xdist>=3.5.0", "ruff", "hypothesis>=6.100.0", "coverage", "pyyaml", "anyio", "build"]
 
 [project.urls]
 Homepage = "https://github.com/nseney1/Aegis-Guardrails"

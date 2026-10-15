@@ -250,20 +250,6 @@ class TestStatus:
         mapping2 = _genome_heading_map(tmp_path / "primary")
         assert mapping2.get("R2 Heading") == "r2"
 
-    def test_format_status_summary(self):
-        from aegis_cli.status import format_status_summary
-        data = {
-            "active_rules": 5,
-            "trap_count": 2,
-            "wall_count": 3,
-            "archived_count": 1,
-        }
-        summary = format_status_summary(data)
-        assert "Active Rules:    5 active" in summary
-        assert "Invariants:      3 enforced" in summary
-        assert "Adaptive Traps:  2 active" in summary
-        assert "Archived Rules:  1 archived" in summary
-
     def test_status_branded_aegis_header_and_no_soma(self, tmp_path, capsys):
         """v3.0.0: status prints Aegis Workspace Status, token budget bar, and zero 'Soma' references."""
         (tmp_path / "rules").mkdir()

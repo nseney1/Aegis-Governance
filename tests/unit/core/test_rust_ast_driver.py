@@ -46,7 +46,7 @@ def test_rust_ast_driver_runner_integration(tmp_path: Path):
     source_file = tmp_path / "worker.rs"
     source_file.write_text(RUST_CODE, encoding="utf-8")
 
-    driver_path = Path(__file__).resolve().parents[3] / "install" / "drivers" / "rust_ast.py"
+    driver_path = Path(__file__).resolve().parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / "rust_ast.py"
     registry = ASTDriverRegistry({".rs": f"python3 {driver_path}"})
     runner = ASTDriverRunner(registry=registry)
 
@@ -87,7 +87,7 @@ def test_rust_call_graph_reachability(tmp_path: Path):
     source_file = tmp_path / "worker.rs"
     source_file.write_text(RUST_CODE, encoding="utf-8")
 
-    driver_path = Path(__file__).resolve().parents[3] / "install" / "drivers" / "rust_ast.py"
+    driver_path = Path(__file__).resolve().parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / "rust_ast.py"
     registry = ASTDriverRegistry({".rs": f"python3 {driver_path}"})
     runner = ASTDriverRunner(registry=registry)
     ast = runner.parse_file(source_file, workspace_root=tmp_path)

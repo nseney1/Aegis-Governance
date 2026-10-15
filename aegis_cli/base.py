@@ -17,7 +17,7 @@ class CommandCategory(str, Enum):
     SETUP = "Setup & Environment"
     WORKFLOW = "Daily Workflow & Verification"
     LIFECYCLE = "Rule Evolution & Intelligence"
-    PLUMBING = "Plumbing & Swarm Protocol"
+    PLUMBING = "Plumbing"
 
 
 class AegisCommand(ABC):

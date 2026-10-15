@@ -92,12 +92,12 @@ def check_mcp(ws):
     if len(lines) != 3:
         fail(f"MCP returned {len(lines)} responses: {proc.stdout[-500:]} {proc.stderr[-500:]}")
     tools = lines[1]["result"]["tools"]
-    if len(tools) != 13:
-        fail(f"MCP tools/list expected 13 default tools, got {len(tools)}")
+    if len(tools) != 4:
+        fail(f"MCP tools/list expected the 4 v4 tools, got {len(tools)}")
     rules = json.loads(lines[2]["result"]["content"][0]["text"])
     if "trap-smoke" not in {c.get("_name") for c in rules}:
         fail(f"MCP aegis_list_rules did not see the workspace rule: {rules!r}")
-    print("ok  aegis_mcp initialize / tools/list (13 default tools) / aegis_list_rules")
+    print("ok  aegis_mcp initialize / tools/list (4 tools) / aegis_list_rules")
 
 
 def check_governance_fitness(ws):
@@ -127,8 +127,8 @@ def check_packaged_skills_and_platform_adapter(ws):
     from aegis_cli.platforms.gemini import GeminiPlatformAdapter
     from aegis_mcp.registry import TOOL_DEFINITIONS
 
-    if len(TOOL_DEFINITIONS) != 17:
-        fail(f"TOOL_DEFINITIONS expected 17 canonical tools, got {len(TOOL_DEFINITIONS)}")
+    if len(TOOL_DEFINITIONS) != 4:
+        fail(f"TOOL_DEFINITIONS expected the 4 v4 tools, got {len(TOOL_DEFINITIONS)}")
     adapter = GeminiPlatformAdapter(workspace=Path(ws), home=Path(ws))
     rules = adapter.get_source_rules()
     skills = adapter.get_source_skills()
@@ -136,7 +136,7 @@ def check_packaged_skills_and_platform_adapter(ws):
         fail(f"GeminiPlatformAdapter.get_source_rules() found only {len(rules)} rules in wheel: {rules!r}")
     if len(skills) < 15:
         fail(f"GeminiPlatformAdapter.get_source_skills() found only {len(skills)} skills in wheel: {skills!r}")
-    print(f"ok  packaged platform adapter ({len(rules)} rules, {len(skills)} skills, 17 MCP tools)")
+    print(f"ok  packaged platform adapter ({len(rules)} rules, {len(skills)} skills, 4 MCP tools)")
 
 
 def main():

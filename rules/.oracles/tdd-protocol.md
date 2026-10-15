@@ -17,7 +17,7 @@ trigger: model_decision
 | 1 | Test Suite Written | Any implementation begins |
 | 2 | Red Phase | Tests fail for the right reasons |
 | 3 | Implementation | Only after Gate 2 |
-| 4 | Green Phase | All tests, registries, and verifiers clean |
+| 4 | Green Phase | All tests and verifiers clean |
 | 5 | Fortress Review | Adversarial subagents audit the diff |
 | 6 | Commit | Only after Gate 5 verdict is SHIP |
 
@@ -76,23 +76,19 @@ Only begins after Gate 2 passes:
 
 ## Gate 4: Green Phase & Complete Verification Battery
 
-All tests, claims, and verification barriers must pass with clean regression before opening a review or PR:
+All tests and verification barriers must pass with clean regression before opening a review or PR:
 
 1. **Full Test Suite** — Run the **complete** test suite (`pytest tests/` via project `.venv`), not just the new tests. Zero failures or unexpected skips allowed.
-2. **Deterministic Quality Checkpoint** — Run `aegis checkpoint` (or `python -m aegis_cli.cli checkpoint`) to verify code structure, AST syntax, and non-LLM safety invariant checks.
-3. **Claims & Bug Registries Verification** —
-   - **README Claims**: Verify all tracked claims in `docs/project/CLAIM_REGISTRY.json` via `cli_verify_readme_claims()`. Every unlocked claim must map to an existing, passing test.
-   - **Bug Registry**: Verify all tracked historical fixes in `docs/project/BUG_REGISTRY.json` via `cli_verify_bug_registry()`. Every resolved bug must map to an existing, passing regression test.
-4. **Platform Smoke & Package Validation** —
-   - Run `make validate` (verify syntax and config JSON across hooks and packages).
-   - Run dry-run install across supported platforms (`python -m aegis_cli.cli install --platform gemini --dry-run`).
+2. **Deterministic Quality Check** — Run `aegis check` (or `python -m aegis_cli.cli check`) to verify code structure, AST syntax, and non-LLM safety invariant checks.
+3. **Package Validation** —
+   - Run the project's lint and build targets (for example `make lint` and `make build`).
    - Check for hardcoded paths outside documentation templates.
-5. **Static Analysis & Import Integrity (`ruff check`)** —
+4. **Static Analysis & Import Integrity (`ruff check`)** —
    - Run `ruff check --select F821` (or complete syntax/name checks `E999,F821,F822,F823`) across modified and package directories.
    - Guard against fatal latent `NameError` bugs lurking in untested exception/error branches (e.g., missing `import os`, `import sys`, `from pathlib import Path`). Must return 0 violations.
-6. **No Test Modifications** — If a pre-existing test broke, the implementation caused a regression. Fix the implementation, not the test (unless the test was genuinely wrong, which must be documented).
-7. **Environment Grounding** — All verification steps must run against the project's dedicated virtual environment (`.venv/bin/python`, `.venv/bin/pytest`) to eliminate interpreter drift and hidden missing dependencies.
-8. **Gate Check** — Agent must state: *"Green phase verified: N/N tests passing, static analysis (ruff F821) clean, deterministic checkpoint clean, claims & bug registries verified. Full regression clean."*
+5. **No Test Modifications** — If a pre-existing test broke, the implementation caused a regression. Fix the implementation, not the test (unless the test was genuinely wrong, which must be documented).
+6. **Environment Grounding** — All verification steps must run against the project's dedicated virtual environment (`.venv/bin/python`, `.venv/bin/pytest`) to eliminate interpreter drift and hidden missing dependencies.
+7. **Gate Check** — Agent must state: *"Green phase verified: N/N tests passing, static analysis (ruff F821) clean, aegis check clean. Full regression clean."*
 
 **Output**: Clean test run output, verification outputs, and pass count.
 

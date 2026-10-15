@@ -107,7 +107,7 @@ class TestPolyglotRecipes:
         sample_ts = tmp_path / "calc.ts"
         sample_ts.write_text(ts_code, encoding="utf-8")
 
-        recipe_path = Path(__file__).parents[3] / "install" / "drivers" / "ts_ast.js"
+        recipe_path = Path(__file__).parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / "ts_ast.js"
         assert recipe_path.is_file(), f"Recipe file missing at {recipe_path}"
 
         proc = subprocess.run(
@@ -137,7 +137,7 @@ class TestPolyglotRecipes:
         sample_ts = tmp_path / "app.ts"
         sample_ts.write_text(ts_code, encoding="utf-8")
 
-        recipe_path = Path(__file__).parents[3] / "install" / "drivers" / "ts_ast.js"
+        recipe_path = Path(__file__).parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / "ts_ast.js"
         driver_cmd = f'"{node_bin}" "{recipe_path}"'
 
         registry = ASTDriverRegistry(drivers={".ts": driver_cmd})
@@ -148,10 +148,26 @@ class TestPolyglotRecipes:
         assert any(d.name == "run" for d in norm_ast.definitions)
 
     def test_go_recipe_source_structure(self):
-        recipe_path = Path(__file__).parents[3] / "install" / "drivers" / "go_ast.go"
+        recipe_path = Path(__file__).parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / "go_ast.go"
         assert recipe_path.is_file()
         content = recipe_path.read_text(encoding="utf-8")
         assert "go/parser" in content
         assert "go/token" in content
         assert "NormalizedAST" in content
         assert "encoding/json" in content
+
+
+@pytest.mark.parametrize("filename", ["ts_ast.js", "go_ast.go", "rust_ast.py"])
+def test_driver_templates_come_from_the_package(filename):
+    """Provisioning copies the recipe shipped in aegis_core, never a repo-local copy."""
+    from aegis_core.ast.detect import _find_driver_template
+
+    found = _find_driver_template(filename)
+    packaged = Path(__file__).resolve().parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / filename
+    assert found is not None and found.resolve() == packaged.resolve()
+
+
+def test_unknown_driver_template_is_none():
+    from aegis_core.ast.detect import _find_driver_template
+
+    assert _find_driver_template("no_such_driver.js") is None

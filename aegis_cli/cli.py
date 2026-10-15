@@ -1,21 +1,65 @@
 #!/usr/bin/env python3
-"""Soma CLI — governance commands for AI coding agents.
+"""aegis — governance commands for AI coding agents.
 
-User-facing interface uses plain language (rules, automations, etc).
-Internal code retains biological naming (genome, enzymes, cells).
+Dispatch goes through the command registry only. Commands and aliases cut in
+v4 (ADR 0005 D5, H1 hard cut) are not parsed at all: each removed name exits 2
+with one line on stderr naming its replacement.
 """
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_cli.registry import get_default_registry
 
-__all__ = ["main", "AegisParser", "COMMANDS"]
+__all__ = ["main", "AegisParser", "REMOVED_COMMANDS"]
+
+PROG = "aegis"
+
+_HOST_HOOK = "no replacement; remove it from your agent host's hook config"
+
+# "name" or "name action" -> what to use instead. The longest match wins, so
+# `aegis agent scan` gets its own pointer, and a removed action of a live
+# command (`aegis hook session-close`, still called by v3 host hook configs)
+# gets one too.
+REMOVED_COMMANDS: Dict[str, str] = {
+    "install": "use aegis init --host",
+    "system": "use aegis doctor",
+    "sys": "use aegis doctor",
+    "system doctor": "use aegis doctor",
+    "system drivers": "use aegis doctor",
+    "system hook": "use aegis hook",
+    "detect": "use aegis doctor",
+    "languages": "use aegis doctor",
+    "drivers": "use aegis doctor",
+    "audit": "use aegis doctor",
+    "rules": "use aegis status",
+    "agent": "use aegis scan to see which rules apply; record outcomes with the MCP tool aegis_report_outcome",
+    "agent scan": "use aegis scan",
+    "agent record": "use aegis_report_outcome (MCP)",
+    "report": (
+        "aegis status shows rule trigger counts; "
+        "outcomes are recorded with the MCP tool aegis_report_outcome"
+    ),
+    "completion": "no replacement",
+    "skill": "no replacement",
+    "handoff": "no replacement",
+    "verify": "use aegis check",
+    "checkpoint": "use aegis check",
+    "rule clean": "no replacement; remove leaked global rule copies by hand",
+    "hook pre-commit": "use aegis check --hook",
+    "hook pre-invocation": _HOST_HOOK,
+    "hook governance-monitor": _HOST_HOOK,
+    "hook immune-init": _HOST_HOOK,
+    "hook session-close": _HOST_HOOK,
+    "hook stop": _HOST_HOOK,
+    "hook post-session": _HOST_HOOK,
+}
+
+# Global options that take a value, so the removed-name scan can skip it.
+_VALUE_OPTIONS = ("--workspace",)
 
 
 def _version() -> str:
@@ -29,41 +73,67 @@ def _version() -> str:
             pass
     try:
         from importlib.metadata import PackageNotFoundError, version
-        for pkg_name in ("aegis-guardrails", "aegis-governance", "soma-governance"):
-            try:
-                return version(pkg_name)
-            except PackageNotFoundError:
-                continue
+        try:
+            return version("aegis-guardrails")
+        except PackageNotFoundError:
+            pass
     except ImportError:
         pass
     return "unknown"
 
 
+def _positionals(argv: List[str]) -> List[str]:
+    out: List[str] = []
+    skip = False
+    for token in argv:
+        if skip:
+            skip = False
+        elif token == "--":
+            break
+        elif token in _VALUE_OPTIONS:
+            skip = True
+        elif not token.startswith("-"):
+            out.append(token)
+    return out
+
+
+def removed_command_pointer(argv: List[str]) -> Optional[str]:
+    """The one-line pointer for a removed command in argv, or None.
+
+    A name the registry still resolves is not removed: a command whose alias
+    is cut in another module keeps working until that module drops it.
+    """
+    words = _positionals(argv)
+    if not words:
+        return None
+    pair = " ".join(words[:2])
+    if len(words) > 1 and pair in REMOVED_COMMANDS:
+        name = pair
+    elif words[0] in REMOVED_COMMANDS and get_default_registry().get(words[0]) is None:
+        name = words[0]
+    else:
+        return None
+    return f"{PROG} {name} was removed in v4: {REMOVED_COMMANDS[name]}"
+
 
 class AegisParser(argparse.ArgumentParser):
-    """ArgumentParser ensuring global flags like plumbing default properly."""
+    """ArgumentParser with the categorized top-level help and an attached OutputContext."""
 
     def format_help(self) -> str:
-        if self.prog in ("soma", "aegis"):
+        if self.prog == PROG:
             return get_default_registry().format_categorized_help(prog=self.prog) + "\n"
         return super().format_help()
 
     def parse_args(self, args=None, namespace=None):
         ns = super().parse_args(args=args, namespace=namespace)
-        if not hasattr(ns, "plumbing"):
-            ns.plumbing = False
+        if not hasattr(ns, "json"):
+            ns.json = False
+        # Only `check` keeps --format; its json value must reach code (and the
+        # OutputContext below) that reads args.json alone.
+        if getattr(ns, "format", None) == "json":
+            ns.json = True
         if not hasattr(ns, "plain"):
             ns.plain = False
-        if not hasattr(ns, "no_emoji"):
-            ns.no_emoji = False
-        if getattr(ns, "no_emoji", False):
-            ns.plain = True
-        if not hasattr(ns, "verbose"):
-            ns.verbose = False
-        if not hasattr(ns, "quiet"):
-            ns.quiet = False
-        if not hasattr(ns, "format"):
-            ns.format = None
         if not hasattr(ns, "workspace"):
             ns.workspace = None
         from aegis_cli.ui.theme import OutputContext
@@ -71,195 +141,96 @@ class AegisParser(argparse.ArgumentParser):
         return ns
 
 
-def _build_parser(prog: str = "aegis") -> argparse.ArgumentParser:
+def _build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
-    common_parser.add_argument("--plumbing", "--internal", action="store_true",
-                               default=argparse.SUPPRESS,
-                               help="Display raw internal biological terms")
-    common_parser.add_argument("--plain", action="store_true",
-                               default=argparse.SUPPRESS,
-                               help="Strip ANSI styling and Unicode emojis for plain logs")
-    common_parser.add_argument("--no-emoji", action="store_true",
-                               default=argparse.SUPPRESS,
-                               help="Strip Unicode emojis from output (alias for --plain)")
-    common_parser.add_argument("--format", choices=["text", "json", "mermaid"],
-                               default=argparse.SUPPRESS,
-                               help="Output format")
-    common_parser.add_argument("--json", action="store_true",
-                               default=False,
-                               help="Emit machine-readable JSON output (shortcut for --format json)")
-    common_parser.add_argument("-v", "--verbose", action="store_true",
-                               default=argparse.SUPPRESS,
-                               help="Verbose diagnostic output")
-    common_parser.add_argument("-q", "--quiet", action="store_true",
-                               default=argparse.SUPPRESS,
-                               help="Suppress informational messages")
-    common_parser.add_argument("--workspace", type=str,
-                               default=argparse.SUPPRESS,
+    # SUPPRESS, not False: a subparser writes its defaults over the namespace
+    # the top-level parser filled, so a False default here drops a `--json`
+    # given before the command. parse_args sets the False fallback once.
+    common_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                               help="Emit machine-readable JSON output")
+    common_parser.add_argument("--plain", action="store_true", default=argparse.SUPPRESS,
+                               help="Strip ANSI styling and emoji")
+    common_parser.add_argument("--workspace", type=str, default=argparse.SUPPRESS,
                                help="Target workspace root")
 
-    prog_title = "Aegis" if prog == "aegis" else "Soma"
     parser = AegisParser(
         prog=prog,
-        description=f"{prog_title} Governance — make AI coding agents trustworthy",
+        description="Aegis Governance — make AI coding agents trustworthy",
         parents=[common_parser],
     )
-    parser.add_argument("--version", action="version",
-                        version=f"{prog} {_version()}")
+    parser.add_argument("--version", action="version", version=f"{prog} {_version()}")
 
     sub = parser.add_subparsers(dest="command", parser_class=AegisParser)
     get_default_registry().populate_subparsers(sub, common_parser=common_parser)
     return parser
 
 
-# ── Backward-compatible command handlers ────────────────────────────────────
+def _attach_workspace(args: argparse.Namespace) -> None:
+    """Resolve the workspace the command acts on (``args.ws``, ``args._project_root``)."""
+    from aegis_core.workspace import Workspace
 
-def cmd_init(args: argparse.Namespace) -> int:
-    from aegis_cli.init import run_init
-    return run_init(args)
-
-def cmd_status(args: argparse.Namespace) -> int:
-    from aegis_cli.status import run_status
-    return run_status(args)
-
-def cmd_check(args: argparse.Namespace) -> int:
-    from aegis_cli.check import run_check
-    return run_check(args)
-
-def cmd_verify(args: argparse.Namespace) -> int:
-    return cmd_check(args)
-
-def cmd_checkpoint(args: argparse.Namespace) -> int:
-    return cmd_check(args)
-
-def cmd_rule(args: argparse.Namespace) -> int:
-    from aegis_cli.rule import run_rule
-    return run_rule(args)
-
-def cmd_system(args: argparse.Namespace) -> int:
-    from aegis_cli.system import run_system
-    return run_system(args)
-
-def cmd_agent(args: argparse.Namespace) -> int:
-    from aegis_cli.agent import run_agent
-    return run_agent(args)
-
-def cmd_completion(args: argparse.Namespace) -> int:
-    from aegis_cli.completion import run_completion
-    return run_completion(args)
-
-def cmd_migrate(args: argparse.Namespace) -> int:
-    from aegis_cli.migrate import run_migrate
-    return run_migrate(args)
-
-def cmd_install(args: argparse.Namespace) -> int:
-    from aegis_cli.install import run_install
-    return run_install(args)
-
-def cmd_uninstall(args: argparse.Namespace) -> int:
-    from aegis_cli.install import run_uninstall
-    return run_uninstall(args)
+    raw_ws = getattr(args, "workspace", None)
+    if args.command == "scan":
+        # scan resolves its own workspace so that a workspace error exits 2.
+        args.ws = None
+        return
+    if args.command == "init":
+        args._allow_home_fallback = True
+        args.ws = Workspace.for_init(raw_ws or Path.cwd())
+    elif args.command == "migrate":
+        args.ws = None
+        start_dir = Path(raw_ws).resolve() if raw_ws else Path.cwd().resolve()
+        target_root = start_dir
+        curr = start_dir
+        while curr != curr.parent:
+            if (curr / ".aegis").is_dir() or (curr / ".soma").is_dir():
+                target_root = curr
+                break
+            curr = curr.parent
+        args._project_root = target_root
+        args.workspace = str(target_root)
+        return
+    elif args.command == "uninstall":
+        try:
+            args.ws = Workspace.resolve(raw_ws)
+        except Exception:
+            # Uninstall must work in a directory that no longer resolves
+            # (for example one holding only a legacy .soma/).
+            args.ws = None
+            p = Path(raw_ws).resolve() if raw_ws else Path.cwd().resolve()
+            args._project_root = p
+            args.workspace = str(p)
+            return
+    else:
+        args.ws = Workspace.resolve(raw_ws)
+    args._project_root = args.ws.root
+    args.workspace = str(args.ws.root)
 
 
-COMMANDS = {
-    "init": cmd_init,
-    "install": cmd_install,
-    "uninstall": cmd_uninstall,
-    "migrate": cmd_migrate,
-    "status": cmd_status,
-    "rules": cmd_status,
-    "check": cmd_check,
-    "verify": cmd_verify,
-    "checkpoint": cmd_checkpoint,
-    "rule": cmd_rule,
-    "system": cmd_system,
-    "agent": cmd_agent,
-    "completion": cmd_completion,
-}
-
-
-def main(argv: list[str] | None = None, prog: str | None = None) -> int:
+def main(argv: Optional[List[str]] = None, prog: str = PROG) -> int:
     # Output uses emoji. On a cp1252 stdout (Windows, redirected) printing
     # one raised UnicodeEncodeError and the command exited 1 (BUG-012).
     # stderr already defaults to errors="backslashreplace".
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
-    if prog is None:
-        if sys.argv:
-            base = os.path.basename(sys.argv[0])
-            if "aegis" in base or "aegis_cli" in sys.argv[0]:
-                prog = "aegis"
-            else:
-                prog = "soma"
-        else:
-            prog = "soma"
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    pointer = removed_command_pointer(argv)
+    if pointer is not None:
+        print(pointer, file=sys.stderr)
+        return 2
 
     parser = _build_parser(prog=prog)
     args = parser.parse_args(argv)
     args.prog = prog
-    if not hasattr(args, "plumbing"):
-        args.plumbing = False
-
-    fmt = getattr(args, "format", None)
-    is_json = getattr(args, "json", False) or fmt == "json"
-    args.json = is_json
-    if is_json and not fmt:
-        args.format = "json"
-
     if args.command is None:
         parser.print_help()
         return 0
 
-    handler = COMMANDS.get(args.command)
-    if handler is None:
-        cmd_obj = get_default_registry().get(args.command)
-        if cmd_obj is not None:
-            handler = cmd_obj.execute
-        else:
-            parser.print_help()
-            return 1
-
+    command = get_default_registry().get(args.command)
     try:
-        from aegis_core.workspace import Workspace
-
-        if args.command == "completion":
-            args.ws = None
-        elif args.command == "init":
-            args._allow_home_fallback = True
-            raw_ws = getattr(args, "workspace", None) or Path.cwd()
-            args.ws = Workspace.for_init(raw_ws)
-        elif args.command == "migrate":
-            args.ws = None
-            raw_ws = getattr(args, "workspace", None)
-            start_dir = Path(raw_ws).resolve() if raw_ws else Path.cwd().resolve()
-            curr = start_dir
-            target_root = start_dir
-            while curr != curr.parent:
-                if (curr / ".aegis").is_dir() or (curr / ".soma").is_dir():
-                    target_root = curr
-                    break
-                curr = curr.parent
-            args._project_root = target_root
-            args.workspace = str(target_root)
-        else:
-            raw_ws = getattr(args, "workspace", None)
-            try:
-                args.ws = Workspace.resolve(raw_ws)
-            except Exception:
-                if args.command in ("install", "uninstall"):
-                    args.ws = None
-                    p = Path(raw_ws).resolve() if raw_ws else Path.cwd().resolve()
-                    args._project_root = p
-                    args.workspace = str(p)
-                else:
-                    raise
-
-        if args.ws is not None:
-            args._project_root = args.ws.root
-            args.workspace = str(args.ws.root)
-
-        func = globals().get(getattr(handler, "__name__", ""), handler)
-        return func(args)
+        _attach_workspace(args)
+        return command.execute(args)
     except KeyboardInterrupt:
         return 130
     except Exception as e:

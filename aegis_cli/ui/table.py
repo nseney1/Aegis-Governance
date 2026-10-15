@@ -1,9 +1,9 @@
-"""Width-aware ANSI Table, Grid, Box, and Error Panel classes for Aegis CLI."""
+"""Width-aware ANSI Table and Grid layouts for Aegis CLI."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 import shutil
-from typing import Any, Iterable, Optional, Sequence, Union
+from typing import Any, Optional, Union
 
 from aegis_cli.ui.theme import OutputContext, strip_ansi
 
@@ -216,64 +216,3 @@ class Grid:
                     parts.append(_align_visible(val, widths[i], justify=col.justify))
             lines.append(sep.join(parts).rstrip())
         return "\n".join(lines)
-
-
-def render_table(
-    headers: Sequence[str],
-    rows: Iterable[Sequence[str]],
-    ctx: Optional[OutputContext] = None,
-    max_width: Optional[int] = None,
-) -> str:
-    """Convenience wrapper around Table for simple header + rows rendering."""
-    tbl = Table(ctx=ctx, max_width=max_width)
-    for h in headers:
-        tbl.add_column(h)
-    for r in rows:
-        tbl.add_row(*r)
-    return tbl.render()
-
-
-def render_box(
-    title: str,
-    body_lines: Sequence[str],
-    ctx: Optional[OutputContext] = None,
-) -> str:
-    """Render a summary header box in Unicode (TTY) or ASCII (--plain)."""
-    ui = ctx or OutputContext()
-    all_lines = [title, *body_lines]
-    inner_width = max((visible_len(line) for line in all_lines), default=20) + 2
-
-    if ui.plain or not ui.emoji_enabled:
-        border = "+" + ("-" * (inner_width + 2)) + "+"
-        out = [border, f"| {_align_visible(ui.style(title, 'bold'), inner_width)} |"]
-        if body_lines:
-            out.append("+" + ("-" * (inner_width + 2)) + "+")
-            for b in body_lines:
-                out.append(f"| {_align_visible(b, inner_width)} |")
-        out.append(border)
-        return "\n".join(out)
-
-    top = "╭─" + ("─" * inner_width) + "─╮"
-    mid = "├─" + ("─" * inner_width) + "─┤"
-    bot = "╰─" + ("─" * inner_width) + "─╯"
-    out = [top, f"│ {_align_visible(ui.style(title, 'bold', 'cyan'), inner_width)} │"]
-    if body_lines:
-        out.append(mid)
-        for b in body_lines:
-            out.append(f"│ {_align_visible(b, inner_width)} │")
-    out.append(bot)
-    return "\n".join(out)
-
-
-def render_error_panel(
-    message: str,
-    fix: Optional[str] = None,
-    ctx: Optional[OutputContext] = None,
-) -> str:
-    """Format an error banner with an optional actionable 'Fix:' remediation line."""
-    ui = ctx or OutputContext()
-    lines = [f"{ui.badge_fail()} {message}"]
-    if fix:
-        fix_label = ui.style("Fix:", "bold", "yellow")
-        lines.append(f"  {fix_label} {fix}")
-    return "\n".join(lines)

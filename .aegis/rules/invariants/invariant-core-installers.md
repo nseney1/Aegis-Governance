@@ -5,14 +5,13 @@ type: invariant
 enforcement: gate
 promotion_threshold: 0.85
 demotion_threshold: 0.3
-hypothesis: "Changes to install.sh, install.ps1, uninstall.sh, common.sh, and Makefile require install-flow review"
+hypothesis: "Changes to the platform installers, the git hook installer and the Makefile require install-flow review"
 prediction: Will flag unreviewed changes to core installer infrastructure
 falsification: 0 findings in 15 sessions → prune
 target_paths:
   - "aegis_cli/platforms/*.py"
   - aegis_cli/cli.py
-  - "install/hooks/*"
-  - install/aegis.conf.example
+  - aegis_cli/hooks/management.py
   - Makefile
 expiry_sessions: 15
 expiry_days: 60

@@ -47,10 +47,3 @@ def test_pathcheck_on_path_handles_windows_colons():
     from aegis_cli.pathcheck import on_path
     path_env = r"C:\Python312\Scripts;C:\Windows\System32"
     assert on_path(r"C:\Python312\Scripts", path_env, sep=";", casefold=True)
-
-def test_publish_workflow_isolates_release_assets():
-    """publish.yml must isolate github release asset uploads to a separate job."""
-    workflow = (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
-    assert "release-assets:" in workflow
-    assert "RELEASE_TAG:" in workflow
-    assert "|| true" not in workflow

@@ -233,9 +233,12 @@ def test_windows_test_job_uses_bash_and_verifies_the_artifact():
         "test-windows must check the wheel digests before installing it"
 
 def test_publish_workflow_isolates_release_assets():
-    """publish.yml must isolate github release asset uploads to a separate job."""
-    with open(os.path.join(REPO_ROOT, ".github", "workflows", "publish.yml"), encoding="utf-8") as f:
-        workflow = f.read()
-    assert "release-assets:" in workflow
-    assert "RELEASE_TAG:" in workflow
-    assert "|| true" not in workflow
+    """Release assets upload from their own job, which alone needs contents: write."""
+    jobs = _load("publish.yml")["jobs"]
+    assets = jobs["release-assets"]
+    assert assets.get("needs") == "publish"
+    assert assets.get("permissions") == {"contents": "write"}
+    upload = [s for s in assets["steps"] if "gh release upload" in s.get("run", "")]
+    assert len(upload) == 1
+    assert "RELEASE_TAG" in upload[0].get("env", {})
+    assert "|| true" not in _read("publish.yml")
