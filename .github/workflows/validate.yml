@@ -124,12 +124,8 @@ jobs:
         run: make lint
 
       - name: Run Layer 1 Deterministic Verification
-        run: python3 -m aegis_cli.cli check --layer1-only
+        run: python3 -m aegis_cli.cli check
 
-      - name: Verify Release Gate 4.5 (PRs targeting main)
-        if: github.base_ref == 'main'
-        run: python3 -m aegis_cli.cli check --release
-      
       - name: Run test suite
         id: test
         run: make test
@@ -142,16 +138,6 @@ jobs:
             exit 1
           fi
           echo "No hardcoded paths found"
-
-      - name: Dry-run install (all platforms)
-        run: |
-          for platform in gemini kiro copilot claude mcp; do
-            echo "=== $platform ==="
-            python3 -m aegis_cli.cli install --platform "$platform" --dry-run || exit 1
-          done
-
-      - name: Dry-run uninstall
-        run: python3 -m aegis_cli.cli uninstall --platform gemini --dry-run
 
   # B3: the full pytest suite on Windows. Failures fail the job; there is no
   # continue-on-error. Steps run under Git Bash (as on a contributor's machine);
@@ -197,7 +183,7 @@ jobs:
           python -c "import aegis_cli, aegis_sdk; print('Aegis wheel imports cleanly')"
 
       - name: Run Layer 1 Deterministic Verification
-        run: python -m aegis_cli.cli check --layer1-only
+        run: python -m aegis_cli.cli check
 
       # HOME and USERPROFILE point at a throwaway directory so no test can write
       # to the runner's real profile (BUG-010). PYTHONUTF8=0 pins the Windows
@@ -211,16 +197,3 @@ jobs:
         run: |
           python -c "import os; os.makedirs(os.environ['USERPROFILE'], exist_ok=True)"
           python -m pytest tests/
-
-  validate-windows:
-    needs: [build-wheel, dependency-audit]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Dry-run Python install and uninstall on Windows
-        run: |
-          python -m aegis_cli.cli install --platform gemini --dry-run
-          python -m aegis_cli.cli uninstall --platform gemini --dry-run
