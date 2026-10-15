@@ -5,7 +5,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from aegis_cli.platforms.base import PlatformAdapter, PlatformInstallResult
+from aegis_cli.platforms.base import (
+    McpConfigError,
+    PlatformAdapter,
+    PlatformInstallResult,
+    load_mcp_config,
+    write_json_atomic,
+)
 
 
 __all__ = ["McpAdapter"]
@@ -44,7 +50,6 @@ class McpAdapter(PlatformAdapter):
         return {
             "mcpServers": {
                 "aegis": dict(entry),
-                "soma": dict(entry),
             }
         }
 
@@ -74,25 +79,24 @@ class McpAdapter(PlatformAdapter):
             command=command,
         )
 
+        try:
+            existing = load_mcp_config(target)
+        except McpConfigError as exc:
+            result.errors.append(str(exc))
+            result.success = False
+            return result
+
         if dry_run:
             result.installed_files.append(target)
         else:
+            existing.setdefault("mcpServers", {}).update(config["mcpServers"])
             try:
-                if target.is_file():
-                    try:
-                        existing = json.loads(target.read_text(encoding="utf-8"))
-                    except Exception:
-                        existing = {}
-                    servers = existing.setdefault("mcpServers", {})
-                    for srv_name, srv_cfg in config["mcpServers"].items():
-                        servers[srv_name] = srv_cfg
-                    target.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-                else:
-                    target.write_text(json.dumps(config, indent=2), encoding="utf-8")
-                result.installed_files.append(target)
-            except Exception as exc:
+                write_json_atomic(target, existing)
+            except OSError as exc:
                 result.errors.append(f"Failed to write {target}: {exc}")
                 result.success = False
+                return result
+            result.installed_files.append(target)
 
         result.messages.append(f"Configured MCP server in {target}")
         return result
@@ -118,7 +122,7 @@ class McpAdapter(PlatformAdapter):
                                 del servers[key]
                                 removed = True
                         if removed:
-                            target.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                            write_json_atomic(target, data)
                             result.uninstalled_files.append(target)
                 except Exception as exc:
                     result.errors.append(f"Failed to update {target}: {exc}")

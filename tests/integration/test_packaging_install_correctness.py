@@ -26,9 +26,10 @@ def test_python_init_mcp_merge_targets_project(tmp_path):
     merged = json.loads(config.read_text(encoding="utf-8"))
     assert merged["unrelated"] == "preserve"
     assert merged["mcpServers"]["other"] == {"command": "keep"}
-    soma = merged["mcpServers"]["soma"]
-    assert soma["cwd"] == str(tmp_path)
-    assert soma["env"] == {"AEGIS_WORKSPACE": str(tmp_path)}
+    aegis = merged["mcpServers"]["aegis"]
+    assert aegis["cwd"] == str(tmp_path)
+    assert aegis["env"] == {"AEGIS_WORKSPACE": str(tmp_path)}
+    assert "soma" not in merged["mcpServers"]
 
 
 def test_python_init_invalid_mcp_json_is_unchanged(tmp_path):

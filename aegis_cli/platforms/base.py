@@ -7,16 +7,93 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
+import tempfile
 from typing import Any, Optional
 
 
 __all__ = [
+    "McpConfigError",
     "PlatformAdapter",
     "PlatformInstallResult",
     "detect_platform",
     "detect_platforms",
     "get_rules_dir",
+    "load_mcp_config",
+    "write_json_atomic",
 ]
+
+
+class McpConfigError(ValueError):
+    """An existing MCP config file cannot be merged without losing the user's data."""
+
+
+def load_mcp_config(path: Path | str) -> dict[str, Any]:
+    """Return the JSON object stored at ``path``, or ``{}`` when the file does not exist.
+
+    Lenient formats (JSONC comments, trailing commas, a UTF-8 BOM) are refused, not
+    repaired: re-serializing them would drop the user's comments, and falling back to
+    ``{}`` would drop their other servers (M3).
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except OSError as exc:
+        raise McpConfigError(f"{path}: cannot be read ({exc}); refusing to modify it") from exc
+    except UnicodeDecodeError as exc:
+        raise McpConfigError(f"{path}: not UTF-8 text ({exc.reason}); refusing to modify it") from exc
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise McpConfigError(
+            f"{path}: not valid JSON ({exc.msg} at line {exc.lineno} column {exc.colno}); "
+            "refusing to modify it. Comments, trailing commas and a UTF-8 BOM are not "
+            "supported: fix the file or move it aside, then re-run."
+        ) from exc
+    if not isinstance(data, dict):
+        raise McpConfigError(f"{path}: top-level value must be a JSON object; refusing to modify it")
+    servers = data.get("mcpServers")
+    if servers is not None and not isinstance(servers, dict):
+        raise McpConfigError(f"{path}: field 'mcpServers' must be a JSON object; refusing to modify it")
+    return data
+
+
+def _umask_mode(mode: int = 0o666) -> int:
+    # The CLI is single-threaded, so the brief umask(0) window cannot race a file creation.
+    current = os.umask(0)
+    os.umask(current)
+    return mode & ~current
+
+
+def write_json_atomic(path: Path | str, data: Any) -> None:
+    """Replace ``path`` with ``data`` serialized as JSON, in a single rename.
+
+    On any failure the previous file is left untouched and no temp file remains. A
+    symlink is written through to its target (dotfile managers link these configs),
+    and the existing permission bits are kept; a new file gets the umask default.
+    """
+    target = Path(path).resolve()
+    payload = (json.dumps(data, indent=2) + "\n").encode("utf-8")
+    try:
+        mode = stat.S_IMODE(target.stat().st_mode)
+    except FileNotFoundError:
+        mode = _umask_mode()
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _detect_markers_in_dir(root: Path) -> list[str]:
@@ -219,7 +296,7 @@ class PlatformAdapter(ABC):
         """Render standard MCP server configuration."""
         return {
             "mcpServers": {
-                "soma": self.render_mcp_entry(local=local),
+                "aegis": self.render_mcp_entry(local=local),
             }
         }
 

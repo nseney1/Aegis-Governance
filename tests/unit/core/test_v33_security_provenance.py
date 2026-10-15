@@ -330,7 +330,7 @@ class TestClaudeAdapterSkillsAndDesktopMcp:
         assert "existing-server" in desktop_data["mcpServers"]
         assert "aegis" in desktop_data["mcpServers"]
         assert desktop_data["mcpServers"]["aegis"]["command"] == "aegis-mcp"
-        assert "soma" in desktop_data["mcpServers"]
+        assert "soma" not in desktop_data["mcpServers"]
 
         # 2. Local install copies skills into <workspace>/.claude/skills/
         res_local = adapter.install(local=True, dry_run=False)

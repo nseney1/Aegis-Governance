@@ -6,7 +6,13 @@ from pathlib import Path
 import shutil
 from typing import Any
 
-from aegis_cli.platforms.base import PlatformAdapter, PlatformInstallResult
+from aegis_cli.platforms.base import (
+    McpConfigError,
+    PlatformAdapter,
+    PlatformInstallResult,
+    load_mcp_config,
+    write_json_atomic,
+)
 
 
 SOMA_MARKER_START = "<!-- SOMA:START -->"
@@ -97,7 +103,7 @@ def _clean_mcp_config(path: Path, server_name: str = "soma", dry_run: bool = Fal
         if not servers and len(data) == 1:
             path.unlink()
         else:
-            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            write_json_atomic(path, data)
         return True
     except Exception:
         return False
@@ -153,40 +159,25 @@ class ClaudeAdapter(PlatformAdapter):
         return {
             "mcpServers": {
                 "aegis": entry,
-                "soma": dict(entry),
             }
         }
 
-    def install_desktop_mcp(self, dry_run: bool = False) -> Path | None:
-        """Merge 'aegis' and 'soma' MCP server entries into ~/.config/Claude/claude_desktop_config.json."""
+    def install_desktop_mcp(self, dry_run: bool = False) -> Path:
+        """Merge the 'aegis' MCP server entry into ~/.config/Claude/claude_desktop_config.json.
+
+        Raises McpConfigError when the existing file cannot be parsed (it is left
+        untouched) and OSError when the write fails (the old file survives).
+        """
         desktop_dir = self.home / ".config" / "Claude"
         config_path = desktop_dir / "claude_desktop_config.json"
+        data = load_mcp_config(config_path)
         if dry_run:
             return config_path
 
-        try:
-            desktop_dir.mkdir(parents=True, exist_ok=True)
-            data: dict[str, Any] = {}
-            if config_path.is_file():
-                try:
-                    loaded = json.loads(config_path.read_text(encoding="utf-8"))
-                    if isinstance(loaded, dict):
-                        data = loaded
-                except Exception:
-                    data = {}
-
-            servers = data.get("mcpServers")
-            if not isinstance(servers, dict):
-                servers = {}
-                data["mcpServers"] = servers
-
-            entry = self.render_mcp_entry(local=False)
-            servers["aegis"] = entry
-            servers["soma"] = dict(entry)
-            config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            return config_path
-        except Exception:
-            return None
+        data.setdefault("mcpServers", {})["aegis"] = self.render_mcp_entry(local=False)
+        desktop_dir.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(config_path, data)
+        return config_path
 
     def install(self, local: bool = False, dry_run: bool = False) -> PlatformInstallResult:
         result = PlatformInstallResult(
@@ -229,9 +220,14 @@ class ClaudeAdapter(PlatformAdapter):
 
         # 3. Install Claude Desktop MCP config when global and ~/.config/Claude exists
         if not local and (self.home / ".config" / "Claude").is_dir():
-            desktop_cfg = self.install_desktop_mcp(dry_run=dry_run)
-            if desktop_cfg is not None:
-                result.installed_files.append(desktop_cfg)
+            try:
+                result.installed_files.append(self.install_desktop_mcp(dry_run=dry_run))
+            except McpConfigError as exc:
+                result.errors.append(str(exc))
+                result.success = False
+            except OSError as exc:
+                result.errors.append(f"Failed to write Claude Desktop MCP config: {exc}")
+                result.success = False
 
         if dry_run:
             result.installed_files.append(claude_md)
