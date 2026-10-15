@@ -64,6 +64,35 @@ def _emit_error(args: argparse.Namespace, msg: str) -> int:
     return 1
 
 
+_REGENERATE = "regenerate it with the aegis_generate_manifest MCP tool."
+
+
+def _warn_if_manifest_stale(root: Path) -> None:
+    """Say so on stderr when ``.aegis/rules/manifest.json`` no longer matches the rules.
+
+    Lifecycle writes never re-attest the manifest (H1: that laundered tampered
+    rules), so after a mutation it is stale until the operator regenerates it.
+    With an HMAC key, the MCP rule cache refuses added or removed rules until
+    then (aegis_mcp/rule_cache.py).
+    """
+    from aegis_core.integrity import load_key, load_manifest, verify_manifest
+
+    manifest = load_manifest(root)
+    if manifest is None:
+        return
+    try:
+        issues = verify_manifest(WorkspaceLayout(root).rules_dir, manifest)
+    except ValueError:
+        print(f"Warning: .aegis/rules/manifest.json is not a valid manifest; {_REGENERATE}", file=sys.stderr)
+        return
+    if not issues:
+        return
+    msg = f"Warning: .aegis/rules/manifest.json is out of date ({len(issues)} rule file(s) changed); {_REGENERATE}"
+    if load_key(root) is not None and any(i.get("type") != "modified" for i in issues):
+        msg += " With an HMAC key configured, the MCP server will not load rules until then."
+    print(msg, file=sys.stderr)
+
+
 class _WorkspaceArg(argparse.Action):
     """Keep the operator's ``--workspace`` verbatim.
 
@@ -206,6 +235,8 @@ def _run_promote(args: argparse.Namespace) -> int:
 
     if getattr(args, "tier_check", False):
         res = evaluate_cell_tiers(root, execute=not dry_run)
+        if not dry_run:
+            _warn_if_manifest_stale(root)
         if use_json:
             print(json.dumps(res, indent=2))
         else:
@@ -245,6 +276,7 @@ def _run_promote(args: argparse.Namespace) -> int:
     from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:
         return _emit_status(use_json, {"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}, f"  🔍 Would promote: {rule_id}: {from_t} → {to_t}", 0)
+    _warn_if_manifest_stale(root)
     return _emit_status(use_json, {"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Promoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
@@ -294,6 +326,7 @@ def _run_demote(args: argparse.Namespace) -> int:
     from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:
         return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}, f"  🔍 Would demote: {rule_id}: {from_t} → {to_t}", 0)
+    _warn_if_manifest_stale(root)
     return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Demoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
@@ -313,7 +346,10 @@ def _run_archive(args: argparse.Namespace) -> int:
     """Archive extinct or decayed rules."""
     root = _resolve_workspace_root(args)
     execute = not getattr(args, "dry_run", False) and getattr(args, "apply", True)
-    return prune_cells(workspace=root, execute=execute)
+    rc = prune_cells(workspace=root, execute=execute)
+    if execute:
+        _warn_if_manifest_stale(root)
+    return rc
 
 
 def _run_clean(args: argparse.Namespace) -> int:
@@ -397,6 +433,7 @@ def _run_create(args: argparse.Namespace) -> int:
     except Exception as exc:
         return _emit_error(args, str(exc))
     print(json.dumps({"status": "created", "path": str(created), "id": created.stem}, indent=2) if getattr(args, "json", False) else f"Created rule: {created}")
+    _warn_if_manifest_stale(root)
     return 0
 
 

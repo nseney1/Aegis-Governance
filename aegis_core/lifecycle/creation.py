@@ -23,6 +23,8 @@ from .parsers import (
     generate_slug,
     validate_cell_id,
 )
+# Rules parked by selection are no longer active, so their ids are free.
+from .selection import PARKED_RULE_DIRS
 
 __all__ = [
     "MAX_RULE_BODY_BYTES",
@@ -102,11 +104,16 @@ def create_cell(
     if minimum_mode:
         minimum_mode = normalize_review_mode(minimum_mode, default=minimum_mode.strip().lower())
 
-    # These two values are interpolated into the frontmatter unquoted; a line
+    # These values are interpolated into the frontmatter unquoted; a line
     # break would let the caller inject arbitrary keys (e.g. `activation`).
+    # The frontmatter parser breaks lines wherever str.splitlines() does
+    # (\v, \f, \x1c-\x1e, \x85, \u2028, \u2029 as well as \n and \r).
     for label, value in (("domain", domain), ("minimum_mode", minimum_mode)):
-        if "\n" in value or "\r" in value:
+        if value != "".join(value.splitlines()):
             raise ValueError(f"Invalid {label} {value!r}: must be a single line.")
+    weight = _as_number("weight", weight, float)
+    expiry_sessions = None if expiry_sessions is None else _as_number("expiry_sessions", expiry_sessions, int)
+    expiry_days = None if expiry_days is None else _as_number("expiry_days", expiry_days, int)
 
     response_type = ""
     activation = ""
@@ -215,14 +222,33 @@ lineage:
     AegisYAML.parse_text(content)
 
     with workspace_lock(ws.root, LockResource.RULES):
+        # Checked under the lock that promote/demote hold: replacing a rule
+        # would discard its fitness and lineage, and the same id in a second
+        # tier would make two active rules answer to one id. A symlink at the
+        # target counts as existing, so the writer never follows it out.
+        existing = file_path if os.path.lexists(file_path) else _active_rule_path(ws.rules_dir, slug)
+        if existing is not None:
+            raise FileExistsError(f"rule '{slug}' already exists: {existing}")
         target_dir.mkdir(parents=True, exist_ok=True)
-        if file_path.is_symlink():
-            # The atomic writer resolves its target; drop the link so the
-            # write replaces it instead of following it out of the rules dir.
-            file_path.unlink()
         atomic_write_text(file_path, content)
 
     return file_path
+
+
+def _active_rule_path(rules_dir: Path, slug: str) -> Path | None:
+    name = f"{slug}.md"
+    for dirpath, dirnames, filenames in os.walk(rules_dir):
+        dirnames[:] = sorted(d for d in dirnames if d not in PARKED_RULE_DIRS)
+        if name in filenames:
+            return Path(dirpath) / name
+    return None
+
+
+def _as_number(label: str, value: object, cast: type) -> float | int:
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid {label} {value!r}: must be a number.") from None
 
 
 def create_cell_from_description(
@@ -351,7 +377,7 @@ def cli_cell_create(argv: list[str] | None = None) -> int:
         )
         print(f"Created cell: {created}")
         return 0
-    except ValueError as e:
+    except (ValueError, FileExistsError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     except Exception as e:

@@ -101,12 +101,38 @@ def test_cli_cell_create_rejects_ghost_from_description_flag(
     assert _rule_files(ws) == []
 
 
+# Every separator str.splitlines() honours; the frontmatter parser splits on all of them.
+_LINE_BREAKS = ["\n", "\r", "\r\n", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"]
+
+
+@pytest.mark.parametrize("sep", _LINE_BREAKS, ids=lambda s: f"U+{ord(s[-1]):04X}" if len(s) == 1 else "CRLF")
 @pytest.mark.parametrize("field", ["domain", "minimum_mode"])
-def test_multiline_unquoted_frontmatter_values_are_rejected(ws: Path, field: str) -> None:
+def test_multiline_unquoted_frontmatter_values_are_rejected(ws: Path, field: str, sep: str) -> None:
     """A line break in an unquoted scalar would inject frontmatter keys."""
     with pytest.raises(ValueError, match=rf"^Invalid {field} .*: must be a single line\.$"):
-        create_cell("trap", "Injected", id_override="injected", workspace=ws, **{field: "patrol\nactivation: dormant"})
+        create_cell("trap", "Injected", id_override="injected", workspace=ws, **{field: f"x{sep}activation: dormant"})
     assert _rule_files(ws) == []
+
+
+@pytest.mark.parametrize(
+    "field", ["weight", "expiry_sessions", "expiry_days"],
+)
+def test_numeric_frontmatter_values_must_be_numbers(ws: Path, field: str) -> None:
+    """These are interpolated unquoted too; a string carrying a line break would inject keys."""
+    with pytest.raises(ValueError, match=rf"^Invalid {field} 'x\\nactivation: dormant': must be a number\.$"):
+        create_cell("trap", "Injected", id_override="injected", workspace=ws, **{field: "x\nactivation: dormant"})
+    assert _rule_files(ws) == []
+
+
+def test_numeric_frontmatter_values_are_written_as_numbers(ws: Path) -> None:
+    path = create_cell(
+        "trap", "Numbers", id_override="numbers", workspace=ws, weight=2, expiry_sessions=None, expiry_days=30,
+    )
+
+    meta = parse_frontmatter(path.read_text(encoding="utf-8")) or {}
+    assert meta["impact_weight"] == 2.0
+    assert meta["expiry_sessions"] is None
+    assert meta["expiry_days"] == 30
 
 
 def test_none_domain_and_minimum_mode_fall_back_to_defaults(ws: Path) -> None:

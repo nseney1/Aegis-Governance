@@ -250,17 +250,31 @@ def test_preserved_global_workspace_flag_is_bounded_like_the_subcommand_flag(hom
     assert _tree(home) == before
 
 
-@pytest.mark.xfail(
+_NEEDS_CLI_MAIN = pytest.mark.xfail(
     strict=True,
     reason="needs aegis_cli/cli.py (outside lane A2) to keep the raw global --workspace as args._workspace_arg",
 )
-def test_global_workspace_flag_never_resolves_above_its_git_toplevel(home, elsewhere, capsys) -> None:
+
+
+@_NEEDS_CLI_MAIN
+@pytest.mark.parametrize("position", ["before-rule", "before-action"])
+def test_global_workspace_flag_never_resolves_above_its_git_toplevel(home, elsewhere, capsys, position: str) -> None:
+    """`aegis --workspace INNER rule create` and `aegis rule --workspace INNER create`.
+
+    Both store into the shared top-level ``--workspace`` that cli.main
+    overwrites with its unbounded walk-up before rule.py runs.
+    """
     outer = home / "code"
     (outer / ".aegis" / "rules").mkdir(parents=True)
     inner = _git_repo(outer / "inner", initialized=False)
     before = _tree(home)
+    create = ["create", "--hypothesis", "crossing", "--id", "crossing"]
+    argv = (
+        ["--workspace", str(inner), "rule", *create] if position == "before-rule"
+        else ["rule", "--workspace", str(inner), *create]
+    )
 
-    rc = main(["--workspace", str(inner), "rule", "create", "--hypothesis", "crossing", "--id", "crossing"])
+    rc = main(argv)
 
     assert rc == 1
     assert f"Error: {_not_a_workspace(inner)}" in capsys.readouterr().err

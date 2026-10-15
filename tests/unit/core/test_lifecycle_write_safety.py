@@ -13,8 +13,10 @@ Invariants under test (docs/adr/0005-evidence-review.md M1):
 - the existence checks that promote/demote/metamorphose run before taking the
   lock are repeated under it, so a rival create or move that lands in between
   is never overwritten and never crashes the second mover;
-- the tier pass rewrites only the rules whose content changes and holds the
-  rules lock per rewrite, not for the whole pass.
+- the tier pass and the selection pass change only the rules that need it
+  and hold the rules lock per rule, not for the whole pass; selection re-reads
+  each rule under the lock, never revisits the queues it moves rules into and
+  never overwrites a rule already archived or queued under the same name.
 """
 from __future__ import annotations
 
@@ -36,6 +38,7 @@ import pytest
 from conftest import REPO_ROOT
 
 import aegis_core.lifecycle.promotion as promotion
+import aegis_core.lifecycle.selection as selection
 from aegis_core.lifecycle import (
     adapt_cell,
     create_cell,
@@ -322,13 +325,13 @@ def test_metamorphose_writes_valid_utc_timestamp(tmp_path: Path) -> None:
 
 # ── Interleavings: a rival lands between the unlocked checks and the lock ──
 
-def _rival_on_first_lock(monkeypatch: pytest.MonkeyPatch, rival) -> None:
+def _rival_on_first_lock(monkeypatch: pytest.MonkeyPatch, rival, module=promotion) -> None:
     """Run ``rival`` just before the lifecycle engine's first rules-lock acquisition.
 
     This is the window a concurrent process gets between promote/demote's
     unlocked existence checks and their locked move.
     """
-    real_lock = promotion.workspace_lock
+    real_lock = module.workspace_lock
     pending = [rival]
 
     @contextmanager
@@ -338,7 +341,17 @@ def _rival_on_first_lock(monkeypatch: pytest.MonkeyPatch, rival) -> None:
         with real_lock(*args, **kwargs) as held:
             yield held
 
-    monkeypatch.setattr(promotion, "workspace_lock", lock_after_rival)
+    monkeypatch.setattr(module, "workspace_lock", lock_after_rival)
+
+
+def _rival_rule(path: Path, marker: str) -> None:
+    """A rule another writer (a second Aegis process, a git checkout) lands meanwhile.
+
+    create_cell refuses an id that is already active in any tier, so the rival
+    writes the file directly.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\nid: {path.stem}\ntype: rival\n---\n{marker}\n", encoding="utf-8")
 
 
 def _rules(ws: Path) -> Path:
@@ -350,9 +363,7 @@ def test_promote_never_overwrites_a_rule_created_in_the_target_tier_meanwhile(
 ) -> None:
     ws = _ws(tmp_path)
     source = _rule(_rules(ws) / "traps" / "shared-id.md", "shared-id", "trap")
-    _rival_on_first_lock(
-        monkeypatch, lambda: create_cell("invariant", "Rival invariant", id_override="shared-id", workspace=ws)
-    )
+    _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "invariants" / "shared-id.md", "Rival invariant"))
 
     res = promote_cell(ws, "shared-id", force=True)
 
@@ -378,7 +389,7 @@ def test_concurrent_promotes_of_one_rule_promote_it_once(tmp_path: Path, monkeyp
 def test_demote_never_overwrites_a_trap_created_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = _ws(tmp_path)
     source, artifacts = _invariant_with_artifacts(ws)
-    _rival_on_first_lock(monkeypatch, lambda: create_cell("trap", "Rival trap", id_override="guarded", workspace=ws))
+    _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "traps" / "guarded.md", "Rival trap"))
 
     res = demote_cell(ws, "guarded")
 
@@ -406,9 +417,7 @@ def test_metamorphose_never_overwrites_a_rule_created_in_the_target_tier_meanwhi
 ) -> None:
     ws = _ws(tmp_path)
     source = _rule(_rules(ws) / "traps" / "mature.md", "mature", "trap", triggers=20, tp=20)
-    _rival_on_first_lock(
-        monkeypatch, lambda: create_cell("invariant", "Rival invariant", id_override="mature", workspace=ws)
-    )
+    _rival_on_first_lock(monkeypatch, lambda: _rival_rule(_rules(ws) / "invariants" / "mature.md", "Rival invariant"))
 
     res = metamorphose_cell(ws, "mature")
 
@@ -500,3 +509,162 @@ def test_tier_pass_keeps_a_concurrent_edit_to_the_rule_it_rewrites(
     text = rule.read_text(encoding="utf-8")
     assert "Edited concurrently." in text
     assert "last_decay_epoch" in ((parse_frontmatter(text) or {}).get("fitness") or {})
+
+
+# ── Selection pass: per-rule lock, re-read under it, no revisits, no overwrites ──
+
+def _dormant(path: Path, rule_id: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\nid: {rule_id}\ntype: trap\ndormant_since: '2026-01-01T00:00:00Z'\n---\n# {rule_id}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _log_actions(ws: Path) -> list[tuple[str, str]]:
+    log = ws / ".aegis" / "evidence" / "lifecycle.jsonl"
+    if not log.exists():
+        return []
+    return [(e["cell"], e["action"]) for e in map(json.loads, log.read_text(encoding="utf-8").splitlines())]
+
+
+def test_selection_with_nothing_to_change_does_not_wait_for_the_rules_lock(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    _rule(_rules(ws) / "traps" / "strong.md", "strong", "trap", triggers=10, tp=10)
+    _dormant(_rules(ws) / "traps" / "asleep.md", "asleep")
+    before = _snapshot(_rules(ws))
+    env = dict(os.environ, PYTHONPATH=REPO_ROOT, HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home"))
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER_UNTIL_EOF, str(ws)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked", holder.stderr.read()
+        # Needing the lock here would raise LockTimeoutError after 5 s.
+        rc = run_cell_selection(ws, execute=True)
+    finally:
+        holder.stdin.close()
+        try:
+            holder.wait(timeout=15)
+        finally:
+            if holder.poll() is None:
+                holder.kill()
+                holder.wait()
+
+    assert rc == 0
+    assert _snapshot(_rules(ws)) == before
+    assert _log_actions(ws) == []
+
+
+def test_selection_takes_the_rules_lock_once_per_changed_rule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pass over hundreds of rules must not hold the lock across all of them (finding F5)."""
+    ws = _ws(tmp_path)
+    for name in ("quiet-a", "quiet-b", "quiet-c"):
+        _rule(_rules(ws) / "traps" / f"{name}.md", name, "trap")
+    _rule(_rules(ws) / "traps" / "strong.md", "strong", "trap", triggers=10, tp=10)
+    real_lock = selection.workspace_lock
+    depth: list[int] = []
+    held = [0]
+
+    @contextmanager
+    def counting_lock(*args, **kwargs):
+        held[0] += 1
+        depth.append(held[0])
+        try:
+            with real_lock(*args, **kwargs) as h:
+                yield h
+        finally:
+            held[0] -= 1
+
+    monkeypatch.setattr(selection, "workspace_lock", counting_lock)
+
+    assert run_cell_selection(ws, execute=True) == 0
+
+    assert depth == [1, 1, 1]
+    assert sorted(_log_actions(ws)) == [(f"quiet-{x}.md", "marked_dormant") for x in "abc"]
+
+
+def test_selection_acts_on_the_rule_as_it_is_under_the_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rule is classified unlocked; an edit landing before the lock must win."""
+    ws = _ws(tmp_path)
+    rule = _rule(_rules(ws) / "traps" / "revived.md", "revived", "trap", triggers=10, tp=0)
+    _rival_on_first_lock(
+        monkeypatch, lambda: _rule(rule, "revived", "trap", triggers=10, tp=10), module=selection
+    )
+
+    assert run_cell_selection(ws, execute=True) == 0
+
+    assert rule.is_file(), "a rule that became healthy before the lock must not be archived"
+    assert not (_rules(ws) / ".archive" / "revived.md").exists()
+    assert _log_actions(ws) == []
+
+
+def test_selection_skips_a_rule_moved_away_meanwhile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _ws(tmp_path)
+    rule = _rule(_rules(ws) / "traps" / "doomed.md", "doomed", "trap", triggers=10, tp=0)
+    moved = _rules(ws) / "invariants" / "doomed.md"
+
+    def move_away() -> None:
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        rule.rename(moved)
+
+    _rival_on_first_lock(monkeypatch, move_away, module=selection)
+
+    assert run_cell_selection(ws, execute=True) == 0
+
+    assert moved.is_file()
+    assert not (_rules(ws) / ".archive" / "doomed.md").exists()
+    assert _log_actions(ws) == []
+
+
+def test_selection_never_revisits_the_last_gasp_queue(tmp_path: Path, capsys) -> None:
+    ws = _ws(tmp_path)
+    _rule(_rules(ws) / "traps" / "noisy.md", "noisy", "trap", triggers=10, tp=1, fp=5)
+    queue = _rules(ws) / ".last_gasp_queue"
+    waiting = _rule(queue / "waiting.md", "waiting", "trap", triggers=10, tp=0)
+
+    run_cell_selection(ws, execute=True)
+    queued = _snapshot(queue)
+    run_cell_selection(ws, execute=True)
+
+    out = capsys.readouterr().out
+    assert _log_actions(ws) == [("noisy.md", "last_gasp_requested")]
+    assert _snapshot(queue) == queued
+    assert waiting.is_file(), "queued rules belong to the last-gasp sentinel, not to selection"
+    assert out.count("noisy.md") == 1
+    assert "waiting.md" not in out
+
+
+@pytest.mark.parametrize(
+    "fitness, queue, action",
+    [((10, 0, 0), ".archive", "moved_to_archive"), ((10, 1, 5), ".last_gasp_queue", "last_gasp_requested")],
+    ids=["archive", "last_gasp"],
+)
+def test_selection_never_overwrites_a_rule_already_parked_under_the_same_name(
+    tmp_path: Path, fitness: tuple[int, int, int], queue: str, action: str
+) -> None:
+    ws = _ws(tmp_path)
+    earlier = _rules(ws) / queue / "reused.md"
+    earlier.parent.mkdir(parents=True)
+    earlier.write_text("---\nid: reused\ntype: trap\n---\nThe earlier rule.\n", encoding="utf-8")
+    triggers, tp, fp = fitness
+    current = _rule(_rules(ws) / "traps" / "reused.md", "reused", "trap", triggers=triggers, tp=tp, fp=fp)
+    current_text = current.read_text(encoding="utf-8")
+
+    run_cell_selection(ws, execute=True)
+
+    assert not current.exists()
+    assert earlier.read_text(encoding="utf-8") == "---\nid: reused\ntype: trap\n---\nThe earlier rule.\n"
+    assert (_rules(ws) / queue / "reused.1.md").read_text(encoding="utf-8") == current_text
+    assert _log_actions(ws) == [("reused.md", action)]
+
+
+def test_selection_runs_in_a_workspace_whose_path_contains_archive(tmp_path: Path) -> None:
+    ws = _ws(tmp_path / "old.archive", "ws")
+    rule = _rule(_rules(ws) / "traps" / "quiet.md", "quiet", "trap")
+
+    run_cell_selection(ws, execute=True)
+
+    assert "dormant_since" in (parse_frontmatter(rule.read_text(encoding="utf-8")) or {})
+    assert _log_actions(ws) == [("quiet.md", "marked_dormant")]
