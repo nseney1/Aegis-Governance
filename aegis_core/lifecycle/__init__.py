@@ -37,7 +37,6 @@ from .constants import (
 from .creation import (
     cli_cell_create,
     create_cell,
-    create_cell_from_description,
     transfer_cell,
 )
 from .decay import (
@@ -120,7 +119,6 @@ __all__ = [
     "validate_cell_id",
     "generate_slug",
     "create_cell",
-    "create_cell_from_description",
     "cli_cell_create",
     "transfer_cell",
     "apply_decay",

@@ -177,8 +177,8 @@ def test_mcp_server_answers_jsonrpc_without_pyyaml(tmp_path):
 def test_entire_runtime_has_zero_third_party_imports():
     """SOMA-C02: soma_cli/, soma_core/, soma_mcp/, soma_sdk/, and enzymes/
     must have strictly ZERO third-party runtime package imports.
-    Only Python standard library modules and internal modules are permitted at runtime.
-    Optional inference providers must be strictly guarded by try/except."""
+    Only Python standard library modules and internal modules are permitted at runtime,
+    with no optional extras either: Layer 2 shells out to --llm-cmd (D14)."""
     import ast
     from aegis_core.verification.import_guard import _get_stdlib_modules
 
@@ -193,7 +193,6 @@ def test_entire_runtime_has_zero_third_party_imports():
         f[:-3] for f in os.listdir(aegis_core_dir) if f.endswith(".py")
     } if os.path.isdir(aegis_core_dir) else set()
     internal_names = soma_core_modules | aegis_core_modules | {"conftest"}
-    optional_allowed = {"google", "anthropic", "openai", "keyring"}
 
     offenders = []
     runtime_dirs = ["soma_cli", "soma_core", "soma_mcp", "soma_sdk", "aegis_cli", "aegis_core", "aegis_mcp", "aegis_sdk"]
@@ -238,13 +237,6 @@ def test_entire_runtime_has_zero_third_party_imports():
                     if mod in stdlib:
                         continue
                     if any(mod.startswith(p) for p in internal_prefixes) or mod in internal_names:
-                        continue
-                    # Permitted optional dependencies must be guarded inside try body
-                    in_try = any(
-                        isinstance(p, ast.Try) and any(any(c is node for c in ast.walk(item)) for item in p.body)
-                        for p in ast.walk(tree)
-                    )
-                    if mod in optional_allowed and in_try:
                         continue
                     rel = os.path.relpath(path, REPO_ROOT)
                     offenders.append(f"{rel}:{node.lineno}: {mod}")
@@ -335,6 +327,37 @@ def test_no_undefined_names_in_python_code():
         text=True,
     )
     assert proc.returncode == 0, f"Found undefined names (F821):\n{proc.stdout}"
+
+
+def test_no_dangling_aegis_imports():
+    """Every `from aegis_x import name` resolves, including lazy imports inside functions.
+
+    A cut (v4 D14 removed inference_provider.resolve_provider) leaves function-level
+    imports that only fail when that code path runs, or that an `except ImportError`
+    quietly turns into a fallback. ruff F821 cannot see either.
+    """
+    import ast
+    import importlib
+
+    dangling = []
+    for pkg in ("aegis_core", "aegis_cli", "aegis_mcp", "aegis_sdk"):
+        for path in sorted(iter_source_files(os.path.join(REPO_ROOT, pkg), (".py",))):
+            rel = os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
+            tree = ast.parse(read(path), filename=rel)
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module):
+                    continue
+                if not node.module.split(".")[0].startswith("aegis_"):
+                    continue
+                module = importlib.import_module(node.module)
+                for alias in node.names:
+                    if alias.name == "*" or hasattr(module, alias.name):
+                        continue
+                    try:
+                        importlib.import_module(f"{node.module}.{alias.name}")
+                    except ModuleNotFoundError:
+                        dangling.append(f"{rel}:{node.lineno} {node.module}.{alias.name}")
+    assert dangling == []
 
 
 def test_no_javascript_sdk_in_readme():

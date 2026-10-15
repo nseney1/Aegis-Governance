@@ -1,21 +1,17 @@
-"""Unit tests for Phase 3.3.2: Declarative forbid_ast & Pre-Edit planned_symbols in aegis_scan."""
+"""Declarative forbid_ast rules: evaluate_forbid_ast and the Layer 1 gate built on it.
+
+The pre-edit planned_symbols scan input was cut in v4 (plan of record: JIT
+ast_triggers/planned_symbols, 0 uses); forbid_ast stays as the gate tier's
+deterministic mechanism.
+"""
 from __future__ import annotations
 
 from pathlib import Path
-import pytest
 
-from aegis_core.ast.match import (
-    evaluate_forbid_ast,
-    extract_normalized_ast,
-    synthesize_planned_ast,
-)
+from aegis_core.ast.match import evaluate_forbid_ast
 from aegis_core.ast.schema import CallSiteNode, ImportNode, NormalizedAST
 from aegis_core.verification import DeterministicVerifier
-from aegis_core.verification.runner import gate_verdict, run_layer1
-from aegis_mcp.handlers.core import handle_scan
-from aegis_mcp.jit_engine import express, match_cells_to_files
-from aegis_mcp.registry import TOOL_DEFINITIONS
-from aegis_mcp.tools import execute_tool
+from aegis_core.verification.runner import gate_verdict
 
 
 class TestEvaluateForbidAST:
@@ -165,106 +161,3 @@ class TestLayer1DeterministicVerifierForbidAST:
         assert gate_verdict(evidence) is True
         forbid_results = [e for e in evidence if e.tool.startswith("forbid_ast:")]
         assert forbid_results == []
-
-
-class TestPlannedSymbolsInAegisScan:
-    """Tests for pre-edit planned_symbols in aegis_scan and match_cells_to_files."""
-
-    def test_registry_schema_exposes_planned_symbols(self):
-        scan_def = next(t for t in TOOL_DEFINITIONS if t["name"] == "aegis_scan")
-        props = scan_def["inputSchema"]["properties"]
-        assert "planned_symbols" in props
-        assert props["planned_symbols"]["type"] == "array"
-        assert props["planned_symbols"]["items"] == {"type": "string"}
-
-    def test_match_cells_to_files_matches_planned_symbols_without_existing_file(self, tmp_path: Path):
-        cells = [
-            {
-                "_name": "no-subprocess-shell",
-                "type": "invariant",
-                "enforcement": "gate",
-                "hypothesis": "Avoid raw subprocess execution without confinement.",
-                "ast_triggers": {"calls": ["subprocess.run", "subprocess.Popen"]},
-            },
-            {
-                "_name": "forbid-pickle-serialization",
-                "type": "trap",
-                "enforcement": "advisory",
-                "hypothesis": "Never deserialize untrusted pickle streams.",
-                "forbid_ast": {"imports": ["pickle"]},
-            },
-            {
-                "_name": "unrelated-css-rule",
-                "type": "persona",
-                "target_paths": ["styles/*.css"],
-            },
-        ]
-
-        # Target file src/future_worker.py does NOT exist on disk yet
-        matched = match_cells_to_files(
-            cells,
-            changed_files=["src/future_worker.py"],
-            workspace=str(tmp_path),
-            planned_symbols=["subprocess.run", "pickle"],
-        )
-        matched_names = {c["_name"] for c in matched}
-        assert "no-subprocess-shell" in matched_names
-        assert "forbid-pickle-serialization" in matched_names
-        assert "unrelated-css-rule" not in matched_names
-        for m in matched:
-            assert m["match_type"] == "ast_match"
-
-    def test_aegis_scan_handler_matches_planned_symbols_pre_edit(self, tmp_path: Path):
-        rules_dir = tmp_path / ".aegis" / "rules"
-        rules_dir.mkdir(parents=True, exist_ok=True)
-        (rules_dir / "subprocess-guard.md").write_text(
-            "---\n"
-            "id: subprocess-guard\n"
-            "type: invariant\n"
-            "enforcement: gate\n"
-            "hypothesis: Subprocess calls must set explicit timeouts.\n"
-            "ast_triggers:\n"
-            "  calls:\n"
-            "    - subprocess.run\n"
-            "---\n"
-            "Always set timeout on subprocess.run.\n",
-            encoding="utf-8",
-        )
-        (rules_dir / "ban-pickle.md").write_text(
-            "---\n"
-            "id: ban-pickle\n"
-            "type: trap\n"
-            "enforcement: advisory\n"
-            "hypothesis: Do not use pickle for untrusted inputs.\n"
-            "forbid_ast:\n"
-            "  imports:\n"
-            "    - pickle\n"
-            "---\n"
-            "Use json instead of pickle.\n",
-            encoding="utf-8",
-        )
-
-        # Call via handle_scan and execute_tool when src/not_yet_created.py does not exist
-        res = handle_scan(
-            {
-                "workspace": str(tmp_path),
-                "files": ["src/not_yet_created.py"],
-                "planned_symbols": ["subprocess.run", "pickle"],
-            },
-            None,
-        )
-        rule_names = {r["name"] for r in res["relevant_rules"]}
-        assert "subprocess-guard" in rule_names
-        assert "ban-pickle" in rule_names
-
-        res_via_tool = execute_tool(
-            "aegis_scan",
-            {
-                "workspace": str(tmp_path),
-                "files": ["src/not_yet_created.py"],
-                "planned_symbols": ["subprocess.run", "pickle"],
-            },
-        )
-        tool_rule_names = {r["name"] for r in res_via_tool["relevant_rules"]}
-        assert "subprocess-guard" in tool_rule_names
-        assert "ban-pickle" in tool_rule_names

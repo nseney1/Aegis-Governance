@@ -7,11 +7,13 @@ Extracts definitions, call sites, use statements (imports), and mutation points.
 """
 from __future__ import annotations
 
+import bisect
+import functools
 import json
 import os
 import re
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 def _strip_comments_and_strings(source: str) -> Tuple[str, List[Tuple[int, int, str]]]:
@@ -27,7 +29,6 @@ def _strip_comments_and_strings(source: str) -> Tuple[str, List[Tuple[int, int, 
     in_block_comment = False
     in_string = False
     in_char = False
-    string_start = 0
 
     while i < n:
         c = chars[i]
@@ -98,13 +99,78 @@ def _strip_comments_and_strings(source: str) -> Tuple[str, List[Tuple[int, int, 
     return "".join(chars), []
 
 
+@functools.lru_cache(maxsize=1)
+def _line_starts(source: str) -> List[int]:
+    return [0] + [i + 1 for i, c in enumerate(source) if c == "\n"]
+
+
 def _compute_line_col(source: str, offset: int) -> Tuple[int, int]:
-    """Compute 1-indexed line and 0-indexed column from byte offset."""
-    prefix = source[:offset]
-    line = prefix.count("\n") + 1
-    last_newline = prefix.rfind("\n")
-    col = offset if last_newline == -1 else offset - (last_newline + 1)
-    return line, col
+    """Compute 1-indexed line and 0-indexed column from byte offset.
+
+    By bisecting the line starts (computed once per source): slicing the prefix for
+    every call site made a large generated file quadratic.
+    """
+    starts = _line_starts(source)
+    line = bisect.bisect_right(starts, offset)
+    return line, offset - starts[line - 1]
+
+
+_USE_LEAF = re.compile(r"^(.*?)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?$", re.DOTALL)
+
+
+def _split_top_level(members: str) -> List[str]:
+    """Split a use-group body on the commas outside nested ``{...}`` groups."""
+    parts: List[str] = []
+    depth = start = 0
+    for i, c in enumerate(members):
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            parts.append(members[start:i])
+            start = i + 1
+    parts.append(members[start:])
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _join_use_path(prefix: str, head: str) -> str:
+    head = head.strip()
+    if head.endswith("::"):
+        head = head[:-2].strip()
+    if head.startswith("::"):
+        head = head[2:].strip()
+    return "::".join(part for part in (prefix, head) if part)
+
+
+def _flatten_use_group(prefix: str, members: str, groups: Dict[str, Dict[str, Any]]) -> None:
+    """File each leaf of ``prefix::{members}`` under the full path of the module it names.
+
+    ``use std::{process::{Command as Cmd}, io};`` is ``use std::process::{Command as Cmd};
+    use std::{io};``: a nested group or a path member is resolved to its own module, so
+    every ``as`` becomes a [bound, original] pair and no member text becomes a name.
+    """
+    for member in _split_top_level(members):
+        if member.endswith("}") and "{" in member:
+            head, inner = member.split("{", 1)
+            _flatten_use_group(_join_use_path(prefix, head), inner[:-1], groups)
+            continue
+        leaf = _USE_LEAF.match(member)
+        path, bound = (leaf.group(1), leaf.group(2)) if leaf else (member, None)
+        segments = [seg.strip() for seg in path.split("::")]
+        module = _join_use_path(prefix, "::".join(segments[:-1]))
+        original = segments[-1]
+        group = groups.setdefault(module, {"names": [], "aliases": [], "wildcard": False})
+        if original == "*":
+            group["wildcard"] = True
+            continue
+        if original == "self":
+            original = module.split("::")[-1]
+        if bound:
+            group["names"].append(bound)
+            group["aliases"].append([bound, original])
+        elif original:
+            group["names"].append(original)
 
 
 def parse_rust_source(source: str, file_path: str) -> Dict[str, Any]:
@@ -121,28 +187,34 @@ def parse_rust_source(source: str, file_path: str) -> Dict[str, Any]:
     for m in use_pattern.finditer(masked):
         use_expr = m.group(1).strip()
         line, _ = _compute_line_col(source, m.start())
+        if use_expr.endswith("}") and "{" in use_expr:
+            # `use a::b::{C as D, e};` renames members one by one: each `as` belongs to
+            # its member, so it becomes a [bound, original] pair, never the whole use's alias.
+            head, members = use_expr.split("{", 1)
+            base = _join_use_path("", head)
+            groups: Dict[str, Dict[str, Any]] = {base: {"names": [], "aliases": [], "wildcard": False}}
+            _flatten_use_group(base, members[:-1], groups)
+            for module_name, group in groups.items():
+                record: Dict[str, Any] = {
+                    "module": module_name,
+                    "imported_names": group["names"],
+                    "alias": None,
+                    "is_wildcard": group["wildcard"],
+                    "line": line,
+                }
+                if group["aliases"]:
+                    record["aliases"] = group["aliases"]
+                imports.append(record)
+            continue
+
         alias = None
         if " as " in use_expr:
-            parts = use_expr.split(" as ")
-            use_expr = parts[0].strip()
-            alias = parts[1].strip()
-
+            use_expr, alias = (part.strip() for part in use_expr.split(" as ", 1))
         is_wildcard = use_expr.endswith("::*")
-        module_name = use_expr
-        imported_names = []
-
-        if "::{" in use_expr and use_expr.endswith("}"):
-            base_mod, symbols = use_expr.split("::{", 1)
-            symbols = symbols.rstrip("}")
-            module_name = base_mod.strip()
-            imported_names = [s.strip() for s in symbols.split(",") if s.strip()]
-        else:
-            last_part = use_expr.split("::")[-1].strip()
-            imported_names = [last_part] if not is_wildcard else []
-
+        last_part = use_expr.split("::")[-1].strip()
         imports.append({
-            "module": module_name,
-            "imported_names": imported_names,
+            "module": use_expr,
+            "imported_names": [last_part] if not is_wildcard else [],
             "alias": alias,
             "is_wildcard": is_wildcard,
             "line": line,
@@ -241,11 +313,13 @@ def parse_rust_source(source: str, file_path: str) -> Dict[str, Any]:
     keywords = {"fn", "if", "while", "for", "match", "let", "return", "impl", "struct", "enum", "type", "use", "mod"}
     for m in call_pattern.finditer(masked):
         callee = m.group(3)
-        prefix = masked[:m.start()].rstrip()
-        if prefix.endswith("fn"):
+        if callee in keywords and not m.group(1) and not m.group(2):
             continue
-        # Also ensure this is not the definition of a function itself
-        if any(d["name"] == callee and d["line"] == line for d in definitions):
+        # `fn name(` is the definition, not a call.
+        before = m.start()
+        while before > 0 and masked[before - 1].isspace():
+            before -= 1
+        if masked.endswith("fn", 0, before):
             continue
         line, col = _compute_line_col(source, m.start())
 

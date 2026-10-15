@@ -2,14 +2,11 @@
 
 Tests prove:
 1. discover_test_evidence identifies test files, parses test names via AST, and runs tests.
-2. soma verify passes test_names and test_results to runner.run_layer2.
+2. aegis check passes test_names and test_results to the Layer 2 pipeline.
 3. Graceful degradation when no test files exist for target files.
 """
 import argparse
-import os
-import sys
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 from aegis_cli import verify
 from aegis_core.verification import ToolEvidence, Verdict
@@ -56,10 +53,10 @@ class TestVerifyTestHarnessDiscovery:
 
 
 class TestVerifyCLIWiringWithTestHarness:
-    """Verify run_verify wires test evidence into runner.run_layer2."""
+    """Verify run_verify wires test evidence into the Layer 2 pipeline."""
 
     def test_run_verify_passes_test_evidence_to_layer2(self, tmp_path, monkeypatch):
-        """run_verify must pass discovered test_names and test_results into run_layer2."""
+        """run_verify must pass discovered test_names and test_results into VerificationPipeline.run."""
         src_file = tmp_path / "service.py"
         src_file.write_text("def serve(): return True\n")
 
@@ -76,15 +73,9 @@ class TestVerifyCLIWiringWithTestHarness:
             res.arbitration_result.verdict = Verdict.SHIP
             res.arbitration_result.divergences = []
             res.arbitration_result.convergences = []
-            res.evidence_path = None
-            res.persistence_error = None
             return res
 
-        mock_provider = MagicMock()
-        mock_provider.generate = MagicMock(return_value="[]")
-
         monkeypatch.setattr("aegis_core.verification.pipeline.VerificationPipeline.run", mock_pipeline_run)
-        monkeypatch.setattr("aegis_cli.verify.resolve_cli_provider", lambda a, r: mock_provider)
         monkeypatch.setattr("aegis_core.verification.runner.run_layer1", lambda *a, **kw: [
             ToolEvidence("call_graph", "service.py", True, "ok")
         ])
@@ -94,6 +85,7 @@ class TestVerifyCLIWiringWithTestHarness:
             repo_root=str(tmp_path),
             workspace=str(tmp_path),
             plan="Implement serve function",
+            llm_cmd="unused-llm --never-run",
             layer1_only=False,
             dry_run=False,
             plain=False,

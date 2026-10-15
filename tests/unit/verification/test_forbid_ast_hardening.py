@@ -10,7 +10,10 @@ instead of being skipped.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import shutil
+import subprocess
 import time
 
 import pytest
@@ -334,8 +337,8 @@ class TestEncodingAwareParsing:
         ]
 
     def test_latin1_cookie_file_is_parsed_and_violation_reported(self, ws: Path):
-        # __init__.py: Layer 1's import_guard (outside this lane) still decodes strictly as
-        # UTF-8 and raises on latin-1 sources; it skips package initialisers, forbid_ast does not.
+        # __init__.py: call_graph and import_guard skip package initialisers, so this
+        # exercises forbid_ast alone (the full Layer 1 path is TestLayer1LegacyEncoding).
         (ws / "src" / "__init__.py").write_bytes(_LATIN1_SOURCE)
         _, results = _forbid_results(ws, "src/__init__.py")
         assert [(r.target, r.verdict, r.detail) for r in results] == [
@@ -707,16 +710,7 @@ class TestDynamicImportResolution:
 
 # ── Review round 3, finding 1 (out of lane scope): Layer 1 aborts on latin-1 ───
 
-class TestLayer1LegacyEncodingGap:
-    @pytest.mark.xfail(
-        strict=True,
-        raises=UnicodeDecodeError,
-        reason=(
-            "Layer 1's call_graph/import_guard read .py files as strict UTF-8 and raise before "
-            "the forbid_ast loop (runner.py, import_guard.py and hooks/runtime.py are outside "
-            "lane a1-forbid-ast). Remove this marker when the follow-up lane lands."
-        ),
-    )
+class TestLayer1LegacyEncoding:
     def test_latin1_module_reaches_forbid_ast_through_layer1(self, ws: Path):
         (ws / "src" / "legacy.py").write_bytes(_LATIN1_SOURCE + b"import subprocess\nsubprocess.run(['ls'])\n")
         _, results = _forbid_results(ws, "src/legacy.py")
@@ -987,6 +981,235 @@ class TestExternalDriverAliases:
 
         assert violations(plain) == [f"Forbidden call '{pattern}' matched rule forbid_ast.calls"]
         assert violations(aliased) == violations(plain)
+
+
+# ── Wave A F1 (d): renamed members of a TypeScript or Rust import group ──────
+
+_TS_DRIVER = Path(__file__).resolve().parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / "ts_ast.js"
+_NODE = shutil.which("node")
+
+# Stand-in for the `typescript` package with only the API ts_ast.js calls. It returns the
+# tree of `import { exec as run, spawn } from "child_process"; run("ls");` so the compiler
+# path can be tested where the real package is not installed.
+_TS_COMPILER_STUB = """\
+"use strict";
+const K = { SourceFile: 1, ImportDeclaration: 2, NamedImports: 3, Identifier: 4, Call: 5 };
+const node = (kind, props, children = []) =>
+  Object.assign({ kind, children, getStart: () => 0, getEnd: () => 0 }, props);
+const id = (text) => node(K.Identifier, { text });
+module.exports = {
+  ScriptTarget: { Latest: 99 },
+  SyntaxKind: { ExportKeyword: 100 },
+  createSourceFile() {
+    const named = node(K.NamedImports, {
+      elements: [{ name: id("run"), propertyName: id("exec") }, { name: id("spawn") }],
+    });
+    const imp = node(K.ImportDeclaration, {
+      moduleSpecifier: { text: "child_process" }, importClause: { namedBindings: named },
+    });
+    const sf = node(K.SourceFile, {}, [imp, node(K.Call, { expression: id("run") })]);
+    sf.getLineAndCharacterOfPosition = () => ({ line: 0, character: 0 });
+    return sf;
+  },
+  forEachChild(n, cb) { for (const c of n.children) cb(c); },
+  isImportDeclaration: (n) => n.kind === K.ImportDeclaration,
+  isNamespaceImport: () => false,
+  isNamedImports: (n) => n.kind === K.NamedImports,
+  isCallExpression: (n) => n.kind === K.Call,
+  isIdentifier: (n) => n.kind === K.Identifier,
+  isFunctionDeclaration: () => false,
+  isClassDeclaration: () => false,
+  isMethodDeclaration: () => false,
+  isPropertyAccessExpression: () => false,
+  isBinaryExpression: () => false,
+};
+"""
+
+
+def _run_ts_driver(cwd: Path, source: str) -> dict:
+    target = cwd / "mod.ts"
+    target.write_text(source, encoding="utf-8")
+    proc = subprocess.run(
+        [_NODE, str(_TS_DRIVER), str(target)], cwd=cwd, capture_output=True, text=True, timeout=60, check=True
+    )
+    return json.loads(proc.stdout)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node is not installed; the TypeScript driver needs it")
+class TestTypeScriptGroupMemberAliases:
+    ALIASED = "import { exec as run, spawn } from 'child_process';\nrun('ls');\n"
+    PLAIN = "import { exec, spawn } from 'child_process';\nexec('ls');\n"
+    SPEC = {"calls": ["child_process.exec"], "imports": ["exec"]}
+
+    def _violations(self, data: dict) -> list[str]:
+        return evaluate_forbid_ast(NormalizedAST.from_dict(data), self.SPEC)
+
+    def test_builtin_lexer_emits_the_alias_pair(self, tmp_path):
+        data = _run_ts_driver(tmp_path, self.ALIASED)
+        (record,) = data["imports"]
+        assert (record["imported_symbols"], record["aliases"]) == (["run", "spawn"], [["run", "exec"]])
+        assert self._violations(data) == self._violations(_run_ts_driver(tmp_path, self.PLAIN))
+        assert self._violations(data) == [
+            "Forbidden import 'exec' matched rule forbid_ast.imports",
+            "Forbidden call 'child_process.exec' matched rule forbid_ast.calls",
+        ]
+
+    def test_compiler_path_emits_the_alias_pair(self, tmp_path):
+        stub = tmp_path / "node_modules" / "typescript"
+        stub.mkdir(parents=True)
+        (stub / "index.js").write_text(_TS_COMPILER_STUB, encoding="utf-8")
+        data = _run_ts_driver(tmp_path, self.ALIASED)
+        (record,) = data["imports"]
+        assert (record["imported_symbols"], record["aliases"]) == (["run", "spawn"], [["run", "exec"]])
+        assert self._violations(data) == [
+            "Forbidden import 'exec' matched rule forbid_ast.imports",
+            "Forbidden call 'child_process.exec' matched rule forbid_ast.calls",
+        ]
+
+    def test_plain_named_import_has_no_alias_pairs(self, tmp_path):
+        (record,) = _run_ts_driver(tmp_path, self.PLAIN)["imports"]
+        assert record["imported_symbols"] == ["exec", "spawn"]
+        assert record.get("aliases", []) == []
+
+
+class TestRustGroupMemberAliases:
+    @pytest.mark.parametrize(
+        "plain, aliased, pattern, record",
+        [
+            (
+                'use std::process::{Command, exit};\nfn main() { Command::new("ls"); exit(0); }\n',
+                'use std::process::{Command as Cmd, exit};\nfn main() { Cmd::new("ls"); exit(0); }\n',
+                "Command::new",
+                ("std::process", ["Cmd", "exit"], [["Cmd", "Command"]]),
+            ),
+            (
+                'use std::process;\nfn main() { process::Command::new("ls"); }\n',
+                'use std::process::{self as p, exit};\nfn main() { p::Command::new("ls"); }\n',
+                "process::Command::new",
+                ("std::process", ["p", "exit"], [["p", "process"]]),
+            ),
+        ],
+        ids=["member-as", "self-as"],
+    )
+    def test_group_member_alias_is_judged_like_the_plain_use(self, plain, aliased, pattern, record):
+        from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+        (imp,) = parse_rust_source(aliased, "m.rs")["imports"]
+        assert (imp["module"], imp["imported_names"], imp["aliases"]) == record
+
+        def violations(src: str) -> list[str]:
+            return evaluate_forbid_ast(NormalizedAST.from_dict(parse_rust_source(src, "m.rs")), {"calls": [pattern]})
+
+        assert violations(plain) == [f"Forbidden call '{pattern}' matched rule forbid_ast.calls"]
+        assert violations(aliased) == violations(plain)
+
+    # A nested or path member of a use-group must be judged exactly like the flat use-group
+    # it abbreviates (b1-verify review): `use std::{process::{Command as Cmd}, io};` is
+    # `use std::process::{Command as Cmd}; use std::{io};`.
+    SPECS = (
+        {"calls": ["Command::new"]},
+        {"calls": ["process::Command::new"]},
+        {"imports": ["std::process"]},
+        {"imports": ["Command"]},
+        {"imports": ["std::io"]},
+    )
+
+    @pytest.mark.parametrize(
+        "grouped, flat",
+        [
+            (
+                'use std::{process::{Command as Cmd}, io};\nfn main() { Cmd::new("ls"); }\n',
+                'use std::process::{Command as Cmd};\nuse std::{io};\nfn main() { Cmd::new("ls"); }\n',
+            ),
+            (
+                'use std::{process::{Command as Cmd, exit}, io::{self, Write}};\nfn main() { Cmd::new("ls"); }\n',
+                'use std::process::{Command as Cmd, exit};\nuse std::io::{self, Write};\n'
+                'fn main() { Cmd::new("ls"); }\n',
+            ),
+            (
+                'use std::{process::Command as Cmd, io};\nfn main() { Cmd::new("ls"); }\n',
+                'use std::process::{Command as Cmd};\nuse std::{io};\nfn main() { Cmd::new("ls"); }\n',
+            ),
+            (
+                'use std::{process::Command, io};\nfn main() { Command::new("ls"); }\n',
+                'use std::process::{Command};\nuse std::{io};\nfn main() { Command::new("ls"); }\n',
+            ),
+            (
+                'use std::{process::{self as p}};\nfn main() { p::Command::new("ls"); }\n',
+                'use std::process::{self as p};\nfn main() { p::Command::new("ls"); }\n',
+            ),
+            (
+                'use {std::process::{Command as Cmd}};\nfn main() { Cmd::new("ls"); }\n',
+                'use std::process::{Command as Cmd};\nfn main() { Cmd::new("ls"); }\n',
+            ),
+        ],
+        ids=["nested-as", "nested-comma-self", "path-member-as", "path-member", "nested-self-as", "leading-brace"],
+    )
+    def test_nested_and_path_members_are_judged_like_the_flat_group(self, grouped, flat):
+        from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+        def violations(src: str) -> list[list[str]]:
+            norm = NormalizedAST.from_dict(parse_rust_source(src, "m.rs"))
+            return [evaluate_forbid_ast(norm, spec) for spec in self.SPECS]
+
+        assert violations(grouped) == violations(flat)
+        assert any("matched rule forbid_ast.calls" in v for found in violations(grouped) for v in found)
+
+    def test_no_member_text_leaks_into_a_bound_name(self):
+        from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+        imports = parse_rust_source("use std::{process::{Command as Cmd, exit}, io::*};\n", "m.rs")["imports"]
+        names = [n for imp in imports for n in imp["imported_names"]]
+        pairs = [a for imp in imports for pair in imp.get("aliases", []) for a in pair]
+        assert all(not set(n) & set("{}:, ") for n in names + pairs), (names, pairs)
+        assert sorted((imp["module"], imp["is_wildcard"]) for imp in imports) == [
+            ("std", False), ("std::io", True), ("std::process", False)
+        ]
+
+    def test_a_plain_self_member_binds_the_module_name(self):
+        from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+        def violations(src: str) -> list[str]:
+            norm = NormalizedAST.from_dict(parse_rust_source(src, "m.rs"))
+            return evaluate_forbid_ast(norm, {"imports": ["process"], "calls": ["process::Command::new"]})
+
+        plain = 'use std::process;\nfn main() { process::Command::new("ls"); }\n'
+        grouped = 'use std::process::{self, exit};\nfn main() { process::Command::new("ls"); }\n'
+        assert violations(grouped) == violations(plain) == [
+            "Forbidden import 'process' matched rule forbid_ast.imports",
+            "Forbidden call 'process::Command::new' matched rule forbid_ast.calls",
+        ]
+
+
+class TestRustCallSites:
+    """Every Rust call is a call site, and only calls are (b1-verify fix round 2)."""
+
+    def test_a_call_to_a_function_defined_below_it_is_seen(self):
+        from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+        src = "fn main() { helper(); }\nfn helper() {}\n"
+        norm = NormalizedAST.from_dict(parse_rust_source(src, "m.rs"))
+        assert evaluate_forbid_ast(norm, {"calls": ["helper"]}) == [
+            "Forbidden call 'helper' matched rule forbid_ast.calls"
+        ]
+
+    def test_a_large_generated_file_is_parsed_within_budget(self):
+        from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+        calls = 50_000
+        src = "fn main() {\n" + "".join(f"    helper({i});\n" for i in range(calls)) + "}\nfn helper(x: u32) {}\n"
+        start = time.perf_counter()
+        data = parse_rust_source(src, "m.rs")
+        elapsed = time.perf_counter() - start
+        assert len(data["call_sites"]) == calls
+        assert data["call_sites"][-1]["line"] == calls + 1
+        assert elapsed < 5.0, f"rust driver took {elapsed:.1f}s on a {len(src) // 1024} KiB file"
+
+    def test_control_flow_keywords_are_not_calls(self):
+        from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+        src = "fn main() { if (a) { b(); } while (c) {} match (d, e) { _ => {} } }\nfn b() {}\n"
+        assert [c["target"] for c in parse_rust_source(src, "m.rs")["call_sites"]] == ["b"]
 
 
 # ── Review round 3: the decorator fallback read must not fail open ────────────

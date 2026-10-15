@@ -9,12 +9,11 @@ import os
 import sys
 from typing import Optional
 
-from . import ToolEvidence, ArbitrationResult
+from . import ToolEvidence
 from . import persistence_checker
 from . import call_graph
 from . import import_guard
 from . import mutation_tester
-from . import branch_coverage
 
 VerificationResult = ToolEvidence
 
@@ -44,8 +43,39 @@ def _matches_rule_patterns(rel_path: str, patterns: list[str]) -> bool:
     return False
 
 
-def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str]]]:
-    """Discover workspace rules in rules/ and .aegis/rules/ declaring forbid_ast."""
+_FORBID_AST_KEYS = ("imports", "calls", "decorators")
+
+
+def _forbid_ast_spec_error(spec: object) -> Optional[str]:
+    """Why a declared ``forbid_ast`` would enforce nothing as written; None when it is well-formed.
+
+    evaluate_forbid_ast ignores what it cannot use (a list, a string where a list belongs,
+    a misspelt key), so a gate rule in such a shape would pass every file.
+    """
+    if not isinstance(spec, dict):
+        return f"forbid_ast must map imports/calls/decorators to lists, not {type(spec).__name__}"
+    unknown = sorted(str(key) for key in spec if key not in _FORBID_AST_KEYS)
+    if unknown:
+        listed = ", ".join(repr(key) for key in unknown)
+        return f"unknown forbid_ast key {listed} (allowed: {', '.join(_FORBID_AST_KEYS)})"
+    patterns = 0
+    for key, value in spec.items():
+        if not isinstance(value, list) or not all(isinstance(p, str) and p.strip() for p in value):
+            return f"forbid_ast.{key} must be a list of non-empty strings, not {type(value).__name__}"
+        patterns += len(value)
+    return None if patterns else "forbid_ast declares no patterns"
+
+
+def _discover_forbid_ast_rules(
+    repo_root: str,
+) -> tuple[list[tuple[str, dict, list[str]]], list[tuple[str, str]]]:
+    """Discover workspace rules in rules/ and .aegis/rules/ declaring forbid_ast.
+
+    Returns (rules, broken): a rule file that cannot be read or parsed might declare
+    forbid_ast, and one whose forbid_ast is malformed enforces nothing, so each is
+    returned as (relative path, reason) for the caller to fail closed on instead of
+    being dropped.
+    """
     from pathlib import Path
     from aegis_core.yaml import AegisYAML
     from aegis_core.workspace import Workspace
@@ -59,6 +89,7 @@ def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str
 
     candidate_dirs = [root_path / "rules", root_path / ".aegis" / "rules"]
     discovered: list[tuple[str, dict, list[str]]] = []
+    broken: list[tuple[str, str]] = []
     seen_ids: set[str] = set()
 
     for rules_dir in candidate_dirs:
@@ -76,13 +107,23 @@ def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str
             except Exception:
                 try:
                     doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
-                except Exception:
+                except Exception as exc:
+                    # Only a file that names the key can declare it: plain notes under a
+                    # rules/ directory stay out of the gate, a damaged forbid_ast rule does not.
+                    try:
+                        may_declare = b"forbid_ast" in md_file.read_bytes()
+                    except OSError:
+                        may_declare = True
+                    if may_declare:
+                        broken.append((md_file.relative_to(root_path).as_posix(), f"{type(exc).__name__}: {exc}"))
                     continue
 
-            if doc.get("expired_at"):
+            if doc.get("expired_at") or "forbid_ast" not in doc:
                 continue
             forbid_spec = doc.get("forbid_ast")
-            if not isinstance(forbid_spec, dict) or not forbid_spec:
+            spec_error = _forbid_ast_spec_error(forbid_spec)
+            if spec_error:
+                broken.append((md_file.relative_to(root_path).as_posix(), spec_error))
                 continue
 
             rule_id = str(doc.get("id") or doc.get("name") or md_file.stem)
@@ -100,7 +141,7 @@ def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str
 
             discovered.append((rule_id, forbid_spec, patterns))
 
-    return discovered
+    return discovered, broken
 
 
 def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
@@ -260,12 +301,21 @@ def _get_modified_lines(filepath: str, repo_root: str, diff_base: Optional[str] 
 
 
 
+def _tool_failure(tool: str, target: str, exc: Exception) -> ToolEvidence:
+    """A Layer 1 tool that raised fails the gate; it must never abort the run or pass silently."""
+    return ToolEvidence(
+        tool=tool,
+        target=target,
+        verdict=False,
+        detail=f"{tool}: cannot verify {target}: {type(exc).__name__}: {exc}",
+    )
+
+
 def run_layer1(
     changed_files: list[str],
     repo_root: str,
     persistence_targets: Optional[list[tuple[str, str]]] = None,
     mutation_targets: Optional[list[tuple[str, str, str]]] = None,
-    coverage_targets: Optional[list[tuple[str, str]]] = None,
     max_mutations: int = 5,
     fast_mode: bool = False,
     diff_base: Optional[str] = None,
@@ -278,8 +328,6 @@ def run_layer1(
         persistence_targets: List of (filepath, dict_name) tuples for
             persistence checking. If None, auto-detects from changed_files.
         mutation_targets: List of (source_file, func_name, test_file) tuples.
-            If None, auto-discovers from changed_files using convention.
-        coverage_targets: List of (source_file, test_file) tuples.
             If None, auto-discovers from changed_files using convention.
         max_mutations: Maximum mutations per function (default: 5).
 
@@ -320,19 +368,22 @@ def run_layer1(
         if _is_test_or_support(filepath):
             continue
         ext = os.path.splitext(filepath)[1].lower()
-        if ext == ".py":
-            results.append(call_graph.check(
-                full_path, repo_root_str,
-                exclude_names={'main', '_parse_args', 'parse_args'},
-                fast_mode=fast_mode,
-            ))
-        elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str):
-            results.append(call_graph.check(
-                full_path, repo_root_str,
-                exclude_names={'main', '_parse_args', 'parse_args'},
-                fast_mode=fast_mode,
-                ast_runner=ast_runner,
-            ))
+        try:
+            if ext == ".py":
+                results.append(call_graph.check(
+                    full_path, repo_root_str,
+                    exclude_names={'main', '_parse_args', 'parse_args'},
+                    fast_mode=fast_mode,
+                ))
+            elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str):
+                results.append(call_graph.check(
+                    full_path, repo_root_str,
+                    exclude_names={'main', '_parse_args', 'parse_args'},
+                    fast_mode=fast_mode,
+                    ast_runner=ast_runner,
+                ))
+        except Exception as exc:
+            results.append(_tool_failure("call_graph", filepath, exc))
 
     # ── Import Guards ─────────────────────────────────────────────────
     for filepath in changed_files:
@@ -340,13 +391,33 @@ def run_layer1(
         if os.path.exists(full_path) and filepath.endswith('.py'):
             if _is_test_or_support(filepath):
                 continue
-            results.append(import_guard.check(full_path, project_root=repo_root_str))
+            try:
+                results.append(import_guard.check(full_path, project_root=repo_root_str))
+            except Exception as exc:
+                results.append(_tool_failure("import_guard", filepath, exc))
 
     # ── Declarative Rule-Level forbid_ast ─────────────────────────────
     from aegis_core.ast.match import evaluate_forbid_ast, extract_normalized_ast
     from aegis_core.ast.policy import ASTExtractionError
 
-    forbid_rules = _discover_forbid_ast_rules(repo_root_str)
+    try:
+        forbid_rules, broken_rules = _discover_forbid_ast_rules(repo_root_str)
+    except Exception as exc:
+        # The rules are gate rules: if they cannot be read, nothing may pass unchecked.
+        forbid_rules, broken_rules = [], []
+        results.append(ToolEvidence(
+            tool="forbid_ast",
+            target=".aegis/rules",
+            verdict=False,
+            detail=f"forbid_ast: cannot load rules: {type(exc).__name__}: {exc}",
+        ))
+    for rule_path, reason in broken_rules:
+        results.append(ToolEvidence(
+            tool="forbid_ast",
+            target=rule_path,
+            verdict=False,
+            detail=f"forbid_ast: cannot load rule {rule_path}: {reason}",
+        ))
     if forbid_rules:
         ast_cache: dict[str, object] = {}
         for filepath in changed_files:
@@ -373,22 +444,26 @@ def run_layer1(
                 if patterns and not _matches_rule_patterns(rel_path, patterns):
                     continue
 
-                if full_path not in ast_cache:
-                    try:
-                        ast_cache[full_path] = extract_normalized_ast(
-                            full_path, workspace_root=repo_root_str, ast_runner=ast_runner
-                        )
-                    except ASTExtractionError as exc:
-                        ast_cache[full_path] = exc
-                norm_ast = ast_cache[full_path]
-                if norm_ast is None:  # no AST driver for this file type: rule does not apply
+                try:
+                    if full_path not in ast_cache:
+                        try:
+                            ast_cache[full_path] = extract_normalized_ast(
+                                full_path, workspace_root=repo_root_str, ast_runner=ast_runner
+                            )
+                        except ASTExtractionError as exc:
+                            ast_cache[full_path] = exc
+                    norm_ast = ast_cache[full_path]
+                    if norm_ast is None:  # no AST driver for this file type: rule does not apply
+                        continue
+                    violations: list[str] = []
+                    if not isinstance(norm_ast, ASTExtractionError):
+                        try:
+                            violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                        except ASTExtractionError as exc:  # decorators had to be re-read from disk
+                            norm_ast = exc
+                except Exception as exc:
+                    results.append(_tool_failure(f"forbid_ast:{rule_id}", rel_path, exc))
                     continue
-                violations: list[str] = []
-                if not isinstance(norm_ast, ASTExtractionError):
-                    try:
-                        violations = evaluate_forbid_ast(norm_ast, forbid_spec)
-                    except ASTExtractionError as exc:  # decorators had to be re-read from disk
-                        norm_ast = exc
                 if isinstance(norm_ast, ASTExtractionError):
                     # Fail closed: a gate rule that cannot read the file must not pass it.
                     results.append(
@@ -440,94 +515,7 @@ def run_layer1(
                         target_lines=mod_lines,
                     ))
 
-    # ── Branch Coverage ───────────────────────────────────────────────
-    if not fast_mode:
-        if coverage_targets:
-            for source, test in coverage_targets:
-                src_path = os.path.join(repo_root_str, source)
-                tst_path = os.path.join(repo_root_str, test)
-                if os.path.exists(src_path) and os.path.exists(tst_path):
-                    results.append(branch_coverage.check(src_path, tst_path))
-        else:
-            # Auto-discover: pair changed files with test files by convention
-            for filepath in changed_files:
-                if not filepath.endswith('.py') or _is_test_or_support(filepath):
-                    continue
-                full_path = os.path.join(repo_root_str, filepath)
-                if not os.path.exists(full_path):
-                    continue
-                test_file = _find_test_file(filepath, repo_root_str)
-                if test_file is None:
-                    continue
-                mod_lines = _get_modified_lines(filepath, repo_root_str, diff_base=diff_base)
-                results.append(branch_coverage.check(full_path, test_file, target_lines=mod_lines))
-
     return results
-
-
-def __getattr__(name: str):
-    if name == "DeterministicVerifier":
-        from .pipeline import DeterministicVerifier
-        return DeterministicVerifier
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-# ── Layer 2: Adversarial Verification Orchestrator ────────────────────────
-
-
-def _strip_code_fence(text: str) -> str:
-    """Strip markdown code fences (```json ... ```) from LLM output."""
-    import re
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
-
-
-def run_layer2(
-    changed_files: list[str],
-    repo_root: str,
-    task_plan: str,
-    layer1_evidence: list[ToolEvidence],
-    llm_backend,
-    test_names: Optional[list[str]] = None,
-    test_results: Optional[str] = None,
-) -> 'ArbitrationResult':
-    """Run Layer 2 adversarial verification protocol.
-
-    Thin backward-compatibility adapter delegating to AdversarialVerifier and Arbiter.
-    """
-    if llm_backend is None:
-        raise TypeError("llm_backend must be a callable, got None")
-
-    import warnings
-    warnings.warn(
-        "aegis_core.verification.runner.run_layer2 is deprecated; use VerificationPipeline",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    from .pipeline import VerificationPipeline
-
-    pipeline = VerificationPipeline()
-    res = pipeline.run(
-        changed_files=changed_files,
-        workspace=repo_root,
-        task_plan=task_plan,
-        backend=llm_backend,
-        in_band=False,
-        test_names=test_names,
-        test_results=test_results,
-        layer1_evidence=layer1_evidence,
-    )
-    return res.arbitration_result or ArbitrationResult(
-        divergences=[],
-        convergences=[],
-        verdict=res.verdict,
-        layer1_results=layer1_evidence or [],
-        predictions=[],
-        claims=[],
-    )
 
 
 def gate_verdict(results: list[ToolEvidence]) -> bool:

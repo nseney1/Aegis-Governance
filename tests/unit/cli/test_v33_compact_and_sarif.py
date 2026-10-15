@@ -1,18 +1,17 @@
-"""Unit tests for v3.3.0 Phase 3.3.3: Segmented Telemetry Compaction & SARIF 2.1.0 Output."""
+"""Unit tests for v3.3.0 Phase 3.3.3: segmented telemetry compaction.
+
+SARIF output was removed in v4 (#40) and `aegis system compact` with the
+`system` command (D5); the core compaction behavior stays tested here.
+"""
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timedelta, timezone
 import gzip
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
-from aegis_cli.check import CheckCommand, run_check
-from aegis_cli.verify import VerifyCommand, format_sarif_report, run_verify
 from aegis_core.telemetry import (
     compact_signals,
     compute_cell_fitness,
@@ -127,108 +126,3 @@ class TestSegmentedTelemetryCompaction:
         assert not (tmp_path / ".aegis" / "telemetry" / "checkpoint_rollup.json").exists()
 
 
-class TestSarifOutput:
-    """Verify `aegis check --format sarif` and `format_sarif_report`."""
-
-    def test_check_parser_accepts_sarif_format(self):
-        cmd = CheckCommand()
-        parser = argparse.ArgumentParser()
-        cmd.configure_parser(parser)
-        args = parser.parse_args(["--format", "sarif", "foo.py"])
-        assert args.format == "sarif"
-
-        vcmd = VerifyCommand()
-        vparser = argparse.ArgumentParser()
-        vcmd.configure_parser(vparser)
-        vargs = vparser.parse_args(["--format", "sarif", "--files", "foo.py"])
-        assert vargs.format == "sarif"
-
-    def test_check_sarif_output_on_passing_run(self, tmp_path: Path, capsys):
-        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-        sample = tmp_path / "clean_mod.py"
-        sample.write_text("def greet(name: str) -> str:\n    return f'hello {name}'\n", encoding="utf-8")
-
-        passed_results = [
-            SimpleNamespace(tool="syntax_check", target="clean_mod.py", verdict=True, detail="OK"),
-            SimpleNamespace(tool="import_guard", target="clean_mod.py", verdict=True, detail="All imports valid"),
-        ]
-        args = argparse.Namespace(
-            target_files=["clean_mod.py"],
-            files=None,
-            hook=False,
-            full=False,
-            release=False,
-            release_gate=False,
-            checkpoint_only=False,
-            plan=None,
-            plan_file=None,
-            workspace=str(tmp_path),
-            json=False,
-            format="sarif",
-        )
-        with patch("aegis_core.verification.runner.run_layer1", return_value=passed_results), \
-             patch("aegis_core.verification.runner.gate_verdict", return_value=True), \
-             patch("aegis_core.verification.runner.format_summary", return_value="Layer 1: PASS"):
-            rc = run_check(args)
-
-        assert rc == 0
-        raw_out = capsys.readouterr().out
-        sarif = json.loads(raw_out)
-        assert sarif["$schema"] == "https://json.schemastore.org/sarif-2.1.0.json"
-        assert sarif["version"] == "2.1.0"
-        assert len(sarif["runs"]) == 1
-        run_obj = sarif["runs"][0]
-        assert run_obj["tool"]["driver"]["name"] == "Aegis Guardrails"
-        assert run_obj["results"] == []
-
-    def test_check_sarif_output_on_failing_run(self, tmp_path: Path, capsys):
-        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-        broken = tmp_path / "broken_mod.py"
-        broken.write_text("def broken(\n", encoding="utf-8")
-
-        failed_results = [
-            SimpleNamespace(
-                tool="syntax_check",
-                target="broken_mod.py",
-                verdict=False,
-                detail="SyntaxError: unexpected EOF while parsing",
-            ),
-            SimpleNamespace(
-                tool="import_guard",
-                target="broken_mod.py",
-                verdict=True,
-                detail="Skipped",
-            ),
-        ]
-        args = argparse.Namespace(
-            target_files=["broken_mod.py"],
-            files=None,
-            hook=False,
-            full=False,
-            release=False,
-            release_gate=False,
-            checkpoint_only=False,
-            plan=None,
-            plan_file=None,
-            workspace=str(tmp_path),
-            json=False,
-            format="sarif",
-        )
-        with patch("aegis_core.verification.runner.run_layer1", return_value=failed_results), \
-             patch("aegis_core.verification.runner.gate_verdict", return_value=False), \
-             patch("aegis_core.verification.runner.format_summary", return_value="Layer 1: FAIL"):
-            rc = run_check(args)
-
-        assert rc == 1
-        raw_out = capsys.readouterr().out
-        sarif = json.loads(raw_out)
-        assert sarif["version"] == "2.1.0"
-        results_list = sarif["runs"][0]["results"]
-        assert len(results_list) == 1
-        item = results_list[0]
-        assert item["ruleId"] == "syntax_check"
-        assert item["level"] == "error"
-        assert item["message"] == {"text": "SyntaxError: unexpected EOF while parsing"}
-        assert item["locations"] == [
-            {"physicalLocation": {"artifactLocation": {"uri": "broken_mod.py"}}}
-        ]

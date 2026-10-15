@@ -7,13 +7,12 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Optional
 
 from aegis_core.yaml import dump_frontmatter, parse_frontmatter
 from aegis_core.locking import workspace_lock
 from aegis_core.storage import atomic_write_text
-from aegis_core.taxonomy import REVIEW_MODES, ReviewMode, normalize_review_mode
-from aegis_core.workspace import Workspace, resolve_workspace
+from aegis_core.taxonomy import ReviewMode, normalize_review_mode
+from aegis_core.workspace import Workspace
 from aegis_core.workspace.layout import LockResource
 from .constants import (
     VALID_ENFORCEMENT,
@@ -29,7 +28,6 @@ from .selection import PARKED_RULE_DIRS
 __all__ = [
     "MAX_RULE_BODY_BYTES",
     "create_cell",
-    "create_cell_from_description",
     "cli_cell_create",
     "transfer_cell",
     "validate_rule_body",
@@ -249,72 +247,6 @@ def _as_number(label: str, value: object, cast: type) -> float | int:
         return cast(value)
     except (TypeError, ValueError):
         raise ValueError(f"Invalid {label} {value!r}: must be a number.") from None
-
-
-def create_cell_from_description(
-    description: str,
-    domain_hint: Optional[str] = None,
-    cell_type: Optional[str] = None,
-    provider_name: Optional[str] = None,
-    workspace: Optional[Workspace | str | Path] = None,
-) -> str:
-    """Use AI inference provider to generate cell YAML from natural language."""
-    from aegis_core.inference_provider import resolve_provider
-
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    provider = resolve_provider(str(ws.root), provider_name)
-
-    examples = []
-    cells_dir = ws.rules_dir
-    if cells_dir.is_dir():
-        for cell_file in cells_dir.rglob("*.md"):
-            if cell_file.name == "README.md":
-                continue
-            try:
-                content = cell_file.read_text(encoding="utf-8")
-                if content.startswith("---"):
-                    examples.append(content[:500])
-            except Exception:
-                pass
-
-    example_text = "\n---\n".join(examples[:3]) if examples else "No existing cells found."
-    domain_context = f"\nDomain hint: {domain_hint}" if domain_hint else ""
-    type_hint = f"\nPreferred cell type: {cell_type}" if cell_type else ""
-
-    prompt = f"""You are a governance rule generator for Aegis.
-
-Given a natural language description of a concern, generate a governance rule in markdown with YAML frontmatter.
-
-Rule types:
-- invariant: Non-negotiable invariant (hard safety gate). Use for things that must ALWAYS hold.
-- trap: Learned anti-pattern trap. Use for known failure modes to watch for.
-- boundary: Escalation gate. Use when sensitive areas need elevated review.
-- persona: Domain persona/accelerator. Use for idiomatic patterns to follow.
-- contract: Cross-service contract. Use for API/data shape agreements.
-
-YAML fields required:
-- id: (filename stem, e.g. 'trap-missing-tests' for trap-missing-tests.md)
-- type: (one of above)
-- domain: (one of: efficiency, correctness, security, style, governance)
-- enforcement: (gate for invariants, advisory for traps)
-- hypothesis: (clear, testable statement)
-- prediction: (what will happen if the hypothesis is violated)
-- falsification: (how to prove this cell is no longer needed)
-- target_paths: (list of file glob patterns this cell monitors)
-- minimum_mode: ({' | '.join(REVIEW_MODES)})
-- tags: (list of relevant tags)
-
-Existing cells in this project for reference:
-{example_text}
-{domain_context}{type_hint}
-
-User description: "{description}"
-
-Generate ONLY the complete markdown cell file content. Start with --- for the YAML frontmatter. After the closing ---, include a brief description paragraph explaining the cell's purpose. Do not include any other text."""
-
-    return provider.generate(prompt).strip()
 
 
 def cli_cell_create(argv: list[str] | None = None) -> int:

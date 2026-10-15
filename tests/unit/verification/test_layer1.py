@@ -4,10 +4,8 @@ from pathlib import Path
 Validates against the actual Soma codebase (post-fix) and against
 synthetic pre-fix scenarios.
 """
-import os
 import sys
 import textwrap
-import tempfile
 
 import pytest
 
@@ -19,7 +17,7 @@ from aegis_core.verification import ToolEvidence
 from aegis_core.verification import persistence_checker
 from aegis_core.verification import call_graph
 from aegis_core.verification import runner
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestPersistenceChecker:
@@ -209,57 +207,6 @@ class TestRunnerMutationTesterIntegration:
         assert "mutation_tester" in tool_names
 
 
-class TestRunnerBranchCoverageIntegration:
-    """run_layer1() should wire branch_coverage with convention-based mapping."""
-
-    def test_coverage_targets_explicit(self, tmp_path):
-        """When coverage_targets is provided, runner calls branch_coverage."""
-        src = tmp_path / "widget.py"
-        src.write_text("def greet(name):\n    return f'hello {name}'\n")
-        test = tmp_path / "test_widget.py"
-        test.write_text(
-            "from widget import greet\n"
-            "def test_greet():\n    assert greet('x') == 'hello x'\n"
-        )
-
-        results = runner.run_layer1(
-            changed_files=["widget.py"],
-            repo_root=str(tmp_path),
-            coverage_targets=[("widget.py", "test_widget.py")],
-        )
-        coverage_results = [r for r in results if r.tool == "branch_coverage"]
-        assert len(coverage_results) >= 1
-        assert all(isinstance(r, ToolEvidence) for r in coverage_results)
-
-    def test_coverage_auto_pairs_by_convention(self, tmp_path):
-        """When coverage_targets is None, auto-pair foo.py -> tests/test_foo.py."""
-        (tmp_path / "helper.py").write_text("def x(): return 1\n")
-        tests_dir = tmp_path / "tests"
-        tests_dir.mkdir()
-        (tests_dir / "test_helper.py").write_text(
-            "from helper import x\ndef test_x():\n    assert x() == 1\n"
-        )
-
-        results = runner.run_layer1(
-            changed_files=["helper.py"],
-            repo_root=str(tmp_path),
-        )
-        tool_names = [r.tool for r in results]
-        assert "branch_coverage" in tool_names
-
-    def test_coverage_skipped_when_no_test_file(self, tmp_path):
-        """When no test file found for a source file, skip branch_coverage."""
-        (tmp_path / "orphan.py").write_text("def y(): return 2\n")
-
-        results = runner.run_layer1(
-            changed_files=["orphan.py"],
-            repo_root=str(tmp_path),
-        )
-        coverage_results = [r for r in results if r.tool == "branch_coverage"]
-        # Should not crash — either 0 results or a skip-evidence
-        assert all(isinstance(r, ToolEvidence) for r in coverage_results)
-
-
 class TestGetModifiedLines:
     """Test git diff modified line extraction helper."""
 
@@ -371,38 +318,6 @@ class TestRunnerCoverageEnhancements:
         # No overlap
         assert _discover_functions(str(f), target_lines={100}) == []
 
-    def test_runner_run_layer2_forwarding(self, tmp_path):
-        """runner.run_layer2 emits DeprecationWarning and forwards to AdversarialVerifier + Arbiter."""
-        import warnings
-        from aegis_core.verification import runner, ToolEvidence, Verdict
-        f = tmp_path / "mod.py"
-        f.write_text("def work(): return 1\n")
-        mock_backend = lambda p: "[]"
-        with warnings.catch_warnings(record=True) as warns:
-            warnings.simplefilter("always")
-            res = runner.run_layer2(
-                changed_files=["mod.py"],
-                repo_root=str(tmp_path),
-                task_plan="Plan",
-                layer1_evidence=[ToolEvidence("call_graph", "mod.py", True, "ok")],
-                llm_backend=mock_backend,
-            )
-        assert res.verdict == Verdict.SHIP
-        assert any(issubclass(w.category, DeprecationWarning) for w in warns)
-
-    def test_runner_run_layer2_empty_files_fallback(self, tmp_path):
-        """runner.run_layer2 fallback ArbitrationResult when changed_files is empty."""
-        from aegis_core.verification import runner, Verdict, ArbitrationResult
-        res = runner.run_layer2(
-            changed_files=[],
-            repo_root=str(tmp_path),
-            task_plan="Empty run",
-            layer1_evidence=[],
-            llm_backend=lambda p: "[]",
-        )
-        assert isinstance(res, ArbitrationResult)
-        assert res.verdict == Verdict.SHIP
-
     def test_run_layer1_polyglot_call_graph(self, tmp_path):
         """run_layer1 invokes call_graph on polyglot files if a driver is resolved."""
         from aegis_core.verification import runner
@@ -451,3 +366,182 @@ class TestRunnerCoverageEnhancements:
             assert called_cmds[0] == ["git", "diff", "-U0", "origin/feat", "--", "foo.py"]
 
 
+_LATIN1 = "# -*- coding: latin-1 -*-\nGREETING = 'café'\n".encode("latin-1")
+
+
+class TestLayer1FailsClosed:
+    """A Layer 1 tool that raises yields a failing result naming the tool and file (wave A F1)."""
+
+    @pytest.fixture
+    def ws(self, tmp_path):
+        (tmp_path / "mod.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.parametrize("module, tool", [(call_graph, "call_graph"), (runner.import_guard, "import_guard")])
+    def test_tool_exception_becomes_a_failing_result(self, ws, monkeypatch, module, tool):
+        def boom(*_args, **_kwargs):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(module, "check", boom)
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(ws), fast_mode=True)
+        failed = [r for r in results if r.tool == tool]
+        assert [(r.target, r.verdict) for r in failed] == [("mod.py", False)]
+        assert failed[0].detail == f"{tool}: cannot verify mod.py: RecursionError: maximum recursion depth exceeded"
+        assert runner.gate_verdict(results) is False
+
+    def test_forbid_ast_exception_becomes_a_failing_result(self, ws, monkeypatch):
+        import aegis_core.ast.match as match
+
+        rules = ws / ".aegis" / "rules"
+        rules.mkdir(parents=True)
+        (rules / "no-eval.md").write_text(
+            "---\nid: no-eval\ntype: invariant\nenforcement: gate\nforbid_ast:\n  calls: [eval]\n---\n",
+            encoding="utf-8",
+        )
+
+        def boom(*_args, **_kwargs):
+            raise MemoryError("ast too large")
+
+        monkeypatch.setattr(match, "evaluate_forbid_ast", boom)
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(ws), fast_mode=True)
+        failed = [r for r in results if r.tool == "forbid_ast:no-eval"]
+        assert [(r.target, r.verdict, r.detail) for r in failed] == [
+            ("mod.py", False, "forbid_ast:no-eval: cannot verify mod.py: MemoryError: ast too large")
+        ]
+
+    def test_forbid_ast_rule_discovery_failure_fails_closed(self, ws, monkeypatch):
+        def boom(_root):
+            raise PermissionError("rules dir unreadable")
+
+        monkeypatch.setattr(runner, "_discover_forbid_ast_rules", boom)
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(ws), fast_mode=True)
+        failed = [r for r in results if r.tool == "forbid_ast"]
+        assert [(r.target, r.verdict, r.detail) for r in failed] == [
+            (".aegis/rules", False, "forbid_ast: cannot load rules: PermissionError: rules dir unreadable")
+        ]
+
+    def test_an_unreadable_rule_file_fails_closed(self, tmp_path):
+        """One undecodable gate rule must not silently drop out of enforcement (b1-verify review)."""
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "no-subprocess.md").write_bytes(
+            b"---\nid: no-subprocess\ntype: invariant\nenforcement: gate\n"
+            b"forbid_ast:\n  calls: [subprocess.run]\n---\nNo shelling out \xff here.\n"
+        )
+        (invariants / "no-eval.md").write_text(
+            "---\nid: no-eval\ntype: invariant\nenforcement: gate\nforbid_ast:\n  calls: [eval]\n---\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "bad.py").write_text(
+            "import subprocess\n\n\ndef main():\n    return subprocess.run(['true'])\n", encoding="utf-8"
+        )
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        failed = [r for r in results if r.tool == "forbid_ast"]
+        assert [(r.target, r.verdict) for r in failed] == [(".aegis/rules/invariants/no-subprocess.md", False)]
+        assert failed[0].detail.startswith(
+            "forbid_ast: cannot load rule .aegis/rules/invariants/no-subprocess.md: UnicodeDecodeError:"
+        )
+        assert runner.gate_verdict(results) is False
+
+    def test_readable_rules_still_enforce_next_to_an_unreadable_one(self, tmp_path):
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "broken.md").write_bytes(b"---\nid: broken\nforbid_ast:\n  calls: [exec]\n---\n\xff\n")
+        (invariants / "no-eval.md").write_text(
+            "---\nid: no-eval\ntype: invariant\nenforcement: gate\nforbid_ast:\n  calls: [eval]\n---\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "bad.py").write_text("def main(x):\n    return eval(x)\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert {(r.tool, r.target) for r in results if not r.verdict} == {
+            ("forbid_ast", ".aegis/rules/invariants/broken.md"),
+            ("forbid_ast:no-eval", "bad.py"),
+        }
+
+    @pytest.mark.parametrize(
+        "spec, reason",
+        [
+            ("forbid_ast:\n  - calls: [eval]\n", "forbid_ast must map imports/calls/decorators to lists, not list"),
+            ("forbid_ast: true\n", "forbid_ast must map imports/calls/decorators to lists, not bool"),
+            ("forbid_ast:\n", "forbid_ast must map imports/calls/decorators to lists, not NoneType"),
+            ("forbid_ast: {}\n", "forbid_ast declares no patterns"),
+            ("forbid_ast:\n  calls: []\n", "forbid_ast declares no patterns"),
+            ("forbid_ast:\n  calls: eval\n", "forbid_ast.calls must be a list of non-empty strings, not str"),
+            ("forbid_ast:\n  calls:\n    - eval\n    - 3\n", "forbid_ast.calls must be a list of non-empty strings"),
+            ("forbid_ast:\n  calls: ['  ']\n", "forbid_ast.calls must be a list of non-empty strings"),
+            ("forbid_ast:\n  call: [eval]\n", "unknown forbid_ast key 'call' (allowed: imports, calls, decorators)"),
+        ],
+        ids=["list", "scalar", "null", "empty-map", "empty-list", "string-value", "non-string-item", "blank-item",
+             "unknown-key"],
+    )
+    def test_a_malformed_forbid_ast_fails_closed(self, tmp_path, spec, reason):
+        """A rule declaring forbid_ast in a shape that enforces nothing must not pass silently (b1-verify F2)."""
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "r1.md").write_text(
+            f"---\nid: r1\ntype: invariant\nenforcement: gate\n{spec}---\nNo eval.\n", encoding="utf-8"
+        )
+        (tmp_path / "bad.py").write_text("def main(x):\n    return eval(x)\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        failed = [(r.tool, r.target, r.verdict) for r in results if r.tool.startswith("forbid_ast")]
+        assert failed == [("forbid_ast", ".aegis/rules/invariants/r1.md", False)]
+        detail = next(r.detail for r in results if r.tool == "forbid_ast")
+        assert detail.startswith(f"forbid_ast: cannot load rule .aegis/rules/invariants/r1.md: {reason}")
+        assert runner.gate_verdict(results) is False
+
+    def test_an_expired_rule_with_a_malformed_forbid_ast_is_not_enforced(self, tmp_path):
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "old.md").write_text(
+            "---\nid: old\nexpired_at: '2026-01-01'\nforbid_ast: true\n---\n", encoding="utf-8"
+        )
+        (tmp_path / "mod.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert [r for r in results if r.tool.startswith("forbid_ast")] == []
+
+    def test_a_well_formed_forbid_ast_still_enforces(self, tmp_path):
+        invariants = tmp_path / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "r1.md").write_text(
+            "---\nid: r1\nforbid_ast:\n  imports: []\n  calls: [eval]\n---\n", encoding="utf-8"
+        )
+        (tmp_path / "bad.py").write_text("def main(x):\n    return eval(x)\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert [(r.tool, r.target, r.verdict) for r in results if r.tool.startswith("forbid_ast")] == [
+            ("forbid_ast:r1", "bad.py", False)
+        ]
+
+    def test_unparseable_notes_that_never_name_forbid_ast_are_not_rules(self, tmp_path):
+        notes = tmp_path / "rules"
+        notes.mkdir()
+        (notes / "style-notes.md").write_text("# Style\n\n- prefer small functions\nsee: below\n", encoding="utf-8")
+        (notes / "latin1-notes.md").write_bytes(b"caf\xe9 notes\n")
+        (tmp_path / "mod.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+        results = runner.run_layer1(changed_files=["mod.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert [r for r in results if r.tool.startswith("forbid_ast")] == []
+        assert runner.gate_verdict(results) is True
+
+
+class TestLayer1LegacyEncodings:
+    """call_graph and import_guard decode .py sources the way CPython does (PEP 263, BOM)."""
+
+    def test_latin1_module_is_not_a_false_call_graph_failure(self, tmp_path):
+        (tmp_path / "legacy.py").write_bytes(_LATIN1 + b"def main():\n    return GREETING\n")
+        result = call_graph.check(str(tmp_path / "legacy.py"), str(tmp_path), exclude_names={"main"})
+        assert result.verdict is True, result.detail
+
+    def test_latin1_module_imports_are_extracted(self, tmp_path):
+        (tmp_path / "legacy.py").write_bytes(_LATIN1 + b"import json\nimport some_vendor_sdk\n")
+        modules = [i.module for i in runner.import_guard.extract_imports(str(tmp_path / "legacy.py"))]
+        assert modules == ["json", "some_vendor_sdk"]
+
+    def test_latin1_module_passes_layer1_end_to_end(self, tmp_path):
+        (tmp_path / "legacy.py").write_bytes(_LATIN1 + b"import json\n\ndef main():\n    return json.dumps(GREETING)\n")
+        results = runner.run_layer1(changed_files=["legacy.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert results and runner.gate_verdict(results) is True, [r.detail for r in results]
+
+    def test_undecodable_module_fails_closed(self, tmp_path):
+        (tmp_path / "bad.py").write_bytes(b"x = '\xff\xfe'\n")
+        results = runner.run_layer1(changed_files=["bad.py"], repo_root=str(tmp_path), fast_mode=True)
+        assert runner.gate_verdict(results) is False
+        assert {r.tool for r in results if not r.verdict} >= {"import_guard"}

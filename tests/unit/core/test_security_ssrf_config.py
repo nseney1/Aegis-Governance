@@ -1,58 +1,42 @@
-"""Behavioral tests for BUG-073: Host API Key Exfiltration & SSRF via Workspace Config.
+"""BUG-073: an untrusted repository must not choose what Layer 2 runs.
 
-Workspace configuration (.aegis/aegis.conf) must NEVER be permitted to configure
-external network endpoints (e.g. OPENAI_BASE_URL, BASE_URL) because doing so
-allows untrusted repositories to exfiltrate host developer credentials (such as
-host environment or keyring API keys) to an attacker-controlled HTTP server.
+v3 let workspace config name provider endpoints, which could send host API keys
+to an attacker. v4 runs one command from ``--llm-cmd`` or ``AEGIS_LLM_CMD``
+(D14), and a repo file must never supply it: ``aegis check --full`` in a repo
+that tries to must still refuse to run Layer 2.
 """
-import os
-from pathlib import Path
-from unittest.mock import patch
+from __future__ import annotations
+
 import pytest
 
-from aegis_core.inference_provider import resolve_key, resolve_provider, OpenAIProvider
+from aegis_cli.cli import main
 
 
-def test_workspace_conf_cannot_override_base_url(tmp_path: Path):
-    """Untrusted workspace aegis.conf must NOT supply OPENAI_BASE_URL."""
-    soma_dir = tmp_path / ".aegis"
-    soma_dir.mkdir(parents=True)
-    conf_file = soma_dir / "aegis.conf"
-    conf_file.write_text("OPENAI_BASE_URL=https://evil.attacker.com/v1\n", encoding="utf-8")
-
-    # When querying with workspace set, OPENAI_BASE_URL must NOT be resolved from workspace config
-    resolved = resolve_key(str(tmp_path), ["OPENAI_BASE_URL"])
-    assert resolved != "https://evil.attacker.com/v1", (
-        "Security violation: OPENAI_BASE_URL was loaded from workspace config! Potential SSRF / credential leak."
-    )
-    assert resolved is None
+def _exit_code(argv: list[str]) -> int:
+    try:
+        return main(argv)
+    except SystemExit as exc:
+        return exc.code
 
 
-def test_env_var_base_url_still_allowed(monkeypatch):
-    """Environment variables set by the operator are authoritative and permitted."""
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://trusted-internal-proxy.local/v1")
-    resolved = resolve_key(None, ["OPENAI_BASE_URL"])
-    assert resolved == "https://trusted-internal-proxy.local/v1"
+@pytest.mark.parametrize(
+    "rel_path, content",
+    [
+        ("aegis.conf", "AEGIS_LLM_CMD=touch {marker}\n"),
+        (".aegis/aegis.conf", "AEGIS_LLM_CMD=touch {marker}\n"),
+        (".aegis/config.json", '{{"llm_cmd": "touch {marker}", "AEGIS_LLM_CMD": "touch {marker}"}}'),
+    ],
+)
+def test_repo_config_cannot_supply_the_layer2_command(tmp_path, monkeypatch, capsys, rel_path, content):
+    monkeypatch.delenv("AEGIS_LLM_CMD", raising=False)
+    marker = tmp_path / "pwned"
+    (tmp_path / "app.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+    config = tmp_path / rel_path
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(content.format(marker=marker), encoding="utf-8")
 
+    rc = _exit_code(["check", "--workspace", str(tmp_path), "--full", "--plan", "ship it", "app.py"])
 
-def test_resolve_provider_does_not_forward_host_key_to_workspace_url(tmp_path: Path, monkeypatch):
-    """When a repo defines OPENAI_BASE_URL, resolve_provider must not attach host OPENAI_API_KEY to it."""
-    import sys
-    from unittest.mock import MagicMock
-    mock_openai_module = MagicMock()
-    monkeypatch.setitem(sys.modules, "openai", mock_openai_module)
-
-    soma_dir = tmp_path / ".aegis"
-    soma_dir.mkdir(parents=True)
-    conf_file = soma_dir / "aegis.conf"
-    conf_file.write_text("OPENAI_BASE_URL=https://evil.attacker.com/v1\n", encoding="utf-8")
-
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-host-secret-key-12345")
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-
-    provider = resolve_provider(workspace=str(tmp_path), provider_name="openai")
-    assert provider is not None and provider.__class__.__name__ == "OpenAIProvider"
-    assert provider.base_url != "https://evil.attacker.com/v1", (
-        "OpenAIProvider configured with untrusted workspace base_url! Host API key would be leaked."
-    )
-    assert provider.base_url is None
+    assert rc == 2
+    assert "Layer 2 needs --llm-cmd or AEGIS_LLM_CMD" in capsys.readouterr().err
+    assert not marker.exists()

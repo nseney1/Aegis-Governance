@@ -1,92 +1,53 @@
-from pathlib import Path
-"""TDD Gate 1 tests for the Layer 2 orchestrator (run_layer2).
+"""Layer 2 orchestration through VerificationPipeline (ported from run_layer2, #31).
 
-The run_layer2() orchestrator wires together:
-- Signature extraction (extract_signatures from immune_verify)
+The pipeline wires together:
+- Signature extraction (adversarial_verify.extract_signatures)
 - Information-partitioned prompt construction (build_spec_prompt, build_code_prompt)
-- Pluggable LLM backend invocation for Spec Agent and Code Agent
-- Structured output parsing (parse_predictions, parse_claims)
+- The Layer 2 backend for the Spec Agent and the Code Agent
+- Structured output parsing (parse_predictions, parse_claims), fenced JSON included
 - Deterministic arbitration (arbiter.arbitrate)
 
 Tests verify:
-1. run_layer2 is importable from aegis_core.verification.runner
-2. llm_backend is a required parameter without defaults
-3. Prompt structure and information partitioning are strictly maintained
-4. Mock LLM returning empty predictions/claims produces SHIP verdict
-5. Mock LLM returning contradicting predictions/claims produces BLOCK verdict
-6. Unmatched high-severity predictions produce REVISE verdict
-7. Layer 1 failures override agent agreement and produce BLOCK
-8. Edge cases: markdown-fenced JSON responses, multiple changed files,
-   empty file list, non-Python files, and custom test names/results.
+1. A backend is required: none is an error, never a silent skip
+2. Prompt structure and information partitioning are strictly maintained (AEGIS-V01)
+3. Empty predictions/claims -> SHIP; contradicted or confirmed risks -> BLOCK
+4. Unmatched high-severity predictions -> REVISE; a Layer 1 failure alone -> BLOCK
+5. Edge cases: markdown-fenced JSON, multiple changed files, no changed files
+   (Layer 2 is not run), non-Python files, and custom test names/results.
 """
-import inspect
 import json
-import os
-import sys
 import textwrap
 
 import pytest
 
-# tests/test_verification/ -> tests/ -> REPO_ROOT
-REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
-sys.path.insert(0, REPO_ROOT)
-
+from aegis_core.inference_provider import MISSING_BACKEND
 from aegis_core.verification import (
     ArbitrationResult,
-    Claim,
-    Divergence,
-    Prediction,
     RiskCategory,
-    Severity,
     ToolEvidence,
     Verdict,
+    VerificationPipeline,
 )
-from aegis_core.verification import runner
-
-try:
-    from aegis_core.verification.runner import run_layer2
-except ImportError:
-    def run_layer2(*args, **kwargs):
-        """Dynamic dispatch to run_layer2 to allow pytest discovery during TDD Red phase."""
-        from aegis_core.verification.runner import run_layer2 as _real
-        return _real(*args, **kwargs)
 
 
-class TestRunLayer2Interface:
-    """Verify interface contract, importability, and required arguments."""
+def _layer2(changed_files, repo_root, task_plan, layer1_evidence, llm_backend, test_names=None, test_results=None):
+    """The v3 run_layer2 call shape, mapped onto VerificationPipeline.run (#31)."""
+    return VerificationPipeline().run(
+        changed_files=changed_files,
+        workspace=repo_root,
+        task_plan=task_plan,
+        backend=llm_backend,
+        layer1_evidence=layer1_evidence,
+        test_names=test_names,
+        test_results=test_results,
+    ).arbitration_result
 
-    def test_run_layer2_is_importable(self):
-        """run_layer2 must be importable directly from aegis_core.verification.runner."""
-        from aegis_core.verification.runner import run_layer2 as imported_fn
-        assert callable(imported_fn), "run_layer2 must be a callable function"
 
-    def test_llm_backend_parameter_is_required(self):
-        """llm_backend parameter must be required with no default value to prevent accidental real API calls."""
-        from aegis_core.verification.runner import run_layer2 as imported_fn
-        sig = inspect.signature(imported_fn)
-        assert "llm_backend" in sig.parameters, "run_layer2 signature must include 'llm_backend'"
-        param = sig.parameters["llm_backend"]
-        assert param.default is inspect.Parameter.empty, (
-            "llm_backend must have no default value (must be explicitly provided)"
-        )
-        with pytest.raises(TypeError):
-            imported_fn(
-                changed_files=[],
-                repo_root=".",
-                task_plan="Implement feature",
-                layer1_evidence=[],
-            )
-
-    def test_llm_backend_none_rejected(self):
-        """Passing llm_backend=None must be rejected with TypeError or ValueError."""
-        with pytest.raises((TypeError, ValueError)):
-            run_layer2(
-                changed_files=[],
-                repo_root=".",
-                task_plan="Implement feature",
-                layer1_evidence=[],
-                llm_backend=None,
-            )
+class TestBackendRequired:
+    def test_missing_backend_raises(self, tmp_path):
+        (tmp_path / "mod.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+        with pytest.raises(ValueError, match=MISSING_BACKEND):
+            _layer2(["mod.py"], str(tmp_path), "Implement feature", [], llm_backend=None)
 
 
 class TestInformationPartitioningAndPromptDispatch:
@@ -127,7 +88,7 @@ class TestInformationPartitioningAndPromptDispatch:
             ToolEvidence("persistence_checker", "engine.py", True, "All state persisted")
         ]
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["engine.py"],
             repo_root=str(tmp_path),
             task_plan=plan,
@@ -182,7 +143,7 @@ class TestInformationPartitioningAndPromptDispatch:
 
 
 class TestLayer2ArbitrationVerdicts:
-    """Verify end-to-end arbitration verdicts through run_layer2."""
+    """Verify end-to-end arbitration verdicts through the pipeline."""
 
     def test_empty_predictions_claims_produces_ship(self, tmp_path):
         """When LLM returns empty predictions and claims and Layer 1 passes -> SHIP."""
@@ -202,7 +163,7 @@ class TestLayer2ArbitrationVerdicts:
             ToolEvidence("call_graph", "noop.py", True, "wired"),
         ]
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["noop.py"],
             repo_root=str(tmp_path),
             task_plan="Create no-op utility",
@@ -254,7 +215,7 @@ class TestLayer2ArbitrationVerdicts:
             ToolEvidence("persistence_checker", "storage.py:state", True, "All keys serialized")
         ]
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["storage.py"],
             repo_root=str(tmp_path),
             task_plan="Add persistent storage mechanism",
@@ -304,7 +265,7 @@ class TestLayer2ArbitrationVerdicts:
             )
         ]
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["cell.py"],
             repo_root=str(tmp_path),
             task_plan="Update cell fitness calculation",
@@ -361,7 +322,7 @@ class TestLayer2ArbitrationVerdicts:
             )
         ]
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["decay.py"],
             repo_root=str(tmp_path),
             task_plan="Implement decay epochs",
@@ -399,7 +360,7 @@ class TestLayer2ArbitrationVerdicts:
                 return json.dumps([])  # Code Agent missed it
             return json.dumps([])
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["step.py"],
             repo_root=str(tmp_path),
             task_plan="Add step execution",
@@ -435,7 +396,7 @@ class TestLayer2ArbitrationVerdicts:
             )
         ]
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["orphan.py"],
             repo_root=str(tmp_path),
             task_plan="Add orphan routine",
@@ -484,7 +445,7 @@ class TestEdgeCasesAndRobustness:
                 return f"```json\n{json.dumps(data, indent=2)}\n```"
             return "```json\n[]\n```"
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["score.py"],
             repo_root=str(tmp_path),
             task_plan="Refactor calculate_score",
@@ -522,7 +483,7 @@ class TestEdgeCasesAndRobustness:
             dispatched_prompts.append(prompt)
             return json.dumps([])
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["mod_a.py", "mod_b.py"],
             repo_root=str(tmp_path),
             task_plan="Implement process_a and process_b",
@@ -546,20 +507,24 @@ class TestEdgeCasesAndRobustness:
         assert isinstance(result, ArbitrationResult)
 
     def test_empty_changed_files_graceful(self, tmp_path):
-        """An empty changed_files list must not crash and produce valid result."""
+        """No changed files: Layer 1 passes, Layer 2 is not run and the backend is never called."""
+        calls = []
+
         def fake_llm(prompt: str) -> str:
+            calls.append(prompt)
             return json.dumps([])
 
-        result = run_layer2(
+        res = VerificationPipeline().run(
             changed_files=[],
-            repo_root=str(tmp_path),
+            workspace=str(tmp_path),
             task_plan="Documentation update only",
+            backend=fake_llm,
             layer1_evidence=[],
-            llm_backend=fake_llm,
         )
 
-        assert isinstance(result, ArbitrationResult)
-        assert result.verdict == Verdict.SHIP
+        assert res.verdict == Verdict.SHIP
+        assert res.arbitration_result is None
+        assert calls == []
 
     def test_non_python_or_missing_changed_files(self, tmp_path):
         """Non-Python files or missing files in changed_files must not raise syntax errors or crashes."""
@@ -569,7 +534,7 @@ class TestEdgeCasesAndRobustness:
         def fake_llm(prompt: str) -> str:
             return json.dumps([])
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["README.md", "non_existent_file.py"],
             repo_root=str(tmp_path),
             task_plan="Update documentation",
@@ -599,7 +564,7 @@ class TestEdgeCasesAndRobustness:
         test_names = ["test_validate_positive", "test_validate_empty"]
         test_results = "test_validate_positive: PASSED\ntest_validate_empty: PASSED"
 
-        result = run_layer2(
+        result = _layer2(
             changed_files=["validator.py"],
             repo_root=str(tmp_path),
             task_plan="Add validator",

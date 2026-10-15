@@ -1,10 +1,7 @@
 """Core Governance API."""
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
 import re
 import warnings
 from pathlib import Path
@@ -266,19 +263,6 @@ class Governance:
         return parse_rule_file(filepath)
 
     parse_rule_file = parse_rule_file
-    
-    def create_cell_from_description(
-        self, description: str, domain: Optional[str] = None, cell_type: Optional[str] = None,
-    ) -> dict[str, Any] | str:
-        """Create a cell using natural language via configured inference provider."""
-        from aegis_core.lifecycle import create_cell_from_description as core_create_cell_nl
-        canonical_type = TYPE_TRANSLATION_MAP.get(cell_type, cell_type) if cell_type else None
-        return core_create_cell_nl(
-            description=description,
-            domain_hint=domain,
-            cell_type=canonical_type,
-            workspace=str(self.root),
-        )
     
     def signal(
         self, cell_name: str, signal_type: str, metric: Optional[dict[str, Any]] = None,

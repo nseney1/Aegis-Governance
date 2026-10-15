@@ -1,12 +1,11 @@
 """Shared, deterministic, read-only checkpoint checks for CLI and MCP."""
 from __future__ import annotations
 
-import json
 import os
 import re
 import stat
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import List
 
 from aegis_core.evidence import aggregate_signals
 from aegis_core.taxonomy import DIR_TO_ALLOWED_RULE_TYPES as DIR_TO_TYPE
@@ -241,8 +240,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_canonical_evidence_readers.py")
     if stem == "frontmatter":
         candidates.append(test_dir / "test_core_lifecycle.py")
-    if stem == "inference_provider":
-        candidates.append(test_dir / "test_keyring_integration.py")
     if stem in ("verification_jobs", "jobs"):
         candidates.append(test_dir / "test_mcp_async_verify.py")
         candidates.append(test_dir / "test_worker_lifecycle.py")
@@ -412,6 +409,14 @@ def check_hardcoded_paths(root: Path) -> list[dict]:
 
 
 def check_assertion_density(root: Path) -> list[dict]:
+    """Every ``test_*`` function under tests/ must assert something and not be a stub.
+
+    Judged per function by AST (#1): text such as "assert " in a comment, a
+    docstring or a neighbouring test no longer passes a file.
+    """
+    from aegis_core.verification.quality_gate import check_assertion_density as density
+    from aegis_core.verification.quality_gate import check_no_bare_pass as bare_pass
+
     issues = []  # type: List[dict]
     try:
         test_files = find_python_files(root, "tests")
@@ -421,47 +426,22 @@ def check_assertion_density(root: Path) -> list[dict]:
     for test_file in test_files:
         if not test_file.name.startswith("test_"):
             continue
-        if not _is_regular_file(
-            "assertion_density", root, test_file, issues
-        ):
+        if not _is_regular_file("assertion_density", root, test_file, issues):
             continue
         try:
-            content = test_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            issues.append(_failure(
-                "assertion_density", root, test_file, "read", exc
-            ))
+            found = [density(str(test_file)), bare_pass(str(test_file))]
+        except (OSError, SyntaxError, UnicodeError, ValueError) as exc:
+            issues.append(_failure("assertion_density", root, test_file, "parse", exc))
             continue
-        has_assertion = (
-            "assert " in content
-            or "assert(" in content
-            or "pytest.raises" in content
-            or "pytest.fail" in content
-            or "self.assert" in content
-        )
-        if not has_assertion:
-            try:
-                from aegis_core.verification.quality_gate import (
-                    check_assertion_density as ast_check,
-                )
-                evidence = ast_check(str(test_file))
-                if evidence.verdict:
-                    continue
-            except (OSError, UnicodeError, ValueError, SyntaxError) as exc:
-                issues.append(_failure(
-                    "assertion_density", root, test_file, "parse", exc
-                ))
-                continue
-            except ImportError:
-                pass
-            issues.append({
-                "check": "assertion_density",
-                "file": _relative(root, test_file),
-                "message": (
-                    f"Low assertion density in {test_file.name}: "
-                    "no assert statements found"
-                ),
-            })
+        prefixes = ("Low assertion density in", "Placeholder tests in")
+        for prefix, evidence in zip(prefixes, found):
+            if not evidence.verdict:
+                issues.append({
+                    "check": "assertion_density",
+                    "file": _relative(root, test_file),
+                    "lines": evidence.lines,
+                    "message": f"{prefix} {test_file.name}: {evidence.detail[0].lower()}{evidence.detail[1:]}",
+                })
     return issues
 
 
@@ -526,7 +506,6 @@ def check_cell_conventions(root: Path) -> list[dict]:
             continue
         if isinstance(allowed_types, str):
             allowed_types = (allowed_types,)
-        expected_type = allowed_types[0]
         rel = entry.relative_path
         try:
             content = entry.content.decode("utf-8")
@@ -621,130 +600,7 @@ def check_cell_conventions(root: Path) -> list[dict]:
     return issues
 
 
-def check_arbitration_evidence(root: Path, strict: bool = False) -> list[dict]:
-    issues = []  # type: List[dict]
-    evidence_dir = root / ".aegis" / "evidence"
-    try:
-        info = os.stat(evidence_dir, follow_symlinks=False)
-    except FileNotFoundError:
-        if strict:
-            return [{
-                "check": "arbitration_evidence",
-                "file": _relative(root, evidence_dir),
-                "message": f"{_relative(root, evidence_dir)}: evidence directory not found",
-            }]
-        return issues
-    except (OSError, UnicodeError) as exc:
-        return [_failure(
-            "arbitration_evidence", root, evidence_dir, "stat", exc
-        )]
-    if not stat.S_ISDIR(info.st_mode):
-        return [{
-            "check": "arbitration_evidence",
-            "file": _relative(root, evidence_dir),
-            "message": f"{_relative(root, evidence_dir)}: expected a directory",
-        }]
-    files: list[Path] = []
-    try:
-        with os.scandir(evidence_dir) as it:
-            for entry in it:
-                if entry.name.startswith("arbitration_cycle_") and entry.name.endswith(".json") and entry.is_file():
-                    files.append(Path(entry.path))
-    except (OSError, UnicodeError) as exc:
-        return [_failure(
-            "arbitration_evidence", root, evidence_dir, "list", exc
-        )]
-    if not files:
-        if strict:
-            return [{
-                "check": "arbitration_evidence",
-                "file": _relative(root, evidence_dir),
-                "message": f"{_relative(root, evidence_dir)}: no arbitration cycles found in evidence directory",
-            }]
-        return issues
-
-
-    def cycle_number(path: Path) -> int:
-        match = re.search(r"cycle_(\d+)", str(path))
-        return int(match.group(1)) if match else 0
-
-    latest = sorted(files, key=cycle_number)[-1]
-    if not _is_regular_file(
-        "arbitration_evidence", root, latest, issues
-    ):
-        return issues
-    try:
-        text = latest.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        return [_failure(
-            "arbitration_evidence", root, latest, "read", exc
-        )]
-    try:
-        record = json.loads(text)
-    except (json.JSONDecodeError, UnicodeError) as exc:
-        return [_failure(
-            "arbitration_evidence", root, latest, "parse", exc
-        )]
-    if not isinstance(record, dict):
-        return [{
-            "check": "arbitration_evidence",
-            "file": _relative(root, latest),
-            "message": f"{_relative(root, latest)}: evidence must be a JSON object",
-        }]
-
-    verdict = str(record.get("verdict", "unknown")).lower()
-    cycle = record.get("cycle", "?")
-    divergences = record.get("divergence_count", 0)
-    if verdict == "block":
-        message = (
-            f"Arbiter verdict is BLOCK for cycle {cycle} "
-            f"({divergences} divergence(s)). Fix all findings before ship."
-        )
-    elif verdict == "revise":
-        message = (
-            f"Arbiter verdict is REVISE for cycle {cycle} "
-            f"({divergences} divergence(s)). Address high-severity findings."
-        )
-    elif verdict != "ship":
-        message = (
-            f"Unknown arbiter verdict '{verdict}' for cycle {cycle}. "
-            "Only 'ship' passes the gate."
-        )
-    else:
-        # On SHIP verdict, if strict, verify target_files coverage against git modified files
-        if strict:
-            target_files = record.get("target_files")
-            if target_files is not None:
-                try:
-                    import subprocess
-                    res = subprocess.run(
-                        ["git", "diff", "--name-only", "--diff-filter=ACMR", "HEAD"],
-                        capture_output=True, text=True, cwd=str(root), timeout=5,
-                    )
-                    if res.returncode == 0:
-                        changed = [f.strip() for f in res.stdout.splitlines() if f.strip().endswith(".py")]
-                        uncovered = [f for f in changed if f not in target_files and not f.startswith("tests/")]
-                        if uncovered:
-                            issues.append({
-                                "check": "arbitration_evidence",
-                                "file": _relative(root, latest),
-                                "message": (
-                                    f"Arbitration cycle {cycle} does not cover modified files: "
-                                    f"{', '.join(uncovered)}"
-                                ),
-                            })
-                except Exception:
-                    pass
-        return issues
-    issues.append({
-        "check": "arbitration_evidence",
-        "file": _relative(root, latest),
-        "message": message,
-    })
-    return issues
-
-
-def check_paper_walls(root: Path, strict: bool = False) -> list[dict]:
+def check_paper_walls(root: Path) -> list[dict]:
     """Verify that all wall cells have 'gate' enforcement and valid frontmatter."""
     issues = []
     walls_dir = root / ".aegis" / "rules" / "invariants"
@@ -772,8 +628,16 @@ def check_paper_walls(root: Path, strict: bool = False) -> list[dict]:
                     "file": _relative(root, wall_file),
                     "message": f"Wall cell '{wall_file.name}' enforcement is '{enforcement}', but all walls must use 'gate'.",
                 })
-        except Exception:
-            continue
+        except Exception as exc:
+            # An unreadable wall cannot be shown to be a gate: report it, never skip it.
+            issues.append({
+                "check": "paper_walls",
+                "file": _relative(root, wall_file),
+                "message": (
+                    f"Wall cell '{wall_file.name}' cannot be read, so it cannot be shown to use 'gate': "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            })
     return issues
 
 
@@ -783,7 +647,6 @@ ALL_CHECKS = [
     check_assertion_density,
     check_cell_fitness,
     check_cell_conventions,
-    check_arbitration_evidence,
     check_paper_walls,
 ]
 CHECK_NAMES = [
@@ -792,20 +655,16 @@ CHECK_NAMES = [
     "assertion_density",
     "cell_fitness",
     "cell_conventions",
-    "arbitration_evidence",
     "paper_walls",
 ]
 
 
-def run_all_checks(root: Path, strict: bool = False, require_arbitration: bool = False) -> list[dict]:
+def run_all_checks(root: Path) -> list[dict]:
     """Run every check and convert unexpected check failures into issues."""
     issues = []  # type: List[dict]
     for check_fn in ALL_CHECKS:
         try:
-            if check_fn == check_arbitration_evidence:
-                issues.extend(check_fn(root, strict=strict or require_arbitration))
-            else:
-                issues.extend(check_fn(root))
+            issues.extend(check_fn(root))
         except Exception as exc:
             check_name = check_fn.__name__.replace("check_", "", 1)
             issues.append(_failure(check_name, root, root, "check", exc))
