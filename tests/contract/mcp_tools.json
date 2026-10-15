@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "aegis_scan",
-      "description": "Call before editing files: returns the governance rules that apply to them, ranked and clamped to the JIT token budget.",
+      "description": "Call before editing files: returns the governance rules that apply to them, ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules (gates, invariants) take at most two slots; the others are listed in omitted_mandatory. stale_rules lists rules edited since the last aegis sync. If any rule file cannot be loaded the scan fails (status FAIL) and names it.",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -143,7 +143,7 @@
     },
     {
       "name": "aegis_list_rules",
-      "description": "List the governance rules with their type, hypothesis and ledger fitness.",
+      "description": "List the governance rules as {rules, stale_rules, ignored}: every rule with its type, hypothesis and ledger fitness (a file that cannot be loaded is listed with _error), the rules edited since the last aegis sync, and markdown under .aegis/rules that is not a rule.",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

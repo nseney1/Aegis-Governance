@@ -1,6 +1,7 @@
 """aegis_create_rule and aegis_list_rules."""
 from __future__ import annotations
 
+from aegis_core.taxonomy import RULE_TYPES
 from aegis_mcp.registry import _STATUS_FAIL, _get_workspace, build_rule_create_prompt, list_rules
 
 
@@ -21,7 +22,9 @@ def handle_create_rule(args: dict) -> dict:
         "prompt": prompt,
         "instruction": (
             "Process this prompt and return the rule markdown. Then use a file-writing tool "
-            "to save it under the matching .aegis/rules/<type>s/ directory."
+            "to save it as .aegis/rules/<type directory>/<id>.md, where the type directory is "
+            + ", ".join(f"{spec.directory}/ ({name})" for name, spec in RULE_TYPES.items())
+            + "."
         ),
     }
 

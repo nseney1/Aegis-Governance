@@ -61,7 +61,8 @@ def test_create_rule_returns_a_prompt_built_from_existing_rules(mcp_workspace: P
     assert "Sample hypothesis" in res["prompt"]
     assert 'User description: "Rule to test something"' in res["prompt"]
     assert "Preferred rule type: trap" in res["prompt"]
-    assert ".aegis/rules/" in res["instruction"]
+    assert "save it as .aegis/rules/<type directory>/<id>.md" in res["instruction"]
+    assert "boundaries/ (boundary)" in res["instruction"]  # never a guessed "<type>s/"
 
 
 @pytest.mark.parametrize("description", [None, "", "   ", 5])
@@ -124,3 +125,21 @@ def test_report_outcome_surfaces_a_ledger_write_failure(mcp_workspace: Path, mon
     })
     assert res == {"status": "FAIL", "error": "Failed to record outcome: disk full"}
 
+
+def test_report_outcome_fails_cleanly_when_the_rules_tree_is_unsafe(mcp_workspace: Path, tmp_path_factory):
+    """The rule names cannot be checked against a tree the loader refuses: nothing is recorded."""
+    outside = tmp_path_factory.mktemp("outside")
+    try:
+        (mcp_workspace / ".aegis" / "rules" / "invariants").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable")
+    res = handle_report_outcome({
+        "workspace": str(mcp_workspace),
+        "outcome": "success",
+        "rules_used": ["sample-rule"],
+        "idempotency_key": "k-unsafe",
+    })
+    assert res["status"] == "FAIL"
+    assert res["error"].startswith("Cannot check 'rules_used' against the rules: rule inventory validate failed")
+    assert "symlinked directory is not allowed" in res["error"]
+    assert not (mcp_workspace / ".aegis" / "state" / "ledger.jsonl").exists()
