@@ -15,20 +15,16 @@ from typing import Any
 
 from aegis_cli.base import CommandCategory, AegisCommand
 from aegis_cli.formatters import (
-    _is_dirty,
     format_in_band_charge_sheet,
     format_layer1_json_payload,
     format_layer2_summary,
     format_sarif_report,
-    verify_release_gate,
 )
 
 __all__ = [
     "run_verify",
     "VerifyCommand",
     "format_sarif_report",
-    "verify_release_gate",
-    "_is_dirty",
     "format_layer2_summary",
 ]
 
@@ -241,22 +237,6 @@ def run_verify(args: argparse.Namespace) -> int:
     use_sarif = fmt == "sarif"
     use_json = bool(getattr(args, "json", False) or fmt == "json")
 
-    if getattr(args, "release_gate", False):
-        passed, msg = verify_release_gate(repo_root)
-        if use_sarif:
-            from types import SimpleNamespace
-            rg_results = [] if passed else [SimpleNamespace(tool="release_gate", target=".", verdict=False, detail=msg)]
-            print(json.dumps(format_sarif_report(rg_results, repo_root), indent=2))
-            return 0 if passed else 1
-        if use_json:
-            print(json.dumps({"release_gate": True, "passed": passed, "message": msg}, indent=2))
-            return 0 if passed else 1
-        if passed:
-            print(f"✅ {msg}")
-            return 0
-        print(f"🔴 {msg}", file=sys.stderr)
-        return 1
-
     if getattr(args, "hook", False):
         from aegis_cli.check import run_check
         return run_check(args)
@@ -401,13 +381,6 @@ def run_verify(args: argparse.Namespace) -> int:
     if not use_sarif and pipeline_res.arbitration_result:
         print(format_layer2_summary(pipeline_res.arbitration_result))
 
-    if not use_sarif and pipeline_res.evidence_path:
-        print(f"Arbitration evidence saved: {pipeline_res.evidence_path}")
-    elif getattr(pipeline_res, "persistence_error", None):
-        print(f"Error: Could not save arbitration evidence: {pipeline_res.persistence_error}", file=sys.stderr)
-        _record_telemetry(False, "BLOCK")
-        return 1
-
     if use_sarif:
         print(json.dumps(format_sarif_report(results, repo_root), indent=2))
 
@@ -434,7 +407,6 @@ class VerifyCommand(AegisCommand):
         parser.add_argument("--plan-file", default=None, help="Path to file containing task plan or prompt context")
         parser.add_argument("--provider", default=None, help="Inference provider to use (gemini, anthropic, openai, keyring, prompt)")
         parser.add_argument("--in-band", action="store_true", help="Generate an in-band charge sheet for conversational rebuttal (zero external API keys)")
-        parser.add_argument("--release-gate", action="store_true", help="Check Release Gate 4.5: assert latest arbitration evidence is a valid SHIP receipt")
         existing_fmt = parser._option_string_actions.pop("--format", None)
         if existing_fmt is not None:
             if existing_fmt in parser._actions:

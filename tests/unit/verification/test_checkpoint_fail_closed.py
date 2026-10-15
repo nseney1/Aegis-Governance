@@ -109,25 +109,10 @@ def _run_cli(root):
     ))
 
 
-def _run_mcp(root, monkeypatch):
-    from aegis_mcp.tools import execute_tool
-
-    monkeypatch.setattr('aegis_mcp.tools.confine_workspace', lambda path: str(root))
-    return execute_tool('aegis_checkpoint', {'workspace': str(root)})
-
-
-@pytest.mark.parametrize('runner', ['cli', 'mcp'])
 @pytest.mark.parametrize('malformed', [False, True], ids=['pass', 'fail'])
-def test_checkpoint_is_recursively_read_only_on_pass_and_fail(
-    tmp_path, monkeypatch, runner, malformed, capsys
-):
+def test_checkpoint_is_recursively_read_only_on_pass_and_fail(tmp_path, malformed, capsys):
     content = '---\nid: [unterminated\n---\nbody\n' if malformed else None
     _write_wall(tmp_path, content)
-    evidence_dir = tmp_path / '.aegis' / 'evidence'
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    (evidence_dir / 'arbitration_cycle_1.json').write_text(
-        '{"verdict": "ship", "cycle": 1}', encoding='utf-8'
-    )
     marker = tmp_path / '.marker'
     marker.write_bytes(b'unchanged bytes\x00\xff')
     external = tmp_path.parent / f'{tmp_path.name}-external'
@@ -139,14 +124,11 @@ def test_checkpoint_is_recursively_read_only_on_pass_and_fail(
         pytest.skip('symlinks are unavailable')
 
     before = _snapshot(tmp_path)
-    result = _run_cli(tmp_path) if runner == 'cli' else _run_mcp(tmp_path, monkeypatch)
+    result = _run_cli(tmp_path)
     after = _snapshot(tmp_path)
 
     assert after == before
-    if runner == 'cli':
-        assert result == (1 if malformed else 0)
-    else:
-        assert result['status'] == ('FAIL' if malformed else 'PASS')
+    assert result == (1 if malformed else 0)
 
 
 def test_resolve_canonical_test_candidates(tmp_path: Path):

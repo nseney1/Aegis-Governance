@@ -5,7 +5,6 @@ Absorbs verify, checkpoint, and pathcheck into a single comprehensive command:
   aegis check [files...]    Check specific files
   aegis check --hook        Fast pre-commit gate for git hooks
   aegis check --full        Full verification (Layer 1 deterministic + Layer 2 adversarial)
-  aegis check --release     Release Gate 4.5 (validates signed SHIP receipt and allowlists)
 """
 from __future__ import annotations
 
@@ -23,7 +22,6 @@ from aegis_cli.verify import (
     resolve_task_plan,
     discover_test_evidence,
     verdict_to_exit_code,
-    verify_release_gate,
     format_sarif_report,
 )
 from aegis_cli.checkpoint import run_checkpoint
@@ -38,11 +36,6 @@ def run_check(args: argparse.Namespace) -> int:
     flag_files = getattr(args, "files", None)
     if pos_files and not flag_files:
         args.files = pos_files
-
-    # Mode 1: Release Gate 4.5
-    if getattr(args, "release", False) or getattr(args, "release_gate", False):
-        args.release_gate = True
-        return run_verify(args)
 
     # Mode 2: Git Pre-Commit Hook mode (--hook)
     if getattr(args, "hook", False):
@@ -122,23 +115,11 @@ class CheckCommand(AegisCommand):
             help="Check all workspace files",
         )
         parser.add_argument(
-            "--require-arbitration",
-            action="store_true",
-            help="Require Layer 2 arbitration evidence",
-        )
-        parser.add_argument(
             "--full",
             "--deep",
             dest="full",
             action="store_true",
             help="Run full verification (Layer 1 deterministic + Layer 2 adversarial LLM pair)",
-        )
-        parser.add_argument(
-            "--release",
-            "--release-gate",
-            dest="release_gate",
-            action="store_true",
-            help="Evaluate Release Gate 4.5 and verify signed SHIP arbitration receipt",
         )
 
         parser.add_argument(

@@ -29,47 +29,6 @@ class FakeUnparseableBackend(AgentBackend):
 class TestPipelineEvidencePersistenceAndFailClosed:
     """Verifies evidence persistence and fail-closed parser handling."""
 
-    def test_pipeline_persists_evidence_on_arbitration(self, tmp_path):
-        f = tmp_path / "auth.py"
-        f.write_text("def login(user, pw):\n    return True\n\ndef main():\n    login('a', 'b')\n", encoding="utf-8")
-
-        pipeline = VerificationPipeline()
-        rebuttal = [
-            {
-                "category": "missing_coverage",
-                "claim": "Tested in test_auth.py",
-                "evidence_file": "tests/test_auth.py",
-                "evidence_line": 5,
-                "tests_covering": ["test_login_success"],
-            },
-            {
-                "category": "unguarded_transition",
-                "claim": "Guarded at line 1",
-                "evidence_file": "auth.py",
-                "evidence_line": 1,
-                "tests_covering": ["test_login_invalid"],
-            },
-        ]
-
-        res = pipeline.run(
-            changed_files=["auth.py"],
-            workspace=tmp_path,
-            task_plan="Add login logic",
-            in_band=True,
-            rebuttal=rebuttal,
-        )
-
-        assert res.verdict == Verdict.SHIP
-        ev_file = tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json"
-        assert ev_file.exists(), "Arbitration evidence must be persisted by VerificationPipeline.run"
-        assert res.evidence_path == str(ev_file)
-        assert res.persistence_error is None
-        assert res.cycle == 1
-        record = json.loads(ev_file.read_text(encoding="utf-8"))
-        assert record["cycle"] == 1
-        assert record["verdict"] == "ship"
-        assert record["target_files"] == ["auth.py"]
-
     def test_pipeline_no_evidence_without_workspace(self):
         pipeline = VerificationPipeline()
         res = pipeline.run(
@@ -89,31 +48,6 @@ class TestPipelineEvidencePersistenceAndFailClosed:
             layer1_only=True,
         )
         assert not (tmp_path / ".aegis" / "evidence" / "arbitration_cycle_1.json").exists()
-
-    def test_pipeline_evidence_persistence_failure_logs_warning(self, tmp_path, monkeypatch, caplog):
-        import logging
-        f = tmp_path / "auth.py"
-        f.write_text("def login(user, pw):\n    return True\n\ndef main():\n    login('a', 'b')\n", encoding="utf-8")
-        pipeline = VerificationPipeline()
-        def _raise(*args, **kwargs):
-            raise OSError("disk full")
-        monkeypatch.setattr("aegis_core.verification.review_adapter.save_arbitration_evidence", _raise)
-        rebuttal = [
-            {"category": "missing_coverage", "claim": "Tested", "evidence_file": "auth.py", "evidence_line": 1, "tests_covering": []},
-            {"category": "unguarded_transition", "claim": "Guarded", "evidence_file": "auth.py", "evidence_line": 1, "tests_covering": []},
-        ]
-        with caplog.at_level(logging.WARNING):
-            res = pipeline.run(
-                changed_files=["auth.py"],
-                workspace=tmp_path,
-                task_plan="Plan",
-                in_band=True,
-                rebuttal=rebuttal,
-            )
-        assert res.verdict == Verdict.SHIP
-        assert any("Failed to persist arbitration evidence" in r.message for r in caplog.records)
-        assert res.evidence_path is None
-        assert res.persistence_error == "disk full"
 
     def test_spec_agent_unparseable_json_fails_closed_to_block(self, tmp_path):
         """When Spec Agent returns malformed JSON or error text, pipeline must FAIL-CLOSED with BLOCK."""
@@ -173,8 +107,6 @@ class TestPipelineEvidencePersistenceAndFailClosed:
         )
         assert res.verdict == Verdict.SHIP
         assert res.passed is True
-        assert res.evidence_path is not None
-        assert res.persistence_error is None
         assert res.layer1_evidence == l1_ev
 
     def test_pipeline_explicit_test_evidence_skips_discovery(self, tmp_path, monkeypatch):

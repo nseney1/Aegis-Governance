@@ -537,54 +537,8 @@ class TestCheckpointEdgeCases:
         assert not SyncMock.called, "Checkpoint mutated workspace state by calling sync/aggregate"
 
 
-class TestRequireArbitrationFlag:
-    """Test soma checkpoint --require-arbitration flag."""
-
-    def test_require_arbitration_fails_without_evidence(self, tmp_path):
-        _setup_clean_workspace(tmp_path)
-        args = argparse.Namespace(
-            workspace=str(tmp_path),
-            pre_commit=True,
-            strict=False,
-            require_arbitration=True,
-            json=False,
-        )
-        exit_code = run_checkpoint(args)
-        assert exit_code == 1
-
-    def test_require_arbitration_passes_with_ship_evidence(self, tmp_path):
-        _setup_clean_workspace(tmp_path)
-        ev_dir = tmp_path / ".aegis" / "evidence"
-        (ev_dir / "arbitration_cycle_1.json").write_text(
-            json.dumps({"cycle": 1, "verdict": "ship", "divergence_count": 0}),
-            encoding="utf-8",
-        )
-        args = argparse.Namespace(
-            workspace=str(tmp_path),
-            pre_commit=True,
-            strict=False,
-            require_arbitration=True,
-            json=False,
-        )
-        exit_code = run_checkpoint(args)
-        assert exit_code == 0
-
-    def test_require_arbitration_fails_with_block_evidence(self, tmp_path):
-        _setup_clean_workspace(tmp_path)
-        ev_dir = tmp_path / ".aegis" / "evidence"
-        (ev_dir / "arbitration_cycle_1.json").write_text(
-            json.dumps({"cycle": 1, "verdict": "block", "divergence_count": 2}),
-            encoding="utf-8",
-        )
-        args = argparse.Namespace(
-            workspace=str(tmp_path),
-            pre_commit=True,
-            strict=False,
-            require_arbitration=True,
-            json=False,
-        )
-        exit_code = run_checkpoint(args)
-        assert exit_code == 1
+class TestPaperWallGate:
+    """An invariant/wall rule without gate enforcement blocks even in warn mode."""
 
     def test_paper_wall_with_advisory_enforcement_fails_gate(self, tmp_path):
         _setup_clean_workspace(tmp_path)
@@ -599,7 +553,6 @@ class TestRequireArbitrationFlag:
             workspace=str(tmp_path),
             pre_commit=False,
             strict=True,
-            require_arbitration=False,
             json=False,
         )
         exit_code = run_checkpoint(args)
@@ -619,7 +572,6 @@ class TestRequireArbitrationFlag:
             workspace=str(tmp_path),
             pre_commit=True,
             strict=False,
-            require_arbitration=False,
             json=False,
         )
         exit_code = run_checkpoint(args)
@@ -631,10 +583,9 @@ class TestRequireArbitrationFlag:
         cmd = CheckpointCommand()
         parser = argparse.ArgumentParser()
         cmd.configure_parser(parser)
-        parsed = parser.parse_args(["--pre-commit", "--strict", "--require-arbitration"])
+        parsed = parser.parse_args(["--pre-commit", "--strict"])
         assert parsed.pre_commit is True
         assert parsed.strict is True
-        assert parsed.require_arbitration is True
 
         with patch("aegis_cli.checkpoint.run_checkpoint", return_value=0) as mock_run:
             assert cmd.execute(parsed) == 0

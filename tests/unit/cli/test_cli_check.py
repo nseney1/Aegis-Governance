@@ -62,23 +62,6 @@ def test_check_full_runs_full_verification():
         mock_verify.assert_called_once_with(args)
 
 
-def test_check_release_runs_release_gate():
-    args = argparse.Namespace(
-        target_files=None,
-        files=None,
-        hook=False,
-        full=False,
-        release=True,
-        release_gate=False,
-        checkpoint_only=False,
-    )
-    with patch("aegis_cli.check.run_verify", return_value=0) as mock_verify:
-        rc = run_check(args)
-        assert rc == 0
-        assert args.release_gate is True
-        mock_verify.assert_called_once_with(args)
-
-
 def test_check_hook_mode():
     args = argparse.Namespace(
         target_files=None,

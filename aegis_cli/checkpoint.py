@@ -6,7 +6,6 @@ Checks:
 - Assertion density in test files
 - Cell fitness scores from .soma/evidence ledger
 - Cell convention enforcement (frontmatter, type/dir match)
-- Arbitration evidence (un-bypassable review gate)
 
 Supports --pre-commit (warn mode), --strict, --json, --workspace flags.
 
@@ -57,7 +56,6 @@ def run_checkpoint(args: argparse.Namespace) -> int:
 
     pre_commit = getattr(args, "pre_commit", False)
     strict = getattr(args, "strict", False)
-    require_arbitration = getattr(args, "require_arbitration", False)
     use_json = getattr(args, "json", False)
 
     # Validate workspace exists
@@ -75,19 +73,17 @@ def run_checkpoint(args: argparse.Namespace) -> int:
         return 1
 
     # Run all checks (from shared module)
-    all_issues = run_all_checks(
-        root, strict=strict, require_arbitration=require_arbitration
-    )
+    all_issues = run_all_checks(root)
     has_issues = len(all_issues) > 0
 
     # Determine exit code
     if has_issues:
         has_gate_issues = any(
-            i.get("check") in ("arbitration_evidence", "paper_walls")
+            i.get("check") == "paper_walls"
             or "wall enforcement" in i.get("message", "").lower()
             for i in all_issues
         )
-        if require_arbitration or has_gate_issues or not pre_commit or strict:
+        if has_gate_issues or not pre_commit or strict:
             exit_code = 1
         else:
             exit_code = 0  # Warn mode only for non-gate issues
@@ -131,11 +127,6 @@ class CheckpointCommand(AegisCommand):
             "--strict",
             action="store_true",
             help="In pre-commit mode, exit 1 on issues",
-        )
-        parser.add_argument(
-            "--require-arbitration",
-            action="store_true",
-            help="Require valid passing arbitration evidence without requiring full --strict",
         )
 
     def execute(self, args: argparse.Namespace) -> int:

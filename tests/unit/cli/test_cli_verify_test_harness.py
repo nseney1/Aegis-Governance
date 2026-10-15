@@ -76,8 +76,6 @@ class TestVerifyCLIWiringWithTestHarness:
             res.arbitration_result.verdict = Verdict.SHIP
             res.arbitration_result.divergences = []
             res.arbitration_result.convergences = []
-            res.evidence_path = None
-            res.persistence_error = None
             return res
 
         mock_provider = MagicMock()
