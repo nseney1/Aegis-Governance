@@ -100,3 +100,30 @@ def test_provision_ast_driver_slots(tmp_path: Path):
     assert drivers_dir.is_dir()
     assert (drivers_dir / "ts_ast.js").exists()
     assert (drivers_dir / "rust_ast.py").exists()
+
+
+def test_provision_preserves_existing_slot_values_with_quotes_and_backslashes(tmp_path: Path):
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='foo'\n", encoding="utf-8")
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
+    slots_file.parent.mkdir(parents=True)
+    original = 'ruff check --select "E,W" C:\\tools\\src'
+    slots_file.write_text("slots:\n  LINT_CMD: '" + original + "'\n", encoding="utf-8")
+    assert SlotRegistry.load(tmp_path).get("LINT_CMD") == original
+
+    provision_ast_driver_slots(tmp_path, copy_drivers=False)
+
+    registry = SlotRegistry.load(tmp_path)
+    assert registry.get("LINT_CMD") == original
+    assert registry.get_ast_driver(".rs") == "{python} .aegis/drivers/rust_ast.py"
+
+
+def test_provision_does_not_overwrite_unparseable_slots_file(tmp_path: Path):
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='foo'\n", encoding="utf-8")
+    slots_file = tmp_path / ".aegis" / "slots.yaml"
+    slots_file.parent.mkdir(parents=True)
+    slots_file.write_text(": : hand-edited, not yet valid\n", encoding="utf-8")
+
+    _, created_files = provision_ast_driver_slots(tmp_path, copy_drivers=False)
+
+    assert slots_file.read_text(encoding="utf-8") == ": : hand-edited, not yet valid\n"
+    assert str(slots_file) not in created_files
