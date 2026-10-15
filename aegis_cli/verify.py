@@ -231,12 +231,18 @@ def run_verify(args: argparse.Namespace) -> int:
 
     if not target_files:
         summary = "Layer 1: 0 files changed (clean repository)"
+        # Say so: a Layer 2 run that reviewed nothing must not read like a Layer 1-only pass.
+        layer2_summary = "Layer 2: no changed files to review"
         if use_json:
             payload = format_layer1_json_payload(not blocking, [], [], summary)
             payload["checkpoint_issues"] = issues
+            if layer2:
+                payload["layer2"] = {"verdict": None, "summary": layer2_summary}
             print(json.dumps(payload, indent=2))
         else:
             print(summary)
+            if layer2:
+                print(layer2_summary)
         return 1 if blocking else 0
 
     try:

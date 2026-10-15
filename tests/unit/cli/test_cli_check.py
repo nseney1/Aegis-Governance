@@ -151,6 +151,41 @@ class TestLayer1:
         assert _exit_code(["check", "--workspace", str(ws)]) == 0
         assert "0 files changed" in capsys.readouterr().out
 
+    def test_an_unreadable_gate_rule_fails_the_check(self, ws, capsys):
+        invariants = ws / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "no-subprocess.md").write_bytes(
+            b"---\nid: no-subprocess\ntype: invariant\nenforcement: gate\n"
+            b"forbid_ast:\n  calls: [subprocess.run]\n---\nNo shelling out \xff here.\n"
+        )
+        (ws / "bad.py").write_text(
+            "import subprocess\n\n\ndef main():\n    return subprocess.run(['true'])\n", encoding="utf-8"
+        )
+        assert _exit_code(["check", "--workspace", str(ws), "bad.py"]) == 1
+        out = capsys.readouterr().out
+        assert "forbid_ast: .aegis/rules/invariants/no-subprocess.md" in out
+        assert "PASSED" not in out
+
+    @pytest.mark.parametrize(
+        "extra, fast",
+        [([], True), (["--hook"], True), (["--full", "--plan", "p"], False), (["--plan", "p"], False)],
+        ids=["default", "hook", "full", "plan"],
+    )
+    def test_mutation_testing_runs_only_behind_layer2(self, ws, monkeypatch, llm, extra, fast):
+        from aegis_core.verification import runner
+
+        seen = []
+
+        def spy(**kwargs):
+            seen.append(kwargs["fast_mode"])
+            return []
+
+        monkeypatch.setattr(runner, "run_layer1", spy)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        backend = ["--llm-cmd", llm("ship")] if "--hook" not in extra else []
+        _exit_code(["check", "--workspace", str(ws), *backend, *extra, "clean.py"])
+        assert seen == [fast]
+
     def test_changed_files_come_from_git_when_none_are_named(self, ws, capsys):
         _git_repo(ws)
         (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
@@ -325,6 +360,26 @@ class TestLayer2:
         argv = ["check", "--workspace", str(ws), "--llm-cmd", llm("ship"), "--plan-file", "missing.md", "clean.py"]
         assert _exit_code(argv) == 1
         assert "plan file not found: missing.md" in capsys.readouterr().err
+
+    def test_no_changed_files_says_layer2_had_nothing_to_review(self, ws, capsys, llm):
+        _git_repo(ws)
+        assert _exit_code(["check", "--workspace", str(ws), "--full", "--plan", "x", "--llm-cmd", llm("fail")]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1: 0 files changed (clean repository)" in out
+        assert "Layer 2: no changed files to review" in out
+
+    def test_no_changed_files_json_reports_layer2_unreviewed(self, ws, capsys, llm):
+        _git_repo(ws)
+        argv = ["check", "--workspace", str(ws), "--format", "json", "--plan", "x", "--llm-cmd", llm("ship")]
+        assert _exit_code(argv) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["passed"] is True
+        assert payload["layer2"] == {"verdict": None, "summary": "Layer 2: no changed files to review"}
+
+    def test_no_changed_files_layer1_only_does_not_mention_layer2(self, ws, capsys):
+        _git_repo(ws)
+        assert _exit_code(["check", "--workspace", str(ws)]) == 0
+        assert "Layer 2" not in capsys.readouterr().out
 
     def test_no_arbitration_evidence_is_written(self, ws, llm):
         _git_repo(ws)
