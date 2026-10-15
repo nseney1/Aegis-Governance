@@ -2,6 +2,7 @@
 
 Subcommands:
   aegis rule list                 List active workspace rules and fitness scores
+  aegis rule create               Create a rule (--hypothesis, optional --body-file)
   aegis rule promote <rule_id>    Promote a rule up lifecycle tiers
   aegis rule demote <rule_id>     Demote a rule down lifecycle tiers
   aegis rule archive [rule_id]    Archive decayed, extinct, or quarantined rules
@@ -21,6 +22,7 @@ from aegis_core.errors import WorkspaceNotFoundError
 from aegis_core.lifecycle.creation import MAX_RULE_BODY_BYTES, validate_rule_body
 from aegis_core.taxonomy import RULE_TYPE_DIRS
 from aegis_core.workspace import Workspace
+from aegis_core.workspace.discovery import _is_workspace_dir
 from aegis_core.workspace.layout import WorkspaceLayout
 from aegis_core.lifecycle import (
     promote_cell, demote_cell, prune_cells, find_cell_file,
@@ -92,16 +94,29 @@ def _not_a_workspace(directory: Path) -> WorkspaceNotFoundError:
     return WorkspaceNotFoundError(f"not an Aegis workspace (no .aegis/ in {directory}); run aegis init")
 
 
+def _walk_up_to_workspace(start: Path) -> Path:
+    """Discovery's start-path walk without its AEGIS_WORKSPACE/AEGIS_ROOT override:
+    an explicit --workspace beats the environment, as it already does for create."""
+    for d in (start, *start.parents):
+        if _is_workspace_dir(str(d)):
+            return d
+    return start
+
+
 def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = False) -> Path:
     """Resolve the rule workspace. Never ``$HOME``, never above the git toplevel (H8).
 
-    An explicit ``rule <action> --workspace DIR`` means exactly DIR. Otherwise
-    the root comes from ``cli.main``'s discovery, which walks up from the cwd
-    without bounds, so it is re-checked against the cwd's git toplevel.
+    An explicit ``--workspace DIR`` is the start point, whichever position it
+    was given in (``_workspace_arg`` is the raw global flag, when ``cli.main``
+    keeps it). ``rule create`` (``require_aegis``) uses exactly DIR; the other
+    actions walk up from DIR like cwd discovery does. Without DIR the root comes
+    from ``cli.main``'s cwd discovery. Either way the root is then bounded by
+    the start point's git toplevel, since discovery itself walks up without bounds.
     """
-    explicit = getattr(args, "_rule_workspace_arg", None)
+    explicit = getattr(args, "_rule_workspace_arg", None) or getattr(args, "_workspace_arg", None)
     if explicit:
-        root = start = Path(explicit).expanduser().resolve()
+        start = Path(explicit).expanduser().resolve()
+        root = start if require_aegis else _walk_up_to_workspace(start)
     else:
         ws_obj = getattr(args, "ws", None)
         raw = getattr(args, "workspace", None) or getattr(args, "_project_root", None) or getattr(args, "_root", None)
@@ -223,8 +238,8 @@ def _run_promote(args: argparse.Namespace) -> int:
     if status == "already_terminal":
         msg = f"Rule '{rule_id}' is already at terminal tier ('{res.get('current_type')}')"
         return _emit_status(use_json, {"info": msg}, f"  ℹ️  {msg}", 0)
-    if status == "target_exists":
-        msg = res.get("message", "Target already exists")
+    if status not in ("promoted", "dry_run"):
+        msg = res.get("message") or f"Promotion of '{rule_id}' failed ({status})"
         return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
 
     from_t, to_t = res.get("from_type"), res.get("to_type")
@@ -272,6 +287,9 @@ def _run_demote(args: argparse.Namespace) -> int:
     if status == "already_base":
         msg = f"Rule '{rule_id}' is already at base tier ('{res.get('current_type')}')"
         return _emit_status(use_json, {"error": msg}, f"  ⚠️  {msg}", 1)
+    if status not in ("demoted", "dry_run"):
+        msg = res.get("message") or f"Demotion of '{rule_id}' failed ({status})"
+        return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
 
     from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:

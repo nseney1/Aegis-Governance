@@ -7,6 +7,7 @@ and proves HOME is byte-identical afterwards.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import io
 import json
@@ -17,6 +18,8 @@ from pathlib import Path
 import pytest
 
 from aegis_cli.cli import main
+from aegis_cli.rule import run_rule
+from aegis_core.workspace import Workspace
 from aegis_core.yaml import _get_body, parse_frontmatter
 
 MAX_BODY = 64 * 1024
@@ -165,6 +168,122 @@ def test_json_mode_reports_workspace_error_on_stdout(home, monkeypatch, capsys) 
     assert rc == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload == {"status": "error", "error": _not_a_workspace(repo)}
+
+
+def _trap(repo: Path, rule_id: str) -> Path:
+    path = repo / ".aegis" / "rules" / "traps" / f"{rule_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\nid: {rule_id}\ntype: trap\nenforcement: advisory\n---\nBody.\n", encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def elsewhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    return cwd
+
+
+@pytest.mark.parametrize("form", ["subcommand", "global"])
+def test_explicit_workspace_subdirectory_lists_the_repo_rules(home, elsewhere, capsys, form: str) -> None:
+    """The global and subcommand --workspace forms resolve a repo subdirectory the same way."""
+    repo = _git_repo(home / "proj", initialized=True)
+    _trap(repo, "repo-rule")
+    (repo / "src").mkdir()
+    src = str(repo / "src")
+    argv = ["rule", "list", "--workspace", src, "--json"] if form == "subcommand" else ["--workspace", src, "rule", "list", "--json"]
+
+    rc = main(argv)
+
+    assert rc == 0
+    assert [r["id"] for r in json.loads(capsys.readouterr().out)] == ["repo-rule"]
+
+
+def test_explicit_workspace_subdirectory_promotes_in_the_repo(home, elsewhere, capsys) -> None:
+    repo = _git_repo(home / "proj", initialized=True)
+    source = _trap(repo, "repo-rule")
+    (repo / "src").mkdir()
+
+    rc = main(["rule", "promote", "repo-rule", "--workspace", str(repo / "src")])
+
+    assert rc == 0, capsys.readouterr().out
+    assert not source.exists()
+    assert (repo / ".aegis" / "rules" / "invariants" / "repo-rule.md").is_file()
+
+
+@pytest.mark.parametrize("action", [["list"], ["promote", "outer-rule"], ["demote", "outer-rule"], ["archive"]], ids=lambda a: a[0])
+def test_explicit_workspace_never_resolves_above_its_git_toplevel(home, elsewhere, capsys, action: list[str]) -> None:
+    outer = home / "code"
+    _trap(outer, "outer-rule")
+    inner = _git_repo(outer / "inner", initialized=False)
+    before = _tree(home)
+
+    rc = main(["rule", *action, "--workspace", str(inner)])
+
+    assert rc == 1
+    assert f"Error: {_not_a_workspace(inner)}" in capsys.readouterr().err
+    assert _tree(home) == before
+
+
+def test_preserved_global_workspace_flag_is_bounded_like_the_subcommand_flag(home, elsewhere, capsys) -> None:
+    """`aegis --workspace INNER rule create`: cli.main walks INNER up to OUTER before dispatch.
+
+    This is the namespace rule.py receives once cli.main also keeps the raw
+    flag as ``_workspace_arg``; the bound must then be checked against INNER.
+    """
+    outer = home / "code"
+    (outer / ".aegis" / "rules").mkdir(parents=True)
+    inner = _git_repo(outer / "inner", initialized=False)
+    walked = Workspace.resolve(str(inner))
+    assert walked.root == outer.resolve()
+    before = _tree(home)
+    args = argparse.Namespace(
+        rule_action="create", hypothesis="crossing", id="crossing", json=False,
+        ws=walked, workspace=str(walked.root), _project_root=walked.root, _workspace_arg=str(inner),
+    )
+
+    rc = run_rule(args)
+
+    assert rc == 1
+    assert f"Error: {_not_a_workspace(inner)}" in capsys.readouterr().err
+    assert _tree(home) == before
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="needs aegis_cli/cli.py (outside lane A2) to keep the raw global --workspace as args._workspace_arg",
+)
+def test_global_workspace_flag_never_resolves_above_its_git_toplevel(home, elsewhere, capsys) -> None:
+    outer = home / "code"
+    (outer / ".aegis" / "rules").mkdir(parents=True)
+    inner = _git_repo(outer / "inner", initialized=False)
+    before = _tree(home)
+
+    rc = main(["--workspace", str(inner), "rule", "create", "--hypothesis", "crossing", "--id", "crossing"])
+
+    assert rc == 1
+    assert f"Error: {_not_a_workspace(inner)}" in capsys.readouterr().err
+    assert _tree(home) == before
+
+
+# ── Lifecycle outcomes the CLI must not report as success ─────────────
+
+def test_promote_into_a_protected_namespace_fails(repo, capsys) -> None:
+    source = _trap(repo, "testing")
+
+    rc = main(["rule", "promote", "testing"])
+
+    assert rc == 1
+    assert "Cannot promote cell into protected core rule namespace: 'testing'" in capsys.readouterr().out
+    assert source.is_file()
+
+
+def test_demote_with_an_invalid_rule_id_fails(repo, capsys) -> None:
+    rc = main(["rule", "demote", "../escape", "--json"])
+
+    assert rc == 1
+    assert json.loads(capsys.readouterr().out) == {"error": "Invalid cell ID: '../escape'"}
 
 
 # ── --body-file ────────────────────────────────────────────────────────
