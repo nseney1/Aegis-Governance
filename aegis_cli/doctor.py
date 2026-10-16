@@ -7,16 +7,21 @@ from ``~/.claude.json`` instead of ``claude mcp list``, which starts every confi
 
 Each host gets one state, the first of these that applies:
 
-- ``missing_binary``: none of its binaries is on PATH outside the workspace (one found only
-  inside it is listed in ``binary.ignored`` with the reason ``binary_in_workspace``);
+- ``missing_binary``: none of its binaries is in an absolute PATH entry outside the
+  workspace (one found only inside it, or only through an empty or relative entry, is
+  listed in ``binary.ignored`` with the reason ``binary_in_workspace`` or
+  ``binary_on_relative_path``, and makes the host's installation unknown);
 - ``unregistered``: its config has no ``aegis`` server, or the registered command is gone;
-- ``auth_unknown``: doctor cannot confirm the host will load ``aegis`` (its CLI failed or
-  timed out, its config cannot be parsed, the registration waits on an approval doctor
-  cannot see, or a host that sends no workspace depends on an unreadable registry);
+- ``auth_unknown``: doctor cannot confirm the host will load ``aegis`` or read its
+  bootstrap (its CLI failed or timed out, its config cannot be parsed, the registration
+  waits on an approval doctor cannot see, a host that sends no workspace depends on an
+  unreadable registry, or a CLAUDE.md-family file above the workspace, which doctor does
+  not read, decides whether Claude Code reads AGENTS.md);
 - ``policy_gap``: ``aegis`` loads, but this repository's policy does not fully reach the
-  host (no or broken bootstrap, a CLAUDE.md or AGENTS.override.md shadowing AGENTS.md, a
-  file the host truncates, an unregistered workspace for a host without roots, a disabled
-  entry, another host's identity);
+  host (no or broken bootstrap, a CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md or
+  AGENTS.override.md shadowing AGENTS.md, a file the host truncates, an unregistered
+  workspace for a host without roots, a disabled entry or one Claude Code turns off for
+  the project in ``disabledMcpServers``, another host's identity);
 - ``ok``: none of the above.
 
 ``--json`` prints one ``aegis.doctor/v1`` document: ``schema``, ``source``, ``aegis_version``,
@@ -58,6 +63,7 @@ import sys
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from aegis_cli.base import CommandCategory, AegisCommand
+from aegis_core.pathlookup import INSIDE_FENCE, Hit, only_skipped, which
 
 __all__ = ["run_doctor", "DoctorCommand", "probe_mcp_launcher", "SCHEMA", "V3_SHIPPED_RULE_SHA256"]
 
@@ -158,56 +164,6 @@ def _check_cli_resolvable() -> bool:
 
 # ── Programs doctor starts ───────────────────────────────────────────────────
 
-def _exe_names(name: str) -> List[str]:
-    if sys.platform != "win32":
-        return [name]
-    exts = [e for e in (os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(os.pathsep) if e]
-    if os.path.splitext(name)[1].upper() in {e.upper() for e in exts}:
-        return [name]
-    return [name + e for e in exts]
-
-
-def _which(name: str, path: Optional[str] = None, outside: Optional[Path] = None) -> Optional[str]:
-    """``shutil.which`` restricted to absolute PATH entries that are not inside ``outside``.
-
-    Doctor runs in a repository the user may just have cloned, and it starts what this
-    finds (``codex mcp get``, ``python3 -c``). An empty or relative PATH entry names the
-    current directory, shutil.which on Windows searches the current directory first
-    whatever ``path=`` says, and an absolute entry inside the workspace is the
-    repository's own: each would let the repository choose the program a read-only
-    command runs.
-    """
-    search = os.environ.get("PATH", os.defpath) if path is None else path
-    fence = _root_key(outside) if outside is not None else None
-    for entry in search.split(os.pathsep):
-        if not entry or not os.path.isabs(entry):
-            continue
-        if fence is not None and _inside(_root_key(entry), fence):
-            continue
-        for candidate in _exe_names(name):
-            full = os.path.join(entry, candidate)
-            if os.path.isfile(full) and os.access(full, os.X_OK):
-                return full
-    return None
-
-
-def _ignored_hits(name: str, path: Optional[str], outside: Path) -> List[str]:
-    """The programs ``_which`` passed over because their absolute PATH entry is inside
-    ``outside``: reported, so a host installed there is never called absent."""
-    search = os.environ.get("PATH", os.defpath) if path is None else path
-    fence = _root_key(outside)
-    hits = []
-    for entry in search.split(os.pathsep):
-        if entry and os.path.isabs(entry) and _inside(_root_key(entry), fence):
-            hits.extend(full for full in (os.path.join(entry, c) for c in _exe_names(name))
-                        if os.path.isfile(full) and os.access(full, os.X_OK))
-    return list(dict.fromkeys(hits))
-
-
-def _inside(path_key: str, root_key: str) -> bool:
-    return path_key == root_key or path_key.startswith(root_key.rstrip(os.sep) + os.sep)
-
-
 def _child_env() -> Dict[str, str]:
     """The environment of a program doctor starts.
 
@@ -241,12 +197,12 @@ def probe_mcp_launcher(path_env: str | None = None,
                        workspace: Optional[Path] = None) -> tuple[str, str]:
     """Resolve `python3` from PATH like an MCP host and classify it.
 
-    Only absolute PATH entries outside ``workspace`` count (see ``_which``): the probe
-    runs what it finds. Returns (status, detail); status is one of ok, missing,
+    Only absolute PATH entries outside ``workspace`` count (aegis_core.pathlookup): the
+    probe runs what it finds. Returns (status, detail); status is one of ok, missing,
     store_stub, broken, no_aegis_mcp.
     """
     path_env = os.environ.get("PATH", "") if path_env is None else path_env
-    exe = _which("python3", path_env, outside=workspace)
+    exe = which("python3", path_env, outside=workspace)
     if not exe:
         return "missing", "python3 is not on PATH"
 
@@ -551,6 +507,11 @@ def _parse_json(entry: _File) -> _File:
     except (UnicodeDecodeError, ValueError) as exc:
         entry.error = f"is not valid JSON ({str(exc)[:120]})"
         return entry
+    except RecursionError:
+        # A file nested past the parser's depth (a cloned repository's .mcp.json can be)
+        # is as unreadable as a malformed one; it must not abort the whole report.
+        entry.error = "is not valid JSON (nested too deeply to parse)"
+        return entry
     if not isinstance(entry.data, dict):
         entry.error = "is not a JSON object"
         entry.data = None
@@ -575,10 +536,13 @@ class _Ctx:
         return self.environ.get("PATH", "")
 
     def which(self, name: str) -> Optional[str]:
-        return _which(name, self.path_env, outside=self.root)
+        return which(name, self.path_env, outside=self.root)
 
-    def ignored(self, name: str) -> List[str]:
-        return _ignored_hits(name, self.path_env, self.root)
+    def passed_over(self, name: str) -> List[Hit]:
+        """Where ``name`` is when ``which`` refused every place: a relative or empty PATH
+        entry (resolved against the workspace, where a host would start) or an absolute
+        entry inside it. Never run."""
+        return only_skipped(name, self.path_env, outside=self.root, base=self.root)
 
     def file(self, path: Path, as_json: bool = False) -> _File:
         key = (os.path.abspath(str(path)), as_json)
@@ -686,8 +650,8 @@ def _command_exists(command: str, ctx: _Ctx) -> bool:
 def _probe_codex(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
     source = "codex mcp get aegis --json"
     if binary is None:
-        detail = ("the only codex on PATH is inside the workspace, and doctor does not run it"
-                  if ctx.ignored("codex") else "codex is not on PATH")
+        detail = ("the only codex on PATH is inside the workspace or behind a relative PATH entry, "
+                  "and doctor does not run it" if ctx.passed_over("codex") else "codex is not on PATH")
         return _registration("unavailable", source, detail=detail)
     try:
         # From the workspace: Codex answers with the config it would use here (user
@@ -705,7 +669,7 @@ def _probe_codex(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
         return _registration("unknown", source, detail=f"codex exited {proc.returncode}: {first}")
     try:
         data = json.loads(proc.stdout)
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: nested past the parser's depth
         return _registration("unknown", source, detail="codex printed no JSON")
     if not isinstance(data, dict) or data.get("name") != SERVER:
         return _registration("unknown", source, detail="codex answered about another server")
@@ -731,13 +695,25 @@ def _probe_claude(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]
         return _registration("unknown", source, detail=f"{source} {cfg.error}")
     data = cfg.data or {}
     projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
-    project = next((projects[k] for k in _claude_project_keys(ctx) if isinstance(projects.get(k), dict)), {})
+    key = next((k for k in _claude_project_keys(ctx) if isinstance(projects.get(k), dict)), None)
+    project = projects[key] if key is not None else {}
+
+    def facts_of(entry: Any) -> Dict[str, Any]:
+        facts = _entry_facts(entry, ctx)
+        # Claude Code turns off any server this project lists, whatever its scope
+        # (user, local or .mcp.json): "turned off; turn it on in /mcp".
+        if SERVER in _names(project.get("disabledMcpServers")):
+            facts["enabled"] = False
+            facts["detail"] = (f"Claude Code turns aegis off in this project: {source} lists it in "
+                               f"projects[{key}].disabledMcpServers; turn it on in Claude Code's /mcp")
+        return facts
+
     local = _server_entry(project)
     user = _server_entry(data)
     if local is not None:
-        return _registration("registered", source, scope="local", **_entry_facts(local, ctx))
+        return _registration("registered", source, scope="local", **facts_of(local))
     if user is not None:
-        return _registration("registered", source, scope="user", **_entry_facts(user, ctx))
+        return _registration("registered", source, scope="user", **facts_of(user))
     dot_mcp = ctx.file(ctx.root / ".mcp.json", as_json=True)
     shared = _server_entry(dot_mcp.data) if not dot_mcp.error else None
     if shared is not None:
@@ -747,7 +723,7 @@ def _probe_claude(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]
         denied = _names(project.get("disabledMcpjsonServers"))
         approval = ("approved" if SERVER in approved or project.get("enableAllProjectMcpServers") is True
                     else "denied" if SERVER in denied else "unknown")
-        facts = _entry_facts(shared, ctx)
+        facts = facts_of(shared)
         if approval == "denied":
             facts["enabled"] = False
         return _registration("registered", ctx.label(ctx.root / ".mcp.json"), scope="project",
@@ -799,8 +775,15 @@ def _probe(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
 _BLOCK_BEGIN = re.compile(r"^<!-- aegis:begin id=(\S+) v=(\S+) sha=(\S+) -->[ \t]*$")
 _BLOCK_END = re.compile(r"^<!-- aegis:end id=(\S+) -->[ \t]*$")
 _HEX12 = re.compile(r"^[0-9a-f]{12}$")
-# An import path runs to the next whitespace, so @AGENTS.md.bak names another file.
+# An import path runs to the next whitespace, so @AGENTS.md.bak names another file. A
+# relative import resolves next to the file holding it: from .claude/ it is ../AGENTS.md.
 _IMPORTS_AGENTS = re.compile(r"(?<![\w@/.\-])@(?:\./)?AGENTS\.md(?=\s|$)")
+_IMPORTS_PARENT_AGENTS = re.compile(r"(?<![\w@/.\-])@\.\./AGENTS\.md(?=\s|$)")
+# What Claude Code loads as project memory from the directory it starts in and from every
+# parent. Any one of them turns off its native AGENTS.md reading (host research digest:
+# "only when no CLAUDE.md or CLAUDE.local.md exists in cwd or any ancestor"; the binary's
+# candidate list also has .claude/CLAUDE.md).
+_CLAUDE_FAMILY = ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md")
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(`+).+?\1")
 _INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
@@ -844,16 +827,27 @@ def _prose(text: str) -> str:
 
 
 @dataclass
+class _ClaudeFile:
+    """One CLAUDE.md-family file in the workspace, as Claude Code would load it."""
+
+    name: str  # relative to the workspace, with forward slashes
+    path: Path
+    size: int
+    imports_agents: bool
+    # It and AGENTS.md are one file (a link either way): Claude Code reads AGENTS.md.
+    is_agents: bool
+    link_target: Optional[str]  # where it points when it is a symlink
+
+
+@dataclass
 class _Instructions:
     agents_bytes: Optional[int] = None
     bootstrap: str = "not_read"  # current outdated hand_edited malformed missing not_read
     block_end: Optional[int] = None  # bytes up to the end of the closing marker line
-    claude_md: Optional[Path] = None
-    claude_bytes: int = 0
-    claude_imports_agents: bool = False
-    # CLAUDE.md and AGENTS.md are one file (a link either way): Claude Code reads AGENTS.md.
-    claude_is_agents: bool = False
-    claude_link_target: Optional[str] = None  # where a CLAUDE.md symlink points
+    claude: List[_ClaudeFile] = field(default_factory=list)  # in the workspace, _CLAUDE_FAMILY order
+    # CLAUDE.md-family files in the workspace's parent directories: they count, but doctor
+    # reads no file outside the workspace, so whether one imports this AGENTS.md is unknown.
+    claude_outside: List[Path] = field(default_factory=list)
     override: bool = False
 
 
@@ -898,41 +892,70 @@ def _instructions(ctx: _Ctx) -> _Instructions:
         info.bootstrap, info.block_end = _bootstrap_state(text)
     else:
         info.bootstrap = "missing"
-    claude = ctx.file(ctx.root / "CLAUDE.md")
-    if claude.raw is not None:
-        info.claude_md = claude.path
-        info.claude_bytes = len(claude.raw)
-        info.claude_imports_agents = bool(_IMPORTS_AGENTS.search(_prose(claude.raw.decode("utf-8", errors="replace"))))
-        if claude.is_link:
-            info.claude_link_target = os.path.realpath(str(claude.path))
+    for name in _CLAUDE_FAMILY:
+        entry = ctx.file(ctx.root.joinpath(*name.split("/")))
+        if entry.raw is None:
+            continue
+        imports = _IMPORTS_PARENT_AGENTS if name.startswith(".claude/") else _IMPORTS_AGENTS
+        same = False
         if agents.raw is not None:
             try:
-                info.claude_is_agents = os.path.samefile(str(claude.path), str(agents.path))
+                same = os.path.samefile(str(entry.path), str(agents.path))
             except OSError:
-                info.claude_is_agents = False
+                same = False
+        info.claude.append(_ClaudeFile(
+            name=name, path=entry.path, size=len(entry.raw),
+            imports_agents=bool(imports.search(_prose(entry.raw.decode("utf-8", errors="replace")))),
+            is_agents=same, link_target=os.path.realpath(str(entry.path)) if entry.is_link else None))
+    info.claude_outside = [d.joinpath(*name.split("/")) for d in ctx.root.parents for name in _CLAUDE_FAMILY
+                           if _present(d.joinpath(*name.split("/")))]
     info.override = (ctx.root / "AGENTS.override.md").exists()
     return info
 
 
+def _present(path: Path) -> bool:
+    """Whether a file is there, without reading it; True when that cannot be told, so an
+    unreadable parent directory never lets doctor claim the bootstrap through."""
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except (OSError, ValueError):
+        return True
+
+
 def _claude_reads_agents(info: _Instructions) -> bool:
-    return info.claude_is_agents or info.claude_imports_agents
+    return any(f.is_agents or f.imports_agents for f in info.claude)
+
+
+def _claude_names(info: _Instructions) -> str:
+    names = [f.name for f in info.claude]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def _claude_import_advice(info: _Instructions) -> str:
-    """How to make Claude Code read AGENTS.md; aegis init never writes through a link."""
-    if info.claude_link_target is not None:
-        return (f"CLAUDE.md is a link to {info.claude_link_target}, which aegis init never writes through: "
+    """How to make Claude Code read AGENTS.md. aegis init adds the import only to a
+    CLAUDE.md at the root, and never writes through a link."""
+    root = next((f for f in info.claude if f.name == "CLAUDE.md"), None)
+    if root is not None and root.link_target is not None:
+        return (f"CLAUDE.md is a link to {root.link_target}, which aegis init never writes through: "
                 "add an @AGENTS.md line to that file, or make CLAUDE.md a link to AGENTS.md")
-    return "run aegis init to add the import"
+    if root is not None:
+        return "run aegis init to add the import"
+    first = info.claude[0]
+    line = "@../AGENTS.md" if first.name.startswith(".claude/") else "@AGENTS.md"
+    return f"add the line {line} to {first.name} (aegis init adds it only to a CLAUDE.md at the root)"
 
 
 def _budget(spec: Any, info: _Instructions) -> Dict[str, Any]:
     budget = spec.budget_bytes
-    if spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None and info.claude_is_agents:
-        size, name = info.claude_bytes, "CLAUDE.md (= AGENTS.md)"
-    elif spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None:
-        size = info.claude_bytes + ((info.agents_bytes or 0) if info.claude_imports_agents else 0)
-        name = "CLAUDE.md" + (" + AGENTS.md" if info.claude_imports_agents else "")
+    if spec.instructions == "agents_md_unless_claude_md" and info.claude:
+        # Claude Code loads every one of them; AGENTS.md too when one imports it, once.
+        whole = any(f.is_agents for f in info.claude)
+        imported = not whole and any(f.imports_agents for f in info.claude)
+        size = sum(f.size for f in info.claude) + ((info.agents_bytes or 0) if imported else 0)
+        name = " + ".join(f.name + (" (= AGENTS.md)" if f.is_agents else "") for f in info.claude)
+        name += " + AGENTS.md" if imported else ""
     elif spec.instructions in ("agents_md", "agents_md_unless_claude_md"):
         size, name = info.agents_bytes, "AGENTS.md"
     else:
@@ -948,28 +971,50 @@ def _bootstrap_reaches(spec: Any, info: _Instructions) -> Optional[bool]:
         return False
     if spec.id in _READS_AGENTS_OVERRIDE and info.override:
         return False
-    if spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None:
-        return _claude_reads_agents(info)
+    if spec.instructions == "agents_md_unless_claude_md":
+        if _claude_reads_agents(info):
+            return True
+        if info.claude:
+            return False
+        if info.claude_outside:
+            return None  # no native read; an import in a file doctor does not read is unknown
     return True
 
 
-def _registered_roots(ctx: _Ctx) -> Optional[set]:
-    """Normalized roots in ~/.aegis/workspaces.json; empty when absent, None when unreadable."""
+def _registered_roots(ctx: _Ctx) -> Tuple[Optional[set], List[int]]:
+    """(normalized roots in ~/.aegis/workspaces.json, indexes of the entries skipped).
+
+    The roots are empty when the file is absent and None when it cannot be read. An
+    entry is skipped, as the server's registry reader skips it, unless it is an object
+    whose ``root`` is an absolute path that resolves: a relative root would otherwise be
+    resolved against doctor's own cwd, and a NUL byte makes resolving raise.
+    """
     if ctx.home is None:
-        return None
+        return None, []
     from aegis_core.workspace.layout import UserLayout
 
     reg = ctx.file(UserLayout(ctx.home).workspaces_file, as_json=True)
     if not reg.exists:
-        return set()
+        return set(), []
     if reg.error or reg.data.get("v") != 1 or not isinstance(reg.data.get("workspaces"), list):
+        return None, []
+    roots, skipped = set(), []
+    for index, entry in enumerate(reg.data["workspaces"]):
+        raw = entry.get("root") if isinstance(entry, dict) else None
+        key = _root_key(raw) if isinstance(raw, str) and os.path.isabs(raw) else None
+        if key is None:
+            skipped.append(index)
+        else:
+            roots.add(key)
+    return roots, skipped
+
+
+def _root_key(root: Any) -> Optional[str]:
+    """``root`` resolved and case-folded for comparison, or None when it cannot be resolved."""
+    try:
+        return os.path.normcase(os.path.realpath(str(root)))
+    except (OSError, ValueError):
         return None
-    return {_root_key(e["root"]) for e in reg.data["workspaces"]
-            if isinstance(e, dict) and isinstance(e.get("root"), str)}
-
-
-def _root_key(root: Any) -> str:
-    return os.path.normcase(os.path.realpath(str(root)))
 
 
 # ── Host plane: one row per host ────────────────────────────────────────────
@@ -1034,8 +1079,9 @@ def _level(advisory: Optional[bool], floor: str, governed: bool, installed: Opti
     """The strongest tier known to be in force for one host (AD-8), never a guess.
 
     Nothing is enforced on a host in an ungoverned workspace or on a host that is not
-    installed; whether one whose only binary is inside the workspace is installed is
-    unknown. The local floor holds for every commit made through git.
+    installed; whether one whose only binary doctor will not run (inside the workspace, or
+    behind an empty or relative PATH entry) is installed is unknown. The local floor
+    holds for every commit made through git.
     """
     if not governed or installed is False:
         return "none"
@@ -1052,9 +1098,10 @@ def _level(advisory: Optional[bool], floor: str, governed: bool, installed: Opti
 
 def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], floor: str) -> Dict[str, Any]:
     binary = next((found for found in (ctx.which(name) for name in spec.binaries) if found), None)
-    ignored = [] if binary else [hit for name in spec.binaries for hit in ctx.ignored(name)]
+    passed = [] if binary else [hit for name in spec.binaries for hit in ctx.passed_over(name)]
+    ignored = list(dict.fromkeys(hit.path for hit in passed))
     # Installed: True, False, or None when the only binary is one doctor will not run.
-    installed: Optional[bool] = True if binary else (None if ignored else False)
+    installed: Optional[bool] = True if binary else (None if passed else False)
     reg = _probe(spec, binary, ctx)
     identity = _identity(spec, reg)
     reasons: List[Dict[str, str]] = []
@@ -1064,11 +1111,19 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         reasons.append({"code": code, "message": _clean(message, 1024)})
 
     names = " or ".join(f"`{b}`" for b in spec.binaries) or "a binary"
-    if ignored:
+    if passed:
         unknown.append("binary")
-        add("binary_in_workspace", f"{names} found only at {ignored[0]}, inside the workspace: doctor does not "
+    fenced = next((hit for hit in passed if hit.reason == INSIDE_FENCE), None)
+    relative = next((hit for hit in passed if hit.reason != INSIDE_FENCE), None)
+    if fenced is not None:
+        add("binary_in_workspace", f"{names} found only at {fenced.path}, inside the workspace: doctor does not "
                                    "run programs from the repository, so it cannot tell whether the host is installed")
-    elif binary is None:
+    if relative is not None:
+        add("binary_on_relative_path", f"{names} found only at {relative.path}, through the relative PATH entry "
+                                       f"{relative.entry!r}, which resolves against the directory a program starts in "
+                                       "(here the workspace): doctor does not run it, so it cannot tell whether the "
+                                       "host is installed")
+    if binary is None and not passed:
         add("missing_binary", f"no {names} on PATH")
     status = reg["status"]
     if status == "absent":
@@ -1088,7 +1143,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
             add("approval_unknown", "aegis is registered only in this project's .mcp.json, which Claude Code "
                                     "runs after an approval doctor cannot see")
         if reg["enabled"] is False:
-            add("registration_disabled", f"the aegis entry is disabled in {reg['source']}")
+            add("registration_disabled", reg["detail"] or f"the aegis entry is disabled in {reg['source']}")
         if identity["status"] == "mismatch":
             add("identity_mismatch", f"the registration says AEGIS_CLIENT={identity['aegis_client']}, so the "
                                      f"server would act as that host: run aegis init --host {spec.id}")
@@ -1115,10 +1170,17 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                 "hand_edited": "the Aegis block in AGENTS.md was edited by hand: run aegis init --force",
                 "malformed": "the Aegis block markers in AGENTS.md are broken: fix them, then run aegis init",
             }[info.bootstrap])
-        if spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None \
-                and not _claude_reads_agents(info):
-            add("claude_md_shadows_agents_md", "CLAUDE.md exists without @AGENTS.md, so Claude Code does "
-                                               f"not read AGENTS.md: {_claude_import_advice(info)}")
+        if spec.instructions == "agents_md_unless_claude_md" and info.claude and not _claude_reads_agents(info):
+            verb = "exists" if len(info.claude) == 1 else "exist"
+            add("claude_md_shadows_agents_md", f"{_claude_names(info)} {verb} without @AGENTS.md, so Claude Code "
+                                               f"does not read AGENTS.md: {_claude_import_advice(info)}")
+        elif spec.instructions == "agents_md_unless_claude_md" and reaches is None and info.claude_outside:
+            unknown.append("bootstrap")
+            add("claude_md_outside_workspace",
+                f"{info.claude_outside[0]} is outside the workspace: Claude Code does not read AGENTS.md "
+                "natively when a CLAUDE.md, CLAUDE.local.md or .claude/CLAUDE.md is in the directory it starts "
+                "in or a parent, and doctor reads no file outside the workspace, so it cannot tell whether "
+                "AGENTS.md reaches Claude Code: add a CLAUDE.md holding the line @AGENTS.md to the workspace")
         if spec.id in _READS_AGENTS_OVERRIDE and info.override:
             add("agents_override_shadows_agents_md", "AGENTS.override.md replaces AGENTS.md for Codex")
         if cut:
@@ -1133,11 +1195,12 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                                               "whether aegis finds this repository")
 
     codes = {r["code"] for r in reasons}
-    if codes & {"missing_binary", "binary_in_workspace"}:
+    if codes & {"missing_binary", "binary_in_workspace", "binary_on_relative_path"}:
         state = "missing_binary"
     elif codes & {"not_registered", "command_missing"}:
         state = "unregistered"
-    elif codes & {"registration_unverifiable", "approval_unknown", "workspace_registry_unknown"}:
+    elif codes & {"registration_unverifiable", "approval_unknown", "workspace_registry_unknown",
+                   "claude_md_outside_workspace"}:
         state = "auth_unknown"
     elif codes:
         state = "policy_gap"
@@ -1455,9 +1518,11 @@ def _budget_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
 
 def _workspace_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
     found = []
-    if info.claude_md is not None and not _claude_reads_agents(info):
-        found.append(_Finding("claude_md_without_agents_import", info.claude_md,
-                              "CLAUDE.md does not import @AGENTS.md, so Claude Code skips AGENTS.md; "
+    if info.claude and not _claude_reads_agents(info):
+        where = next((f for f in info.claude if f.name == "CLAUDE.md"), info.claude[0])
+        verb = "does" if len(info.claude) == 1 else "do"
+        found.append(_Finding("claude_md_without_agents_import", where.path,
+                              f"{_claude_names(info)} {verb} not import @AGENTS.md, so Claude Code skips AGENTS.md; "
                               f"{_claude_import_advice(info)}"))
     if info.override:
         found.append(_Finding("agents_override", ctx.root / "AGENTS.override.md",
@@ -1583,13 +1648,14 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     environ = os.environ if environ is None else environ
     layout = UserLayout.current()
     # The home directory's .aegis/ is the user plane (~/.aegis), never a workspace.
-    is_home = layout is not None and _root_key(root) == _root_key(layout.home)
+    root_key = _root_key(root)
+    is_home = layout is not None and root_key is not None and root_key == _root_key(layout.home)
     governed = is_aegis_workspace(root) and not is_home
     selected, selection, notes = _selection(root, governed)
     ctx = _Ctx(root=root, governed=governed, home=layout.home if layout else None, environ=environ,
                selected=selected, selection=selection, is_home=is_home)
     info = _instructions(ctx)
-    roots = _registered_roots(ctx)
+    roots, skipped = _registered_roots(ctx)
     floor = _floor_status(root)
     rows = [_host_row(spec, ctx, info, roots, floor) for spec in selected]
     claude_user = _claude_user_registered(ctx)
@@ -1600,6 +1666,11 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
         findings.append(_Finding("unreadable_config", UserLayout(ctx.home).workspaces_file,
                                  "~/.aegis/workspaces.json cannot be read as a v1 registry; doctor "
                                  "reports workspace registration as unknown"))
+    for index in skipped:
+        findings.append(_Finding("registry_entry_skipped", UserLayout(ctx.home).workspaces_file,
+                                 f"~/.aegis/workspaces.json: entry {index} has no absolute 'root' that resolves; "
+                                 "aegis skips it (run aegis init in that workspace to register it again)",
+                                 location=f"workspaces[{index}]"))
     return _Diagnosis(ctx, rows, _tiers(rows, floor, governed), findings)
 
 
@@ -1883,7 +1954,8 @@ def _print_hosts(diag: _Diagnosis) -> None:
         reg, boot, budget = row["registration"], row["bootstrap"], row["budget"]
         print(f"  {_ICON[row['state']]} {row['display_name']} ({row['id']}): {row['state']}")
         binary = row["binary"]
-        where = binary["path"] or ("only inside the workspace (not run)" if binary["ignored"] else "not on PATH")
+        where = binary["path"] or ("found only where doctor runs nothing (see below)" if binary["ignored"]
+                                   else "not on PATH")
         print(f"      binary       {where}")
         registered = {"registered": f"yes, {reg['scope']} scope", "absent": "no", "unknown": "unknown",
                       "unavailable": "not checked"}[reg["status"]]

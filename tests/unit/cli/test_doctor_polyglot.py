@@ -25,9 +25,11 @@ def isolated_hosts(tmp_path, monkeypatch):
     # machine's PATH (doctor's own lookup; shutil.which patches do not reach it).
     no_programs = tmp_path / "no-programs"
     no_programs.mkdir()
-    real_which = doctor._which
-    monkeypatch.setattr(doctor, "_which", lambda name, path=None, outside=None:
+    real_which, real_skipped = doctor.which, doctor.only_skipped
+    monkeypatch.setattr(doctor, "which", lambda name, path=None, outside=None:
                         real_which(name, str(no_programs), outside))
+    monkeypatch.setattr(doctor, "only_skipped", lambda name, path=None, outside=None, base=None:
+                        real_skipped(name, str(no_programs), outside, base))
     return home
 
 
