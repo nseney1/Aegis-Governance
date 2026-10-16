@@ -512,7 +512,7 @@ Input schema:
 
 ### `aegis_report_outcome`
 
-**Report Outcome** (idempotent)
+**Report Outcome**
 
 Report whether the rules you were shown helped. Each report is an advisory self-report row in the outcome ledger; it never promotes a rule by itself.
 
