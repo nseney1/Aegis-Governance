@@ -148,17 +148,17 @@ def test_remedy_git_bash_home_match_is_case_insensitive():
 
 # ── scripts_dir ──────────────────────────────────────────────────────────────
 
-def test_scripts_dir_picks_first_candidate_containing_soma(tmp_path):
+def test_scripts_dir_picks_first_candidate_containing_aegis(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     real = tmp_path / "bin"
     real.mkdir()
-    (real / "soma").write_text("#!/bin/sh\n")
+    (real / "aegis").write_text("#!/bin/sh\n")
     assert scripts_dir([str(empty), str(real)]) == str(real)
 
 
 def test_scripts_dir_finds_windows_exe(tmp_path):
-    (tmp_path / "soma.exe").write_bytes(b"MZ")
+    (tmp_path / "aegis.exe").write_bytes(b"MZ")
     assert scripts_dir([str(tmp_path)]) == str(tmp_path)
 
 
@@ -168,23 +168,23 @@ def test_scripts_dir_none_when_not_installed(tmp_path):
 
 # ── build_hint ───────────────────────────────────────────────────────────────
 
-def _bin_with_soma(tmp_path):
+def _bin_with_aegis(tmp_path):
     home = tmp_path / "home"
     bindir = home / ".local" / "bin"
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     return home, bindir
 
 
 def test_build_hint_none_when_resolvable(tmp_path):
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/usr/bin/zsh", "PATH": str(bindir), "HOME": str(home)}
-    assert build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: str(bindir / "soma"),
+    assert build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: str(bindir / "aegis"),
                       home=str(home), platform="linux", os_name="posix") is None
 
 
 def test_build_hint_zsh_names_zshrc_and_fallback(tmp_path):
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin:/bin", "HOME": str(home)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(home), platform="linux", os_name="posix")
@@ -199,7 +199,7 @@ def test_build_hint_zsh_names_zshrc_and_fallback(tmp_path):
 def test_build_hint_on_path_but_shell_not_refreshed(tmp_path):
     # Directory already on PATH but `which` misses it (e.g. stale hash):
     # don't tell the user to edit their rc file again.
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/usr/bin/zsh", "PATH": str(bindir), "HOME": str(home)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(home), platform="linux", os_name="posix")
@@ -227,7 +227,7 @@ def test_build_hint_defaults_to_the_aegis_package(tmp_path):
 
 
 def test_build_hint_unknown_shell_gives_generic_advice(tmp_path):
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/bin/tcsh", "PATH": "/usr/bin", "HOME": str(home)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(home), platform="linux", os_name="posix")
@@ -240,7 +240,7 @@ def test_build_hint_venv_says_activate_not_rc_file(tmp_path):
     venv = tmp_path / "venv"
     bindir = venv / "bin"
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin", "HOME": str(tmp_path)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(tmp_path), platform="linux", os_name="posix",
@@ -269,7 +269,7 @@ def test_build_hint_venv_path_with_spaces_is_quoted(tmp_path):
     venv = tmp_path / "my venv"
     bindir = venv / "bin"
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin", "HOME": str(tmp_path)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(tmp_path), platform="linux", os_name="posix",
@@ -282,7 +282,7 @@ def test_build_hint_pwsh_venv_activate_is_quoted_call(tmp_path):
     venv = tmp_path / "my venv"
     scripts = venv / "Scripts"
     scripts.mkdir(parents=True)
-    (scripts / "soma.exe").write_bytes(b"MZ")
+    (scripts / "aegis.exe").write_bytes(b"MZ")
     text = build_hint(env={"PATH": "C:\\Windows"}, candidates=[str(scripts)],
                       which=lambda *_a, **_k: None, home="C:\\Users\\U",
                       platform="win32", os_name="nt", shell="pwsh",
@@ -294,7 +294,7 @@ def _venv_hint(tmp_path, name, bin_name, **kw):
     venv = tmp_path / name
     bindir = venv / bin_name
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     text = build_hint(env={"PATH": "/usr/bin"}, candidates=[str(bindir)],
                       which=lambda *_a, **_k: None, home="/nonexistent",
                       venv_prefix=str(venv), **kw)
@@ -331,7 +331,7 @@ def test_build_hint_git_bash_venv_with_space_is_quoted(tmp_path):
 
 
 def test_build_hint_empty_path_reports_install_dir(tmp_path):
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/usr/bin/zsh", "PATH": "", "HOME": str(home)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(home), platform="linux", os_name="posix", venv_prefix=None)
@@ -342,13 +342,27 @@ def test_build_hint_empty_path_reports_install_dir(tmp_path):
 
 def test_build_hint_windows_uses_python_not_python3(tmp_path):
     home = tmp_path
-    (tmp_path / "soma.exe").write_bytes(b"MZ")
+    (tmp_path / "aegis.exe").write_bytes(b"MZ")
     env = {"PATH": "C:\\Windows"}
     text = build_hint(env=env, candidates=[str(tmp_path)], which=lambda *_a, **_k: None,
                       home=str(home), platform="win32", os_name="nt")
     assert text is not None
     assert "python -m aegis_cli" in text
     assert "python3 -m" not in text
+
+def test_scripts_dir_ignores_a_v3_soma_script(tmp_path):
+    # v4 installs only `aegis`; a leftover v3 `soma` script is not where aegis is.
+    (tmp_path / "soma").write_text("#!/bin/sh\n")
+    (tmp_path / "soma.exe").write_bytes(b"MZ")
+    assert scripts_dir([str(tmp_path)]) is None
+
+
+def test_build_hint_is_not_silenced_by_a_soma_on_path(tmp_path):
+    env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin", "HOME": str(tmp_path)}
+    text = build_hint(env=env, candidates=[str(tmp_path)],
+                      which=lambda cmd, **_k: "/usr/bin/soma" if cmd == "soma" else None,
+                      home=str(tmp_path), platform="linux", os_name="posix")
+    assert text is not None and "The 'aegis' command is not installed" in text
 
 
 # ── module entry points ──────────────────────────────────────────────────────
