@@ -1,5 +1,10 @@
 """Fail-closed slot resolution binding abstract skill parameters to host and user values.
 
+Shipped rule and skill text names capabilities, never one host's tools: ``${SLOT.TOOL_EDIT}``,
+``${SLOT.MODEL_FAST}`` (build-sheet D16). They are rendered for the host that asks, by the
+``slot_profile`` of its row in :mod:`aegis_core.hosts`; a host Aegis does not know gets the
+neutral ``generic`` profile, never another vendor's.
+
 Trust model (H5, D10): the repo's .aegis/config.json is untrusted input. It can only
 opt in to the AST drivers that ship inside aegis (``ast.packaged_drivers``); it
 cannot name a command or set a slot, and such keys are reported in ``warnings``.
@@ -11,9 +16,11 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import unicodedata
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from aegis_core import hosts
 from aegis_core.errors import AegisValidationError
+from aegis_core.hosts import GENERIC
 
 __all__ = [
     "SlotResolutionError",
@@ -21,13 +28,17 @@ __all__ = [
     "SLOT_REF_PATTERN",
     "PLATFORM_SLOT_PROFILES",
     "DEFAULT_SLOTS",
+    "profile_id",
+    "render_for_host",
     "sanitize_slot_value",
     "MAX_SLOT_VALUE_LEN",
 ]
 
 SLOT_REF_PATTERN = re.compile(r"\$\{(?:SLOT|RULE)\.([A-Za-z0-9_\-]+)\}|\$\{([A-Za-z0-9_\-]+)\}")
 
-_GEMINI_PROFILE: dict[str, str] = {
+# One profile per host slot_profile id (aegis_core.hosts). Values are single tool or
+# model names, so they pass sanitize_slot_value and render inside backticks.
+_ANTIGRAVITY_PROFILE: dict[str, str] = {
     "TOOL_READ": "view_file",
     "TOOL_EDIT": "replace_file_content",
     "TOOL_WRITE": "write_to_file",
@@ -51,30 +62,56 @@ _CLAUDE_PROFILE: dict[str, str] = {
     "MODEL_HEAVY": "opus",
 }
 
+# Codex has no read or search tool: it reads and greps through exec_command. The model
+# slugs are the account catalog seen on codex-cli 0.162.1 (2026-10-15); catalogs differ
+# per plan, so ~/.aegis/config.json "slots" can override them.
+_CODEX_PROFILE: dict[str, str] = {
+    "TOOL_READ": "exec_command",
+    "TOOL_EDIT": "apply_patch",
+    "TOOL_WRITE": "apply_patch",
+    "TOOL_SEARCH": "exec_command",
+    "TOOL_RUN": "exec_command",
+    "TOOL_SUBAGENT": "spawn_agent",
+    "MODEL_FAST": "gpt-6-luna",
+    "MODEL_STANDARD": "gpt-6.1-sol",
+    "MODEL_HEAVY": "gpt-6-astra",
+}
+
+# Neutral names for a host Aegis does not know: a tool kind, never one vendor's name.
 _GENERIC_PROFILE: dict[str, str] = {
     "TOOL_READ": "read_file",
     "TOOL_EDIT": "edit_file",
     "TOOL_WRITE": "write_file",
     "TOOL_SEARCH": "grep",
-    "TOOL_RUN": "run_terminal_cmd",
+    "TOOL_RUN": "shell",
     "TOOL_SUBAGENT": "subagent",
     "MODEL_FAST": "fast-tier",
     "MODEL_STANDARD": "standard-tier",
     "MODEL_HEAVY": "heavy-tier",
 }
 
-PLATFORM_SLOT_PROFILES: dict[str, dict[str, str]] = {
-    "gemini": dict(_GEMINI_PROFILE),
-    "antigravity": dict(_GEMINI_PROFILE),
-    "claude": dict(_CLAUDE_PROFILE),
-    "claude-code": dict(_CLAUDE_PROFILE),
-    "claude-ai": dict(_CLAUDE_PROFILE),
-    "claude-desktop": dict(_CLAUDE_PROFILE),
-    "cursor": dict(_GENERIC_PROFILE),
-    "copilot": dict(_GENERIC_PROFILE),
-    "kiro": dict(_GENERIC_PROFILE),
-    "generic": dict(_GENERIC_PROFILE),
+# The gemini-cli row is unverified (phase 2): only its documented tool names are bound;
+# the subagent tool and the model tiers stay generic until a real install confirms them.
+_GEMINI_CLI_PROFILE: dict[str, str] = {
+    **_GENERIC_PROFILE,
+    "TOOL_READ": "read_file",
+    "TOOL_EDIT": "replace",
+    "TOOL_WRITE": "write_file",
+    "TOOL_SEARCH": "grep_search",
+    "TOOL_RUN": "run_shell_command",
 }
+
+PLATFORM_SLOT_PROFILES: dict[str, dict[str, str]] = {
+    "codex-cli": dict(_CODEX_PROFILE),
+    "claude-code": dict(_CLAUDE_PROFILE),
+    "antigravity": dict(_ANTIGRAVITY_PROFILE),
+    "gemini-cli": dict(_GEMINI_CLI_PROFILE),
+    GENERIC: dict(_GENERIC_PROFILE),
+}
+
+# Transitional: until wave C's runtime lane lands, the MCP server on this base still
+# names its client by the v3 platform labels below. Nothing else may add one (H1).
+_V3_PLATFORM_PROFILES: dict[str, str] = {"claude": "claude-code", "gemini": "antigravity"}
 
 DEFAULT_SLOTS: dict[str, str] = {
     "TEST_RUNNER": "python3 -m pytest -q",
@@ -82,7 +119,7 @@ DEFAULT_SLOTS: dict[str, str] = {
     "FORMATTER": "ruff format",
     "TYPE_CHECKER": "mypy",
     "BUILD_TOOL": "python3 -m build",
-    **_GEMINI_PROFILE,
+    **_GENERIC_PROFILE,
 }
 
 
@@ -121,15 +158,18 @@ def _keys_summary(keys: Sequence[str]) -> str:
     return f"{len(keys)} {'slot' if len(keys) == 1 else 'slots'} ({names})"
 
 
-def _normalize_platform_name(platform: str) -> str:
-    norm = (platform or "gemini").strip().lower()
-    if norm in ("antigravity", "gemini"):
-        return "gemini"
-    if norm.startswith("claude"):
-        return "claude"
-    if norm in PLATFORM_SLOT_PROFILES:
-        return norm
-    return "generic"
+def profile_id(host: Optional[str]) -> str:
+    """The slot profile for a host id (or a profile id); anything unknown is ``generic``.
+
+    A host whose table row names another profile gets that one (Claude Desktop is
+    identity only and gets ``generic``). It never falls back to a vendor's profile.
+    """
+    key = str(host or "").strip()
+    key = _V3_PLATFORM_PROFILES.get(key, key)
+    try:
+        return hosts.get(key).slot_profile
+    except KeyError:
+        return key if key in PLATFORM_SLOT_PROFILES else GENERIC
 
 
 class SlotResolutionError(AegisValidationError):
@@ -202,10 +242,10 @@ class SlotRegistry:
 
     @classmethod
     def for_platform(cls, platform: str, workspace: str | Path | None = None) -> SlotRegistry:
-        """Platform capability slots, then user-scope overrides, then the repo's driver opt-ins."""
+        """The host's capability slots (``platform`` is a host or profile id, see profile_id),
+        then user-scope overrides, then the repo's driver opt-ins."""
         merged: Dict[str, str] = dict(DEFAULT_SLOTS)
-        raw_norm = (platform or "gemini").strip().lower()
-        profile = PLATFORM_SLOT_PROFILES.get(raw_norm) or PLATFORM_SLOT_PROFILES.get(_normalize_platform_name(raw_norm), _GENERIC_PROFILE)
+        profile = PLATFORM_SLOT_PROFILES[profile_id(platform)]
         merged.update(profile)
         user_reg = cls.load_user(workspace)
         warnings = user_reg.warnings
@@ -277,3 +317,22 @@ class SlotRegistry:
         return exts
 
 
+_USER_CONFIG_UNREADABLE = "~/.aegis/config.json could not be read or parsed; built-in slot values were used"
+
+
+def render_for_host(text: str, host: Optional[str], workspace: str | Path | None = None) -> Tuple[str, List[str]]:
+    """``(text, warnings)``: ``text`` with its ${SLOT.*} references rendered for ``host``.
+
+    Values are sanitized before they are inlined (the reader is an agent); a reference
+    with no value stays as written so the gap is visible. A user config that cannot be
+    read never costs the text: the host's built-in values are used and a fixed warning
+    (no file content) says so.
+    """
+    try:
+        registry = SlotRegistry.for_platform(host or GENERIC, workspace=workspace)
+        warnings = registry.warnings
+    except (SlotResolutionError, OSError):
+        merged = dict(DEFAULT_SLOTS)
+        merged.update(PLATFORM_SLOT_PROFILES[profile_id(host)])
+        registry, warnings = SlotRegistry(merged), [_USER_CONFIG_UNREADABLE]
+    return registry.sanitized().resolve(text, strict=False), warnings

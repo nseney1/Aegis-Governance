@@ -24,19 +24,8 @@ class TestCrossModelSlotRegistry:
     """Verify SlotRegistry.for_platform and slot resolution across AI platforms."""
 
     def test_platform_slot_profiles_and_defaults(self):
-        for platform in (
-            "gemini",
-            "antigravity",
-            "claude",
-            "claude-code",
-            "claude-ai",
-            "claude-desktop",
-            "cursor",
-            "copilot",
-            "kiro",
-            "generic",
-        ):
-            assert platform in PLATFORM_SLOT_PROFILES
+        # Keyed by host slot_profile id (D16); v3 platform names are not profiles.
+        assert set(PLATFORM_SLOT_PROFILES) == {"codex-cli", "claude-code", "antigravity", "gemini-cli", "generic"}
 
         for key in (
             "TEST_RUNNER",
