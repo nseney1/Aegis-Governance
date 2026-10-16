@@ -35,6 +35,7 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis doctor` | Setup & Environment | System health and governance audit |
 | `aegis init` | Setup & Environment | Set up governance for this project and register it with your agent hosts |
 | `aegis migrate` | Setup & Environment | Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply) |
+| `aegis skills` | Setup & Environment | Copy the packaged skills into your hosts' project skills folders (sync) |
 | `aegis uninstall` | Setup & Environment | Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/) |
 | `aegis check` | Daily Workflow & Verification | Verify changes: Layer 1 checks, plus a Layer 2 model review with --full |
 | `aegis scan` | Daily Workflow & Verification | Show which rules apply to the given files (run before editing them) |
@@ -87,6 +88,22 @@ Category: Setup & Environment.
 | --- | --- | --- | --- |
 | `--apply` |  |  | Perform the migration (default: dry run) |
 | `--dry-run` |  |  | Only report what would change (the default) |
+
+### `aegis skills`
+
+Copy the packaged skills into your hosts' project skills folders (sync)
+
+Category: Setup & Environment. Subcommands: `sync`.
+
+### `aegis skills sync`
+
+Copy the packaged skills to .claude/skills (Claude Code) and .agents/skills (Codex CLI, Antigravity), replacing only Aegis's own unedited copies
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--host` | `HOST[,HOST]|auto` |  | Hosts to copy skills for (default: the hosts in .aegis/config.json); 'auto' takes the ones detected on this machine |
+| `--force` |  |  | Also replace Aegis copies edited by hand (never a file without the Aegis marker, a link or anything outside the workspace) |
+| `--dry-run` |  |  | Report what would change; write nothing |
 
 ### `aegis uninstall`
 

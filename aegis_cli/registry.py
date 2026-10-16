@@ -139,6 +139,7 @@ def create_default_registry() -> CommandRegistry:
     from aegis_cli.migrate import MigrateCommand
     from aegis_cli.rule import RuleCommand
     from aegis_cli.scan import ScanCommand
+    from aegis_cli.skills_sync import SkillsCommand
     from aegis_cli.status import StatusCommand
     from aegis_cli.sync import SyncCommand
     from aegis_cli.uninstall import UninstallCommand
@@ -154,6 +155,7 @@ def create_default_registry() -> CommandRegistry:
         RuleCommand,
         SyncCommand,
         HookCommand,
+        SkillsCommand,
     ):
         reg.register(cmd_cls)
 
