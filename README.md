@@ -101,7 +101,7 @@ Commit `.aegis/` and `AGENTS.md`; the local ledger in `.aegis/state/` is git-ign
 | **Antigravity** (`antigravity`: app, IDE and `agy`) | an `aegis` entry in `~/.gemini/config/mcp_config.json` | `AGENTS.md` (24,000 bytes per file). Antigravity tells the server no workspace, so run `aegis init` once per repo on each machine. |
 | **Gemini CLI** | Retired: Google refuses the client for individual Code Assist accounts, and Antigravity is the Gemini-family host. `aegis init --host gemini-cli` exits with status 2 and points you to `--host antigravity`. | — |
 
-On every host the enforcement is the same today: advisory rules through the bootstrap and `aegis_scan`, the git pre-commit hook as the local floor, and CI as the authority. Per-host agent hooks are planned for v4.1, with a different strength on each host (the tier table under "What Aegis does not do" lists them). Claude Desktop chat sessions are recognized but not registered. Every host runs `aegis-mcp` with your own user's permissions.
+On every host, rules are advisory through the bootstrap and `aegis_scan`, the git pre-commit hook is the local floor, and CI is the authority. `aegis hook install --host <host>` adds a pre-tool hook that stops destructive commands and edits to files nobody scanned first, with a different strength on each host (the tier table under "What Aegis does not do" lists them; `aegis doctor` shows what is installed). It writes your user's host settings; `--scope project` writes the repository's instead, which your teammates' hosts will run. Claude Desktop chat sessions are recognized but not registered. Every host runs `aegis-mcp` and the hooks with your own user's permissions.
 
 ## How it works
 
@@ -115,11 +115,17 @@ The full story, with diagrams, is in [How Aegis works](https://github.com/nseney
 
 ## What's included
 
-- **A CLI** with 10 commands (`init`, `uninstall`, `doctor`, `migrate`, `check`, `scan`, `status`, `rule`, `sync`, `hook`) and **an MCP server** with 4 tools (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`).
+- **A CLI** with 12 commands (`init`, `uninstall`, `doctor`, `migrate`, `check`, `scan`, `status`, `rule`, `sync`, `hook`, `team`, `skills`) and **an MCP server** with 4 tools (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`).
 - **12 starter [rules](https://github.com/nseney1/Aegis-Guardrails/tree/main/rules)**: grounding claims in the code before acting, dry runs before destructive commands, behavioral tests, test-first development, git hygiene and more. `aegis init --rules minimal|standard|full` seeds 2, 5 or all 12. They apply to no file until you set their `target_paths`.
-- **15 [skills](https://github.com/nseney1/Aegis-Guardrails/tree/main/skills)**, `SKILL.md` playbooks for reviews, audits, incident debugging, refactoring and more. Copy the ones you want into your host's skills folder; `aegis init --skills` is planned for v4.1.
+- **15 [skills](https://github.com/nseney1/Aegis-Guardrails/tree/main/skills)**, `SKILL.md` playbooks for reviews, audits, incident debugging, refactoring and more. `aegis skills sync` (or `aegis init --skills`) copies them into `.claude/skills/` for Claude Code and `.agents/skills/` for Codex CLI and Antigravity, and later runs replace only Aegis's own unedited copies.
 - **AST checks for Python** (in process), plus drivers that ship in the wheel for Rust, TypeScript/JavaScript (needs `node`) and Go (needs `go`); `aegis init` turns them on for the languages it detects.
 - **A Python SDK facade**, `aegis_sdk.Governance`, for tools that read rules and fitness.
+
+## Agent teams
+
+When several agents work in parallel, each in its own worktree and branch (a lane), whoever dispatches them can declare each lane's paths: `aegis team claim docs --paths 'docs/**' README.md`. The lease is a git ref every worktree sees, and a claim whose paths may overlap another live lane's is refused. A lease is cooperative conflict input, not a lock, not an identity and not proof that an agent is still working.
+
+The gate is `aegis check --lane docs`: every path the lane changed since its merge base must be inside its paths, and no Python test may disappear or gain a skip. Any finding fails, and the reviewer decides with the findings in view. With the lease or `--paths` the result is self-attested, because the lane can write those; with `--base-policy` the paths come from `.aegis/team.json` on the base branch, and the result is witnessed. As a CI job it is advisory in v4.1. `aegis team metrics` counts denied claims and conflicting merges, which decide whether leases earn their place. Details are in [How Aegis works](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/how-it-works.md).
 
 ## Rules that earn their place
 
@@ -134,21 +140,21 @@ Aegis does not claim enforcement it lacks. `aegis doctor` reports these tiers, i
 | Tier | Mechanism | What gets past it |
 |---|---|---|
 | Advisory | AGENTS.md bootstrap, MCP instructions, JIT rules | any agent: it is guidance |
-| Best-effort | per-host pre-tool hooks | everything: 4.0 has no agent hooks. Planned for v4.1: Claude Code blocks with exit 2 (documented by Anthropic); Codex blocks with exit 2 once you trust the hook in `/hooks` (documented by OpenAI); Antigravity blocks only destructive commands (exit 1, verified live) and only records whether a file was scanned before an edit. Every hook lets the call through when Aegis itself errors, and edits made through shell commands never reach the edit check |
+| Best-effort | per-host pre-tool hooks | everything on a host without `aegis hook install --host`, a Codex hook you have not trusted in `/hooks`, edits made through shell commands, and any call when Aegis itself errors: the hooks fail open. Installed, `aegis doctor` reports Claude Code: blocking (documented; fails open on error) [DOC] (exit 2, documented by Anthropic); Codex CLI: blocking once trusted in /hooks (documented; fails open) [DOC] (exit 2, documented by OpenAI); Antigravity: blocks destructive commands (live); scan gate records only [LIVE] (exit 1, verified live). Antigravity hooks are unavailable on Windows |
 | Local floor | git pre-commit runs aegis check --hook (--no-verify bypasses it) | anyone using `git commit --no-verify` |
 | Authoritative | CI runs aegis check on the exact SHA; a human merges | a pull request that also weakens the rules or the CI workflow it is checked with, unless a person reviews those changes |
 
 **CI is the floor.** Agent hooks are guardrails, not a security boundary. Put `aegis check` in CI and require it before merge: it is the strongest tier, but not tamper-proof. CI checks a pull request against the rules in the pull request itself, so a pull request that deletes a rule and breaks it passes. Review every change under `.aegis/` and to your CI workflow like code; protecting the reviewed rules from the change they judge is planned for v4.3.
 
-- It does not force an agent to scan. Hosts are prompted to, and `aegis status --compliance` measures each host's scan-before-edit rate.
+- It does not force every agent to scan. With the hook installed, Claude Code (and Codex, once trusted) blocks an edit to a file no scan covered within the scan window (an hour by default); Antigravity only records it, and edits made through shell commands pass everywhere. `aegis status --compliance` measures each host's scan-before-edit rate.
 - It does not sandbox agents or sign anything. Rule files are protected only by your review of the pull requests that change them.
 - It sends nothing anywhere unless you ask: see the FAQ below.
 
 ## FAQ
 
-**How do I add guardrails to Claude Code?** Run `aegis init --host claude-code` in the repo. It registers the server at user scope, so every Claude Code session can use it, and the bootstrap in `AGENTS.md` tells the agent to call `aegis_scan`. If the repo already has a `CLAUDE.md`, `init` adds an `@AGENTS.md` import block to it, because Claude Code skips `AGENTS.md` when a `CLAUDE.md` exists.
+**How do I add guardrails to Claude Code?** Run `aegis init --host claude-code` in the repo. It registers the server at user scope, so every Claude Code session can use it, and the bootstrap in `AGENTS.md` tells the agent to call `aegis_scan`. If the repo already has a `CLAUDE.md`, `init` adds an `@AGENTS.md` import block to it, because Claude Code skips `AGENTS.md` when a `CLAUDE.md` exists. `aegis hook install --host claude-code` then adds the pre-tool hook that blocks unscanned edits and destructive commands.
 
-**How do I add guardrails to Codex CLI?** Run `aegis init --host codex-cli`. It runs `codex mcp add aegis`, and Codex reads the bootstrap from `AGENTS.md` natively.
+**How do I add guardrails to Codex CLI?** Run `aegis init --host codex-cli`. It runs `codex mcp add aegis`, and Codex reads the bootstrap from `AGENTS.md` natively. For the pre-tool hook, run `aegis hook install --host codex-cli`, then trust the hook in Codex's `/hooks` screen: until you do, Codex skips it without a word.
 
 **What is AGENTS.md?** A plain markdown instructions file in the repository root that coding agents such as Codex CLI, Antigravity and Claude Code read at the start of a session. Aegis writes only one small marked block into it. Your rules stay in `.aegis/rules/` and reach the agent through `aegis_scan`, so they never bloat the file.
 

@@ -462,3 +462,119 @@ def test_link_problem_rejects_paths_that_leave_the_repository(tmp_path):
     root.mkdir()
     (tmp_path / "outside.md").write_text("x\n", encoding="utf-8")
     assert link_problem(root, "blob", "../outside.md") == "../outside.md is outside the repository"
+
+
+# --- v4.1: what shipped, stated as the code does it ----------------------------------
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _registered_commands() -> List[str]:
+    tree = json.loads((ROOT / "tests" / "contract" / "cli_tree.json").read_text(encoding="utf-8"))
+    return sorted(entry["name"] for entry in tree["registry"])
+
+
+def test_the_readme_lists_every_command_the_cli_registers():
+    """'What's included' counts and names the CLI's commands; the contract snapshot, which
+    tests/contract holds to the live parser, is the list."""
+    included = _section(README.read_text(encoding="utf-8"), "What's included")
+    match = re.search(r"A CLI\*\* with (\d+) commands \(([^)]*)\)", included)
+    assert match, "the README no longer says 'A CLI** with N commands (...)'"
+    named = sorted(re.findall(r"`([a-z]+)`", match.group(2)))
+    assert named == _registered_commands()
+    assert int(match.group(1)) == len(named)
+
+
+def test_no_doc_calls_a_shipped_v41_feature_planned():
+    """Wave D shipped the team commands, the lane gate, the per-host hooks and skills sync:
+    the README and how-it-works no longer promise them for v4.1."""
+    for doc in (README, HOW):
+        text = _flat(doc.read_text(encoding="utf-8")).lower()
+        for phrase in ("planned for v4.1", "until they ship", "will copy the 15 packaged"):
+            assert phrase not in text, (doc.name, phrase)
+
+
+def test_the_best_effort_row_states_each_hosts_hook_tier_as_doctor_reports_it():
+    """AD-8: the Best-effort row names, per host, the tier and evidence label `aegis doctor`
+    prints for a registered hook, that the hooks fail open, and where they are unavailable."""
+    from aegis_cli.hooks import registrar
+    from aegis_core.hosts import get
+
+    row = re.search(r"^\| Best-effort \|[^\n]*$", README.read_text(encoding="utf-8"), re.M).group(0)
+    for host in registrar.HOOK_HOSTS:
+        said = f"{get(host).display_name}: {registrar.TIERS[host]} [{registrar.EVIDENCE[host]}]"
+        assert said in row, said
+    assert "fail open" in row and "Antigravity hooks are unavailable on Windows" in row
+    assert "aegis hook install --host" in row
+
+
+def test_the_readme_has_a_short_agent_teams_section():
+    """Leases are cooperative conflict input; check --lane is the gate, self-attested unless
+    --base-policy makes it witnessed. Details live in how-it-works."""
+    teams = _flat(_section(README.read_text(encoding="utf-8"), "Agent teams"))
+    for phrase in ("aegis team claim", "conflict input", "not a lock", "aegis check --lane",
+                   "self-attested", "--base-policy", "witnessed", "advisory", "how-it-works.md"):
+        assert phrase in teams, phrase
+    assert len(teams.split()) < 220, "keep the README section short; details go to how-it-works"
+
+
+def test_how_it_works_states_the_hook_runtime_as_the_code_runs_it():
+    """The known gaps, the block and record sets, the scan window key with its default and
+    range, and the exit codes per host are the ones the handler uses."""
+    from aegis_cli.hooks import pretool, registrar
+    from aegis_core import command_safety, config
+
+    how = _flat(HOW.read_text(encoding="utf-8"))
+    for gap in registrar.KNOWN_GAPS:
+        assert _flat(gap) in how, gap
+    for rule in command_safety.BLOCK_SET + command_safety.RECORD_SET:
+        assert f"`{rule.id}`" in how, rule.id
+    low, high = config.SCAN_WINDOW_RANGE
+    assert f"`jit.scan_window_s` (default {config.DEFAULT_SCAN_WINDOW_S}, from {low} to {high})" in how
+    assert f"exit {pretool.EXIT_AGY_BLOCK}" in how and f"exit {pretool.EXIT_BLOCK}" in how
+    assert f"{int(pretool.DEADLINE_SECONDS)} s deadline" in how
+    for host, matcher in registrar.MATCHERS.items():
+        assert f"`{matcher}`" in how, host
+
+
+def test_how_it_works_lists_the_scan_window_among_the_repo_config_keys():
+    row = next(line for line in HOW.read_text(encoding="utf-8").splitlines()
+               if line.startswith("| `.aegis/config.json` |"))
+    assert "`jit.scan_window_s`" in row and "`jit.max_tokens`" in row
+
+
+def test_how_it_works_describes_the_events_log_the_code_writes(tmp_path):
+    """The events log lives in the git common dir (shared by every worktree), and the doc
+    names every kind 4.1 writes."""
+    from aegis_core import events
+
+    _git(tmp_path, "init", "-q", "-b", "main")
+    assert events.events_path(tmp_path).as_posix().endswith(".git/aegis/events.jsonl")
+    how = _flat(HOW.read_text(encoding="utf-8"))
+    assert "`<git common dir>/aegis/events.jsonl`" in how and "`.aegis/state/events.jsonl`" in how
+    for kind in ("lease_claimed", "lease_denied", "lane_check", "scan_gate", "guard_match", "skills_sync"):
+        assert f"`{kind}`" in how, kind
+    assert set(events.KINDS) >= {"lease_claimed", "lease_denied", "lane_check", "scan_gate", "guard_match",
+                                 "skills_sync"}
+
+
+def test_how_it_works_shows_the_skills_marker_sync_writes(tmp_path):
+    """The provenance marker in the doc is the one `aegis skills sync` writes, and the
+    overwrite rules match: unedited copies replaced, edited ones only with --force, files
+    without the marker never."""
+    how = _flat(HOW.read_text(encoding="utf-8"))
+    assert "`<!-- aegis:skill id=<id> v=1 sha=<12 hex> -->`" in how
+    for phrase in (".claude/skills/<id>/SKILL.md", ".agents/skills/<id>/SKILL.md", "--force",
+                   "never replaced, even with `--force`"):
+        assert phrase in how, phrase
+    from aegis_cli import skills_sync
+
+    assert skills_sync.MARKER_VERSION == 1 and skills_sync.SHA_LEN == 12
+
+
+def test_how_it_works_states_the_lane_gate_ci_caveat():
+    how = _flat(HOW.read_text(encoding="utf-8"))
+    for phrase in ("advisory (not a required check) in v4.1", "a witness is only as strong as the protection on",
+                   "Assert weakening is not detected", "`refs/aegis/lanes/<lane>`"):
+        assert phrase in how, phrase
