@@ -101,7 +101,7 @@ These are the v3.3 defects found by the v4 review ([evidence review](docs/adr/00
 
 - `aegis check` records each run's pass or fail against every rule whose paths match the checked files, and self-reports from MCP clients count toward fitness too. So a gate that blocks a bad commit is scored as a miss. Fitness only ranks guidance and drives `sync` suggestions; no rule changes tier without an explicit command. A per-rule credit model is planned for v4.3 ([why-aegis](docs/why-aegis.md) §6).
 - The starter rules `aegis init` seeds have no `target_paths`, so they apply to no file until you add patterns; `aegis status` lists them.
-- Per-host agent hooks arrive in v4.1. In v4.0 the enforcement points are the git pre-commit hook (`--no-verify` skips it) and CI.
+- Per-host agent hooks for Claude Code, Codex CLI and Antigravity are planned for v4.1. In v4.0 the enforcement points are the git pre-commit hook (`--no-verify` skips it) and CI.
 - Rule frontmatter has no schema version yet; the ledger, the config files, the derived view and the workspace registry do.
 
 ## [3.3.0] — 2026-10-14 — "Cryptographic Provenance, Declarative AST Rules, Telemetry Compaction, SARIF 2.1.0 & Multi-Platform Claude Desktop Support"
