@@ -138,6 +138,10 @@ Category: Daily Workflow & Verification.
 | `--llm-cmd` | `CMD` |  | Layer 2 model command, e.g. 'claude -p': gets the prompt on stdin, prints the reply. It runs in an empty temporary directory, never the repository, so give scripts absolute paths (default: $AEGIS_LLM_CMD; never read from repository files) |
 | `--dry-run` |  |  | Show what would be checked without running anything |
 | `--format` | one of `text`, `json` | `"text"` | Output format |
+| `--lane` | `LANE` |  | Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment (every changed path, deletions and both sides of a move included, inside the lane's globs) and Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong as the protection on .github/** and on the base branch |
+| `--base` | `REF` |  | With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0 |
+| `--paths` | `GLOB [GLOB ...]` |  | With --lane: the lane's globs instead of its live lease (self-attested). They match as rule target_paths do: a glob without '/' matches at any depth, so CHANGELOG.md also admits docs/CHANGELOG.md. They never allow .aegis/** or .github/workflows/** |
+| `--base-policy` |  |  | With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may .aegis/** and .github/workflows/** change |
 
 ### `aegis scan`
 

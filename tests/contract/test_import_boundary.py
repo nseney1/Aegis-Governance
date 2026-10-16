@@ -64,6 +64,8 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core.team": 1,
     # Host hook payload normalization (stdlib only).
     "aegis_core.hook_events": 1,
+    # The post-lane gate (aegis check --lane): team, the matcher, gitsafe and events.
+    "aegis_core.lane_gate": 1,
     "aegis_core.scan": 2,
     "aegis_core.scan_compliance": 2,
     "aegis_core.sync": 2,
