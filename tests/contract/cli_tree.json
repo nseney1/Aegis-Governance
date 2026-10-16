@@ -885,6 +885,19 @@
             "required": false
           },
           {
+            "const": true,
+            "default": false,
+            "dest": "skills",
+            "flags": [
+              "--skills"
+            ],
+            "help": "Also copy the packaged skills into the hosts' project skills folders (.claude/skills, .agents/skills), as aegis skills sync does",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
             "default": "==SUPPRESS==",
             "dest": "platform",
             "flags": [

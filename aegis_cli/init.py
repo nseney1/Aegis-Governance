@@ -496,6 +496,7 @@ class _Context:
     pin: Optional[str]
     path_env: Optional[str]
     report: Report
+    skills: bool = False
 
 
 def _real_key(path: Path) -> str:
@@ -539,6 +540,40 @@ def _claude_shim(ctx: _Context, dry_run: bool) -> Step:
                     "it was left as it is. For Claude Code to read the Aegis bootstrap, add an @AGENTS.md import "
                     "to that file, or make CLAUDE.md a link to AGENTS.md.")
     return Step(CLAUDE_FILE, "skipped", "a symlink, never written through")
+
+
+def _skills_steps(ctx: _Context, dry_run: bool) -> List[Step]:
+    """``--skills``: the packaged skills copied for the configured and selected hosts, as
+    ``aegis skills sync`` copies them. A refusal (a link, a file of the wrong kind) stops
+    init like any other step; a file the user owns or edited is kept, with a warning."""
+    from aegis_cli.skills_sync import summary, sync_skills
+    from aegis_core.config import ConfigError, RepoConfig
+
+    try:
+        configured = list(RepoConfig.load(ctx.root).hosts)
+    except ConfigError:
+        configured = []  # _config_hosts has already warned about the file
+    result = sync_skills(ctx.root, ordered_hosts(configured + ctx.selected), dry_run=dry_run, trigger="init")
+    if not result.targets:
+        return [Step("skills", "skipped", "no selected host reads project skills; "
+                                          "add --host claude-code, codex-cli or antigravity")]
+    problems = [e.detail for t in result.targets for e in t.entries if e.result in ("refused", "failed")]
+    problems += result.errors
+    if problems:
+        raise InstallError(f"skills: {problems[0]}. Fix it, or re-run without --skills.")
+    for warning in result.warnings:
+        ctx.report.warn(warning)
+    steps = []
+    for target in result.targets:
+        for entry in target.entries:
+            if entry.result == "skipped":
+                ctx.report.warn(f"{entry.path}: {entry.detail}")
+        counts = target.counts
+        written = counts["created"] + counts["updated"] + counts["overwritten"]
+        label = "" if target.verified else ", unverified"
+        steps.append(Step(target.dir, "synced" if written else "unchanged",
+                          f"{', '.join(target.hosts)}{label}: {summary(counts)}"))
+    return steps
 
 
 def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -> List[Step]:
@@ -610,6 +645,8 @@ def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -
     actions.append(Step(AGENTS_FILE, write_managed_block(
         agents, BOOTSTRAP_ID, bootstrap_text(), force=ctx.force, dry_run=dry_run)))
     actions.append(_claude_shim(ctx, dry_run))
+    if ctx.skills:
+        actions.extend(_skills_steps(ctx, dry_run))
 
     if not ctx.no_hooks:
         in_place = shared_hook_in_place(root)
@@ -741,7 +778,7 @@ def run_init(args: argparse.Namespace) -> int:
     ctx = _Context(ws=ws, root=root, home=home, selected=selected, preset=preset,
                    force=bool(getattr(args, "force", False)), no_hooks=_no_hooks(args),
                    command=mcp_command(path_env), pin=str(root) if getattr(args, "pin", False) else None,
-                   path_env=path_env, report=report)
+                   path_env=path_env, report=report, skills=bool(getattr(args, "skills", False)))
 
     # Every step is checked first; a refusal stops init before anything is written.
     report.muted = not dry_run
@@ -900,6 +937,12 @@ class InitCommand(AegisCommand):
             "--no-hooks",
             action="store_true",
             help="Skip installing the git pre-commit hook",
+        )
+        parser.add_argument(
+            "--skills",
+            action="store_true",
+            help="Also copy the packaged skills into the hosts' project skills folders (.claude/skills, "
+                 ".agents/skills), as aegis skills sync does",
         )
         parser.add_argument("--platform", action=RemovedOption, nargs="?", pointer="use aegis init --host")
         parser.add_argument("--mcp", action=RemovedOption,

@@ -75,6 +75,7 @@ Category: Setup & Environment.
 | `--force` |  |  | Replace Aegis blocks in AGENTS.md/CLAUDE.md even if they were edited by hand |
 | `--pin` |  |  | Pin the host registrations to this workspace (AEGIS_WORKSPACE) |
 | `--no-hooks` |  |  | Skip installing the git pre-commit hook |
+| `--skills` |  |  | Also copy the packaged skills into the hosts' project skills folders (.claude/skills, .agents/skills), as aegis skills sync does |
 
 ### `aegis migrate`
 
