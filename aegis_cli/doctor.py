@@ -922,6 +922,9 @@ def _instructions(ctx: _Ctx) -> _Instructions:
     # Claude Code loads <config dir>/CLAUDE.md (~/.claude/CLAUDE.md) as user memory and
     # leaves exactly that path out of the walk that decides whether AGENTS.md is read
     # (claude 2.1.301: the walk's processed paths start as {managed, user} memory).
+    # The match is by spelling. Under a symlinked home the ancestors of the resolved root
+    # spell that file differently, and whether Claude Code still skips it there is
+    # unverified, so it counts and the reach stays unknown rather than claimed.
     claude_dir = _claude_dir(ctx)
     user_memory = _path_key(claude_dir / "CLAUDE.md") if claude_dir is not None else None
     candidates = (d.joinpath(*name.split("/")) for d in ctx.root.parents for name in _CLAUDE_FAMILY)
@@ -1032,9 +1035,15 @@ def _registered_roots(ctx: _Ctx) -> Tuple[Optional[set], List[int]]:
 
 
 def _root_key(root: Any) -> Optional[str]:
-    """``root`` resolved and case-folded for comparison, or None when it cannot be resolved."""
+    """``root`` resolved and case-folded for comparison, or None when it cannot be resolved.
+
+    A NUL byte is refused here, not left to realpath: realpath raises on it everywhere
+    except Windows Python 3.12+, where it returns the path as given (gh-106242)."""
+    text = str(root)
+    if "\x00" in text:
+        return None
     try:
-        return os.path.normcase(os.path.realpath(str(root)))
+        return os.path.normcase(os.path.realpath(text))
     except (OSError, ValueError):
         return None
 

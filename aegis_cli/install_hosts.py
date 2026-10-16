@@ -542,9 +542,10 @@ def _root_key(root: Union[str, Path]) -> str:
 
 def _stored_key(root: str) -> Optional[str]:
     """The key of a root read from the registry, or None for one the server's reader skips:
-    a relative root would resolve against the current directory, and a NUL byte makes
-    resolving raise. Such an entry never matches, and stays in the file as it is."""
-    if not os.path.isabs(root):
+    a relative root would resolve against the current directory, and the server cannot
+    resolve a NUL byte (realpath itself returns it as given on Windows Python 3.12+,
+    gh-106242). Such an entry never matches, and stays in the file as it is."""
+    if not os.path.isabs(root) or "\x00" in root:
         return None
     try:
         return _root_key(root)

@@ -409,14 +409,23 @@ class TestWorkspaceRegistry:
         assert [w["root"] for w in remaining] == [str(b.resolve())]
         assert ih.unregister_workspace(home, a)[0] == "absent"
 
-    @pytest.mark.parametrize("stored", ["repo", os.path.join(".", "repo"), "\u0000x", "/re\u0000po"],
-                             ids=["relative", "dot-relative", "nul", "absolute-nul"])
-    def test_a_stored_root_the_server_skips_never_matches_and_is_kept(self, tmp_path, monkeypatch, stored):
+    @pytest.mark.parametrize("stored, realpath_keeps_nul", [
+        ("repo", False), (os.path.join(".", "repo"), False), ("\u0000x", False), ("/re\u0000po", False),
+        ("/re\u0000po", True),
+    ], ids=["relative", "dot-relative", "nul", "absolute-nul", "absolute-nul-realpath-keeps"])
+    def test_a_stored_root_the_server_skips_never_matches_and_is_kept(self, tmp_path, monkeypatch, stored,
+                                                                      realpath_keeps_nul):
         # The server's registry reader skips a root that is not absolute or cannot be resolved;
         # resolving a relative one here would match whatever the cwd makes of it.
         home, root = tmp_path / "home", tmp_path / "repo"
         root.mkdir()
         monkeypatch.chdir(tmp_path)
+        if realpath_keeps_nul:
+            # Windows Python 3.12+: non-strict realpath returns a NUL path as given (gh-106242).
+            real = os.path.realpath
+            monkeypatch.setattr(os.path, "realpath", lambda path, *a, **k: (
+                os.path.normpath(os.path.abspath(os.fspath(path))) if "\x00" in os.fspath(path)
+                else real(path, *a, **k)))
         reg = home / ".aegis" / "workspaces.json"
         reg.parent.mkdir(parents=True)
         junk = {"root": stored, "added_at": "x", "added_by": "aegis init", "hosts": ["codex-cli"]}

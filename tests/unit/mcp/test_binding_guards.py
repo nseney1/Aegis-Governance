@@ -8,7 +8,8 @@ tests pin the forms that still survived:
   selected nor "own" a call's files and turn a good binding into a hold;
 - a host root must be an absolute local path: a relative ``file:`` URI, or a relative
   ``CLAUDE_PROJECT_DIR`` (the sibling of the Codex ``_meta`` check), would resolve
-  against whatever the server's process cwd is; ``file://localhost/...`` is local.
+  against whatever the server's process cwd is; ``file://localhost/...`` is local, and a
+  URI of any other scheme names no local directory at all.
 """
 from __future__ import annotations
 
@@ -133,6 +134,17 @@ def test_a_relative_file_uri_root_is_ignored(cwd_with_a_governed_child, monkeypa
 def test_a_relative_claude_project_dir_is_ignored(cwd_with_a_governed_child, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", "child")
     is_error, payload = _list_rules(monkeypatch, capsys, "claude-code")
+    assert is_error
+    assert (payload["status"], payload["binding"]["reason"]) == ("not_governed", "no_workspace")
+
+
+@pytest.mark.parametrize("scheme", ["http", "https", "vscode-remote"])
+def test_a_root_uri_of_another_scheme_is_ignored(cwd_with_a_governed_child, tmp_path, monkeypatch, capsys,
+                                                 scheme):
+    # Only a file: URI names a local directory; the same path under another scheme does not.
+    root = _governed(tmp_path / "rooted", "rule-rooted")
+    is_error, payload = _list_rules(monkeypatch, capsys, "claude-code",
+                                    roots_uri=f"{scheme}:///" + root.as_posix().lstrip("/"))
     assert is_error
     assert (payload["status"], payload["binding"]["reason"]) == ("not_governed", "no_workspace")
 

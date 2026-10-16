@@ -1272,11 +1272,27 @@ def test_deeply_nested_codex_output_is_an_unanswered_probe(env):
     assert row["state"] == "auth_unknown" and "registration_unverifiable" in codes(row)
 
 
-@pytest.mark.parametrize("bad", ["absolute-with-nul", {"root": "\u0000x"}, {"root": "relative/repo"}, {"root": 7},
-                                 "not-an-entry"])
-def test_a_registry_entry_doctor_cannot_place_is_skipped_and_reported(env, bad):
+def _realpath_keeping_nul(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make os.path.realpath act as on Windows Python 3.12+: non-strict ntpath.realpath
+    returns a path holding a NUL byte as given (gh-106242) instead of raising ValueError."""
+    real = os.path.realpath
+
+    def realpath(path, *args, **kwargs):
+        text = os.fspath(path)
+        if isinstance(text, str) and "\x00" in text:
+            return os.path.normpath(os.path.abspath(text))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+
+
+@pytest.mark.parametrize("bad", ["absolute-with-nul", "absolute-with-nul-realpath-keeps", {"root": "\u0000x"},
+                                 {"root": "relative/repo"}, {"root": 7}, "not-an-entry"])
+def test_a_registry_entry_doctor_cannot_place_is_skipped_and_reported(env, monkeypatch, bad):
     env.all_ok()
-    if bad == "absolute-with-nul":  # resolving it raises ValueError: embedded null byte
+    if bad in ("absolute-with-nul", "absolute-with-nul-realpath-keeps"):
+        if bad == "absolute-with-nul-realpath-keeps":
+            _realpath_keeping_nul(monkeypatch)
         bad = {"root": str(env.ws.resolve()) + "\u0000x"}
     reg = env.home / ".aegis" / "workspaces.json"
     data = json.loads(reg.read_text(encoding="utf-8"))
@@ -1390,6 +1406,28 @@ def test_an_unreadable_claude_md_above_the_workspace_still_counts(env, tmp_path)
     assert claude["bootstrap"]["reaches_host"] is None
 
 
+@pytest.mark.skipif(os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
+                    reason="needs POSIX permissions and a non-root user")
+def test_a_claude_md_above_the_workspace_that_cannot_be_checked_still_counts(env, tmp_path):
+    # A .claude directory doctor may not search: whether .claude/CLAUDE.md is there cannot be
+    # told, so the bootstrap's reach stays unknown rather than claimed.
+    env.all_ok()
+    ws = _nested_workspace(env, tmp_path)
+    hidden = tmp_path / "outer" / ".claude"
+    hidden.mkdir()
+    (hidden / "CLAUDE.md").write_text("secret\n", encoding="utf-8")
+    hidden.chmod(0)
+    try:
+        payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    finally:
+        hidden.chmod(0o700)
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
+    assert "claude-code.bootstrap" in payload["unknown"]
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(hidden / "CLAUDE.md") in reason["message"]
+
+
 def test_an_import_inside_the_workspace_wins_over_a_claude_md_above_it(env, tmp_path):
     env.all_ok()
     ws = _nested_workspace(env, tmp_path)
@@ -1445,6 +1483,27 @@ def test_the_users_own_claude_md_never_shadows_agents_md(env, monkeypatch, confi
     assert claude["state"] == "ok" and claude["enforcement_level"] == "advisory"
     assert "claude-code.bootstrap" not in payload["unknown"]
     assert "claude_md_outside_workspace" not in codes(claude)
+
+
+def test_under_a_symlinked_home_the_users_claude_md_leaves_the_reach_unknown(env, monkeypatch, tmp_path):
+    # HOME names a link to the real home directory, and the workspace is found by its resolved
+    # path. Whether Claude Code then matches its user memory against the ancestors of the
+    # project by spelling or by resolved path is not known, so doctor claims neither way.
+    env.all_ok()
+    _workspace_under_home(env)
+    link = tmp_path / "home-link"
+    try:
+        link.symlink_to(env.home, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("cannot create a directory symlink here")
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(link))
+    memory = _user_memory(env.home / ".claude")
+    payload = json.loads(env.run(json=True, workspace=str(link / "projects" / "repo"))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(memory.resolve()) in reason["message"]
 
 
 def test_a_dot_claude_md_in_home_counts_when_claude_keeps_its_config_elsewhere(env, monkeypatch, tmp_path):
