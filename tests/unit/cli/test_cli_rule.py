@@ -221,3 +221,83 @@ def test_rule_parser_rejects_legacy_cell_flag():
     with pytest.raises(SystemExit):
         parser.parse_args(["demote", "--cell", "old-id"])
 
+
+
+def test_an_unknown_action_is_reported_on_stderr_and_exits_1(tmp_path, capsys):
+    args = argparse.Namespace(rule_action="graduate", workspace=str(tmp_path), json=False)
+    assert run_rule(args) == 1
+    captured = capsys.readouterr()
+    assert captured.err == "Unknown rule subcommand: graduate\n"
+    assert captured.out == ""
+
+
+# ── `aegis rule <action> [options]` through main(): the parser binds each option ──
+
+
+def _two_rule_workspace(root: Path) -> Path:
+    for folder, rule_id, extra in (("traps", "old-trap", "expired_at: 2026-01-01\n"), ("invariants", "inv", "")):
+        directory = root / ".aegis" / "rules" / folder
+        directory.mkdir(parents=True)
+        (directory / f"{rule_id}.md").write_text(
+            f"---\nid: {rule_id}\ntype: {folder[:-1]}\n{extra}---\nBody\n", encoding="utf-8")
+    return root
+
+
+def _listed(capsys, *argv) -> dict:
+    from aegis_cli.cli import main
+
+    assert main(["rule", "list", "--json", *argv]) == 0
+    return {row["id"]: row for row in json.loads(capsys.readouterr().out)}
+
+
+def test_rule_list_takes_workspace_after_the_action(tmp_path, monkeypatch, capsys):
+    ws = _two_rule_workspace(tmp_path / "ws")
+    monkeypatch.chdir(tmp_path)
+    assert set(_listed(capsys, "--workspace", str(ws))) == {"old-trap", "inv"}
+
+
+def test_rule_list_marks_only_expired_rules(tmp_path, monkeypatch, capsys):
+    ws = _two_rule_workspace(tmp_path / "ws")
+    monkeypatch.chdir(tmp_path)
+    rows = _listed(capsys, "--workspace", str(ws))
+    assert rows["old-trap"]["expired"] is True
+    assert "expired" not in rows["inv"]
+
+
+def test_rule_list_type_filters_and_rejects_an_unknown_type(tmp_path, monkeypatch, capsys):
+    from aegis_cli.cli import main
+
+    ws = _two_rule_workspace(tmp_path / "ws")
+    monkeypatch.chdir(tmp_path)
+    assert set(_listed(capsys, "--type", "invariant", "--workspace", str(ws))) == {"inv"}
+    with pytest.raises(SystemExit) as exc:
+        main(["rule", "list", "--type", "rumor", "--workspace", str(ws)])
+    assert exc.value.code == 2
+    assert "invalid choice: 'rumor'" in capsys.readouterr().err
+
+
+def test_rule_create_binds_type_body_file_and_workspace(tmp_path, monkeypatch, capsys):
+    from aegis_cli.cli import main
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
+
+    ws = _two_rule_workspace(tmp_path / "ws")
+    body = tmp_path / "body.md"
+    body.write_text("## Detail\n\nUse argv lists.\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    rc = main(["rule", "create", "--json", "-t", "invariant", "--id", "argv-lists", "--hypothesis", "No shell strings",
+               "--body-file", str(body), "--workspace", str(ws)])
+    assert rc == 0
+    created = Path(json.loads(capsys.readouterr().out)["path"])
+    assert created == ws / ".aegis" / "rules" / "invariants" / "argv-lists.md"
+    text = created.read_text(encoding="utf-8")
+    assert parse_frontmatter(text)["type"] == "invariant"
+    assert text.endswith("---\n## Detail\n\nUse argv lists.\n")
+
+
+def test_rule_create_without_type_makes_a_trap(tmp_path, monkeypatch, capsys):
+    from aegis_cli.cli import main
+
+    ws = _two_rule_workspace(tmp_path / "ws")
+    monkeypatch.chdir(tmp_path)
+    assert main(["rule", "create", "--json", "--id", "plain", "--hypothesis", "h", "--workspace", str(ws)]) == 0
+    assert (ws / ".aegis" / "rules" / "traps" / "plain.md").is_file()
