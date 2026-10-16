@@ -265,6 +265,36 @@ def test_build_hint_which_searches_env_path(tmp_path):
     assert seen["path"] == "/only/this"
 
 
+def _stub_aegis(directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    program = directory / ("aegis.exe" if os.name == "nt" else "aegis")
+    program.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    program.chmod(0o755)
+    return program
+
+
+@pytest.mark.parametrize("entry", ["", ".", "bin"])
+def test_build_hint_by_default_never_counts_an_aegis_behind_a_relative_entry(tmp_path, monkeypatch, entry):
+    # The default lookup is doctor's (aegis_core.pathlookup): an aegis reached only
+    # through an empty or relative entry is one the current directory (a cloned
+    # repository) supplies, so the hint agrees with doctor's "not found".
+    repo = tmp_path / "repo"
+    _stub_aegis(repo)
+    _stub_aegis(repo / "bin")
+    monkeypatch.chdir(repo)
+    env = {"SHELL": "/usr/bin/zsh", "PATH": entry, "HOME": str(tmp_path)}
+    text = build_hint(env=env, candidates=[str(tmp_path / "nowhere")], home=str(tmp_path),
+                      platform="linux", os_name="posix")
+    assert text is not None and "is not installed for this Python" in text
+
+
+def test_build_hint_by_default_finds_aegis_on_an_absolute_entry(tmp_path):
+    program = _stub_aegis(tmp_path / "bin")
+    env = {"SHELL": "/usr/bin/zsh", "PATH": str(program.parent), "HOME": str(tmp_path)}
+    assert build_hint(env=env, candidates=[str(tmp_path / "nowhere")], home=str(tmp_path),
+                      platform="linux", os_name="posix") is None
+
+
 def test_build_hint_venv_path_with_spaces_is_quoted(tmp_path):
     venv = tmp_path / "my venv"
     bindir = venv / "bin"

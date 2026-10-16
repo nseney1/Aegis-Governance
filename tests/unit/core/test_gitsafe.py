@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import time
 
 import pytest
@@ -92,9 +93,70 @@ def test_timeout_and_missing_git_raise_git_error(monkeypatch, tmp_path: Path):
         gitsafe.run(["status"], tmp_path, timeout=0.5)
     assert gitsafe.changed_files(tmp_path) is None  # helpers degrade to "unknown"
 
-    monkeypatch.setattr(gitsafe.shutil, "which", lambda name: None)
-    with pytest.raises(gitsafe.GitError, match="git is not installed"):
+    (tmp_path / "no-git").mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "no-git"))
+    with pytest.raises(gitsafe.GitError, match="^git is not installed or not on PATH$"):
         gitsafe.run(["status"], tmp_path)
+
+
+# ── Which git runs: absolute PATH entries only (aegis_core.pathlookup) ──────
+
+_REAL_GIT_DIR = os.path.dirname(shutil.which("git") or "")
+
+
+def _plant_git(directory: Path, marker: Path) -> None:
+    """A `git` that leaves ``marker`` when run. Windows runs only PATHEXT types, so
+    there it is a .cmd beside the script."""
+    directory.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        (directory / "git.cmd").write_text(f'@echo ran> "{marker}"\n', encoding="utf-8")
+        return
+    program = directory / "git"
+    program.write_text(f'#!/bin/sh\necho ran >> "{marker}"\nexit 0\n', encoding="utf-8")
+    program.chmod(0o755)
+
+
+@pytest.mark.parametrize("entry", ["", ".", "bin"])
+def test_a_git_planted_behind_an_empty_or_relative_path_entry_is_never_run(tmp_path, monkeypatch, entry):
+    # Each entry names a directory relative to the cwd: the repository, where a
+    # clone can plant a `git` that doctor's hook check or `aegis check` would start.
+    repo = tmp_path / "repo"
+    marker = tmp_path / "PWNED"
+    _plant_git(repo, marker)
+    _plant_git(repo / "bin", marker)
+    monkeypatch.chdir(repo)
+
+    monkeypatch.setenv("PATH", os.pathsep.join([entry, _REAL_GIT_DIR]))
+    proc = gitsafe.run(["--version"], repo)
+    assert proc.returncode == 0 and proc.stdout.startswith(b"git version")
+    assert not marker.exists(), "a git found through a relative PATH entry was run"
+
+    monkeypatch.setenv("PATH", entry)
+    with pytest.raises(gitsafe.GitError, match="^git is not installed or not on PATH$"):
+        gitsafe.run(["--version"], repo)
+    assert not marker.exists()
+
+
+def test_on_windows_the_current_directory_is_not_searched_for_git(tmp_path, monkeypatch):
+    # shutil.which searches the cwd first on Windows whatever PATH says: with the cwd
+    # in a cloned repository, its git.exe would run.
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("PATHEXT", os.pathsep.join([".COM", ".EXE", ".BAT", ".CMD"]))
+    for where in (tmp_path / "repo", tmp_path / "Git" / "cmd"):
+        where.mkdir(parents=True)
+        (where / "git.exe").write_bytes(b"MZ")
+        (where / "git.exe").chmod(0o755)
+    monkeypatch.chdir(tmp_path / "repo")
+    monkeypatch.setenv("PATH", str(tmp_path / "Git" / "cmd"))
+    started = []
+
+    def record(argv, **kwargs):
+        started.append(argv[0])
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(gitsafe.subprocess, "run", record)
+    gitsafe.run(["status"], tmp_path / "repo")
+    assert started == [str(tmp_path / "Git" / "cmd" / "git.exe")]
 
 
 # ── The fsmonitor regression (red team blocker) ──────────────────────────────

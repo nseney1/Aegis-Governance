@@ -280,9 +280,9 @@ class TestResolveTargetFilesFallbacks:
     def test_resolve_target_files_without_git(self, tmp_path, monkeypatch):
         """git missing: nothing is known and no base was diffed, so a clean tree is not assumed."""
         from aegis_cli.verify import resolve_target_files
-        from aegis_core import gitsafe
 
-        monkeypatch.setattr(gitsafe.shutil, "which", lambda name: None)
+        (tmp_path / "no-git").mkdir()
+        monkeypatch.setenv("PATH", str(tmp_path / "no-git"))
         args = argparse.Namespace(files=None, workspace=str(tmp_path))
         assert resolve_target_files(args) == []
         assert args._no_diff_base is True

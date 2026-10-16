@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import shutil
 from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
+from aegis_core.pathlookup import which
 from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, WorkspaceLayout
 
 __all__ = [
@@ -103,6 +103,10 @@ def detect_project_languages(project_root: Path | str) -> Dict[str, Dict[str, An
     root = Path(project_root).resolve()
     detected: Dict[str, Dict[str, Any]] = {}
 
+    def installed(toolchains: List[str]) -> List[str]:
+        # Only what aegis would run: a toolchain the repository itself provides is not one.
+        return [t for t in toolchains if which(t, outside=root)]
+
     # Quick manifest check
     manifest_found: Set[str] = set()
     for lang, config in LANGUAGE_DEFINITIONS.items():
@@ -112,7 +116,7 @@ def detect_project_languages(project_root: Path | str) -> Dict[str, Dict[str, An
                 "manifests": found_manifests,
                 "extensions": set(),
                 "file_count": 0,
-                "toolchains": [t for t in config["toolchains"] if shutil.which(t)],
+                "toolchains": installed(config["toolchains"]),
             }
             manifest_found.add(lang)
 
@@ -133,7 +137,7 @@ def detect_project_languages(project_root: Path | str) -> Dict[str, Dict[str, An
                         "manifests": [],
                         "extensions": set(),
                         "file_count": 0,
-                        "toolchains": [t for t in LANGUAGE_DEFINITIONS[lang]["toolchains"] if shutil.which(t)],
+                        "toolchains": installed(LANGUAGE_DEFINITIONS[lang]["toolchains"]),
                     }
                 detected[lang]["extensions"].add(ext)
                 detected[lang]["file_count"] += 1

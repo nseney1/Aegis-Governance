@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import os
 import shlex
-import shutil
 import sys
 import sysconfig
 from typing import Callable, Iterable, Mapping
+
+from aegis_core import pathlookup
 
 KNOWN_SHELLS = ("zsh", "bash", "fish", "pwsh")
 
@@ -185,9 +186,13 @@ def build_hint(env: Mapping[str, str] | None = None,
                shell: str | None = None,
                venv_prefix: object = _UNSET,
                cmd_name: str = "aegis") -> str | None:
-    """Human-readable remedy, or None when ``cmd_name`` (the aegis command) already resolves."""
+    """Human-readable remedy, or None when ``cmd_name`` (the aegis command) already resolves.
+
+    It resolves through the lookup doctor uses (aegis_core.pathlookup: absolute PATH
+    entries only), so the hint never calls resolvable what doctor reports missing.
+    """
     env = os.environ if env is None else env
-    which = shutil.which if which is None else which
+    which = pathlookup.which if which is None else which
     home = os.path.expanduser("~") if home is None else home
     platform = sys.platform if platform is None else platform
     os_name = os.name if os_name is None else os_name

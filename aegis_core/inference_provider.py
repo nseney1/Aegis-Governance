@@ -11,16 +11,28 @@ project config from their working directory (``.claude/settings.json`` hooks,
 not be able to steer its reviewer. The prompt carries everything the review needs. So a
 script in the command needs an absolute path, and ``codex exec`` needs
 ``--skip-git-repo-check``.
+
+A bare program name is looked up here, in absolute PATH entries only
+(aegis_core.pathlookup): an empty or relative entry names aegis's own cwd, often the
+repository, and on Windows CreateProcess searches that cwd first and applies no PATHEXT.
+A Windows batch file (npm's ``claude.cmd``, ``codex.cmd``, ``gemini.cmd``) runs under
+``cmd.exe /d /s /c`` with every argument quoted for cmd.exe and the C runtime; an
+argument holding a line break, which cmd.exe would take as the end of the command, is
+refused.
 """
 from __future__ import annotations
 
+import errno
+import ntpath
 import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
-from typing import List, Mapping, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence, Tuple, Union
 
+from aegis_core import pathlookup
 from aegis_core.config import ENV_LLM_CMD, env_llm_cmd
 
 ENV_VAR = ENV_LLM_CMD
@@ -43,13 +55,26 @@ class CommandBackend:
         self.argv: List[str] = list(argv)
         self.timeout = timeout
 
+    def _start(self) -> Tuple[Union[str, List[str]], Optional[str]]:
+        """What to start: (args, executable)."""
+        program = self.argv[0]
+        if _is_bare(program):
+            found = pathlookup.which(program)
+            if found is None:
+                raise LLMCommandError(f"cannot run LLM command {program}: {os.strerror(errno.ENOENT)}")
+            program = found
+        if sys.platform == "win32" and os.path.splitext(program)[1].lower() in (".cmd", ".bat"):
+            return _batch_command_line(program, self.argv[1:]), _comspec()
+        return [program, *self.argv[1:]], None
+
     def generate(self, prompt: str) -> str:
+        args, executable = self._start()
         # input= gives the child a fresh stdin pipe, so it can never read (and steal)
         # this process's stdin, which carries JSON-RPC when Aegis runs under MCP.
         workdir = tempfile.mkdtemp(prefix="aegis-llm-")
         try:
             proc = subprocess.run(
-                self.argv, input=prompt, capture_output=True, text=True, cwd=workdir,
+                args, executable=executable, input=prompt, capture_output=True, text=True, cwd=workdir,
                 encoding="utf-8", errors="replace", timeout=self.timeout, check=False,
             )
         except subprocess.TimeoutExpired:
@@ -64,6 +89,55 @@ class CommandBackend:
             detail = (proc.stderr or "").strip().splitlines()
             raise LLMCommandError(f"LLM command exited {proc.returncode}: {detail[-1] if detail else 'no stderr'}")
         return proc.stdout
+
+
+def _is_bare(name: str) -> bool:
+    """A name PATH lookup applies to: no directory part and no drive."""
+    return not (os.sep in name or (os.altsep and os.altsep in name) or os.path.splitdrive(name)[0])
+
+
+def _comspec() -> str:
+    comspec = os.environ.get("ComSpec", "")
+    if ntpath.isabs(comspec):
+        return comspec
+    return ntpath.join(os.environ.get("SystemRoot") or "C:\\Windows", "System32", "cmd.exe")
+
+
+def _cmd_quote(text: str) -> str:
+    """One argument for a batch file, quoted for cmd.exe and then the C runtime.
+
+    Inside double quotes cmd.exe treats & | < > ( ) ^ as text; a quote is doubled (``""``
+    keeps cmd.exe inside the quotes and is a literal quote to the C runtime); backslashes
+    are doubled only before a quote; ``%`` becomes ``%%cd:~,%``, which cmd.exe expands to
+    a bare ``%`` (an empty substring of %cd%), so no %VAR% in the text expands. Delayed
+    ``!VAR!`` expansion is off (/v:OFF). The scheme is Rust's std after CVE-2024-24576.
+    """
+    if "\r" in text or "\n" in text:
+        raise LLMCommandError(f"cannot pass {text!r} to a batch file: cmd.exe ends the command at a line break")
+    out = ['"']
+    backslashes = 0
+    for ch in text:
+        if ch == "\\":
+            backslashes += 1
+        else:
+            if ch == '"':
+                out.append("\\" * backslashes + '"')
+            elif ch == "%":
+                out.append("%%cd:~,")
+            backslashes = 0
+        out.append(ch)
+    out.append("\\" * backslashes + '"')
+    return "".join(out)
+
+
+def _batch_command_line(script: str, args: Sequence[str]) -> str:
+    """The cmd.exe command line that runs ``script`` with ``args`` unchanged.
+
+    /d skips AutoRun commands, /e:ON enables the substring syntax ``%%cd:~,%`` needs,
+    /s strips exactly the outer pair of quotes.
+    """
+    quoted = " ".join(_cmd_quote(part) for part in (script, *args))
+    return f'cmd.exe /d /e:ON /v:OFF /s /c "{quoted}"'
 
 
 def _split_command(raw: str) -> List[str]:

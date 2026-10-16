@@ -32,8 +32,7 @@ def isolated_hosts(tmp_path, tmp_path_factory, monkeypatch):
 
     monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
     # Doctor's own lookups (the aegis CLI, host CLIs, python3) search a private directory
-    # holding only an aegis stub, never this machine's PATH; shutil.which patches do not
-    # reach them. It lies outside tmp_path, which many of these tests use as the
+    # holding only an aegis stub, never this machine's PATH. It lies outside tmp_path, which many of these tests use as the
     # workspace. Tests of the CLI check itself use the real lookup (``real_lookup``).
     programs = tmp_path_factory.mktemp("programs")
     _stub(programs, "aegis")
@@ -73,10 +72,6 @@ def _governed(root):
     return root
 
 
-def _only_aegis(cmd, **_kw):
-    return "/usr/local/bin/aegis" if cmd == "aegis" else None
-
-
 # ── Individual check tests ──────────────────────────────────────────────────
 
 
@@ -98,16 +93,14 @@ def test_doctor_returns_zero_in_valid_env(tmp_path, monkeypatch):
     """run_doctor returns 0 when the workspace serves rules and aegis is on PATH."""
     _governed(tmp_path)
     monkeypatch.chdir(tmp_path)
-    with patch("shutil.which", side_effect=_only_aegis):
-        result = run_doctor(argparse.Namespace())
+    result = run_doctor(argparse.Namespace())
     assert result == 0
 
 
 def test_doctor_fails_when_no_rule_is_served(tmp_path, monkeypatch, capsys):
     (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
-    with patch("shutil.which", side_effect=_only_aegis):
-        assert run_doctor(argparse.Namespace()) == 1
+    assert run_doctor(argparse.Namespace()) == 1
     out = capsys.readouterr().out
     assert "No rules are served" in out and "aegis init" in out
 
@@ -123,9 +116,8 @@ def test_doctor_returns_one_on_failure(tmp_path, monkeypatch):
     fake_version = _VersionInfo(3, 8, 0, "final", 0)
 
     monkeypatch.setattr("aegis_cli.doctor.sys.version_info", fake_version)
-    with patch("shutil.which", side_effect=_only_aegis):
-        args = argparse.Namespace()
-        result = run_doctor(args)
+    args = argparse.Namespace()
+    result = run_doctor(args)
 
     assert result == 1
 
@@ -145,8 +137,7 @@ def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, ca
     monkeypatch.delenv("ZDOTDIR", raising=False)
     monkeypatch.setattr("aegis_cli.pathcheck.default_candidates", lambda: [str(bindir)])
     monkeypatch.setattr("aegis_cli.pathcheck.sys.platform", "linux")
-    with patch("aegis_cli.pathcheck.shutil.which", return_value=None):
-        assert _check_cli_resolvable(tmp_path / "ws") is False
+    assert _check_cli_resolvable(tmp_path / "ws") is False
     out = capsys.readouterr().out
     assert "aegis CLI not found on PATH" in out
     assert "~/.zshrc" in out
@@ -160,8 +151,7 @@ def test_cli_check_never_says_aegis_is_where_only_a_v3_soma_script_is(tmp_path, 
     (bindir / "soma").write_text("#!/bin/sh\n")
     monkeypatch.setenv("PATH", str(bindir))
     monkeypatch.setattr("aegis_cli.pathcheck.default_candidates", lambda: [str(bindir)])
-    with patch("aegis_cli.pathcheck.shutil.which", side_effect=lambda cmd, **kw: str(bindir / cmd) if cmd == "soma" else None):
-        assert _check_cli_resolvable(tmp_path / "ws") is False
+    assert _check_cli_resolvable(tmp_path / "ws") is False
     out = capsys.readouterr().out
     assert "The 'aegis' command is not installed" in out
     assert "pip install aegis-guardrails" in out
@@ -217,7 +207,7 @@ def test_check_ast_drivers_native_when_no_slots(tmp_path, capsys):
     assert "native Python stdlib" in out2
 
 
-def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys, monkeypatch):
+def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys, monkeypatch, real_lookup):
     from aegis_cli.doctor import _check_ast_drivers
     home = tmp_path / "home"
     (home / ".aegis").mkdir(parents=True)
@@ -228,17 +218,30 @@ def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys, monkey
     ws.mkdir()
     tmp_path = ws
 
-    # With both binaries resolvable
-    with patch("shutil.which", side_effect=lambda cmd: f"/bin/{cmd}"):
-        assert _check_ast_drivers(tmp_path) is True
+    # With the binary on an absolute PATH entry
+    node = _stub(tmp_path.parent / "bin", "node")
+    monkeypatch.setenv("PATH", str(node.parent))
+    assert _check_ast_drivers(tmp_path) is True
     out = capsys.readouterr().out
-    assert "AST driver (.ts): node resolvable" in out
+    assert f"AST driver (.ts): node resolvable ({node})" in out
 
     # With missing binary
-    with patch("shutil.which", return_value=None):
-        assert _check_ast_drivers(tmp_path) is False
+    (tmp_path.parent / "empty").mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path.parent / "empty"))
+    assert _check_ast_drivers(tmp_path) is False
     out = capsys.readouterr().out
-    assert "not found on PATH" in out
+    assert "executable 'node' not found on PATH" in out
+
+    # Found only inside the workspace or through a relative entry: aegis never runs it
+    planted = _stub(tmp_path / "node_modules" / ".bin", "node")
+    _stub(tmp_path, "node")
+    monkeypatch.chdir(tmp_path)
+    for entry, where in ((str(planted.parent), f"{planted}, inside the workspace"),
+                         ("", f"{tmp_path / planted.name}, through the relative PATH entry ''")):
+        monkeypatch.setenv("PATH", entry)
+        assert _check_ast_drivers(tmp_path) is False
+        out = capsys.readouterr().out
+        assert f"AST driver (.ts): executable 'node' is found only at {where}, where aegis never runs it" in out
 
     # An unreadable config is reported, not a crash
     (tmp_path / ".aegis").mkdir()
@@ -256,9 +259,9 @@ def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsy
     config.write_text('{"v": 1, "ast": {"packaged_drivers": ["ts"]}, "drivers": {"ts": "evil"}}')
 
     monkeypatch.chdir(tmp_path)
-    with patch("shutil.which", side_effect=_only_aegis):
-        args = argparse.Namespace()
-        result = run_doctor(args)
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))  # no node; doctor's own lookups are faked
+    result = run_doctor(argparse.Namespace())
     assert result == 0
     captured = capsys.readouterr().out
     assert "AST driver (.ts): executable 'node' not found on PATH" in captured
@@ -310,8 +313,7 @@ def test_run_doctor_with_fix_flag(tmp_path, monkeypatch, capsys):
     (tmp_path / "src" / "index.ts").write_text("console.log(1);")
 
     monkeypatch.chdir(tmp_path)
-    with patch("shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/node"):
-        res = run_doctor(argparse.Namespace(fix=True, yes=True))
+    res = run_doctor(argparse.Namespace(fix=True, yes=True))
     assert res == 0
     captured = capsys.readouterr().out
     assert "enable the packaged AST drivers for .ts" in captured
@@ -324,8 +326,7 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
     (tmp_path / "src" / "index.ts").write_text("console.log(1);")
 
     monkeypatch.chdir(tmp_path)
-    with patch("shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/node"):
-        run_doctor(argparse.Namespace())
+    run_doctor(argparse.Namespace())
     assert not (tmp_path / ".aegis" / "config.json").exists()
     out = capsys.readouterr().out
     assert "Run 'aegis doctor --fix' to provision" in out
@@ -438,27 +439,26 @@ def test_doctor_json_mode_and_warning_counts(tmp_path, monkeypatch, capsys):
     (tmp_path / ".aegis" / "rules").mkdir(parents=True)
 
     monkeypatch.chdir(tmp_path)
-    with patch("shutil.which", side_effect=_only_aegis):
-        # 1. Text mode with no served rules -> fails with Fix: remediation and warning/fail summary
-        rc_text = run_doctor(argparse.Namespace())
-        assert rc_text == 1
-        out_text = capsys.readouterr().out
-        assert "aegis doctor — running health checks" in out_text
-        assert "Fix:" in out_text
-        assert "warning" in out_text and "failed" in out_text
+    # 1. Text mode with no served rules -> fails with Fix: remediation and warning/fail summary
+    rc_text = run_doctor(argparse.Namespace())
+    assert rc_text == 1
+    out_text = capsys.readouterr().out
+    assert "aegis doctor — running health checks" in out_text
+    assert "Fix:" in out_text
+    assert "warning" in out_text and "failed" in out_text
 
-        # 2. JSON mode -> valid JSON with zero ANSI codes
-        _governed(tmp_path)
-        rc_json = run_doctor(argparse.Namespace(json=True))
-        assert rc_json == 0
-        raw_json = capsys.readouterr().out
-        assert "\x1b[" not in raw_json
-        payload = json.loads(raw_json)
-        assert payload["checks_ok"] is True
-        assert payload["summary"]["passed"] >= 5
-        assert "warnings" in payload["summary"]
-        assert payload["summary"]["failed"] == 0
-        assert {c["id"] for c in payload["checks"]} >= {"python_version", "rules", "cli_on_path"}
+    # 2. JSON mode -> valid JSON with zero ANSI codes
+    _governed(tmp_path)
+    rc_json = run_doctor(argparse.Namespace(json=True))
+    assert rc_json == 0
+    raw_json = capsys.readouterr().out
+    assert "\x1b[" not in raw_json
+    payload = json.loads(raw_json)
+    assert payload["checks_ok"] is True
+    assert payload["summary"]["passed"] >= 5
+    assert "warnings" in payload["summary"]
+    assert payload["summary"]["failed"] == 0
+    assert {c["id"] for c in payload["checks"]} >= {"python_version", "rules", "cli_on_path"}
 
 
 
@@ -493,6 +493,5 @@ def test_doctor_fails_closed_on_a_rule_that_cannot_be_served(tmp_path, monkeypat
     _governed(tmp_path)
     (tmp_path / ".aegis" / "rules" / "invariants" / "broken.md").write_text("---\nid: [unclosed\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    with patch("shutil.which", side_effect=_only_aegis):
-        assert run_doctor(argparse.Namespace()) == 1
+    assert run_doctor(argparse.Namespace()) == 1
     assert "cannot be served" in capsys.readouterr().out

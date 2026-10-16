@@ -22,7 +22,7 @@ def isolated_hosts(tmp_path, monkeypatch):
 
     monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
     # Host CLIs and python3 are looked up in an empty private directory, never on this
-    # machine's PATH (doctor's own lookup; shutil.which patches do not reach it).
+    # machine's PATH (doctor's own lookup).
     no_programs = tmp_path / "no-programs"
     no_programs.mkdir()
     real_which, real_skipped = doctor.which, doctor.only_skipped
@@ -61,9 +61,6 @@ def test_doctor_fix_provisions_missing_drivers(tmp_path: Path):
     assert not (tmp_path / ".aegis" / "drivers").exists()
 
 
-from unittest.mock import patch
-
-
 def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch):
     (tmp_path / "go.mod").write_text("module example.com/app\n", encoding="utf-8")
     (tmp_path / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
@@ -72,8 +69,7 @@ def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch):
     args = argparse.Namespace(_project_root=tmp_path, fix=True, yes=True)
 
     monkeypatch.chdir(tmp_path)
-    with patch("shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/go"):
-        run_doctor(args)
+    run_doctor(args)
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".go") is not None
 

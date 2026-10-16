@@ -14,7 +14,6 @@ import json
 import os
 from pathlib import Path
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,6 +22,7 @@ from typing import Dict, List, Mapping, Optional, Tuple, Union
 from aegis_core.ast.drivers.python import parse_python_ast
 from aegis_core.ast.schema import NormalizedAST
 from aegis_core.errors import AegisError
+from aegis_core.pathlookup import INSIDE_FENCE, only_skipped, which
 from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import as_workspace
 
@@ -71,8 +71,13 @@ class _DriverPlan:
     unavailable: Optional[str] = None  # why the chosen driver cannot run here
 
 
-def _command_plan(command: str, ext: str) -> _DriverPlan:
-    """Plan for a trusted command string (registered in code or from user scope)."""
+def _command_plan(command: str, ext: str, ws_root: Optional[Path] = None, where: str = "the driver") -> _DriverPlan:
+    """Plan for a trusted command string (registered in code or from user scope).
+
+    A bare executable name is resolved here, through absolute PATH entries outside
+    ``ws_root``: left to the child, an empty or relative entry (and on Windows the
+    current directory) would resolve against the workspace.
+    """
     if ext == ".rs" and "rust_ast.py" in command:
         return _DriverPlan(label=command, in_process_rust=True)
     try:
@@ -81,7 +86,28 @@ def _command_plan(command: str, ext: str) -> _DriverPlan:
         return _DriverPlan(label=command, unavailable=f"the driver command cannot be parsed: {exc}")
     if parts and _is_python_name(parts[0]):
         parts[0] = resolve_driver_executable(parts[0]) or parts[0]
+    elif parts and _is_bare(parts[0]):
+        found = which(parts[0], outside=ws_root)
+        if found is None:
+            return _DriverPlan(label=command, unavailable=f"{where} {_not_found(parts[0], ws_root)}")
+        parts[0] = found
     return _DriverPlan(label=command, argv=tuple(parts))
+
+
+def _is_bare(name: str) -> bool:
+    """A name PATH lookup applies to: no directory part and no drive."""
+    return not (os.sep in name or (os.altsep and os.altsep in name) or os.path.splitdrive(name)[0])
+
+
+def _not_found(name: str, ws_root: Optional[Path]) -> str:
+    """Why ``name`` resolves nowhere aegis will run it from."""
+    hits = only_skipped(name, outside=ws_root)
+    if not hits:
+        return f"needs '{name}', which was not found on PATH"
+    hit = hits[0]
+    if hit.reason == INSIDE_FENCE:
+        return f"needs '{name}', which resolves to {hit.path} inside the workspace"
+    return f"needs '{name}', which is reached only through the relative PATH entry {hit.entry!r} ({hit.path})"
 
 
 def _inside_workspace(path: Union[Path, str], ws_root: Path) -> bool:
@@ -95,9 +121,10 @@ def _inside_workspace(path: Union[Path, str], ws_root: Path) -> bool:
 
 
 def _trusted_interpreter(name: str, ws_root: Path) -> Optional[str]:
-    """Resolve an interpreter on PATH, refusing relative PATH hits and binaries inside the workspace."""
-    found = shutil.which(name)
-    if not found or not os.path.isabs(found) or _inside_workspace(found, ws_root):
+    """Resolve an interpreter through absolute PATH entries outside the workspace; one
+    whose file links back into the workspace is refused too."""
+    found = which(name, outside=ws_root)
+    if not found or _inside_workspace(found, ws_root):
         return None
     return found
 
@@ -156,28 +183,22 @@ def _user_command_plan(command: str, ext: str, ws_root: Path) -> Optional[_Drive
     if config is not None and names_packaged_driver(command, config):
         return _packaged_plan(ext, ws_root)
 
-    plan = _command_plan(command, ext)
+    where = f"the ~/.aegis/config.json driver for '{ext}'"
+    plan = _command_plan(command, ext, ws_root, where)
     if plan.in_process_rust or plan.unavailable or not plan.argv:
         return plan
-    where = f"the ~/.aegis/config.json driver for '{ext}'"
     argv = list(plan.argv)
     first = _split_command(command)[0]
     if not _is_python_name(first):  # python names already resolved to sys.executable, which runs aegis itself
-        if os.path.isabs(first) or os.sep in first or (os.altsep and os.altsep in first):
-            if _inside_workspace(ws_root / first, ws_root):
+        if not _is_bare(first):
+            # The child runs in an empty directory, so a relative path is joined to the
+            # workspace root here, never left to the child's cwd or to CreateProcess.
+            full = os.path.normpath(os.path.join(str(ws_root), first))
+            if _inside_workspace(full, ws_root):
                 return replace(plan, unavailable=f"{where} runs {first}, which is inside the workspace")
-        else:
-            found = shutil.which(first)
-            if not found:
-                # Never let the child search PATH: with cwd = workspace, relative entries resolve into the repo.
-                return replace(plan, unavailable=f"{where} needs '{first}', which was not found on PATH")
-            trusted = _trusted_interpreter(first, ws_root)
-            if trusted is None:
-                return replace(
-                    plan,
-                    unavailable=f"{where} needs '{first}', which resolves to {found} inside the workspace or via a relative PATH entry",
-                )
-            argv[0] = trusted
+            argv[0] = full
+        elif _inside_workspace(argv[0], ws_root):
+            return replace(plan, unavailable=f"{where} needs '{first}', which resolves to {argv[0]} inside the workspace")
     for arg in argv[1:]:
         value = arg.split("=", 1)[1] if arg.startswith("-") and "=" in arg else arg
         if value and not value.startswith("-") and os.path.lexists(ws_root / value) and _inside_workspace(ws_root / value, ws_root):
@@ -208,7 +229,11 @@ class ASTDriverRegistry:
         clean_ext = clean_ext.lower()
 
         if clean_ext in self._drivers:
-            return _command_plan(self._drivers[clean_ext], clean_ext)
+            fence = None
+            if workspace_root:
+                fence = Path(workspace_root.root if isinstance(workspace_root, Workspace) else workspace_root)
+            return _command_plan(self._drivers[clean_ext], clean_ext, fence,
+                                 f"the driver registered for '{clean_ext}'")
         if not workspace_root:
             return None
 
@@ -255,31 +280,51 @@ class ASTDriverRegistry:
         return exts
 
 
+def _names_program(token: str) -> bool:
+    """An absolute path to a file, or a bare name on an absolute PATH entry. A relative
+    path names a file in aegis's own cwd, which the repository may control."""
+    if _is_bare(token):
+        return which(token) is not None
+    return os.path.isabs(token) and os.path.isfile(token)
+
+
 def _split_command(cmd: str) -> list[str]:
     """Split a driver command line string into argv arguments, preserving Windows paths."""
     if os.name == "nt":
         parts = [p.strip('"') for p in shlex.split(cmd, posix=False)]
-        if parts and not shutil.which(parts[0]):
+        # Rejoin the words of an unquoted path with spaces (C:\Program Files\...).
+        if parts and not _names_program(parts[0]):
             for i in range(1, len(parts)):
                 cand = " ".join(parts[: i + 1])
-                if os.path.isfile(cand) or shutil.which(cand):
+                if _names_program(cand):
                     return [cand] + parts[i + 1 :]
         return parts
     return shlex.split(cmd)
 
 
-def resolve_driver_executable(name: str) -> Optional[str]:
-    """Return the path a driver command's executable resolves to, or None.
+def resolve_driver_executable(name: str, workspace: Optional[Union[Path, str]] = None) -> Optional[str]:
+    """Return the program a driver command's executable names, or None.
 
     Placeholder tokens '{python}', 'python3', and 'python' resolve deterministically
-    to the active Python interpreter running Soma (sys.executable). Other commands
-    are resolved via PATH.
+    to the active Python interpreter running aegis (sys.executable). A bare name is
+    looked up in absolute PATH entries outside ``workspace`` (aegis_core.pathlookup); a
+    relative path is joined to ``workspace``, never to the cwd; and a program inside
+    ``workspace`` does not count, as when a user-scope driver runs.
     """
     clean = name.strip()
     if _is_python_name(clean):
         return sys.executable if sys.executable else None
-
-    return shutil.which(clean)
+    if _is_bare(clean):
+        return which(clean, outside=workspace)
+    if not os.path.isabs(clean):
+        if workspace is None:
+            return None
+        clean = os.path.normpath(os.path.join(os.fspath(workspace), clean))
+    if workspace is not None and _inside_workspace(clean, Path(workspace)):
+        return None
+    if os.path.isfile(clean) and (os.name == "nt" or os.access(clean, os.X_OK)):
+        return clean
+    return None
 
 
 class ASTDriverRunner:
