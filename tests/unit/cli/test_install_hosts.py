@@ -409,6 +409,27 @@ class TestWorkspaceRegistry:
         assert [w["root"] for w in remaining] == [str(b.resolve())]
         assert ih.unregister_workspace(home, a)[0] == "absent"
 
+    @pytest.mark.parametrize("stored", ["repo", os.path.join(".", "repo"), "\u0000x", "/re\u0000po"],
+                             ids=["relative", "dot-relative", "nul", "absolute-nul"])
+    def test_a_stored_root_the_server_skips_never_matches_and_is_kept(self, tmp_path, monkeypatch, stored):
+        # The server's registry reader skips a root that is not absolute or cannot be resolved;
+        # resolving a relative one here would match whatever the cwd makes of it.
+        home, root = tmp_path / "home", tmp_path / "repo"
+        root.mkdir()
+        monkeypatch.chdir(tmp_path)
+        reg = home / ".aegis" / "workspaces.json"
+        reg.parent.mkdir(parents=True)
+        junk = {"root": stored, "added_at": "x", "added_by": "aegis init", "hosts": ["codex-cli"]}
+        reg.write_text(json.dumps({"v": 1, "workspaces": [junk]}), encoding="utf-8")
+
+        assert ih.find_workspace(ih.read_registry(home), root) is None
+        assert ih.unregister_workspace(home, root) == ("absent", [junk])
+        assert ih.register_workspace(home, root, ["claude-code"], now="t") == "added"
+        assert ih.read_registry(home)["workspaces"] == [junk, {
+            "root": str(root.resolve()), "added_at": "t", "added_by": "aegis init", "hosts": ["claude-code"]}]
+        status, remaining = ih.unregister_workspace(home, root)
+        assert (status, remaining) == ("removed", [junk])
+
     @pytest.mark.parametrize("raw, reason", [
         (b"{nope", "not valid JSON"),
         (b'{"v": 2, "workspaces": []}', "version 2"),

@@ -540,6 +540,18 @@ def _root_key(root: Union[str, Path]) -> str:
     return os.path.normcase(os.path.realpath(os.fspath(root)))
 
 
+def _stored_key(root: str) -> Optional[str]:
+    """The key of a root read from the registry, or None for one the server's reader skips:
+    a relative root would resolve against the current directory, and a NUL byte makes
+    resolving raise. Such an entry never matches, and stays in the file as it is."""
+    if not os.path.isabs(root):
+        return None
+    try:
+        return _root_key(root)
+    except (OSError, ValueError):
+        return None
+
+
 def is_denied_root(root: Union[str, Path], home: Union[str, Path]) -> bool:
     """True for the home directory and a filesystem root: never a workspace (AD-4)."""
     real = os.path.realpath(os.fspath(root))
@@ -589,7 +601,7 @@ def register_workspace(home: Union[str, Path], root: Union[str, Path], hosts: Se
     raw, data = _load_registry(path)
     key = _root_key(root)
     entries = data["workspaces"]
-    entry = next((e for e in entries if _root_key(e["root"]) == key), None)
+    entry = next((e for e in entries if _stored_key(e["root"]) == key), None)
     if entry is None:
         entries.append({"root": os.path.realpath(os.fspath(root)), "added_at": now or _utc_now(),
                         "added_by": "aegis init", "hosts": ordered_hosts(hosts)})
@@ -611,7 +623,7 @@ def unregister_workspace(home: Union[str, Path], root: Union[str, Path], *,
     path = _registry_file(home)
     raw, data = _load_registry(path)
     key = _root_key(root)
-    remaining = [e for e in data["workspaces"] if _root_key(e["root"]) != key]
+    remaining = [e for e in data["workspaces"] if _stored_key(e["root"]) != key]
     if len(remaining) == len(data["workspaces"]):
         return "absent", remaining
     data["workspaces"] = remaining
@@ -626,7 +638,7 @@ def workspace_hosts(entry: Optional[Dict[str, Any]]) -> List[str]:
 
 def find_workspace(registry: Dict[str, Any], root: Union[str, Path]) -> Optional[Dict[str, Any]]:
     key = _root_key(root)
-    return next((e for e in registry.get("workspaces", []) if _root_key(e["root"]) == key), None)
+    return next((e for e in registry.get("workspaces", []) if _stored_key(e["root"]) == key), None)
 
 
 # ── Hosts ────────────────────────────────────────────────────────────────────
