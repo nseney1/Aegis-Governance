@@ -51,6 +51,25 @@ def test_json_mode_prints_only_json_naming_the_matching_rule(ws, capsys):
     assert payload["relevant_rules"][0]["matched_files"] == ["src/app.py"]
 
 
+def test_json_mode_prints_one_two_space_indented_document(ws, capsys):
+    assert main(["scan", "src/app.py", "--json"]) == 0
+    out = capsys.readouterr().out
+    assert out == json.dumps(json.loads(out), indent=2) + "\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the long paths exceed MAX_PATH")
+def test_text_mode_caps_each_warning_line_at_1024_characters(ws, capsys):
+    rules = ws / ".aegis" / "rules"
+    for letter in "abc":
+        folder = rules / (letter * 200)
+        folder.mkdir()
+        (folder / ("n" * 200 + ".md")).write_text("# notes\n", encoding="utf-8")
+    assert main(["scan", "src/app.py"]) == 0
+    (line,) = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("Warning: ")]
+    assert "are not rules and were ignored" in line
+    assert len(line) == len("Warning: ") + 1024 and line.endswith("...")
+
+
 def test_text_mode_prints_the_rule_guidance(ws, capsys):
     rc = main(["scan", "src/app.py"])
     out = capsys.readouterr().out
