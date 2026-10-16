@@ -393,14 +393,15 @@
           {
             "choices": [
               "text",
-              "json"
+              "json",
+              "github"
             ],
             "default": "text",
             "dest": "format",
             "flags": [
               "--format"
             ],
-            "help": "Output format",
+            "help": "Output format (github, with --ci only: workflow-command annotations)",
             "kind": "store",
             "metavar": null,
             "nargs": null,
@@ -471,6 +472,31 @@
             "required": false
           },
           {
+            "const": true,
+            "default": false,
+            "dest": "ci",
+            "flags": [
+              "--ci"
+            ],
+            "help": "The CI weakening check: compare the rules that bind (gates, invariants, enforcement: gate) at merge-base(--base, --head) with those at --head, and flag every way one binds less (a deletion or archive, a rank decrease, lost coverage of existing files, a forbid_ast pattern no longer covered, a new or unknown key, any applies_to change, or a mandatory rule added past the scan's slot cap). A flagged change passes only with a signed Aegis-Approve commit (aegis approve) by a key in the base branch's allowed_signers. Exit 0 pass, 1 fail",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "head",
+            "flags": [
+              "--head"
+            ],
+            "help": "With --ci: the commit under review (default: the pull request head in $GITHUB_EVENT_PATH, else HEAD)",
+            "kind": "store",
+            "metavar": "REF",
+            "nargs": null,
+            "required": false
+          },
+          {
             "default": null,
             "dest": "split",
             "flags": [
@@ -488,7 +514,7 @@
             "flags": [
               "--base"
             ],
-            "help": "With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection",
+            "help": "With --ci: the pull request's base (default: its base.sha in $GITHUB_EVENT_PATH, else as below). With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection",
             "kind": "store",
             "metavar": "REF",
             "nargs": null,
