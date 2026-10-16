@@ -17,21 +17,21 @@ enforcement: gate
 - **Direct Answers**: Provide the solution or code immediately.
 
 ## 2. Diffs Only
-- **Precise Edits**: Always use precise file editing tools (`replace_file_content` or `multi_replace_file_content`) to apply changes.
+- **Precise Edits**: Always apply changes with the precise file-editing tool (`${SLOT.TOOL_EDIT}`), never by rewriting a whole file.
 - **No Full File Outputs**: Never re-output entire functions or files in chat unless explicitly requested by the user.
 
 ## 3. Subagent Model Selection
 - **Model Tiering Protocol** (authoritative source — `subagent-delegation.md §3` defers here):
-  - `flash`: Research, audit, review prongs (Sentry/Trace/Probe/Gauntlet/Bastion/Debrief), diff proposing, verification
-  - `flash`: Mechanical diff application from pre-computed before/after blocks
-  - `inherit`: Independent coding lanes under Disjoint Lane Protocol
+  - `${SLOT.MODEL_FAST}`: Research, audit, review prongs (Sentry/Trace/Probe/Gauntlet/Bastion/Debrief), diff proposing, verification
+  - `${SLOT.MODEL_FAST}`: Mechanical diff application from pre-computed before/after blocks
+  - `${SLOT.MODEL_STANDARD}`: Independent coding lanes under Disjoint Lane Protocol
   - `orchestrator only`: Synthesis, architecture, design authority (never delegated to subagents)
-- **Mechanical Diff Application**: When Probe/Gauntlet has already produced exact before/after diffs, applying those diffs is syntactic — use `flash` tier, never `inherit` or `pro`.
+- **Mechanical Diff Application**: When Probe/Gauntlet has already produced exact before/after diffs, applying those diffs is syntactic — use the `${SLOT.MODEL_FAST}` tier, never `${SLOT.MODEL_STANDARD}` or `${SLOT.MODEL_HEAVY}`.
 
 ## 4. Task Hygiene
 - **Kill Stale Tasks**: Terminate hanging or timed-out background commands before respawning.
 - **Concurrency Limit**: Max 3 concurrent background tasks per logical operation.
-- **Media Staging**: Never copy bulk media (>10 files) to brain scratch; process in-place or use project temp dirs.
+- **Media Staging**: Never copy bulk media (>10 files) into the agent's scratch or memory directory; process in-place or use project temp dirs.
 
 ## 5. Efficiency Metrics
 - **Waste Rate**: Percentage of steps that produce no useful output (target: <5%).
