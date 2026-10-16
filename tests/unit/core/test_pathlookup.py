@@ -167,6 +167,30 @@ class TestWindowsLookup:
         monkeypatch.chdir(tmp_path)
         assert which("codex", os.pathsep.join(["", "."])) is None
 
+    # What only_skipped reports is what doctor lists in binary.ignored: the three Windows CI
+    # failures at 41cd3f0 were codex.EXE reported for a codex.exe on disk.
+    @pytest.mark.parametrize("on_disk", ["codex.exe", "Codex.Exe"])
+    def test_a_program_passed_over_inside_the_fence_keeps_its_on_disk_spelling(self, tmp_path, windows,
+                                                                               on_disk):
+        ws = tmp_path / "ws"
+        exe = ws / "tools" / on_disk
+        exe.parent.mkdir(parents=True)
+        exe.write_bytes(b"MZ")
+        exe.chmod(0o755)
+        assert only_skipped("codex", str(exe.parent), outside=ws) == [
+            Hit(path=str(exe), entry=str(exe.parent), reason="inside_fence")]
+
+    @pytest.mark.parametrize("on_disk", ["codex.exe", "Codex.Exe"])
+    def test_a_program_passed_over_on_a_relative_entry_keeps_its_on_disk_spelling(self, tmp_path, windows,
+                                                                                  on_disk):
+        ws = tmp_path / "ws"
+        exe = ws / "bin" / on_disk
+        exe.parent.mkdir(parents=True)
+        exe.write_bytes(b"MZ")
+        exe.chmod(0o755)
+        assert only_skipped("codex", "bin", outside=ws, base=ws) == [
+            Hit(path=os.path.normpath(str(exe)), entry="bin", reason="relative_entry")]
+
 
 # ── only_skipped ─────────────────────────────────────────────────────────────
 
