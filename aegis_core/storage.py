@@ -6,6 +6,12 @@ concurrency guarantees live in one place:
 - ``locked(workspace)``: the single workspace lock, ``.aegis/state/lock``. It is
   re-entrant per thread, so nested acquisition never deadlocks, and its wait is
   bounded with an error that names the lock file.
+- ``shared_state_dir(workspace)``: ``<git common dir>/aegis``, the state every
+  worktree of one repository shares (the events log), with the same symlink and
+  outside-entry refusals, confined to the resolved common dir; ``.aegis/state`` outside
+  git. ``shared_locked(workspace, name)`` holds a lock file there with the same
+  primitive as ``locked``. Lock order: the workspace lock first; a shared lock is a
+  leaf, so nothing else is taken while holding one (LockOrderError otherwise).
 - ``state_dir(workspace)``: ``.aegis/state``, refused when it (or ``.aegis``, or any
   entry directly inside it: the ledger, the lock, a log, a backup) is a symlink or
   resolves outside the workspace, so machine-local state is never written through a
@@ -35,7 +41,8 @@ import threading
 import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
-from aegis_core.errors import LockTimeoutError, PathTraversalError
+from aegis_core import gitsafe
+from aegis_core.errors import AegisError, LockTimeoutError, PathTraversalError
 from aegis_core.taxonomy import (
     LOCK_MAX_BACKOFF_SECONDS,
     LOCK_RETRY_INTERVAL_SECONDS,
@@ -57,6 +64,7 @@ except ImportError:  # POSIX
 
 __all__ = [
     "JsonlRead",
+    "LockOrderError",
     "LockTimeoutError",
     "append_jsonl",
     "atomic_write_and_unlink",
@@ -65,6 +73,8 @@ __all__ = [
     "fsync_dir",
     "locked",
     "read_jsonl",
+    "shared_locked",
+    "shared_state_dir",
     "state_dir",
 ]
 
@@ -81,9 +91,19 @@ _NEW_FILE_MODE = 0o666
 
 # ── The one workspace lock ───────────────────────────────────────────────────
 
+class LockOrderError(AegisError, RuntimeError):
+    """A lock was requested out of order: the workspace lock comes before any shared
+    lock, and a shared lock is a leaf (two processes taking two locks in opposite
+    orders would deadlock until a timeout)."""
+
+    def __init__(self, message: str = "", code: str = "LOCK_ORDER", **kwargs: Any) -> None:
+        super().__init__(message, code=code, **kwargs)
+
+
 _GUARD = threading.Lock()
 _THREAD_LOCKS: Dict[str, "threading.RLock"] = {}
-_HELD = threading.local()  # .depth: {lock path: (depth, fd or None)}
+# .depth: {lock key: (depth, fd or None)}; .leaves: {lock key: path} of shared locks held
+_HELD = threading.local()
 
 
 def _reset_after_fork() -> None:
@@ -111,6 +131,13 @@ def _held() -> Dict[str, Tuple[int, Optional[int]]]:
     if held is None:
         held = _HELD.depth = {}
     return held
+
+
+def _held_leaves() -> Dict[str, Path]:
+    leaves = getattr(_HELD, "leaves", None)
+    if leaves is None:
+        leaves = _HELD.leaves = {}
+    return leaves
 
 
 def _try_os_lock(fd: int) -> bool:
@@ -142,9 +169,9 @@ def _os_unlock(fd: int) -> None:
         pass
 
 
-def _timeout_error(path: Path, timeout: float) -> LockTimeoutError:
+def _timeout_error(path: Path, timeout: float, kind: str = "workspace") -> LockTimeoutError:
     return LockTimeoutError(
-        f"timed out after {timeout:g}s waiting for the Aegis workspace lock {path}: "
+        f"timed out after {timeout:g}s waiting for the Aegis {kind} lock {path}: "
         "another aegis process or thread holds it",
         path=str(path),
     )
@@ -153,22 +180,27 @@ def _timeout_error(path: Path, timeout: float) -> LockTimeoutError:
 _EXTENDED_UNC, _EXTENDED = "\\\\?\\UNC\\", "\\\\?\\"
 
 
-def _real(path: Path | str) -> str:
-    """``path`` with every link resolved, in one spelling per location.
+def _resolved(path: Path | str) -> str:
+    """``path`` with every link resolved and without the Windows extended-length prefix.
 
     realpath, not Path.resolve(): it never raises (3.9 resolve raises RuntimeError on
     loops) and it resolves Windows junctions, which is_symlink() misses before 3.12.
     Windows realpath answers in the extended-length form (``\\\\?\\C:\\...``) when the
     path appears or disappears while it resolves it (another process creating
-    ``.aegis/state``); that prefix is dropped, and normcase folds the case Windows
-    ignores, so two spellings of one location compare equal.
+    ``.aegis/state``); that prefix is dropped.
     """
     real = os.path.realpath(path)
     if real.startswith(_EXTENDED_UNC):
         real = "\\\\" + real[len(_EXTENDED_UNC):]
     elif real.startswith(_EXTENDED):
         real = real[len(_EXTENDED):]
-    return os.path.normcase(real)
+    return real
+
+
+def _real(path: Path | str) -> str:
+    """``path`` resolved (``_resolved``) in one spelling per location: normcase folds the
+    case Windows ignores, so two spellings of one location compare equal."""
+    return os.path.normcase(_resolved(path))
 
 
 def _within(path: Path, root: Path) -> bool:
@@ -221,6 +253,121 @@ def state_dir(workspace: Any) -> Path:
     return layout.state_dir
 
 
+# ── Shared state: one directory for every worktree of a repository ───────────
+
+_SHARED_DIR_NAME = "aegis"
+_SHARED_DIR_MODE = 0o700
+
+
+def _shared_link_error(path: Path, base: Path) -> PathTraversalError:
+    return PathTraversalError(
+        f"refusing to use {path}: it is a symlink; aegis keeps shared state only inside {base}",
+        path=str(path),
+    )
+
+
+def _shared_outside_error(path: Path, base: Path) -> PathTraversalError:
+    return PathTraversalError(
+        f"refusing to use {path}: it resolves outside {base}; aegis keeps shared state only inside it",
+        path=str(path),
+    )
+
+
+def _confined(directory: Path, base: Path, link_error, outside_error, entries: bool = True) -> None:
+    """Refuse ``directory`` when it is a symlink, is not a directory, or resolves outside
+    ``base``, and (``entries``) when an entry directly inside it is a symlink or a
+    directory that resolves outside ``base``. A missing ``directory`` passes."""
+    if directory.is_symlink():
+        raise link_error(directory)
+    if not os.path.lexists(directory):
+        return
+    if not _within(directory, base):  # a Windows junction is not a symlink
+        raise outside_error(directory)
+    if not directory.is_dir():
+        raise PathTraversalError(f"refusing to use {directory}: it is not a directory", path=str(directory))
+    if not entries:
+        return
+    with os.scandir(directory) as found:
+        for entry in found:
+            if entry.is_symlink():
+                raise link_error(Path(entry.path))
+            if entry.is_dir(follow_symlinks=False) and not _within(Path(entry.path), base):
+                raise outside_error(Path(entry.path))
+
+
+def shared_state_dir(workspace: Any, create: bool = True) -> Path:
+    """Machine-local state every worktree of the workspace's repository shares:
+    ``<git common dir>/aegis`` (realpath of ``git rev-parse --git-common-dir``, so a
+    linked worktree answers the main ``.git``, never ``.git/worktrees/<name>``).
+
+    Created mode 0o700 when ``create``; with ``create=False`` nothing is created and the
+    path is returned whether or not it exists. Raises PathTraversalError (nothing is
+    created) when ``<common>/aegis`` is a symlink, is not a directory or resolves outside
+    the common dir, or when an entry directly inside it is a symlink or a directory that
+    resolves outside it. Outside a git repository, or when git cannot run, it is the
+    workspace's ``.aegis/state`` with ``state_dir``'s refusals.
+    """
+    root = Path(os.fspath(workspace)).resolve()
+    common = gitsafe.common_dir(root)
+    if common is None:
+        if create:
+            return state_dir(root)
+        layout = WorkspaceLayout(root)
+        # state_dir()'s checks, without creating anything.
+        _confined(layout.aegis_dir, layout.root, _link_error, _outside_error, entries=False)
+        _confined(layout.state_dir, layout.root, _link_error, _outside_error)
+        return layout.state_dir
+    base = Path(_resolved(common))
+    shared = base / _SHARED_DIR_NAME
+
+    def link_error(path: Path) -> PathTraversalError:
+        return _shared_link_error(path, base)
+
+    def outside_error(path: Path) -> PathTraversalError:
+        return _shared_outside_error(path, base)
+
+    _confined(shared, base, link_error, outside_error)
+    if create and not os.path.lexists(shared):
+        try:
+            shared.mkdir(mode=_SHARED_DIR_MODE)
+        except FileExistsError:
+            pass  # another worktree's process made it first; checked again below
+        _confined(shared, base, link_error, outside_error)
+    return shared
+
+
+def _shared_lock_name(name: object) -> str:
+    ok = (
+        isinstance(name, str)
+        and name.endswith(".lock")
+        and name != ".lock"
+        and not any(ch in name for ch in "/\\\0")
+        and name not in (".", "..")
+    )
+    if not ok:
+        raise ValueError(f"a shared lock is one file name ending in .lock, got {name!r}")
+    return name  # type: ignore[return-value]
+
+
+@contextmanager
+def shared_locked(workspace: Any, name: str, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Path]:
+    """Hold the lock file ``<shared_state_dir>/<name>`` (e.g. ``events.lock``) for the block.
+
+    The same primitive as ``locked`` (re-entrant per thread, bounded wait, the OS lock
+    across processes and worktrees) on its own file, so it never waits on the workspace
+    lock. It is a leaf: take it after the workspace lock, never before, and take no lock
+    while holding it (LockOrderError). Raises ValueError for a ``name`` that is not one
+    file name ending in ``.lock``, LockTimeoutError naming the lock file, and
+    PathTraversalError when the shared state dir is not confined.
+    """
+    _shared_lock_name(name)
+    directory = shared_state_dir(workspace)
+    lock_path = directory / name
+    key = os.path.join(_real(directory), name)
+    with _hold(lock_path, key, timeout, shared=True) as path:
+        yield path
+
+
 def _open_regular(path: Path, flags: int) -> int:
     """``os.open`` that refuses a symlink at ``path`` and anything but a regular file.
 
@@ -252,22 +399,13 @@ def _open_regular(path: Path, flags: int) -> int:
 
 
 @contextmanager
-def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Path]:
-    """Hold the workspace lock (``.aegis/state/lock``) for the duration of the block.
+def _hold(lock_path: Path, key: str, timeout: float, shared: bool) -> Iterator[Path]:
+    """Hold the lock file ``lock_path`` (``key``: its one spelling) for the block:
+    re-entrant per thread, a thread lock then the OS lock, bounded by ``timeout``.
 
-    ``workspace`` is a Workspace, a path or a string; every spelling of one root shares
-    one lock. Re-entrant per thread: a nested ``locked()`` in the thread that holds it
-    returns immediately. Raises LockTimeoutError, naming the lock file, when another
-    thread or process holds it for longer than ``timeout`` seconds, and
-    PathTraversalError when the state directory is not confined (``state_dir``).
+    ``shared`` marks a shared lock, which is a leaf: taking the workspace lock or another
+    shared lock while this thread holds one raises LockOrderError before waiting.
     """
-    layout = WorkspaceLayout(Path(os.fspath(workspace)).resolve())
-    state = state_dir(layout.root)
-    lock_path = layout.lock_file
-    # state_dir() confined the directory; the lock file itself is opened by its own
-    # name, never through what a link named "lock" points at. One spelling per location:
-    # two keys for one lock file would make a nested locked() wait on itself.
-    key = os.path.join(_real(state), lock_path.name)
     held = _held()
     depth, fd = held.get(key, (0, None))
     if depth:
@@ -279,29 +417,66 @@ def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Pa
             held[key] = (d - 1, f)
         return
 
+    leaves = _held_leaves()
+    if leaves:
+        holding = next(iter(leaves.values()))
+        if shared:
+            raise LockOrderError(
+                f"lock order: a shared lock is a leaf; {lock_path} cannot be taken while holding {holding}"
+            )
+        raise LockOrderError(
+            f"lock order: the Aegis workspace lock is taken before a shared lock, never while holding {holding}"
+        )
+
     deadline = time.monotonic() + max(0.0, timeout)
+    kind = "shared" if shared else "workspace"
     thread_lock = _thread_lock(key)
     if not thread_lock.acquire(timeout=max(0.0, timeout)):
-        raise _timeout_error(lock_path, timeout)
+        raise _timeout_error(lock_path, timeout, kind)
     fd = None
     try:
         fd = _open_regular(lock_path, os.O_RDWR | os.O_CREAT)
         interval = LOCK_RETRY_INTERVAL_SECONDS
         while not _try_os_lock(fd):
             if time.monotonic() >= deadline:
-                raise _timeout_error(lock_path, timeout)
+                raise _timeout_error(lock_path, timeout, kind)
             time.sleep(interval)
             interval = min(interval * 1.5, LOCK_MAX_BACKOFF_SECONDS)
         held[key] = (1, fd)
+        if shared:
+            leaves[key] = lock_path
         try:
             yield lock_path
         finally:
             held.pop(key, None)
+            leaves.pop(key, None)
             _os_unlock(fd)
     finally:
         if fd is not None:
             os.close(fd)
         thread_lock.release()
+
+
+@contextmanager
+def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Path]:
+    """Hold the workspace lock (``.aegis/state/lock``) for the duration of the block.
+
+    ``workspace`` is a Workspace, a path or a string; every spelling of one root shares
+    one lock. Re-entrant per thread: a nested ``locked()`` in the thread that holds it
+    returns immediately. Raises LockTimeoutError, naming the lock file, when another
+    thread or process holds it for longer than ``timeout`` seconds, PathTraversalError
+    when the state directory is not confined (``state_dir``), and LockOrderError when
+    this thread holds a shared lock (``shared_locked``).
+    """
+    layout = WorkspaceLayout(Path(os.fspath(workspace)).resolve())
+    state = state_dir(layout.root)
+    lock_path = layout.lock_file
+    # state_dir() confined the directory; the lock file itself is opened by its own
+    # name, never through what a link named "lock" points at. One spelling per location:
+    # two keys for one lock file would make a nested locked() wait on itself.
+    key = os.path.join(_real(state), lock_path.name)
+    with _hold(lock_path, key, timeout, shared=False) as path:
+        yield path
 
 
 # ── Atomic writes ─────────────────────────────────────────────────────────────
