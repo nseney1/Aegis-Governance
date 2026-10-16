@@ -772,10 +772,12 @@ def launch_risk(argv: Sequence[str]) -> Optional[str]:
     flags = set()
     rest = iter(argv[1:])
     for arg in rest:
-        if not arg.startswith("-") or arg in ("-", "--") or arg.startswith("--"):
-            if arg.startswith("--") and arg != "--":
-                continue
-            return None  # a script path, a `-` for stdin, or arguments of a non-interpreter
+        if arg.startswith("--") and arg != "--":
+            if arg == "--check-hash-based-pycs":
+                next(rest, None)
+            continue
+        if arg in ("-", "--") or not arg.startswith("-"):
+            return None  # a script path, `-` for stdin, or a non-interpreter's arguments
         body = arg[1:]
         for at, letter in enumerate(body):
             if letter == "m":

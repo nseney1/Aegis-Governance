@@ -31,7 +31,7 @@ def _same_dir(a: Path, b: Path) -> bool:
 
 
 def _project_root(args: argparse.Namespace) -> Path:
-    """Find the project root (where .soma/ lives)."""
+    """The workspace the command acts on."""
     return resolve_root(args)
 
 
