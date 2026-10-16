@@ -56,8 +56,21 @@ def _install_description() -> str:
         "unparseable, symlinked or hard-linked files, and backs the old file up to "
         "~/.aegis/backups/<stamp>/<scope>/. Codex also gets ~/.codex/rules/aegis.rules and runs the hook only "
         "after you trust it in /hooks; Antigravity hooks are unavailable on Windows. aegis doctor shows each "
-        "host's entries and tier; it cannot confirm that a host runs them.\n\n"
+        "host's entries and tier; it cannot confirm that a host runs them. " + _HOME_NOTE + "\n\n"
         f"Known gaps:\n{gaps}")
+
+
+#: Every aegis command but `hook run` attaches a workspace first, and $HOME never is one.
+_HOME_NOTE = ("Run it from any directory but your home directory, which Aegis never takes as a workspace, even "
+              "for --scope user (which changes only your user files).")
+
+
+def _uninstall_description() -> str:
+    return (
+        "Without --host: remove the aegis block from the git pre-commit hook.\n\n"
+        "With --host: remove Aegis's PreToolUse entries from that host's files at --scope (default: both "
+        "scopes) and nothing else, backing each file up first; for Codex also ~/.codex/rules/aegis.rules once "
+        "no Aegis Codex hook is left. " + _HOME_NOTE)
 
 
 def _host_options(parser: Any, host_help: str, scope_help: str) -> None:
@@ -122,7 +135,8 @@ class HookCommand(AegisCommand):
 
         p_hook_uninstall = p_hook_sub.add_parser(
             "uninstall", parents=p_parents,
-            help="Remove the aegis block from the pre-commit hook, or with --host an agent host's PreToolUse hook")
+            help="Remove the aegis block from the pre-commit hook, or with --host an agent host's PreToolUse hook",
+            description=_uninstall_description(), formatter_class=argparse.RawDescriptionHelpFormatter)
         p_hook_uninstall.add_argument("--force", action="store_true", help="Git hook only: force removal")
         p_hook_uninstall.add_argument("--dry-run", action="store_true", help="Preview without modifying disk")
         _host_options(p_hook_uninstall, "Remove Aegis's PreToolUse hook entries from this host instead of the git hook",

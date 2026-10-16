@@ -219,7 +219,7 @@ Category: Plumbing. Subcommands: `install`, `run`, `safety-gate`, `status`, `uni
 
 Install the git pre-commit hook, or with --host an agent host's PreToolUse hook
 
-Without --host: install the git pre-commit hook (it runs aegis check --hook). With --host claude-code\|codex-cli\|antigravity: register `aegis hook run pre-tool --host <h>` as that host's PreToolUse hook, at user scope (default) or, with --scope project, in the repository's host file, which teammates' hosts will execute. The merge keeps everything else in the file, refuses unparseable, symlinked or hard-linked files, and backs the old file up to ~/.aegis/backups/<stamp>/<scope>/. Codex also gets ~/.codex/rules/aegis.rules and runs the hook only after you trust it in /hooks; Antigravity hooks are unavailable on Windows. aegis doctor shows each host's entries and tier; it cannot confirm that a host runs them. Known gaps: - Edits made through shell commands never reach the edit gate on any host. - Codex write_stdin into an interactive shell has no PreToolUse payload, and the Codex Bash payload carries no working directory. - Antigravity manage_task with send_input types into a background terminal past run_command. - Aegis never emits an 'ask' decision (it fails open on Codex and soft-denies in agy headless runs). - The hooks fail open on any Aegis error: they are guardrails, not a security boundary.
+Without --host: install the git pre-commit hook (it runs aegis check --hook). With --host claude-code\|codex-cli\|antigravity: register `aegis hook run pre-tool --host <h>` as that host's PreToolUse hook, at user scope (default) or, with --scope project, in the repository's host file, which teammates' hosts will execute. The merge keeps everything else in the file, refuses unparseable, symlinked or hard-linked files, and backs the old file up to ~/.aegis/backups/<stamp>/<scope>/. Codex also gets ~/.codex/rules/aegis.rules and runs the hook only after you trust it in /hooks; Antigravity hooks are unavailable on Windows. aegis doctor shows each host's entries and tier; it cannot confirm that a host runs them. Run it from any directory but your home directory, which Aegis never takes as a workspace, even for --scope user (which changes only your user files). Known gaps: - Edits made through shell commands never reach the edit gate on any host. - Codex write_stdin into an interactive shell has no PreToolUse payload, and the Codex Bash payload carries no working directory. - Antigravity manage_task with send_input types into a background terminal past run_command. - Aegis never emits an 'ask' decision (it fails open on Codex and soft-denies in agy headless runs). - The hooks fail open on any Aegis error: they are guardrails, not a security boundary.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
@@ -254,6 +254,8 @@ Inspect the pre-commit hook and the interpreter it runs
 ### `aegis hook uninstall`
 
 Remove the aegis block from the pre-commit hook, or with --host an agent host's PreToolUse hook
+
+Without --host: remove the aegis block from the git pre-commit hook. With --host: remove Aegis's PreToolUse entries from that host's files at --scope (default: both scopes) and nothing else, backing each file up first; for Codex also ~/.codex/rules/aegis.rules once no Aegis Codex hook is left. Run it from any directory but your home directory, which Aegis never takes as a workspace, even for --scope user (which changes only your user files).
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |

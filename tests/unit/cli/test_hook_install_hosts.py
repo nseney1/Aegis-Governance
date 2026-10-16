@@ -32,6 +32,13 @@ from aegis_cli.install_hosts import InstallError
 from aegis_core import command_safety
 
 
+#: The aegis path the registration tests write when the stub's own path is outside the
+#: shell-form charset, as every native Windows path is ('\\' and ':'), which makes Codex
+#: hooks unavailable there (test_codex_on_windows_*). A forward-slash UNC path is absolute
+#: on every platform and Python and inside the charset; the registrar never opens it.
+PLAIN_AEGIS = "//aegis.test/tools/bin/aegis"
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     home = tmp_path / "home"
@@ -40,14 +47,16 @@ def env(tmp_path, monkeypatch):
     (repo / ".aegis" / "rules").mkdir(parents=True)
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    aegis = bindir / "aegis"
-    aegis.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    aegis.chmod(0o755)
+    # Windows finds a program on PATH only under a PATHEXT name.
+    stub = bindir / ("aegis.exe" if os.name == "nt" else "aegis")
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "AEGIS_WORKSPACE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
-    return argparse.Namespace(home=home, repo=repo, aegis=str(aegis), environ={}, tmp=tmp_path)
+    aegis = str(stub) if registrar.AEGIS_PATH_CHARSET.fullmatch(str(stub)) else PLAIN_AEGIS
+    return argparse.Namespace(home=home, repo=repo, aegis=aegis, stub=str(stub), environ={}, tmp=tmp_path)
 
 
 def install(env, host, scope="user", **kw):
@@ -188,6 +197,14 @@ def test_hosts_without_hooks_are_refused(env, host):
                                   "Code Assist accounts; use --host antigravity.")
     else:
         assert "claude-code, codex-cli, antigravity" in str(exc.value)
+
+
+def test_matches_install_holds_only_for_the_exact_group_of_an_aegis_handler():
+    want = registrar.hook_group("claude-code", "/x/aegis")
+    assert registrar.matches_install("claude-code", want, want["hooks"][0])
+    lookalike = {key: value for key, value in want["hooks"][0].items() if key != "command"}
+    assert not registrar.matches_install("claude-code", dict(want, hooks=[lookalike]), lookalike)
+    assert not registrar.matches_install("claude-code", ["not", "a", "group"], want["hooks"][0])
 
 
 # ── the merge keeps the user's file ─────────────────────────────────────────
@@ -349,7 +366,11 @@ def test_codex_on_windows_with_an_aegis_path_cmd_would_split_is_unavailable(env,
 
 def test_codex_on_windows_with_a_plain_aegis_path_is_installed(env, monkeypatch):
     monkeypatch.setattr(registrar, "_windows", lambda: True)
-    assert install(env, "codex-cli").status == "added"
+    env.aegis = PLAIN_AEGIS
+    result = install(env, "codex-cli")
+    assert result.status == "added"
+    assert load(result.path)["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == \
+        f"{PLAIN_AEGIS} hook run pre-tool --host codex-cli"
 
 
 def test_reinstall_from_the_home_directory_is_unchanged_not_a_clash(env):
@@ -618,6 +639,150 @@ def test_uninstall_on_agy_drops_the_empty_aegis_group_only(env, monkeypatch):
     assert list(load(path)) == ["mine"]
 
 
+# ── uninstall: the Codex rules file follows the last Codex hook ─────────────
+
+def rules_file(env) -> Path:
+    return env.home / ".codex" / "rules" / "aegis.rules"
+
+
+def test_uninstall_of_the_project_scope_keeps_the_rules_file_the_user_hook_uses(env):
+    install(env, "codex-cli", "user")
+    before = rules_file(env).read_bytes()
+    (result,) = uninstall(env, "codex-cli", "project")
+    assert (result.scope, result.status) == ("project", "absent")
+    assert result.rules_status == "kept"
+    assert result.detail == f"the Aegis hook at user scope ({env.home / '.codex' / 'hooks.json'}) still uses it"
+    assert rules_file(env).read_bytes() == before and backups(env) == []
+    assert registrar.aegis_handlers("codex-cli", load(env.home / ".codex" / "hooks.json"))
+
+
+def test_uninstall_of_the_user_scope_keeps_the_rules_file_a_project_hook_uses(env):
+    install(env, "codex-cli", "project")
+    (result,) = uninstall(env, "codex-cli", "user")
+    assert (result.status, result.rules_status) == ("absent", "kept")
+    assert "project scope" in result.detail and rules_file(env).exists()
+
+
+def test_uninstall_of_the_last_codex_hook_removes_the_rules_file_whatever_the_scope(env):
+    install(env, "codex-cli", "project")
+    (result,) = uninstall(env, "codex-cli", "project")
+    assert (result.status, result.rules_status) == ("removed", "removed")
+    assert not rules_file(env).exists()
+    assert sorted(p.name for p in backups(env)) == ["aegis.rules", "hooks.json"]
+
+
+def test_uninstall_removes_an_orphaned_rules_file_and_backs_it_up(env):
+    result = install(env, "codex-cli")
+    result.path.write_text("{}", encoding="utf-8")  # the hook entry removed by hand
+    (after,) = uninstall(env, "codex-cli", "user")
+    assert (after.status, after.rules_status) == ("absent", "removed")
+    assert not result.rules_path.exists()
+    assert [p.name for p in backups(env)] == ["aegis.rules"]
+    assert (after.backup_dir / "user" / "aegis.rules").is_file()
+
+
+def test_uninstall_keeps_the_rules_file_when_the_other_scopes_file_cannot_be_read(env):
+    install(env, "codex-cli", "project")
+    user = env.home / ".codex" / "hooks.json"
+    user.write_bytes(b"{bad")
+    (result,) = uninstall(env, "codex-cli", "project")
+    assert (result.status, result.rules_status) == ("removed", "kept")
+    assert result.detail.startswith("cannot tell whether a user-scope hook uses it: ")
+    assert "not valid JSON" in result.detail
+    assert rules_file(env).exists() and user.read_bytes() == b"{bad"
+
+
+# ── uninstall checks every file before it writes one ────────────────────────
+
+def _claude_entry_at_both_scopes(env) -> Dict[str, Path]:
+    """An Aegis Claude entry at each scope (install refuses the second, so it is written)."""
+    user = install(env, "claude-code", "user").path
+    project = env.repo / ".claude" / "settings.json"
+    project.parent.mkdir(parents=True)
+    project.write_text(json.dumps({"hooks": {"PreToolUse": [registrar.hook_group("claude-code", env.aegis)]}}),
+                       encoding="utf-8")
+    return {"user": user, "project": project}
+
+
+def test_uninstall_of_both_scopes_writes_nothing_when_a_later_file_is_unparseable(env):
+    user = install(env, "claude-code", "user").path
+    before = user.read_bytes()
+    project = env.repo / ".claude" / "settings.json"
+    project.parent.mkdir(parents=True)
+    project.write_bytes(b"{bad")
+    with pytest.raises(InstallError, match="not valid JSON"):
+        uninstall(env, "claude-code")
+    assert user.read_bytes() == before and project.read_bytes() == b"{bad" and backups(env) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_uninstall_of_both_scopes_writes_nothing_when_a_later_file_is_read_only(env):
+    paths = _claude_entry_at_both_scopes(env)
+    before = {scope: path.read_bytes() for scope, path in paths.items()}
+    paths["project"].chmod(0o444)
+    with pytest.raises(InstallError, match="read-only"):
+        uninstall(env, "claude-code")
+    assert {scope: path.read_bytes() for scope, path in paths.items()} == before and backups(env) == []
+
+
+def test_uninstall_refuses_a_linked_rules_file_before_it_changes_the_hooks_file(env):
+    result = install(env, "codex-cli")
+    before = result.path.read_bytes()
+    elsewhere = env.tmp / "elsewhere.rules"
+    os.link(result.rules_path, elsewhere)
+    with pytest.raises(InstallError, match="hard link"):
+        uninstall(env, "codex-cli", "user")
+    assert result.path.read_bytes() == before and result.rules_path.exists() and backups(env) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_uninstall_refuses_a_read_only_rules_file_before_it_changes_the_hooks_file(env):
+    result = install(env, "codex-cli")
+    before = result.path.read_bytes()
+    result.rules_path.chmod(0o444)
+    with pytest.raises(InstallError, match="read-only"):
+        uninstall(env, "codex-cli", "user")
+    assert result.path.read_bytes() == before and result.rules_path.exists() and backups(env) == []
+
+
+def test_a_rules_file_that_cannot_be_removed_names_the_hook_already_removed(env, monkeypatch):
+    result = install(env, "codex-cli")
+    real = os.unlink
+
+    def busy(path, *args, **kwargs):
+        if Path(path) == result.rules_path:
+            raise PermissionError(13, "Permission denied")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", busy)
+    with pytest.raises(InstallError) as exc:
+        uninstall(env, "codex-cli", "user")
+    assert str(exc.value).startswith(f"{result.rules_path}: cannot be removed (Permission denied); left in place. "
+                                     f"The Aegis hook was already removed from {result.path} (backup in ")
+    assert result.rules_path.exists() and not registrar.aegis_handlers("codex-cli", load(result.path))
+
+
+def test_a_write_that_fails_after_the_checks_names_the_removals_already_made(env, monkeypatch):
+    from aegis_cli import install_hosts
+
+    paths = _claude_entry_at_both_scopes(env)
+    real = install_hosts.atomic_write_bytes
+
+    def disk_full(path, data, *args, **kwargs):
+        if Path(path) == paths["project"]:
+            raise OSError(28, "No space left on device")
+        return real(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(install_hosts, "atomic_write_bytes", disk_full)
+    with pytest.raises(InstallError) as exc:
+        uninstall(env, "claude-code")
+    message = str(exc.value)
+    assert "No space left on device" in message
+    assert f"already removed from {paths['user']} (backup in " in message
+    assert registrar.aegis_handlers("claude-code", load(paths["project"]))
+    assert not registrar.aegis_handlers("claude-code", load(paths["user"]))
+
+
 # ── the agy wrapper, run by a real shell ────────────────────────────────────
 
 _SHELLS = [name for name in ("sh", "bash", "dash") if shutil.which(name)]
@@ -665,11 +830,11 @@ def test_codex_rules_are_generated_from_every_block_set_prefix_as_forbidden():
 def test_aegis_command_prefers_an_absolute_path_entry_outside_the_repo(env, tmp_path):
     inside = env.repo / "bin"
     inside.mkdir()
-    planted = inside / "aegis"
+    planted = inside / Path(env.stub).name
     planted.write_text("#!/bin/sh\n", encoding="utf-8")
     planted.chmod(0o755)
-    path_env = os.pathsep.join(["relative", str(inside), str(Path(env.aegis).parent)])
-    assert registrar.aegis_command(path_env, scripts_dirs=[], outside=env.repo) == env.aegis
+    path_env = os.pathsep.join(["relative", str(inside), str(Path(env.stub).parent)])
+    assert registrar.aegis_command(path_env, scripts_dirs=[], outside=env.repo) == env.stub
 
 
 def test_aegis_command_is_none_when_nothing_is_found(env):
@@ -677,14 +842,14 @@ def test_aegis_command_is_none_when_nothing_is_found(env):
 
 
 def test_aegis_command_falls_back_to_this_interpreters_scripts_directory(env):
-    scripts = str(Path(env.aegis).parent)
-    assert registrar.aegis_command("", scripts_dirs=[scripts], outside=env.repo) == env.aegis
+    scripts = str(Path(env.stub).parent)
+    assert registrar.aegis_command("", scripts_dirs=[scripts], outside=env.repo) == env.stub
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows has no execute bit")
 def test_aegis_command_skips_a_scripts_entry_that_is_not_executable(env):
-    Path(env.aegis).chmod(0o644)
-    assert registrar.aegis_command("", scripts_dirs=[str(Path(env.aegis).parent)], outside=env.repo) is None
+    Path(env.stub).chmod(0o644)
+    assert registrar.aegis_command("", scripts_dirs=[str(Path(env.stub).parent)], outside=env.repo) is None
 
 
 # ── the CLI ─────────────────────────────────────────────────────────────────
@@ -700,10 +865,18 @@ def cli(env, *argv, monkeypatch=None):
 
 @pytest.fixture
 def cli_env(env, monkeypatch):
-    monkeypatch.setenv("PATH", str(Path(env.aegis).parent))
+    monkeypatch.setenv("PATH", str(Path(env.stub).parent))
     monkeypatch.setattr(registrar, "_scripts_dirs", lambda: [])
     monkeypatch.chdir(env.repo)
     return env
+
+
+@pytest.fixture
+def shell_form_cli_env(cli_env, monkeypatch):
+    """The CLI given env.aegis as the aegis it finds. The stub it would find on PATH has a
+    native path, which on Windows makes Codex hooks unavailable: not these tests' subject."""
+    monkeypatch.setattr(registrar, "aegis_command", lambda *args, **kwargs: cli_env.aegis)
+    return cli_env
 
 
 def test_cli_install_json_carries_the_envelope_and_the_result(cli_env):
@@ -718,8 +891,8 @@ def test_cli_install_json_carries_the_envelope_and_the_result(cli_env):
     assert result["evidence"] == "DOC"
 
 
-def test_cli_codex_install_prints_the_trust_step(cli_env):
-    rc, out, err = cli(cli_env, "hook", "install", "--host", "codex-cli")
+def test_cli_codex_install_prints_the_trust_step(shell_form_cli_env):
+    rc, out, err = cli(shell_form_cli_env, "hook", "install", "--host", "codex-cli")
     assert rc == 0
     assert "/hooks" in out and "trust" in out
     assert "--dangerously-bypass-hook-trust" in out
@@ -772,10 +945,10 @@ def test_cli_text_says_why_a_host_is_unavailable(cli_env, monkeypatch):
     assert rc == 1 and "antigravity: hooks unavailable: Antigravity hooks are unavailable on Windows" in out
 
 
-def test_cli_dry_run_writes_nothing(cli_env):
-    rc, out, err = cli(cli_env, "hook", "install", "--host", "codex-cli", "--dry-run")
+def test_cli_dry_run_writes_nothing(shell_form_cli_env):
+    rc, out, err = cli(shell_form_cli_env, "hook", "install", "--host", "codex-cli", "--dry-run")
     assert rc == 0 and "(dry run)" in out
-    assert not (cli_env.home / ".codex").exists()
+    assert not (shell_form_cli_env.home / ".codex").exists()
 
 
 def test_cli_without_any_aegis_found_refuses(cli_env, monkeypatch):
@@ -791,6 +964,14 @@ def test_cli_uninstall_json(cli_env):
     doc = json.loads(out)
     assert rc == 0 and doc["source"] == "aegis hook uninstall"
     assert {r["scope"]: r["status"] for r in doc["results"]} == {"user": "removed", "project": "absent"}
+
+
+def test_cli_uninstall_says_why_the_codex_rules_file_stays(shell_form_cli_env):
+    cli(shell_form_cli_env, "hook", "install", "--host", "codex-cli")
+    rc, out, err = cli(shell_form_cli_env, "hook", "uninstall", "--host", "codex-cli", "--scope", "project")
+    assert rc == 0
+    assert (f"Codex rules {shell_form_cli_env.home / '.codex' / 'rules' / 'aegis.rules'}: kept "
+            f"(the Aegis hook at user scope ({shell_form_cli_env.home / '.codex' / 'hooks.json'}) still uses it)") in out
 
 
 def test_run_hook_takes_a_callers_namespace_without_the_new_options(cli_env, capsys):
@@ -824,6 +1005,18 @@ def test_install_help_documents_the_known_gaps(cli_env):
     for gap in registrar.KNOWN_GAPS:
         assert " ".join(gap.split()) in flat
     assert "--host claude-code|codex-cli|antigravity" in flat
+
+
+@pytest.mark.parametrize("action", ["install", "uninstall"])
+def test_host_hook_help_says_it_does_not_run_from_the_home_directory(cli_env, action):
+    from aegis_cli.cli import _build_parser
+
+    parser = _build_parser(prog="aegis")
+    help_text = parser._subparsers._group_actions[0].choices["hook"]._subparsers._group_actions[0] \
+        .choices[action].format_help()
+    flat = " ".join(help_text.split())
+    assert ("Run it from any directory but your home directory, which Aegis never takes as a workspace, "
+            "even for --scope user") in flat
 
 
 @pytest.mark.parametrize("action", ["install", "uninstall"])

@@ -19,6 +19,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 from typing import Any, Dict, List
 
 import pytest
@@ -66,6 +67,12 @@ class Env:
             stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             stub.chmod(0o755)
         self.aegis = str(self.bin / "aegis")
+        if not registrar.AEGIS_PATH_CHARSET.fullmatch(self.aegis):
+            # A native Windows path ('\\' and ':') is outside the shell-form charset, so
+            # install would refuse the Codex and Antigravity entries these tests read back.
+            # What install accepts is test_hook_install_hosts's subject; here, as with
+            # _windows above, the stub's own path is let through.
+            monkeypatch.setattr(registrar, "AEGIS_PATH_CHARSET", re.compile(r".+"))
 
     @staticmethod
     def _no_cli(argv, cwd, timeout):
@@ -150,7 +157,7 @@ def test_a_registered_hook_is_presence_never_enforcement(env):
     row = hooks(payload, "claude-code")
     assert row["status"] == "registered"
     assert row["entries"] == [{"scope": "user", "path": str(env.home / ".claude" / "settings.json"),
-                               "aegis": env.aegis, "executable": True}]
+                               "aegis": env.aegis, "executable": True, "modified": False}]
     assert {r["id"]: r["enforcement_level"] for r in payload["hosts"]} == before
     best = tier(payload, "best_effort")
     assert best["status"] == "unknown" and best["hosts"] == ["claude-code"]
@@ -234,7 +241,7 @@ def test_an_entry_whose_aegis_is_gone_is_broken_and_fails_open(env):
     row = hooks(payload, "codex-cli")
     assert row["status"] == "broken"
     assert row["entries"] == [{"scope": "user", "path": str(env.home / ".codex" / "hooks.json"),
-                               "aegis": gone, "executable": False}]
+                               "aegis": gone, "executable": False, "modified": False}]
     (missing,) = findings(payload, "hook_aegis_missing")
     assert gone in missing["message"]
     assert missing["message"].endswith("(it fails open): run aegis hook install --host codex-cli")
@@ -269,6 +276,81 @@ def test_a_non_executable_aegis_is_broken(env):
     env.write_json(env.home / ".claude" / "settings.json",
                    {"hooks": {"PreToolUse": [registrar.hook_group("claude-code", str(plain))]}})
     assert hooks(env.doctor(), "claude-code")["status"] == "broken"
+
+
+# ── drift: an Aegis entry that is not the one install writes ────────────────
+
+def _edit_first_entry(env, path: Path, group: Dict[str, Any], handler: Dict[str, Any]) -> None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    first = data["hooks"]["PreToolUse"][0]
+    first.update(group)
+    first["hooks"][0].update(handler)
+    env.write_json(path, data)
+
+
+@pytest.mark.parametrize("group, handler", [
+    ({"matcher": "Read"}, {}),
+    ({}, {"args": ["hook", "run", "pre-tool", "--host", "codex-cli"]}),
+    ({}, {"args": ["hook", "run", "pre-tool"]}),
+    ({}, {"timeout": 0}),
+    ({}, {"type": "prompt"}),
+], ids=["matcher", "other-host", "no-host", "timeout", "type"])
+def test_an_entry_that_is_not_what_install_writes_is_modified_and_claims_no_tier(env, group, handler):
+    path = env.install("claude-code").path
+    _edit_first_entry(env, path, group, handler)
+    payload = env.doctor()
+    row = hooks(payload, "claude-code")
+    assert row["status"] == "modified"
+    assert row["entries"] == [{"scope": "user", "path": str(path), "aegis": env.aegis, "executable": True,
+                               "modified": True}]
+    best = tier(payload, "best_effort")
+    assert best["status"] == "unknown" and best["hosts"] == []
+    assert best["detail"] == ("cannot tell for claude-code: its Aegis hook entry is not the one aegis hook "
+                              "install writes (see the warnings)")
+    (finding,) = findings(payload, "hook_entry_modified")
+    assert finding["fixable"] is False
+    assert finding["message"].endswith(
+        "is not the entry aegis hook install writes (its matcher, type, command, arguments or timeout differ), "
+        "so Claude Code may not run it as its tier says: run aegis hook install --host claude-code")
+    rc, out = env.run()
+    assert ("hooks        registered but modified (user scope, ~/.claude/settings.json): not the entry aegis "
+            "hook install writes, so no tier is claimed") in out
+    assert "if Claude Code runs it" not in out
+
+
+def test_a_codex_entry_for_another_host_is_modified(env):
+    path = env.install("codex-cli").path
+    _edit_first_entry(env, path, {}, {"command": f"{env.aegis} hook run pre-tool --host claude-code"})
+    assert hooks(env.doctor(), "codex-cli")["status"] == "modified"
+
+
+def test_an_antigravity_entry_without_the_exit_mapping_wrapper_is_modified(env):
+    """Without the wrapper agy blocks on every non-zero exit, a crash included."""
+    want = registrar.hook_group("antigravity", env.aegis)
+    bare = dict(want, hooks=[dict(want["hooks"][0], command=f"{env.aegis} hook run pre-tool --host antigravity")])
+    env.write_json(env.home / ".gemini" / "config" / "hooks.json", {"aegis": {"PreToolUse": [bare]}})
+    assert hooks(env.doctor(), "antigravity")["status"] == "modified"
+
+
+def test_a_key_install_does_not_write_is_not_drift(env):
+    path = env.install("claude-code").path
+    _edit_first_entry(env, path, {}, {"statusMessage": "aegis checks the call"})
+    row = hooks(env.doctor(), "claude-code")
+    assert row["status"] == "registered" and row["entries"][0]["modified"] is False
+
+
+def test_a_modified_project_entry_names_the_project_install(env):
+    path = env.install("claude-code", "project").path
+    _edit_first_entry(env, path, {}, {"timeout": 60})
+    (finding,) = findings(env.doctor(), "hook_entry_modified")
+    assert finding["message"].endswith(": run aegis hook install --host claude-code --scope project")
+
+
+def test_install_rewrites_a_modified_entry_and_doctor_then_says_registered(env):
+    path = env.install("claude-code").path
+    _edit_first_entry(env, path, {"matcher": "Read"}, {})
+    assert env.install("claude-code").status == "updated"
+    assert hooks(env.doctor(), "claude-code")["status"] == "registered"
 
 
 @pytest.mark.parametrize("content, says", [

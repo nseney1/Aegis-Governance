@@ -48,7 +48,9 @@ runs an executable ``aegis``, and the tier such an entry gives with its evidence
 (Claude Code and Codex blocking are documented, DOC; Antigravity's exit-1 block is LIVE).
 Presence never claims enforcement: no entry changes ``state`` or ``enforcement_level``, and
 the best-effort tier is ``unknown`` while any is registered, since doctor cannot see a host
-run it (nor Codex's /hooks approval). Duplicates, host files that do not parse, entries
+run it (nor Codex's /hooks approval). An entry that is not the one ``aegis hook install``
+writes (matcher, type, command form with its host, or timeout) is ``modified`` and claims no
+tier. Duplicates, modified entries, host files that do not parse, entries
 whose ``aegis`` is gone and v3 leftovers (``soma hook ...`` or a removed ``aegis hook``
 phase, in any hook file or the stale v3 Antigravity plugin) are findings; ``--fix`` removes
 the leftovers with the ``remove_list_items`` action (or deletes a plugin file that holds
@@ -1413,8 +1415,9 @@ def _runnable(path: Optional[str]) -> bool:
 def _hook_row(spec: Any, ctx: _Ctx) -> Dict[str, Any]:
     """Whether an Aegis PreToolUse entry for ``spec`` is in a file the host reads, and the
     tier it would give. ``status``: registered, absent, duplicate (more than one entry),
-    broken (its aegis is missing), unknown (a host file cannot be read), unavailable (the
-    host cannot run the hook here) or none (a host without Aegis hooks)."""
+    broken (its aegis is missing), modified (not the entry install writes, so no tier is
+    claimed), unknown (a host file cannot be read), unavailable (the host cannot run the
+    hook here) or none (a host without Aegis hooks)."""
     from aegis_cli.hooks import registrar
 
     row: Dict[str, Any] = {"status": "none", "tier": None, "evidence": None, "trust": None, "detail": None,
@@ -1437,9 +1440,13 @@ def _hook_row(spec: Any, ctx: _Ctx) -> Dict[str, Any]:
                                                 f"('{exc.where}' must be {exc.what})")
             continue
         item["status"] = "ok"
-        for *_where, handler in located:
+        for keys, group_index, _handler_index, handler in located:
+            groups: Any = entry.data
+            for key in keys:
+                groups = groups[key]
             aegis = registrar.handler_aegis(handler)
-            row["entries"].append({"scope": scope, "path": str(path), "aegis": aegis, "executable": _runnable(aegis)})
+            row["entries"].append({"scope": scope, "path": str(path), "aegis": aegis, "executable": _runnable(aegis),
+                                   "modified": not registrar.matches_install(spec.id, groups[group_index], handler)})
     entries = row["entries"]
     invalid = [f for f in row["files"] if f["status"] == "invalid"]
     why = registrar.unavailable_reason(spec.id, ctx.which("aegis"))
@@ -1449,7 +1456,7 @@ def _hook_row(spec: Any, ctx: _Ctx) -> Dict[str, Any]:
     if len(entries) > 1:
         status = "duplicate"
     elif entries:
-        status = "registered" if entries[0]["executable"] else "broken"
+        status = "broken" if not entries[0]["executable"] else "modified" if entries[0]["modified"] else "registered"
     else:
         status = "unknown" if invalid else "absent"
     row.update(status=status, tier=registrar.TIERS[spec.id], evidence=registrar.EVIDENCE[spec.id])
@@ -1479,15 +1486,19 @@ def _hook_findings(ctx: _Ctx, rows: List[Dict[str, Any]]) -> List[_Finding]:
                                   f"the handler {times} per tool call: keep one (aegis hook uninstall --host "
                                   f"{host_id} --scope user|project removes one scope's)"))
         for e in entries:
-            if e["executable"]:
-                continue
             path = Path(e["path"])
             fix = (f"remove it from that file, then run aegis hook install --host {host_id}" if e["scope"] == "local"
                    else f"run aegis hook install --host {host_id}" + (" --scope project" if e["scope"] == "project"
                                                                         else ""))
-            found.append(_Finding("hook_aegis_missing", path,
-                                  f"{ctx.label(path)}: the Aegis hook runs {e['aegis']}, which is missing or not "
-                                  f"executable, so {name} gets no Aegis check from it (it fails open): {fix}"))
+            if not e["executable"]:
+                found.append(_Finding("hook_aegis_missing", path,
+                                      f"{ctx.label(path)}: the Aegis hook runs {e['aegis']}, which is missing or not "
+                                      f"executable, so {name} gets no Aegis check from it (it fails open): {fix}"))
+            elif e["modified"]:
+                found.append(_Finding("hook_entry_modified", path,
+                                      f"{ctx.label(path)}: the Aegis hook entry is not the entry aegis hook install "
+                                      "writes (its matcher, type, command, arguments or timeout differ), so "
+                                      f"{name} may not run it as its tier says: {fix}"))
     return found + _legacy_hook_findings(ctx)
 
 
@@ -1708,6 +1719,11 @@ def _best_effort(rows: List[Dict[str, Any]], governed: bool, setup: str) -> Dict
     if unreadable:
         return dict(tier, status="unknown",
                     detail=f"cannot tell for {', '.join(unreadable)}: a hook file cannot be read (see the warnings)")
+    modified = [h for h in capable if hooks[h]["status"] == "modified"]
+    if modified:
+        return dict(tier, status="unknown",
+                    detail=f"cannot tell for {', '.join(modified)}: its Aegis hook entry is not the one aegis hook "
+                           "install writes (see the warnings)")
     absent = [h for h in capable if hooks[h]["status"] == "absent"]
     broken = [h for h in capable if hooks[h]["status"] == "broken"]
     parts = [f"no Aegis PreToolUse hook registered for {', '.join(absent)}"] if absent else []
@@ -2472,6 +2488,10 @@ def _hooks_line(row: Dict[str, Any], ctx: _Ctx) -> str:
         return f"{len(entries)} Aegis entries ({', '.join(e['scope'] for e in entries)}): keep one"
     if status == "broken":
         return f"registered, but {entries[0]['aegis']} is missing or not executable (fails open)"
+    if status == "modified":
+        e = entries[0]
+        return (f"registered but modified ({e['scope']} scope, {ctx.label(Path(e['path']))}): not the entry aegis "
+                "hook install writes, so no tier is claimed")
     if status in ("unknown", "unavailable"):
         return f"{status}: {hooks['detail']}"
     return "none"

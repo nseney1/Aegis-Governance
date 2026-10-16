@@ -24,7 +24,9 @@ go to ``~/.aegis/backups/<UTC stamp>/<scope>/`` first (both scopes' files share 
 the Codex rules file is a user file), the replacement is atomic and is re-read
 afterwards (a broken Claude settings file silently drops all its hooks, DOC). Aegis
 entries are identified by their command (an absolute ``aegis`` followed by ``hook run``),
-never by position, and a host never gets an Aegis entry at both scopes.
+never by position, and a host never gets an Aegis entry at both scopes. Uninstall reads and
+checks every file it would change before it writes the first, and removes the Codex rules
+file only with the last Aegis Codex hook.
 """
 from __future__ import annotations
 
@@ -67,6 +69,7 @@ __all__ = [
     "hook_group",
     "install",
     "is_aegis_handler",
+    "matches_install",
     "run_host_install",
     "run_host_uninstall",
     "uninstall",
@@ -308,6 +311,22 @@ def handler_aegis(handler: Any) -> Optional[str]:
 def is_aegis_handler(handler: Any) -> bool:
     """Whether a hook handler runs ``<absolute aegis> hook run ...`` (exec or shell form)."""
     return handler_aegis(handler) is not None
+
+
+#: The handler keys install writes (``args`` too: a shell form must not carry any).
+_HANDLER_KEYS = ("type", "command", "args", "timeout")
+
+
+def matches_install(host: str, group: Any, handler: Any) -> bool:
+    """Whether an Aegis ``handler`` in ``group`` is what install writes for its own aegis
+    path: the matcher, the type, the exec or shell form with its host, and the timeout.
+    Keys install never writes do not count, so a host's own additions are not drift."""
+    aegis = handler_aegis(handler)
+    if aegis is None or not isinstance(group, dict):
+        return False
+    want = hook_group(host, aegis)
+    return (group.get("matcher") == want["matcher"]
+            and all(handler.get(key) == want["hooks"][0].get(key) for key in _HANDLER_KEYS))
 
 
 #: (path of keys to a PreToolUse group list, group index, handler index, handler)
@@ -600,19 +619,38 @@ def _ensure_list(data: Dict[str, Any], keys: Tuple[str, ...], path: Path) -> lis
     return groups
 
 
+def _rules_still_used(host: str, covered: Sequence[str], home: Path, root: Optional[Path],
+                      environ: Mapping[str, str]) -> Optional[str]:
+    """Why the Codex rules file stays once the entries at ``covered`` are gone: an Aegis
+    Codex hook at another scope still uses it, or that scope's file cannot tell."""
+    for other in SCOPES:
+        if other in covered or (other == "project" and (root is None or _same_dir(root, home))):
+            continue
+        path = hook_file(host, other, home=home, root=root, environ=environ)
+        assert path is not None
+        try:
+            _, data = _load(path)
+        except InstallError as exc:
+            return f"cannot tell whether a {other}-scope hook uses it: {exc}"
+        if aegis_handlers(host, data, path):
+            return f"the Aegis hook at {other} scope ({path}) still uses it"
+    return None
+
+
 def uninstall(host: str, scope: Optional[str] = None, *, home: Union[str, Path], root: Optional[Union[str, Path]],
               environ: Mapping[str, str], dry_run: bool = False) -> List[HookResult]:
     """Remove Aegis's hook entries for ``host`` at ``scope`` (both scopes when None), and
-    for Codex the aegis.rules Aegis wrote. Everything else in the files stays."""
+    for Codex the aegis.rules Aegis wrote once no Aegis Codex hook is left at any scope.
+    Everything else in the files stays. Every file is read and checked before the first
+    is written, so a refusal writes nothing."""
     check_host(host)
     if scope is not None and scope not in SCOPES:
         raise UsageError(f"--scope must be one of {', '.join(SCOPES)}")
     home = Path(home)
     root = None if root is None else Path(root)
-    scopes = [scope] if scope else list(SCOPES)
     results: List[HookResult] = []
-    backup: Optional[Path] = None
-    for each in scopes:
+    writes: List[Tuple[str, Path, Optional[bytes], Dict[str, Any]]] = []
+    for each in [scope] if scope else list(SCOPES):
         if each == "project" and (root is None or _same_dir(root, home)):
             if scope == "project":
                 raise InstallError("--scope project needs a repository: here the workspace is your home directory")
@@ -624,27 +662,47 @@ def uninstall(host: str, scope: Optional[str] = None, *, home: Union[str, Path],
         if raw is not None and aegis_handlers(host, data, path, strict=True):
             _remove_aegis(host, data, path)
             _drop_empty(host, data)
-            backup = backup or plane.backup_dir(home)
-            _write_json(path, raw, data, backup / each, dry_run)
+            plane._preflight(path, raw)
+            writes.append((each, path, raw, data))
             status = "removed"
         results.append(HookResult(host, each, path, status, "", dry_run))
+    remove_rules: Optional[Path] = None
+    rules_raw: Optional[bytes] = None
     if host == "codex-cli":
         rules = codex_rules_file(home, environ)
-        raw, ours = _rules_state(rules)
-        rules_status = "absent"
-        if raw is not None and ours:
-            plane._preflight(rules, raw)
-            backup = backup or plane.backup_dir(home)
-            _backup(rules, raw, backup / "user", dry_run)
-            if not dry_run:
-                plane._preflight(rules, raw)
-                os.unlink(rules)
-            rules_status = "removed"
-        elif raw is not None:
+        rules_raw, ours = _rules_state(rules)
+        rules_status, why = "absent", ""
+        if rules_raw is not None and not ours:
             rules_status = "not_aegis"
-        target = results[0] if results else None
-        if target is not None:
-            target.rules_path, target.rules_status = rules, rules_status
+        elif rules_raw is not None:
+            why = _rules_still_used(host, [r.scope for r in results], home, root, environ) or ""
+            if why:
+                rules_status = "kept"
+            else:
+                plane._preflight(rules, rules_raw)
+                rules_status, remove_rules = "removed", rules
+        # results is never empty: only the project scope is ever skipped, and only with both.
+        results[0].rules_path, results[0].rules_status, results[0].detail = rules, rules_status, why
+    backup = plane.backup_dir(home) if writes or remove_rules is not None else None
+    done: List[str] = []
+    try:
+        for each, path, raw, data in writes:
+            _write_json(path, raw, data, backup / each, dry_run)  # type: ignore[operator]
+            done.append(str(path))
+        if remove_rules is not None:
+            _backup(remove_rules, rules_raw, backup / "user", dry_run)  # type: ignore[arg-type,operator]
+            if not dry_run:
+                plane._preflight(remove_rules, rules_raw)
+                try:
+                    os.unlink(remove_rules)
+                except OSError as exc:
+                    raise InstallError(f"{remove_rules}: cannot be removed ({exc.strerror or exc}); "
+                                       "left in place") from exc
+    except InstallError as exc:
+        if done:
+            raise InstallError(f"{str(exc).rstrip('.')}. The Aegis hook was already removed from {', '.join(done)} "
+                               f"(backup in {backup}).") from exc
+        raise
     used = backup if backup is not None and backup.exists() else None
     for result in results:
         result.backup_dir = used
@@ -685,7 +743,8 @@ def _print_text(command: str, results: List[HookResult]) -> None:
         icon = "ℹ️ " if r.status in ("absent", "unchanged") else "✅"
         print(f"{icon} {prefix}{r.host}: the Aegis PreToolUse hook {verb} {where} ({r.scope} scope)")
         if r.rules_status:  # set exactly when the result has a Codex rules file
-            print(f"   Codex rules {r.rules_path}: {r.rules_status.replace('_', ' ')}")
+            why = f" ({r.detail})" if r.rules_status == "kept" else ""
+            print(f"   Codex rules {r.rules_path}: {r.rules_status.replace('_', ' ')}{why}")
         if command == "install":
             print(f"   tier: {TIERS[r.host]} [{EVIDENCE[r.host]}]; doctor cannot confirm the host runs it")
         if r.backup_dir is not None:
