@@ -10,7 +10,8 @@ Each host gets one state, the first of these that applies:
 - ``missing_binary``: none of its binaries is in an absolute PATH entry outside the
   workspace (one found only inside it, or only through an empty or relative entry, is
   listed in ``binary.ignored`` with the reason ``binary_in_workspace`` or
-  ``binary_on_relative_path``, and makes the host's installation unknown);
+  ``binary_on_relative_path``, and makes the host's installation unknown), and none of
+  its desktop apps is installed (``app``: an IDE or desktop app puts nothing on PATH);
 - ``unregistered``: its config has no ``aegis`` server, or the registered command is gone;
 - ``auth_unknown``: doctor cannot confirm the host will load ``aegis`` or read its
   bootstrap (its CLI failed or timed out, its config cannot be parsed, the registration
@@ -34,6 +35,13 @@ determine), ``checks_ok`` (no blocking check failed; it says nothing about the h
 ``checks``, ``hosts`` (each with ``state``, ``reasons``, the matrix facts,
 ``enforcement_level`` and ``trust_tier``, reserved as null until v4.3), ``enforcement_tiers``,
 ``findings``, and with ``--fix`` the ``fixes`` it applied and its ``backup_dir``.
+
+Each row lists the ``surfaces`` its config plane covers (CLI, IDE extension, desktop app).
+Without ``hosts`` in .aegis/config.json the matrix is every verified host plus each
+experimental one found on this machine (by binary, config path or app). A host found
+here whose agent reads AGENTS.md, while AGENTS.md carries the bootstrap and the host has
+no ``aegis`` registration, is the ``bootstrap_without_tools`` warning: the bootstrap
+tells that agent to call tools it does not have (fix: ``aegis init --host <id>``).
 
 ``enforcement_level`` is the strongest tier known to be in force for the host here:
 ``local_floor``, ``advisory``, ``none`` (an ungoverned workspace, a host not installed,
@@ -698,6 +706,37 @@ def _desktop_configs(ctx: _Ctx) -> List[Path]:
     return list(unique.values())
 
 
+def _platform() -> str:
+    """``sys.platform``, read in one place so a test can emulate another OS's app folders."""
+    return sys.platform
+
+
+def _app(spec: Any, ctx: _Ctx) -> Optional[str]:
+    """The installed desktop app of ``spec`` (an app bundle is a directory), or None."""
+    from aegis_core import hosts
+
+    if ctx.home is None:
+        return None
+    return next((app for app in hosts.app_paths(spec, ctx.home, ctx.environ, _platform()) if os.path.isdir(app)),
+                None)
+
+
+def _plane_found(spec: Any, ctx: _Ctx) -> Optional[str]:
+    """What shows ``spec``'s config plane is on this machine, for people: a binary doctor
+    would run, a config path in the home directory or a desktop app; None when nothing does."""
+    for name in spec.binaries:
+        found = ctx.which(name)
+        if found:
+            return ctx.label(Path(found))
+    if ctx.home is not None:
+        for spec_path in spec.config_paths:
+            rel = spec_path[2:] if spec_path.startswith("~/") else spec_path
+            if os.path.exists(ctx.home.joinpath(*rel.split("/"))):
+                return spec_path
+    app = _app(spec, ctx)
+    return ctx.label(Path(app)) if app else None
+
+
 def _host_json_path(spec: Any, ctx: _Ctx) -> Optional[Path]:
     reg = spec.registration
     if reg is None or reg.kind != "json_file" or ctx.home is None:
@@ -1233,8 +1272,10 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     binary = next((found for found in (ctx.which(name) for name in spec.binaries) if found), None)
     passed = [] if binary else [hit for name in spec.binaries for hit in ctx.passed_over(name)]
     ignored = list(dict.fromkeys(hit.path for hit in passed))
+    # An IDE or desktop app of the plane puts no binary on PATH; its bundle is the evidence.
+    app = None if binary else _app(spec, ctx)
     # Installed: True, False, or None when the only binary is one doctor will not run.
-    installed: Optional[bool] = True if binary else (None if passed else False)
+    installed: Optional[bool] = True if binary or app else (None if passed else False)
     reg = _probe(spec, binary, ctx)
     identity = _identity(spec, reg)
     reasons: List[Dict[str, str]] = []
@@ -1244,10 +1285,10 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         reasons.append({"code": code, "message": _clean(message, 1024)})
 
     names = " or ".join(f"`{b}`" for b in spec.binaries) or "a binary"
-    if passed:
+    if passed and not app:
         unknown.append("binary")
-    fenced = next((hit for hit in passed if hit.reason == INSIDE_FENCE), None)
-    relative = next((hit for hit in passed if hit.reason != INSIDE_FENCE), None)
+    fenced = next((hit for hit in passed if hit.reason == INSIDE_FENCE), None) if not app else None
+    relative = next((hit for hit in passed if hit.reason != INSIDE_FENCE), None) if not app else None
     if fenced is not None:
         add("binary_in_workspace", f"{names} found only at {fenced.path}, inside the workspace: doctor does not "
                                    "run programs from the repository, so it cannot tell whether the host is installed")
@@ -1256,7 +1297,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                                        f"{relative.entry!r}, which resolves against the directory a program starts in "
                                        "(here the workspace): doctor does not run it, so it cannot tell whether the "
                                        "host is installed")
-    if binary is None and not passed:
+    if binary is None and not passed and not app:
         add("missing_binary", f"no {names} on PATH")
     status = reg["status"]
     if status == "absent":
@@ -1264,7 +1305,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     elif status in ("unknown", "unavailable"):
         unknown.append("registration")
         # An installed host doctor cannot ask is never "ok": unknown is not absent either.
-        if status == "unknown" or binary is not None:
+        if status == "unknown" or installed:
             add("registration_unverifiable", f"cannot tell whether {spec.display_name} loads aegis: {reg['detail']}")
     else:
         if reg["command_exists"] is False:
@@ -1364,9 +1405,11 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         "id": spec.id,
         "display_name": spec.display_name,
         "verified_row": spec.verified,
+        "surfaces": list(spec.surfaces),
         "state": state,
         "reasons": reasons,
         "binary": {"found": binary is not None, "path": binary, "names": list(spec.binaries), "ignored": ignored},
+        "app": app,
         "registration": shown,
         "identity": identity,
         "workspace_registered": workspace_registered,
@@ -1974,6 +2017,39 @@ def _workspace_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
     return found
 
 
+def _bootstrap_tool_findings(ctx: _Ctx, info: _Instructions, rows: List[Dict[str, Any]]) -> List[_Finding]:
+    """Hosts found on this machine whose agent reads the bootstrap in AGENTS.md, which
+    tells it to call aegis_scan, while the host has no ``aegis`` server: the field case of
+    an IDE that read AGENTS.md but had no tools. Any registrable host counts, selected or
+    not; a registration doctor cannot read is unknown, never absent, so it is not one."""
+    from aegis_core import hosts
+
+    if not ctx.governed or info.bootstrap not in ("current", "outdated"):
+        return []
+    by_id = {row["id"]: row for row in rows}
+    found = []
+    for spec in hosts.all_hosts(phase=1):
+        if spec.registration is None or spec.retired or _bootstrap_reaches(spec, info) is not True:
+            continue
+        evidence = _plane_found(spec, ctx)
+        if evidence is None:
+            continue
+        row = by_id.get(spec.id)
+        if row is not None:
+            status = row["registration"]["status"]
+        else:
+            binary = next((b for b in (ctx.which(name) for name in spec.binaries) if b), None)
+            status = _probe(spec, binary, ctx)["status"]
+        if status != "absent":
+            continue
+        found.append(_Finding(
+            "bootstrap_without_tools", ctx.root / "AGENTS.md",
+            f"AGENTS.md carries the Aegis bootstrap, which tells {spec.display_name}'s agent to call the aegis "
+            f"tools, but {spec.display_name} (found: {evidence}) has no Aegis MCP server: "
+            f"run aegis init --host {spec.id}"))
+    return found
+
+
 def _upgrade_findings(ctx: _Ctx) -> List[_Finding]:
     """v3 state here that v4 never reads (discovery.unmigrated_state): status, scan and sync
     refuse such a workspace, and doctor, which still runs in it, must not call it healthy.
@@ -2069,13 +2145,15 @@ def _v3_copy_findings(ctx: _Ctx) -> List[_Finding]:
 
 # ── The diagnosis ───────────────────────────────────────────────────────────
 
-def _selection(root: Path, governed: bool) -> Tuple[Tuple[Any, ...], str, List[_Finding]]:
+def _selection(root: Path, governed: bool, ctx: _Ctx) -> Tuple[Tuple[Any, ...], str, List[_Finding]]:
     from aegis_core import hosts
     from aegis_core.config import ConfigError, RepoConfig
     from aegis_core.workspace.layout import WorkspaceLayout
 
     config = WorkspaceLayout(root).config_file
-    default = tuple(h for h in hosts.all_hosts(phase=1) if h.registration is not None)
+    # An experimental row joins the default matrix only where its plane is on this machine.
+    default = tuple(h for h in hosts.all_hosts(phase=1) if h.registration is not None
+                    and (h.verified or _plane_found(h, ctx) is not None))
     if not governed:
         return default, "default", []
     try:
@@ -2115,10 +2193,11 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     # The home directory's .aegis/ is the user plane (~/.aegis), never a workspace.
     is_home = _is_home(root)
     governed = is_aegis_workspace(root) and not is_home
-    selected, selection, notes = _selection(root, governed)
     ctx = _Ctx(root=root, governed=governed, home=layout.home if layout else None, environ=environ,
-               selected=selected, selection=selection, is_home=is_home,
+               selected=(), selection="default", is_home=is_home,
                setup="aegis init" if governed or is_home else _setup_command(root))
+    ctx.selected, ctx.selection, notes = _selection(root, governed, ctx)
+    selected = ctx.selected
     info = _instructions(ctx)
     roots, skipped = _registered_roots(ctx)
     floor, unreached = _floor_status(root)
@@ -2126,7 +2205,7 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     claude_user = _claude_user_registered(ctx)
     findings = (notes + _upgrade_findings(ctx) + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
                 + _legacy_block_findings(ctx) + _budget_findings(ctx, info) + _home_rules_finding(ctx)
-                + _v3_copy_findings(ctx) + _hook_findings(ctx, rows))
+                + _v3_copy_findings(ctx) + _hook_findings(ctx, rows) + _bootstrap_tool_findings(ctx, info, rows))
     if roots is None and ctx.home is not None:
         findings.append(_Finding("unreadable_config", UserLayout(ctx.home).workspaces_file,
                                  "~/.aegis/workspaces.json cannot be read as a v1 registry; doctor "
@@ -2448,10 +2527,14 @@ def _print_hosts(diag: _Diagnosis) -> None:
     for row in diag.rows:
         reg, boot, budget = row["registration"], row["bootstrap"], row["budget"]
         print(f"  {_ICON[row['state']]} {row['display_name']} ({row['id']}): {row['state']}")
+        if row["surfaces"]:
+            print(f"      surfaces     {', '.join(row['surfaces'])}")
         binary = row["binary"]
         where = binary["path"] or ("found only where doctor runs nothing (see below)" if binary["ignored"]
                                    else "not on PATH")
         print(f"      binary       {where}")
+        if row["app"]:
+            print(f"      app          {_clean(ctx.label(Path(row['app'])), 4096)}")
         registered = {"registered": f"yes, {reg['scope']} scope", "absent": "no", "unknown": "unknown",
                       "unavailable": "not checked"}[reg["status"]]
         print(f"      registered   {registered} ({_clean(reg['source'], 4096)})")
@@ -2466,7 +2549,9 @@ def _print_hosts(diag: _Diagnosis) -> None:
         print(f"      workspace    {ws} in ~/.aegis/workspaces.json")
         print(f"      bootstrap    {boot['file']}: {boot['status']}")
         if budget["bytes"] is not None:
-            print(f"      budget       {budget['file']} {budget['bytes']} of {budget['budget_bytes']} bytes")
+            limit = (f"of {budget['budget_bytes']} bytes" if budget["budget_bytes"] is not None
+                     else "bytes (no documented limit)")
+            print(f"      budget       {budget['file']} {budget['bytes']} {limit}")
         print(f"      hooks        {_clean(_hooks_line(row, ctx), 4096)}")
         print(f"      enforcement  {row['enforcement_level'].replace('_', ' ')}")
         for reason in row["reasons"]:

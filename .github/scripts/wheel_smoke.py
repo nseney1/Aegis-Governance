@@ -20,9 +20,11 @@ import sysconfig
 import tempfile
 
 PACKAGES = ("aegis_cli", "aegis_sdk", "aegis_core", "aegis_mcp")
-# Shipped rule floor (D16): rules/ has 4 rules plus META.md and rules/.oracles/ has 8;
-# init's rule locator and the full preset see all 12 rules (not META.md).
+# Shipped rule floor (D16): rules/ has 4 guidance rules, the active starter and META.md, and
+# rules/.oracles/ has 8; init's rule locator and the full preset see the 12 guidance rules
+# (not META.md, not the active starter, which init seeds as an invariant: v4.1 d5).
 FULL_PRESET_RULES = 12
+ACTIVE_STARTERS = ("no-eval",)
 # The author's dogfood rules live in the repository's .aegis/rules (D16), and
 # desktop-automation is not shipped; none of them may reach the wheel.
 UNSHIPPED_RULES = ("gitflow-review-gate", "ci-green-before-release", "core-change-protocol",
@@ -142,7 +144,7 @@ def check_packaged_rules_and_skills(ws):
     import importlib.metadata
     import importlib.resources
     from pathlib import Path
-    from aegis_cli.init import packaged_dir, packaged_rules
+    from aegis_cli.init import packaged_active_rules, packaged_dir, packaged_rules
     from aegis_mcp.registry import TOOL_DEFINITIONS
 
     if len(TOOL_DEFINITIONS) != 4:
@@ -163,6 +165,9 @@ def check_packaged_rules_and_skills(ws):
     rules = packaged_rules()
     if len(rules) < FULL_PRESET_RULES:
         fail(f"packaged_rules() found only {len(rules)} rules in the wheel: {sorted(rules)!r}")
+    active = packaged_active_rules()
+    if sorted(active) != sorted(ACTIVE_STARTERS) or any(p.parent != data / "rules" for p in active.values()):
+        fail(f"the wheel's active starter rules are {active!r}, expected {ACTIVE_STARTERS!r} in {data / 'rules'}")
     skills = sorted(d.name for d in (data / "skills").iterdir() if (d / "SKILL.md").is_file())
     if len(skills) < 15:
         fail(f"the wheel packages only {len(skills)} skills: {skills!r}")
@@ -243,7 +248,11 @@ def check_init_ignores_a_repository_rules_package():
     if os.path.exists(marker) or "pricing.md" in seeded or len(seeded) != FULL_PRESET_RULES:
         fail(f"aegis init read the repository's own rules/: seeded {seeded!r}, "
              f"planted code ran: {os.path.exists(marker)}")
-    print(f"ok  aegis init in a repository with its own rules/ seeds the wheel's {len(seeded)} rules")
+    active = sorted(os.listdir(os.path.join(repo, ".aegis", "rules", "invariants")))
+    if active != [f"{name}.md" for name in sorted(ACTIVE_STARTERS)]:
+        fail(f"aegis init seeded the active starters {active!r}, expected {ACTIVE_STARTERS!r}")
+    print(f"ok  aegis init in a repository with its own rules/ seeds the wheel's {len(seeded)} rules "
+          f"and {len(active)} active one")
 
 
 def check_init_dry_run(ws):

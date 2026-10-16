@@ -140,6 +140,16 @@ def remedy(shell: str, directory: str, home: str, os_name: str | None = None) ->
     return f'export PATH="{shown}:$PATH"'
 
 
+def macos_user_scripts(home: str | None = None) -> str:
+    """~/Library/Python/X.Y/bin: where ``pip install --user`` puts commands on macOS.
+
+    That is the user scheme of the framework builds (python.org, Homebrew and the Xcode
+    command line tools Python), and macOS puts no such directory on PATH.
+    """
+    home = os.path.expanduser("~") if home is None else home
+    return os.path.join(home, "Library", "Python", f"{sys.version_info[0]}.{sys.version_info[1]}", "bin")
+
+
 def default_candidates() -> list[str]:
     """Script directories pip may have used for this interpreter."""
     out: list[str] = []
@@ -153,6 +163,13 @@ def default_candidates() -> list[str]:
             continue
         if path and path not in out:
             out.append(path)
+    if sys.platform == "darwin":
+        # Named outright, not only through sysconfig: an interpreter that is not a framework
+        # build (pyenv, uv) maps its user scheme to ~/.local, yet a `pip3 install --user` by
+        # the system or Homebrew python3 put aegis in ~/Library/Python/X.Y/bin.
+        user = macos_user_scripts()
+        if user not in out:
+            out.append(user)
     return out
 
 
@@ -251,6 +268,10 @@ def build_hint(env: Mapping[str, str] | None = None,
     rc = rc_file(shell, env=env, platform=platform)
     shell_label = shell if shell != "unknown" else "shell"
     lines = [f"ℹ️  '{cmd_name}' was installed to {directory}, which is not on your {shell_label} PATH."]
+    on_mac = platform == "darwin" and _norm(directory, False) == _norm(macos_user_scripts(home), False)
+    if on_mac:
+        shown = "~" + (_home_relative(directory, home) or "")
+        lines.append(f"    On macOS, pip install --user puts commands in {shown}, which is not on PATH by default.")
     if shell == "pwsh" and os_name == "nt":
         lines.append("    Run this once in PowerShell, then open a new terminal:")
     elif rc:
@@ -259,5 +280,9 @@ def build_hint(env: Mapping[str, str] | None = None,
         lines.append("    Add the equivalent of this line to your shell's startup file, "
                      "then open a new terminal:")
     lines.append(f"      {line}")
+    if on_mac:
+        # The field case: an IDE agent's shell had no aegis. An app keeps the environment it
+        # started with, so the rc line reaches it only after a restart.
+        lines.append("    An IDE or desktop app started before this change keeps its old PATH: restart it.")
     lines.append(fallback)
     return "\n".join(lines)
