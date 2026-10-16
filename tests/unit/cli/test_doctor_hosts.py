@@ -624,14 +624,17 @@ def test_a_registration_waiting_for_an_approval_doctor_cannot_see_has_an_unknown
     assert tier(payload, "advisory")["status"] != "active"
 
 
-def test_a_host_doctor_cannot_check_yet_is_never_reported_ok(env):
+def test_the_retired_gemini_cli_is_never_a_checked_host_nor_promised(env):
     env.all_ok()
     env.stub("gemini")
     (env.ws / ".aegis" / "config.json").write_text(json.dumps({"v": 1, "hosts": ["gemini-cli"]}))
-    row = host(env.doctor(), "gemini-cli")
-    assert row["registration"]["status"] == "unavailable"
-    assert row["state"] == "auth_unknown" and "registration_unverifiable" in codes(row)
-    assert row["verified_row"] is False
+    payload = env.doctor()
+    assert [h["id"] for h in payload["hosts"]] == []
+    notes = [f for f in payload["findings"] if f["code"] == "unknown_host"]
+    assert len(notes) == 1 and notes[0]["severity"] == "info" and "'gemini-cli'" in notes[0]["message"]
+    said = list(_strings(payload)) + env.run()[1].splitlines()
+    about = [text for text in said if "gemini-cli" in text or "Gemini CLI" in text]
+    assert about and not [text for text in about if "v4." in text]
 
 
 def tier(payload: Dict[str, Any], name: str) -> Dict[str, Any]:

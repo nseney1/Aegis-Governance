@@ -644,6 +644,15 @@ def find_workspace(registry: Dict[str, Any], root: Union[str, Path]) -> Optional
 
 # ── Hosts ────────────────────────────────────────────────────────────────────
 
+#: Hosts kept in the table only so identify() can name their client; naming one with
+#: --host says why and what to use instead.
+_RETIRED_HOSTS = {
+    "gemini-cli": "gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
+                  "accounts; use --host antigravity. You can still register aegis-mcp by hand with "
+                  "`gemini mcp add`.",
+}
+
+
 def registrable_hosts() -> Tuple[host_table.HostSpec, ...]:
     """Hosts `aegis init` can register in this phase (they have a registration row)."""
     return tuple(h for h in host_table.all_hosts(phase=1) if h.registration is not None)
@@ -679,10 +688,13 @@ def parse_hosts(value: str) -> Union[str, List[str]]:
             spec = host_table.get(name)
         except KeyError as exc:
             raise ValueError(f"unknown host {name!r}; hosts: {', '.join(sorted(registrable))}") from exc
+        if name in _RETIRED_HOSTS:
+            raise ValueError(_RETIRED_HOSTS[name])
         if spec.registration is None:
             raise ValueError(f"{name} is identity only: Aegis does not register there (ADR 0005 H4)")
         if name not in registrable:
-            raise ValueError(f"{name}: registration lands in v4.1; hosts now: {', '.join(sorted(registrable))}")
+            raise ValueError(f"{name}: Aegis does not register this host in this release; "
+                             f"hosts now: {', '.join(sorted(registrable))}")
     return ordered_hosts(names)
 
 

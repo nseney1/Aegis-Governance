@@ -49,6 +49,21 @@ def test_phase_one_hosts_are_the_three_the_author_runs_plus_desktop_identity():
     assert hosts.get("claude-desktop").registration is None
 
 
+def test_gemini_cli_is_retired_and_kept_only_to_name_the_client():
+    # Google no longer serves Gemini CLI to individual Code Assist accounts; Antigravity is
+    # the Gemini-family host. The row stays so identify() can name the client if it connects.
+    row = hosts.get("gemini-cli")
+    assert row.registration is None
+    assert row.verified is False
+    assert row.slot_profile == hosts.GENERIC
+    assert row.phase == 2
+    assert row.notes == (
+        "Retired: Google no longer serves Gemini CLI to individual Code Assist accounts; "
+        "Antigravity is the Gemini-family host. Identity only.",
+    )
+    assert hosts.identify("gemini-cli-mcp-client") == "gemini-cli"
+
+
 def test_bootstrap_fits_every_host_budget_and_carries_no_rule_bodies():
     text = bootstrap.bootstrap_text()
     size = len(text.encode("utf-8"))

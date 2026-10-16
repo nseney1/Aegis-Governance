@@ -126,14 +126,14 @@ HOSTS: Tuple[HostSpec, ...] = (
         binaries=("gemini",),
         user_dirs=("~/.gemini",),
         instructions="gemini_md",
-        registration=Registration(
-            kind="native_cli",
-            argv=("gemini", "mcp", "add", "-s", "user", "aegis", "-e", "AEGIS_CLIENT=gemini-cli", "--", "{command}"),
-        ),
-        slot_profile="gemini-cli",
+        registration=None,
+        slot_profile=GENERIC,
         phase=2,
         verified=False,
-        notes=("Reads GEMINI.md only unless context.fileName lists AGENTS.md.",),
+        notes=(
+            "Retired: Google no longer serves Gemini CLI to individual Code Assist accounts; "
+            "Antigravity is the Gemini-family host. Identity only.",
+        ),
     ),
 )
 

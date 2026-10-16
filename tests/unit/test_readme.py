@@ -296,26 +296,32 @@ def _description() -> str:
     return re.search(r'^description = "(.*)"$', PYPROJECT.read_text(encoding="utf-8"), re.M).group(1)
 
 
-def test_the_opening_names_every_host_and_qualifies_the_ones_init_cannot_register_yet():
-    """The opening words name all four hosts (search snippets stop near 160 characters),
-    and a host `aegis init --host` still rejects carries its 'until v4.1' in the same breath."""
-    from aegis_core import hosts
-    from aegis_cli.install_hosts import parse_hosts
+def test_the_opening_names_every_host_init_registers_with_no_version_qualifier():
+    """The opening words name every host `aegis init --host` registers (search snippets
+    stop near 160 characters), and neither they nor the PyPI summary qualify one of them
+    with a later version."""
+    from aegis_cli.install_hosts import parse_hosts, registrable_hosts
 
     lead = _lead(README.read_text(encoding="utf-8"))
-    named = [h for h in hosts.all_hosts() if h.registration is not None]
-    assert {h.display_name for h in named} == {"Claude Code", "Codex CLI", "Gemini CLI", "Antigravity"}
+    named = registrable_hosts()
+    assert {h.display_name for h in named} == {"Claude Code", "Codex CLI", "Antigravity"}
     for host in named:
+        assert parse_hosts(host.id) == [host.id]
         assert host.display_name in lead[:160], host.display_name
-        try:
-            parse_hosts(host.id)
-            registrable = True
-        except ValueError as exc:
-            assert "v4.1" in str(exc)
-            registrable = False
         for where, text in (("README lead", lead), ("pyproject description", _description())):
-            qualified = re.search(rf"{re.escape(host.display_name)} \([^)]*\bv4\.1\b[^)]*\)", text)
-            assert bool(qualified) != registrable, f"{where}: {host.display_name}"
+            qualified = re.search(rf"{re.escape(host.display_name)} \([^)]*\bv4\.\d", text)
+            assert not qualified, f"{where}: {host.display_name}"
+
+
+@pytest.mark.xfail(strict=True, reason="deferred to the v4.0 docs lane: README.md and the pyproject "
+                                       "description still promise Gemini CLI registration in v4.1")
+def test_the_retired_gemini_cli_is_promised_nowhere():
+    """Gemini CLI is retired (aegis_core.hosts): `aegis init --host gemini-cli` is refused for
+    good, so no README line or PyPI summary that names it may promise a version."""
+    lines = README.read_text(encoding="utf-8").splitlines() + [_description()]
+    promises = [line for line in lines
+                if ("Gemini CLI" in line or "gemini-cli" in line) and re.search(r"\bv4\.\d", line)]
+    assert promises == []
 
 
 # --- the link checker itself ---------------------------------------------------------

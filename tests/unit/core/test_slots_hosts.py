@@ -39,12 +39,12 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_profiles_are_keyed_by_host_slot_profile_ids():
-    assert set(PLATFORM_SLOT_PROFILES) == {"codex-cli", "claude-code", "antigravity", "gemini-cli", "generic"}
+    assert set(PLATFORM_SLOT_PROFILES) == {"codex-cli", "claude-code", "antigravity", "generic"}
     for host in hosts.HOSTS:
         assert host.slot_profile in PLATFORM_SLOT_PROFILES, host.id
 
 
-@pytest.mark.parametrize("profile", sorted(["codex-cli", "claude-code", "antigravity", "gemini-cli", "generic"]))
+@pytest.mark.parametrize("profile", sorted(["codex-cli", "claude-code", "antigravity", "generic"]))
 def test_every_profile_binds_every_capability_to_a_value_the_sanitizer_keeps(profile):
     values = PLATFORM_SLOT_PROFILES[profile]
     for key in CAPABILITY_KEYS:
@@ -61,7 +61,8 @@ def test_every_profile_binds_every_capability_to_a_value_the_sanitizer_keeps(pro
         ("codex-cli", "exec_command", "apply_patch", "spawn_agent", "fast"),
         ("claude-code", "Read", "Edit", "Task", "haiku"),
         ("antigravity", "view_file", "replace_file_content", "invoke_subagent", "flash"),
-        ("gemini-cli", "read_file", "replace", "subagent", "fast"),
+        # Retired, identity only: the generic profile, never its old tool names.
+        ("gemini-cli", "read_file", "edit_file", "subagent", "fast"),
         ("generic", "read_file", "edit_file", "subagent", "fast"),
     ],
 )

@@ -517,13 +517,27 @@ class TestHostSelection:
     @pytest.mark.parametrize("value, message", [
         ("gemini", "unknown host 'gemini'"),
         ("claude-desktop", "identity only"),
-        ("gemini-cli", "v4.1"),
         ("", "no host"),
         ("auto,codex-cli", "auto"),
     ])
     def test_parse_hosts_refuses(self, value, message):
         with pytest.raises(ValueError, match=message):
             ih.parse_hosts(value)
+
+    @pytest.mark.parametrize("value", ["gemini-cli", "codex-cli,gemini-cli"])
+    def test_retired_gemini_cli_is_refused_with_the_way_to_antigravity(self, value):
+        with pytest.raises(ValueError) as exc:
+            ih.parse_hosts(value)
+        assert str(exc.value) == (
+            "gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
+            "accounts; use --host antigravity. You can still register aegis-mcp by hand with "
+            "`gemini mcp add`.")
+
+    def test_a_host_this_release_cannot_register_is_refused_without_a_version_promise(self, monkeypatch):
+        monkeypatch.setattr(ih, "registrable_hosts", lambda: (hosts.get("claude-code"),))
+        with pytest.raises(ValueError) as exc:
+            ih.parse_hosts("codex-cli")
+        assert str(exc.value) == "codex-cli: Aegis does not register this host in this release; hosts now: claude-code"
 
 
 class TestRegistrationCommands:

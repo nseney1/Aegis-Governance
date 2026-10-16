@@ -839,7 +839,7 @@ def _probe(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
         return _PROBES[spec.id](spec, binary, ctx)
     if spec.registration is not None and spec.registration.kind == "json_file":
         return _probe_json_host(spec, binary, ctx)
-    return _registration("unavailable", "-", detail=f"doctor cannot check {spec.display_name} yet")
+    return _registration("unavailable", "-", detail=f"doctor has no check for {spec.display_name}")
 
 
 # ── Host plane: instruction files ───────────────────────────────────────────
