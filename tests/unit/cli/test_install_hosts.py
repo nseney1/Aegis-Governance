@@ -251,6 +251,61 @@ class TestRemoveManagedBlock:
         assert "aegis:begin" in outside.read_text(encoding="utf-8")
 
 
+# ── has_block_marker (what uninstall asks of a linked AGENTS.md / CLAUDE.md) ─
+
+
+class TestHasBlockMarker:
+    def test_a_file_holding_the_block_has_its_marker(self, tmp_path):
+        target = tmp_path / "AGENTS.md"
+        target.write_bytes(b"# Notes\n")
+        ih.write_managed_block(target, "bootstrap", "Hello\n")
+        assert ih.has_block_marker(target, "bootstrap") is True
+
+    def test_a_lone_end_marker_counts(self, tmp_path):
+        target = tmp_path / "AGENTS.md"
+        target.write_text("# Notes\n" + END.format(id="bootstrap") + "\n", encoding="utf-8")
+        assert ih.has_block_marker(str(target), "bootstrap") is True
+
+    def test_the_marker_is_read_through_a_link(self, tmp_path):
+        outside = tmp_path / "outside.md"
+        outside.write_text(_block("agents-import", "@AGENTS.md\n"), encoding="utf-8")
+        link = tmp_path / "CLAUDE.md"
+        symlink_or_skip(outside, link)
+        assert ih.has_block_marker(link, "agents-import") is True
+
+    @pytest.mark.parametrize("text", [
+        "# Notes\nid=bootstrap is mentioned in prose\n",
+        _block("other", "Keep\n"),
+        _block("bootstrap-extra", "Keep\n"),
+        "",
+    ])
+    def test_text_without_that_block_s_marker_has_none(self, tmp_path, text):
+        target = tmp_path / "AGENTS.md"
+        target.write_text(text, encoding="utf-8")
+        assert ih.has_block_marker(target, "bootstrap") is False
+
+    def test_a_missing_file_or_a_directory_has_no_marker(self, tmp_path):
+        assert ih.has_block_marker(tmp_path / "AGENTS.md", "bootstrap") is False
+        (tmp_path / "CLAUDE.md").mkdir()
+        assert ih.has_block_marker(tmp_path / "CLAUDE.md", "bootstrap") is False
+
+    def test_a_dangling_link_has_no_marker(self, tmp_path):
+        link = tmp_path / "AGENTS.md"
+        symlink_or_skip(tmp_path / "gone.md", link)
+        assert ih.has_block_marker(link, "bootstrap") is False
+
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX permissions that bind the user")
+    def test_an_unreadable_file_has_no_marker(self, tmp_path):
+        target = tmp_path / "AGENTS.md"
+        target.write_text(_block("bootstrap", "Hello\n"), encoding="utf-8")
+        target.chmod(0)
+        try:
+            assert ih.has_block_marker(target, "bootstrap") is False
+        finally:
+            target.chmod(0o644)
+
+
 # ── JSON MCP configs (Antigravity) ───────────────────────────────────────────
 
 ENTRY = {"command": "/opt/bin/aegis-mcp", "args": [], "env": {"AEGIS_CLIENT": "antigravity"}}
