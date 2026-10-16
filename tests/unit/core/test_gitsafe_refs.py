@@ -463,9 +463,15 @@ def test_creating_over_a_dangling_symbolic_ref_never_creates_its_target(sha1_rep
     first, _ = _two_commits(sha1_repo)
     dangling = "refs/aegis/lanes/dangling"
     _git(sha1_repo, "symbolic-ref", dangling, "refs/heads/nowhere")
-    gitsafe.update_ref(sha1_repo, dangling, first, None)
+    # git before ~2.5x replaces a dangling link under --no-deref; newer git refuses
+    # ("dangling symref already exists"). Either way the link's target is never written.
+    try:
+        gitsafe.update_ref(sha1_repo, dangling, first, None)
+    except gitsafe.GitError:
+        pass
+    else:
+        assert gitsafe.read_ref(sha1_repo, dangling) == first
     assert _ref_value(sha1_repo, "refs/heads/nowhere") is None
-    assert gitsafe.read_ref(sha1_repo, dangling) == first
 
 
 def test_list_refs_lists_one_hierarchy(repo: Path):
