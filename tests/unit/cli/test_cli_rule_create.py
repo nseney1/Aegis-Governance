@@ -61,6 +61,16 @@ def _not_a_workspace(directory: Path) -> str:
     return f"not an Aegis workspace (no .aegis/ in {directory}); run aegis init"
 
 
+def _said(captured) -> str:
+    """stderr and stdout, plus a JSON error decoded: JSON escapes Windows backslashes."""
+    try:
+        payload = json.loads(captured.out)
+    except ValueError:
+        payload = None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    return captured.out + captured.err + (error if isinstance(error, str) else "")
+
+
 # ── Workspace resolution ───────────────────────────────────────────────
 
 def test_explicit_workspace_without_aegis_fails_and_writes_nothing(home, monkeypatch, capsys) -> None:
@@ -296,7 +306,7 @@ def test_the_user_rule_layer_never_makes_home_the_rule_workspace(home, monkeypat
     assert str(home / ".aegis") not in captured.out
     assert _tree(home) == before
     if explicit or action[0] == "create":
-        assert rc == 1 and _not_a_workspace((repo / "src").resolve()) in captured.out + captured.err
+        assert rc == 1 and _not_a_workspace((repo / "src").resolve()) in _said(captured)
     elif action[0] == "list":
         assert rc == 0 and json.loads(captured.out) == []
 
@@ -325,7 +335,7 @@ def test_an_explicit_workspace_never_walks_past_home(enclosed_home, elsewhere, c
 
     captured = capsys.readouterr()
     assert rc == 1
-    assert _not_a_workspace(notes.resolve()) in captured.out + captured.err
+    assert _not_a_workspace(notes.resolve()) in _said(captured)
     assert "outer-rule" not in captured.out
     assert _tree(outer) == before
 
