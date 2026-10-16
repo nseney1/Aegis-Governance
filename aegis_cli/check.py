@@ -6,6 +6,9 @@
   aegis check --strict                also fail on checkpoint warnings
   aegis check --hook                  git pre-commit mode: Layer 1 only, never a model call
   aegis check --full --plan TEXT      add Layer 2: adversarial review by --llm-cmd
+  aegis check --lane LANE [--base REF] [--paths GLOB...] [--base-policy]
+                                      post-lane gate: containment and Python test
+                                      integrity of the lane's commits (aegis_core.lane_gate)
 """
 from __future__ import annotations
 
@@ -72,6 +75,42 @@ class CheckCommand(AegisCommand):
             help="Show what would be checked without running anything",
         )
         parser.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
+        # One mode at a time; v4.2 adds --partition, --card, --write-baseline and --prune-baseline here.
+        mode = parser.add_mutually_exclusive_group()
+        mode.add_argument(
+            "--lane",
+            metavar="LANE",
+            default=None,
+            help="Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment "
+            "(every changed path, deletions and both sides of a move included, inside the lane's globs) and "
+            "Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert "
+            "weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; "
+            "witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong "
+            "as the protection on .github/** and on the base branch",
+        )
+        parser.add_argument(
+            "--base",
+            metavar="REF",
+            default=None,
+            help="With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, "
+            "main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0",
+        )
+        parser.add_argument(
+            "--paths",
+            nargs="+",
+            metavar="GLOB",
+            default=None,
+            help="With --lane: the lane's globs instead of its live lease (self-attested). They match as rule "
+            "target_paths do: a glob without '/' matches at any depth, so CHANGELOG.md also admits "
+            "docs/CHANGELOG.md. They never allow .aegis/** or .github/workflows/**",
+        )
+        parser.add_argument(
+            "--base-policy",
+            action="store_true",
+            help="With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the "
+            "candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may "
+            ".aegis/** and .github/workflows/** change",
+        )
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_check(args)
