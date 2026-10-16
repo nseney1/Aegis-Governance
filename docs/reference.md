@@ -38,6 +38,7 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis package` | Setup & Environment | Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published |
 | `aegis skills` | Setup & Environment | Copy the packaged skills into your hosts' project skills folders (sync) |
 | `aegis uninstall` | Setup & Environment | Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/) |
+| `aegis approve` | Daily Workflow & Verification | Sign a human approval of this branch's governance changes |
 | `aegis check` | Daily Workflow & Verification | Verify changes: Layer 1 checks, plus a Layer 2 model review with --full |
 | `aegis scan` | Daily Workflow & Verification | Show which rules apply to the given files (run before editing them) |
 | `aegis status` | Daily Workflow & Verification | Show active rules and stats |
@@ -60,6 +61,9 @@ Category: Setup & Environment.
 | `--fix` |  |  | Repair what doctor reported, after confirmation; every file is backed up first |
 | `--yes` |  |  | With --fix: apply without asking (required with --json or without a terminal) |
 | `--drivers` |  |  | Run only AST driver and language detection health check |
+| `--github` |  |  | Print what trust tiers A and B need: the ruleset JSON, CODEOWNERS lines and signing setup |
+| `--apply` |  |  | With --github --tier: create the ruleset through gh, only after a y/N at a terminal |
+| `--tier` | one of `A`, `B` |  | With --github --apply: which ruleset to create (A: reviews; B: solo, signed approvals) |
 
 ### `aegis init`
 
@@ -137,6 +141,18 @@ Category: Setup & Environment.
 | `--host` | `HOST[,HOST]` |  | Unregister these hosts even if another workspace uses them (default: the hosts this workspace was registered with) |
 | `--dry-run` |  |  | Show what would be removed without changing anything |
 | `--force` |  |  | Also remove Aegis blocks that were edited by hand |
+
+### `aegis approve`
+
+Sign a human approval of this branch's governance changes
+
+Makes one signed, empty commit 'Aegis-Approve: <governance tree hash>' naming the governance files as committed at HEAD. Refuses when nothing governance-related changed since the base branch, when anything is staged or uncommitted, and without a terminal. The signing key, format and program come from your user-level git config (gpg.format ssh); no key is created.
+
+Category: Daily Workflow & Verification.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--base` | `REF` |  | The base branch to measure governance changes against (default: origin/main, main, origin/develop, develop) |
 
 ### `aegis check`
 

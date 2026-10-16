@@ -23,6 +23,16 @@ except ImportError:
     pass
 
 
+@pytest.fixture(autouse=True)
+def _no_real_gh(monkeypatch):
+    """The trust tier (``aegis doctor``) reads GitHub through the user's own gh. No test reaches
+    the network or the developer's gh: without a stand-in the answer is "gh is not installed"
+    (tier C). A test of tier detection or ``doctor --github`` installs its own fake runner."""
+    from aegis_core import human_gate
+
+    monkeypatch.setattr(human_gate, "default_gh_runner", lambda argv, stdin=None, cwd=None: None)
+
+
 @pytest.fixture(scope="session")
 def repo_root():
     return REPO_ROOT

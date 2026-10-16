@@ -167,7 +167,7 @@ def _tree(root: Path) -> Dict[str, Any]:
 
 # ── the machine-readable envelope ───────────────────────────────────────────
 
-def test_json_carries_schema_source_version_time_scope_and_reserved_trust_tier(env):
+def test_json_carries_schema_source_version_time_scope_and_the_trust_tier(env):
     env.all_ok()
     payload = env.doctor()
     assert payload["schema"] == "aegis.doctor/v1"
@@ -181,7 +181,7 @@ def test_json_carries_schema_source_version_time_scope_and_reserved_trust_tier(e
     assert payload["stale"] is False
     for row in payload["hosts"]:
         assert row["state"] in STATES
-        assert row["trust_tier"] is None and row["trust_tier_status"] == "unavailable"
+        assert row["trust_tier"] == "C" and row["trust_tier_status"] == "detected"
         assert row["stale"] is False
 
 
@@ -455,7 +455,7 @@ def test_enforcement_tiers_report_what_is_in_force_here_and_nothing_more(env):
     assert tiers["advisory"]["status"] == "active"
     assert tiers["best_effort"]["status"] == "inactive"  # no host hook registered (v4.1)
     assert tiers["local_floor"]["status"] == "inactive"
-    # doctor makes no network call, so CI is a capability it does not have: unavailable.
+    # doctor does not read CI runs, so CI is a capability it does not have: unavailable.
     assert tiers["authoritative"]["status"] == "unavailable"
     assert all(h["enforcement_level"] == "advisory" for h in payload["hosts"])
 
