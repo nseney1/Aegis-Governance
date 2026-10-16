@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""Pre-tag check: CI is green on the exact commit about to be tagged (ADR 0005 AD-10).
+"""Pre-tag check: the required workflow is green on the exact commit about to be tagged.
 
-    python3 .github/scripts/ci_green.py <full-sha> [--workflow validate.yml]
+    python3 .github/scripts/ci_green.py <full-sha> [--workflow validate.yml] [--repo OWNER/REPO]
 
-Run it before `git tag`. It cannot be a step inside validate.yml: a job never
-sees its own run's conclusion. Exit 0 only when GitHub reports at least one
-run for that SHA and every one of them completed with conclusion "success";
-1 when CI is not green (failed, cancelled, still running, or never ran); 2 for
-a usage error or when gh is missing or fails. Standard library plus the gh CLI.
+Run it before `git tag`. It cannot be a step inside validate.yml: a job never sees its own
+run's conclusion (the workflow's final `verdict` job attests the result for
+`aegis doctor --release`, which is the check that does not trust this script's host).
+
+It asks the GitHub REST API (`gh api`), never `gh run list`, and applies the v4.3 T1 rules to
+`GET /repos/{owner}/{repo}/actions/runs?head_sha=<sha>`:
+
+- only runs whose workflow `path` is `.github/workflows/<workflow>` (a run's name is not an
+  identity), whose `head_sha` is the commit, whose head repository is the repository itself
+  (a fork cannot make a commit green), and whose event is push, workflow_dispatch or release;
+- cancelled runs are ignored; of the rest the newest run (its latest attempt) decides, and it
+  must be completed with conclusion "success". A run still queued or in progress is not green.
+
+Exit 0 only then; 1 when CI is not green (failed, still running, or never ran); 2 for a usage
+error or when gh is missing or fails. Standard library plus the gh CLI.
 """
 from __future__ import annotations
 
@@ -16,37 +26,76 @@ import json
 import re
 import subprocess
 import sys
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-FIELDS = "conclusion,headSha,status,workflowName"
+REPO = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+DEFAULT_WORKFLOW = "validate.yml"
+EVENTS = frozenset({"push", "workflow_dispatch", "release"})
+PER_PAGE = 100
+MAX_PAGES = 10
 
 
 class GhError(Exception):
     """gh is missing, failed, or printed something that is not a run list."""
 
 
-def _runs_for(sha: str, workflow: Optional[str]) -> list:
-    argv = ["gh", "run", "list", "--commit", sha, "--json", FIELDS, "--limit", "100"]
-    if workflow:
-        argv += ["--workflow", workflow]
+def _api(endpoint: str) -> Dict[str, Any]:
+    argv = ["gh", "api", "-H", "Accept: application/vnd.github+json", endpoint]
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=120)
     except FileNotFoundError:
         raise GhError("gh (GitHub CLI) not found on PATH; install it and run `gh auth login`")
     except subprocess.TimeoutExpired:
-        raise GhError("gh run list did not answer within 120s")
+        raise GhError("gh api did not answer within 120s")
     if proc.returncode != 0:
-        raise GhError(f"gh run list failed (exit {proc.returncode}): {proc.stderr.strip()}")
+        raise GhError(f"gh api failed (exit {proc.returncode}): {proc.stderr.strip()}")
     try:
-        runs = json.loads(proc.stdout)
+        body = json.loads(proc.stdout)
     except ValueError:
         raise GhError(f"could not parse gh output as JSON: {proc.stdout[:200]!r}")
-    if not isinstance(runs, list):
-        raise GhError(f"could not parse gh output as a list of runs: {proc.stdout[:200]!r}")
-    # gh filters by --commit already; checking headSha again guards against a gh
-    # that ignores the flag.
-    return [r for r in runs if isinstance(r, dict) and r.get("headSha") == sha]
+    if not isinstance(body, dict) or not isinstance(body.get("workflow_runs"), list):
+        raise GhError(f"could not parse gh output as a list of workflow runs: {proc.stdout[:200]!r}")
+    return body
+
+
+def _runs_for(sha: str, repo: Optional[str]) -> List[Dict[str, Any]]:
+    slug = repo if repo else "{owner}/{repo}"  # gh fills the placeholders from the current directory
+    runs: List[Dict[str, Any]] = []
+    for page in range(1, MAX_PAGES + 1):
+        body = _api(f"repos/{slug}/actions/runs?head_sha={sha}&per_page={PER_PAGE}&page={page}")
+        batch = body["workflow_runs"]
+        runs += [r for r in batch if isinstance(r, dict)]
+        if len(batch) < PER_PAGE:
+            break
+    return runs
+
+
+def _full_name(run: Dict[str, Any], key: str) -> Optional[str]:
+    value = run.get(key)
+    name = value.get("full_name") if isinstance(value, dict) else None
+    return name.lower() if isinstance(name, str) else None
+
+
+def counted_runs(runs: List[Dict[str, Any]], sha: str, workflow: str) -> List[Dict[str, Any]]:
+    """The runs that may decide: the required workflow, this commit, this repository, a trusted event, not cancelled."""
+    wanted = f".github/workflows/{workflow}"
+    kept = []
+    for run in runs:
+        path = run.get("path")
+        head, repository = _full_name(run, "head_repository"), _full_name(run, "repository")
+        run_id = run.get("id")
+        if (run.get("head_sha") == sha and isinstance(path, str) and path.split("@", 1)[0] == wanted
+                and run.get("event") in EVENTS and run.get("conclusion") != "cancelled"
+                and head is not None and head == repository
+                and isinstance(run_id, int) and not isinstance(run_id, bool)):
+            kept.append(run)
+    return kept
+
+
+def newest(runs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The run that decides: the latest start (a re-run restarts its run), then the highest id."""
+    return max(runs, key=lambda r: (str(r.get("run_started_at") or r.get("created_at") or ""), r["id"]))
 
 
 def _fail(code: int, message: str) -> int:
@@ -55,28 +104,32 @@ def _fail(code: int, message: str) -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Exit 0 only if CI is green on the exact commit.")
+    parser = argparse.ArgumentParser(description="Exit 0 only if the required workflow is green on the exact commit.")
     parser.add_argument("sha", help="full 40-character commit SHA")
-    parser.add_argument("--workflow", default=None, help="only consider runs of this workflow file")
+    parser.add_argument("--workflow", default=DEFAULT_WORKFLOW,
+                        help=f"the required workflow file name under .github/workflows (default {DEFAULT_WORKFLOW})")
+    parser.add_argument("--repo", default=None, help="OWNER/REPO (default: the repository of the current directory)")
     args = parser.parse_args(argv)
 
     if not FULL_SHA.match(args.sha):
         return _fail(2, f"expected a full 40-character commit SHA in lowercase hex, got {args.sha!r}")
+    if args.repo is not None and not REPO.match(args.repo):
+        return _fail(2, f"expected OWNER/REPO, got {args.repo!r}")
+    if "/" in args.workflow or not args.workflow.endswith((".yml", ".yaml")):
+        return _fail(2, f"expected a workflow file name such as validate.yml, got {args.workflow!r}")
     try:
-        runs = _runs_for(args.sha, args.workflow)
+        runs = _runs_for(args.sha, args.repo)
     except GhError as exc:
         return _fail(2, str(exc))
 
-    if not runs:
-        return _fail(1, f"no CI run found for {args.sha}")
-    not_green = [r for r in runs if r.get("status") != "completed" or r.get("conclusion") != "success"]
-    if not_green:
-        detail = ", ".join(
-            f"{r.get('workflowName', '?')}: {r.get('conclusion') or r.get('status') or 'unknown'}"
-            for r in not_green
-        )
-        return _fail(1, f"CI is not green on {args.sha} ({detail})")
-    print(f"CI is green on {args.sha} ({len(runs)} run(s))")
+    counted = counted_runs(runs, args.sha, args.workflow)
+    if not counted:
+        return _fail(1, f"no CI run of {args.workflow} found for {args.sha}")
+    decisive = newest(counted)
+    if decisive.get("status") != "completed" or decisive.get("conclusion") != "success":
+        state = decisive.get("conclusion") or decisive.get("status") or "unknown"
+        return _fail(1, f"CI is not green on {args.sha} ({args.workflow} run {decisive.get('id')}: {state})")
+    print(f"CI is green on {args.sha} ({args.workflow} run {decisive.get('id')}, attempt {decisive.get('run_attempt', 1)})")
     return 0
 
 
