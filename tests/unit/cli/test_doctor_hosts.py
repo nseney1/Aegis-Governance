@@ -1258,9 +1258,12 @@ def test_deeply_nested_codex_output_is_an_unanswered_probe(env):
     assert row["state"] == "auth_unknown" and "registration_unverifiable" in codes(row)
 
 
-@pytest.mark.parametrize("bad", [{"root": "\u0000x"}, {"root": "relative/repo"}, {"root": 7}, "not-an-entry"])
+@pytest.mark.parametrize("bad", ["absolute-with-nul", {"root": "\u0000x"}, {"root": "relative/repo"}, {"root": 7},
+                                 "not-an-entry"])
 def test_a_registry_entry_doctor_cannot_place_is_skipped_and_reported(env, bad):
     env.all_ok()
+    if bad == "absolute-with-nul":  # resolving it raises ValueError: embedded null byte
+        bad = {"root": str(env.ws.resolve()) + "\u0000x"}
     reg = env.home / ".aegis" / "workspaces.json"
     data = json.loads(reg.read_text(encoding="utf-8"))
     data["workspaces"].insert(0, bad)
