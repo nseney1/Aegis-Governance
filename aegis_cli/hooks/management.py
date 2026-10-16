@@ -15,7 +15,13 @@ _SOMA_HOOK_START = "# >>> soma pre-commit >>>"
 _SOMA_HOOK_END = "# <<< soma pre-commit <<<"
 AEGIS_HOOK_FORMAT = "# aegis-hook-format:"
 SOMA_HOOK_FORMAT = "# soma-hook-format:"
-CURRENT_HOOK_FORMAT_VERSION = 5
+# 6: the block runs first (right after the shebang) and no longer ends in exec.
+CURRENT_HOOK_FORMAT_VERSION = 6
+# The marked blocks install and uninstall manage: today's and the pre-v3 one.
+_MARKERS = ((_AEGIS_HOOK_START, _AEGIS_HOOK_END), (_SOMA_HOOK_START, _SOMA_HOOK_END))
+
+# The block is POSIX sh; a hook any of these runs can carry it.
+_SHELLS = frozenset({"sh", "bash", "dash", "zsh"})
 
 
 # The hook runs this code with the pinned interpreter. -I keeps the working
@@ -40,6 +46,8 @@ def generate_hook_block(python: str | None = None, import_root: str | None = Non
     One absolute interpreter (default: sys.executable of the installing aegis)
     and the directory aegis_cli was imported from are baked in at install
     time. Nothing is looked up on PATH, in $VIRTUAL_ENV or in the repository.
+    A failed check ends the hook with its exit code; a passing one lets the
+    hook's own lines after the block run (no exec).
     """
     python = python if python is not None else sys.executable
     import_root = import_root if import_root is not None else _default_import_root()
@@ -58,20 +66,18 @@ def generate_hook_block(python: str | None = None, import_root: str | None = Non
         f"AEGIS_PYTHON={py}\n"
         f"AEGIS_PATH={root}\n"
         'if [ -x "$AEGIS_PYTHON" ] && [ -f "$AEGIS_PATH/aegis_cli/__init__.py" ]; then\n'
-        f'  exec "$AEGIS_PYTHON" -I -c {runner} "$AEGIS_PATH" check --hook\n'
+        f'  "$AEGIS_PYTHON" -I -c {runner} "$AEGIS_PATH" check --hook || exit $?\n'
+        "else\n"
+        '  echo "aegis pre-commit: aegis not found at $AEGIS_PYTHON; run aegis hook install, or commit with --no-verify" >&2\n'
+        "  exit 1\n"
         "fi\n"
-        'echo "aegis pre-commit: aegis not found at $AEGIS_PYTHON; run aegis hook install, or commit with --no-verify" >&2\n'
-        "exit 1\n"
         f"{_AEGIS_HOOK_END}\n"
     )
 
 
 def _replace_hook_block(content: str, block: str) -> str | None:
     """content with its marked block swapped for block, or None if malformed."""
-    for start_m, end_m in (
-        (_AEGIS_HOOK_START, _AEGIS_HOOK_END),
-        (_SOMA_HOOK_START, _SOMA_HOOK_END),
-    ):
+    for start_m, end_m in _MARKERS:
         start = content.find(start_m)
         if start >= 0:
             end = content.find(end_m, start)
@@ -87,6 +93,72 @@ def _replace_hook_block(content: str, block: str) -> str | None:
     return None
 
 
+def _hook_interpreter(text: str) -> str | None:
+    """The program a hook's shebang names (``env``'s argument for ``#!/usr/bin/env X``),
+    or None without a shebang (git then runs the file with sh)."""
+    first = text.split("\n", 1)[0].rstrip("\r")
+    if not first.startswith("#!"):
+        return None
+    words = first[2:].split()
+    if not words:
+        return None
+    program = words[0].replace("\\", "/").rsplit("/", 1)[-1]
+    if program == "env":
+        rest = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
+        program = rest[0].replace("\\", "/").rsplit("/", 1)[-1] if rest else program
+    return program
+
+
+def _without_hook_block(text: str) -> str | None:
+    """``text`` with every marked aegis (or soma) block removed; None when one is unterminated."""
+    for start_m, end_m in _MARKERS:
+        while True:
+            start = text.find(start_m)
+            if start < 0:
+                break
+            end = text.find(end_m, start)
+            if end < 0:
+                return None
+            line_start = text.rfind("\n", 0, start) + 1
+            end += len(end_m)
+            if text.startswith("\n", end):
+                end += 1
+            text = text[:line_start] + text[end:]
+    return text
+
+
+def _with_hook_block_first(text: str, block: str) -> str:
+    """``text`` (holding no aegis block) with ``block`` right after its shebang, so the
+    check runs before any of the hook's own lines, which may end it with exec or exit."""
+    if not text.startswith("#!"):
+        return "#!/bin/sh\n" + block + text
+    shebang, _, rest = text.partition("\n")
+    return shebang + "\n" + block + rest
+
+
+def _back_up_hook(hook_file: Path, raw: bytes) -> Path | None:
+    """Copy a hook's current bytes, owner-only, to ``~/.aegis/backups/<UTC stamp>/``; the
+    copy's path, or None (after saying why) when no copy could be made."""
+    from aegis_cli.install_hosts import InstallError, backup_dir
+    from aegis_core.storage import atomic_write_bytes
+    from aegis_core.workspace.layout import UserLayout
+
+    layout = UserLayout.current()
+    try:
+        if layout is None:
+            raise InstallError("no home directory resolves")
+        folder = backup_dir(layout.home)
+        missing = [p for p in (folder, *folder.parents) if not os.path.lexists(p)]
+        for path in reversed(missing):
+            path.mkdir(mode=0o700)
+        copy = folder / hook_file.name
+        atomic_write_bytes(copy, raw, mode=0o600)
+        return copy
+    except (InstallError, OSError) as exc:
+        print(f"Error: cannot back up {hook_file} before editing it ({exc}); left unchanged", file=sys.stderr)
+        return None
+
+
 def install_hook(
     project_root: str | Path | Any | None = None,
     force: bool = False,
@@ -94,7 +166,15 @@ def install_hook(
     dry_run: bool = False,
     import_root: str | None = None,
 ) -> bool:
-    """Install or refresh the aegis pre-commit hook in a git repository."""
+    """Install or refresh the aegis pre-commit hook in a git repository.
+
+    The block goes right after the hook's shebang (an existing block moves there), so a
+    hook whose own lines end in exec or exit still runs the check first. A hook that is
+    not a shell script (another interpreter, or not text) is refused unless ``force``,
+    which replaces it. An existing file is copied to ``~/.aegis/backups/<stamp>/`` before
+    it is changed, and is left unchanged when no copy can be made. A dry run makes the
+    same checks and writes nothing. Returns False when nothing was (or would be) installed.
+    """
     from aegis_core.workspace.base import Workspace
     from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
@@ -110,13 +190,10 @@ def install_hook(
         return False
 
     block = generate_hook_block(python, import_root=import_root)
-    if dry_run:
-        return True
-
-    git_hooks_dir.mkdir(parents=True, exist_ok=True)
     hook_file = git_hooks_dir / "pre-commit"
 
     target_file = hook_file
+    replace_link = False
     if hook_file.is_symlink():
         real_target = hook_file.resolve()
         if not real_target.exists():
@@ -126,8 +203,7 @@ def install_hook(
                     file=sys.stderr,
                 )
                 return False
-            hook_file.unlink()
-            target_file = hook_file
+            replace_link = True
         else:
             is_contained = False
             for boundary in (root, git_hooks_dir):
@@ -146,26 +222,47 @@ def install_hook(
                 return False
             target_file = real_target
 
-    if target_file.exists():
-        content = target_file.read_text(encoding="utf-8")
-        if _AEGIS_HOOK_START in content or _SOMA_HOOK_START in content:
-            updated = _replace_hook_block(content, block)
-            if updated is None:
+    raw = None if replace_link or not target_file.exists() else target_file.read_bytes()
+    if raw is None:
+        new_content = _with_hook_block_first("#!/bin/sh\n", block)
+    else:
+        try:
+            content: str | None = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            content = None
+        interpreter = "a program that is not a text file" if content is None else _hook_interpreter(content)
+        if interpreter is not None and interpreter not in _SHELLS:
+            if not force:
+                print(
+                    f"Error: {target_file} runs {interpreter}, not a shell, so the aegis block cannot go in it. "
+                    "To replace it (a copy is kept in ~/.aegis/backups/), run: aegis hook install --force; "
+                    "or call `aegis check --hook` from it yourself.",
+                    file=sys.stderr,
+                )
+                return False
+            new_content = _with_hook_block_first("#!/bin/sh\n", block)
+        else:
+            stripped = _without_hook_block((content or "").replace("\r\n", "\n"))
+            if stripped is None:
                 print(f"  ⚠️  {target_file} has an unterminated hook block; left unchanged", file=sys.stderr)
                 return True
-            new_content = updated
-        else:
-            if not content.endswith("\n"):
-                content += "\n"
-            new_content = content + "\n" + block
-    else:
-        new_content = "#!/bin/sh\n\n" + block
+            new_content = _with_hook_block_first(stripped, block)
 
-    new_content = new_content.replace("\r\n", "\n")
+    if dry_run:
+        return True
+    payload = new_content.encode("utf-8")
+    if raw is not None and payload != raw:
+        copy = _back_up_hook(target_file, raw)
+        if copy is None:
+            return False
+        print(f"Saved the previous pre-commit hook to {copy}", file=sys.stderr)
+    if replace_link:
+        hook_file.unlink()
 
+    git_hooks_dir.mkdir(parents=True, exist_ok=True)
     tmp_file = target_file.parent / f".pre-commit.tmp.{os.getpid()}"
     try:
-        tmp_file.write_bytes(new_content.encode("utf-8"))
+        tmp_file.write_bytes(payload)
         if os.name != "nt":
             tmp_file.chmod(0o755)
         tmp_file.replace(target_file)
@@ -237,13 +334,13 @@ def uninstall_hook(
             target_file = real_target
 
     content = target_file.read_text(encoding="utf-8")
-    if _AEGIS_HOOK_START not in content and _SOMA_HOOK_START not in content:
+    if not any(start_m in content for start_m, _end_m in _MARKERS):
         return False
 
     if dry_run:
         return True
 
-    start_m, end_m = (_AEGIS_HOOK_START, _AEGIS_HOOK_END) if _AEGIS_HOOK_START in content else (_SOMA_HOOK_START, _SOMA_HOOK_END)
+    start_m, end_m = next(pair for pair in _MARKERS if pair[0] in content)
     start = content.find(start_m)
     end = content.find(end_m, start)
     if end >= 0:
@@ -324,8 +421,58 @@ def _pinned_value(text: str, var: str) -> str | None:
         return match.group(1)
 
 
+_REDIRECTION = re.compile(r"^[0-9]*(?:[<>]|&>)")
+_OPENERS = frozenset({"if", "case", "for", "while", "until", "select", "{"})
+_CLOSERS = frozenset({"fi", "esac", "done", "}"})
+
+
+def _ends_hook_at(lines: list[str]) -> tuple[int, str] | None:
+    """The first line (1-based, and its text) that ends the hook unconditionally: an
+    ``exec`` of a command or an ``exit`` at the top level, outside any if/case/loop/
+    function body and not behind ``&&``/``||``. A shell parse would be exact; this reads
+    lines, which is what hook files are, and ignores quoted text and comments."""
+    depth = 0
+    for number, line in enumerate(lines, start=1):
+        text = re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", "''", line)
+        text = re.sub(r"(^|\s)#.*$", "", text).strip()
+        if not text:
+            continue
+        words = text.split()
+        if depth == 0 and words[0] in ("exec", "exit"):
+            command = [w for w in words[1:] if not _REDIRECTION.match(w)]
+            if words[0] == "exit" or command:  # `exec >log 2>&1` only redirects
+                return number, line.strip()
+        for segment in re.split(r"&&|\|\||[;&|()]", text):
+            first = segment.split()[:1]
+            if first and first[0] in _OPENERS:
+                depth += 1
+            if first and first[0] in _CLOSERS:
+                depth = max(depth - 1, 0)
+    return None
+
+
+def _unreachable_reason(hook_file: Path, text: str) -> str | None:
+    """Why the aegis block in a hook never runs, or None when nothing stops it."""
+    interpreter = _hook_interpreter(text)
+    if interpreter is not None and interpreter not in _SHELLS:
+        return f"the hook runs {interpreter}, not a shell, so the aegis block never runs"
+    if os.name != "nt" and not os.access(hook_file, os.X_OK):
+        return "the hook file is not executable, so git skips it"
+    start = min((i for i in (text.find(start_m) for start_m, _end_m in _MARKERS) if i >= 0), default=-1)
+    lines = text[:start].splitlines()[1 if text.startswith("#!") else 0:] if start >= 0 else []
+    ended = _ends_hook_at(lines)
+    if ended is not None:
+        number = ended[0] + (1 if text.startswith("#!") else 0)
+        return f"line {number} ({ended[1]}) ends the hook before the aegis block, so the check never runs"
+    return None
+
+
 def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
-    """Inspect the aegis pre-commit hook in the target repository."""
+    """Inspect the aegis pre-commit hook in the target repository.
+
+    ``reachable`` is True only when the hook holds the aegis block and nothing stops it
+    from running (a non-shell interpreter, a file git cannot execute, an exec or exit
+    before the block); ``unreachable_reason`` then says which, and is None otherwise."""
     from aegis_core.workspace.base import Workspace
     from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
@@ -351,7 +498,7 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
         else:
             try:
                 text = hook_file.read_text(encoding="utf-8", errors="replace")
-                if _AEGIS_HOOK_START in text or _SOMA_HOOK_START in text:
+                if any(start_m in text for start_m, _end_m in _MARKERS):
                     managed = True
                     match = re.search(r"(?:aegis|soma)-hook-format:\s*(\d+)", text)
                     if match:
@@ -369,6 +516,7 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
 
     interpreter = None
     aegis_path = None
+    unreachable_reason = _unreachable_reason(hook_file, text) if managed else None
     if managed:
         pinned = _pinned_value(text, "AEGIS_PYTHON")
         if pinned is not None:
@@ -395,6 +543,8 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
         "current_format_version": CURRENT_HOOK_FORMAT_VERSION,
         "interpreter": interpreter,
         "aegis_path": aegis_path,
+        "reachable": managed and unreachable_reason is None,
+        "unreachable_reason": unreachable_reason,
         "hooks_dir_in_work_tree": bool(git_hooks_dir) and _hooks_dir_in_work_tree(root, git_hooks_dir),
     }
 
@@ -413,7 +563,7 @@ def run_hook_install(args: Any) -> int:
         if ok:
             print(f"✅ aegis pre-commit hook installed ({st.get('hook_file')})")
         else:
-            print("❌ Failed to install the aegis pre-commit hook (no .git directory or symlink outside repo)", file=sys.stderr)
+            print("❌ Failed to install the aegis pre-commit hook (see above, or no .git directory)", file=sys.stderr)
     if st.get("hooks_dir_in_work_tree"):
         print(work_tree_warning(st["hook_file"]), file=sys.stderr)
     return 0 if ok else 1
@@ -469,4 +619,6 @@ def run_hook_status(args: Any) -> int:
         if pinned:
             mark = "✅" if pinned["exists"] else "❌ (missing: run 'aegis hook install')"
             print(f"  {label:<17}{pinned['path']} {mark}")
+    if st["unreachable_reason"]:
+        print(f"  Reachable:       ❌ {st['unreachable_reason']}; run 'aegis hook install' to put the block first")
     return 0

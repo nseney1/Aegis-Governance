@@ -158,10 +158,10 @@ def test_block_names_no_path_or_repo_relative_interpreter():
     for unsafe in ("command -v", "$PWD", ".venv", "VIRTUAL_ENV", "soma"):
         assert unsafe not in block
     assert f"aegis-hook-format: {CURRENT_HOOK_FORMAT_VERSION}" in block
-    exec_lines = [ln.strip() for ln in block.splitlines() if ln.strip().startswith("exec ")]
-    assert len(exec_lines) == 1
-    tokens = shlex.split(exec_lines[0])
-    assert tokens[2] == "-I"
+    run_lines = [ln.strip() for ln in block.splitlines() if "check --hook" in ln]
+    assert len(run_lines) == 1
+    tokens = shlex.split(run_lines[0])
+    assert tokens[:2] == ["$AEGIS_PYTHON", "-I"]
 
 
 def test_default_interpreter_and_import_root_are_the_installing_aegis(tmp_path):
@@ -181,7 +181,7 @@ def test_hook_is_posix_sh(tmp_path):
         assert bashism not in text
 
 
-def test_reinstall_replaces_old_block_in_place(tmp_path):
+def test_reinstall_replaces_an_old_block_and_runs_it_first(tmp_path):
     project = bare_repo(tmp_path / "p")
     hook = project / ".git" / "hooks" / "pre-commit"
     hook.write_text("#!/bin/sh\necho user-before\n\n" + OLD_BLOCK + "echo user-after\n",
@@ -190,8 +190,8 @@ def test_reinstall_replaces_old_block_in_place(tmp_path):
     text = hook.read_text(encoding="utf-8")
     assert text.count(_AEGIS_HOOK_START) == 1 and text.count(_AEGIS_HOOK_END) == 1
     assert _SOMA_HOOK_START not in text
-    assert text.startswith("#!/bin/sh\necho user-before\n\n")
-    assert text.endswith(_AEGIS_HOOK_END + "\necho user-after\n")
+    assert text.startswith("#!/bin/sh\n" + _AEGIS_HOOK_START + "\n")
+    assert text.endswith(_AEGIS_HOOK_END + "\necho user-before\n\necho user-after\n")
     assert "check --hook" in text
     # Idempotent: a second run is byte-identical.
     install_hook(project, python="/usr/bin/python3")
