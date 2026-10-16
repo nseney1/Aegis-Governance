@@ -438,6 +438,33 @@ def test_a_symlinked_aegis_dir_is_refused_and_nothing_is_written(tmp_path: Path)
     assert _snapshot(outside) == before
 
 
+def test_a_symlinked_aegis_dir_is_refused_even_when_it_points_inside_the_workspace(tmp_path: Path):
+    root = tmp_path / "ws"
+    (root / "real-aegis" / "rules" / "traps").mkdir(parents=True)
+    _symlink_or_skip(root / ".aegis", root / "real-aegis")
+
+    plan = migrate.plan(root)
+
+    assert plan.to_dict()["refusal"] == ".aegis is a symlink; aegis migrate reads and writes only inside the workspace"
+
+
+def test_an_existing_config_json_is_not_rewritten_when_no_legacy_setting_feeds_it(tmp_path: Path):
+    root = tmp_path / "ws"
+    rule = root / ".aegis" / "rules" / "invariants" / "w.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("---\nid: w\ntype: wall\nenforcement: gate\nhypothesis: h\n---\nBody\n", encoding="utf-8")
+    config = root / ".aegis" / "config.json"
+    config.write_bytes(b'{"v": 1,   "expiry": {"default_days": 30}}')
+    plan = migrate.plan(root)
+    assert plan.to_dict()["status"] == "pending"
+
+    result = migrate.apply(plan)
+
+    assert ".aegis/config.json" not in result.written
+    assert config.read_bytes() == b'{"v": 1,   "expiry": {"default_days": 30}}'
+    assert "type: invariant" in rule.read_text(encoding="utf-8")
+
+
 def test_a_rerun_after_an_interrupted_apply_converges(legacy: Path, monkeypatch):
     real_unlink = Path.unlink
 

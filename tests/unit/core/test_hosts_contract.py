@@ -53,6 +53,11 @@ RETIRED_GEMINI_CLI = ("gemini-cli is not supported: Google retired Gemini CLI fo
                       "accounts; use --host antigravity.")
 
 
+def test_without_a_phase_every_host_is_listed_in_table_order():
+    assert hosts.all_hosts() == hosts.HOSTS
+    assert {h.id for h in hosts.all_hosts(phase=1)} < {h.id for h in hosts.all_hosts()}
+
+
 def test_gemini_cli_is_retired_and_kept_only_to_name_the_client():
     # Google no longer serves Gemini CLI to individual Code Assist accounts; Antigravity is
     # the Gemini-family host. The row stays so identify() can name the client if it connects,

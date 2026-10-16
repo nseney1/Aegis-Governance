@@ -83,6 +83,12 @@ def test_paths_and_patterns_are_normalized_to_workspace_relative_posix() -> None
     assert not matches("github/**", ".github/workflows/ci.yml")
 
 
+@pytest.mark.parametrize("path", ["", "./", "/"])
+@pytest.mark.parametrize("pattern", ["*", "**", "**/*"])
+def test_a_path_that_names_no_file_matches_no_pattern(pattern: str, path: str) -> None:
+    assert not matches(pattern, path)
+
+
 def test_non_string_patterns_never_match() -> None:
     assert not matches(None, "a.py")  # type: ignore[arg-type]
     assert not matches(3, "a.py")  # type: ignore[arg-type]
