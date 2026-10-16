@@ -708,9 +708,13 @@ MCP_RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from aegis_mcp.server
 
 
 def _mcp_import_root() -> str:
-    import aegis_mcp
+    """The directory aegis_cli was imported from: the wheel installs aegis_mcp beside it.
+    Located through aegis_cli, never by looking aegis_mcp up on sys.path, where the
+    current directory (a repository) can come first; aegis_cli does not import aegis_mcp
+    (ADR 0005 AD-3)."""
+    import aegis_cli
 
-    return str(Path(aegis_mcp.__file__).resolve().parent.parent)
+    return str(Path(aegis_cli.__file__).resolve().parent.parent)
 
 
 def _installed_script(scripts_dirs: Optional[Sequence[str]]) -> Optional[str]:
