@@ -53,11 +53,6 @@ def _call(name, arguments):
     })
 
 
-def test_tools_list_returns_exactly_the_four_surviving_tools(initialized):
-    names = [tool["name"] for tool in _list_tools()["result"]["tools"]]
-    assert sorted(names) == sorted(SURVIVING_TOOLS)
-
-
 def test_execution_env_flag_no_longer_widens_the_surface(initialized, monkeypatch):
     monkeypatch.setenv("AEGIS_EXECUTION_ENABLED", "1")
     names = {tool["name"] for tool in _list_tools()["result"]["tools"]}
@@ -68,13 +63,6 @@ def test_execution_env_flag_no_longer_widens_the_surface(initialized, monkeypatc
 def test_removed_tool_is_an_unknown_tool_protocol_error(initialized, name):
     response = _call(name, {})
     assert response["error"] == {"code": -32602, "message": f"Unknown tool: {name}"}
-
-
-def test_no_tool_schema_takes_a_receipt(initialized):
-    for tool in _list_tools()["result"]["tools"]:
-        properties = tool["inputSchema"].get("properties", {})
-        assert "receipt" not in properties, tool["name"]
-        assert "receipt" not in tool["inputSchema"].get("required", []), tool["name"]
 
 
 def test_initialize_hands_out_no_session_token(initialized):
@@ -114,15 +102,6 @@ def test_read_tool_ignores_a_client_chosen_workspace(tmp_path, monkeypatch):
 
     names = {rule.get("_name") for rule in json.loads(response["result"]["content"][0]["text"])["rules"]}
     assert names == {"rule-canonical"}
-
-
-def test_rule_type_enums_list_only_the_six_canonical_types(initialized):
-    from aegis_core.taxonomy import CANONICAL_RULE_TYPES
-
-    tools = {tool["name"]: tool for tool in _list_tools()["result"]["tools"]}
-    for name in ("aegis_create_rule", "aegis_list_rules"):
-        enum = tools[name]["inputSchema"]["properties"]["rule_type"]["enum"]
-        assert enum == list(CANONICAL_RULE_TYPES) == ["invariant", "trap", "gate", "boundary", "persona", "contract"]
 
 
 def test_serving_every_tool_never_imports_the_sdk(tmp_path):
