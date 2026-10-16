@@ -23,9 +23,9 @@ ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml"
 # Strict xfails document deferrals named in the lane debrief; each must be
 # removed when its owner fixes the file (an XPASS fails the suite).
 DEFERRED = {
-    "docs/project/CHANGELOG.md": (
-        "pre-2.0 entries link to soma_core/* and tests/test_*.py, which no longer exist; "
-        "the final docs wave moves the CHANGELOG to the root and collapses that history"
+    "README.md": (
+        "the v3 README links docs/guides/* and docs/project/CHANGELOG.md, which lane f2 deleted or "
+        "moved; lane f1-readme-how rewrites the README, and its merge removes this entry"
     ),
 }
 
@@ -120,6 +120,12 @@ def test_the_checked_set_includes_the_readme_and_the_docs_tree():
     checked = {_rel(p) for p in _docs()}
     assert "README.md" in checked
     assert any(name.startswith("docs/") for name in checked)
+
+
+def test_every_deferral_names_a_checked_doc():
+    """A deferral for a moved or deleted doc would otherwise linger silently."""
+    checked = {_rel(p) for p in _docs()}
+    assert sorted(set(DEFERRED) - checked) == []
 
 
 # --- the checker itself -----------------------------------------------------------

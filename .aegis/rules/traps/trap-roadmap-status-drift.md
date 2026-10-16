@@ -7,8 +7,8 @@ hypothesis: "Shipping a feature without updating ROADMAP.md status markers cause
 prediction: "Will fire when a release (version bump, CHANGELOG entry) ships features listed in ROADMAP.md but the roadmap status is not updated to reflect shipped state"
 falsification: 0 findings in 20 sessions → prune
 target_paths:
-  - docs/project/ROADMAP.md
-  - docs/project/CHANGELOG.md
+  - docs/why-aegis.md
+  - CHANGELOG.md
   - aegis_core/_version.py
   - pyproject.toml
 triggers:

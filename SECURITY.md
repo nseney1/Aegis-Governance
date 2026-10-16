@@ -27,7 +27,7 @@ Include, where you can: the affected version (`VERSION` or `pip show aegis-guard
 - Confirm or reject it, with reasoning, within 30 days.
 - Coordinate a fix and a GitHub Security Advisory with you before public disclosure, and credit you unless you prefer otherwise.
 
-Fixed vulnerabilities are recorded in [`docs/project/CHANGELOG.md`](docs/project/CHANGELOG.md) and the Bug Registry. No bug bounty is offered.
+Fixed vulnerabilities are recorded in the [CHANGELOG](CHANGELOG.md) and in the GitHub Security Advisory. No bug bounty is offered.
 
 ## Scope
 
