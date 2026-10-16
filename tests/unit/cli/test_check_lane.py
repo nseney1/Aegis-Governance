@@ -2,10 +2,11 @@
 
 The post-lane gate through the real CLI: exit 0 when the lane's committed range passes
 containment and Python test integrity, 1 when it does not or cannot be checked (a
-shallow clone, an unresolvable base, no allowed paths), 2 for a usage error. ``--base``,
-``--paths`` and ``--base-policy`` belong to ``--lane``; FILES and the Layer 1/2 options
-do not combine with it. ``--json`` (or ``--format json``) prints one document with
-``source``, ``aegis_version``, ``checked_at`` and ``scope``, errors included.
+shallow clone, an unresolvable base, no allowed paths), 2 for a usage error. ``--paths``
+and ``--base-policy`` belong to ``--lane`` (``--base`` also names a plain check's baseline
+source); FILES and the Layer 1/2 options do not combine with it. ``--json`` (or
+``--format json``) prints one document with ``source``, ``aegis_version``, ``checked_at``
+and ``scope``, errors included.
 """
 from __future__ import annotations
 
@@ -206,7 +207,8 @@ def test_no_allowed_paths_exits_1(repo: Path, capsys):
 
 
 @pytest.mark.parametrize("argv, flag", [
-    (["--base", "main"], "--base"),
+    # --base is not here: since v4.2 a plain check takes it too, to read the baseline from the base
+    # (tests/unit/cli/test_check_baseline.py); --paths and --base-policy stay with --lane.
     (["--paths", "docs/**"], "--paths"),
     (["--base-policy"], "--base-policy"),
 ])
