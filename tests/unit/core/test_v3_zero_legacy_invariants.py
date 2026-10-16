@@ -100,6 +100,12 @@ class TestV3CLIOutputContextAndANSIHygiene:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
+        from aegis_cli import doctor
+
+        def no_host_cli(cli_argv, cwd, timeout):  # doctor asks codex; never a real host in tests
+            raise OSError("host CLIs are not run in tests")
+
+        monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
         monkeypatch.setenv("NO_COLOR", "1")
         cli_main(argv)
         captured = capsys.readouterr()

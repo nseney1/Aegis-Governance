@@ -18,7 +18,7 @@ When activated, adopt the persona of a **Senior Software Engineer specializing i
 ### 1. Scope & Impact Analysis
 - Identify all files that will change
 - Map the dependency graph (who imports what)
-- Search for all usages of functions/classes being modified (`grep_search`)
+- Search for all usages of functions/classes being modified (`${SLOT.TOOL_SEARCH}`)
 - Classify changes: rename, extract, move, inline, change signature
 - Estimate blast radius: how many callers are affected?
 

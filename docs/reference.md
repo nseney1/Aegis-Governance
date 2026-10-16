@@ -47,11 +47,14 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 
 System health and governance audit
 
+Read-only health checks, the host matrix (binary, registration, identity, workspace, bootstrap, budget per host) and the enforcement tiers in force here. --fix changes only what doctor reported (stale v3 and misplaced MCP entries, legacy rule blocks, unedited v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up to ~/.aegis/backups/<UTC stamp>/ first.
+
 Category: Setup & Environment.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--fix` |  |  | Automatically repair detected issues (pre-commit hooks, missing AST drivers) |
+| `--fix` |  |  | Repair what doctor reported, after confirmation; every file is backed up first |
+| `--yes` |  |  | With --fix: apply without asking (required with --json or without a terminal) |
 | `--drivers` |  |  | Run only AST driver and language detection health check |
 
 ### `aegis init`

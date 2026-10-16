@@ -12,7 +12,7 @@ trigger: user_request
 
 # Session Monitor
 
-> **Role**: Live waste tracking and alerting for active Antigravity sessions. Periodically samples session trajectories, quantifies waste patterns, and alerts the orchestrator upon regression or threshold breaches.
+> **Role**: Live waste tracking and alerting for active agent sessions. Periodically samples session trajectories, quantifies waste patterns, and alerts the orchestrator upon regression or threshold breaches.
 
 ## Workflow
 

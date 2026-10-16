@@ -1,4 +1,4 @@
-"""`soma doctor` MCP launcher check (C1).
+"""`aegis doctor` MCP launcher check (C1).
 
 MCP configs keep `"command": "python3"`. On Windows `python3` on PATH is often
 the Microsoft Store App Installer stub: it exits 49 (or prints a Store message
@@ -7,7 +7,6 @@ starts. Doctor resolves `python3` from PATH exactly as the host would and says
 which of four states applies. Stubs live in a fake PATH directory.
 """
 import os
-import sys
 
 import pytest
 
@@ -24,7 +23,7 @@ def make_stub(directory, body):
     return stub
 
 
-def test_working_python_with_soma_mcp(tmp_path):
+def test_working_python_with_aegis_mcp(tmp_path):
     d = tmp_path / "bin"
     make_stub(d, 'case "$*" in *aegis_mcp*) exit 0;; esac\necho 3\n')
     status, detail = probe_mcp_launcher(str(d))
@@ -52,7 +51,7 @@ def test_store_stub_message_without_output(tmp_path):
     assert status == "store_stub"
 
 
-def test_soma_mcp_not_importable(tmp_path):
+def test_aegis_mcp_not_importable(tmp_path):
     d = tmp_path / "bin"
     make_stub(d, 'case "$*" in *aegis_mcp*) exit 1;; esac\necho 3\n')
     status, _ = probe_mcp_launcher(str(d))
@@ -92,8 +91,31 @@ def test_store_stub_report_names_the_fix(tmp_path, capsys):
     assert "python.org" in out
 
 
-def test_no_soma_mcp_report_gives_pip_guidance(tmp_path, capsys):
+def test_no_aegis_mcp_report_gives_pip_guidance(tmp_path, capsys):
     d = tmp_path / "bin"
     make_stub(d, 'case "$*" in *aegis_mcp*) exit 1;; esac\necho 3\n')
     _check_mcp_launcher(path_env=str(d))
     assert "pip install" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("entries", [["", "{outside}"], [".", "{outside}"], ["{ws}/bin", "{outside}"]])
+def test_a_python3_the_workspace_supplies_is_never_run(tmp_path, monkeypatch, entries):
+    """Only absolute PATH entries outside the workspace count: the probe runs what it finds."""
+    ws, outside, marker = tmp_path / "ws", tmp_path / "outside", tmp_path / "ran"
+    outside.mkdir()
+    for where in (ws, ws / "bin"):
+        make_stub(where, f'echo ran >> "{marker}"\necho 3\n')
+    monkeypatch.chdir(ws)
+    path = os.pathsep.join(e.format(ws=ws, outside=outside) for e in entries)
+    status, detail = probe_mcp_launcher(path, workspace=ws)
+    assert (status, detail) == ("missing", "python3 is not on PATH")
+    assert not marker.exists()
+
+
+def test_the_python3_outside_the_workspace_is_the_one_probed(tmp_path, monkeypatch):
+    ws, outside = tmp_path / "ws", tmp_path / "outside"
+    make_stub(ws / "bin", "exit 7\n")
+    real = make_stub(outside, 'case "$*" in *aegis_mcp*) exit 0;; esac\necho 3\n')
+    monkeypatch.chdir(ws)
+    status, detail = probe_mcp_launcher(os.pathsep.join(["", str(ws / "bin"), str(outside)]), workspace=ws)
+    assert (status, detail) == ("ok", str(real))

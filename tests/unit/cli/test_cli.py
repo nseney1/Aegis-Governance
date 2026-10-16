@@ -55,8 +55,14 @@ class TestCLIDispatch:
         ("scan", ["src/app.py"]),
         ("hook", ["status"]),
     ])
-    def test_subcommand_runs_without_crash(self, cmd, extra_args, capsys):
+    def test_subcommand_runs_without_crash(self, cmd, extra_args, capsys, monkeypatch):
+        from aegis_cli import doctor
         from aegis_cli.cli import main
+
+        def no_host_cli(argv, cwd, timeout):  # doctor asks codex; never a real host in tests
+            raise OSError("host CLIs are not run in tests")
+
+        monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
         result = main([cmd] + extra_args)
         assert result in (0, 1)
         captured = capsys.readouterr()

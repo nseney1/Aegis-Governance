@@ -33,9 +33,9 @@ ls package.json 2>/dev/null                              # Node
 grep -l 'pyautogui\|xdotool\|pygame' *.py **/*.py 2>/dev/null  # GUI automation
 ```
 
-### Step 2: Dispatch Flash Preflight Subagent
+### Step 2: Dispatch a Fast-Tier Preflight Subagent
 
-Dispatch a **Flash** read-only research subagent with the appropriate checklist below. The subagent must NOT modify any files.
+Dispatch a **`${SLOT.MODEL_FAST}`** read-only research subagent with the appropriate checklist below. The subagent must NOT modify any files.
 
 #### Python Project Checklist
 
@@ -110,7 +110,7 @@ When the preflight subagent reports back:
 
 | Component | Tokens | Time |
 |:----------|:------:|:----:|
-| Flash subagent | ~500 | ~5s |
+| Fast-tier subagent | ~500 | ~5s |
 | Shell commands (5-7) | ~200 | ~3s |
 | Result processing | ~100 | ~1s |
 | **Total** | **~800** | **<10s** |
@@ -118,6 +118,6 @@ When the preflight subagent reports back:
 ## Anti-Patterns
 
 - **Don't skip preflight for "quick fixes"** — the 5dd84eed session started as a "quick git setup" and burned 58 steps on venv drift
-- **Don't use inherit/pro for preflight** — Flash is sufficient for read-only diagnostics
+- **Don't use `${SLOT.MODEL_STANDARD}` or `${SLOT.MODEL_HEAVY}` for preflight** — `${SLOT.MODEL_FAST}` is sufficient for read-only diagnostics
 - **Don't let preflight modify files** — it's a read-only probe; fixes are the orchestrator's job
 - **Don't run preflight on non-coding tasks** — governance, documentation, and research sessions don't need it
