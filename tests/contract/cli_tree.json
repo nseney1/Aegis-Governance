@@ -489,7 +489,7 @@
                 "flags": [
                   "--force"
                 ],
-                "help": "Overwrite symlinks pointing outside repository",
+                "help": "Git hook only: overwrite symlinks pointing outside repository",
                 "kind": "store_true",
                 "metavar": null,
                 "nargs": 0,
@@ -507,10 +507,38 @@
                 "metavar": null,
                 "nargs": 0,
                 "required": false
+              },
+              {
+                "default": null,
+                "dest": "host",
+                "flags": [
+                  "--host"
+                ],
+                "help": "Register the PreToolUse hook with this host instead of the git hook: claude-code, codex-cli, antigravity",
+                "kind": "store",
+                "metavar": "HOST",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "choices": [
+                  "user",
+                  "project"
+                ],
+                "default": null,
+                "dest": "scope",
+                "flags": [
+                  "--scope"
+                ],
+                "help": "With --host: user (default) or project",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
               }
             ],
-            "description": null,
-            "help": "Install the pre-commit hook into the git repository"
+            "description": "Without --host: install the git pre-commit hook (it runs aegis check --hook).\n\nWith --host claude-code|codex-cli|antigravity: register `aegis hook run pre-tool --host <h>` as that host's PreToolUse hook, at user scope (default) or, with --scope project, in the repository's host file, which teammates' hosts will execute. The merge keeps everything else in the file, refuses unparseable, symlinked or hard-linked files, and backs the old file up to ~/.aegis/backups/<stamp>/<scope>/. Codex also gets ~/.codex/rules/aegis.rules and runs the hook only after you trust it in /hooks; Antigravity hooks are unavailable on Windows. aegis doctor shows each host's entries and tier; it cannot confirm that a host runs them.\n\nKnown gaps:\n  - Edits made through shell commands never reach the edit gate on any host.\n  - Codex write_stdin into an interactive shell has no PreToolUse payload, and the Codex Bash payload carries no working directory.\n  - Antigravity manage_task with send_input types into a background terminal past run_command.\n  - Aegis never emits an 'ask' decision (it fails open on Codex and soft-denies in agy headless runs).\n  - The hooks fail open on any Aegis error: they are guardrails, not a security boundary.\n",
+            "help": "Install the git pre-commit hook, or with --host an agent host's PreToolUse hook"
           },
           "run": {
             "aliases": [],
@@ -786,7 +814,7 @@
                 "flags": [
                   "--force"
                 ],
-                "help": "Force removal",
+                "help": "Git hook only: force removal",
                 "kind": "store_true",
                 "metavar": null,
                 "nargs": 0,
@@ -804,14 +832,42 @@
                 "metavar": null,
                 "nargs": 0,
                 "required": false
+              },
+              {
+                "default": null,
+                "dest": "host",
+                "flags": [
+                  "--host"
+                ],
+                "help": "Remove Aegis's PreToolUse hook entries from this host instead of the git hook: claude-code, codex-cli, antigravity",
+                "kind": "store",
+                "metavar": "HOST",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "choices": [
+                  "user",
+                  "project"
+                ],
+                "default": null,
+                "dest": "scope",
+                "flags": [
+                  "--scope"
+                ],
+                "help": "With --host: only this scope (default: both)",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
               }
             ],
             "description": null,
-            "help": "Remove the aegis block from the pre-commit hook"
+            "help": "Remove the aegis block from the pre-commit hook, or with --host an agent host's PreToolUse hook"
           }
         },
         "description": null,
-        "help": "Install, inspect or remove the git pre-commit hook"
+        "help": "Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks"
       },
       "init": {
         "aliases": [],
@@ -2054,7 +2110,7 @@
     {
       "aliases": [],
       "category": "Plumbing",
-      "help": "Install, inspect or remove the git pre-commit hook",
+      "help": "Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks",
       "name": "hook"
     },
     {

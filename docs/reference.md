@@ -41,7 +41,7 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis status` | Daily Workflow & Verification | Show active rules and stats |
 | `aegis rule` | Rule Evolution & Intelligence | Manage rule lifecycle (list, create, promote, demote, archive) |
 | `aegis sync` | Rule Evolution & Intelligence | Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them) |
-| `aegis hook` | Plumbing | Install, inspect or remove the git pre-commit hook |
+| `aegis hook` | Plumbing | Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks |
 
 ### `aegis doctor`
 
@@ -211,18 +211,22 @@ Category: Rule Evolution & Intelligence.
 
 ### `aegis hook`
 
-Install, inspect or remove the git pre-commit hook
+Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks
 
 Category: Plumbing. Subcommands: `install`, `run`, `safety-gate`, `status`, `uninstall`.
 
 ### `aegis hook install`
 
-Install the pre-commit hook into the git repository
+Install the git pre-commit hook, or with --host an agent host's PreToolUse hook
+
+Without --host: install the git pre-commit hook (it runs aegis check --hook). With --host claude-code\|codex-cli\|antigravity: register `aegis hook run pre-tool --host <h>` as that host's PreToolUse hook, at user scope (default) or, with --scope project, in the repository's host file, which teammates' hosts will execute. The merge keeps everything else in the file, refuses unparseable, symlinked or hard-linked files, and backs the old file up to ~/.aegis/backups/<stamp>/<scope>/. Codex also gets ~/.codex/rules/aegis.rules and runs the hook only after you trust it in /hooks; Antigravity hooks are unavailable on Windows. aegis doctor shows each host's entries and tier; it cannot confirm that a host runs them. Known gaps: - Edits made through shell commands never reach the edit gate on any host. - Codex write_stdin into an interactive shell has no PreToolUse payload, and the Codex Bash payload carries no working directory. - Antigravity manage_task with send_input types into a background terminal past run_command. - Aegis never emits an 'ask' decision (it fails open on Codex and soft-denies in agy headless runs). - The hooks fail open on any Aegis error: they are guardrails, not a security boundary.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--force` |  |  | Overwrite symlinks pointing outside repository |
+| `--force` |  |  | Git hook only: overwrite symlinks pointing outside repository |
 | `--dry-run` |  |  | Preview without creating or modifying hook |
+| `--host` | `HOST` |  | Register the PreToolUse hook with this host instead of the git hook: claude-code, codex-cli, antigravity |
+| `--scope` | one of `user`, `project` |  | With --host: user (default) or project |
 
 ### `aegis hook run`
 
@@ -249,12 +253,14 @@ Inspect the pre-commit hook and the interpreter it runs
 
 ### `aegis hook uninstall`
 
-Remove the aegis block from the pre-commit hook
+Remove the aegis block from the pre-commit hook, or with --host an agent host's PreToolUse hook
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--force` |  |  | Force removal |
+| `--force` |  |  | Git hook only: force removal |
 | `--dry-run` |  |  | Preview without modifying disk |
+| `--host` | `HOST` |  | Remove Aegis's PreToolUse hook entries from this host instead of the git hook: claude-code, codex-cli, antigravity |
+| `--scope` | one of `user`, `project` |  | With --host: only this scope (default: both) |
 
 ### Removed commands
 
