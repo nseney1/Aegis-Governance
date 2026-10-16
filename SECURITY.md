@@ -2,13 +2,12 @@
 
 ## Supported Versions
 
-Only the current minor release line receives security fixes. Fixes land on `develop` and ship in the next release of that line; older lines are not patched.
+Security fixes go into the latest 4.x release. Earlier major lines are not patched; v4 changed the layout, the config and the MCP surface, and [`aegis migrate`](CHANGELOG.md#upgrading-from-3x) converts a v3 workspace.
 
 | Version | Supported |
 |:--------|:---------:|
-| 3.3.x | ✅ |
-| 3.2.x | ✅ |
-| < 3.2 | ❌ |
+| 4.x | ✅ |
+| < 4.0 | ❌ |
 
 ## Reporting a Vulnerability
 
@@ -19,41 +18,40 @@ Report it privately through GitHub's private vulnerability reporting: open the r
 > [!NOTE]
 > This channel works only after the maintainer enables *Private vulnerability reporting* under **Settings → Code security** for the repository. If the button is missing, open a public issue that asks for a private contact channel, without any vulnerability details.
 
-Include, where you can: the affected version (`VERSION` or `pip show aegis-guardrails`), OS and shell, the component (`aegis_core`, `aegis_mcp`, `aegis_cli`, `aegis_sdk`), reproduction steps or a proof of concept, and the impact you observed.
+Include, where you can: the version (`aegis --version`), OS and shell, the component (`aegis_core`, `aegis_mcp`, `aegis_cli`, `aegis_sdk`), steps or a proof of concept, and the impact you observed.
 
-**What to expect.** Aegis Guardrails is maintained by Nicholas Seney, so these are goals, not guarantees:
-
-- Acknowledge the report within 7 days.
-- Confirm or reject it, with reasoning, within 30 days.
-- Coordinate a fix and a GitHub Security Advisory with you before public disclosure, and credit you unless you prefer otherwise.
-
-Fixed vulnerabilities are recorded in the [CHANGELOG](CHANGELOG.md) and in the GitHub Security Advisory. No bug bounty is offered.
+Aegis Guardrails is maintained by one person, so these are goals, not guarantees: acknowledge within 7 days, confirm or reject with reasons within 30 days, and coordinate the fix and a GitHub Security Advisory with you before disclosure, crediting you unless you prefer otherwise. Fixes are recorded in the [CHANGELOG](CHANGELOG.md) and the advisory. There is no bug bounty.
 
 ## Scope
 
-In scope: defects that break one of the security guarantees below.
+In scope: a defect that breaks one of these guarantees.
 
-- **Workspace Path Confinement** ([`aegis_core/workspace/confinement.py`](aegis_core/workspace/confinement.py), [`aegis_core/storage.py`](aegis_core/storage.py)): any tool or CLI operation reading or writing outside the governed workspace, including through `..` traversal, symlink escapes, null bytes, Windows extended device namespaces (`\\?\`), alternate data streams or reserved device names.
-- **Repository-Controlled Execution** ([`aegis_core/gitsafe.py`](aegis_core/gitsafe.py), [`aegis_core/config.py`](aegis_core/config.py)): a file a repository controls (`.aegis/config.json`, rule files, `.git/config`, `.gitattributes`) making Aegis run a command, a git fsmonitor, hook or filter driver, or inject instructions into scan output. Repository config cannot name commands; those come only from packaged templates or your user-level `~/.aegis/config.json`.
-- **No Automatic Rule Rewrites** ([`tests/integration/test_no_rule_writes.py`](tests/integration/test_no_rule_writes.py)): any automatic path (`aegis check`, `aegis scan`, the MCP tools, hooks) modifying files under `.aegis/rules/`. Only explicit commands (`aegis rule …`, `aegis sync --apply`, `aegis migrate --apply`) write rule files. Rule integrity rests on git history, review and CI; Aegis does not sign rules. Witnessed rule integrity is planned for v4.3.
-- **Evidence Ledger Integrity** ([`aegis_core/telemetry_engine/ledger.py`](aegis_core/telemetry_engine/ledger.py)): lost, duplicated or rewritten rows in `.aegis/state/ledger.jsonl` under concurrent writers, or a torn line corrupting later reads. Ledger rows from MCP tools are self-reports (advice only); they never promote a rule on their own.
-- **MCP Response Projection** ([`aegis_mcp/projection.py`](aegis_mcp/projection.py)): a `view` projection leaking fields it should drop or failing to keep error results intact.
-- **Supply Chain**: the release pipeline ([`.github/workflows/publish.yml`](.github/workflows/publish.yml)) publishing artifacts that differ from the verified build, or risks around the `aegis-guardrails` PyPI distribution.
-- Secrets that leak into the repository, the wheel, or the sdist.
+- **Path confinement** ([`aegis_core/workspace/confinement.py`](aegis_core/workspace/confinement.py), [`aegis_core/storage.py`](aegis_core/storage.py)): a tool or command reading or writing outside the governed workspace, through `..`, symlinks, NUL bytes, Windows device names or alternate data streams, or writing state through a link.
+- **Repository-controlled execution** ([`aegis_core/gitsafe.py`](aegis_core/gitsafe.py), [`aegis_core/config.py`](aegis_core/config.py)): a file the repository controls (`.aegis/config.json`, rule files, `.git/config`, `.gitattributes`) making Aegis run a program it did not choose, or injecting instructions into scan output. See [Repository trust](#repository-trust) for what Aegis does run.
+- **Workspace binding** ([`aegis_core/workspace/binding.py`](aegis_core/workspace/binding.py)): the MCP server governing `$HOME`, a directory above the git top level, or a repository chosen by a tool argument.
+- **No automatic rule rewrites** ([`tests/integration/test_no_rule_writes.py`](tests/integration/test_no_rule_writes.py)): `aegis check`, `aegis scan`, the MCP tools or the git hook modifying files under `.aegis/rules/`. Only explicit commands (`aegis rule …`, `aegis sync --apply`, `aegis migrate --apply`) write rule files.
+- **Ledger integrity** ([`aegis_core/telemetry_engine/ledger.py`](aegis_core/telemetry_engine/ledger.py)): lost, duplicated or rewritten rows in `.aegis/state/ledger.jsonl` under concurrent writers, or a torn line corrupting later reads.
+- **MCP input and output** ([`aegis_mcp/server.py`](aegis_mcp/server.py), [`aegis_mcp/projection.py`](aegis_mcp/projection.py)): an argument that bypasses its tool schema, a client overriding the server-owned host or session, or a `view` projection leaking fields it should drop.
+- **Supply chain** ([`.github/workflows/publish.yml`](.github/workflows/publish.yml)): a published wheel or sdist that differs from the one CI built and tested, or secrets in the repository, the wheel or the sdist.
 
-## Out of Scope
+Out of scope: an agent or person with shell access as your user (Aegis advises and checks; it does not sandbox anyone), self-reported outcomes (any connected MCP client can write them; they rank guidance and never change a rule's tier on their own), defects in agent hosts, MCP clients, Python or the OS, denial of service of the local stdio server by its own client, and versions marked ❌ above.
 
-- **A malicious or compromised agent with direct shell access.** Aegis gives advice and runs deterministic checks; it does not sandbox an OS user or a shell that can change files directly. Git review and CI on the exact commit are the authoritative gate.
-- **Self-reported outcomes.** `aegis_report_outcome` rows are advice-tier self-reports: any connected MCP client can write them, so they rank guidance but never promote a rule on their own.
-- Vulnerabilities in third-party AI agents, MCP hosts, Python itself, or the host OS.
-- Denial of service against the local stdio server by its own connected client.
-- Releases older than the supported lines.
+## Repository trust
 
-## Security Model (v4)
+Aegis treats a repository you clone as untrusted input. What it runs, and from where:
 
-1. **Small MCP surface.** The server exposes four tools: `aegis_scan`, `aegis_report_outcome`, `aegis_create_rule` and `aegis_list_rules`. Every argument is checked against the tool's published schema before dispatch. Client identity (host, session) is server-owned; a tool argument cannot override it.
-2. **Path confinement.** Every path is resolved and confined to the governed workspace (`aegis_core/workspace/confinement.py`, `aegis_core/storage.py`), rejecting traversal, symlink escapes, null bytes and Windows device names. State files are never written through a link.
-3. **No repository-controlled execution.** Every git call goes through `aegis_core/gitsafe.py`, which neutralises repository-scope config (fsmonitor, hooks, filter drivers, submodule status) while keeping your system and user git config. Repository config cannot name commands.
-4. **Rules are never rewritten behind your back.** Fitness lives in the append-only ledger (`.aegis/state/ledger.jsonl`), written under one workspace lock. Only explicit commands write rule files.
-5. **Code leaves your machine only on request.** Layer 2 (`aegis check --full`) runs the model command you pass with `--llm-cmd` or `AEGIS_LLM_CMD`, never a command from repository config.
-6. **Planned (v4.3):** witnessed receipts, git-witnessed rule integrity, per-rule credit and a calibrated Layer-2 arbiter. Until then this policy does not claim them.
+| What runs | When | Where it comes from |
+|---|---|---|
+| `git` | most commands, and `aegis_scan` | your PATH, always through `gitsafe`: the repository's own config cannot make git run anything (fsmonitor, hooks, filter drivers, credential helpers, remote protocols and submodule status are switched off; your user and system git config still apply) |
+| `codex`, `claude` | `aegis init --host`, `aegis uninstall`, and `aegis doctor` (`codex mcp get` only) | by name from the absolute entries of PATH; relative and empty entries, which point into the current directory, are skipped, and doctor also skips entries inside the workspace |
+| AST drivers (`node`, `go`) | `aegis check` on TypeScript, Go or Rust files | Aegis's packaged driver templates, which a repository may only switch on, or commands from your user `~/.aegis/config.json`; the interpreter must be outside the workspace |
+| `pytest` | `aegis check --full` only | your active virtualenv, then `.venv/` inside the repository, then PATH. It runs the tests that match the changed files, which executes repository code (tests, `conftest.py`) just as running the suite yourself would |
+| your model command | `aegis check --full` only | `--llm-cmd` or `AEGIS_LLM_CMD`, never repository files. It runs in an empty temporary directory and receives the prompt, which includes the diff, on stdin |
+
+Plain `aegis check` and the git pre-commit hook (`aegis check --hook`) parse files and never run the repository's code or a model. Run `aegis check --full` only on code you would run yourself.
+
+## What Aegis does not claim
+
+Aegis signs nothing. Rules are protected by git history, review and CI on the exact commit, not by Aegis; the v3 HMAC manifest and receipts were removed because a same-user agent could forge them ([why-aegis](docs/why-aegis.md) §5). Witnessed checks, rule integrity with git as the witness and a calibrated Layer 2 arbiter are planned for v4.3 ([why-aegis](docs/why-aegis.md) §6). Until they ship, this policy does not claim them.
+
+Release artifacts are built once in CI, recorded with SHA-256 digests, given a GitHub build provenance attestation, and published to PyPI with Trusted Publishing, so no long-lived upload token exists.
