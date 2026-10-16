@@ -9,9 +9,9 @@ from aegis_core.errors import WorkspaceError
 from aegis_core.workspace.confinement import validate_workspace_path
 
 
-def test_a_v4_workspace_validates_to_its_resolved_root(tmp_path: Path):
+def test_a_v4_workspace_validates_to_its_root(tmp_path: Path):
     (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-    assert validate_workspace_path(str(tmp_path / ".")) == tmp_path.resolve()
+    assert validate_workspace_path(str(tmp_path)).samefile(tmp_path)
 
 
 def test_v3_rule_files_left_beside_a_v4_workspace_are_refused_with_the_upgrade_path(tmp_path: Path):

@@ -1,7 +1,8 @@
-"""aegis_core.lifecycle.creation.create_rule: the enforcement a new rule records.
+"""aegis_core.lifecycle.creation: the enforcement a new rule records, and what body it may have.
 
 Invariant and gate rules are mandatory: they are created as gates and refuse any other
-tier. Every other type defaults to advisory and keeps the tier it is given.
+tier. Every other type defaults to advisory and keeps the tier it is given. A body is
+non-blank and at most 64 KiB of UTF-8.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import re
 
 import pytest
 
-from aegis_core.lifecycle.creation import create_rule
+from aegis_core.lifecycle.creation import MAX_RULE_BODY_BYTES, create_rule, validate_rule_body
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 
@@ -39,4 +40,20 @@ def test_a_mandatory_type_refuses_any_enforcement_but_gate_and_writes_nothing(tm
     message = f"{rule_type.capitalize()} rules must use 'gate' enforcement, got '{given}'."
     with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
         create_rule(rule_type, "Edits keep the contract", id_override="new-rule", workspace=ws, enforcement=given)
+    assert list((ws / ".aegis" / "rules").rglob("*.md")) == []
+
+
+@pytest.mark.parametrize("body", ["Body.\n", "\u00e9" * (MAX_RULE_BODY_BYTES // 2)])
+def test_a_body_of_at_most_64_kib_is_returned_unchanged(body):
+    assert validate_rule_body(body) == body
+
+
+@pytest.mark.parametrize("body, message", [
+    (" \n\t", "rule body is empty"),
+    ("\u00e9" * (MAX_RULE_BODY_BYTES // 2) + "x", "rule body exceeds 64 KiB (65536 bytes)"),  # bytes, not characters
+])
+def test_a_blank_or_oversized_body_is_refused_before_anything_is_written(tmp_path: Path, body, message):
+    ws = _ws(tmp_path)
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        create_rule("trap", "Edits keep the contract", id_override="new-rule", workspace=ws, body=body)
     assert list((ws / ".aegis" / "rules").rglob("*.md")) == []
