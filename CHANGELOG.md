@@ -2,6 +2,22 @@
 
 All notable changes to Aegis Guardrails are documented here. The project uses [Semantic Versioning](https://semver.org/). Releases before 1.0.0 are summarized at the end.
 
+## [4.1.1] - 2026-10-17
+
+Fixes from the independent 4.1.0 release review.
+
+### Fixed
+
+- `aegis hook install --host` registered whichever `aegis` came first on `PATH`, even one older than 4.1 that has no `hook run`. Claude Code and Codex read that command's exit 2 (a usage error) as a block, so every tool call in every repository would have been blocked. Install now runs `aegis hook run pre-tool --host H` on an empty payload first and refuses unless it exits 0. If you downgrade below 4.1, run `aegis hook uninstall --host H` first for each host.
+- `aegis hook install` and `aegis hook uninstall` accept the surface names `init` accepts (`codex-app`, `chatgpt-desktop`, `claude-desktop-code`, and so on).
+- `aegis uninstall` says that user-scope host hooks stay until `aegis hook uninstall --host <host>`.
+- The seeded `no-eval` rule, its init line and the README now say it matches by call name, so a method named `eval` or `exec` (pandas `df.eval()`, PyTorch `model.eval()`) fails the check; delete the file or init with `--rules none-active` if your code relies on them.
+
+### Known limitations
+
+- `aegis hook install` and `uninstall` run from your home directory fail with "not an Aegis workspace"; run them inside any repository (they only touch user files at user scope).
+- `aegis check --lane` reports a test file moved to another path as removed tests; it has no exemption flag, so a refactor lane that moves tests needs a human merge.
+
 ## [4.1.0] - 2026-10-16
 
 v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel agents, and skills projection, as designed in [ADR 0005](docs/adr/0005-v4-plan-of-record.md) AD-7 and AD-8 (amended 2026-10-16). Nothing from 4.0 is removed. The details are in [How Aegis works](docs/how-it-works.md) section 8.

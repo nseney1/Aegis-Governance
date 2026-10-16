@@ -876,6 +876,7 @@ def shell_form_cli_env(cli_env, monkeypatch):
     """The CLI given env.aegis as the aegis it finds. The stub it would find on PATH has a
     native path, which on Windows makes Codex hooks unavailable: not these tests' subject."""
     monkeypatch.setattr(registrar, "aegis_command", lambda *args, **kwargs: cli_env.aegis)
+    monkeypatch.setattr(registrar, "probe_hook_run", lambda *args, **kwargs: None)  # env.aegis is no file
     return cli_env
 
 
@@ -1027,3 +1028,53 @@ def test_cli_force_with_host_is_a_usage_error_and_touches_nothing(cli_env, actio
     rc, out, err = cli(cli_env, "hook", action, "--host", "claude-code", "--force")
     assert rc == 2 and "--force applies only to the git hook" in err
     assert path.read_bytes() == b"{nope"
+
+
+# ── an aegis without `hook run` is never registered (release review F1) ──────────
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub is a shell script")
+def test_install_refuses_an_aegis_that_has_no_hook_run(cli_env):
+    """A 4.0.x aegis answers `hook run` with an argparse usage error (exit 2), which Claude Code
+    and Codex read as a block; registering it would block every tool call in every repo."""
+    Path(cli_env.stub).write_text("#!/bin/sh\necho \"aegis: error: argument command: invalid choice: 'run'\" >&2\nexit 2\n",
+                                  encoding="utf-8")
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "claude-code")
+    assert rc == 1
+    assert "does not support `hook run` (exit 2: aegis: error: argument command: invalid choice: 'run')" in err
+    assert "older aegis than 4.1" in err
+    assert not (cli_env.home / ".claude" / "settings.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub is a shell script")
+def test_install_refuses_an_aegis_that_cannot_be_run(cli_env):
+    Path(cli_env.stub).write_text("not a program\n", encoding="utf-8")
+    Path(cli_env.stub).chmod(0o755)
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "claude-code")
+    assert rc == 1 and "cannot run" in err
+    assert not (cli_env.home / ".claude" / "settings.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub is a shell script")
+def test_install_probes_with_an_empty_payload_from_an_empty_directory(cli_env):
+    log = cli_env.tmp / "probe.log"
+    Path(cli_env.stub).write_text(f"#!/bin/sh\necho \"$@|$PWD\" > {log}\nexit 0\n", encoding="utf-8")
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "claude-code")
+    assert rc == 0, err
+    args, cwd = log.read_text(encoding="utf-8").strip().split("|")
+    assert args == "hook run pre-tool --host claude-code"
+    assert Path(cwd).name.startswith("aegis-hook-probe-") and not str(cli_env.repo) in cwd
+
+
+def test_hook_install_and_uninstall_accept_a_surface_alias(cli_env):
+    """init and skills sync take surface names; hook install takes them too (release review F4)."""
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "claude-desktop-code", "--json")
+    assert rc == 0, err
+    assert json.loads(out)["results"][0]["host"] == "claude-code"
+    rc, out, err = cli(cli_env, "hook", "uninstall", "--host", "claude-desktop-code", "--json")
+    assert rc == 0, err
+    assert json.loads(out)["results"][0]["host"] == "claude-code"
+
+
+def test_hook_install_still_refuses_a_host_without_hooks(cli_env):
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "kiro-ide")
+    assert rc == 2 and "has no Aegis hooks" in err
