@@ -1425,6 +1425,17 @@
             "nargs": null,
             "required": false,
             "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "compliance",
+            "flags": [
+              "--compliance"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
           }
         ]
       },

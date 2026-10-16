@@ -10,6 +10,7 @@ Repository plane, committed except ``state/``::
         .gitignore       "*": the directory ignores itself even where .aegis/.gitignore
                          lacks "state/" (a v3 workspace not yet migrated)
         ledger.jsonl     the outcome ledger (aegis_core.telemetry_engine.ledger)
+        activity.jsonl   MCP scan and edit events (aegis_core.scan_compliance); fitness never reads it
         derived.json     derived views rebuilt by `aegis sync`
         lock             the one workspace lock (aegis_core.storage.locked)
 
@@ -101,6 +102,10 @@ class WorkspaceLayout:
     @property
     def ledger_file(self) -> Path:
         return self.state_dir / "ledger.jsonl"
+
+    @property
+    def activity_file(self) -> Path:
+        return self.state_dir / "activity.jsonl"
 
     @property
     def derived_file(self) -> Path:
