@@ -7,7 +7,11 @@ from datetime import date, timedelta
 import json
 
 
+from pathlib import Path
+
 from aegis_cli.status import run_status
+
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
 
 
 class TestStatus:
@@ -24,21 +28,31 @@ class TestStatus:
         assert "0 active" in captured.out
         assert "No rules found" in captured.out
 
-    def test_status_counts_core_rules(self, tmp_path, capsys):
-        """Create 3 .md files in mock genome/ dir → '3 active'."""
-        genome = tmp_path / "genome"
-        genome.mkdir()
-        (genome / "rule1.md").write_text("# Rule 1 content\n")
-        (genome / "rule2.md").write_text("# Rule 2 content\n")
-        (genome / "rule3.md").write_text("# Rule 3 content\n")
-        # README should be excluded
-        (genome / "README.md").write_text("# Readme info\n")
+    def test_status_counts_core_rules(self, capsys):
+        """In the Aegis checkout, core rules are the shipped ones: what init's one locator sees."""
+        from aegis_cli.init import packaged_rules
 
-        args = argparse.Namespace(_root=tmp_path)
-        ret = run_status(args)
-        assert ret == 0
-        captured = capsys.readouterr()
-        assert "3 active" in captured.out
+        args = argparse.Namespace(_root=REPO_ROOT, json=True)
+        assert run_status(args) in (0, 1)  # the checkout's own rules may need attention
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["core_rules"] == len(packaged_rules()) == 12
+        core = {r["name"] for r in payload["rules"] if r["type"] == "core"}
+        assert {"providence", "testing", "tdd-protocol"} <= core and "META" not in core
+
+    def test_a_workspaces_own_rules_or_genome_dir_is_never_listed_as_core(self, tmp_path, capsys):
+        """Release review: status read <workspace>/rules (or genome/) as Aegis's shipped
+        rules, so a project's own markdown was listed and counted as active core rules."""
+        marker = tmp_path / "PLANTED_RAN"
+        for name in ("rules", "genome"):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "pricing.md").write_text("# Pricing\n" + "x" * 400)
+            (tmp_path / name / "__init__.py").write_text(f"open({str(marker)!r}, 'w').write('x')\n")
+        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+        assert run_status(argparse.Namespace(_root=tmp_path)) == 0
+        out = capsys.readouterr().out
+        assert "Core rules:     0 active" in out and "pricing" not in out
+        assert "~0 tokens" in out
+        assert not marker.exists()
 
     def test_status_counts_adaptive_rules(self, tmp_path, capsys):
         """Rules in their type directories are counted; other markdown is listed as not a rule."""
@@ -147,10 +161,10 @@ class TestStatus:
 
     def test_status_reads_trigger_counts(self, tmp_path, capsys):
         """Ledger rows win over contradictory legacy evidence."""
-        genome = tmp_path / "genome"
-        genome.mkdir()
-        (genome / "rule-a.md").write_text("# Rule A\n")
-        (genome / "rule-b.md").write_text("# Rule B\n")
+        traps = tmp_path / ".aegis" / "rules" / "traps"
+        traps.mkdir(parents=True)
+        for name in ("rule-a", "rule-b"):
+            (traps / f"{name}.md").write_text(f"---\nid: {name}\ntarget_paths: ['*.py']\n---\n# {name}\n")
 
         evidence = tmp_path / ".aegis" / "evidence"
         evidence.mkdir(parents=True)
@@ -196,12 +210,9 @@ class TestStatus:
 
     def test_status_output_no_biology_terms(self, tmp_path, capsys):
         """Capture output, assert no 'enzyme', 'vacuole', 'genome', 'cell' in output."""
-        genome = tmp_path / "genome"
-        genome.mkdir()
-        (genome / "rule-a.md").write_text("# Rule A\n")
-
+        (tmp_path / ".aegis" / "rules" / "traps").mkdir(parents=True)
+        (tmp_path / ".aegis" / "rules" / "traps" / "rule-a.md").write_text("---\nid: rule-a\n---\n# Rule A\n")
         cells = tmp_path / ".aegis" / "rules"
-        cells.mkdir(parents=True)
         (cells / "rule-b.md").write_text(
             "---\ncreated: 2026-09-01\nexpiry_days: 30\n---\n# Rule B\n"
         )
@@ -234,29 +245,20 @@ class TestStatus:
         args = argparse.Namespace(_root=tmp_path)
         assert run_status(args) == 0
 
-    def test_status_oracle_rules_counted(self, tmp_path, capsys):
-        """Core rules include .md files in genome/.oracles/."""
-        genome = tmp_path / "genome"
-        oracles = genome / ".oracles"
-        oracles.mkdir(parents=True)
-        (genome / "base.md").write_text("# Base\n")
-        (oracles / "oracle1.md").write_text("# Oracle 1\n")
-        (oracles / "README.md").write_text("# Ignore\n")
-
-        args = argparse.Namespace(_root=tmp_path)
-        ret = run_status(args)
-        assert ret == 0
-        captured = capsys.readouterr()
-        assert "2 active" in captured.out
-        assert "base" in captured.out
-        assert "oracle1" in captured.out
+    def test_status_oracle_rules_counted(self, capsys):
+        """Core rules include the shipped rules/.oracles/ files."""
+        args = argparse.Namespace(_root=REPO_ROOT, json=True)
+        run_status(args)
+        payload = json.loads(capsys.readouterr().out)
+        core = {r["name"] for r in payload["rules"] if r["type"] == "core"}
+        assert {"providence", "architectural-tenets", "polyglot-standards"} <= core
 
     def test_status_context_load_calculation(self, tmp_path, capsys):
         """Approximate context overhead divides total chars by 4."""
-        genome = tmp_path / "genome"
-        genome.mkdir()
-        content = "x" * 400
-        (genome / "rule1.md").write_text(content)
+        traps = tmp_path / ".aegis" / "rules" / "traps"
+        traps.mkdir(parents=True)
+        head = "---\nid: rule1\n---\n"
+        (traps / "rule1.md").write_text(head + "x" * (400 - len(head)))
 
         args = argparse.Namespace(_root=tmp_path)
         ret = run_status(args)

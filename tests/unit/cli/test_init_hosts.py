@@ -17,6 +17,7 @@ import pytest
 from conftest import symlink_or_skip
 
 import aegis_cli.install_hosts as ih
+from aegis_cli import pathcheck
 from aegis_cli.cli import main
 from aegis_core.bootstrap import bootstrap_text
 
@@ -151,11 +152,29 @@ class TestExactFilesPerHostSelection:
         data = json.loads((env.home / ".gemini" / "config" / "mcp_config.json").read_text(encoding="utf-8"))
         assert data["mcpServers"]["aegis"]["env"] == {"AEGIS_CLIENT": "antigravity", "AEGIS_WORKSPACE": root}
 
-    def test_without_aegis_mcp_on_path_the_interpreter_is_the_command(self, env):
+    def test_without_aegis_mcp_on_path_the_script_next_to_the_interpreter_is_the_command(
+            self, env, tmp_path, monkeypatch):
         (env.bin / ("aegis-mcp" + (".exe" if os.name == "nt" else ""))).unlink()
-        import sys
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        script = scripts / ("aegis-mcp" + (".exe" if os.name == "nt" else ""))
+        script.write_bytes(b"#!/bin/sh\nexit 0\n")
+        script.chmod(0o755)
+        monkeypatch.setattr(pathcheck, "default_candidates", lambda: [str(scripts)])
         assert init(env, "--host", "codex-cli") == 0
-        assert env.runner.calls[-1][-4:] == ["--", sys.executable, "-m", "aegis_mcp"]
+        assert env.runner.calls[-1][-2:] == ["--", str(script)]
+
+    def test_without_any_aegis_mcp_the_interpreter_runs_isolated_never_with_dash_m(self, env, monkeypatch):
+        (env.bin / ("aegis-mcp" + (".exe" if os.name == "nt" else ""))).unlink()
+        monkeypatch.setattr(pathcheck, "default_candidates", lambda: [])
+        import sys
+        assert init(env, "--host", "codex-cli,antigravity") == 0
+        command = env.runner.calls[-1][env.runner.calls[-1].index("--") + 1:]
+        assert command[:3] == [sys.executable, "-I", "-c"] and "-m" not in command
+        data = json.loads((env.home / ".gemini" / "config" / "mcp_config.json").read_text(encoding="utf-8"))
+        entry = data["mcpServers"]["aegis"]
+        assert entry["command"] == sys.executable and entry["args"][:2] == ["-I", "-c"]
+        assert "-m" not in entry["args"]
 
     def test_a_linked_aegis_mcp_is_written_as_the_path_entry(self, env, tmp_path):
         """mise or asdf put aegis-mcp on PATH as a link to one dispatcher; the config must

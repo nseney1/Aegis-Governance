@@ -41,9 +41,9 @@ flowchart TD
 | `~/.aegis/workspaces.json` | user | the repos you ran `aegis init` in on this machine |
 | `~/.aegis/rules/` | user | an optional personal rule layer, served read-only where no repo is governed |
 | `~/.aegis/config.json` | user | the only place for command-like settings, such as an AST driver command |
-| `~/.aegis/backups/` | user | copies of every file `aegis doctor --fix` changed |
+| `~/.aegis/backups/` | user | a copy of each file taken before Aegis changes it, one timestamped folder per run: the host config `aegis init --host` and `aegis uninstall` merge (Antigravity's `mcp_config.json`), the files `aegis doctor --fix` edits, and the pre-commit hook `aegis hook install` (or `init`) rewrites |
 
-Four environment variables are read: `AEGIS_WORKSPACE` (pin the server to one repo; `aegis init --pin` writes it into the registration), `AEGIS_CLIENT` (host identity, written by `aegis init`), `AEGIS_MAX_JIT_TOKENS` (scan budget) and `AEGIS_LLM_CMD` (the Layer 2 model command).
+Four environment variables are read: `AEGIS_WORKSPACE` (pin the server to one repo, which must hold `.aegis/`; `aegis init --pin` writes it into the registration, and the CLI honors it too, as section 4 describes), `AEGIS_CLIENT` (host identity, written by `aegis init`), `AEGIS_MAX_JIT_TOKENS` (scan budget) and `AEGIS_LLM_CMD` (the Layer 2 model command).
 
 ## 3. Rules
 
@@ -117,18 +117,20 @@ Without MCP, `aegis scan FILE...` prints the same rules for a person or a shell-
 
 **Which repository a call governs.** One `aegis-mcp` process can serve sessions in several repos, so every call is bound to a workspace. The first source that names a governed repo (one with `.aegis/`) wins:
 
-1. an operator pin, `AEGIS_WORKSPACE` in the registration; it is strict, and a pin that does not resolve is an error, not a fallback;
+1. an operator pin, `AEGIS_WORKSPACE` in the registration; it is strict: a pin that does not resolve, or names a directory without `.aegis/`, is an error, not a fallback, and a pin that disagrees with the workspace the host reports is a hold;
 2. what the host itself reports: Codex's per-turn workspace metadata, Claude Code's `CLAUDE_PROJECT_DIR`, or MCP roots;
 3. the registry `~/.aegis/workspaces.json`: the files in the call may only choose among repos you registered with `aegis init`;
 4. a walk up from the server's working directory that stops at the git top level.
 
 There is no workspace argument a model could set, and `$HOME` or `/` is never a workspace. When sources disagree, the call is held with a machine-readable reason instead of governing the wrong repo. When nothing resolves, the server answers "not governed here", and `aegis_scan` serves only the read-only personal layer in `~/.aegis/rules/`, writing nothing.
 
+The CLI reads the same pin. A command run inside another workspace, or in a git repository that does not hold the pinned one (where that repository's pre-commit hook runs), holds with the reason `pin_conflicts_with_cwd` and exits 1 instead of acting on the pinned workspace: unset the pin there. From outside any workspace and repository, the pin decides.
+
 **Who is calling.** The host id comes from `AEGIS_CLIENT` in the registration (written by `aegis init`, so the model cannot set it), otherwise from the MCP client name, otherwise `generic`. Ledger rows carry `host` and `session` set by the server; a tool argument with the same name is ignored.
 
 ## 5. Verification: `aegis check`
 
-**Which files.** Files you name, or else the working-tree changes (`git diff HEAD` plus staged), or else what the branch adds to its base (`origin/$GITHUB_BASE_REF` in a GitHub pull request, then `main` or `develop`), or else the last commit. Untracked files are never picked up on their own: `git add` a new file or name it (`aegis check app.py`).
+**Which files.** Files you name; with `--hook` (the pre-commit hook), the staged files, read as staged; or else the working-tree changes (`git diff HEAD` plus staged), or else what the branch adds to its base (`origin/$GITHUB_BASE_REF` in a GitHub pull request, then `main` or `develop`), or else the last commit. Untracked files are never picked up on their own: `git add` a new file or name it (`aegis check app.py`).
 
 **Layer 1** runs without a network or a model:
 
@@ -140,7 +142,7 @@ There is no workspace argument a model could set, and `$HOME` or `/` is never a 
 
 Use a reviewer from a different vendor than the agent that wrote the change. A model reviewing its own vendor's output tends to share its blind spots, and the Aegis release process itself requires a cross-vendor `--llm-cmd` review ([ADR 0005](adr/0005-v4-plan-of-record.md) AD-10). The arbiter's verdict is not yet calibrated against outcomes; scoring it is v4.3 work (section 10).
 
-**The git hook.** `aegis init` installs a pre-commit hook (`aegis hook install|status|uninstall` manage it) that runs `aegis check --hook`: Layer 1 only, never a model. `git commit --no-verify` skips it, which is why CI matters.
+**The git hook.** `aegis init` installs a pre-commit hook (`aegis hook install|status|uninstall` manage it) that runs `aegis check --hook`: Layer 1 only, never a model, on the staged content, which is what `git commit` records, whatever the working tree holds. In an existing shell hook the Aegis block goes right after the shebang, so it runs before the hook's own lines (an `exec` or `exit` there would otherwise skip it), and the old file is first copied to `~/.aegis/backups/<UTC stamp>/`. A hook written in another language is refused, and `aegis init` then writes nothing: `aegis hook install --force` replaces it (keeping the copy), or call `aegis check --hook` from it yourself. `aegis hook status` and `aegis doctor` report a block git never reaches, such as a hook file that is not executable or an `exec` before the block. `git commit --no-verify` skips the hook, which is why CI matters.
 
 **CI.** On GitHub Actions, check out with `fetch-depth: 0` so the base branch is there, then run `pip install aegis-guardrails && aegis check` (the [README](../README.md) has a complete snippet). CI checks the pull request against the rules in the pull request itself: a pull request that deletes a rule and breaks it passes. Review changes under `.aegis/` and to the CI workflow like code; protecting the reviewed rules from the change they judge is v4.3 work.
 
@@ -176,7 +178,7 @@ Use a reviewer from a different vendor than the agent that wrote the change. A m
 | `gemini-cli` | never: retired (`init` exits 2 and names `--host antigravity`) | — | — |
 | `claude-desktop` | never: identity only | — | — |
 
-`<aegis-mcp>` is the absolute path of the `aegis-mcp` script `init` finds on `PATH`, or, when there is none, the Python interpreter running `aegis` with `-m aegis_mcp`. Gemini CLI is retired: Google refuses the client for individual Code Assist accounts, so `aegis init --host gemini-cli` and `aegis uninstall --host gemini-cli` exit with status 2 and point to `--host antigravity`, the Gemini-family host. Every host runs `aegis-mcp` unsandboxed with your user's permissions, so the server's own confinement is the only boundary. Repository files never register a server: a committed `.mcp.json` would run whatever command a pull request put there.
+`<aegis-mcp>` is an absolute command that never depends on the directory a host starts it in (the project, which a cloned repository controls). `init` takes, in order: the `aegis-mcp` script in an absolute `PATH` entry; the `aegis-mcp` script installed next to the Python running `aegis` (a virtual environment's `bin/`, or the user scripts directory after `pip install --user`); else that Python in isolated mode, `<python> -I -c "<run aegis_mcp.server>" <directory aegis is installed in>`, which keeps the current directory off `sys.path`. It never registers `python -m aegis_mcp`: `-m` imports from the current directory first, so a repository with its own `aegis_mcp` package would run its code. `aegis doctor` compares each host's registered command with this one and reports as an unsafe registration one that is not an absolute path, a Python that runs `-m` or `-c` without `-I` or a script by a relative path, or either behind `env`; it starts none of them. Gemini CLI is retired: Google refuses the client for individual Code Assist accounts, so `aegis init --host gemini-cli` and `aegis uninstall --host gemini-cli` exit with status 2 and point to `--host antigravity`, the Gemini-family host. Every host runs `aegis-mcp` unsandboxed with your user's permissions, so the server's own confinement is the only boundary. Repository files never register a server: a committed `.mcp.json` would run whatever command a pull request put there.
 
 **Enforcement tiers**, as `aegis doctor` prints them:
 
@@ -187,11 +189,11 @@ Use a reviewer from a different vendor than the agent that wrote the change. A m
 | Local floor | git pre-commit runs aegis check --hook (--no-verify bypasses it) | every host that commits through git |
 | Authoritative | CI runs aegis check on the exact SHA; a human merges | your CI and branch protection |
 
-**`aegis doctor`** reads; it changes nothing, makes no network calls and starts no host CLI except `codex mcp get aegis --json` (Codex keeps its registrations in TOML). For each host it reports one state: `missing_binary`, `unregistered`, `auth_unknown` (it cannot confirm the host loads `aegis`), `policy_gap` (the server loads, but the rules do not fully reach the agent, for example a `CLAUDE.md` shadowing `AGENTS.md` or an instructions file past the host's limit) or `ok`. It also reports the strongest tier known to be in force for that host (`local_floor`, `advisory`, `none` or `unknown`), never a guess. `--json` prints the same as one document. `aegis doctor --fix` removes only what doctor reported, such as stale v3 `soma` entries and legacy instruction blocks, after confirmation, and copies each file to `~/.aegis/backups/` first.
+**`aegis doctor`** reads; it changes nothing, makes no network calls and starts no host CLI except `codex mcp get aegis --json` (Codex keeps its registrations in TOML). For each host it reports one state: `missing_binary`, `unregistered`, `auth_unknown` (it cannot confirm the host loads `aegis`), `policy_gap` (the server loads, but the rules do not fully reach the agent, for example a `CLAUDE.md` shadowing `AGENTS.md` or an instructions file past the host's limit) or `ok`. It also reports the strongest tier known to be in force for that host (`local_floor`, `advisory`, `none` or `unknown`), never a guess: the local floor counts only when the Aegis pre-commit hook is installed, current and reached by git (an earlier `exec` or `exit` in the hook, or a hook that is not a shell script, means it never runs). `--json` prints the same as one document. `aegis doctor --fix` removes only what doctor reported, such as stale v3 `soma` entries and legacy instruction blocks, after confirmation, and copies each file to `~/.aegis/backups/` first.
 
 **`aegis uninstall`** removes the hook block, the `AGENTS.md`/`CLAUDE.md` blocks, the registry entry and the host registrations, keeping a host that another registered repo still uses. It never deletes `.aegis/`.
 
-**Upgrading from v3.** `aegis migrate` shows the plan and `aegis migrate --apply` performs it: the v3 ledger becomes `.aegis/state/ledger.jsonl`, the old config files become `.aegis/config.json`, `.soma` rules move to `.aegis/rules/<type>/`, and every changed file is backed up first. Then run `aegis doctor --fix`.
+**Upgrading from v3.** `aegis migrate` shows the plan and `aegis migrate --apply` performs it: the v3 ledger becomes `.aegis/state/ledger.jsonl`, the old config files become `.aegis/config.json`, `.soma` rules move to `.aegis/rules/<type>/`, and every changed file is backed up first (the [changelog](../CHANGELOG.md#upgrading-from-3x) lists every file it converts). Then run `aegis init --host <hosts>` to register the server and write the bootstrap, and `aegis doctor --fix` to remove v3 leftovers. Until the workspace is migrated, `aegis status`, `aegis scan` and `aegis sync` refuse to run in it and name the v3 state v4 does not read (a v3 or v2 ledger, `aegis.conf` or `soma.conf`, `.aegis/slots.yaml` or `.aegis/config.yaml`, v3 keys, receipts or rule manifest); `aegis check` warns and still runs, `aegis init` refuses while `.soma/` holds rules, and `aegis doctor` lists the files. In a `.soma` workspace, `aegis doctor` says to run `aegis migrate`, not `aegis init`.
 
 ## 8. Planned for v4.1: agent teams, per-host hooks and skills
 
@@ -250,6 +252,6 @@ Flags and defaults for every command are in the [reference](reference.md); this 
 | rebuild fitness and get suggestions | `aegis sync` (`--apply` to apply them) |
 | promote or demote one rule | `aegis rule promote RULE_ID` / `aegis rule demote RULE_ID` |
 | manage the pre-commit hook | `aegis hook install` / `status` / `uninstall` |
-| upgrade a v3 workspace | `aegis migrate`, then `aegis migrate --apply` |
+| upgrade a v3 workspace | `aegis migrate`, then `aegis migrate --apply`, `aegis init --host ...` and `aegis doctor --fix` |
 | remove Aegis from a repo | `aegis uninstall` (keeps `.aegis/`) |
 | use Aegis from Python | `from aegis_sdk import Governance; Governance(project_root=".").scan(["app.py"])` |

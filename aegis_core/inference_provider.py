@@ -1,7 +1,7 @@
 """Layer 2 model backend: one external command, so Aegis needs no SDKs or API keys.
 
-The command (for example ``claude -p``, ``codex exec`` or ``gemini -p``) is run as an
-argv list with no shell. It reads the prompt on stdin and prints the reply on stdout.
+The command (for example ``claude -p`` or ``codex exec``) is run as an argv list with no
+shell. It reads the prompt on stdin and prints the reply on stdout.
 It comes only from ``--llm-cmd`` or ``AEGIS_LLM_CMD``: a file in the repository being
 checked must never choose what Aegis executes (BUG-073).
 
@@ -15,7 +15,7 @@ script in the command needs an absolute path, and ``codex exec`` needs
 A bare program name is looked up here, in absolute PATH entries only
 (aegis_core.pathlookup): an empty or relative entry names aegis's own cwd, often the
 repository, and on Windows CreateProcess searches that cwd first and applies no PATHEXT.
-A Windows batch file (npm's ``claude.cmd``, ``codex.cmd``, ``gemini.cmd``) runs under
+A Windows batch file (npm's ``claude.cmd`` or ``codex.cmd``) runs under
 ``cmd.exe /d /s /c`` with every argument quoted for cmd.exe and the C runtime; an
 argument holding a line break, which cmd.exe would take as the end of the command, is
 refused.

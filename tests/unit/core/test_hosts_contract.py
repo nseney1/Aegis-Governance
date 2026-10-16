@@ -92,3 +92,12 @@ def test_bootstrap_fits_every_host_budget_and_carries_no_rule_bodies():
 def test_instructions_first_512_characters_stand_alone():
     head = bootstrap.instructions_text()[:512]
     assert "aegis_scan" in head and "aegis_report_outcome" in head
+
+
+def test_the_hook_notes_state_the_planned_v41_tiers_as_adr_0005_ad8_does():
+    """AD-8 as amended on 2026-10-16: Claude Code blocks with exit 2; Codex blocks once the
+    hook is trusted in /hooks; every hook fails open on an Aegis error."""
+    assert "PreToolUse hooks can block with exit 2." in hosts.get("claude-code").notes
+    assert "Hooks need trust in /hooks and fail open on errors." in hosts.get("codex-cli").notes
+    for row in hosts.HOSTS:
+        assert not any("strongest host" in n or "need user approval" in n for n in row.notes), row.id

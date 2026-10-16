@@ -66,6 +66,7 @@ __all__ = [
     "Step",
     "hook_refusal",
     "install_rules",
+    "packaged_dir",
     "packaged_rules",
     "preset_rules",
     "report_partial",
@@ -97,9 +98,29 @@ SEED_TYPE_DIR = RULE_TYPES[SEED_TYPE].directory
 _NOT_RULES = {"META.md", "README.md"}
 
 
+def packaged_dir(name: str, base: Optional[Path] = None) -> Path:
+    """The directory of Aegis's shipped ``rules`` or ``skills``.
+
+    A wheel carries them in ``aegis_core/_data/<name>`` (pyproject.toml maps the
+    repository's ``<name>/`` there); a source checkout has them at its root, next to its
+    pyproject.toml. ``base`` is the aegis_core package directory. Nothing is imported by
+    name: a top-level ``rules`` package may be another distribution's, or a repository's
+    own directory first on sys.path. A missing directory is returned as is, for the
+    caller to report.
+    """
+    base = Path(str(importlib.resources.files("aegis_core"))) if base is None else Path(base)
+    installed = base / "_data" / name
+    if installed.is_dir():
+        return installed
+    checkout = base.parent
+    if (checkout / "pyproject.toml").is_file() and (checkout / name).is_dir():
+        return checkout / name
+    return installed
+
+
 def packaged_rules() -> Dict[str, Path]:
-    """Every rule shipped in the ``rules`` package (``rules/*.md``, ``rules/.oracles/*.md``) by id."""
-    base = Path(str(importlib.resources.files("rules")))
+    """Every shipped rule (``rules/*.md``, ``rules/.oracles/*.md``, through ``packaged_dir``) by id."""
+    base = packaged_dir("rules")
     found: Dict[str, Path] = {}
     for directory in (base, base / ".oracles"):
         if directory.is_dir():
@@ -304,9 +325,10 @@ def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
 
     A hooks directory outside the repository and its git directories (``core.hooksPath``
     set to a team or dotfiles directory, often globally, or a ``.git/hooks`` linked to one)
-    holds a hook every repository using it runs; install_hook would append the Aegis block
-    there, pinned to this machine's aegis, so it is refused here and left to an explicit
-    ``aegis hook install`` (after which shared_hook_in_place lets init through).
+    holds a hook every repository using it runs; install_hook would insert the Aegis block
+    there, right after the shebang so it runs before the hook's own lines, pinned to this
+    machine's aegis, so it is refused here and left to an explicit ``aegis hook install``
+    (after which shared_hook_in_place lets init through).
     """
     from aegis_cli.hooks.management import _replace_hook_block
 
@@ -821,44 +843,6 @@ def _report_hook(report: Report, root: Path, actions: Sequence[Step]) -> None:
     report.say(f"    🪝 Pre-commit hook installed ({st['hook_file']})")
     if st["hooks_dir_in_work_tree"]:
         print(work_tree_warning(st["hook_file"]), file=sys.stderr)
-
-
-# ── Doctor seam ──────────────────────────────────────────────────────────────
-# `aegis doctor` (aegis_cli/doctor.py, lane c3) still checks the v3 platform rules
-# directory through these two names. They are kept, unexported, only until the
-# host-matrix doctor replaces _check_platform/_check_rules; delete them with it.
-
-_V3_MARKERS = (
-    ("gemini", (".gemini",), ()),
-    ("claude", (".claude",), ("CLAUDE.md",)),
-    ("cursor", (".cursor",), (".cursorrules",)),
-    ("copilot", (".github/copilot",), (".github/copilot-instructions.md",)),
-    ("kiro", (".kiro",), ()),
-)
-
-
-def detect_platform(project_root: Path) -> str:
-    """The first v3 platform whose marker is under ``project_root``, or ``unknown``."""
-    root = Path(project_root)
-    for name, dirs, files in _V3_MARKERS:
-        if any((root / d).is_dir() for d in dirs) or any((root / f).is_file() for f in files):
-            return name
-    return "unknown"
-
-
-def get_rules_dir(platform: str, home: Optional[Path] = None, project_root: Optional[Path] = None) -> Path:
-    """The v3 global rules directory of ``platform``."""
-    home = Path(home) if home is not None else Path.home()
-    dirs = {
-        "gemini": home / ".gemini" / "config" / "rules",
-        "claude": home / ".claude",
-        "cursor": home / ".cursor" / "rules",
-        "copilot": Path(project_root or Path.cwd()) / ".github" / "copilot",
-        "kiro": home / ".kiro" / "steering",
-    }
-    if platform not in dirs:
-        raise ValueError(f"Unsupported platform: '{platform}'. Supported: {', '.join(sorted(dirs))}")
-    return dirs[platform]
 
 
 class InitCommand(AegisCommand):

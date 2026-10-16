@@ -96,7 +96,8 @@ def test_policy_documents_use_no_retired_v3_names():
 SPAWN_SITES = {
     "aegis_core/gitsafe.py": ("`git`",),
     "aegis_cli/install_hosts.py": ("`codex`, `claude`",),
-    "aegis_cli/doctor.py": ("`codex`, `claude`", "`python3`"),
+    # Doctor's MCP launcher check compares commands and starts nothing (no `python3`).
+    "aegis_cli/doctor.py": ("`codex`, `claude`",),
     "aegis_core/ast/runner.py": ("AST drivers",),
     "aegis_core/verification/test_runner.py": ("`pytest`",),
     "aegis_core/verification/mutation_tester.py": ("`pytest`",),

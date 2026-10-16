@@ -418,6 +418,7 @@ def test_check_precommit_hook_all_branches(tmp_path, capsys):
     # 2. Current hook
     from aegis_cli.hooks.management import generate_hook_block
     hook_file.write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    hook_file.chmod(0o755)  # git skips a hook it cannot execute
     assert _check_precommit_hook(tmp_path) is True
     assert "Pre-commit hook is current" in capsys.readouterr().out
 

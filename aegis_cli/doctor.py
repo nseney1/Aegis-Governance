@@ -23,7 +23,9 @@ Each host gets one state, the first of these that applies:
   host (no or broken bootstrap, a CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md or
   AGENTS.override.md shadowing AGENTS.md, a file the host truncates, an unregistered
   workspace for a host without roots, a disabled entry or one Claude Code turns off for
-  the project in ``disabledMcpServers``, another host's identity);
+  the project in ``disabledMcpServers``, another host's identity, or an unsafe
+  registration: a command that is not absolute, or that runs ``-m`` or ``-c`` without
+  ``-I`` and so imports from the project directory the host starts it in);
 - ``ok``: none of the above.
 
 ``--json`` prints one ``aegis.doctor/v1`` document: ``schema``, ``source``, ``aegis_version``,
@@ -40,8 +42,10 @@ that decides it cannot be read, such as a host binary found only inside the work
 The home directory is never a governed workspace: its ``.aegis/`` is the user plane, so
 run from there doctor checks no project rules, state or AST drivers.
 Strings taken from files or host output are printed without control sequences, and
-doctor starts only programs found in absolute PATH entries (aegis_core.pathlookup): host
-CLIs and ``python3`` only outside the workspace.
+doctor starts only host CLIs found in absolute PATH entries outside the workspace
+(aegis_core.pathlookup). It never starts the MCP server or a registered command: the MCP
+launcher check compares what each host registered with what ``aegis init --host`` would
+register from this install.
 
 ``--fix`` changes only what a finding reported as fixable, after confirmation (``--yes``
 skips it). Every file is first copied to ``~/.aegis/backups/<UTC stamp>/`` with a manifest;
@@ -111,6 +115,26 @@ def _is_home(root: Path) -> bool:
     return layout is not None and key is not None and key == _root_key(layout.home)
 
 
+def _setup_command(root: Path) -> str:
+    """What sets governance up here: ``aegis migrate`` while an unmigrated v3 workspace is
+    here (``aegis init`` would leave its rules unserved, and the check would then pass on
+    none of them), else ``aegis init``."""
+    from aegis_core.errors import WorkspaceError
+    from aegis_core.workspace.discovery import refuse_unmigrated_v3
+
+    try:
+        refuse_unmigrated_v3(root)
+    except WorkspaceError:
+        return "aegis migrate"
+    return "aegis init"
+
+
+def _setup_fix(root: Path, purpose: str) -> str:
+    if _setup_command(root) == "aegis migrate":
+        return "Fix: Run 'aegis migrate' to see how this v3 workspace converts, then 'aegis migrate --apply'."
+    return f"Fix: Run 'aegis init' to {purpose}."
+
+
 def _check_rules(project_root: Path) -> bool:
     """The workspace serves at least one rule and every rule file loads."""
     from aegis_core.rules import load_rules
@@ -124,7 +148,7 @@ def _check_rules(project_root: Path) -> bool:
     rules_dir = WorkspaceLayout(Path(project_root)).rules_dir
     if not rules_dir.is_dir():
         print(f"  ❌ No rules directory ({rules_dir})")
-        print("    Fix: Run 'aegis init' to install starter rules.")
+        print("    " + _setup_fix(project_root, "install starter rules"))
         return False
     try:
         ruleset = load_rules(project_root)
@@ -138,7 +162,7 @@ def _check_rules(project_root: Path) -> bool:
         return False
     if not ruleset.served:
         print(f"  ❌ No rules are served from {rules_dir}")
-        print("    Fix: Run 'aegis init' to install starter rules.")
+        print("    " + _setup_fix(project_root, "install starter rules"))
         return False
     print(f"  ✅ Rules: {len(ruleset.served)} served from {rules_dir}")
     return True
@@ -166,7 +190,7 @@ def _check_state_dir(project_root: Path | None = None) -> Optional[bool]:
         print(f"  ✅ State directory can be created ({state})")
         return True
     print(f"  ❌ State directory does not exist ({state})")
-    print("    Fix: Run 'aegis init' to create workspace directories.")
+    print("    " + _setup_fix(root, "create workspace directories"))
     return False
 
 
@@ -219,60 +243,53 @@ def _clean(text: Any, limit: int = 512) -> str:
 
 # ── MCP launcher ─────────────────────────────────────────────────────────────
 
-# MCP configs start the server as `python3 -m aegis_mcp`. The import probe runs
-# without -I so user site-packages count, but drops the implicit CWD entry so
-# doctor never imports (executes) a aegis_mcp that happens to sit in the cwd.
-_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __import__('aegis_mcp')"
+# A registered command, as doctor compares it: (host id, argv as the host config holds it).
+Registered = Tuple[str, Sequence[str]]
 
 
-def probe_mcp_launcher(path_env: str | None = None,
-                       timeout: float = 10.0,
-                       workspace: Optional[Path] = None) -> tuple[str, str]:
-    """Resolve `python3` from PATH like an MCP host and classify it.
+def _same_command(a: Sequence[str], b: Sequence[str]) -> bool:
+    if len(a) != len(b) or not a:
+        return False
+    return os.path.normcase(a[0]) == os.path.normcase(b[0]) and list(a[1:]) == list(b[1:])
 
-    Only absolute PATH entries outside ``workspace`` count (aegis_core.pathlookup): the
-    probe runs what it finds. Returns (status, detail); status is one of ok, missing,
-    refused (python3 is only behind an empty or relative PATH entry or inside
-    ``workspace``, so it is not run), store_stub, broken, no_aegis_mcp.
+
+def _launcher_problem(argv: Sequence[str], current: Sequence[str]) -> Optional[str]:
+    """Why a registered launcher is wrong, or None. Nothing is run."""
+    from aegis_cli.install_hosts import MCP_RUNNER, display_command, launch_risk
+
+    shown = display_command(argv) if argv else "an empty command"
+    risk = launch_risk(argv)
+    if risk:
+        return f"starts `{shown}`, an unsafe registration: {risk}"
+    if not (os.path.isfile(argv[0]) and (os.name == "nt" or os.access(argv[0], os.X_OK))):
+        return f"starts {argv[0]}, which does not exist"
+    if len(argv) == 5 and argv[1:4] == ["-I", "-c", MCP_RUNNER] \
+            and not os.path.isfile(os.path.join(argv[4], "aegis_mcp", "server.py")):
+        return f"starts {argv[0]} with no aegis_mcp in {argv[4]}: that install is gone"
+    if not _same_command(argv, current):
+        return f"starts {shown}, not this install's {display_command(current)}"
+    return None
+
+
+def probe_mcp_launcher(path_env: Optional[str] = None, registered: Sequence[Registered] = (),
+                       scripts_dirs: Optional[Sequence[str]] = None) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """The command `aegis init --host` registers from this install (install_hosts.mcp_command
+    under ``path_env``), and each ``registered`` host whose command is unsafe (launch_risk),
+    gone, or another install's, with the reason.
+
+    Doctor runs neither: the registered argv comes from a host's config file, and
+    starting the server would prove nothing a host does not do at its next session.
     """
+    from aegis_cli.install_hosts import mcp_command
+
     path_env = os.environ.get("PATH", "") if path_env is None else path_env
-    exe = which("python3", path_env, outside=workspace)
-    if not exe:
-        hits = only_skipped("python3", path_env, outside=workspace, base=workspace)
-        if hits:
-            return "refused", f"python3 is found only at {_where(hits[0], workspace)}, where doctor runs nothing"
-        return "missing", "python3 is not on PATH"
-
-    def _run(argv: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run([exe, *argv], stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, errors="replace",
-                              timeout=timeout, env=_child_env())
-
-    try:
-        proc = _run(["-I", "-S", "-c", "import sys; print(sys.version_info[0])"])
-    except subprocess.TimeoutExpired:
-        return "broken", f"{exe} timed out after {timeout:g}s"
-    except OSError as exc:
-        return "broken", f"{exe} could not be started: {exc}"
-    out = proc.stdout.strip()
-    # The App Installer stub exits 49, or prints a Store message and nothing
-    # on stdout, instead of running Python.
-    store_msg = "microsoft store" in (proc.stdout + proc.stderr).lower()
-    if proc.returncode == 49 or (not out and store_msg):
-        return "store_stub", exe
-    if proc.returncode != 0 or out != "3":
-        err = (proc.stderr.strip() or out)[:200]
-        return "broken", f"{exe} exited {proc.returncode}: {err}"
-
-    try:
-        imp = _run(["-c", _IMPORT_PROBE])
-    except subprocess.TimeoutExpired:
-        return "broken", f"{exe} timed out after {timeout:g}s importing aegis_mcp"
-    except OSError as exc:
-        return "broken", f"{exe} could not be started: {exc}"
-    if imp.returncode != 0:
-        return "no_aegis_mcp", exe
-    return "ok", exe
+    current = mcp_command(path_env, scripts_dirs)
+    problems = []
+    for host_id, argv in registered:
+        why = _launcher_problem(list(argv), current)
+        if why:
+            problems.append((host_id, why))
+    return current, problems
 
 
 def _where(hit: Hit, fence: Any) -> str:
@@ -283,29 +300,30 @@ def _where(hit: Hit, fence: Any) -> str:
     return f"{hit.path}, through the relative PATH entry {hit.entry!r}"
 
 
-def _check_mcp_launcher(path_env: str | None = None, workspace: Optional[Path] = None) -> bool:
-    """Advisory: report whether `python3 -m aegis_mcp` would start."""
-    status, detail = probe_mcp_launcher(path_env, workspace=workspace)
-    if status == "ok":
-        print(f"  ✅ MCP launcher: python3 ({detail}) runs and imports aegis_mcp")
-        return True
-    if status == "refused":
-        print(f"  ⚠️  MCP launcher: {detail}, so doctor cannot tell whether `python3 -m aegis_mcp` starts.")
-    elif status == "missing":
-        print("  ⚠️  MCP launcher: python3 not found on PATH. MCP configs start the\n"
-              "      server with `python3 -m aegis_mcp`; install Python 3 from python.org\n"
-              "      or put it on PATH (only needed if you use the MCP server).")
-    elif status == "store_stub":
-        print(f"  ⚠️  MCP launcher: {detail} is the Windows Store App Installer stub, not Python.\n"
-              "      Fix: Settings > Apps > Advanced app settings > App execution aliases:\n"
-              "      turn off python.exe and python3.exe, then install Python from python.org\n"
-              "      (or make sure the real python3 comes first on PATH).")
-    elif status == "no_aegis_mcp":
-        print(f"  ⚠️  MCP launcher: {detail} runs but cannot import aegis_mcp.\n"
-              f"      Install it for that interpreter: {detail} -m pip install --user aegis-guardrails")
+def _check_mcp_launcher(path_env: Optional[str] = None, workspace: Optional[Path] = None,
+                        registered: Sequence[Registered] = (),
+                        scripts_dirs: Optional[Sequence[str]] = None) -> bool:
+    """Advisory: the MCP launcher this install registers, and whether each host's matches."""
+    from aegis_cli.install_hosts import MCP_SCRIPT, display_command
+
+    current, problems = probe_mcp_launcher(path_env, registered, scripts_dirs)
+    where = ""
+    if len(current) == 1 and workspace is not None:
+        # The script's directory, not the script: a version manager's link resolves elsewhere.
+        key, fence = _root_key(Path(current[0]).parent), _root_key(workspace)
+        if key and fence and (key == fence or key.startswith(fence.rstrip(os.sep) + os.sep)):
+            where = ", inside the workspace"
+    if len(current) == 1:
+        print(f"  {'⚠️ ' if problems else '✅'} MCP launcher: {current[0]}{where} (what aegis init --host registers)")
     else:
-        print(f"  ⚠️  MCP launcher: {detail}")
-    return False
+        print(f"  {'⚠️ ' if problems else '✅'} MCP launcher: no {MCP_SCRIPT} script found, so aegis init --host "
+              f"registers this interpreter in isolated mode: {display_command(current)}")
+    for host_id, why in problems:
+        print(f"      {host_id} {why}. Fix: re-run aegis init --host {host_id}")
+    ok_hosts = [h for h, _ in registered if h not in {p for p, _ in problems}]
+    if ok_hosts:
+        print(f"      registered for {', '.join(ok_hosts)}")
+    return not problems
 
 
 def _missing_ast_extensions(ws_root: Path) -> List[str]:
@@ -443,6 +461,11 @@ def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
         if gone:
             print(f"  ❌ Pre-commit hook ({st['hook_file']}) pins {gone[0]}, which no longer exists,\n"
                   "      so every commit fails closed. Re-run `aegis hook install` to re-pin it.")
+            return False
+        if st.get("reachable", True) is False:
+            print(f"  ❌ Pre-commit hook ({st['hook_file']}) is installed but never runs: "
+                  f"{st.get('unreachable_reason') or 'git does not reach the Aegis block'}.\n"
+                  "      Run `aegis hook status` for the fix.")
             return False
         print(f"  ✅ Pre-commit hook is current ({st['hook_file']})")
         return True
@@ -590,6 +613,8 @@ class _Ctx:
     selected: Tuple[Any, ...]
     selection: str
     is_home: bool = False
+    # What sets this workspace up: aegis migrate while an unmigrated v3 workspace is here.
+    setup: str = "aegis init"
     _cache: Dict[Tuple[str, bool], _File] = field(default_factory=dict)
 
     @property
@@ -1189,6 +1214,8 @@ def _level(advisory: Optional[bool], floor: str, governed: bool, installed: Opti
 
 
 def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], floor: str) -> Dict[str, Any]:
+    from aegis_cli.install_hosts import launch_risk
+
     binary = next((found for found in (ctx.which(name) for name in spec.binaries) if found), None)
     passed = [] if binary else [hit for name in spec.binaries for hit in ctx.passed_over(name)]
     ignored = list(dict.fromkeys(hit.path for hit in passed))
@@ -1239,6 +1266,10 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                        "doctor does not look")
                 add("command_unverifiable", f"the registered command {cmd} {why}, so doctor cannot tell whether "
                                             f"it exists: run aegis init --host {spec.id} to register an absolute path")
+        risk = launch_risk(reg["command"]) if reg["command"] else None
+        if risk:
+            add("unsafe_registration", f"the registered command {reg['command'][0]} is an unsafe registration: "
+                                       f"{risk}: run aegis init --host {spec.id}")
         if reg["approval"] == "unknown":
             add("approval_unknown", "aegis is registered only in this project's .mcp.json, which Claude Code "
                                     "runs after an approval doctor cannot see")
@@ -1262,7 +1293,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         add("workspace_not_governed", f"{ctx.root} is your home directory: its .aegis/ is your user layer, "
                                       "never a governed workspace. Run aegis doctor inside a repository")
     elif not ctx.governed:
-        add("workspace_not_governed", f"{ctx.root} has no .aegis/: run aegis init there")
+        add("workspace_not_governed", f"{ctx.root} has no .aegis/: run {ctx.setup} there")
     else:
         if info.bootstrap in ("missing", "hand_edited", "malformed"):
             add("bootstrap_" + info.bootstrap, {
@@ -1334,21 +1365,28 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
 
 # ── Enforcement tiers (AD-8) ────────────────────────────────────────────────
 
-def _floor_status(root: Path) -> str:
-    from aegis_cli.hooks.management import hook_status
+def _floor_status(root: Path) -> Tuple[str, Optional[str]]:
+    """The local floor's status, and why an installed, current hook never runs. The floor
+    is active only for a hook that is installed, current and reached by git (hook_status
+    ``reachable``; a status without the key predates it and counts as reachable)."""
+    from aegis_cli.hooks import management
 
     try:
-        st = hook_status(root)
+        st = management.hook_status(root)
     except Exception:
-        return "unknown"
+        return "unknown", None
     if st.get("status") == "no_git_repository":
-        return "unavailable"
+        return "unavailable", None
     if not st.get("managed_by_aegis"):
-        return "inactive"
+        return "inactive", None
     if st.get("status") != "installed":
-        return "outdated"
+        return "outdated", None
     gone = [p for p in (st.get("interpreter"), st.get("aegis_path")) if p and not p.get("exists")]
-    return "outdated" if gone else "active"
+    if gone:
+        return "outdated", None
+    if st.get("reachable", True) is False:
+        return "inactive", _clean(st.get("unreachable_reason") or "git does not reach the Aegis block", 1024)
+    return "active", None
 
 
 _TIER_TEXT = {
@@ -1359,7 +1397,8 @@ _TIER_TEXT = {
 }
 
 
-def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool) -> List[Dict[str, Any]]:
+def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool, unreached: Optional[str] = None,
+           setup: str = "aegis init") -> List[Dict[str, Any]]:
     ids = [r["id"] for r in rows]
     reached = [r["id"] for r in rows if r["advisory"] is True]
     unsure = [r["id"] for r in rows if r["advisory"] is None]
@@ -1377,14 +1416,18 @@ def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool) -> List[Dict[
         "unavailable": "not a git repository",
         "unknown": "the git hooks directory could not be read",
     }[floor]
+    if unreached:
+        floor_detail = f"the Aegis pre-commit hook is installed but never runs: {unreached}; see aegis hook status"
     if not governed and floor != "unavailable":
         # A hook here, installed or not, has no rules to check: the floor is not in force.
-        floor, floor_detail = "inactive", "no .aegis/ here, so a pre-commit hook has nothing to enforce: run aegis init"
+        floor, floor_detail = "inactive", f"no .aegis/ here, so a pre-commit hook has nothing to enforce: run {setup}"
     return [
         {"tier": "advisory", "mechanism": _TIER_TEXT["advisory"][1], "hosts": ids, "status": advisory,
          "detail": reach},
         {"tier": "best_effort", "mechanism": _TIER_TEXT["best_effort"][1], "hosts": [], "status": "unavailable",
-         "detail": "per-host hooks ship in v4.1 (Claude Code can block; Codex fails open)"},
+         "detail": "none in 4.0. Planned for v4.1: Claude Code blocks with exit 2; Codex blocks with exit 2 once "
+                   "you trust the hook in /hooks; Antigravity blocks only destructive commands (exit 1) and "
+                   "records scan-before-edit. Each fails open when Aegis errors"},
         {"tier": "local_floor", "mechanism": _TIER_TEXT["local_floor"][1], "hosts": ids, "status": floor,
          "detail": floor_detail},
         {"tier": "authoritative", "mechanism": _TIER_TEXT["authoritative"][1], "hosts": [], "status": "unavailable",
@@ -1634,6 +1677,25 @@ def _workspace_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
     return found
 
 
+def _upgrade_findings(ctx: _Ctx) -> List[_Finding]:
+    """v3 state here that v4 never reads (discovery.unmigrated_state): status, scan and sync
+    refuse such a workspace, and doctor, which still runs in it, must not call it healthy.
+    The home directory's .aegis/ is the user plane, which aegis migrate never converts."""
+    if ctx.is_home:
+        return []
+    from aegis_core.workspace import discovery
+
+    # The helper comes with the commands that refuse; a build without it has neither.
+    pending = getattr(discovery, "unmigrated_state", None)
+    found = list(pending(ctx.root)) if pending is not None else []
+    if not found:
+        return []
+    return [_Finding("unmigrated_v3_state", ctx.root / found[0],
+                     f"unmigrated v3 state: {', '.join(found)}. Aegis v4 does not read it, and aegis status, "
+                     "scan and sync refuse to run until it is converted: run aegis migrate to see the "
+                     "conversion, then aegis migrate --apply")]
+
+
 def _home_rules_finding(ctx: _Ctx) -> List[_Finding]:
     if ctx.home is None:
         return []
@@ -1758,13 +1820,14 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     governed = is_aegis_workspace(root) and not is_home
     selected, selection, notes = _selection(root, governed)
     ctx = _Ctx(root=root, governed=governed, home=layout.home if layout else None, environ=environ,
-               selected=selected, selection=selection, is_home=is_home)
+               selected=selected, selection=selection, is_home=is_home,
+               setup="aegis init" if governed or is_home else _setup_command(root))
     info = _instructions(ctx)
     roots, skipped = _registered_roots(ctx)
-    floor = _floor_status(root)
+    floor, unreached = _floor_status(root)
     rows = [_host_row(spec, ctx, info, roots, floor) for spec in selected]
     claude_user = _claude_user_registered(ctx)
-    findings = (notes + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
+    findings = (notes + _upgrade_findings(ctx) + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
                 + _legacy_block_findings(ctx) + _budget_findings(ctx, info) + _home_rules_finding(ctx)
                 + _v3_copy_findings(ctx))
     if roots is None and ctx.home is not None:
@@ -1776,7 +1839,7 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
                                  f"~/.aegis/workspaces.json: entry {index} has no absolute 'root' that resolves; "
                                  "aegis skips it (run aegis init in that workspace to register it again)",
                                  location=f"workspaces[{index}]"))
-    return _Diagnosis(ctx, rows, _tiers(rows, floor, governed), findings)
+    return _Diagnosis(ctx, rows, _tiers(rows, floor, governed, unreached, ctx.setup), findings)
 
 
 def _claude_user_registered(ctx: _Ctx) -> bool:
@@ -1988,7 +2051,14 @@ _CHECKS: Tuple[Tuple[str, bool], ...] = (
 )
 
 
-def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
+def _registered_launchers(rows: List[Dict[str, Any]]) -> List[Registered]:
+    """The command each host has registered, where doctor could read it."""
+    return [(row["id"], row["registration"]["command"]) for row in rows
+            if row["registration"]["status"] == "registered" and row["registration"]["command"]]
+
+
+def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None,
+                registered: Sequence[Registered] = ()) -> List[Dict[str, Any]]:
     calls: Dict[str, Callable[[], Optional[bool]]] = {
         "python_version": _check_python_version,
         "zero_dependencies": _check_zero_dependencies,
@@ -1997,7 +2067,7 @@ def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None)
         "cli_on_path": lambda: _check_cli_resolvable(root),
         "precommit_hook": lambda: _check_precommit_hook(root),
         "ast_drivers": lambda: _check_ast_drivers(root, fix=fix_ast),
-        "mcp_launcher": lambda: _check_mcp_launcher(workspace=root),
+        "mcp_launcher": lambda: _check_mcp_launcher(workspace=root, registered=registered),
     }
     out = []
     for check_id, blocking in _CHECKS:
@@ -2206,7 +2276,7 @@ def run_doctor(args: argparse.Namespace) -> int:
     with contextlib.redirect_stdout(text) if use_json else contextlib.nullcontext():
         if not use_json:
             print(f"aegis doctor — running health checks ({_clean(root, 4096)}):\n")
-        checks = _run_checks(root, fix_ast=False)
+        checks = _run_checks(root, fix_ast=False, registered=_registered_launchers(diag.rows))
         if not use_json:
             for check in checks:
                 print(check["text"], end="")

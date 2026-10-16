@@ -461,6 +461,7 @@ def test_enforcement_tiers_report_what_is_in_force_here_and_nothing_more(env):
 
     from aegis_cli.hooks.management import generate_hook_block
     (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)  # git skips a hook it cannot execute
     payload = env.doctor()
     tiers = {t["tier"]: t for t in payload["enforcement_tiers"]}
     assert tiers["local_floor"]["status"] == "active"
@@ -748,24 +749,61 @@ def test_the_codex_probe_runs_the_absolute_codex_outside_the_workspace(env, monk
 
 
 @pytest.mark.parametrize("layout", LAYOUTS)
-def test_the_mcp_launcher_check_never_runs_a_python3_from_the_workspace(env, monkeypatch, tmp_path, layout):
+def test_the_mcp_launcher_check_runs_no_python3_and_no_aegis_mcp(env, monkeypatch, tmp_path, layout):
+    """The launcher check compares commands; it starts no program, from the workspace or not."""
     env.all_ok()
     marker = tmp_path / "decoy-ran"
     for where in (env.ws, env.ws / "tools"):
         _decoy(where, "python3", marker)
+        _decoy(where, "aegis-mcp", marker)
     monkeypatch.chdir(env.ws)
     monkeypatch.setenv("PATH", _path_with(env, layout))
     payload = env.doctor()
     (check,) = [c for c in payload["checks"] if c["id"] == "mcp_launcher"]
-    assert not marker.exists(), "doctor ran a python3 the repository supplied"
+    assert not marker.exists(), "doctor ran a program the repository supplied"
     detail = " ".join(check["detail"])
-    assert check["status"] == "warn"
-    if layout == "cwd_only":
-        assert "python3 not found on PATH" in detail
+    assert "python3" not in detail and "pip install" not in detail
+    if layout == "entry_inside_workspace":
+        # An absolute PATH entry is the user's choice, so init would register the
+        # workspace's aegis-mcp; doctor says where it is and that the hosts run another.
+        decoy = env.ws / "tools" / _decoy_name("aegis-mcp")
+        assert check["status"] == "warn", detail
+        assert f"MCP launcher: {decoy}, inside the workspace" in detail
+        assert f"codex-cli starts {env.mcp}, not this install's {decoy}" in detail
     else:
-        # Reported where it is, never as absent, and with no advice to install Python.
-        assert "python3 is found only at" in detail and "where doctor runs nothing" in detail
-        assert "not found" not in detail and "python.org" not in detail
+        assert check["status"] == "pass", detail
+        assert f"MCP launcher: {env.mcp}" in detail
+        assert "registered for codex-cli, claude-code, antigravity" in detail
+
+
+@pytest.mark.parametrize("command, args", [
+    ("{py}", ["-m", "aegis_mcp"]),
+    ("python3", ["-m", "aegis_mcp"]),
+    ("{py}", ["aegis_mcp/server.py"]),
+    ("{env}", ["python3", "-m", "aegis_mcp"]),
+    ("{env}", ["AEGIS_CLIENT=antigravity", "{py}", "-m", "aegis_mcp"]),
+])
+def test_a_registration_that_runs_from_the_start_directory_is_unsafe_on_the_host_row_and_in_the_launcher_check(
+        env, command, args):
+    """The v4.0.0 release candidate's fallback (`<python> -m aegis_mcp`), a bare `python3 -m aegis_mcp`,
+    a relative script, and either one behind `env` import from the project directory the host
+    starts the server in."""
+    env.all_ok()
+    names = {"py": env.stub("python3"), "env": env.stub("env")}
+    cfg = env.antigravity_registered()
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    data["mcpServers"]["aegis"].update(command=command.format(**names), args=[a.format(**names) for a in args])
+    cfg.write_text(json.dumps(data), encoding="utf-8")
+    payload = env.doctor()
+    row = host(payload, "antigravity")
+    assert "unsafe_registration" in codes(row) and row["state"] == "policy_gap"
+    (reason,) = [r for r in row["reasons"] if r["code"] == "unsafe_registration"]
+    assert "run aegis init --host antigravity" in reason["message"]
+    (check,) = [c for c in payload["checks"] if c["id"] == "mcp_launcher"]
+    detail = " ".join(check["detail"])
+    assert check["status"] == "warn" and "unsafe registration" in detail
+    assert "re-run aegis init --host antigravity" in detail
+    assert {h["id"]: h["state"] for h in payload["hosts"]}["codex-cli"] == "ok"
 
 
 # ── honest enforcement levels (review finding 2) ────────────────────────────
@@ -1028,6 +1066,7 @@ def test_a_host_binary_found_only_inside_the_workspace_is_reported_never_run(env
     hooks = env.ws / ".git" / "hooks"
     hooks.mkdir(parents=True)
     (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)  # git skips a hook it cannot execute
     payload = env.doctor()
     assert tier(payload, "local_floor")["status"] == "active"
     # The floor holds for commits, but not for a host that may not be installed at all.
@@ -1098,6 +1137,7 @@ def test_an_ungoverned_git_repository_is_not_called_a_non_repository(env, tmp_pa
     assert "not a git repository" not in floor["detail"] and ".aegis" in floor["detail"]
 
     (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)  # git skips a hook it cannot execute
     payload = json.loads(env.run(json=True, workspace=str(bare))[1])
     assert tier(payload, "local_floor")["status"] == "inactive"
     assert levels(payload) == dict.fromkeys(PHASE1, "none")
@@ -1115,6 +1155,7 @@ def test_an_active_local_floor_is_never_claimed_for_a_host_that_is_not_installed
     hooks = env.ws / ".git" / "hooks"
     hooks.mkdir(parents=True)
     (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)  # git skips a hook it cannot execute
     payload = env.doctor()
     assert tier(payload, "local_floor")["status"] == "active"
     assert levels(payload) == {"codex-cli": "local_floor", "claude-code": "local_floor", "antigravity": "none"}
@@ -1134,9 +1175,7 @@ def test_on_windows_host_cli_children_do_not_search_the_current_directory(monkey
     monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)  # some launchers set it
     monkeypatch.setattr(doctor.sys, "platform", "win32")
     doctor._run_host_cli(["C:\\bin\\codex.cmd", "mcp", "get", "aegis", "--json"], cwd="C:\\repo", timeout=1.0)
-    monkeypatch.setattr(doctor, "which", lambda name, path=None, outside=None: "C:\\bin\\python3.exe")
-    doctor.probe_mcp_launcher("C:\\bin")
-    assert len(seen) == 3  # codex, then python3's version and import probes
+    assert len(seen) == 1  # the codex probe: the MCP launcher check starts no program
     for kw in seen:
         assert kw["env"]["NoDefaultCurrentDirectoryInExePath"] == "1"
         assert kw["env"]["PATH"] == "C:\\bin"
@@ -1565,12 +1604,15 @@ def test_a_bare_registered_command_on_no_path_entry_is_missing(env):
     assert row["state"] == "unregistered" and "command_missing" in codes(row)
 
 
-def test_a_bare_registered_command_on_an_absolute_path_entry_exists(env):
+def test_a_bare_registered_command_on_an_absolute_path_entry_exists_but_is_unsafe(env):
+    """The host resolves a bare name itself, from the directory it starts in (libuv on
+    Windows searches it before PATH); aegis init registers only absolute commands."""
     env.all_ok()
     env.antigravity_registered(command="aegis-mcp")
     row = host(env.doctor(), "antigravity")
     assert row["registration"]["command_exists"] is True
-    assert row["state"] == "ok" and row["reasons"] == []
+    assert row["state"] == "policy_gap" and codes(row) == ["unsafe_registration"]
+    assert "not an absolute path" in row["reasons"][0]["message"]
 
 
 @pytest.mark.parametrize("layout", ["empty_entry", "relative_entry", "entry_inside_workspace"])
@@ -1652,3 +1694,154 @@ def test_from_home_no_source_file_under_it_is_taken_for_a_project(env):
     assert "user layer" in " ".join(checks["ast_drivers"]["detail"])
     assert not (env.home / ".aegis" / "config.json").exists()
     assert not any(f.get("action", "").startswith("enable") for f in payload.get("fixes", []))
+
+
+# ── v4.0.0 release review: the floor must be reachable, a .soma workspace migrates ──
+
+def _install_current_hook(env: Env) -> Path:
+    from aegis_cli.hooks.management import generate_hook_block
+
+    hooks = env.ws / ".git" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    hook.chmod(0o755)
+    return hook
+
+
+def _unreachable(monkeypatch, reason: str) -> None:
+    """hook_status as the git-hook lane reports a block git never reaches."""
+    from aegis_cli.hooks import management
+
+    real = management.hook_status
+
+    def status(root=None):
+        st = real(root)
+        st.update(reachable=False, unreachable_reason=reason)
+        return st
+
+    monkeypatch.setattr(management, "hook_status", status)
+
+
+def test_a_current_hook_git_never_reaches_is_not_the_local_floor(env, monkeypatch):
+    env.all_ok()
+    _install_current_hook(env)
+    assert tier(env.doctor(), "local_floor")["status"] == "active"
+    reason = "line 2 (exec ./other-hook) ends the hook before the aegis block, so the check never runs"
+    _unreachable(monkeypatch, reason)
+    payload = env.doctor()
+    floor = tier(payload, "local_floor")
+    assert floor["status"] == "inactive"
+    assert floor["detail"] == f"the Aegis pre-commit hook is installed but never runs: {reason}; see aegis hook status"
+    assert levels(payload) == dict.fromkeys(PHASE1, "advisory")
+    (check,) = [c for c in payload["checks"] if c["id"] == "precommit_hook"]
+    assert check["status"] == "fail" and payload["_rc"] == 1
+    assert f"never runs: {reason}" in " ".join(check["detail"])
+
+
+def test_a_hook_status_without_reachability_counts_as_reachable(env):
+    """hook_status gains `reachable` in the git-hook lane; until then its absence is no gap."""
+    env.all_ok()
+    _install_current_hook(env)
+    from aegis_cli.hooks.management import hook_status
+
+    st = hook_status(env.ws)
+    if "reachable" in st:
+        assert st["reachable"] is True
+    payload = env.doctor()
+    assert tier(payload, "local_floor")["status"] == "active"
+    (check,) = [c for c in payload["checks"] if c["id"] == "precommit_hook"]
+    assert check["status"] == "pass"
+
+
+def test_the_best_effort_tier_states_the_planned_v41_hooks_as_the_docs_do(env):
+    env.all_ok()
+    best = tier(env.doctor(), "best_effort")
+    assert best["status"] == "unavailable" and best["hosts"] == []
+    assert best["detail"] == (
+        "none in 4.0. Planned for v4.1: Claude Code blocks with exit 2; Codex blocks with exit 2 "
+        "once you trust the hook in /hooks; Antigravity blocks only destructive commands (exit 1) "
+        "and records scan-before-edit. Each fails open when Aegis errors")
+
+
+def test_a_legacy_workspace_without_rules_is_told_to_migrate_never_to_init(env, tmp_path, monkeypatch, capsys):
+    """Release review (upgrade): `aegis init` in a .soma workspace leaves its rules unserved.
+    Run through the CLI, which lets doctor (and only doctor and uninstall) into one."""
+    from aegis_cli.cli import main
+
+    env.all_ok()
+    legacy = tmp_path / "legacy"
+    (legacy / ".soma" / "cells" / "traps").mkdir(parents=True)
+    (legacy / ".soma" / "cells" / "traps" / "trap-x.md").write_text("---\nid: trap-x\n---\n# x\n", encoding="utf-8")
+    (legacy / ".git" / "hooks").mkdir(parents=True)
+    monkeypatch.chdir(legacy)
+    main(["doctor"])
+    out = capsys.readouterr().out
+    assert "Fix: Run 'aegis migrate' to see how this v3 workspace converts, then 'aegis migrate --apply'." in out
+    assert f"{legacy.resolve()} has no .aegis/: run aegis migrate there" in out
+    assert "a pre-commit hook has nothing to enforce: run aegis migrate" in out
+    for setup_advice in ("Run 'aegis init'", "run aegis init there", "nothing to enforce: run aegis init"):
+        assert setup_advice not in out
+    plain = tmp_path / "plain"
+    (plain / ".git" / "hooks").mkdir(parents=True)
+    monkeypatch.chdir(plain)
+    main(["doctor"])
+    out = capsys.readouterr().out
+    assert "Fix: Run 'aegis init' to install starter rules." in out and "aegis migrate" not in out
+
+
+# ── unmigrated v3 state (discovery.unmigrated_state, from the gate/upgrade lane) ──
+
+V3_STATE = [".aegis/evidence/signals.jsonl", "aegis.conf"]
+
+
+def test_unmigrated_v3_state_is_a_warning_that_names_the_files_and_aegis_migrate(env, monkeypatch):
+    """status, scan and sync refuse a workspace with v3 state v4 never reads; doctor, which
+    still runs there, says so instead of reporting a healthy workspace."""
+    from aegis_core.workspace import discovery
+
+    env.all_ok()
+    seen = []
+
+    def pending(root):
+        seen.append(Path(root))
+        return list(V3_STATE)
+
+    monkeypatch.setattr(discovery, "unmigrated_state", pending, raising=False)
+    payload = env.doctor()
+    assert [p.resolve() for p in seen] == [env.ws.resolve()]
+    (finding,) = [f for f in payload["findings"] if f["code"] == "unmigrated_v3_state"]
+    assert finding["severity"] == "warning" and finding["fixable"] is False
+    assert Path(finding["path"]) == env.ws.resolve() / ".aegis" / "evidence" / "signals.jsonl"
+    assert finding["message"] == (
+        "unmigrated v3 state: .aegis/evidence/signals.jsonl, aegis.conf. Aegis v4 does not read it, and "
+        "aegis status, scan and sync refuse to run until it is converted: run aegis migrate to see the "
+        "conversion, then aegis migrate --apply")
+    assert payload["summary"]["warnings"] >= 1
+    rc, out = env.run()
+    assert "unmigrated v3 state: .aegis/evidence/signals.jsonl, aegis.conf" in out.split("Warnings:")[1]
+
+
+def test_no_unmigrated_state_and_no_helper_mean_no_upgrade_warning(env, monkeypatch):
+    """A v4 workspace has none; a build without the helper (it lands in a parallel lane)
+    reports none and does not fail."""
+    from aegis_core.workspace import discovery
+
+    env.all_ok()
+    monkeypatch.setattr(discovery, "unmigrated_state", lambda root: [], raising=False)
+    assert "unmigrated_v3_state" not in finding_codes(env.doctor())
+    monkeypatch.delattr(discovery, "unmigrated_state", raising=False)
+    payload = env.doctor()
+    assert "unmigrated_v3_state" not in finding_codes(payload) and payload["findings"] == []
+
+
+def test_the_home_directory_is_never_checked_for_unmigrated_state(env, monkeypatch):
+    """~/.aegis is the user plane, not a v3 workspace: aegis migrate never runs there."""
+    from aegis_core.workspace import discovery
+
+    env.all_ok()
+    seen = []
+    monkeypatch.setattr(discovery, "unmigrated_state", lambda root: seen.append(root) or list(V3_STATE),
+                        raising=False)
+    payload = env.doctor(workspace=str(env.home))
+    assert seen == [] and "unmigrated_v3_state" not in finding_codes(payload)

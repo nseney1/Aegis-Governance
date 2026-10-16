@@ -279,17 +279,50 @@ def test_the_readme_gives_the_install_remedies_aegis_itself_prints(tmp_path):
 
     nowhere = {"env": {"PATH": ""}, "which": lambda *a, **k: None, "os_name": "posix"}
     not_installed = build_hint(candidates=[], **nowhere)
-    scripts = tmp_path / "bin"
-    scripts.mkdir()
+    scripts = tmp_path / ".local" / "bin"
+    scripts.mkdir(parents=True)
     (scripts / "aegis").write_text("", encoding="utf-8")
     off_path = build_hint(candidates=[str(scripts)], home=str(tmp_path), platform="linux",
                           shell="bash", venv_prefix=None, **nowhere)
 
     pipx = re.search(r"pipx install [\w.-]+", not_installed).group(0)
-    module = re.search(r"python3 -m \w+", off_path).group(0)
     quick = _section(README.read_text(encoding="utf-8"), "Quick start")
-    assert pipx in quick and module in quick
+    assert pipx in quick
     assert "externally-managed-environment" in quick
+    # The script pip --user installed, by its full path: what the PATH fix adds.
+    assert f"was installed to {scripts}" in off_path and "~/.local/bin/aegis" in quick
+    assert "pipx ensurepath" in quick and "activate the virtual environment" in quick
+
+
+def test_the_readme_never_advises_running_aegis_with_python_dash_m():
+    """Release review: `python3 -m aegis_cli` (and `-m aegis_mcp`) put the current directory
+    first on sys.path, so in a cloned repository they run its own aegis_* packages."""
+    readme = README.read_text(encoding="utf-8")
+    advice = re.findall(r"python3? -m aegis_\w+", readme)
+    assert all("Do not fall back to `" + a in readme for a in advice), advice
+    how = HOW.read_text(encoding="utf-8")
+    assert "-m aegis_mcp" not in how.replace("never registers `python -m aegis_mcp`", "")
+
+
+UNSAFE_KINDS = "a Python that runs `-m` or `-c` without `-I` or a script by a relative path, or either behind `env`"
+
+
+def test_the_docs_name_the_unsafe_registrations_doctor_reports():
+    """how-it-works, SECURITY and the changelog list what `aegis doctor` calls an unsafe MCP
+    registration: each kind they name is one launch_risk flags, and isolated mode is not."""
+    import sys
+
+    from aegis_cli.install_hosts import launch_risk
+
+    for doc in (HOW, ROOT / "SECURITY.md", ROOT / "CHANGELOG.md"):
+        assert UNSAFE_KINDS in doc.read_text(encoding="utf-8"), doc.name
+    py = sys.executable
+    env = os.path.join(os.path.dirname(py), "env")
+    for argv in (["aegis-mcp"], [py, "-m", "aegis_mcp"], [py, "-c", "x"], [py, "aegis_mcp/server.py"],
+                 [env, "python3", "-m", "aegis_mcp"], [env, py, "aegis_mcp/server.py"]):
+        assert launch_risk(argv), argv
+    for argv in ([py, "-I", "-m", "aegis_mcp"], [py, "-I", "-c", "x"], [env, py, "-I", "-c", "x"]):
+        assert launch_risk(argv) is None, argv
 
 
 def _description() -> str:
