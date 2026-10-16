@@ -6,6 +6,7 @@
     "hook": "hook",
     "init": "init",
     "migrate": "migrate",
+    "package": "package",
     "rule": "rule",
     "scan": "scan",
     "skills": "skills",
@@ -1295,6 +1296,102 @@
         ],
         "description": "Plan, then with --apply perform, the move to the v4 layout: the v3 ledger becomes .aegis/state/ledger.jsonl (v2 rows), aegis.conf/slots.yaml/config.yaml become .aegis/config.json, .soma cells move to .aegis/rules/<type>/, derived counters leave rule frontmatter and v3 runtime state is removed. Every changed file is backed up to .aegis/state/migrate-backup-<time>/ first; running it again changes nothing.",
         "help": "Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply)"
+      },
+      "package": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "host",
+            "flags": [
+              "--host"
+            ],
+            "help": "The host to package for; only claude-code",
+            "kind": "store",
+            "metavar": "claude-code",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "out",
+            "flags": [
+              "--out"
+            ],
+            "help": "Where to write the plugin (default ./aegis-claude-plugin in the workspace); an existing directory must be empty or an earlier Aegis plugin",
+            "kind": "store",
+            "metavar": "DIR",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "help": "Report what would be written; write nothing",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "description": "Write a Claude Code plugin directory: .claude-plugin/plugin.json, the Aegis MCP server (.mcp.json), the pre-tool hook (hooks/hooks.json) and the packaged skills (skills/). Experimental: nothing is published, and the directory names absolute paths on this machine, so it works only here. Only --host claude-code is supported; the Gemini CLI is retired. In an Aegis workspace a real run appends one package event.",
+        "help": "Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published"
       },
       "rule": {
         "aliases": [],
@@ -3317,6 +3414,12 @@
       "category": "Setup & Environment",
       "help": "Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply)",
       "name": "migrate"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published",
+      "name": "package"
     },
     {
       "aliases": [],

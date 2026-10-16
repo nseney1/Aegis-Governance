@@ -35,6 +35,7 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis doctor` | Setup & Environment | System health and governance audit |
 | `aegis init` | Setup & Environment | Set up governance for this project and register it with your agent hosts |
 | `aegis migrate` | Setup & Environment | Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply) |
+| `aegis package` | Setup & Environment | Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published |
 | `aegis skills` | Setup & Environment | Copy the packaged skills into your hosts' project skills folders (sync) |
 | `aegis uninstall` | Setup & Environment | Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/) |
 | `aegis check` | Daily Workflow & Verification | Verify changes: Layer 1 checks, plus a Layer 2 model review with --full |
@@ -92,6 +93,20 @@ Category: Setup & Environment.
 | --- | --- | --- | --- |
 | `--apply` |  |  | Perform the migration (default: dry run) |
 | `--dry-run` |  |  | Only report what would change (the default) |
+
+### `aegis package`
+
+Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published
+
+Write a Claude Code plugin directory: .claude-plugin/plugin.json, the Aegis MCP server (.mcp.json), the pre-tool hook (hooks/hooks.json) and the packaged skills (skills/). Experimental: nothing is published, and the directory names absolute paths on this machine, so it works only here. Only --host claude-code is supported; the Gemini CLI is retired. In an Aegis workspace a real run appends one package event.
+
+Category: Setup & Environment.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--host` | `claude-code` |  | The host to package for; only claude-code |
+| `--out` | `DIR` |  | Where to write the plugin (default ./aegis-claude-plugin in the workspace); an existing directory must be empty or an earlier Aegis plugin |
+| `--dry-run` |  |  | Report what would be written; write nothing |
 
 ### `aegis skills`
 

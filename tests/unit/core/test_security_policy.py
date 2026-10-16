@@ -104,6 +104,8 @@ SPAWN_SITES = {
     "aegis_core/inference_provider.py": ("your model command",),
     # Install runs the aegis it is about to register once, on an empty payload, in an empty directory.
     "aegis_cli/hooks/registrar.py": ("`aegis`, the hook handler",),
+    # `aegis benchmark` starts the same handler under this Python (-I -c) on a fixture payload, in a temp workspace.
+    "aegis_core/benchmark.py": ("`aegis`, the hook handler",),
 }
 _SPAWN_MODULES = {"subprocess", "pty", "multiprocessing"}
 _OS_SPAWN = re.compile(r"^(system|popen|startfile|exec\w*|spawn\w*|posix_spawn\w*)$")

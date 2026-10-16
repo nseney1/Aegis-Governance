@@ -79,6 +79,8 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core.packs": 2,
     # The benchmark: scan, Layer 1 and events over a fixture corpus it ships as package data.
     "aegis_core.benchmark": 2,
+    # The Claude Code plugin dir (aegis package): pure builders plus an atomic writer over storage.
+    "aegis_core.packaging": 1,
 }
 # Leaf tables: importable from anywhere because they import no aegis module.
 CORE_LEAVES = ("aegis_core._version", "aegis_core.errors", "aegis_core.taxonomy")

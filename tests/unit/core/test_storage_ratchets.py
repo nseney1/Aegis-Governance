@@ -21,6 +21,7 @@ NON_AEGIS_WRITERS = {
     ("aegis_cli/hooks/management.py", "install_hook"): "the git pre-commit hook (.git/hooks)",
     ("aegis_cli/hooks/management.py", "uninstall_hook"): "the git pre-commit hook (.git/hooks)",
     ("aegis_core/verification/runner.py", "snapshot_index"): "staged blobs in a temporary directory (aegis check --hook)",
+    ("aegis_core/benchmark.py", "materialize"): "the fixture corpus in a temporary directory (aegis benchmark)",
 }
 _WRITE_MODE = re.compile(r"[wax+]")
 _COPIES = {"copy", "copy2", "copyfile", "copytree"}
