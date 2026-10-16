@@ -1,6 +1,6 @@
 # Aegis Guardrails: rules and an MCP server that keep AI coding agents on track
 
-Aegis keeps Claude Code, Codex CLI, Gemini CLI and Antigravity on your project's rules. It gives each agent the rules for the files it is about to edit, then checks the change before commit and in CI.
+Aegis keeps Claude Code, Codex CLI, Antigravity and Gemini CLI (manual registration until v4.1) on your project's rules. It gives each agent the rules for the files it is about to edit, then checks the change before commit and in CI.
 
 [![PyPI](https://img.shields.io/pypi/v/aegis-guardrails)](https://pypi.org/project/aegis-guardrails/)
 [![Python](https://img.shields.io/pypi/pyversions/aegis-guardrails)](https://pypi.org/project/aegis-guardrails/)
@@ -31,6 +31,8 @@ pip install aegis-guardrails
 cd my-app
 aegis init --host claude-code,codex-cli   # or --host auto: every supported host found on this machine
 ```
+
+If pip stops with `externally-managed-environment` (PEP 668, as many Linux distributions and Homebrew Python do), run `pipx install aegis-guardrails` or install into a virtual environment. If your shell then says `aegis: command not found`, run `python3 -m aegis_cli <command>` instead (`python -m aegis_cli` on Windows); `aegis init` and `aegis doctor` print the PATH fix for your shell.
 
 `aegis init` prints its plan and asks before it writes anything. After you confirm, it reports (absolute paths shortened to `~`):
 
@@ -68,9 +70,10 @@ forbid_ast:
 Never call `eval` or `exec` on data. Parse it with `json.loads` or `ast.literal_eval`.
 ```
 
-An agent that calls `aegis_scan` before editing `app.py` gets this rule (`aegis scan app.py` shows the same thing in a shell). If the change calls `eval` anyway, the check fails, and so does `git commit`, because the pre-commit hook runs the same check:
+An agent that calls `aegis_scan` before editing `app.py` gets this rule (`aegis scan app.py` shows the same thing in a shell). If the change calls `eval` anyway, the check fails, and so does `git commit`, because the pre-commit hook runs the same check. With no file arguments, `aegis check` looks only at tracked files: your changes and staged files (on a clean tree, what the branch adds to its base). It skips untracked files, so `git add` a new file first, or name it: `aegis check app.py`.
 
 ```text
+$ git add app.py
 $ aegis check
 checkpoint: all checks passed
 🔴 forbid_ast:no-eval: app.py — Forbidden call 'eval' matched rule forbid_ast.calls
@@ -128,17 +131,17 @@ Be clear about what the score means today: every rule that matched a change's fi
 
 Aegis does not claim enforcement it lacks. `aegis doctor` reports these tiers, in these words:
 
-| Tier | Mechanism | Who can skip it |
+| Tier | Mechanism | What gets past it |
 |---|---|---|
 | Advisory | AGENTS.md bootstrap, MCP instructions, JIT rules | any agent: it is guidance |
 | Best-effort | per-host pre-tool hooks | planned for v4.1: Claude Code's can block, Codex's fail open |
 | Local floor | git pre-commit runs aegis check --hook (--no-verify bypasses it) | anyone using `git commit --no-verify` |
-| Authoritative | CI runs aegis check on the exact SHA; a human merges | no one, when branch protection requires the check and agents cannot merge |
+| Authoritative | CI runs aegis check on the exact SHA; a human merges | a pull request that also weakens the rules or the CI workflow it is checked with, unless a person reviews those changes |
 
-**CI is the floor.** Put `aegis check` in CI and require it before merge; it is the only tier an agent cannot skip.
+**CI is the floor.** Put `aegis check` in CI and require it before merge: it is the strongest tier, but not tamper-proof. CI checks a pull request against the rules in the pull request itself, so a pull request that deletes a rule and breaks it passes. Review every change under `.aegis/` and to your CI workflow like code; protecting the reviewed rules from the change they judge is planned for v4.3.
 
 - It does not force an agent to scan. Hosts are prompted to, and `aegis status --compliance` measures each host's scan-before-edit rate.
-- It does not sandbox agents or sign anything. Rule files are protected by git review and CI, not by Aegis.
+- It does not sandbox agents or sign anything. Rule files are protected only by your review of the pull requests that change them.
 - It sends nothing anywhere unless you ask: see the FAQ below.
 
 ## FAQ

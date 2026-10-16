@@ -25,7 +25,7 @@ flowchart TD
 1. **Bootstrap.** `aegis init` writes a short marked block into `AGENTS.md` and registers the `aegis` MCP server with the hosts you name. The block holds no rule text; it tells the agent to call `aegis_scan` before editing and `aegis_report_outcome` after verifying.
 2. **Scan.** Before editing, the agent calls `aegis_scan` with the files it plans to change. Aegis returns the few rules whose `target_paths` match those files.
 3. **Edit and report.** The agent edits, runs its tests and calls `aegis_report_outcome` with the rules it used. The report is an advisory row in the local ledger.
-4. **Check.** `git commit` runs `aegis check --hook` (Layer 1 only, never a model call). CI runs `aegis check` on the pull request. CI is the only step an agent cannot skip.
+4. **Check.** `git commit` runs `aegis check --hook` (Layer 1 only, never a model call). CI runs `aegis check` on the pull request. CI is the strongest step, but it judges the pull request by the rules in the pull request itself, so changes under `.aegis/` and to the CI workflow need a person's review (section 5).
 5. **Learn.** `aegis sync` rebuilds each rule's fitness from the ledger and suggests promotions or demotions. Nothing changes until a person applies a suggestion and commits it.
 
 ## 2. What lives where
@@ -128,7 +128,7 @@ There is no workspace argument a model could set, and `$HOME` or `/` is never a 
 
 ## 5. Verification: `aegis check`
 
-**Which files.** Files you name, or else the working-tree changes (`git diff HEAD` plus staged), or else what the branch adds to its base (`origin/$GITHUB_BASE_REF` in a GitHub pull request, then `main` or `develop`), or else the last commit.
+**Which files.** Files you name, or else the working-tree changes (`git diff HEAD` plus staged), or else what the branch adds to its base (`origin/$GITHUB_BASE_REF` in a GitHub pull request, then `main` or `develop`), or else the last commit. Untracked files are never picked up on their own: `git add` a new file or name it (`aegis check app.py`).
 
 **Layer 1** runs without a network or a model:
 
@@ -142,7 +142,7 @@ Use a reviewer from a different vendor than the agent that wrote the change. A m
 
 **The git hook.** `aegis init` installs a pre-commit hook (`aegis hook install|status|uninstall` manage it) that runs `aegis check --hook`: Layer 1 only, never a model. `git commit --no-verify` skips it, which is why CI matters.
 
-**CI.** On GitHub Actions, check out with `fetch-depth: 0` so the base branch is there, then run `pip install aegis-guardrails && aegis check` (the [README](../README.md) has a complete snippet). CI checks the pull request against the rules in the pull request itself, so review changes under `.aegis/rules/` like code; protecting the reviewed rules from the change they judge is v4.3 work.
+**CI.** On GitHub Actions, check out with `fetch-depth: 0` so the base branch is there, then run `pip install aegis-guardrails && aegis check` (the [README](../README.md) has a complete snippet). CI checks the pull request against the rules in the pull request itself: a pull request that deletes a rule and breaks it passes. Review changes under `.aegis/` and to the CI workflow like code; protecting the reviewed rules from the change they judge is v4.3 work.
 
 ## 6. Evidence: the ledger and `aegis sync`
 
