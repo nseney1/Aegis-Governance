@@ -7,7 +7,7 @@ import re
 from conftest import REPO_ROOT, read
 
 
-def test_packaging_excludes_private_state_and_includes_rules_package():
+def test_packaging_excludes_private_state_and_ships_rules_inside_aegis_core():
     manifest = read(os.path.join(REPO_ROOT, "MANIFEST.in"))
     assert "recursive-include .soma" not in manifest
     assert "prune .aegis" in manifest
@@ -15,10 +15,11 @@ def test_packaging_excludes_private_state_and_includes_rules_package():
     assert ".aegis/dreams" not in manifest
 
     pyproject = read(os.path.join(REPO_ROOT, "pyproject.toml"))
-    assert '"rules*"' in pyproject or '"genome*"' in pyproject
-    assert re.search(r"(?m)^(rules|genome)\s*=\s*\[", pyproject)
+    # No top-level `rules`/`skills` package (release review): the sources map into aegis_core.
+    assert '"rules*"' not in pyproject and '"skills*"' not in pyproject
+    assert not re.search(r"(?m)^(rules|skills|genome)\s*=\s*\[", pyproject)
+    assert re.search(r'(?m)^"aegis_core\._data\.rules"\s*=\s*"rules"$', pyproject)
     assert '"*.md"' in pyproject and '".oracles/*.md"' in pyproject
-    assert os.path.isfile(os.path.join(REPO_ROOT, "rules", "__init__.py")) or os.path.isfile(os.path.join(REPO_ROOT, "genome", "__init__.py"))
 
 
 def test_manifest_ships_no_bytecode_and_no_stale_trees():

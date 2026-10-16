@@ -15,7 +15,7 @@ import subprocess
 import pytest
 
 from aegis_cli.cli import _build_parser, main
-from aegis_cli.init import InitCommand, install_rules, packaged_rules, preset_rules, run_init
+from aegis_cli.init import InitCommand, install_rules, packaged_dir, packaged_rules, preset_rules, run_init
 
 STANDARD = {"providence", "destructive-ops", "testing", "cost-optimization", "git-workflow"}
 MINIMAL = {"providence", "destructive-ops"}
@@ -61,6 +61,55 @@ class TestRuleSourceLocator:
         for name, path in found.items():
             assert path.name == f"{name}.md"
             assert path.resolve().parent in {REPO_ROOT / "rules", REPO_ROOT / "rules" / ".oracles"}
+
+    def test_a_top_level_rules_package_on_sys_path_is_never_imported_or_read(self, tmp_path, monkeypatch):
+        """Release review: the wheel shipped a top-level `rules` package, so a repository's
+        own rules/ (first on sys.path under `python -m`) or another distribution's `rules`
+        replaced Aegis's rules, and its __init__.py ran."""
+        import sys
+
+        marker = tmp_path / "PLANTED_RAN"
+        planted = tmp_path / "repo" / "rules"
+        planted.mkdir(parents=True)
+        (planted / "__init__.py").write_text(f"open({str(marker)!r}, 'w').write('x')\n", encoding="utf-8")
+        for name in ("pricing", "providence"):
+            (planted / f"{name}.md").write_text("---\nid: planted\n---\n# planted\n", encoding="utf-8")
+        monkeypatch.syspath_prepend(str(tmp_path / "repo"))
+        monkeypatch.delitem(sys.modules, "rules", raising=False)
+        try:
+            found = packaged_rules()
+            full = {p.stem for p in preset_rules("full")}
+        finally:
+            if str(planted) in str(getattr(sys.modules.get("rules"), "__file__", "")):
+                del sys.modules["rules"]
+        assert set(found) == FULL and full == FULL
+        assert all(planted not in p.parents for p in found.values())
+        assert not marker.exists()
+
+    def test_the_shipped_data_lives_under_aegis_core_in_a_wheel_and_in_the_checkout_here(self, tmp_path):
+        """A wheel maps rules/ and skills/ into aegis_core/_data/ (pyproject package-dir);
+        a source checkout keeps them at its root, next to pyproject.toml."""
+        site = tmp_path / "site" / "aegis_core"
+        (site / "_data" / "rules").mkdir(parents=True)
+        assert packaged_dir("rules", base=site) == site / "_data" / "rules"
+        checkout = tmp_path / "checkout"
+        (checkout / "aegis_core").mkdir(parents=True)
+        (checkout / "rules").mkdir()
+        (checkout / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+        assert packaged_dir("rules", base=checkout / "aegis_core") == checkout / "rules"
+        # site-packages has no pyproject.toml: a sibling rules/ there is another distribution's.
+        other = tmp_path / "other-site"
+        (other / "aegis_core").mkdir(parents=True)
+        (other / "rules").mkdir()
+        assert packaged_dir("rules", base=other / "aegis_core") == other / "aegis_core" / "_data" / "rules"
+        assert packaged_dir("skills") in {REPO_ROOT / "skills", REPO_ROOT / "aegis_core" / "_data" / "skills"}
+
+    def test_a_broken_install_without_the_data_is_reported_not_guessed(self, tmp_path, monkeypatch):
+        import aegis_cli.init as init_mod
+
+        monkeypatch.setattr(init_mod, "packaged_dir", lambda name, base=None: tmp_path / "missing" / name)
+        with pytest.raises(ValueError, match="not found; reinstall aegis-guardrails"):
+            preset_rules("minimal")
 
     @pytest.mark.parametrize("preset, names", [("minimal", MINIMAL), ("standard", STANDARD), ("full", FULL)])
     def test_presets_resolve_through_the_locator(self, preset, names):

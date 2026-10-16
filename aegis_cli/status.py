@@ -19,8 +19,15 @@ from aegis_core.yaml_engine.frontmatter import parse_rule_file
 
 
 def _repo_root(args: argparse.Namespace) -> Path:
-    """Find the Soma install root (where genome/ lives)."""
+    """The workspace, or else the directory aegis_cli is installed in."""
     return resolve_root(args, default=Path(__file__).resolve().parent.parent)
+
+
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return a.is_dir() and b.is_dir() and a.resolve() == b.resolve()
+    except OSError:
+        return False
 
 
 def _project_root(args: argparse.Namespace) -> Path:
@@ -91,19 +98,14 @@ def run_status(args: argparse.Namespace) -> int:
     root = _repo_root(args)
     proj = _project_root(args)
 
-    # 1. Core rules: the shipped rules of an Aegis checkout (its rules/ and rules/.oracles/).
-    #    v4 installs no rule files into host directories (host-matrix spec §3.2).
+    # 1. Core rules: the shipped rules, listed only in the Aegis checkout they ship from.
+    #    v4 installs no rule files into host directories (host-matrix spec §3.2), and a
+    #    workspace's own rules/ is its project's, never Aegis's.
+    from aegis_cli.init import packaged_dir, packaged_rules
+
     core_files: list[Path] = []
-    genome_dir = (root / "rules") if (root / "rules").is_dir() else (root / "genome")
-    if genome_dir.is_dir():
-        for p in sorted(genome_dir.glob("*.md")):
-            if p.is_file() and p.name.lower() != "readme.md":
-                core_files.append(p)
-    oracles_dir = genome_dir / ".oracles"
-    if oracles_dir.is_dir():
-        for p in sorted(oracles_dir.glob("*.md")):
-            if p.is_file() and p.name.lower() != "readme.md":
-                core_files.append(p)
+    if _same_dir(root / "rules", packaged_dir("rules")):
+        core_files = list(packaged_rules().values())
 
     # 2. Workspace rules, through the one loader; fitness from the ledger.
     from aegis_core.fitness import for_rules
