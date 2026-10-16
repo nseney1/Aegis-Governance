@@ -73,8 +73,9 @@ class CommandBackend:
         # this process's stdin, which carries JSON-RPC when Aegis runs under MCP.
         workdir = tempfile.mkdtemp(prefix="aegis-llm-")
         try:
+            # encoding= opens the pipes in text mode; text=True would say it twice.
             proc = subprocess.run(
-                args, executable=executable, input=prompt, capture_output=True, text=True, cwd=workdir,
+                args, executable=executable, input=prompt, capture_output=True, cwd=workdir,
                 encoding="utf-8", errors="replace", timeout=self.timeout, check=False,
             )
         except subprocess.TimeoutExpired:
