@@ -1000,7 +1000,7 @@ class TestActiveStarterRule:
         assert run_init(_args(project)) == 0
         out = capsys.readouterr().out
         assert "Active rule in .aegis/rules/invariants/:" in out
-        assert "✅ no-eval: bans eval() and exec() in **/*.py; aegis check and the pre-commit hook enforce it" in out
+        assert "✅ no-eval: bans eval() and exec() in **/*.py, methods named eval or exec included (df.eval(), model.eval()); aegis check and the pre-commit hook enforce it" in out
         assert "Next: add a rule for your own code with aegis rule create (aegis rule create --help)" in out
 
     def test_none_active_opts_out_and_keeps_the_standard_personas(self, project, capsys):

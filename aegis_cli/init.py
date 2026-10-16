@@ -106,7 +106,7 @@ RULE_PRESETS: Dict[str, Optional[Tuple[str, ...]]] = {
 # workspace: the personas apply to no file until someone sets their target_paths, so
 # without one `aegis check` enforced nothing on day one (v4.1 field report). They are in
 # no persona preset; ``--rules none-active`` leaves them out.
-ACTIVE_STARTERS: Dict[str, str] = {"no-eval": "bans eval() and exec() in **/*.py"}
+ACTIVE_STARTERS: Dict[str, str] = {"no-eval": "bans eval() and exec() in **/*.py, methods named eval or exec included (df.eval(), model.eval())"}
 NO_ACTIVE_PRESETS = ("none-active",)
 ACTIVE_TYPE_DIR = RULE_TYPES[RuleType.INVARIANT].directory
 _ACTIVE_LABEL = f"{RULES_RELDIR}/{ACTIVE_TYPE_DIR}"

@@ -568,3 +568,22 @@ class TestCommandLine:
             uninstall(env.project, "--host", value)
         assert exc.value.code == 2
         assert message in capsys.readouterr().err
+
+
+def test_uninstall_says_host_hooks_stay_until_hook_uninstall(tmp_path, monkeypatch, capsys):
+    """User-scope host hooks live outside the workspace; uninstall must not leave them unmentioned."""
+    from aegis_cli.cli import main
+
+    home = tmp_path / "home"
+    home.mkdir()
+    repo = tmp_path / "repo"
+    (repo / ".aegis" / "rules").mkdir(parents=True)
+    subprocess_run = __import__("subprocess").run
+    subprocess_run(["git", "init", "-q"], cwd=repo, check=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
+    monkeypatch.chdir(repo)
+    assert main(["uninstall", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "aegis hook uninstall --host <host>" in out

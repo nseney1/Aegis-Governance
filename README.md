@@ -47,7 +47,7 @@ If pip stops with `externally-managed-environment` (PEP 668, as many Linux distr
     ✅ git-workflow
     They apply to no file until you set their target_paths (aegis status lists them).
   Active rule in .aegis/rules/invariants/:
-    ✅ no-eval: bans eval() and exec() in **/*.py; aegis check and the pre-commit hook enforce it
+    ✅ no-eval: bans eval() and exec() in **/*.py, methods named eval or exec included (df.eval(), model.eval()); aegis check and the pre-commit hook enforce it
     Next: add a rule for your own code with aegis rule create (aegis rule create --help)
   ✅ AGENTS.md: created
   ✅ ~/.aegis/workspaces.json: added
@@ -56,7 +56,7 @@ If pip stops with `externally-managed-environment` (PEP 668, as many Linux distr
     🪝 Pre-commit hook installed (~/code/my-app/.git/hooks/pre-commit)
 ```
 
-`init` seeds one rule that is active from day one: `.aegis/rules/invariants/no-eval.md` (leave it out with `--rules none-active`). Here is what it looks like, as a template for your own (`aegis rule create` writes one for you):
+`init` seeds one rule that is active from day one: `.aegis/rules/invariants/no-eval.md` (leave it out with `--rules none-active`). It matches by call name, so a method called `eval` or `exec` (pandas `df.eval()`, PyTorch `model.eval()`, SQLModel `session.exec()`) fails the check too; delete the file, or use `none-active`, if your code relies on those. Here is what it looks like, as a template for your own (`aegis rule create` writes one for you):
 
 ```markdown
 ---

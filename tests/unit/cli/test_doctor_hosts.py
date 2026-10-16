@@ -1758,7 +1758,9 @@ def test_the_best_effort_tier_without_host_hooks_is_inactive_and_names_the_insta
     env.all_ok()
     best = tier(env.doctor(), "best_effort")
     assert best["status"] == "inactive" and best["hosts"] == []
-    assert best["detail"] == ("no Aegis PreToolUse hook registered for codex-cli, claude-code, antigravity: "
+    # Antigravity hooks are unavailable on Windows, and Codex's shell form needs a plain path there.
+    hosts_named = "claude-code" if os.name == "nt" else "codex-cli, claude-code, antigravity"
+    assert best["detail"] == (f"no Aegis PreToolUse hook registered for {hosts_named}: "
                               "run aegis hook install --host <host>")
 
 
