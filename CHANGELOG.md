@@ -22,6 +22,10 @@ v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has
 - `aegis rule clean` and `aegis doctor --fix-path` are removed (they rewrote global files and shell rc files). `aegis doctor --fix` removes legacy rule blocks and unedited v3 rule copies; remove edited copies by hand.
 - `aegis hook pre-commit` is replaced by `aegis check --hook`. The agent-side hook phases `pre-invocation`, `governance-monitor`, `immune-init`, `session-close`, `stop` and `post-session` are removed; remove them from your host's hook config. `python -m aegis_cli.hooks` no longer exists. Git hooks installed by v3 are reported as outdated, and `aegis hook install` rewrites them.
 
+**Hosts**
+
+- Gemini CLI is retired: Google refuses the client for individual Code Assist accounts, and Antigravity is the Gemini-family host. `aegis init --host gemini-cli` and `aegis uninstall --host gemini-cli` exit with status 2 and print `gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist accounts; use --host antigravity.` The MCP server still recognizes a connecting Gemini CLI client by name; no Gemini CLI registration, hooks or extension are planned.
+
 **Flags**
 
 - Global flags are `--json`, `--plain` and `--workspace`. `--plumbing`, `--internal`, `-q`, `-v`, `--no-emoji` and the global `--format` are removed.
@@ -56,7 +60,7 @@ v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has
 
 **Layer 2 (`aegis check --full`)**
 
-- One backend: the command given with `--llm-cmd` or `AEGIS_LLM_CMD`, for example `claude -p`, `codex exec` or `gemini -p`. It runs as an argument list (no shell) in an empty temporary directory, gets the prompt on stdin and returns its reply on stdout. It is never read from repository files. The Gemini, Anthropic and OpenAI SDK wrappers, the keyring, the in-band charge sheet and MCP sampling are removed.
+- One backend: the command given with `--llm-cmd` or `AEGIS_LLM_CMD`, for example `claude -p` or `codex exec`. It runs as an argument list (no shell) in an empty temporary directory, gets the prompt on stdin and returns its reply on stdout. It is never read from repository files. The Gemini, Anthropic and OpenAI SDK wrappers, the keyring, the in-band charge sheet and MCP sampling are removed.
 - `--full`, `--plan` or `--plan-file` without a backend exits 2 instead of skipping Layer 2.
 
 **Output and Python API**

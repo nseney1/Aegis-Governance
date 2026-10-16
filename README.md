@@ -1,6 +1,6 @@
 # Aegis Guardrails: rules and an MCP server that keep AI coding agents on track
 
-Aegis keeps Claude Code, Codex CLI, Antigravity and Gemini CLI (manual registration until v4.1) on your project's rules. It gives each agent the rules for the files it is about to edit, then checks the change before commit and in CI.
+Aegis keeps Claude Code, Codex CLI and Antigravity on your project's rules. It gives each agent the rules for the files it is about to edit, then checks the change before commit and in CI.
 
 [![PyPI](https://img.shields.io/pypi/v/aegis-guardrails)](https://pypi.org/project/aegis-guardrails/)
 [![Python](https://img.shields.io/pypi/pyversions/aegis-guardrails)](https://pypi.org/project/aegis-guardrails/)
@@ -99,7 +99,7 @@ Commit `.aegis/` and `AGENTS.md`; the local ledger in `.aegis/state/` is git-ign
 | **Claude Code** (`claude-code`) | `claude mcp add --scope user aegis` | `AGENTS.md`, but only when there is no `CLAUDE.md`. If the repo has one, `init` adds an `@AGENTS.md` block to it; it never creates one. |
 | **Codex CLI** (`codex-cli`) | `codex mcp add aegis` | `AGENTS.md` (Codex truncates it past 32 KiB) |
 | **Antigravity** (`antigravity`: app, IDE and `agy`) | an `aegis` entry in `~/.gemini/config/mcp_config.json` | `AGENTS.md` (24,000 bytes per file). Antigravity tells the server no workspace, so run `aegis init` once per repo on each machine. |
-| **Gemini CLI** | Not yet: `--host gemini-cli` lands in v4.1. Until then, register `aegis-mcp` with `gemini mcp add` yourself. | `GEMINI.md`, unless its `context.fileName` setting lists `AGENTS.md` |
+| **Gemini CLI** | Retired: Google refuses the client for individual Code Assist accounts, and Antigravity is the Gemini-family host. `aegis init --host gemini-cli` exits with status 2 and points you to `--host antigravity`. | — |
 
 On every host the enforcement is the same today: advisory rules through the bootstrap and `aegis_scan`, the git pre-commit hook as the local floor, and CI as the authority. Per-host agent hooks (Claude Code's can block an edit; Codex's fail open) are planned for v4.1. Claude Desktop chat sessions are recognized but not registered. Every host runs `aegis-mcp` with your own user's permissions.
 
