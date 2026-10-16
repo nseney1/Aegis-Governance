@@ -7,6 +7,10 @@ registrations. It never deletes ``.aegis/`` (rules, config, ledger): those are t
 repository's. Hosts default to the ones this workspace was registered with; a host
 another registered workspace still lists keeps its registration unless named with
 ``--host``. Every step is checked first: a refusal changes nothing.
+
+A CLAUDE.md that is a link is never written through: it has nothing of Aegis to remove
+unless the file it points to holds the ``@AGENTS.md`` block, which is then refused. An
+AGENTS.md that CLAUDE.md links to is emptied, not deleted, so the link does not dangle.
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from aegis_cli.init import (
     RemovedOption,
     Step,
     Report,
+    report_partial,
     hook_refusal,
 )
 from aegis_cli.install_hosts import (
@@ -30,6 +35,7 @@ from aegis_cli.install_hosts import (
     InstallError,
     display_command,
     find_workspace,
+    has_block_marker,
     parse_hosts,
     read_registry,
     remove_managed_block,
@@ -65,13 +71,33 @@ def _recorded_hosts(root: Path, home: Path, report: Report) -> List[str]:
         return []
 
 
+def _links_to(link: Path, target: Path) -> bool:
+    return link.is_symlink() and (os.path.normcase(os.path.realpath(link))
+                                  == os.path.normcase(os.path.realpath(target)))
+
+
+def _claude_shim(root: Path, force: bool, dry_run: bool) -> Step:
+    claude = root / CLAUDE_FILE
+    if not claude.is_symlink():
+        return Step(CLAUDE_FILE, remove_managed_block(claude, CLAUDE_SHIM_ID, force=force, dry_run=dry_run))
+    if has_block_marker(claude, CLAUDE_SHIM_ID):
+        target = os.path.realpath(claude)
+        raise InstallError(f"{claude}: is a symlink to {target}, which holds the Aegis {CLAUDE_SHIM_ID!r} block; "
+                           f"Aegis never writes through a link. Remove the block from {target} yourself, then re-run.")
+    return Step(CLAUDE_FILE, "absent", "a symlink with nothing of Aegis in it")
+
+
 def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, dry_run: bool,
-           report: Report) -> List[Step]:
-    """Every uninstall step; with ``dry_run`` only check and plan. Raises InstallError."""
+           report: Report, actions: Optional[List[Step]] = None) -> List[Step]:
+    """Every uninstall step; with ``dry_run`` only check and plan. Raises InstallError.
+
+    Each finished step is appended to ``actions`` as it completes, so a run that fails
+    part way still says what it had already removed.
+    """
     from aegis_cli.hooks import uninstall_hook
     from aegis_core.bootstrap import BOOTSTRAP_ID
 
-    actions: List[Step] = []
+    actions = [] if actions is None else actions
     hosts = explicit if explicit is not None else _recorded_hosts(root, home, report)
 
     refusal = hook_refusal(root, removing=True)
@@ -79,10 +105,11 @@ def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, d
         raise InstallError(f"pre-commit hook: {refusal}.")
     removed = uninstall_hook(project_root=root, dry_run=dry_run)
     actions.append(Step("pre-commit hook", "removed" if removed else "absent"))
+    agents = root / AGENTS_FILE
     actions.append(Step(AGENTS_FILE, remove_managed_block(
-        root / AGENTS_FILE, BOOTSTRAP_ID, force=force, dry_run=dry_run, delete_if_empty=True)))
-    actions.append(Step(CLAUDE_FILE, remove_managed_block(
-        root / CLAUDE_FILE, CLAUDE_SHIM_ID, force=force, dry_run=dry_run)))
+        agents, BOOTSTRAP_ID, force=force, dry_run=dry_run,
+        delete_if_empty=not _links_to(root / CLAUDE_FILE, agents))))
+    actions.append(_claude_shim(root, force, dry_run))
 
     status, remaining = unregister_workspace(home, root, dry_run=dry_run)
     actions.append(Step(REGISTRY_LABEL, status))
@@ -126,12 +153,14 @@ def run_uninstall(args: argparse.Namespace) -> int:
                       ("pre-commit hook", AGENTS_FILE, CLAUDE_FILE, REGISTRY_LABEL)]
     actions = plan
     if not dry_run:
+        actions = []
         try:
-            actions = _steps(root, home, explicit, force, False, report)
-        except InstallError as exc:
-            # Only a file that changed between the check and the write gets here.
-            report.error(str(exc))
-            report.finish("failed", scope, False, [])
+            _steps(root, home, explicit, force, False, report, actions)
+        except (InstallError, OSError) as exc:
+            # The check pass refuses everything it can see, so only a change between the
+            # check and the write (a file edited meanwhile, a disk error) gets here.
+            report_partial(report, exc, actions, "changed")
+            report.finish("failed", scope, False, actions)
             return 1
 
     for action in actions:

@@ -9,7 +9,9 @@ registration of each selected host and the workspace entry in ``~/.aegis/workspa
 
 Host detection only proposes: hosts are registered only when named with ``--host``
 (``--host auto`` takes the detected ones). Every step is checked before anything is
-written, so a file Aegis cannot change safely stops init with nothing written.
+written, so a file Aegis cannot change safely stops init with nothing written. A
+``CLAUDE.md`` that is a link is never written through: a link to ``AGENTS.md`` already
+gives Claude Code the bootstrap, and a link elsewhere is left alone with a warning.
 """
 from __future__ import annotations
 
@@ -66,12 +68,14 @@ __all__ = [
     "install_rules",
     "packaged_rules",
     "preset_rules",
+    "report_partial",
     "run_init",
     "seed_workspace_rules",
 ]
 
 CONFIG_LABEL = f"{AEGIS_DIRNAME}/config.json"
 GITIGNORE_LABEL = f"{AEGIS_DIRNAME}/.gitignore"
+SCAFFOLD_LABEL = f"{AEGIS_DIRNAME}/"
 AGENTS_FILE = "AGENTS.md"
 CLAUDE_FILE = "CLAUDE.md"
 CLAUDE_SHIM_ID = "agents-import"
@@ -228,33 +232,59 @@ def _within(path: Path, boundary: Path) -> bool:
         return False
 
 
+def _unwritable(directory: Path) -> Optional[str]:
+    """Why no file can be created in ``directory`` (made with its parents when missing,
+    so the nearest directory that exists decides); None when one can."""
+    existing = Path(directory)
+    while not os.path.lexists(existing) and existing.parent != existing:
+        existing = existing.parent
+    if existing.is_dir() and os.access(existing, os.W_OK | os.X_OK):
+        return None
+    return f"{existing} is not a writable directory"
+
+
 def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
     """Why the pre-commit hook cannot be installed (or, ``removing``, uninstalled) safely.
 
     install_hook and uninstall_hook print a refusal and return False, which a caller
-    cannot tell from "not a git repository", or warn and report success; and their dry
-    runs never look at the file. So init's and uninstall's check passes ask here first.
-    None when the hook can be changed, or when there is no git repository.
+    cannot tell from "not a git repository", or warn and report success; their dry runs
+    never look at the file; and a hooks directory they cannot write fails them with a raw
+    OSError. So init's and uninstall's check passes ask here first. None when the hook
+    can be changed, or when there is no git repository.
+
+    A hooks directory outside the repository and its git directories (``core.hooksPath``
+    set to a team or dotfiles directory, often globally) holds a hook every repository
+    using it runs; install_hook would append the Aegis block there, pinned to this
+    machine's aegis, so it is refused here and left to an explicit ``aegis hook install``.
     """
-    from aegis_core.workspace.hooks import resolve_git_hooks_dir
+    from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
     from aegis_cli.hooks.management import _replace_hook_block
 
     root = Path(root).resolve()
     hooks_dir = resolve_git_hooks_dir(root)
     if not hooks_dir:
         return None
-    hook = Path(hooks_dir) / "pre-commit"
-    target, outside = hook, False
+    hooks_dir = Path(hooks_dir)
+    hook = hooks_dir / "pre-commit"
+    repository = (root, *(d for d in _find_git_dirs(root) if d is not None))
+    shared = not any(_within(hooks_dir.resolve(), b) for b in repository)
+    if shared and not removing:
+        return (f"the hooks directory {hooks_dir} (core.hooksPath) is outside this repository, so its pre-commit "
+                "hook may run in other repositories too; Aegis does not add its block there. To add it anyway, "
+                "run: aegis hook install")
+    verb = "removed" if removing else "installed"
+    target, outside = hook, shared
     if hook.is_symlink():
         target = hook.resolve()
         if not target.exists():
             return None if removing else f"{hook} is a dangling symlink; to replace it, run: aegis hook install --force"
-        outside = not any(_within(target, b) for b in (root, Path(hooks_dir)))
+        outside = shared or not any(_within(target, b) for b in (root, hooks_dir))
         if outside and not removing:
             return (f"{hook} is a symlink to {target}, outside the repository; Aegis does not write through it. "
                     "To add the hook to that file anyway, run: aegis hook install --force")
     if not target.exists():
-        return None
+        reason = None if removing else _unwritable(hooks_dir)
+        return f"{reason}, so the hook cannot be {verb}" if reason else None
     try:
         content = target.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -262,14 +292,21 @@ def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
     except OSError as exc:
         return f"{target} cannot be read ({exc.strerror or exc})"
     if _AEGIS_HOOK_START not in content and _SOMA_HOOK_START not in content:
-        return None
+        reason = None if removing else _unwritable(target.parent)
+        return f"{reason}, so the hook cannot be {verb}" if reason else None
+    if shared:
+        return (f"{hook} holds the Aegis hook, but its hooks directory {hooks_dir} (core.hooksPath) is outside this "
+                "repository and may serve other repositories; Aegis leaves it as it is. To remove the block anyway, "
+                "run: aegis hook uninstall")
     if outside:
         return (f"{hook} is a symlink to {target}, outside the repository, and that file holds the Aegis hook; "
                 "Aegis does not write through it. Remove the block from that file yourself, or run: "
                 "aegis hook uninstall --force")
     if _replace_hook_block(content, "") is None:
         return f"{target} has an unterminated Aegis hook block; fix or remove it"
-    return None
+    # Removing may delete the hook file (and the file a link in the repository points to).
+    reason = next(filter(None, (_unwritable(d) for d in (hook.parent, target.parent))), None)
+    return f"{reason}, so the hook cannot be {verb}" if reason else None
 
 
 # ── The run ──────────────────────────────────────────────────────────────────
@@ -313,6 +350,7 @@ class Report:
     def error(self, line: str) -> None:
         self.errors.append(line)
         if not self.json_mode:
+            sys.stdout.flush()  # keep the order of stdout and stderr lines in a pipe
             print(f"  ❌ {line}", file=sys.stderr)
 
     def finish(self, status: str, scope: Dict[str, Any], dry_run: bool, actions: Sequence[Step]) -> None:
@@ -393,31 +431,96 @@ class _Context:
     report: Report
 
 
-def _steps(ctx: _Context, dry_run: bool) -> List[Step]:
-    """Run every init step; with ``dry_run`` only check and plan. Raises InstallError."""
+def _real_key(path: Path) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _check_repo_dirs(root: Path, dirs: Sequence[Path]) -> None:
+    """Refuse, before the first write, a directory under .aegis/ that init writes into
+    but cannot use: a link (it could point anywhere), a file, a junction resolving out of
+    the workspace, or (when it is still to be made) no writable directory to make it in."""
+    inside = _real_key(root) + os.sep
+    for directory in dirs:
+        if directory.is_symlink():
+            raise InstallError(f"{directory}: is a symlink; Aegis keeps .aegis/ only as real directories inside "
+                               "the workspace. Replace the link, then re-run.")
+        if not os.path.lexists(directory):
+            _need_writable(directory)
+        elif not directory.is_dir():
+            raise InstallError(f"{directory}: is not a directory; left unchanged. Move it aside, then re-run.")
+        elif not _real_key(directory).startswith(inside):
+            raise InstallError(f"{directory}: resolves outside the workspace; Aegis keeps .aegis/ only inside it. "
+                               "Replace it with a real directory, then re-run.")
+
+
+def _need_writable(directory: Path) -> None:
+    reason = _unwritable(directory)
+    if reason:
+        where = "" if os.path.lexists(directory) else f"{directory} cannot be created: "
+        raise InstallError(f"{where}{reason}; nothing can be written there. Fix its permissions, then re-run.")
+
+
+def _claude_shim(ctx: _Context, dry_run: bool) -> Step:
+    """The ``@AGENTS.md`` block in an existing CLAUDE.md; a link is never written through."""
+    claude, agents = ctx.root / CLAUDE_FILE, ctx.root / AGENTS_FILE
+    if not claude.is_symlink():
+        return Step(CLAUDE_FILE, write_managed_block(
+            claude, CLAUDE_SHIM_ID, CLAUDE_SHIM_TEXT, force=ctx.force, create=False, dry_run=dry_run))
+    if _real_key(claude) == _real_key(agents):
+        return Step(CLAUDE_FILE, "linked", "a link to AGENTS.md, so Claude Code reads the bootstrap as it is")
+    ctx.report.warn(f"{claude} is a symlink to {os.path.realpath(claude)}; Aegis never writes through a link, so "
+                    "it was left as it is. For Claude Code to read the Aegis bootstrap, add an @AGENTS.md import "
+                    "to that file, or make CLAUDE.md a link to AGENTS.md.")
+    return Step(CLAUDE_FILE, "skipped", "a symlink, never written through")
+
+
+def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -> List[Step]:
+    """Run every init step; with ``dry_run`` only check and plan. Raises InstallError.
+
+    Each finished step is appended to ``actions`` as it completes, so a run that fails
+    part way still says what it had already written.
+    """
     from aegis_core.ast.detect import detect_project_languages, provision_ast_driver_slots
     from aegis_core.bootstrap import BOOTSTRAP_ID, bootstrap_text
     from aegis_core.errors import PathTraversalError, WorkspaceBareRepoError
     from aegis_core.workspace.hooks import resolve_git_hooks_dir
+    from aegis_core.workspace.layout import WorkspaceLayout
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
     report, root = ctx.report, ctx.root
-    actions: List[Step] = []
+    actions = [] if actions is None else actions
+    layout = WorkspaceLayout(root)
+    personas = layout.rules_dir / SEED_TYPE_DIR
     try:
-        ctx.ws.scaffold(minimal=(ctx.preset == "minimal"), dry_run=dry_run)
+        planned = ctx.ws.scaffold(minimal=(ctx.preset == "minimal"), dry_run=True)
+        missing = [d for d in planned if not os.path.lexists(d)]
+        if dry_run:
+            # The real run creates these directories first, so only this pass can see them.
+            _check_repo_dirs(root, [layout.aegis_dir, layout.rules_dir, *planned, personas])
+            _need_writable(layout.state_dir)  # the workspace lock lives there
+        else:
+            ctx.ws.scaffold(minimal=(ctx.preset == "minimal"), dry_run=False)
     except WorkspaceBareRepoError as exc:
         raise InstallError(str(exc)) from exc
+    if missing:
+        actions.append(Step(SCAFFOLD_LABEL, "created", ", ".join(d.relative_to(root).as_posix() for d in missing)))
     actions.append(_config_hosts(root, ctx.selected, dry_run, report))
+    if dry_run and actions[-1].result in ("created", "updated"):
+        _need_writable(layout.aegis_dir)
 
     gitignore = ensure_runtime_gitignore(ctx.ws.aegis_dir, dry_run=dry_run)
     if gitignore == "symlink":
         report.warn(".aegis/.gitignore is a symlink; not modified. Add Aegis runtime state to it yourself.")
+    elif gitignore == "dry-run":
+        _need_writable(layout.aegis_dir)
     actions.append(Step(GITIGNORE_LABEL, gitignore))
 
     try:
         seeded, present = seed_workspace_rules(root, ctx.preset, dry_run=dry_run)
     except ValueError as exc:
         raise InstallError(str(exc)) from exc
+    if dry_run and seeded:
+        _need_writable(personas)
     actions.append(Step(f"{RULES_RELDIR}/{SEED_TYPE_DIR}", "seeded" if seeded else "unchanged",
                            f"preset {ctx.preset}: {', '.join(seeded) or 'nothing new'}",
                            names=seeded, kept=present))
@@ -432,8 +535,7 @@ def _steps(ctx: _Context, dry_run: bool) -> List[Step]:
 
     actions.append(Step(AGENTS_FILE, write_managed_block(
         root / AGENTS_FILE, BOOTSTRAP_ID, bootstrap_text(), force=ctx.force, dry_run=dry_run)))
-    actions.append(Step(CLAUDE_FILE, write_managed_block(
-        root / CLAUDE_FILE, CLAUDE_SHIM_ID, CLAUDE_SHIM_TEXT, force=ctx.force, create=False, dry_run=dry_run)))
+    actions.append(_claude_shim(ctx, dry_run))
 
     if not ctx.no_hooks:
         refusal = hook_refusal(root)
@@ -452,7 +554,10 @@ def _steps(ctx: _Context, dry_run: bool) -> List[Step]:
     return actions
 
 
-_ICONS = {"failed": "❌", "manual": "👉", "kept": "⚠️ "}
+_ICONS = {"failed": "❌", "manual": "👉", "kept": "⚠️ ", "skipped": "⚠️ "}
+# Results that changed nothing on disk (what a failed run reports as already written).
+_NO_CHANGE = {"unchanged", "absent", "none", "kept", "skipped", "linked", "would_run", "manual", "failed",
+              "dry-run", "skipped (not a git repository)"}
 
 
 def _print_actions(report: Report, actions: Sequence[Step], dry_run: bool, preset: str) -> None:
@@ -473,8 +578,8 @@ def _print_actions(report: Report, actions: Sequence[Step], dry_run: bool, prese
             for ext in action.detail.split(", ") if action.detail else []:
                 report.say(f"    ✨ {verb} AST driver (.{ext}): packaged {ext} driver")
             continue
-        if action.target == "pre-commit hook":
-            continue  # printed by _report_hook
+        if action.target in ("pre-commit hook", SCAFFOLD_LABEL):
+            continue  # the hook is printed by _report_hook; the directories are in JSON only
         icon = _ICONS.get(action.result, "✅")
         if action.result == "manual":
             report.say(f"  {icon} {action.target}: {action.detail}; run it yourself:")
@@ -485,6 +590,20 @@ def _print_actions(report: Report, actions: Sequence[Step], dry_run: bool, prese
         else:
             detail = f" ({action.detail})" if action.detail else ""
             report.say(f"  {icon} {action.target}: {action.result}{detail}")
+
+
+def report_partial(report: Report, exc: Exception, actions: Sequence[Step], done: str) -> None:
+    """Report a failure in the middle of a real run with what it had already changed."""
+    if isinstance(exc, OSError):
+        where = f"{exc.filename}: " if exc.filename else ""
+        report.error(f"{where}{exc.strerror or exc}; stopped there.")
+    else:
+        report.error(str(exc))
+    changed = [a.target for a in actions if a.result not in _NO_CHANGE]
+    if changed:
+        report.error(f"Already {done}: {', '.join(changed)}. Fix the cause, then re-run (it keeps what is there).")
+    else:
+        report.error(f"Nothing was {done}.")
 
 
 def run_init(args: argparse.Namespace) -> int:
@@ -568,21 +687,32 @@ def run_init(args: argparse.Namespace) -> int:
         _print_actions(report, plan, True, preset)
         try:
             answer = input("  Proceed? [Y/n] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            answer = "n"
+        except EOFError:
+            # Not a decline: stdin is closed (a script that forgot --yes) and nothing was done.
             report.say()
+            report.error("no answer to the prompt (end of input); nothing was written. "
+                         "Re-run with --yes to skip the prompt.")
+            report.finish("aborted", scope, False, plan)
+            return 1
+        except KeyboardInterrupt:
+            report.say()
+            report.say("  Aborted.")
+            report.finish("aborted", scope, False, plan)
+            return 130
         if answer and answer not in ("y", "yes"):
             report.say("  Aborted.")
             report.finish("aborted", scope, False, plan)
             return 0
         report.say()
 
+    actions: List[Step] = []
     try:
-        actions = _steps(ctx, dry_run=False)
-    except InstallError as exc:
-        # Only a file that changed between the check and the write gets here.
-        report.error(str(exc))
-        report.finish("failed", scope, False, [])
+        _steps(ctx, dry_run=False, actions=actions)
+    except (InstallError, OSError) as exc:
+        # The check pass refuses everything it can see, so only a change between the check
+        # and the write (a file edited meanwhile, a disk error) gets here.
+        report_partial(report, exc, actions, "written")
+        report.finish("failed", scope, False, actions)
         return 1
     _print_actions(report, actions, False, preset)
     _report_hook(report, root, actions)

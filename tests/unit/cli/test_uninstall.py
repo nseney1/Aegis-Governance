@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -245,6 +246,38 @@ class TestRefusalsTheCheckPassMustSee:
         finally:
             agents.chmod(0o644)
 
+    def test_a_write_error_after_the_check_names_what_was_already_changed(self, env, capsys, monkeypatch):
+        import aegis_cli.uninstall as uninstall_mod
+
+        init(env, env.project, "codex-cli")
+        real = uninstall_mod.unregister_workspace
+
+        def disk_error(home, root, *, dry_run=False):
+            if dry_run:
+                return real(home, root, dry_run=True)
+            raise PermissionError(13, "Permission denied", str(env.home / ".aegis" / "workspaces.json"))
+
+        monkeypatch.setattr(uninstall_mod, "unregister_workspace", disk_error)
+        capsys.readouterr()
+        assert uninstall(env.project) == 1
+        err = capsys.readouterr().err
+        assert "workspaces.json: Permission denied" in err and "Already changed: AGENTS.md" in err
+
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX directory permissions as a non-root user")
+    def test_a_read_only_hooks_directory_refuses_before_anything_changes(self, env, capsys):
+        init(env, env.project, "antigravity")
+        hook = self._hooked(env)
+        hook.parent.chmod(0o555)
+        try:
+            before = snapshot(env.project, env.home)
+            assert uninstall(env.project) == 1
+            assert snapshot(env.project, env.home) == before
+            err = capsys.readouterr().err
+            assert "not a writable directory" in err and "Nothing was changed." in err
+        finally:
+            hook.parent.chmod(0o755)
+
     def test_aegis_hook_behind_a_link_outside_the_repository_refuses_everything(self, env, tmp_path, capsys):
         init(env, env.project, "antigravity")
         outside = tmp_path / "dotfiles" / "pre-commit"
@@ -272,6 +305,94 @@ class TestRefusalsTheCheckPassMustSee:
         assert uninstall(env.project) == 0
         assert outside.read_text(encoding="utf-8") == "#!/bin/sh\necho mine\n"
         assert (hooks / "pre-commit").is_symlink()
+
+
+class TestLinkedClaudeMd:
+    """A CLAUDE.md that is a link (usually to AGENTS.md) must not block uninstall: there is
+    nothing of Aegis to remove from it unless the file it points to holds the import block."""
+
+    def test_a_link_to_agents_md_is_kept_and_agents_md_is_not_deleted(self, env, capsys):
+        init(env, env.project, "codex-cli")
+        claude = env.project / "CLAUDE.md"
+        symlink_or_skip("AGENTS.md", claude)
+        assert uninstall(env.project) == 0
+        assert os.readlink(claude) == "AGENTS.md"
+        # AGENTS.md held only the Aegis block, but deleting it would leave CLAUDE.md dangling.
+        assert (env.project / "AGENTS.md").read_bytes() == b""
+        assert "Nothing was changed." not in capsys.readouterr().err
+
+    def test_user_text_in_a_linked_agents_md_is_kept(self, env):
+        agents = env.project / "AGENTS.md"
+        agents.write_text("# Ours\n", encoding="utf-8")
+        init(env, env.project, "codex-cli")
+        symlink_or_skip("AGENTS.md", env.project / "CLAUDE.md")
+        assert uninstall(env.project) == 0
+        assert agents.read_text(encoding="utf-8") == "# Ours\n"
+
+    def test_a_link_to_a_file_without_the_block_is_nothing_to_remove(self, env, tmp_path):
+        init(env, env.project, "codex-cli")
+        outside = tmp_path / "shared.md"
+        outside.write_bytes(b"# shared\n")
+        symlink_or_skip(outside, env.project / "CLAUDE.md")
+        assert uninstall(env.project) == 0
+        assert outside.read_bytes() == b"# shared\n"
+        assert (env.project / "CLAUDE.md").is_symlink()
+        assert not (env.project / "AGENTS.md").exists()
+
+    def test_a_link_to_a_file_holding_the_block_refuses_everything(self, env, tmp_path, capsys):
+        claude = env.project / "CLAUDE.md"
+        claude.write_text("# Claude\n", encoding="utf-8")
+        init(env, env.project, "codex-cli")
+        outside = tmp_path / "shared.md"
+        claude.replace(outside)
+        symlink_or_skip(outside, claude)
+        env.runner.calls.clear()
+        before, outside_before = snapshot(env.project, env.home), outside.read_bytes()
+        assert uninstall(env.project) == 1
+        assert snapshot(env.project, env.home) == before
+        assert outside.read_bytes() == outside_before
+        assert env.runner.calls == []
+        err = capsys.readouterr().err
+        assert str(outside) in err and "never writes through a link" in err and "Nothing was changed." in err
+
+
+GIT = shutil.which("git")
+
+
+@pytest.mark.skipif(GIT is None, reason="needs git")
+class TestSharedHooksDirectory:
+    """core.hooksPath outside the repository: its pre-commit hook may serve other
+    repositories, so uninstall does not edit it; with no Aegis block there is nothing to do."""
+
+    @pytest.fixture
+    def shared(self, env, monkeypatch):
+        monkeypatch.setenv("PATH", os.pathsep.join([str(env.bin), os.path.dirname(GIT)]))
+        subprocess.run([GIT, "init", "-q", str(env.project)], check=True, capture_output=True)
+        shared = env.tmp / "team-hooks"
+        shared.mkdir()
+        subprocess.run([GIT, "-C", str(env.project), "config", "core.hooksPath", str(shared)],
+                       check=True, capture_output=True)
+        init(env, env.project, "codex-cli")
+        env.runner.calls.clear()
+        return shared
+
+    def test_an_aegis_block_there_refuses_everything(self, env, shared, capsys):
+        hook = shared / "pre-commit"
+        hook.write_text("#!/bin/sh\necho team\n\n" + generate_hook_block("/usr/bin/python3"), encoding="utf-8")
+        before, hook_before = snapshot(env.project, env.home), hook.read_bytes()
+        assert uninstall(env.project) == 1
+        assert snapshot(env.project, env.home) == before
+        assert hook.read_bytes() == hook_before
+        assert env.runner.calls == []
+        err = capsys.readouterr().err
+        assert "outside this repository" in err and "aegis hook uninstall" in err and "Nothing was changed." in err
+
+    def test_without_an_aegis_block_the_rest_is_uninstalled(self, env, shared):
+        (shared / "pre-commit").write_bytes(b"#!/bin/sh\necho team\n")
+        assert uninstall(env.project) == 0
+        assert (shared / "pre-commit").read_bytes() == b"#!/bin/sh\necho team\n"
+        assert not (env.project / "AGENTS.md").exists()
+        assert env.runner.calls[0] == ["codex", "mcp", "remove", "aegis"]
 
 
 class TestCommandLine:

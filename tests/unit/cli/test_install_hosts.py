@@ -532,15 +532,15 @@ class _Runner:
 
 
 class TestRegisterHost:
-    def test_native_host_removes_then_adds_with_the_resolved_binary(self, tmp_path, monkeypatch):
+    def test_native_host_removes_then_adds_with_the_binary_found_on_path(self, tmp_path, monkeypatch):
         exe = _fake_bin(tmp_path / "bin", "claude")
         runner = _Runner()
         monkeypatch.setattr(ih, "_run_cli", runner)
         action = ih.register_host("claude-code", home=tmp_path, command=["/x/aegis-mcp"], path=str(tmp_path / "bin"))
         assert action.result == "registered"
         assert runner.calls == [
-            [str(exe.resolve()), "mcp", "remove", "--scope", "user", "aegis"],
-            [str(exe.resolve()), "mcp", "add", "--scope", "user", "aegis", "-e", "AEGIS_CLIENT=claude-code",
+            [str(exe), "mcp", "remove", "--scope", "user", "aegis"],
+            [str(exe), "mcp", "add", "--scope", "user", "aegis", "-e", "AEGIS_CLIENT=claude-code",
              "--", "/x/aegis-mcp"],
         ]
 
@@ -581,8 +581,7 @@ class TestRegisterHost:
         monkeypatch.setattr(ih, "_run_cli", runner)
         action = ih.unregister_host("codex-cli", home=tmp_path, path=str(tmp_path / "bin"))
         assert action.result == "removed"
-        assert runner.calls == [[str(exe.resolve()), "mcp", "remove", "aegis"],
-                                [str(exe.resolve()), "mcp", "remove", "soma"]]
+        assert runner.calls == [[str(exe), "mcp", "remove", "aegis"], [str(exe), "mcp", "remove", "soma"]]
 
     def test_unregister_antigravity_edits_only_its_entries(self, tmp_path):
         cfg = tmp_path / ".gemini" / "config" / "mcp_config.json"
@@ -739,6 +738,22 @@ class TestDryRunRefusesWhatTheWriteRefuses:
         assert target.read_bytes() == raw
         assert not backups.exists()
 
+    @pytest.mark.parametrize("number", ["1e999", "-1e999"])
+    def test_a_number_that_overflows_to_infinity_is_refused_before_any_write(self, tmp_path, number):
+        """json.loads reads 1e999 as inf without calling parse_constant; written back it
+        would be ``Infinity``, which is not JSON, and the next init would refuse the file."""
+        target = tmp_path / "mcp_config.json"
+        raw = b'{"mcpServers": {"x": {"command": "x"}}, "timeout": ' + number.encode() + b"}"
+        target.write_bytes(raw)
+        backups = tmp_path / "bk"
+        for dry_run in (True, False):
+            with pytest.raises(ih.InstallError, match="cannot be written back as JSON"):
+                ih.merge_mcp_json(target, "aegis", ENTRY, dry_run=dry_run, backup_dir=backups)
+            with pytest.raises(ih.InstallError, match="cannot be written back as JSON"):
+                ih.remove_mcp_json(target, ("x",), dry_run=dry_run, backup_dir=backups)
+        assert target.read_bytes() == raw
+        assert not backups.exists()
+
     def test_a_refused_rewrite_leaves_no_backup(self, tmp_path):
         target = tmp_path / "mcp_config.json"
         target.write_bytes(b'{"mcpServers": {}}')
@@ -820,7 +835,7 @@ class TestRepositoryExecutablesAreNeverRun:
         monkeypatch.setattr(ih, "_run_cli", runner)
         path = os.pathsep.join([".", str(tmp_path / "real-bin")])
         assert ih.register_host("codex-cli", home=repo.home, command=["/x"], path=path).result == "registered"
-        assert {c[0] for c in runner.calls} == {str(exe.resolve())}
+        assert {c[0] for c in runner.calls} == {str(exe)}
 
     @pytest.mark.skipif(sys.platform != "win32", reason="PATHEXT applies on Windows")
     def test_windows_runs_a_cmd_shim_from_an_absolute_entry(self, tmp_path, monkeypatch):
@@ -828,3 +843,43 @@ class TestRepositoryExecutablesAreNeverRun:
         bindir.mkdir()
         (bindir / "codex.cmd").write_bytes(b"@echo off\r\n")
         assert ih.detect_hosts(tmp_path, path=str(bindir)) == ["codex-cli"]
+
+
+class TestMultiCallShims:
+    """Version managers (Volta, mise, asdf) install a host CLI as a link to one dispatcher
+    that picks the tool from the name it was run under (argv[0]). The CLI must be run by
+    the path found on PATH, not by the link's target, or the dispatcher sees its own name."""
+
+    def _shim(self, tmp_path, script: bytes = b"#!/bin/sh\nexit 0\n") -> Path:
+        real = tmp_path / "toolchain" / "dispatcher"
+        real.parent.mkdir()
+        real.write_bytes(script)
+        real.chmod(0o755)
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        symlink_or_skip(real, bindir / "codex")
+        return bindir
+
+    def test_a_linked_host_cli_is_run_under_its_own_name(self, tmp_path, monkeypatch):
+        bindir = self._shim(tmp_path)
+        runner = _Runner()
+        monkeypatch.setattr(ih, "_run_cli", runner)
+        assert ih.register_host("codex-cli", home=tmp_path, command=["/x"], path=str(bindir)).result == "registered"
+        assert ih.unregister_host("codex-cli", home=tmp_path, path=str(bindir)).result == "removed"
+        assert {c[0] for c in runner.calls} == {str(bindir / "codex")}
+
+    @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell dispatcher")
+    def test_a_dispatcher_that_reads_argv0_registers(self, tmp_path, monkeypatch):
+        log = tmp_path / "calls.log"
+        bindir = self._shim(tmp_path, (
+            "#!/bin/sh\n"
+            'echo "$(basename "$0") $*" >> "%s"\n'
+            'case "$(basename "$0")" in codex) exit 0 ;; *) echo "error: unknown tool" >&2; exit 127 ;; esac\n'
+            % log).encode())
+        monkeypatch.setattr(ih, "_run_cli", _REAL_RUN_CLI)
+        action = ih.register_host("codex-cli", home=tmp_path, command=["/x/aegis-mcp"], path=str(bindir))
+        assert (action.result, action.detail) == ("registered", "")
+        assert log.read_text(encoding="utf-8").splitlines() == [
+            "codex mcp remove aegis",
+            "codex mcp add aegis --env AEGIS_CLIENT=codex-cli -- /x/aegis-mcp",
+        ]

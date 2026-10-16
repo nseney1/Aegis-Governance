@@ -24,7 +24,9 @@ are (BOM included).
 JSON merge into the host's config file (Antigravity's ``~/.gemini/config/mcp_config.json``),
 whose previous bytes are first copied, owner-only, to ``~/.aegis/backups/<UTC stamp>/``.
 Host CLIs and ``aegis-mcp`` are looked up only in absolute ``PATH`` entries, never in
-the current directory (the repository being set up).
+the current directory (the repository being set up). A host CLI is run by the path found
+there, not the file a link there points to: version managers (Volta, mise, asdf) install
+it as a link to one dispatcher that picks the tool from the name it is run under.
 The server is always registered as ``aegis``, with an absolute command and the env
 ``AEGIS_CLIENT=<host id>`` (plus ``AEGIS_WORKSPACE`` only for an explicit pin).
 Unregistering removes ``aegis`` and the legacy ``soma`` entry and nothing else.
@@ -83,6 +85,7 @@ __all__ = [
     "detect_hosts",
     "find_workspace",
     "display_command",
+    "has_block_marker",
     "is_denied_root",
     "mcp_command",
     "mcp_entry",
@@ -360,6 +363,26 @@ def remove_managed_block(path: Union[str, Path], block_id: str, *, force: bool =
     return "removed"
 
 
+def has_block_marker(path: Union[str, Path], block_id: str) -> bool:
+    """Whether the file at ``path``, read through any link, has an Aegis marker of ``block_id``.
+
+    Read only, for deciding what a link means: the writers above never follow one. A
+    missing, unreadable or non-regular target has no marker.
+    """
+    try:
+        if not os.path.isfile(path):
+            return False
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        match = _MARKER.match(line)
+        if match and f"id={block_id} " in match.group(2) + " ":
+            return True
+    return False
+
+
 # ── JSON configs ─────────────────────────────────────────────────────────────
 
 def _reject_duplicates(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
@@ -407,6 +430,11 @@ def _load_json_object(path: Path) -> Tuple[Optional[bytes], Dict[str, Any]]:
         raise InstallError(f"{path}: holds an unpaired surrogate escape "
                            f"({exc.object[exc.start:exc.end].encode('unicode_escape').decode()}) that cannot be "
                            "written back as UTF-8; left unchanged. Fix the file, then re-run.") from exc
+    except ValueError as exc:
+        # json.loads reads a number such as 1e999 as inf without calling parse_constant;
+        # dumped, it would be the non-JSON literal Infinity.
+        raise InstallError(f"{path}: holds a number too large for a float (such as 1e999), which "
+                           "cannot be written back as JSON; left unchanged. Fix the file, then re-run.") from exc
     return raw, data
 
 
@@ -420,7 +448,7 @@ def _servers(path: Path, data: Dict[str, Any], key: str) -> Dict[str, Any]:
 
 
 def _dump(data: Dict[str, Any]) -> bytes:
-    return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    return (json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
 
 
 def _private_dirs(directory: Path) -> None:
@@ -760,10 +788,9 @@ def _native(host: host_table.HostSpec, steps: List[List[str]], path: Optional[st
         return HostAction(host.id, "manual", steps[-1], f"{steps[-1][0]} is not on PATH")
     if dry_run:
         return HostAction(host.id, "would_run", steps[-1])
-    resolved = os.path.realpath(binary)
     code, detail = 0, ""
     for step in steps:
-        code, detail = _call([resolved, *step[1:]])
+        code, detail = _call([binary, *step[1:]])
     if code != 0:
         return HostAction(host.id, "failed", steps[-1], f"exit {code}: {detail}".rstrip(": "))
     return HostAction(host.id, done, steps[-1])
@@ -812,9 +839,8 @@ def unregister_host(host_id: str, *, home: Union[str, Path], path: Optional[str]
         return HostAction(host_id, "manual", steps[0], f"{steps[0][0]} is not on PATH")
     if dry_run:
         return HostAction(host_id, "would_run", steps[0])
-    resolved = os.path.realpath(binary)
-    code, detail = _call([resolved, *steps[0][1:]])
-    _call([resolved, *steps[1][1:]])  # the legacy name is usually absent; its failure is expected
+    code, detail = _call([binary, *steps[0][1:]])
+    _call([binary, *steps[1][1:]])  # the legacy name is usually absent; its failure is expected
     # A host CLI exits non-zero for a name it does not hold, so a failure is reported, not fatal.
     return HostAction(host_id, "removed" if code == 0 else "absent", steps[0],
                       "" if code == 0 else f"exit {code}: {detail}".rstrip(": "))

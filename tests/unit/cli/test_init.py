@@ -9,6 +9,8 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 
 import pytest
 
@@ -263,11 +265,146 @@ class TestHookRefusal:
         assert (project / "AGENTS.md").is_file()
         assert outside.read_bytes() == b"#!/bin/sh\n"
 
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX directory permissions as a non-root user")
+    def test_a_read_only_hooks_directory(self, project, hooks, capsys):
+        hooks.chmod(0o555)
+        try:
+            self._refused(project, capsys, message="not a writable directory")
+            self._refused(project, capsys, "--dry-run", message="not a writable directory")
+        finally:
+            hooks.chmod(0o755)
+
     def test_outside_a_git_repository_the_hook_is_skipped(self, project, capsys):
         assert main(["--json", "init", "--workspace", str(project), "--yes", "--rules", "minimal"]) == 0
         payload = json.loads(capsys.readouterr().out)
         assert {a["target"]: a["result"] for a in payload["actions"]}["pre-commit hook"] == \
             "skipped (not a git repository)"
+
+
+GIT = shutil.which("git")
+
+
+def _git(*args: str) -> None:
+    subprocess.run([GIT, *args], check=True, capture_output=True, stdin=subprocess.DEVNULL)
+
+
+@pytest.mark.skipif(GIT is None, reason="needs git")
+class TestSharedHooksDirectory:
+    """core.hooksPath set to a directory outside the repository (a team or dotfiles hooks
+    dir, often global) holds a pre-commit hook that runs in every repository using it.
+    init adds no block there; it names --no-hooks and the explicit `aegis hook install`."""
+
+    TEAM_HOOK = b"#!/bin/sh\necho team-hook\n"
+
+    @pytest.fixture(autouse=True)
+    def git_on_path(self, project, tmp_path, monkeypatch):
+        # core.hooksPath is read through git; the project fixture's PATH holds no binary.
+        monkeypatch.setenv("PATH", os.pathsep.join([str(tmp_path / "empty-bin"), os.path.dirname(GIT)]))
+
+    @pytest.fixture
+    def shared(self, project, tmp_path):
+        _git("init", "-q", str(project))
+        shared = tmp_path / "team-hooks"
+        shared.mkdir()
+        (shared / "pre-commit").write_bytes(self.TEAM_HOOK)
+        _git("-C", str(project), "config", "core.hooksPath", str(shared))
+        return shared
+
+    def test_init_refuses_and_writes_nothing(self, project, shared, capsys):
+        home = Path.home()
+        before = _tree(project, home, shared)
+        for flags in ((), ("--dry-run",)):
+            assert run_init(_args(project, *flags, hooks=True)) == 1
+            assert _tree(project, home, shared) == before
+            err = capsys.readouterr().err
+            assert str(shared) in err and "outside this repository" in err
+            assert "--no-hooks" in err and "aegis hook install" in err and "Nothing was written." in err
+
+    def test_no_hooks_sets_up_everything_else(self, project, shared):
+        assert run_init(_args(project, hooks=False)) == 0
+        assert (project / "AGENTS.md").is_file()
+        assert (shared / "pre-commit").read_bytes() == self.TEAM_HOOK
+
+    def test_a_hooks_path_inside_the_repository_still_gets_the_hook(self, project, capsys):
+        _git("init", "-q", str(project))
+        _git("-C", str(project), "config", "core.hooksPath", ".githooks")
+        assert run_init(_args(project, hooks=True)) == 0
+        assert "aegis pre-commit" in (project / ".githooks" / "pre-commit").read_text(encoding="utf-8")
+
+
+class TestRepositoryPlaneChecks:
+    """What the writes under .aegis/ need is checked before anything is written: a dry run
+    reported success and the real run then died with a raw OSError after writing
+    .aegis/config.json, the rules and AGENTS.md."""
+
+    def _refused(self, project, capsys, *flags, message):
+        home = Path.home()
+        before = _tree(project, home)
+        for extra in ((), ("--dry-run",)):
+            assert run_init(_args(project, *flags, *extra)) == 1
+            assert _tree(project, home) == before
+            err = capsys.readouterr().err
+            assert message in err and "Nothing was written." in err
+
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX directory permissions as a non-root user")
+    def test_a_read_only_rules_directory(self, project, capsys):
+        personas = project / ".aegis" / "rules" / "personas"
+        personas.mkdir(parents=True)
+        personas.chmod(0o555)
+        try:
+            self._refused(project, capsys, message="not a writable directory")
+        finally:
+            personas.chmod(0o755)
+
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX directory permissions as a non-root user")
+    def test_a_read_only_aegis_directory(self, project, capsys):
+        aegis = project / ".aegis"
+        aegis.mkdir()
+        aegis.chmod(0o555)
+        try:
+            self._refused(project, capsys, message="not a writable directory")
+        finally:
+            aegis.chmod(0o755)
+
+    def test_a_symlinked_state_directory(self, project, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (project / ".aegis").mkdir()
+        symlink_or_skip(elsewhere, project / ".aegis" / "state", target_is_directory=True)
+        self._refused(project, capsys, message="symlink")
+        assert list(elsewhere.iterdir()) == []
+
+    def test_a_file_where_a_directory_belongs(self, project, capsys):
+        (project / ".aegis").mkdir()
+        (project / ".aegis" / "state").write_bytes(b"not a directory\n")
+        self._refused(project, capsys, message="not a directory")
+
+    def test_a_write_error_after_the_check_names_what_was_already_written(self, project, capsys, monkeypatch):
+        """Only a change between the check and the write gets past the check pass; the
+        error is then reported with what init had already done, not as a traceback."""
+        import aegis_cli.init as init_mod
+
+        (project / ".git" / "hooks").mkdir(parents=True)
+
+        def disk_error(*args, dry_run=False, **kwargs):
+            if dry_run:
+                return True
+            raise PermissionError(13, "Permission denied", str(project / ".git" / "hooks" / "pre-commit"))
+
+        monkeypatch.setattr(init_mod, "install_hook", disk_error)
+        assert run_init(_args(project, hooks=True)) == 1
+        err = capsys.readouterr().err
+        assert "Permission denied" in err and "pre-commit" in err
+        assert "Already written:" in err and "AGENTS.md" in err and ".aegis/config.json" in err
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--rules", "minimal"]) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "failed"
+        assert any("Permission denied" in e for e in payload["errors"])
 
 
 # ── Prompt, dry run, output ──────────────────────────────────────────────────
@@ -292,11 +429,24 @@ class TestPromptAndDryRun:
         assert "Aborted" in capsys.readouterr().out
         assert _snapshot(project, home) == before
 
-    def test_end_of_input_at_the_prompt_aborts(self, project, monkeypatch):
+    def test_end_of_input_at_the_prompt_is_not_success(self, project, monkeypatch, capsys):
+        """`aegis init < /dev/null` in a script that forgot --yes did nothing and exited 0."""
         def eof(_):
             raise EOFError
         monkeypatch.setattr("builtins.input", eof)
-        assert run_init(_args(project, yes=False)) == 0
+        home = Path.home()
+        before = _snapshot(project, home)
+        assert run_init(_args(project, yes=False)) == 1
+        assert _snapshot(project, home) == before
+        err = capsys.readouterr().err
+        assert "no answer" in err and "--yes" in err
+
+    def test_interrupting_the_prompt_exits_130(self, project, monkeypatch, capsys):
+        def interrupt(_):
+            raise KeyboardInterrupt
+        monkeypatch.setattr("builtins.input", interrupt)
+        assert run_init(_args(project, yes=False)) == 130
+        assert "Aborted" in capsys.readouterr().out
         assert not (project / ".aegis").exists()
 
     def test_accepting_the_prompt_proceeds(self, project, monkeypatch, capsys):

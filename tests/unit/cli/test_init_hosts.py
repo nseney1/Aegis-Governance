@@ -186,6 +186,43 @@ class TestBootstrapAndClaudeShim:
             b"# Claude notes\r\n\r\n<!-- aegis:begin id=agents-import v=1 sha="
             + ih._digest("@AGENTS.md\n").encode() + b" -->\r\n@AGENTS.md\r\n<!-- aegis:end id=agents-import -->\r\n")
 
+    def test_a_claude_md_linked_to_agents_md_needs_no_import(self, env, capsys):
+        """`ln -s AGENTS.md CLAUDE.md` is the usual way to give Claude Code the same file:
+        it already reads the bootstrap, so the link is kept and nothing is written through it."""
+        agents = env.project / "AGENTS.md"
+        agents.write_text("# Team guide\n", encoding="utf-8")
+        symlink_or_skip("AGENTS.md", env.project / "CLAUDE.md")
+        assert init(env, "--host", "claude-code") == 0
+        assert os.readlink(env.project / "CLAUDE.md") == "AGENTS.md"
+        text = agents.read_text(encoding="utf-8")
+        assert text.startswith("# Team guide\n\n") and bootstrap_text() in text
+        assert "agents-import" not in text
+        captured = capsys.readouterr()
+        assert "CLAUDE.md: linked" in captured.out and captured.err == ""
+        before = snapshot(env.project, env.home)
+        assert init(env, "--host", "claude-code") == 0
+        def outside_state(snap):
+            return {k: v for k, v in snap.items() if "/.aegis/state" not in k.replace(os.sep, "/")}
+        assert outside_state(snapshot(env.project, env.home)) == outside_state(before)
+
+    def test_a_claude_md_link_to_an_agents_md_init_creates(self, env):
+        symlink_or_skip("AGENTS.md", env.project / "CLAUDE.md")
+        assert init(env) == 0
+        assert (env.project / "CLAUDE.md").is_symlink()
+        assert bootstrap_text() in (env.project / "CLAUDE.md").read_text(encoding="utf-8")
+
+    def test_a_claude_md_linked_elsewhere_is_left_alone_with_a_warning(self, env, capsys, tmp_path):
+        outside = tmp_path / "shared" / "CLAUDE.md"
+        outside.parent.mkdir()
+        outside.write_bytes(b"x\n")
+        symlink_or_skip(outside, env.project / "CLAUDE.md")
+        assert init(env, "--host", "codex-cli") == 0
+        assert outside.read_bytes() == b"x\n"
+        assert (env.project / "CLAUDE.md").is_symlink()
+        assert bootstrap_text() in (env.project / "AGENTS.md").read_text(encoding="utf-8")
+        err = capsys.readouterr().err
+        assert str(outside) in err and "never writes through a link" in err and "@AGENTS.md" in err
+
     def test_force_replaces_a_hand_edited_bootstrap(self, env):
         agents = env.project / "AGENTS.md"
         agents.write_text("<!-- aegis:begin id=bootstrap v=1 sha=000000000000 -->\nmine\n"
@@ -253,12 +290,6 @@ class TestRefusalsWriteNothing:
             "<!-- aegis:begin id=bootstrap v=1 sha=000000000000 -->\nmine\n<!-- aegis:end id=bootstrap -->\n",
             encoding="utf-8")
         self._refused(env, capsys, "--host", "codex-cli", message="--force")
-
-    def test_symlinked_claude_md(self, env, capsys, tmp_path):
-        outside = tmp_path / "CLAUDE.md"
-        outside.write_bytes(b"x\n")
-        symlink_or_skip(outside, env.project / "CLAUDE.md")
-        self._refused(env, capsys, message="symlink")
 
     def test_unreadable_registry(self, env, capsys):
         reg = env.home / ".aegis" / "workspaces.json"
