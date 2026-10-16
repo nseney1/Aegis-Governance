@@ -452,18 +452,20 @@ def _ends_hook_at(lines: list[str]) -> tuple[int, str] | None:
 
 
 def _unreachable_reason(hook_file: Path, text: str) -> str | None:
-    """Why the aegis block in a hook never runs, or None when nothing stops it."""
+    """Why the aegis block in a hook never runs, and the fix; None when nothing stops it."""
     interpreter = _hook_interpreter(text)
     if interpreter is not None and interpreter not in _SHELLS:
-        return f"the hook runs {interpreter}, not a shell, so the aegis block never runs"
+        return (f"the hook runs {interpreter}, not a shell, so the aegis block never runs; "
+                "replace it with: aegis hook install --force (a copy is kept)")
     if os.name != "nt" and not os.access(hook_file, os.X_OK):
-        return "the hook file is not executable, so git skips it"
+        return "the hook file is not executable, so git skips it; run aegis hook install"
     start = min((i for i in (text.find(start_m) for start_m, _end_m in _MARKERS) if i >= 0), default=-1)
     lines = text[:start].splitlines()[1 if text.startswith("#!") else 0:] if start >= 0 else []
     ended = _ends_hook_at(lines)
     if ended is not None:
         number = ended[0] + (1 if text.startswith("#!") else 0)
-        return f"line {number} ({ended[1]}) ends the hook before the aegis block, so the check never runs"
+        return (f"line {number} ({ended[1]}) ends the hook before the aegis block, so the check never runs; "
+                "run aegis hook install to put the block first")
     return None
 
 
@@ -620,5 +622,5 @@ def run_hook_status(args: Any) -> int:
             mark = "✅" if pinned["exists"] else "❌ (missing: run 'aegis hook install')"
             print(f"  {label:<17}{pinned['path']} {mark}")
     if st["unreachable_reason"]:
-        print(f"  Reachable:       ❌ {st['unreachable_reason']}; run 'aegis hook install' to put the block first")
+        print(f"  Reachable:       ❌ {st['unreachable_reason']}")
     return 0

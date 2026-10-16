@@ -453,6 +453,12 @@ def _plan_ledger(result: MigrationPlan, layout: WorkspaceLayout) -> None:
 def _plan_not_converted(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     """List the v3 data that has no v4 form, so dropping it is never silent."""
     for rel in LEGACY_LEDGER_FILES:
+        archive = layout.legacy(rel).parent / LEGACY_LEDGER_ARCHIVE
+        if archive.is_symlink():
+            result.not_converted.append({
+                "path": result._rel(archive),
+                "reason": "a symlink, never followed: the rows behind it are not converted; the link is removed",
+            })
         rollup = layout.legacy(rel).parent / LEGACY_LEDGER_ROLLUP
         if os.path.lexists(rollup):
             result.not_converted.append({

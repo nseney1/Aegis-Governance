@@ -203,6 +203,21 @@ def test_an_unreadable_archive_is_reported_not_fatal(tmp_path):
     assert report["ledger"]["rows"] == 1
 
 
+def test_a_symlinked_archive_is_never_followed_and_is_listed(tmp_path):
+    root = tmp_path / "repo"
+    elsewhere = _gz(tmp_path / "elsewhere" / "signals-2026-08.jsonl.gz", [_row("no-eval", "e1")]).parent
+    (root / ".aegis" / "evidence").mkdir(parents=True)
+    try:
+        (root / ".aegis" / "evidence" / "archive").symlink_to(elsewhere, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+    report = migrate.plan(root).to_dict()
+
+    assert report["ledger"] is None
+    assert [e["path"] for e in report["not_converted"]] == [".aegis/evidence/archive"]
+
+
 def test_the_v2_soma_ledger_is_converted_and_removed(tmp_path):
     root = tmp_path / "repo"
     (root / ".soma" / "evidence").mkdir(parents=True)
