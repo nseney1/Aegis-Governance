@@ -1,5 +1,6 @@
 """The host table and bootstrap text are the shared contract for the host plane."""
 import os
+from pathlib import Path
 
 import pytest
 
@@ -48,9 +49,9 @@ def test_every_row_is_well_formed():
             assert h.registration.path.startswith("~/"), h.id
 
 
-def test_phase_one_hosts_are_the_three_the_author_runs_plus_kiro_and_desktop_identity():
+def test_phase_one_hosts_are_the_three_the_author_runs_desktop_identity_and_the_experimental_rows():
     assert {h.id for h in hosts.all_hosts(phase=1)} == {
-        "codex-cli", "claude-code", "claude-desktop", "antigravity", "kiro"}
+        "codex-cli", "claude-code", "claude-desktop", "antigravity", "kiro", "cursor", "copilot", "windsurf"}
     assert hosts.get("claude-desktop").registration is None
 
 
@@ -99,6 +100,9 @@ def test_skills_dirs_are_the_documented_project_directories_and_none_is_verified
         "antigravity": (".agents/skills", False),
         "gemini-cli": (None, False),
         "kiro": (None, False),
+        "cursor": (None, False),
+        "copilot": (None, False),
+        "windsurf": (None, False),
     }
     assert hosts.get("claude-code").verified is True  # the row's own flag is untouched
 
@@ -154,6 +158,9 @@ def test_a_host_is_a_config_plane_and_lists_the_surfaces_that_share_it():
         "antigravity": ("Antigravity app", "Antigravity IDE", "agy CLI"),
         "gemini-cli": (),
         "kiro": ("Kiro IDE", "Kiro CLI"),
+        "cursor": ("Cursor IDE", "Cursor CLI (cursor-agent)"),
+        "copilot": ("GitHub Copilot in VS Code (agent mode)", "GitHub Copilot CLI"),
+        "windsurf": ("Windsurf IDE",),
     }
 
 
@@ -162,12 +169,14 @@ def test_a_host_is_a_config_plane_and_lists_the_surfaces_that_share_it():
     ("chatgpt-desktop", "codex-cli"), ("claude-code", "claude-code"), ("claude-desktop-code", "claude-code"),
     ("antigravity-app", "antigravity"), ("antigravity-ide", "antigravity"), ("kiro-ide", "kiro"),
     ("kiro-cli", "kiro"), ("kiro", "kiro"), ("claude-desktop", "claude-desktop"), ("gemini-cli", "gemini-cli"),
+    ("cursor", "cursor"), ("cursor-ide", "cursor"), ("copilot", "copilot"), ("copilot-cli", "copilot"),
+    ("windsurf", "windsurf"), ("windsurf-ide", "windsurf"),
 ])
 def test_resolve_maps_a_surface_alias_to_its_plane_id(name, plane):
     assert hosts.resolve(name) == plane
 
 
-@pytest.mark.parametrize("name", ["gemini", "Codex-App", "cursor", "", " codex"])
+@pytest.mark.parametrize("name", ["gemini", "Codex-App", "cursor-vscode", "", " codex"])
 def test_resolve_refuses_anything_else_and_names_the_ids_and_aliases(name):
     with pytest.raises(KeyError) as exc:
         hosts.resolve(name)
@@ -224,3 +233,89 @@ def test_app_paths_follow_the_platform_and_resolve_home_and_environment(tmp_path
     assert hosts.app_paths(kiro, home, {"LOCALAPPDATA": "rel"}, "win32") == []
     assert hosts.app_paths(kiro, home, {}, "linux") == []
     assert hosts.app_paths(hosts.get("claude-code"), home, {}, "darwin") == []
+
+
+# ── experimental rows: cursor, copilot, kiro, windsurf (v4.2 #6) ──────────────
+
+EXPERIMENTAL = ("kiro", "cursor", "copilot", "windsurf")  # table order
+
+
+def test_the_experimental_rows_are_exactly_the_unverified_ones_that_aegis_registers():
+    """A row flips to verified only after the ADR 0007 section 4 bar of 3 clean runs on a real install,
+    and nobody flips it by accident: the verified rows are these, every other row is unverified."""
+    assert [h.id for h in hosts.HOSTS if not h.verified and h.registration is not None] == list(EXPERIMENTAL)
+    assert [h.id for h in hosts.HOSTS if h.verified] == ["codex-cli", "claude-code", "claude-desktop", "antigravity"]
+    assert [h.id for h in hosts.HOSTS if not h.verified and h.registration is None] == ["gemini-cli"]
+
+
+@pytest.mark.parametrize("host_id, path, key", [
+    ("cursor", "~/.cursor/mcp.json", "mcpServers"),
+    ("copilot", "~/.copilot/mcp-config.json", "mcpServers"),
+    ("kiro", "~/.kiro/settings/mcp.json", "mcpServers"),
+    ("windsurf", "~/.codeium/windsurf/mcp_config.json", "mcpServers"),
+])
+def test_each_experimental_row_registers_in_the_file_its_vendor_documents(host_id: str, path: str, key: str):
+    row = hosts.get(host_id)
+    assert row.registration == hosts.Registration(kind="json_file", path=path, key=key)
+    assert (row.verified, row.retired, row.phase, row.skills_dir, row.skills_verified) == (False, "", 1, None, False)
+    assert row.slot_profile == hosts.GENERIC
+    assert row.instructions == "agents_md" and row.redirect == ""
+    assert row.surfaces and row.binaries and row.config_paths
+
+
+@pytest.mark.parametrize("host_id", EXPERIMENTAL)
+def test_each_experimental_row_cites_its_vendor_documentation_in_a_comment(host_id: str):
+    source = Path(hosts.__file__).read_text(encoding="utf-8")
+    block = source.split(f'id="{host_id}"', 1)[1].split("HostSpec(", 1)[0]
+    comments = [line for line in block.splitlines() if line.strip().startswith("#")]
+    assert any("https://" in line for line in comments), host_id
+
+
+@pytest.mark.parametrize("host_id", EXPERIMENTAL)
+def test_an_experimental_row_says_it_is_unchecked_and_what_flips_it(host_id: str):
+    row = hosts.get(host_id)
+    assert row.notes[0] == "Its row follows the vendor's documentation and is not yet checked on a real install."
+    assert any("3 clean runs" in note for note in row.notes), row.notes
+
+
+def test_the_flip_to_verified_is_documented_and_not_automated():
+    doc = hosts.__doc__
+    assert "3 clean runs" in doc and "ADR 0007" in doc
+    assert "by hand" in doc or "no automation" in doc
+
+
+def test_the_new_experimental_rows_are_identified_by_aegis_client_alone():
+    # Their MCP clientInfo names are not documented, so none is guessed (kiro's is a log line).
+    for host_id in ("cursor", "copilot", "windsurf"):
+        assert hosts.get(host_id).client_names == (), host_id
+    assert hosts.identify("kiro") == "kiro"
+
+
+def test_the_experimental_rows_are_found_by_their_binaries_and_config_directories():
+    assert hosts.get("cursor").config_paths == ("~/.cursor",)
+    assert hosts.get("cursor").binaries == ("cursor-agent", "cursor")
+    assert hosts.get("copilot").config_paths == ("~/.copilot",)
+    assert hosts.get("copilot").binaries == ("copilot",)
+    assert hosts.get("windsurf").config_paths == ("~/.codeium/windsurf",)
+    assert hosts.get("windsurf").binaries == ("windsurf",)
+
+
+def test_the_experimental_rows_name_their_surfaces_and_take_surface_aliases():
+    assert hosts.resolve("cursor-ide") == hosts.resolve("cursor-cli") == "cursor"
+    assert hosts.resolve("github-copilot") == hosts.resolve("copilot-cli") == "copilot"
+    assert hosts.resolve("windsurf-ide") == "windsurf"
+    assert hosts.get("windsurf").surfaces == ("Windsurf IDE",)
+    assert "GitHub Copilot in VS Code (agent mode)" in hosts.get("copilot").surfaces
+    assert "Cursor IDE" in hosts.get("cursor").surfaces
+
+
+def test_app_paths_find_the_new_desktop_apps(tmp_path, monkeypatch):
+    apps = tmp_path / "Applications"
+    monkeypatch.setattr(hosts, "APP_DIRS", {"darwin": (str(apps),), "win32": ("%LOCALAPPDATA%/Programs",)})
+    assert hosts.app_paths(hosts.get("cursor"), tmp_path, {}, "darwin") == [str(apps / "Cursor.app")]
+    assert hosts.app_paths(hosts.get("windsurf"), tmp_path, {}, "darwin") == [str(apps / "Windsurf.app")]
+    local = {"LOCALAPPDATA": str(tmp_path / "local")}
+    programs = os.path.join(str(tmp_path / "local"), "Programs")
+    assert hosts.app_paths(hosts.get("cursor"), tmp_path, local, "win32") == [os.path.join(programs, "cursor")]
+    assert hosts.app_paths(hosts.get("windsurf"), tmp_path, local, "win32") == [os.path.join(programs, "Windsurf")]
+    assert hosts.app_paths(hosts.get("copilot"), tmp_path, local, "win32") == []

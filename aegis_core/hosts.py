@@ -13,7 +13,16 @@ documentation, SECONDARY an issue or user report, UNVERIFIED an inference neithe
 documented nor checked on a real install.
 
 Rows marked ``verified=False`` describe documented behaviour that has not been
-checked on a real install; ``aegis init`` warns before using them.
+checked on a real install; ``aegis init`` warns before using them (and records an
+``init_host`` event), and ``aegis doctor`` labels them experimental.
+
+Experimental rows (cursor, copilot, kiro, windsurf; v4.2 #6): a row flips to
+``verified=True`` only after 3 clean runs on real installs (ADR 0007 section 4), by hand:
+a maintainer sets the flag in a commit that cites the runs, and there is no automation
+that flips it. A clean run is ``aegis init --host <id>`` followed by ``aegis doctor``
+reporting the host ``ok``, and the host calling ``aegis_scan`` in a session. A row still
+unverified after two minor releases is a candidate for removal (the prune row for
+experimental hosts, v4.1-v4.2 spec).
 """
 from __future__ import annotations
 
@@ -197,6 +206,8 @@ HOSTS: Tuple[HostSpec, ...] = (
         id="kiro",
         display_name="Kiro",
         vendor="AWS",
+        # DOC https://kiro.dev/docs/mcp/configuration/ (user ~/.kiro/settings/mcp.json,
+        # workspace .kiro/settings/mcp.json, top-level mcpServers).
         # SECONDARY: a Kiro IDE 0.11 log shows clientInfo "kiro"; the Kiro CLI's name is
         # UNVERIFIED (closed source), so it is identified by AEGIS_CLIENT alone.
         client_names=("kiro",),
@@ -212,6 +223,7 @@ HOSTS: Tuple[HostSpec, ...] = (
         verified=False,
         notes=(
             "Its row follows the vendor's documentation and is not yet checked on a real install.",
+            "It becomes verified only after 3 clean runs (ADR 0007 section 4).",
             "No Aegis hooks in v4.1: Kiro's hook semantics for blocking are not verified.",
             "MCP support must be switched on in Kiro's settings.",
         ),
@@ -220,6 +232,88 @@ HOSTS: Tuple[HostSpec, ...] = (
         # darwin: UNVERIFIED (the usual bundle name); win32: SECONDARY (issue #10486 shows
         # %LOCALAPPDATA%\Programs\Kiro as the install directory).
         apps=(("darwin", "Kiro.app"), ("win32", "Kiro")),
+    ),
+    HostSpec(
+        id="cursor",
+        display_name="Cursor",
+        vendor="Anysphere",
+        # DOC https://cursor.com/docs/context/mcp (global ~/.cursor/mcp.json, project
+        # .cursor/mcp.json, top-level mcpServers; a stdio server is command/args/env).
+        # AGENTS.md at the project root: DOC https://cursor.com/docs/context/rules.
+        # UNVERIFIED: Cursor's MCP clientInfo name is not documented, so none is claimed (a
+        # "cursor-vscode" seen in the wild is not matched); the registration's AEGIS_CLIENT
+        # names the host. The project file .cursor/mcp.json is not written: no committed MCP
+        # files (host-matrix spec 3.2).
+        binaries=("cursor-agent", "cursor"),
+        config_paths=("~/.cursor",),
+        instructions="agents_md",
+        registration=Registration(kind="json_file", path="~/.cursor/mcp.json", key="mcpServers"),
+        slot_profile=GENERIC,
+        verified=False,
+        notes=(
+            "Its row follows the vendor's documentation and is not yet checked on a real install.",
+            "It becomes verified only after 3 clean runs (ADR 0007 section 4).",
+            "No Aegis hooks: Cursor's hook semantics are not verified.",
+        ),
+        surfaces=("Cursor IDE", "Cursor CLI (cursor-agent)"),
+        aliases=("cursor-ide", "cursor-cli"),
+        # darwin and win32 install directories: UNVERIFIED (the usual bundle and per-user
+        # install names).
+        apps=(("darwin", "Cursor.app"), ("win32", "cursor")),
+    ),
+    HostSpec(
+        id="copilot",
+        display_name="GitHub Copilot",
+        vendor="GitHub",
+        # DOC https://code.visualstudio.com/docs/copilot/customization/mcp-servers : Copilot's
+        # user-scope MCP file is $COPILOT_HOME/mcp-config.json, else ~/.copilot/mcp-config.json,
+        # top-level mcpServers. VS Code's own user-profile mcp.json (top-level "servers") sits in
+        # an operating-system specific profile directory the page does not spell out, so it is
+        # not registered. The page does not say which Copilot surfaces read ~/.copilot, nor name
+        # a clientInfo; both are UNVERIFIED. AGENTS.md: UNVERIFIED (the page does not mention it).
+        binaries=("copilot",),
+        config_paths=("~/.copilot",),
+        instructions="agents_md",
+        registration=Registration(kind="json_file", path="~/.copilot/mcp-config.json", key="mcpServers"),
+        slot_profile=GENERIC,
+        verified=False,
+        notes=(
+            "Its row follows the vendor's documentation and is not yet checked on a real install.",
+            "It becomes verified only after 3 clean runs (ADR 0007 section 4).",
+            "Which Copilot surfaces read ~/.copilot/mcp-config.json is not documented; COPILOT_HOME moves it.",
+            "No Aegis hooks: Copilot's hook semantics are not verified.",
+        ),
+        surfaces=("GitHub Copilot in VS Code (agent mode)", "GitHub Copilot CLI"),
+        aliases=("github-copilot", "copilot-cli", "vscode-copilot"),
+    ),
+    HostSpec(
+        id="windsurf",
+        display_name="Windsurf",
+        vendor="Windsurf",
+        # DOC https://docs.windsurf.com/windsurf/cascade/mcp (the page now redirects to
+        # https://docs.devin.ai/desktop/cascade/mcp, which documents ~/.config/devin/mcp_config.json
+        # and %APPDATA%\devin\mcp_config.json for the legacy Cascade agent in Devin Desktop).
+        # SECONDARY: guides and the long-standing Windsurf docs give ~/.codeium/windsurf/mcp_config.json
+        # on every platform, top-level mcpServers, no project-level file. The row keeps that path
+        # until a real install shows which one the current app reads. Windsurf's clientInfo name
+        # and its reading of AGENTS.md are UNVERIFIED.
+        binaries=("windsurf",),
+        config_paths=("~/.codeium/windsurf",),
+        instructions="agents_md",
+        registration=Registration(kind="json_file", path="~/.codeium/windsurf/mcp_config.json", key="mcpServers"),
+        slot_profile=GENERIC,
+        verified=False,
+        notes=(
+            "Its row follows the vendor's documentation and is not yet checked on a real install.",
+            "It becomes verified only after 3 clean runs (ADR 0007 section 4).",
+            "The vendor's current docs name ~/.config/devin/mcp_config.json (Devin Desktop); this row uses "
+            "~/.codeium/windsurf/mcp_config.json.",
+            "No Aegis hooks: Windsurf's hook semantics are not verified.",
+        ),
+        surfaces=("Windsurf IDE",),
+        aliases=("windsurf-ide",),
+        # UNVERIFIED install names.
+        apps=(("darwin", "Windsurf.app"), ("win32", "Windsurf")),
     ),
 )
 

@@ -555,7 +555,8 @@ def _paths(*paths) -> list:
 
 class TestHostSelection:
     def test_registrable_hosts_are_the_phase_1_rows_with_a_registration(self):
-        assert [h.id for h in ih.registrable_hosts()] == ["codex-cli", "claude-code", "antigravity", "kiro"]
+        assert [h.id for h in ih.registrable_hosts()] == [
+            "codex-cli", "claude-code", "antigravity", "kiro", "cursor", "copilot", "windsurf"]
 
     def test_detection_reads_binaries_on_path_and_user_dirs(self, tmp_path):
         home, bindir = tmp_path / "home", tmp_path / "bin"
@@ -1265,3 +1266,45 @@ class TestWindowsLookup:
         shim.write_bytes(b"@echo off\r\n")
         shim.chmod(0o755)
         assert ih.detect_hosts(tmp_path, path=str(shim.parent)) == ["codex-cli"]
+
+
+class TestInitHostEvent:
+    """register_workspace is the one place `aegis init` records the hosts it set up for a
+    workspace; for each selected host whose row is unverified it also appends an init_host event."""
+
+    def test_one_event_per_unverified_host_in_the_events_log(self, tmp_path):
+        from aegis_core import events
+
+        home, root = tmp_path / "home", tmp_path / "ws"
+        root.mkdir()
+        assert ih.register_workspace(home, root, ["codex-cli", "windsurf", "copilot"]) == "added"
+        rows = events.read(root, "init_host").rows
+        assert [(r["host"], r["result"]) for r in rows] == [("copilot", "experimental"), ("windsurf", "experimental")]
+        assert rows[0]["detail"] == {"host": "copilot", "verified": False,
+                                     "surfaces": ["GitHub Copilot in VS Code (agent mode)", "GitHub Copilot CLI"]}
+
+    def test_an_unchanged_registry_entry_still_records_the_run(self, tmp_path):
+        from aegis_core import events
+
+        home, root = tmp_path / "home", tmp_path / "ws"
+        root.mkdir()
+        ih.register_workspace(home, root, ["kiro"])
+        assert ih.register_workspace(home, root, ["kiro"]) == "unchanged"
+        assert len(events.read(root, "init_host").rows) == 2
+
+    def test_a_dry_run_and_verified_hosts_record_nothing(self, tmp_path):
+        from aegis_core import events
+
+        home, root = tmp_path / "home", tmp_path / "ws"
+        root.mkdir()
+        ih.register_workspace(home, root, ["kiro"], dry_run=True)
+        ih.register_workspace(home, root, ["codex-cli", "claude-code", "antigravity"])
+        assert events.read(root, "init_host").rows == []
+
+    def test_a_host_the_table_does_not_know_is_skipped(self, tmp_path):
+        from aegis_core import events
+
+        home, root = tmp_path / "home", tmp_path / "ws"
+        root.mkdir()
+        ih.register_workspace(home, root, ["zed", "kiro"])
+        assert [r["host"] for r in events.read(root, "init_host").rows] == ["kiro"]
