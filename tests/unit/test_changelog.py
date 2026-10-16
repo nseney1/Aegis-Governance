@@ -112,3 +112,61 @@ def test_the_lead_paragraph_promises_pointers_only_where_the_parser_prints_them(
     lead = _v4_entry().split("### ", 1)[0]
     assert not re.search(r"[Ee]very removed command and flag[^.]*prints", lead), lead
     assert re.search(r"removed `init` and `uninstall` flags, print one line", lead), lead
+
+
+# --- the 4.1.0 entry -------------------------------------------------------------------
+
+def _entry(version: str) -> str:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    match = re.search(rf"^## \[{re.escape(version)}\].*?(?=^## \[|\Z)", text, re.M | re.S)
+    assert match, f"CHANGELOG.md has no '## [{version}]' entry"
+    return match.group(0)
+
+
+def _subsection(entry: str, title: str) -> str:
+    match = re.search(rf"^### {re.escape(title)}\n(.*?)(?=^### |\Z)", entry, re.M | re.S)
+    assert match, f"no '### {title}' in the entry"
+    return " ".join(match.group(1).split())
+
+
+def test_the_4_1_0_entry_sits_above_4_0_0_and_is_unreleased():
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    first = re.search(r"^## \[(.*?)\](.*)$", text, re.M)
+    assert first.group(1) == "4.1.0" and first.group(2).strip() == "- Unreleased"
+
+
+def test_the_4_1_0_entry_names_every_command_4_1_added():
+    """Each new command and flag, as the parser spells it."""
+    added = _subsection(_entry("4.1.0"), "Added")
+    for name in ("aegis team claim", "renew", "transfer", "release", "gc", "list", "metrics",
+                 "aegis check --lane", "--base-policy", "aegis hook install --host", "aegis hook uninstall --host",
+                 "aegis hook run pre-tool --host", "aegis skills sync", "aegis init --skills",
+                 "jit.scan_window_s"):
+        assert f"`{name}`" in added or f"`{name} " in added or f" {name}`" in added, name
+    rc = None
+    for argv in (["team", "--help"], ["skills", "sync", "--help"], ["hook", "run", "--help"]):
+        try:
+            rc = main(argv)
+        except SystemExit as exc:
+            rc = exc.code
+        assert rc == 0, argv
+
+
+def test_the_4_1_0_known_limitations_are_the_ones_doctor_prints():
+    from aegis_cli.hooks import registrar
+
+    limits = _subsection(_entry("4.1.0"), "Known limitations")
+    for gap in registrar.KNOWN_GAPS:
+        assert " ".join(gap.split()) in limits, gap
+    assert "advisory" in limits and "check --lane" in limits
+
+
+def test_the_4_1_0_entry_records_the_staged_ast_driver_fix():
+    fixed = _subsection(_entry("4.1.0"), "Fixed")
+    assert "escapes workspace" in fixed and "Rust" in fixed and "index snapshot" in fixed
+
+
+def test_the_4_1_0_entry_has_a_security_section():
+    security = _subsection(_entry("4.1.0"), "Security")
+    for phrase in ("guardrails, not a security boundary", "--scope project", "/hooks", "not an identity"):
+        assert phrase in security, phrase
