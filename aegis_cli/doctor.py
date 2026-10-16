@@ -14,7 +14,8 @@ Each host gets one state, the first of these that applies:
 - ``unregistered``: its config has no ``aegis`` server, or the registered command is gone;
 - ``auth_unknown``: doctor cannot confirm the host will load ``aegis`` or read its
   bootstrap (its CLI failed or timed out, its config cannot be parsed, the registration
-  waits on an approval doctor cannot see, a host that sends no workspace depends on an
+  waits on an approval doctor cannot see, the registered command is a relative path or is
+  found only where doctor does not look, a host that sends no workspace depends on an
   unreadable registry, or a CLAUDE.md-family file above the workspace, which doctor does
   not read, decides whether Claude Code reads AGENTS.md; the user's own
   ``~/.claude/CLAUDE.md``, which Claude Code loads as user memory, never does);
@@ -36,9 +37,11 @@ determine), ``checks_ok`` (no blocking check failed; it says nothing about the h
 ``local_floor``, ``advisory``, ``none`` (an ungoverned workspace, a host not installed,
 or no route by which aegis or its bootstrap reaches the agent) or ``unknown`` (a fact
 that decides it cannot be read, such as a host binary found only inside the workspace).
-The home directory is never a governed workspace: its ``.aegis/`` is the user plane.
+The home directory is never a governed workspace: its ``.aegis/`` is the user plane, so
+run from there doctor checks no project rules, state or AST drivers.
 Strings taken from files or host output are printed without control sequences, and
-doctor starts only programs found in absolute PATH entries outside the workspace.
+doctor starts only programs found in absolute PATH entries (aegis_core.pathlookup): host
+CLIs and ``python3`` only outside the workspace.
 
 ``--fix`` changes only what a finding reported as fixable, after confirmation (``--yes``
 skips it). Every file is first copied to ``~/.aegis/backups/<UTC stamp>/`` with a manifest;
@@ -99,11 +102,25 @@ def _check_zero_dependencies() -> bool:
     return ok
 
 
+def _is_home(root: Path) -> bool:
+    """Whether ``root`` is the home directory, whose ``.aegis/`` is the user plane."""
+    from aegis_core.workspace.layout import UserLayout
+
+    layout = UserLayout.current()
+    key = _root_key(root)
+    return layout is not None and key is not None and key == _root_key(layout.home)
+
+
 def _check_rules(project_root: Path) -> bool:
     """The workspace serves at least one rule and every rule file loads."""
     from aegis_core.rules import load_rules
-    from aegis_core.workspace.layout import WorkspaceLayout
+    from aegis_core.workspace.layout import UserLayout, WorkspaceLayout
 
+    if _is_home(project_root):
+        print(f"  ❌ Rules: {project_root} is your home directory, never a workspace: "
+              f"{UserLayout(Path(project_root)).rules_dir} is your user rule layer, which every workspace adds to its own")
+        print("    Fix: run aegis doctor inside a repository.")
+        return False
     rules_dir = WorkspaceLayout(Path(project_root)).rules_dir
     if not rules_dir.is_dir():
         print(f"  ❌ No rules directory ({rules_dir})")
@@ -127,11 +144,16 @@ def _check_rules(project_root: Path) -> bool:
     return True
 
 
-def _check_state_dir(project_root: Path | None = None) -> bool:
+def _check_state_dir(project_root: Path | None = None) -> Optional[bool]:
     """Check .aegis/state/ (ledger, lock) exists and is writable, or can be created (read-only check)."""
     from aegis_core.workspace.layout import WorkspaceLayout
 
-    state = WorkspaceLayout(Path(project_root or Path.cwd()).resolve()).state_dir
+    root = Path(project_root or Path.cwd()).resolve()
+    if _is_home(root):
+        print(f"  ℹ️  State directory: not checked: {root} is your home directory, whose .aegis/ is your "
+              "user layer; a workspace keeps its state in its own .aegis/state")
+        return None
+    state = WorkspaceLayout(root).state_dir
     if state.is_dir():
         if os.access(str(state), os.W_OK):
             print(f"  ✅ State directory writable ({state})")
@@ -210,11 +232,15 @@ def probe_mcp_launcher(path_env: str | None = None,
 
     Only absolute PATH entries outside ``workspace`` count (aegis_core.pathlookup): the
     probe runs what it finds. Returns (status, detail); status is one of ok, missing,
-    store_stub, broken, no_aegis_mcp.
+    refused (python3 is only behind an empty or relative PATH entry or inside
+    ``workspace``, so it is not run), store_stub, broken, no_aegis_mcp.
     """
     path_env = os.environ.get("PATH", "") if path_env is None else path_env
     exe = which("python3", path_env, outside=workspace)
     if not exe:
+        hits = only_skipped("python3", path_env, outside=workspace, base=workspace)
+        if hits:
+            return "refused", f"python3 is found only at {_where(hits[0], workspace)}, where doctor runs nothing"
         return "missing", "python3 is not on PATH"
 
     def _run(argv: list[str]) -> subprocess.CompletedProcess:
@@ -249,13 +275,23 @@ def probe_mcp_launcher(path_env: str | None = None,
     return "ok", exe
 
 
+def _where(hit: Hit, fence: Any) -> str:
+    """Where a program ``only_skipped`` passed over is, and why it was passed over;
+    ``fence`` names what it was inside."""
+    if hit.reason == INSIDE_FENCE:
+        return f"{hit.path}, inside {fence}"
+    return f"{hit.path}, through the relative PATH entry {hit.entry!r}"
+
+
 def _check_mcp_launcher(path_env: str | None = None, workspace: Optional[Path] = None) -> bool:
     """Advisory: report whether `python3 -m aegis_mcp` would start."""
     status, detail = probe_mcp_launcher(path_env, workspace=workspace)
     if status == "ok":
         print(f"  ✅ MCP launcher: python3 ({detail}) runs and imports aegis_mcp")
         return True
-    if status == "missing":
+    if status == "refused":
+        print(f"  ⚠️  MCP launcher: {detail}, so doctor cannot tell whether `python3 -m aegis_mcp` starts.")
+    elif status == "missing":
         print("  ⚠️  MCP launcher: python3 not found on PATH. MCP configs start the\n"
               "      server with `python3 -m aegis_mcp`; install Python 3 from python.org\n"
               "      or put it on PATH (only needed if you use the MCP server).")
@@ -281,6 +317,8 @@ def _missing_ast_extensions(ws_root: Path) -> List[str]:
     from aegis_core.ast.detect import detect_project_languages
     from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
 
+    if _is_home(ws_root):
+        return []
     langs = {k: v for k, v in detect_project_languages(ws_root).items() if k != "python"}
     configured: set = set()
     try:
@@ -298,7 +336,7 @@ def _missing_ast_extensions(ws_root: Path) -> List[str]:
     return sorted({ext for info in langs.values() for ext in info.get("extensions", []) if ext not in configured})
 
 
-def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> bool:
+def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> Optional[bool]:
     """Check the AST drivers this workspace uses and that their executables resolve.
 
     A repository opts in to a packaged driver in .aegis/config.json; driver commands
@@ -311,6 +349,11 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
     from aegis_core.ast.runner import resolve_driver_executable
 
     ws_root = Path(project_root or Path.cwd())
+    if _is_home(ws_root):
+        # Never walk the home directory for sources, nor write a repository's driver
+        # opt-in into ~/.aegis/config.json, which is the user scope.
+        print(f"  ℹ️  AST drivers: not checked: {ws_root} is your home directory, whose .aegis/ is your user layer")
+        return None
     detected_langs = detect_project_languages(ws_root)
     non_py_langs = {k: v for k, v in detected_langs.items() if k != "python"}
 
@@ -364,9 +407,16 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
         if not parts:
             continue
         bin_name = parts[0]
-        found = resolve_driver_executable(bin_name)
+        # As the driver runs: absolute PATH entries outside the workspace, a relative path
+        # joined to the workspace root (aegis_core.ast.runner).
+        found = resolve_driver_executable(bin_name, workspace=ws_root)
+        hits = [] if found else only_skipped(bin_name, outside=ws_root, base=ws_root)
         if found:
             print(f"  ✅ AST driver ({ext}): {bin_name} resolvable ({found})")
+        elif hits:
+            print(f"  ⚠️  AST driver ({ext}): executable '{bin_name}' is found only at "
+                  f"{_where(hits[0], 'the workspace')}, where aegis never runs it")
+            all_resolvable = False
         else:
             print(f"  ⚠️  AST driver ({ext}): executable '{bin_name}' not found on PATH")
             all_resolvable = False
@@ -652,10 +702,21 @@ def _entry_facts(entry: Any, ctx: _Ctx) -> Dict[str, Any]:
     return facts
 
 
-def _command_exists(command: str, ctx: _Ctx) -> bool:
+def _command_exists(command: str, ctx: _Ctx) -> Optional[bool]:
+    """Whether the registered command exists; None when doctor cannot tell.
+
+    A relative path with a directory part resolves against the directory the host starts
+    the server in, which doctor does not know. A bare name found only through an empty or
+    relative PATH entry, or in an absolute entry inside the workspace, is one the host
+    may run but doctor does not count.
+    """
     if os.path.isabs(command):
         return os.path.isfile(command) and (os.name == "nt" or os.access(command, os.X_OK))
-    return ctx.which(command) is not None
+    if os.sep in command or (os.altsep and os.altsep in command):
+        return None
+    if ctx.which(command) is not None:
+        return True
+    return None if ctx.passed_over(command) else False
 
 
 def _probe_codex(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
@@ -1170,6 +1231,14 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                                    f"run aegis init --host {spec.id}")
         elif reg["command_exists"] is None:
             unknown.append("command_exists")
+            if reg["command"]:
+                cmd = reg["command"][0]
+                why = (f"is a relative path, which {spec.display_name} resolves against the directory it starts "
+                       "the server in" if os.sep in cmd or (os.altsep and os.altsep in cmd) else
+                       "is found only through an empty or relative PATH entry or inside the workspace, where "
+                       "doctor does not look")
+                add("command_unverifiable", f"the registered command {cmd} {why}, so doctor cannot tell whether "
+                                            f"it exists: run aegis init --host {spec.id} to register an absolute path")
         if reg["approval"] == "unknown":
             add("approval_unknown", "aegis is registered only in this project's .mcp.json, which Claude Code "
                                     "runs after an approval doctor cannot see")
@@ -1231,7 +1300,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     elif codes & {"not_registered", "command_missing"}:
         state = "unregistered"
     elif codes & {"registration_unverifiable", "approval_unknown", "workspace_registry_unknown",
-                   "claude_md_outside_workspace"}:
+                   "claude_md_outside_workspace", "command_unverifiable"}:
         state = "auth_unknown"
     elif codes:
         state = "policy_gap"
@@ -1679,8 +1748,7 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     environ = os.environ if environ is None else environ
     layout = UserLayout.current()
     # The home directory's .aegis/ is the user plane (~/.aegis), never a workspace.
-    root_key = _root_key(root)
-    is_home = layout is not None and root_key is not None and root_key == _root_key(layout.home)
+    is_home = _is_home(root)
     governed = is_aegis_workspace(root) and not is_home
     selected, selection, notes = _selection(root, governed)
     ctx = _Ctx(root=root, governed=governed, home=layout.home if layout else None, environ=environ,
@@ -1992,7 +2060,7 @@ def _print_hosts(diag: _Diagnosis) -> None:
                       "unavailable": "not checked"}[reg["status"]]
         print(f"      registered   {registered} ({_clean(reg['source'], 4096)})")
         if reg["command"]:
-            exists = {True: "exists", False: "MISSING", None: "not checked"}[reg["command_exists"]]
+            exists = {True: "exists", False: "MISSING", None: "unknown"}[reg["command_exists"]]
             print(f"      command      {reg['command'][0]} ({exists})")
         ident = row["identity"]
         if reg["status"] == "registered":

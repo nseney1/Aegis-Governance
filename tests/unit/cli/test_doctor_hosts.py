@@ -745,7 +745,14 @@ def test_the_mcp_launcher_check_never_runs_a_python3_from_the_workspace(env, mon
     payload = env.doctor()
     (check,) = [c for c in payload["checks"] if c["id"] == "mcp_launcher"]
     assert not marker.exists(), "doctor ran a python3 the repository supplied"
-    assert check["status"] == "warn" and "python3 not found on PATH" in " ".join(check["detail"])
+    detail = " ".join(check["detail"])
+    assert check["status"] == "warn"
+    if layout == "cwd_only":
+        assert "python3 not found on PATH" in detail
+    else:
+        # Reported where it is, never as absent, and with no advice to install Python.
+        assert "python3 is found only at" in detail and "where doctor runs nothing" in detail
+        assert "not found" not in detail and "python.org" not in detail
 
 
 # ── honest enforcement levels (review finding 2) ────────────────────────────
@@ -1533,3 +1540,102 @@ def test_a_claude_md_directly_in_home_still_counts(env, name):
     assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
     (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
     assert str(env.home / name) in reason["message"]
+
+
+# ── a registered command doctor cannot place (C-fix round 3, R5) ────────────
+
+def test_a_bare_registered_command_on_no_path_entry_is_missing(env):
+    env.all_ok()
+    env.antigravity_registered(command="no-such-aegis-mcp")
+    row = host(env.doctor(), "antigravity")
+    assert row["registration"]["command_exists"] is False
+    assert row["state"] == "unregistered" and "command_missing" in codes(row)
+
+
+def test_a_bare_registered_command_on_an_absolute_path_entry_exists(env):
+    env.all_ok()
+    env.antigravity_registered(command="aegis-mcp")
+    row = host(env.doctor(), "antigravity")
+    assert row["registration"]["command_exists"] is True
+    assert row["state"] == "ok" and row["reasons"] == []
+
+
+@pytest.mark.parametrize("layout", ["empty_entry", "relative_entry", "entry_inside_workspace"])
+def test_a_bare_registered_command_found_only_where_doctor_does_not_look_is_unknown(env, monkeypatch, tmp_path,
+                                                                                     layout):
+    # The host would find it (on PATH from the directory it starts in, or in an absolute
+    # entry inside the repository); doctor counts neither, so it can say neither
+    # "exists" nor "missing".
+    env.all_ok()
+    marker = tmp_path / "decoy-ran"
+    for where in (env.ws, env.ws / "tools"):
+        _decoy(where, "repo-mcp", marker)
+    monkeypatch.chdir(env.ws)
+    monkeypatch.setenv("PATH", _path_with(env, layout))
+    env.antigravity_registered(command="repo-mcp")
+    payload = env.doctor()
+    row = host(payload, "antigravity")
+    assert row["registration"]["command_exists"] is None
+    assert row["state"] == "auth_unknown"
+    (reason,) = [r for r in row["reasons"] if r["code"] == "command_unverifiable"]
+    assert "repo-mcp" in reason["message"] and "doctor does not look" in reason["message"]
+    assert "antigravity.command_exists" in payload["unknown"]
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("command", ["./aegis-mcp", "sub/aegis-mcp", os.path.join("sub", "aegis-mcp")])
+def test_a_relative_registered_command_path_is_unknown_never_looked_up_on_path(env, command):
+    # The host resolves such a command against the directory it starts the server in,
+    # not against PATH: an aegis-mcp in a PATH directory (bin/ and bin/sub/ here) says nothing.
+    env.all_ok()
+    (env.bin / "sub").mkdir()
+    (env.bin / "sub" / env.mcp.name).write_bytes(env.mcp.read_bytes())
+    (env.bin / "sub" / env.mcp.name).chmod(0o755)
+    env.antigravity_registered(command=command)
+    rc, out = env.run()
+    payload = env.doctor()
+    row = host(payload, "antigravity")
+    assert row["registration"]["command_exists"] is None
+    assert row["state"] == "auth_unknown"
+    (reason,) = [r for r in row["reasons"] if r["code"] == "command_unverifiable"]
+    assert "relative path" in reason["message"]
+    assert f"command      {command} (unknown)" in out
+
+
+# ── doctor run from the home directory (C-fix round 3, R7) ──────────────────
+
+def _home_rules(env: Env) -> Path:
+    rules = env.home / ".aegis" / "rules" / "invariants"
+    rules.mkdir(parents=True)
+    (rules / "mine.md").write_text((env.ws / ".aegis" / "rules" / "invariants" / "invariant-sample.md")
+                                   .read_text(encoding="utf-8"), encoding="utf-8")
+    return env.home / ".aegis" / "rules"
+
+
+def test_from_home_the_rules_check_names_the_user_layer_never_a_workspace(env):
+    env.all_ok()
+    user_rules = _home_rules(env)
+    payload = json.loads(env.run(json=True, workspace=str(env.home))[1])
+    checks = {c["id"]: c for c in payload["checks"]}
+    assert checks["rules"]["status"] == "fail"
+    joined = " ".join(checks["rules"]["detail"])
+    assert f"{user_rules} is your user rule layer" in joined
+    assert "served" not in joined and "aegis init" not in joined
+    assert checks["state_dir"]["status"] == "skip"
+    assert "user layer" in " ".join(checks["state_dir"]["detail"])
+    assert not any(str(env.home / ".aegis" / "state") in line for line in checks["state_dir"]["detail"])
+
+
+def test_from_home_no_source_file_under_it_is_taken_for_a_project(env):
+    # ~/.aegis/config.json is the user scope: --fix must never write a repository's
+    # driver opt-in there, and the AST check never walks the home directory.
+    env.all_ok()
+    _home_rules(env)
+    (env.home / "scratch").mkdir()
+    (env.home / "scratch" / "index.ts").write_text("console.log(1);\n", encoding="utf-8")
+    payload = json.loads(env.run(json=True, workspace=str(env.home), fix=True, yes=True)[1])
+    checks = {c["id"]: c for c in payload["checks"]}
+    assert checks["ast_drivers"]["status"] == "skip"
+    assert "user layer" in " ".join(checks["ast_drivers"]["detail"])
+    assert not (env.home / ".aegis" / "config.json").exists()
+    assert not any(f.get("action", "").startswith("enable") for f in payload.get("fixes", []))

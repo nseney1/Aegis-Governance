@@ -34,11 +34,11 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
-import shutil
 import stat
 import subprocess
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from aegis_core import pathlookup
 from aegis_core.errors import AegisError
 
 __all__ = [
@@ -80,7 +80,10 @@ class GitError(AegisError):
 
 
 def _git_executable() -> str:
-    found = shutil.which("git")
+    # Absolute PATH entries only: an empty or relative entry names the cwd (the
+    # repository, where a clone can plant a git), and so does the current directory
+    # the standard library's lookup searches first on Windows.
+    found = pathlookup.which("git")
     if not found:
         raise GitError("git is not installed or not on PATH")
     return found

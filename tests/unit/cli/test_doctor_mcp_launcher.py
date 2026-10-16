@@ -98,18 +98,42 @@ def test_no_aegis_mcp_report_gives_pip_guidance(tmp_path, capsys):
     assert "pip install" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("entries", [["", "{outside}"], [".", "{outside}"], ["{ws}/bin", "{outside}"]])
-def test_a_python3_the_workspace_supplies_is_never_run(tmp_path, monkeypatch, entries):
-    """Only absolute PATH entries outside the workspace count: the probe runs what it finds."""
+@pytest.mark.parametrize("entries, where", [
+    (["", "{outside}"], "{ws}/python3, through the relative PATH entry ''"),
+    ([".", "{outside}"], "{ws}/python3, through the relative PATH entry '.'"),
+    (["{ws}/bin", "{outside}"], "{ws}/bin/python3, inside {ws}"),
+])
+def test_a_python3_the_workspace_supplies_is_never_run(tmp_path, monkeypatch, entries, where):
+    """Only absolute PATH entries outside the workspace count: the probe runs what it
+    finds. One found only elsewhere is reported where it is, never as absent."""
     ws, outside, marker = tmp_path / "ws", tmp_path / "outside", tmp_path / "ran"
     outside.mkdir()
-    for where in (ws, ws / "bin"):
-        make_stub(where, f'echo ran >> "{marker}"\necho 3\n')
+    for directory in (ws, ws / "bin"):
+        make_stub(directory, f'echo ran >> "{marker}"\necho 3\n')
     monkeypatch.chdir(ws)
     path = os.pathsep.join(e.format(ws=ws, outside=outside) for e in entries)
     status, detail = probe_mcp_launcher(path, workspace=ws)
-    assert (status, detail) == ("missing", "python3 is not on PATH")
+    assert status == "refused"
+    assert detail == f"python3 is found only at {where.format(ws=ws)}, where doctor runs nothing"
     assert not marker.exists()
+
+
+def test_a_python3_found_only_where_doctor_runs_nothing_gets_no_install_advice(tmp_path, monkeypatch, capsys):
+    ws, marker = tmp_path / "ws", tmp_path / "ran"
+    make_stub(ws / "bin", f'echo ran >> "{marker}"\necho 3\n')
+    assert _check_mcp_launcher(path_env=str(ws / "bin"), workspace=ws) is False
+    out = capsys.readouterr().out
+    assert f"python3 is found only at {ws}/bin/python3, inside {ws}, where doctor runs nothing" in out
+    assert "cannot tell whether `python3 -m aegis_mcp` starts" in out
+    assert "not found" not in out and "install Python" not in out and "python.org" not in out
+    assert not marker.exists()
+
+
+def test_a_python3_on_no_path_entry_is_missing_with_install_advice(tmp_path, capsys):
+    (tmp_path / "empty").mkdir()
+    assert _check_mcp_launcher(path_env=str(tmp_path / "empty"), workspace=tmp_path) is False
+    out = capsys.readouterr().out
+    assert "python3 not found on PATH" in out and "python.org" in out
 
 
 def test_the_python3_outside_the_workspace_is_the_one_probed(tmp_path, monkeypatch):
