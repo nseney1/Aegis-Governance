@@ -188,34 +188,30 @@ def inventory_rules(workspace: str) -> RuleInventory:
         path = getattr(exc, "filename", None) or rules_root
         raise RuleInventoryError("list", path, str(exc), exc)
 
-    try:
-        walker = os.walk(rules_root, topdown=True, followlinks=False, onerror=walk_error)
-        for dirpath, dirnames, filenames in walker:
-            dir_info = _stat_path(dirpath)
-            _require_directory(dirpath, dir_info)
-            directory_signatures[dirpath] = _stat_signature(dir_info)
+    # os.walk's defaults: top down, so each directory's children are validated (a
+    # symlinked one raises) before any is entered, and links are never followed. A
+    # listing error reaches walk_error; nothing else in the loop raises OSError.
+    for dirpath, dirnames, filenames in os.walk(rules_root, onerror=walk_error):
+        dir_info = _stat_path(dirpath)
+        _require_directory(dirpath, dir_info)
+        directory_signatures[dirpath] = _stat_signature(dir_info)
 
-            dirnames.sort()
-            for dirname in dirnames:
-                child = os.path.join(dirpath, dirname)
-                child_info = _stat_path(child)
-                if stat.S_ISLNK(child_info.st_mode):
-                    raise RuleInventoryError(
-                        "validate", child, "symlinked directory is not allowed"
-                    )
-                if not stat.S_ISDIR(child_info.st_mode):
-                    raise RuleInventoryError("validate", child, "expected a directory")
+        dirnames.sort()
+        for dirname in dirnames:
+            child = os.path.join(dirpath, dirname)
+            child_info = _stat_path(child)
+            if stat.S_ISLNK(child_info.st_mode):
+                raise RuleInventoryError(
+                    "validate", child, "symlinked directory is not allowed"
+                )
+            if not stat.S_ISDIR(child_info.st_mode):
+                raise RuleInventoryError("validate", child, "expected a directory")
 
-            for filename in sorted(filenames):
-                # Any case of the extension: the loader reports a rule named x.MD instead
-                # of letting it go unseen.
-                if filename.lower().endswith(".md"):
-                    rule_paths.append(os.path.join(dirpath, filename))
-    except RuleInventoryError:
-        raise
-    except OSError as exc:
-        path = getattr(exc, "filename", None) or rules_root
-        raise RuleInventoryError("list", path, str(exc), exc) from exc
+        for filename in sorted(filenames):
+            # Any case of the extension: the loader reports a rule named x.MD instead
+            # of letting it go unseen.
+            if filename.lower().endswith(".md"):
+                rule_paths.append(os.path.join(dirpath, filename))
 
     entries = []  # type: List[RuleInventoryEntry]
     for path in sorted(rule_paths):
