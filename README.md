@@ -172,7 +172,7 @@ Aegis does not claim enforcement it lacks. `aegis doctor` reports these tiers, i
 - [How Aegis works](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/how-it-works.md): the loop, rules, MCP delivery, checks, the ledger, hosts and enforcement.
 - [Why Aegis is built this way](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/why-aegis.md): the evidence, what went wrong in v3, the v4.3 roadmap.
 - [Reference](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/reference.md): every command, flag and MCP tool, generated from the code.
-- [Plan of record (ADR 0005)](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/adr/0005-v4-plan-of-record.md) and the [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md).
+- Plan of record (ADR 0005) and the [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md).
 - [Contributing](https://github.com/nseney1/Aegis-Guardrails/blob/main/CONTRIBUTING.md) and [privacy](https://github.com/nseney1/Aegis-Guardrails/blob/main/PRIVACY.md).
 - Security issues: report them privately as described in [SECURITY.md](SECURITY.md).
 

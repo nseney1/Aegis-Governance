@@ -83,3 +83,6 @@ docs/postmortem-work-sessions.md
 docs/internal/
 .hypothesis/
 
+
+# Architecture decision records: kept locally, not published (author decision 2026-10-17)
+docs/adr/

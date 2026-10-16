@@ -38,7 +38,7 @@ Fixes from the independent 4.1.0 release review.
 
 ## [4.1.0] - 2026-10-16
 
-v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel agents, and skills projection, as designed in [ADR 0005](docs/adr/0005-v4-plan-of-record.md) AD-7 and AD-8 (amended 2026-10-16). Nothing from 4.0 is removed. The details are in [How Aegis works](docs/how-it-works.md) section 8.
+v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel agents, and skills projection, as designed in ADR 0005 AD-7 and AD-8 (amended 2026-10-16). Nothing from 4.0 is removed. The details are in [How Aegis works](docs/how-it-works.md) section 8.
 
 ### Added
 
@@ -84,7 +84,7 @@ v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel a
 
 ## [4.0.0] - 2026-10-16
 
-v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has fewer commands and MCP tools, one config file, an append-only ledger as the only source of rule fitness, and a host plane that registers Aegis with Codex CLI, Claude Code and Antigravity. The reasons, with the evidence and the mistakes behind them, are in [docs/why-aegis.md](docs/why-aegis.md); the decisions are in [ADR 0005](docs/adr/0005-v4-plan-of-record.md). Every removed command and flag exits with status 2. Removed commands, and the removed `init` and `uninstall` flags, print one line naming the replacement (or saying there is none); the other removed flags get the argument parser's usage error, and the Breaking changes list below names their replacements.
+v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has fewer commands and MCP tools, one config file, an append-only ledger as the only source of rule fitness, and a host plane that registers Aegis with Codex CLI, Claude Code and Antigravity. The reasons, with the evidence and the mistakes behind them, are in [docs/why-aegis.md](docs/why-aegis.md); the decisions are in ADR 0005. Every removed command and flag exits with status 2. Removed commands, and the removed `init` and `uninstall` flags, print one line naming the replacement (or saying there is none); the other removed flags get the argument parser's usage error, and the Breaking changes list below names their replacements.
 
 ### Upgrading from 3.x
 
@@ -175,7 +175,7 @@ v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has
 
 ### Fixed
 
-These are the v3.3 defects found by the v4 review ([evidence review](docs/adr/0005-evidence-review.md)) and the build waves.
+These are the v3.3 defects found by the v4 review (evidence review) and the build waves.
 
 - `forbid_ast` was bypassed by import aliases (`import subprocess as sp`), rebinding, a CR-only encoding cookie and dynamic imports, and silently skipped files it could not read (a byte-order mark, latin-1). It now resolves aliases and fails closed.
 - A repository's `.aegis/slots.yaml` could run commands and inject text into scan output. Repository config can no longer name commands.
