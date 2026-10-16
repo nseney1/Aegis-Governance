@@ -16,6 +16,15 @@
   - Antigravity app 2.19.1.
 
   Unverified items are marked (U).
+- **Amendment (author direction, 2026-10-16)**: "gemini cli is replaced by agy" (first recorded 2026-10-15) and "dont use gemini cli. use agy" (2026-10-16).
+  - **Gemini CLI is retired.** Google refuses the client for individual Code Assist accounts: Gemini CLI 0.64.0 failed to authenticate with `IneligibleTierError` in the 2026-10-15 live probe. `gemini-cli` stays in the host table only as an identity row, so a connecting client is still named. It has no registration, and `aegis init --host gemini-cli` and `aegis uninstall --host gemini-cli` exit 2 with `gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist accounts; use --host antigravity.` Antigravity is the Gemini-family host. This supersedes "(table row, Phase 2)" in §3.1.
+  - **Phase 2 (v4.1)** is per-host hooks for Claude Code, Codex CLI and Antigravity, plus skills projection. The experimental cursor, copilot, kiro and windsurf rows are v4.2 work, as [ADR 0005](0005-v4-plan-of-record.md) Appendix C already scheduled them (§4 below). The hook tiers are those of ADR 0005 AD-8 as amended, which supersede the Best-effort row of §3.9.
+  - **Antigravity facts that changed** (live probes on `agy` 1.3.6, 2026-10-15 and 2026-10-16):
+    - Hooks must be silent. agy parses hook stdout against the event's result schema: printing `{"decision":"allow"}` from a PostToolUse hook failed the tool call. Empty stdout with exit 0 passes, and stderr with exit 0 has no visible effect.
+    - A PreToolUse hook that exits 1 blocks the tool call, and the hook command runs through a shell. A missing or crashing `aegis` must therefore be mapped to exit 0, or it would block every tool call.
+    - Both `~/.gemini/config/hooks.json` (global) and `<repo>/.agents/hooks.json` (workspace) are honoured. With the global file the hook's working directory is outside any repository, so the workspace comes from the payload's `workspacePaths[0]` and its git top level, never from the working directory.
+    - MCP `tools/call` `_meta` carries `antigravity.google/conversation_id`, equal to the hook payload's `conversationId`.
+    - The hook shell on Windows is unverified, so Antigravity hooks are unavailable there.
 
 ## 1. Problem (v3.3 / Wave 1)
 
@@ -32,7 +41,7 @@
 | **claude-code** | `claude-code` | yes | launch dir; `CLAUDE_PROJECT_DIR` | `CLAUDE.md` hierarchy; reads `AGENTS.md` only if no `CLAUDE.md` exists (≥ 2.1.277) | `claude mcp add --scope user aegis -e K=V -- CMD` |
 | **claude-desktop** | `local-agent-mode-<key>` | union of open sessions | `$HOME`; minimal env | n/a | identity only (H4): Aegis no longer registers here |
 | **antigravity** (app, IDE, `agy`) | `antigravity-client` | none / `[]` (verified live) | launch dir; full env; eager spawn at startup | `AGENTS.md`, `GEMINI.md`; 24,000 B per file | `~/.gemini/config/mcp_config.json` (JSON, no `${}` expansion) |
-| **gemini-cli** (later) | `gemini-cli-mcp-client` | yes | config cwd | `GEMINI.md` only, unless `context.fileName` lists `AGENTS.md` | `gemini mcp add -s user` |
+| **gemini-cli** ~~(later)~~ (retired 2026-10-16: identity only) | `gemini-cli-mcp-client` | yes | config cwd | `GEMINI.md` only, unless `context.fileName` lists `AGENTS.md` | ~~`gemini mcp add -s user`~~ none: `init --host gemini-cli` exits 2 |
 
 Every host runs `aegis-mcp` unsandboxed with the user's privileges, so Aegis's own confinement is the only boundary.
 
@@ -170,8 +179,8 @@ It touches only what it reports.
 | Phase | Ships | Release |
 |---|---|---|
 | 1 | §3.1–3.10 for codex-cli, claude-code (user scope) and antigravity; claude-desktop identity only | v4.0 (ADR §6 step 3) |
-| 2 | Per-host hooks (Claude scan-before-edit first); skills projection (`.agents/skills`, `.claude/skills`); gemini-cli, cursor, copilot, kiro and windsurf rows after 3 clean runs each | v4.1 |
-| 3 | Plugins and extensions; worktree-shared ledger (H5) | v4.2, only with an incident or metric |
+| 2 | ~~Per-host hooks (Claude scan-before-edit first); skills projection (`.agents/skills`, `.claude/skills`); gemini-cli, cursor, copilot, kiro and windsurf rows after 3 clean runs each~~ Amended 2026-10-16: per-host hooks for Claude Code, Codex CLI and Antigravity (one fail-open handler; tiers in ADR 0005 AD-8 as amended); skills projection (`.claude/skills`, `.agents/skills`) | v4.1 |
+| 3 | ~~Plugins and extensions; worktree-shared ledger (H5)~~ Amended 2026-10-16: experimental cursor, copilot, kiro and windsurf rows, each verified only after 3 clean runs; an experimental Claude Code plugin directory (`aegis package`; nothing is published, and the Gemini CLI extension is cut); worktree-shared ledger (H5) | v4.2, ~~only with an incident or metric~~ each with a prune row (ADR 0005 Appendix D) |
 
 ## 5. Trade-offs
 
