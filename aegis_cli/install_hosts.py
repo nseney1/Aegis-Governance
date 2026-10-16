@@ -88,6 +88,7 @@ __all__ = [
     "display_command",
     "has_block_marker",
     "is_denied_root",
+    "launch_risk",
     "mcp_command",
     "mcp_entry",
     "ordered_hosts",
@@ -697,13 +698,94 @@ def parse_hosts(value: str) -> Union[str, List[str]]:
     return ordered_hosts(names)
 
 
-def mcp_command(path: Optional[str] = None) -> List[str]:
-    """The absolute command that starts the Aegis MCP server: the aegis-mcp found on PATH,
-    under that name (not a link's target, which may be a dispatcher), else this interpreter."""
-    exe = which("aegis-mcp", path)
+MCP_SCRIPT = "aegis-mcp"
+# The last-resort launcher, shaped like the pre-commit hook's runner: -I keeps the
+# directory the host starts the server in (the project, which a cloned repository
+# controls), PYTHON* variables and user site-packages off sys.path; the one directory
+# aegis_mcp was installed in comes in as sys.argv[1]. `python -m aegis_mcp` would import
+# whatever aegis_mcp (or aegis_core) package sits in that start directory.
+MCP_RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from aegis_mcp.server import main; main()"
+
+
+def _mcp_import_root() -> str:
+    import aegis_mcp
+
+    return str(Path(aegis_mcp.__file__).resolve().parent.parent)
+
+
+def _installed_script(scripts_dirs: Optional[Sequence[str]]) -> Optional[str]:
+    """The aegis-mcp console script pip installed with this interpreter, if any: the
+    scheme's scripts directory (a venv's bin/, which pipx and unactivated venvs leave off
+    PATH) or the user scheme's (pip --user), as ``aegis_cli.pathcheck`` finds them."""
+    from aegis_cli import pathcheck
+
+    dirs = pathcheck.default_candidates() if scripts_dirs is None else list(scripts_dirs)
+    directory = pathcheck.scripts_dir(dirs, cmd_name=MCP_SCRIPT)
+    if directory is None or not os.path.isabs(directory):
+        return None
+    for name in (MCP_SCRIPT + ".exe", MCP_SCRIPT) if os.name == "nt" else (MCP_SCRIPT,):
+        candidate = os.path.join(directory, name)
+        if os.path.isfile(candidate) and (os.name == "nt" or os.access(candidate, os.X_OK)):
+            return candidate
+    return None
+
+
+def mcp_command(path: Optional[str] = None, scripts_dirs: Optional[Sequence[str]] = None) -> List[str]:
+    """The absolute command that starts the Aegis MCP server, in this order:
+
+    1. the aegis-mcp found in an absolute PATH entry, under that name (not a link's
+       target, which may be a dispatcher);
+    2. the aegis-mcp script installed with this interpreter (``scripts_dirs``, default
+       its sysconfig scripts directories, the user scheme's included);
+    3. this interpreter in isolated mode (``-I -c``) importing aegis_mcp from the
+       directory it is installed in.
+
+    Never ``python -m aegis_mcp``: hosts start the server in the project directory, and
+    ``-m`` imports from there first. ``launch_risk`` of the result is always None.
+    """
+    exe = which(MCP_SCRIPT, path)
     if exe:
         return [exe]
-    return [sys.executable, "-m", "aegis_mcp"]
+    script = _installed_script(scripts_dirs)
+    if script:
+        return [script]
+    return [sys.executable, "-I", "-c", MCP_RUNNER, _mcp_import_root()]
+
+
+# Interpreter options whose value follows them (attached or as the next argument).
+_PY_VALUE_OPTIONS = "WX"
+
+
+def launch_risk(argv: Sequence[str]) -> Optional[str]:
+    """Why ``argv`` could run code from the directory a host starts it in, or None.
+
+    A command that is not an absolute path resolves against that directory or a PATH
+    Aegis cannot see; ``python -m`` and ``python -c`` without ``-I`` put that directory
+    first on sys.path, so a repository holding an ``aegis_mcp`` package runs its own code.
+    """
+    if not argv or not os.path.isabs(argv[0]):
+        return "the command is not an absolute path"
+    flags = set()
+    rest = iter(argv[1:])
+    for arg in rest:
+        if not arg.startswith("-") or arg in ("-", "--") or arg.startswith("--"):
+            if arg.startswith("--") and arg != "--":
+                continue
+            return None  # a script path, a `-` for stdin, or arguments of a non-interpreter
+        body = arg[1:]
+        for at, letter in enumerate(body):
+            if letter == "m":
+                return "it runs -m, which imports the module from the directory the host starts it in"
+            if letter == "c":
+                if "I" in flags or "P" in flags:
+                    return None
+                return "it runs -c without -I, which imports from the directory the host starts it in"
+            if letter in _PY_VALUE_OPTIONS:
+                if at == len(body) - 1:
+                    next(rest, None)
+                break
+            flags.add(letter)
+    return None
 
 
 def _env(host_id: str, pin: Optional[str]) -> Dict[str, str]:

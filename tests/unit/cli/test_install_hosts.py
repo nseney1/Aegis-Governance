@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -553,8 +554,57 @@ class TestRegistrationCommands:
         exe = _fake_bin(tmp_path / "bin", "aegis-mcp")
         assert _paths(*ih.mcp_command(path=str(tmp_path / "bin"))) == _paths(exe)
 
-    def test_mcp_command_falls_back_to_this_interpreter(self, tmp_path):
-        assert ih.mcp_command(path=str(tmp_path / "nobin")) == [sys.executable, "-m", "aegis_mcp"]
+    def test_mcp_command_takes_the_console_script_installed_with_this_interpreter(self, tmp_path):
+        """pip --user and unactivated venvs leave aegis-mcp off PATH, next to the interpreter."""
+        script = _fake_bin(tmp_path / "scripts", "aegis-mcp")
+        command = ih.mcp_command(path=str(tmp_path / "nobin"), scripts_dirs=[str(tmp_path / "empty"),
+                                                                            str(tmp_path / "scripts")])
+        assert _paths(*command) == _paths(script)
+
+    def test_an_aegis_mcp_on_path_wins_over_the_interpreter_scripts_directory(self, tmp_path):
+        on_path = _fake_bin(tmp_path / "bin", "aegis-mcp")
+        _fake_bin(tmp_path / "scripts", "aegis-mcp")
+        command = ih.mcp_command(path=str(tmp_path / "bin"), scripts_dirs=[str(tmp_path / "scripts")])
+        assert _paths(*command) == _paths(on_path)
+
+    def test_mcp_command_falls_back_to_this_interpreter_in_isolated_mode(self, tmp_path):
+        command = ih.mcp_command(path=str(tmp_path / "nobin"), scripts_dirs=[])
+        import aegis_mcp
+
+        assert command[:3] == [sys.executable, "-I", "-c"]
+        assert "-m" not in command
+        root = command[4]
+        assert os.path.isabs(root) and len(command) == 5
+        assert Path(root, "aegis_mcp", "server.py").is_file()
+        assert Path(root).resolve() == Path(aegis_mcp.__file__).resolve().parent.parent
+        assert ih.launch_risk(command) is None
+
+    @pytest.mark.parametrize("argv, risk", [
+        (["/py", "-m", "aegis_mcp"], "-m"),
+        (["/py", "-Im", "aegis_mcp"], "-m"),
+        (["/py", "-maegis_mcp"], "-m"),
+        (["/py", "-W", "ignore", "-m", "aegis_mcp"], "-m"),
+        (["/py", "-c", "import aegis_mcp"], "-c without -I"),
+        (["python3", "-I", "-c", "x"], "not an absolute path"),
+        (["aegis-mcp"], "not an absolute path"),
+        (["./aegis-mcp"], "not an absolute path"),
+        ([], "not an absolute path"),
+    ])
+    def test_launch_risk_names_a_command_that_depends_on_the_start_directory(self, argv, risk):
+        assert risk in (ih.launch_risk(argv) or "")
+
+    @pytest.mark.parametrize("argv", [
+        ["/x/aegis-mcp"],
+        ["/py", "-I", "-c", "import sys", "/root"],
+        ["/py", "-Ic", "import sys"],
+        ["/py", "-X", "frozen_modules=off", "-I", "-c", "x"],
+        ["/py", "-Xfrozen_modules=off", "-I", "-c", "x"],
+        ["/py", "/abs/script.py"],
+    ])
+    def test_launch_risk_accepts_absolute_isolated_commands(self, argv):
+        if os.name == "nt":
+            argv = ["C:" + argv[0].replace("/", "\\")] + argv[1:]
+        assert ih.launch_risk(argv) is None
 
     def test_codex_argv_uses_the_table_template(self):
         argv = ih.register_argv(hosts.get("codex-cli"), ["/x/aegis-mcp"])
@@ -578,6 +628,43 @@ class TestRegistrationCommands:
             "env": {"AEGIS_CLIENT": "antigravity", "AEGIS_WORKSPACE": "/repo"}}
         assert ih.mcp_entry("antigravity", ["/x/aegis-mcp"]) == {
             "command": "/x/aegis-mcp", "args": [], "env": {"AEGIS_CLIENT": "antigravity"}}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX process started in the planted directory")
+class TestTheRegisteredLauncherNeverImportsFromTheStartDirectory:
+    """Hosts start the MCP server in the project directory, which a cloned repository
+    controls. The registered command must start Aegis's own server from there, never a
+    planted aegis_mcp or aegis_core (release review: v4.0.0 registered `python -m aegis_mcp`)."""
+
+    def _planted(self, tmp_path):
+        repo = tmp_path / "evil"
+        marker = tmp_path / "PLANTED_RAN"
+        for package in ("aegis_mcp", "aegis_core"):
+            (repo / package).mkdir(parents=True)
+            code = f"open({str(marker)!r}, 'a').write({package!r} + '\\n')\n"
+            for module in ("__init__.py", "__main__.py", "server.py"):
+                (repo / package / module).write_text(code, encoding="utf-8")
+        return repo, marker
+
+    def test_the_fallback_launcher_runs_aegis_and_not_the_planted_package(self, tmp_path):
+        repo, marker = self._planted(tmp_path)
+        command = ih.mcp_command(path=str(tmp_path / "nobin"), scripts_dirs=[])
+        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n"
+        env = {k: v for k, v in os.environ.items() if k != "AEGIS_WORKSPACE"}
+        env["PYTHONPATH"] = str(repo)  # isolated mode ignores it too
+        proc = subprocess.run(command, input=request, cwd=str(repo), capture_output=True, text=True,
+                              timeout=60, env=env)
+        assert not marker.exists(), marker.read_text(encoding="utf-8")
+        assert proc.returncode == 0, proc.stderr
+        reply = json.loads(proc.stdout.splitlines()[0])
+        assert reply["result"]["serverInfo"]["name"] == "aegis-mcp"
+
+    def test_the_v4_0_0_launcher_ran_the_planted_package(self, tmp_path):
+        """The control: the same directory takes over `python -m aegis_mcp`."""
+        repo, marker = self._planted(tmp_path)
+        subprocess.run([sys.executable, "-m", "aegis_mcp"], input="", cwd=str(repo), capture_output=True,
+                       text=True, timeout=60)
+        assert marker.exists()
 
 
 class _Runner:
@@ -898,7 +985,9 @@ class TestRepositoryExecutablesAreNeverRun:
         runner = _Runner()
         monkeypatch.setattr(ih, "_run_cli", runner)
         assert ih.detect_hosts(repo.home, path=path) == []
-        assert ih.mcp_command(path=path) == [sys.executable, "-m", "aegis_mcp"]
+        command = ih.mcp_command(path=path, scripts_dirs=[])
+        assert command[:3] == [sys.executable, "-I", "-c"] and ih.launch_risk(command) is None
+        assert not any(str(repo.root) in part for part in command)
         assert ih.register_host("codex-cli", home=repo.home, command=["/x"], path=path).result == "manual"
         assert ih.unregister_host("claude-code", home=repo.home, path=path).result == "manual"
         assert runner.calls == []
