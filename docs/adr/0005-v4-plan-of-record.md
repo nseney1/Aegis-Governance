@@ -206,6 +206,7 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
 
 ### AD-7: Git-native agent team coordination (v4.1, gated by the §6 soak)
 
+- **Status**: shipped in 4.1.0 as amended below: `aegis team claim|renew|transfer|release|gc|list|metrics`, the optional `.aegis/team.json`, `aegis check --lane` (containment and Python test integrity, self-attested or witnessed with `--base-policy`, advisory as a CI job) and the events log ([CHANGELOG](../../CHANGELOG.md) 4.1.0).
 - **Decision**: use git itself as the coordination substrate for H3.
   - **Lanes**: one worktree and branch per lane, which is what Antigravity, Claude and Codex already do.
   - **Leases**: refs under `refs/aegis/lanes/<lane>`, written with `git update-ref <ref> <new> <old>`. That is an atomic compare-and-swap, shared across all worktrees through the common dir, needs no daemon (B2) and adds zero dependencies (B1).
@@ -238,6 +239,7 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
 
 ### AD-8: Honest enforcement tiers
 
+- **Status**: the per-host hook tiers of the amendment below shipped in 4.1.0: `aegis hook install|uninstall --host`, the fail-open handler `aegis hook run pre-tool --host <h>`, and doctor's per-host tier rows with their evidence labels ([CHANGELOG](../../CHANGELOG.md) 4.1.0).
 - **Decision**:
   - CI running Layer-1 deterministic checks on every PR is the **authoritative floor**.
   - The local git pre-commit hook is fast feedback and can be bypassed with `--no-verify`.
@@ -455,6 +457,8 @@ Each §5 cut was argued by a keep-advocate before it was made. The conditions be
 Accepted 2026-10-15, when the author extended implementation scope through v4.2.0 (§6 scope amendment). Tags still follow AD-10. This summarizes the v4.1/v4.2 spec used during the build; the waves that build each feature own the details.
 
 **Evidence for the lease design**: a git 2.43 ref probe (2026-10-15) showed that a create-only `update-ref <ref> <new> 0{40}` refuses an existing ref, that compare-and-swap works from another worktree, that a stale old value is rejected with the current value, and that blob-valued refs survive `gc --prune=now`. (The amended design writes through `update-ref --stdin` with the `create` verb instead of an all-zero old value, which SHA-256 repositories do not accept.)
+
+**Status**: the v4.1 rows below shipped in 4.1.0 ([CHANGELOG](../../CHANGELOG.md) 4.1.0); the v4.2 rows remain planned.
 
 **Amendment (author direction, 2026-10-16).** The rows below replace the table accepted on 2026-10-15, which stays visible under "Superseded rows". They summarize the v4.1/v4.2 spec, revision 3 (2026-10-16), which is not in the repository, so each row carries the design its wave needs. "Live" means probed on `agy` 1.3.6, Claude Code 2.1.301 or Codex 0.162.1; "documented" means official docs or vendor source, not probed.
 
