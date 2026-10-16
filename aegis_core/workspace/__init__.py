@@ -70,21 +70,9 @@ def confine_path(
     return Workspace.resolve(start=workspace).confine_path(untrusted_path)
 
 
-def validate_rule_names(
-    rule_names: list[str],
-    workspace: str | Path | os.PathLike[str] | Workspace,
-) -> list[str]:
-    """Validate that rule names reference rules that actually exist."""
-    from aegis_core.workspace.base import Workspace
-
-    ws = workspace if isinstance(workspace, Workspace) else Workspace.resolve(start=workspace)
-    return ws.validate_rule_names(rule_names)
-
-
 __all__ = [
     "as_workspace",
     "confine_path",
     "literal_workspace",
     "resolve_workspace",
-    "validate_rule_names",
 ]

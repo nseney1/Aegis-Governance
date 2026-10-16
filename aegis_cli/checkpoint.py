@@ -3,9 +3,9 @@
 The checks live in aegis_core.verification.checkpoint_checks: a test file per
 source file, hardcoded absolute paths, per-test assertions (AST), rule fitness
 from the ledger, rule conventions, and gate/invariant rules that do not use
-`gate` enforcement ("paper walls").
+`gate` enforcement ("paper gates").
 
-Issues are warnings unless --strict. Two always block: a paper wall (a rule that
+Issues are warnings unless --strict. Two always block: a paper gate (a rule that
 claims to be a gate but enforces nothing) and a rule file that cannot be loaded
 (aegis scan refuses to serve the rule set while it exists).
 """
@@ -17,7 +17,7 @@ from aegis_core.verification.checkpoint_checks import run_all_checks
 
 __all__ = ["GATE_CHECKS", "is_blocking", "run_checkpoint"]
 
-GATE_CHECKS = frozenset({"paper_walls", "rule_load"})
+GATE_CHECKS = frozenset({"paper_gates", "rule_load"})
 
 
 def is_blocking(issue: dict, strict: bool) -> bool:

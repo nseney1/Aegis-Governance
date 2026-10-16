@@ -1,6 +1,5 @@
 include README.md
 include LICENSE
-include VERSION
 include Makefile
 prune .soma
 prune .aegis

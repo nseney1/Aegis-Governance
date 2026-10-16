@@ -10,13 +10,13 @@ import json
 from pathlib import Path
 import pytest
 
-from aegis_core.lifecycle.creation import create_cell
+from aegis_core.lifecycle.creation import create_rule
 from aegis_core.fitness import for_rules
-from aegis_core.lifecycle.parsers import find_cell_file
+from aegis_core.lifecycle.parsers import find_rule_file
 from aegis_core.rules import load_rules
 from aegis_core.sync import build
 from aegis_core.lifecycle.promotion import evaluate_demotions, evaluate_promotions
-from aegis_core.lifecycle.selection import run_cell_selection
+from aegis_core.lifecycle.selection import run_rule_selection
 from aegis_core.workspace.base import Workspace
 
 
@@ -67,8 +67,8 @@ class TestLifecycleWorkspaceInteroperability:
     """Verify lifecycle subsystem functions accept Workspace directly."""
 
     def test_create_cell_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        created = create_cell(
-            cell_type="trap",
+        created = create_rule(
+            rule_type="trap",
             hypothesis="Always validate user inputs",
             workspace=mock_soma_workspace,
         )
@@ -81,7 +81,7 @@ class TestLifecycleWorkspaceInteroperability:
         assert derived["rules"]["test-rule"]["triggers"] == 1  # the ledger row, not the frontmatter
 
     def test_run_cell_selection_with_workspace_instance(self, mock_soma_workspace: Workspace):
-        res = run_cell_selection(workspace=mock_soma_workspace, execute=False)
+        res = run_rule_selection(workspace=mock_soma_workspace, execute=False)
         assert res == 0
 
     def test_parsers_and_promotions_with_workspace_instance(self, mock_soma_workspace: Workspace):
@@ -91,7 +91,7 @@ class TestLifecycleWorkspaceInteroperability:
         fits = for_rules(mock_soma_workspace, rules.rules)
         assert fits["test-rule"].tp == 1
 
-        cand_file, ctype = find_cell_file(mock_soma_workspace, "test-rule")
+        cand_file, ctype = find_rule_file(mock_soma_workspace, "test-rule")
         assert cand_file is not None
         assert cand_file.is_file()
         assert ctype == "trap"

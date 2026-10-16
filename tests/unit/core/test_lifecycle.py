@@ -139,37 +139,37 @@ class TestIncompleteLedger:
         assert (tmp_path / ".aegis" / "rules" / "traps" / "noisy-trap.md").is_file()
 
     def test_aegis_rule_archive_moves_nothing(self, tmp_path, capsys):
-        from aegis_core.lifecycle.selection import prune_cells
+        from aegis_core.lifecycle.selection import prune_rules
 
         _trap(_ws(tmp_path), "noisy-trap", fp=3)
         _damage_ledger(tmp_path)
 
-        assert prune_cells(tmp_path, execute=True) == 0
+        assert prune_rules(tmp_path, execute=True) == 0
 
         assert "not archived: Rule 'noisy-trap' was not archived: the ledger is incomplete" in capsys.readouterr().out
         assert (tmp_path / ".aegis" / "rules" / "traps" / "noisy-trap.md").is_file()
 
     def test_tier_changes_are_reported_but_not_written(self, tmp_path):
-        from aegis_core.lifecycle.promotion import evaluate_cell_tiers
+        from aegis_core.lifecycle.promotion import evaluate_rule_tiers
 
         _trap(_ws(tmp_path), "proven", tp=30)
         _damage_ledger(tmp_path)
         path = tmp_path / ".aegis" / "rules" / "traps" / "proven.md"
         before = path.read_bytes()
 
-        result = evaluate_cell_tiers(tmp_path, execute=True)
+        result = evaluate_rule_tiers(tmp_path, execute=True)
 
         assert [(c["rule"], c["old_tier"], c["new_tier"]) for c in result["changes"]] == [("proven", "advisory", "mechanical")]
         assert result["refused"] == "not written: the ledger is incomplete (1 unreadable line(s))"
         assert path.read_bytes() == before
 
     def test_an_evidence_checked_promotion_is_ineligible(self, tmp_path):
-        from aegis_core.lifecycle.promotion import promote_cell
+        from aegis_core.lifecycle.promotion import promote_rule
 
         _trap(_ws(tmp_path), "proven", tp=25)
         _damage_ledger(tmp_path)
 
-        result = promote_cell(tmp_path, "proven")
+        result = promote_rule(tmp_path, "proven")
 
         assert result["status"] == "ineligible"
         assert "the ledger is incomplete (1 unreadable line(s))" in result["message"]

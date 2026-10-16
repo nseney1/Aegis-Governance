@@ -13,6 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from aegis_core._version import __version__
 from aegis_core.config import env_workspace
 from aegis_core.taxonomy import MCP_DEFAULT_RATE_LIMITS
 from aegis_core.workspace.base import Workspace
@@ -65,31 +66,6 @@ def _check_rate_limit(tool_name: str) -> bool:
         recent.append(now)
         _tool_call_times[tool_name] = recent
         return True
-
-
-def _server_version() -> str:
-    """Resolve the version from a single source of truth."""
-    version_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "VERSION"
-    )
-    if os.path.isfile(version_file):
-        try:
-            with open(version_file, "r", encoding="utf-8") as fh:
-                val = fh.read().strip()
-                if val:
-                    return val
-        except OSError:
-            pass
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-        for pkg_name in ("aegis-guardrails", "aegis-governance", "soma-governance"):
-            try:
-                return version(pkg_name)
-            except PackageNotFoundError:
-                continue
-    except ImportError:
-        pass
-    return "unknown"
 
 
 def send_response(response: Dict[str, Any]):
@@ -151,7 +127,7 @@ def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "aegis-mcp", "version": _server_version()},
+                "serverInfo": {"name": "aegis-mcp", "version": __version__},
             },
         }
     if method == "notifications/initialized":

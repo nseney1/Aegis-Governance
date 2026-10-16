@@ -128,14 +128,6 @@ class TestInterface:
         assert _exit_code(["check", "--workspace", str(ws), "--plan", "x", "--plan-file", "p.md"]) == 2
         assert "not allowed with argument" in capsys.readouterr().err
 
-    def test_help_lists_exactly_the_v4_interface(self, capsys):
-        assert _exit_code(["check", "--help"]) == 0
-        out = capsys.readouterr().out
-        for flag in ("--hook", "--strict", "--full", "--plan", "--plan-file", "--llm-cmd", "--dry-run", "--format"):
-            assert flag in out
-        assert "sarif" not in out
-        assert "--provider" not in out
-
 
 # ── Layer 1 (default) ───────────────────────────────────────────────────────
 

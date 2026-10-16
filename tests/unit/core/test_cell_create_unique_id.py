@@ -1,4 +1,4 @@
-"""create_cell must never replace an existing rule (review finding F4, lane A2).
+"""create_rule must never replace an existing rule (review finding F4, lane A2).
 
 A rule id names one active rule. Re-creating an id silently replaced the rule
 and discarded its accumulated fitness and lineage, and creating the id in a
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from aegis_core.lifecycle.creation import create_cell
+from aegis_core.lifecycle.creation import create_rule
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
 
@@ -56,7 +56,7 @@ def test_recreating_an_existing_id_is_refused_and_keeps_its_fitness(ws: Path) ->
     before = _snapshot(_rules(ws))
 
     with pytest.raises(FileExistsError) as exc:
-        create_cell("trap", "Fresh hypothesis", id_override="dup", workspace=ws)
+        create_rule("trap", "Fresh hypothesis", id_override="dup", workspace=ws)
 
     assert str(exc.value) == f"rule 'dup' already exists: {existing}"
     assert _snapshot(_rules(ws)) == before
@@ -66,11 +66,11 @@ def test_recreating_an_existing_id_is_refused_and_keeps_its_fitness(ws: Path) ->
 
 
 def test_an_id_cannot_be_created_in_a_second_tier(ws: Path) -> None:
-    existing = create_cell("trap", "First", id_override="dup", workspace=ws)
+    existing = create_rule("trap", "First", id_override="dup", workspace=ws)
     before = _snapshot(_rules(ws))
 
     with pytest.raises(FileExistsError) as exc:
-        create_cell("invariant", "Second", id_override="dup", workspace=ws)
+        create_rule("invariant", "Second", id_override="dup", workspace=ws)
 
     assert str(exc.value) == f"rule 'dup' already exists: {existing}"
     assert _snapshot(_rules(ws)) == before
@@ -78,10 +78,10 @@ def test_an_id_cannot_be_created_in_a_second_tier(ws: Path) -> None:
 
 
 def test_a_slug_derived_from_the_hypothesis_is_checked_too(ws: Path) -> None:
-    first = create_cell("trap", "Same words", workspace=ws)
+    first = create_rule("trap", "Same words", workspace=ws)
 
     with pytest.raises(FileExistsError, match=r"^rule '.+' already exists: "):
-        create_cell("trap", "Same words", workspace=ws)
+        create_rule("trap", "Same words", workspace=ws)
 
     assert [p.name for p in _rules(ws).rglob("*.md")] == [first.name]
 
@@ -95,7 +95,7 @@ def test_a_symlink_at_the_target_is_refused_and_left_alone(ws: Path, tmp_path: P
     os.symlink(outside, link)
 
     with pytest.raises(FileExistsError) as exc:
-        create_cell("trap", "Through a link", id_override="linked", workspace=ws)
+        create_rule("trap", "Through a link", id_override="linked", workspace=ws)
 
     assert str(exc.value) == f"rule 'linked' already exists: {link}"
     # Not os.readlink: on Windows it returns the target as an extended \\?\ path.
@@ -108,7 +108,7 @@ def test_an_archived_rule_does_not_block_re_creation(ws: Path) -> None:
     archived.parent.mkdir(parents=True)
     archived.write_text("---\nid: revived\ntype: trap\n---\nOld.\n", encoding="utf-8")
 
-    path = create_cell("trap", "Revived", id_override="revived", workspace=ws)
+    path = create_rule("trap", "Revived", id_override="revived", workspace=ws)
 
     assert path == _rules(ws) / "traps" / "revived.md"
     assert archived.read_text(encoding="utf-8") == "---\nid: revived\ntype: trap\n---\nOld.\n"

@@ -7,7 +7,7 @@ comes from aegis_core.fitness (the ledger); rule frontmatter is never read for i
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,15 +31,15 @@ from .constants import (
     TIER_DOWN_MISFIRE,
     TIER_UP,
 )
-from .parsers import _transform_frontmatter_type, find_cell_file, rule_age_days, sanitize_cell_id
+from .parsers import _transform_frontmatter_type, find_rule_file, rule_age_days, sanitize_rule_id
 
 __all__ = [
     "SUGGESTIONS",
-    "demote_cell",
-    "evaluate_cell_tiers",
+    "demote_rule",
+    "evaluate_rule_tiers",
     "evaluate_demotions",
     "evaluate_promotions",
-    "promote_cell",
+    "promote_rule",
     "suggest",
 ]
 
@@ -159,9 +159,9 @@ def _move(ws: Workspace, rule_id: str, source: Path, from_type: str, to_type: st
     return result
 
 
-def promote_cell(
+def promote_rule(
     workspace: Workspace | Path | str,
-    cell_id: str,
+    rule_id: str,
     force: bool = False,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
@@ -170,23 +170,23 @@ def promote_cell(
     Without ``force`` the rule's ledger evidence must support it (``suggest``).
     """
     ws = literal_workspace(workspace)
-    rule_path, current_type = find_cell_file(ws, cell_id)
+    rule_path, current_type = find_rule_file(ws, rule_id)
     if rule_path is None or current_type is None:
-        return {"status": "not_found", "message": f"Rule '{cell_id}' not found in workspace"}
+        return {"status": "not_found", "message": f"Rule '{rule_id}' not found in workspace"}
 
     next_type = PROMOTION_PATH.get(current_type)
     if next_type is None:
         return {
             "status": "already_terminal",
             "current_type": current_type,
-            "message": f"Rule '{cell_id}' is already at terminal level ('{current_type}')",
+            "message": f"Rule '{rule_id}' is already at terminal level ('{current_type}')",
         }
 
-    clean_id = sanitize_cell_id(cell_id) or rule_path.stem
+    clean_id = sanitize_rule_id(rule_id) or rule_path.stem
     if _protected(clean_id):
         return {
             "status": "protected_rule_immutable",
-            "message": f"Cannot promote a rule into the protected core rule namespace: '{cell_id}'",
+            "message": f"Cannot promote a rule into the protected core rule namespace: '{rule_id}'",
         }
 
     if not force:
@@ -195,7 +195,7 @@ def promote_cell(
             return {
                 "status": "ineligible",
                 "current_type": current_type,
-                "message": f"Rule '{cell_id}' was not promoted: the ledger is incomplete ({view.incomplete})",
+                "message": f"Rule '{rule_id}' was not promoted: the ledger is incomplete ({view.incomplete})",
             }
         rule = load_rules(ws).get(clean_id)
         fit = for_rules(ws, [rule], view=view)[clean_id] if rule is not None else Fitness(clean_id)
@@ -207,7 +207,7 @@ def promote_cell(
                 "tp": fit.tp,
                 "fitness": fit.score,
                 "message": (
-                    f"Rule '{cell_id}' does not meet the promotion threshold "
+                    f"Rule '{rule_id}' does not meet the promotion threshold "
                     f"(fitness >= {PROMOTION_THRESHOLD} over >= {MIN_PROMOTION_VERDICTS} verdicts, "
                     f"{MIN_AGE_DAYS_FOR_PROMOTION} days old)"
                 ),
@@ -216,20 +216,20 @@ def promote_cell(
     return _move(ws, clean_id, rule_path, current_type, next_type, dry_run, "promoted")
 
 
-def demote_cell(
+def demote_rule(
     workspace: Workspace | Path | str,
-    cell_id: str,
+    rule_id: str,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     """Demote a rule one tier (gate -> invariant -> trap)."""
-    clean_id = sanitize_cell_id(cell_id)
+    clean_id = sanitize_rule_id(rule_id)
     if not clean_id:
-        return {"status": "invalid_id", "message": f"Invalid rule ID: '{cell_id}'"}
+        return {"status": "invalid_id", "message": f"Invalid rule ID: '{rule_id}'"}
     if _protected(clean_id):
-        raise ValueError(f"Cannot demote protected core rule: '{cell_id}'")
+        raise ValueError(f"Cannot demote protected core rule: '{rule_id}'")
 
     ws = literal_workspace(workspace)
-    rule_path, current_type = find_cell_file(ws, clean_id)
+    rule_path, current_type = find_rule_file(ws, clean_id)
     if rule_path is None or current_type is None:
         return {"status": "not_found", "message": f"Rule '{clean_id}' not found in workspace"}
 
@@ -273,7 +273,7 @@ def _rewrite_enforcement(path: Path, before: str, tier: str) -> bool:
     return True
 
 
-def evaluate_cell_tiers(workspace: Workspace | Path | str | None = None, execute: bool = False) -> Dict[str, Any]:
+def evaluate_rule_tiers(workspace: Workspace | Path | str | None = None, execute: bool = False) -> Dict[str, Any]:
     """Evaluate the enforcement tier (advisory -> mechanical -> gate) of each rule from
     its ledger fitness; with ``execute``, rewrite only the ``enforcement`` key.
 

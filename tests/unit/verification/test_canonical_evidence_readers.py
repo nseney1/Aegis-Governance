@@ -33,7 +33,7 @@ def _signal(cell: str, signal: str, timestamp: str = "2026-01-01T00:00:00Z", wei
 
 def _cell(path: Path, cell_id: str, cell_type: str = "trap", age_days: int = 45) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    created = (datetime.now() - timedelta(days=age_days)).strftime("%Y-%m-%d")
+    created = (datetime.now(timezone.utc) - timedelta(days=age_days)).strftime("%Y-%m-%d")
     metadata = {
         "id": cell_id,
         "domain": "testing",

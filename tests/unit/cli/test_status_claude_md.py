@@ -179,9 +179,9 @@ def test_bom_prefixed_loose_rule_uses_frontmatter_and_dedupes(env, capsys):
 
 
 def test_genome_heading_map_fallback_coverage(tmp_path):
-    from aegis_cli.status import _genome_heading_map
+    from aegis_cli.status import _package_rule_headings
     genome_dir = tmp_path / "genome"
     genome_dir.mkdir()
     (genome_dir / "test.md").write_text("# Test Heading\nBody", encoding="utf-8")
-    mapping = _genome_heading_map(tmp_path)
+    mapping = _package_rule_headings(tmp_path)
     assert mapping.get("Test Heading") == "test"

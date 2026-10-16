@@ -144,12 +144,12 @@ class SyncResult:
 
 
 def _apply(workspace: Any, derived: Dict[str, Any]) -> List[Dict[str, Any]]:
-    from aegis_core.lifecycle.promotion import demote_cell, promote_cell
+    from aegis_core.lifecycle.promotion import demote_rule, promote_rule
     from aegis_core.lifecycle.selection import archive_rule
 
     actions = {
-        "promote": lambda rid: promote_cell(workspace, rid, force=True),
-        "demote": lambda rid: demote_cell(workspace, rid),
+        "promote": lambda rid: promote_rule(workspace, rid, force=True),
+        "demote": lambda rid: demote_rule(workspace, rid),
         "archive": lambda rid: archive_rule(workspace, rid),
     }
     applied = []

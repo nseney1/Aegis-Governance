@@ -22,7 +22,7 @@ What a plan converts:
 - **Rules**: ``.soma/cells/<type>/*.md``, and the rules v3.1-v3.3 kept in a v3 type
   directory of ``.aegis/rules`` (``walls/``, ``membranes/``…; notes there stay), move
   to ``.aegis/rules/<canonical type>/`` through the legacy type-name table
-  (LEGACY_TYPE_NAMES: the v1-v3 aliases and the v2.1 organelle names); a type it does
+  (taxonomy.LEGACY_TYPE_NAMES: the v1-v3 aliases and the v2.1 organelle names); a type it does
   not map is reported and left in place, never guessed. A v3 type name in a canonical
   directory (``type: wall`` in ``invariants/``) is rewritten to the v4 name. Derived
   counters (``fitness``, ``triggers``, ``score``…) and keys v4 never reads
@@ -56,7 +56,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from aegis_core.errors import PathTraversalError, WorkspaceError
 from aegis_core.rules import is_legacy_key
 from aegis_core.storage import atomic_write_bytes, atomic_write_text, locked, read_jsonl, state_dir
-from aegis_core.taxonomy import CANONICAL_RULE_TYPES, DIR_RULE_TYPES, RULE_TYPE_DIRS
+from aegis_core.taxonomy import DIR_RULE_TYPES, RULE_TYPE_DIRS, legacy_rule_type
 from aegis_core.workspace.layout import (
     LEGACY_CONFIG_ENTRIES,
     LEGACY_LEDGER_FILES,
@@ -65,25 +65,9 @@ from aegis_core.workspace.layout import (
     WorkspaceLayout,
 )
 
-__all__ = ["MigrationPlan", "MigrationRefused", "MigrationResult", "apply", "legacy_rule_type", "plan"]
+__all__ = ["MigrationPlan", "MigrationRefused", "MigrationResult", "apply", "plan"]
 
 _REPO_CONF_NAMES = (LEGACY_REPO_CONF, "soma.conf")
-# Every legacy rule-type name a v1-v3 workspace can hold, mapped to its v4 type: the
-# v3 type-normalization aliases, plus the v2 organelle names exactly as v2.1's
-# `aegis migrate` mapped them (ORGANELLE_MAPPING, commit 06a7e39). Only migration reads
-# legacy names; the rest of Aegis knows the six types of taxonomy.RULE_TYPES.
-LEGACY_TYPE_NAMES = {
-    "wall": "invariant", "walls": "invariant", "invariants": "invariant", "safety-guard": "invariant",
-    "membrane": "boundary", "membranes": "boundary", "boundaries": "boundary",
-    "escalation-boundary": "boundary",
-    "traps": "trap", "patterns": "trap", "cells": "trap", "rules": "trap", "learned-trap": "trap",
-    "personas": "persona", "agent-persona": "persona",
-    "contracts": "contract", "contract-bridge": "contract",
-    "gates": "gate",
-    "vacuole": "trap", "vacuoles": "trap",
-    "chloroplast": "persona", "chloroplasts": "persona",
-    "plasmodesmata": "contract",
-}
 _V4_ENTRIES = frozenset({"config.json", ".gitignore", "rules", "state"})
 _TOP_KEY = re.compile(r"^([A-Za-z_][\w\-]*)[ \t]*:")
 _TYPE_LINE = re.compile(r"^type[ \t]*:[ \t]*(['\"]?)([A-Za-z_][\w\-]*)\1[ \t]*(#.*)?$")
@@ -282,21 +266,6 @@ def _inside(root: Path, path: Path) -> bool:
     """True if ``path``, with every symlink resolved, stays inside ``root``."""
     real, base = os.path.realpath(path), os.path.realpath(root)
     return real == base or real.startswith(base.rstrip(os.sep) + os.sep)
-
-
-def legacy_rule_type(raw: Any) -> Optional[str]:
-    """The v4 type that a type name or type-directory name of any version (``wall``,
-    ``walls``, ``Trap``, ``invariant``) stands for, or None.
-
-    Only migration reads legacy names; the loader asks only to say that aegis migrate
-    can convert a rule it cannot serve.
-    """
-    if not isinstance(raw, str):
-        return None
-    name = raw.strip().lower()
-    if name in CANONICAL_RULE_TYPES:
-        return name
-    return LEGACY_TYPE_NAMES.get(name)
 
 
 def _merge_missing(current: Dict[str, Any], changes: Dict[str, Any]) -> None:

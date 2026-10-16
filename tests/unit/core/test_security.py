@@ -14,7 +14,8 @@ import pytest
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_core.workspace import confine_path, validate_rule_names
+from aegis_core.rules import validate_rule_names
+from aegis_core.workspace import confine_path
 from aegis_core.workspace.base import Workspace
 
 

@@ -544,7 +544,7 @@ def _install_claude_md(
                 print("  ⚠️  CLAUDE.md has corrupted SOMA markers, skipping")
                 return
             if not force:
-                print("  ℹ️  CLAUDE.md already has Soma rules (use --force to update)")
+                print("  ℹ️  CLAUDE.md already has the Aegis rules block (use --force to update)")
                 return
             # Replace existing section
             updated = existing[:start_idx] + soma_block + existing[end_idx:]

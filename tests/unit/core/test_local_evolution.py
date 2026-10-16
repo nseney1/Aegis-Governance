@@ -9,9 +9,9 @@ from pathlib import Path
 
 from aegis_core.yaml_engine.serializer import dump_frontmatter
 from aegis_core.yaml_engine.frontmatter import parse_frontmatter
-from aegis_core.lifecycle.parsers import find_cell_file
+from aegis_core.lifecycle.parsers import find_rule_file
 from aegis_core.rules import load_rules
-from aegis_core.lifecycle.promotion import promote_cell, demote_cell
+from aegis_core.lifecycle.promotion import promote_rule, demote_rule
 from aegis_core.workspace.base import Workspace
 
 
@@ -27,7 +27,7 @@ def test_the_aegis_repository_promotes_on_the_same_ladder(tmp_path: Path):
     (inv_dir / "law.md").write_text(dump_frontmatter({"id": "law", "type": "invariant", "enforcement": "gate"}, body="Law\n"), encoding="utf-8")
     ws = Workspace(root=soma_repo)
 
-    res = promote_cell(ws, "law", force=True)
+    res = promote_rule(ws, "law", force=True)
 
     assert res["status"] == "promoted" and res["to_type"] == "gate"
     assert (soma_repo / ".aegis" / "rules" / "gates" / "law.md").is_file()
@@ -53,7 +53,7 @@ def test_foreign_repo_local_promotion(tmp_path: Path):
     ws = Workspace(root=repo)
 
     # Step 1: Promote trap -> invariant
-    res1 = promote_cell(ws, "safety-check", force=True)
+    res1 = promote_rule(ws, "safety-check", force=True)
     assert res1["status"] == "promoted"
     assert res1["from_type"] == "trap"
     assert res1["to_type"] == "invariant"
@@ -67,7 +67,7 @@ def test_foreign_repo_local_promotion(tmp_path: Path):
     assert inv_meta["enforcement"] == "gate"
 
     # Step 2: Promote invariant -> gate
-    res2 = promote_cell(ws, "safety-check", force=True)
+    res2 = promote_rule(ws, "safety-check", force=True)
     assert res2["status"] == "promoted"
     assert res2["from_type"] == "invariant"
     assert res2["to_type"] == "gate"
@@ -81,7 +81,7 @@ def test_foreign_repo_local_promotion(tmp_path: Path):
     assert gate_meta["enforcement"] == "gate"
 
     # Step 3: Terminal check
-    res3 = promote_cell(ws, "safety-check", force=True)
+    res3 = promote_rule(ws, "safety-check", force=True)
     assert res3["status"] == "already_terminal"
     assert not (repo / "genome").exists()
 
@@ -105,7 +105,7 @@ def test_foreign_repo_local_demotion(tmp_path: Path):
     ws = Workspace(root=repo)
 
     # Demote gate -> invariant
-    res1 = demote_cell(ws, "strict-check")
+    res1 = demote_rule(ws, "strict-check")
     assert res1["status"] == "demoted"
     assert res1["from_type"] == "gate"
     assert res1["to_type"] == "invariant"
@@ -114,7 +114,7 @@ def test_foreign_repo_local_demotion(tmp_path: Path):
     assert not cell_file.exists()
 
     # Demote invariant -> trap
-    res2 = demote_cell(ws, "strict-check")
+    res2 = demote_rule(ws, "strict-check")
     assert res2["status"] == "demoted"
     assert res2["from_type"] == "invariant"
     assert res2["to_type"] == "trap"
@@ -137,8 +137,8 @@ def test_parsers_ignore_a_genome_directory(tmp_path: Path):
 
     ws = Workspace(root=repo)
 
-    # 1. find_cell_file should NOT return chromosome1
-    found_path, cell_type = find_cell_file(ws, "chromosome1")
+    # 1. find_rule_file should NOT return chromosome1
+    found_path, cell_type = find_rule_file(ws, "chromosome1")
     assert found_path is None
     assert cell_type is None
 

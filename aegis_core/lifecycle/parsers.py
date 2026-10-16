@@ -13,36 +13,36 @@ from aegis_core.workspace.base import Workspace
 from aegis_core.taxonomy import RULE_TYPE_DIRS, RULE_TYPES
 
 __all__ = [
-    "find_cell_file",
+    "find_rule_file",
     "generate_slug",
     "rule_age_days",
-    "sanitize_cell_id",
-    "validate_cell_id",
+    "sanitize_rule_id",
+    "validate_rule_id",
 ]
 
 
-def sanitize_cell_id(cell_id: str) -> Optional[str]:
+def sanitize_rule_id(rule_id: str) -> Optional[str]:
     """A rule id with no path separator or "..", without a trailing .md (None if invalid)."""
-    if not cell_id or "/" in cell_id or "\\" in cell_id or ".." in cell_id:
+    if not rule_id or "/" in rule_id or "\\" in rule_id or ".." in rule_id:
         return None
-    cleaned = cell_id.strip()
+    cleaned = rule_id.strip()
     if cleaned.endswith(".md"):
         cleaned = cleaned[:-3]
     return cleaned if cleaned else None
 
 
-def validate_cell_id(cell_id: str | None) -> None:
+def validate_rule_id(rule_id: str | None) -> None:
     """Raise ValueError for a rule id that could escape its directory."""
-    if not cell_id:
+    if not rule_id:
         return
-    if "/" in cell_id or "\\" in cell_id or ".." in cell_id:
-        raise ValueError(f"Invalid ID_OVERRIDE contains path traversal characters: {cell_id!r}")
+    if "/" in rule_id or "\\" in rule_id or ".." in rule_id:
+        raise ValueError(f"Invalid ID_OVERRIDE contains path traversal characters: {rule_id!r}")
 
 
 def generate_slug(hypothesis: str, id_override: str | None = None) -> str:
     """A file-safe rule id from the hypothesis (or the explicit override)."""
     if id_override:
-        validate_cell_id(id_override)
+        validate_rule_id(id_override)
         return id_override
 
     cleaned = re.sub(r"[^a-zA-Z0-9 ]", "", hypothesis.lower())
@@ -50,9 +50,9 @@ def generate_slug(hypothesis: str, id_override: str | None = None) -> str:
     return slug or "unnamed-rule"
 
 
-def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Optional[Path], Optional[str]]:
+def find_rule_file(workspace: Workspace | Path | str, rule_id: str) -> Tuple[Optional[Path], Optional[str]]:
     """Locate a rule in its type directory, ``.aegis/rules/<type dir>/<id>.md``."""
-    clean_id = sanitize_cell_id(cell_id)
+    clean_id = sanitize_rule_id(rule_id)
     if not clean_id:
         return None, None
 

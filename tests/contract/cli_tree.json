@@ -20,7 +20,9 @@
           "-h",
           "--help"
         ],
+        "help": "show this help message and exit",
         "kind": "help",
+        "metavar": null,
         "nargs": 0,
         "required": false
       },
@@ -31,7 +33,9 @@
         "flags": [
           "--json"
         ],
+        "help": "Emit machine-readable JSON output",
         "kind": "store_true",
+        "metavar": null,
         "nargs": 0,
         "required": false
       },
@@ -42,7 +46,9 @@
         "flags": [
           "--plain"
         ],
+        "help": "Strip ANSI styling and emoji",
         "kind": "store_true",
+        "metavar": null,
         "nargs": 0,
         "required": false
       },
@@ -52,7 +58,9 @@
         "flags": [
           "--workspace"
         ],
+        "help": "Target workspace root",
         "kind": "store",
+        "metavar": null,
         "nargs": null,
         "required": false,
         "type": "str"
@@ -63,7 +71,9 @@
         "flags": [
           "--version"
         ],
+        "help": "show program's version number and exit",
         "kind": "version",
+        "metavar": null,
         "nargs": 0,
         "required": false
       },
@@ -71,7 +81,9 @@
         "default": null,
         "dest": "command",
         "flags": [],
+        "help": null,
         "kind": "parsers",
+        "metavar": null,
         "nargs": "A...",
         "required": false
       }
@@ -87,7 +99,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -98,7 +112,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -109,7 +125,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -119,7 +137,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -128,7 +148,9 @@
             "default": null,
             "dest": "files",
             "flags": [],
+            "help": "Files to check (default: changed against HEAD, staged, or against the branch base)",
             "kind": "store",
+            "metavar": "FILES",
             "nargs": "*",
             "required": false
           },
@@ -139,7 +161,9 @@
             "flags": [
               "--hook"
             ],
+            "help": "Git pre-commit mode: Layer 1 only, never a model call",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -150,7 +174,9 @@
             "flags": [
               "--strict"
             ],
+            "help": "Fail on checkpoint warnings too (missing tests, hardcoded paths, stub tests...)",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -161,7 +187,9 @@
             "flags": [
               "--full"
             ],
+            "help": "Add Layer 2: adversarial review of the change by the --llm-cmd model",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -171,7 +199,9 @@
             "flags": [
               "--plan"
             ],
+            "help": "Task plan for Layer 2 (implies --full)",
             "kind": "store",
+            "metavar": "TEXT",
             "nargs": null,
             "required": false
           },
@@ -181,7 +211,9 @@
             "flags": [
               "--plan-file"
             ],
+            "help": "File holding the task plan (implies --full)",
             "kind": "store",
+            "metavar": "PATH",
             "nargs": null,
             "required": false
           },
@@ -191,7 +223,9 @@
             "flags": [
               "--llm-cmd"
             ],
+            "help": "Layer 2 model command, e.g. 'claude -p': gets the prompt on stdin, prints the reply. It runs in an empty temporary directory, never the repository, so give scripts absolute paths (default: $AEGIS_LLM_CMD; never read from repository files)",
             "kind": "store",
+            "metavar": "CMD",
             "nargs": null,
             "required": false
           },
@@ -202,7 +236,9 @@
             "flags": [
               "--dry-run"
             ],
+            "help": "Show what would be checked without running anything",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -216,11 +252,15 @@
             "flags": [
               "--format"
             ],
+            "help": "Output format",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false
           }
-        ]
+        ],
+        "description": null,
+        "help": "Verify changes: Layer 1 checks, plus a Layer 2 model review with --full"
       },
       "doctor": {
         "aliases": [],
@@ -232,7 +272,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -243,7 +285,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -254,7 +298,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -264,7 +310,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -276,7 +324,9 @@
             "flags": [
               "--fix"
             ],
+            "help": "Automatically repair detected issues (pre-commit hooks, missing AST drivers)",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -287,11 +337,15 @@
             "flags": [
               "--drivers"
             ],
+            "help": "Run only AST driver and language detection health check",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           }
-        ]
+        ],
+        "description": null,
+        "help": "System health and governance audit"
       },
       "hook": {
         "aliases": [],
@@ -303,7 +357,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -314,7 +370,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -325,7 +383,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -335,7 +395,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -344,7 +406,9 @@
             "default": null,
             "dest": "hook_action",
             "flags": [],
+            "help": null,
             "kind": "parsers",
+            "metavar": null,
             "nargs": "A...",
             "required": false
           }
@@ -360,7 +424,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -371,7 +437,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": "Emit machine-readable JSON output",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -382,7 +450,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": "Strip ANSI styling and emoji",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -392,7 +462,9 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": "Target workspace root",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
@@ -404,7 +476,9 @@
                 "flags": [
                   "--force"
                 ],
+                "help": "Overwrite symlinks pointing outside repository",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -415,11 +489,15 @@
                 "flags": [
                   "--dry-run"
                 ],
+                "help": "Preview without creating or modifying hook",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               }
-            ]
+            ],
+            "description": null,
+            "help": "Install the pre-commit hook into the git repository"
           },
           "safety-gate": {
             "aliases": [],
@@ -431,7 +509,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -442,7 +522,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": "Emit machine-readable JSON output",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -453,7 +535,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": "Strip ANSI styling and emoji",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -463,7 +547,9 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": "Target workspace root",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
@@ -474,12 +560,16 @@
                 "flags": [
                   "--cmd"
                 ],
+                "help": "Command line to check (default: JSON payload on stdin)",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
               }
-            ]
+            ],
+            "description": null,
+            "help": "Check a shell command against the safety gate (prints a JSON decision)"
           },
           "status": {
             "aliases": [],
@@ -491,7 +581,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -502,7 +594,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": "Emit machine-readable JSON output",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -513,7 +607,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": "Strip ANSI styling and emoji",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -523,12 +619,16 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": "Target workspace root",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
               }
-            ]
+            ],
+            "description": null,
+            "help": "Inspect the pre-commit hook and the interpreter it runs"
           },
           "uninstall": {
             "aliases": [],
@@ -540,7 +640,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -551,7 +653,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": "Emit machine-readable JSON output",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -562,7 +666,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": "Strip ANSI styling and emoji",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -572,7 +678,9 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": "Target workspace root",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
@@ -584,7 +692,9 @@
                 "flags": [
                   "--force"
                 ],
+                "help": "Force removal",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -595,13 +705,19 @@
                 "flags": [
                   "--dry-run"
                 ],
+                "help": "Preview without modifying disk",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               }
-            ]
+            ],
+            "description": null,
+            "help": "Remove the aegis block from the pre-commit hook"
           }
-        }
+        },
+        "description": null,
+        "help": "Install, inspect or remove the git pre-commit hook"
       },
       "init": {
         "aliases": [],
@@ -613,7 +729,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -624,7 +742,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -635,7 +755,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -645,7 +767,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -657,7 +781,9 @@
             "flags": [
               "--dry-run"
             ],
+            "help": "Show what would be installed without doing it",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -674,7 +800,9 @@
             "flags": [
               "--platform"
             ],
+            "help": "Skip platform detection, force a platform",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false
           },
@@ -685,7 +813,9 @@
             "flags": [
               "--local"
             ],
+            "help": "Install rules to project-local directory instead of user home",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -700,7 +830,9 @@
             "flags": [
               "--rules"
             ],
+            "help": "Rule set to install (default: standard)",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false
           },
@@ -711,7 +843,9 @@
             "flags": [
               "--mcp"
             ],
+            "help": "Generate .mcp.json for JIT rule matching",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -723,7 +857,9 @@
               "--yes",
               "-y"
             ],
+            "help": "Skip confirmation prompts",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -734,7 +870,9 @@
             "flags": [
               "--force"
             ],
+            "help": "Overwrite existing rules",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -745,11 +883,15 @@
             "flags": [
               "--no-hooks"
             ],
+            "help": "Skip installing git pre-commit hook",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           }
-        ]
+        ],
+        "description": null,
+        "help": "Set up governance for this project"
       },
       "migrate": {
         "aliases": [],
@@ -761,7 +903,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -772,7 +916,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -783,7 +929,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -793,7 +941,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -805,7 +955,9 @@
             "flags": [
               "--apply"
             ],
+            "help": "Perform the migration (default: dry run)",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -816,11 +968,15 @@
             "flags": [
               "--dry-run"
             ],
+            "help": "Only report what would change (the default)",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           }
-        ]
+        ],
+        "description": "Plan, then with --apply perform, the move to the v4 layout: the v3 ledger becomes .aegis/state/ledger.jsonl (v2 rows), aegis.conf/slots.yaml/config.yaml become .aegis/config.json, .soma cells move to .aegis/rules/<type>/, derived counters leave rule frontmatter and v3 runtime state is removed. Every changed file is backed up to .aegis/state/migrate-backup-<time>/ first; running it again changes nothing.",
+        "help": "Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply)"
       },
       "rule": {
         "aliases": [],
@@ -832,7 +988,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -843,7 +1001,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -854,7 +1014,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -864,7 +1026,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -873,7 +1037,9 @@
             "default": null,
             "dest": "rule_action",
             "flags": [],
+            "help": null,
             "kind": "parsers",
+            "metavar": "ACTION",
             "nargs": "A...",
             "required": false
           }
@@ -889,7 +1055,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -900,7 +1068,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -911,7 +1081,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -921,7 +1093,9 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": null,
                 "kind": "_WorkspaceArg",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
@@ -933,11 +1107,15 @@
                 "flags": [
                   "--dry-run"
                 ],
+                "help": "Report the rules that would be archived; move nothing",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               }
-            ]
+            ],
+            "description": null,
+            "help": "Archive rules whose ledger evidence says they misfire"
           },
           "create": {
             "aliases": [],
@@ -949,7 +1127,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -960,7 +1140,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -971,7 +1153,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -981,7 +1165,9 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": null,
                 "kind": "_WorkspaceArg",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
@@ -993,7 +1179,9 @@
                   "-t",
                   "--type"
                 ],
+                "help": "Rule type (invariant, trap, gate, boundary, persona, contract)",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1003,7 +1191,9 @@
                 "flags": [
                   "--hypothesis"
                 ],
+                "help": "Testable rule hypothesis",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1014,7 +1204,9 @@
                   "-p",
                   "--prediction"
                 ],
+                "help": "Expected outcome when hypothesis holds",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1025,7 +1217,9 @@
                   "-f",
                   "--falsification"
                 ],
+                "help": "Criteria that falsify the rule",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1036,7 +1230,9 @@
                   "-d",
                   "--domain"
                 ],
+                "help": "Governance domain",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1047,7 +1243,9 @@
                   "-e",
                   "--enforcement"
                 ],
+                "help": "Enforcement tier (gate, advisory)",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1059,7 +1257,9 @@
                   "--name",
                   "--id"
                 ],
+                "help": "Explicit rule ID stem",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1069,7 +1269,9 @@
                 "flags": [
                   "--target-paths"
                 ],
+                "help": "Comma-separated target path globs",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1079,7 +1281,9 @@
                 "flags": [
                   "--tags"
                 ],
+                "help": "Comma-separated tags",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1089,11 +1293,15 @@
                 "flags": [
                   "--body-file"
                 ],
+                "help": "Rule body (markdown after the frontmatter) from PATH, or '-' for stdin; max 64 KiB",
                 "kind": "store",
+                "metavar": "PATH",
                 "nargs": null,
                 "required": false
               }
-            ]
+            ],
+            "description": null,
+            "help": "Create a new governance rule"
           },
           "demote": {
             "aliases": [],
@@ -1105,7 +1313,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1116,7 +1326,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1127,7 +1339,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1137,7 +1351,9 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": null,
                 "kind": "_WorkspaceArg",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
@@ -1146,7 +1362,9 @@
                 "default": null,
                 "dest": "rule_id",
                 "flags": [],
+                "help": "Rule identifier to demote",
                 "kind": "store",
+                "metavar": "RULE_ID",
                 "nargs": "?",
                 "required": false
               },
@@ -1157,11 +1375,15 @@
                 "flags": [
                   "--dry-run"
                 ],
+                "help": "Preview demotion without moving files",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               }
-            ]
+            ],
+            "description": null,
+            "help": "Demote a rule down lifecycle tiers (no RULE_ID: list candidates)"
           },
           "list": {
             "aliases": [],
@@ -1173,7 +1395,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1184,7 +1408,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1195,7 +1421,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1205,7 +1433,9 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": null,
                 "kind": "_WorkspaceArg",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
@@ -1224,7 +1454,9 @@
                 "flags": [
                   "--type"
                 ],
+                "help": "Filter by rule type",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false
               },
@@ -1234,12 +1466,16 @@
                 "flags": [
                   "--min-fitness"
                 ],
+                "help": "Filter by minimum fitness score",
                 "kind": "store",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "float"
               }
-            ]
+            ],
+            "description": null,
+            "help": "List active rules and fitness metrics"
           },
           "promote": {
             "aliases": [],
@@ -1251,7 +1487,9 @@
                   "-h",
                   "--help"
                 ],
+                "help": "show this help message and exit",
                 "kind": "help",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1262,7 +1500,9 @@
                 "flags": [
                   "--plain"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1273,7 +1513,9 @@
                 "flags": [
                   "--json"
                 ],
+                "help": null,
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1283,7 +1525,9 @@
                 "flags": [
                   "--workspace"
                 ],
+                "help": null,
                 "kind": "_WorkspaceArg",
+                "metavar": null,
                 "nargs": null,
                 "required": false,
                 "type": "str"
@@ -1292,7 +1536,9 @@
                 "default": null,
                 "dest": "rule_id",
                 "flags": [],
+                "help": "Rule identifier to promote",
                 "kind": "store",
+                "metavar": "RULE_ID",
                 "nargs": "?",
                 "required": false
               },
@@ -1303,7 +1549,9 @@
                 "flags": [
                   "--tier-check"
                 ],
+                "help": "Evaluate enforcement tier transitions",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               },
@@ -1314,13 +1562,19 @@
                 "flags": [
                   "--dry-run"
                 ],
+                "help": "Preview promotion without moving files",
                 "kind": "store_true",
+                "metavar": null,
                 "nargs": 0,
                 "required": false
               }
-            ]
+            ],
+            "description": null,
+            "help": "Promote a rule up lifecycle tiers (no RULE_ID: list candidates)"
           }
-        }
+        },
+        "description": null,
+        "help": "Manage rule lifecycle (list, create, promote, demote, archive)"
       },
       "scan": {
         "aliases": [],
@@ -1332,7 +1586,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1343,7 +1599,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1354,7 +1612,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1364,7 +1624,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -1373,11 +1635,15 @@
             "default": null,
             "dest": "files",
             "flags": [],
+            "help": "File(s) you are about to edit",
             "kind": "store",
+            "metavar": "FILE",
             "nargs": "+",
             "required": true
           }
-        ]
+        ],
+        "description": null,
+        "help": "Show which rules apply to the given files (run before editing them)"
       },
       "status": {
         "aliases": [],
@@ -1389,7 +1655,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1400,7 +1668,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1411,7 +1681,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1421,12 +1693,16 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
           }
-        ]
+        ],
+        "description": null,
+        "help": "Show active rules and stats"
       },
       "sync": {
         "aliases": [],
@@ -1438,7 +1714,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1449,7 +1727,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1460,7 +1740,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1470,7 +1752,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -1482,11 +1766,15 @@
             "flags": [
               "--apply"
             ],
+            "help": "Apply the suggested promote/demote/archive transitions (moves rule files)",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           }
-        ]
+        ],
+        "description": null,
+        "help": "Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them)"
       },
       "uninstall": {
         "aliases": [],
@@ -1498,7 +1786,9 @@
               "-h",
               "--help"
             ],
+            "help": "show this help message and exit",
             "kind": "help",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1509,7 +1799,9 @@
             "flags": [
               "--json"
             ],
+            "help": "Emit machine-readable JSON output",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1520,7 +1812,9 @@
             "flags": [
               "--plain"
             ],
+            "help": "Strip ANSI styling and emoji",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1530,7 +1824,9 @@
             "flags": [
               "--workspace"
             ],
+            "help": "Target workspace root",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false,
             "type": "str"
@@ -1549,7 +1845,9 @@
               "--platform",
               "-p"
             ],
+            "help": "Target platform (default: auto-detected or gemini)",
             "kind": "store",
+            "metavar": null,
             "nargs": null,
             "required": false
           },
@@ -1560,7 +1858,9 @@
             "flags": [
               "--local"
             ],
+            "help": "Uninstall from project-local directory",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1571,7 +1871,9 @@
             "flags": [
               "--dry-run"
             ],
+            "help": "Show what would be uninstalled without deleting files",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           },
@@ -1582,13 +1884,18 @@
             "flags": [
               "--purge"
             ],
+            "help": "Purge .aegis directory and local governance state",
             "kind": "store_true",
+            "metavar": null,
             "nargs": 0,
             "required": false
           }
-        ]
+        ],
+        "description": null,
+        "help": "Uninstall Aegis governance rules and configuration"
       }
-    }
+    },
+    "description": "Aegis Governance — make AI coding agents trustworthy"
   },
   "registry": [
     {

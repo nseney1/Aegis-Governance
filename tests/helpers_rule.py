@@ -34,7 +34,7 @@ def _placement(rules_dir, rule_type):
 def make_rule(cells_dir, name, cell_type="trap", created_days_ago=10,
               expiry_days=365, expiry_sessions=100):
     """Create a minimal rule file in its type directory."""
-    created = (datetime.now() - timedelta(days=created_days_ago)).strftime("%Y-%m-%d")
+    created = (datetime.now(timezone.utc) - timedelta(days=created_days_ago)).strftime("%Y-%m-%d")
     fm = {
         'id': name,
         'type': cell_type,
@@ -64,7 +64,7 @@ def write_rule_with_fitness(cells_dir, name, enforcement="advisory",
     ``triggers - tp - fp`` bare trigger rows."""
     folder, workspace = _placement(cells_dir, cell_type)
     folder.mkdir(parents=True, exist_ok=True)
-    created = (datetime.now() - timedelta(days=created_days_ago)).strftime("%Y-%m-%d")
+    created = (datetime.now(timezone.utc) - timedelta(days=created_days_ago)).strftime("%Y-%m-%d")
     fm = {
         "id": name,
         "type": cell_type,

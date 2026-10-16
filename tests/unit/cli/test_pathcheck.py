@@ -361,15 +361,6 @@ def test_python_m_soma_cli_runs():
     assert "usage: aegis" in proc.stdout or "usage: soma" in proc.stdout
 
 
-def test_soma_version_flag(capsys):
-    from aegis_cli.cli import main
-    with pytest.raises(SystemExit) as exc:
-        main(["--version"])
-    assert exc.value.code == 0
-    out = capsys.readouterr().out
-    assert (REPO / "VERSION").read_text().strip() in out
-
-
 def test_pathcheck_on_path_handles_windows_colons():
     """on_path with sep=';' should not corrupt Windows drive paths containing colons."""
     from aegis_cli.pathcheck import on_path

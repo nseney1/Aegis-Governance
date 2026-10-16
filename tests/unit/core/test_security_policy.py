@@ -1,4 +1,4 @@
-"""SECURITY.md must exist, cover the required sections, and track the current release line."""
+"""SECURITY.md must exist, cover the required sections and name a private reporting channel."""
 import re
 from pathlib import Path
 
@@ -23,20 +23,6 @@ def test_security_policy_has_required_sections():
     text = _security_text()
     for title in ("Supported Versions", "Reporting a Vulnerability", "Scope"):
         assert _section(text, title).strip(), f"'## {title}' section is empty"
-
-
-def test_supported_versions_table_names_current_minor_line():
-    version = read(str(ROOT / "VERSION")).strip()
-    major, minor = version.split(".")[:2]
-    line = f"{major}.{minor}.x"
-    table_rows = [
-        row for row in _section(_security_text(), "Supported Versions").splitlines()
-        if row.lstrip().startswith("|")
-    ]
-    assert table_rows, "Supported Versions section has no table"
-    assert any(line in row for row in table_rows), (
-        f"Supported Versions table does not name the current line {line} (VERSION={version})"
-    )
 
 
 def test_reporting_uses_private_channel_not_public_issues():

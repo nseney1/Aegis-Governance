@@ -1,21 +1,17 @@
-"""v3.0.0 Zero-Legacy Architectural Sentinel Tests.
+"""v3.0.0 zero-legacy invariants that are not vocabulary counts.
 
-Enforces via AST and regex scans across `aegis_core/`, `aegis_cli/`, `aegis_mcp/`,
-`aegis_sdk/`, `rules/`, `skills/`, and `tests/` that:
-1. Zero `soma_*` imports or `Soma*` class aliases exist, and legacy shims are deleted.
-2. Zero biological rule type literals (`vacuole`, `chloroplast`, `plasmodesmata`)
-   exist in production modules.
-3. All `.aegis/rules/` files use pure Aegis prefixes and types.
-4. All 20 MCP tools are registered strictly under the `aegis_*` namespace.
-5. Every CLI command in `CommandRegistry` supports `OutputContext` (`--plain`,
+1. All `.aegis/rules/` files use pure Aegis prefixes and types.
+2. The MCP tools are registered strictly under the `aegis_*` namespace.
+3. Every CLI command in `CommandRegistry` supports `OutputContext` (`--plain`,
    `NO_COLOR`, `--json`) without leaking ANSI escape sequences.
+
+Zero `soma_*` imports, zero `Soma*` classes or aliases and zero organelle rule-type
+literals are rows of the legacy-vocabulary ratchet (tests/contract/test_legacy_ratchet.py).
 """
 from __future__ import annotations
 
 import argparse
-import ast
 from pathlib import Path
-import re
 
 import pytest
 
@@ -27,83 +23,10 @@ from aegis_mcp.registry import TOOL_DEFINITIONS
 from aegis_mcp.tools import _TOOL_HANDLERS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PROD_PACKAGES = ("aegis_core", "aegis_cli", "aegis_mcp", "aegis_sdk")
-ALL_SCAN_DIRS = (*PROD_PACKAGES, "rules", "skills", "tests")
-THIS_FILE = Path(__file__).resolve()
 
 
-def _iter_python_files(dirs: tuple[str, ...]) -> list[Path]:
-    files: list[Path] = []
-    for d in dirs:
-        root = REPO_ROOT / d
-        if not root.exists():
-            continue
-        for p in sorted(root.rglob("*.py")):
-            if "__pycache__" in p.parts or p.resolve() == THIS_FILE:
-                continue
-            files.append(p)
-    return files
-
-
-class TestV3ZeroLegacyImportsAndShims:
-    """Verify zero soma_* imports, zero Soma* class aliases, and deleted shim files."""
-
-    def test_zero_soma_imports_across_repo(self) -> None:
-        offenders: list[str] = []
-        import_re = re.compile(r"^\s*(?:from|import)\s+soma_[a-zA-Z0-9_.]*")
-
-        for path in _iter_python_files(ALL_SCAN_DIRS):
-            rel = path.relative_to(REPO_ROOT)
-            text = path.read_text(encoding="utf-8")
-            for lineno, line in enumerate(text.splitlines(), start=1):
-                if import_re.match(line):
-                    offenders.append(f"{rel}:{lineno}: {line.strip()}")
-
-            tree = ast.parse(text, filename=str(rel))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    for alias in node.names:
-                        if alias.name.startswith("soma_"):
-                            offenders.append(f"{rel}:{node.lineno}: import {alias.name}")
-                elif isinstance(node, ast.ImportFrom):
-                    if node.module and node.module.startswith("soma_"):
-                        offenders.append(f"{rel}:{node.lineno}: from {node.module} import ...")
-
-        assert not offenders, "Found prohibited soma_* imports:\n" + "\n".join(offenders)
-
-    def test_zero_soma_class_definitions_or_aliases(self) -> None:
-        offenders: list[str] = []
-        for path in _iter_python_files(ALL_SCAN_DIRS):
-            rel = path.relative_to(REPO_ROOT)
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(rel))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef) and node.name.startswith("Soma"):
-                    offenders.append(f"{rel}:{node.lineno}: class {node.name}")
-                elif isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name) and target.id.startswith("Soma"):
-                            offenders.append(f"{rel}:{node.lineno}: {target.id} = ...")
-
-        assert not offenders, "Found prohibited Soma* class/alias definitions:\n" + "\n".join(offenders)
-
-
-class TestV3ZeroBiologicalRuleTypes:
-    """Verify zero biological rule type literals in production modules and .aegis/rules/."""
-
-    def test_zero_biological_literals_in_production_modules(self) -> None:
-        bio_re = re.compile(r"\b(vacuoles?|chloroplasts?|plasmodesmata)\b", re.IGNORECASE)
-        offenders: list[str] = []
-        for path in _iter_python_files(PROD_PACKAGES):
-            rel = path.relative_to(REPO_ROOT)
-            if rel.as_posix() == "aegis_core/migrate.py":
-                continue  # D21: the one table that converts legacy .soma cell types
-            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                if bio_re.search(line):
-                    offenders.append(f"{rel}:{lineno}: {line.strip()}")
-
-        assert not offenders, (
-            "Found biological rule type terms in production modules:\n" + "\n".join(offenders)
-        )
+class TestV3RuleAndToolNamespaces:
+    """Repository rules and MCP tools use the Aegis names."""
 
     def test_repository_rules_use_pure_aegis_prefixes_and_types(self) -> None:
         rules_dir = REPO_ROOT / ".aegis" / "rules"

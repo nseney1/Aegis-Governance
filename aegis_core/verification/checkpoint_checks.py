@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List
 
 from aegis_core.taxonomy import RULE_TYPES
-from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, RULES_RELDIR, WorkspaceLayout
+from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME
 
 
 HARDCODED_PATH_RE = re.compile(r'''(?:"|')(/home/|/Users/|/tmp/)''')
@@ -473,7 +473,7 @@ def check_rule_conventions(root: Path) -> list[dict]:
     return issues
 
 
-def check_paper_walls(root: Path) -> list[dict]:
+def check_paper_gates(root: Path) -> list[dict]:
     """A gate or invariant rule must use ``gate`` enforcement: one that does not claims to
     be a gate and enforces nothing. A mandatory-type rule that cannot be loaded cannot be
     shown to be a gate, so it is reported too."""
@@ -483,7 +483,7 @@ def check_paper_walls(root: Path) -> list[dict]:
     try:
         ruleset = load_rules(root)
     except RuleInventoryError as exc:
-        return [_failure("paper_walls", root, Path(exc.path), exc.operation, exc)]
+        return [_failure("paper_gates", root, Path(exc.path), exc.operation, exc)]
     issues = []
     for rule in ruleset.rules:
         if rule.type is None or not RULE_TYPES[rule.type].mandatory:
@@ -492,13 +492,13 @@ def check_paper_walls(root: Path) -> list[dict]:
         label = f"{rule.type.capitalize()} rule '{name}'"
         if rule.error:
             issues.append({
-                "check": "paper_walls",
+                "check": "paper_gates",
                 "file": rule.path,
                 "message": f"{label} cannot be read, so it cannot be shown to use 'gate': {rule.error}",
             })
         elif rule.enforcement != "gate":
             issues.append({
-                "check": "paper_walls",
+                "check": "paper_gates",
                 "file": rule.path,
                 "message": (
                     f"{label} enforcement is '{rule.meta.get('enforcement')}', "
@@ -514,7 +514,7 @@ ALL_CHECKS = [
     check_assertion_density,
     check_rule_fitness,
     check_rule_conventions,
-    check_paper_walls,
+    check_paper_gates,
 ]
 CHECK_NAMES = [
     "test_coverage",
@@ -522,7 +522,7 @@ CHECK_NAMES = [
     "assertion_density",
     "rule_fitness",
     "rule_conventions",
-    "paper_walls",
+    "paper_gates",
 ]
 
 

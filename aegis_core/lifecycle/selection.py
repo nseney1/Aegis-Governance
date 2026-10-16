@@ -19,14 +19,14 @@ from aegis_core.storage import append_jsonl, locked
 from aegis_core.telemetry_engine import ledger
 from aegis_core.workspace import literal_workspace
 from aegis_core.workspace.base import Workspace
-from .parsers import find_cell_file, sanitize_cell_id
+from .parsers import find_rule_file, sanitize_rule_id
 
 __all__ = [
     "ARCHIVE_DIR",
     "archive_rule",
     "evaluate_archives",
-    "prune_cells",
-    "run_cell_selection",
+    "prune_rules",
+    "run_rule_selection",
 ]
 
 ARCHIVE_DIR = ".archive"
@@ -88,11 +88,11 @@ def archive_rule(workspace: Workspace | Path | str, rule_id: str, dry_run: bool 
     and that is checked again under the lock: evidence recorded since the caller judged
     the rule wins.
     """
-    clean = sanitize_cell_id(rule_id)
+    clean = sanitize_rule_id(rule_id)
     if not clean:
         return {"status": "invalid_id", "message": f"Invalid rule ID: '{rule_id}'"}
     ws = literal_workspace(workspace)
-    path, rule_type = find_cell_file(ws, clean)
+    path, rule_type = find_rule_file(ws, clean)
     if path is None:
         return {"status": "not_found", "message": f"Rule '{clean}' not found in workspace"}
     archive_dir = ws.rules_dir / ARCHIVE_DIR
@@ -118,7 +118,7 @@ def archive_rule(workspace: Workspace | Path | str, rule_id: str, dry_run: bool 
     return {"status": "archived", "from_type": rule_type, "source_path": str(path), "target_path": str(dest)}
 
 
-def run_cell_selection(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
+def run_rule_selection(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
     """Report the rules whose evidence supports archiving; with ``execute``, archive them."""
     ws = literal_workspace(workspace)
     if not ws.rules_dir.exists():
@@ -140,6 +140,6 @@ def run_cell_selection(workspace: Workspace | Path | str | None = None, execute:
     return 0
 
 
-def prune_cells(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
-    """Archive the rules that misfire (``run_cell_selection``)."""
-    return run_cell_selection(workspace=workspace, execute=execute)
+def prune_rules(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
+    """Archive the rules that misfire (``run_rule_selection``)."""
+    return run_rule_selection(workspace=workspace, execute=execute)

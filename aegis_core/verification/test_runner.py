@@ -46,14 +46,10 @@ def resolve_pytest_cmd(
     # 2. Local workspace virtual environment (.venv)
     root = None
     if workspace is not None:
-        if hasattr(workspace, "cells_dir") and hasattr(workspace, "root"):
-            # Soma Workspace instance
-            root = Path(workspace.root)
-        else:
-            try:
-                root = Path(workspace)
-            except Exception:
-                root = None
+        try:
+            root = Path(workspace)  # a path, or a Workspace (os.PathLike)
+        except Exception:
+            root = None
 
     if root is not None:
         local_venv = Path(root) / ".venv"

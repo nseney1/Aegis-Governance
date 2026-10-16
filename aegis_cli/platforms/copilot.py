@@ -26,7 +26,7 @@ class CopilotAdapter(PlatformAdapter):
         rule_lines = "\n".join(f"- **{r.stem}**: See `.github/instructions/{r.name}`" for r in rules)
         return (
             "# GitHub Copilot Governance Instructions\n\n"
-            "This repository uses Soma Governance rules:\n\n"
+            "This repository uses Aegis governance rules:\n\n"
             f"{rule_lines}\n"
         )
 

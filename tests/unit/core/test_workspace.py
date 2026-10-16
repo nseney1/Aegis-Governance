@@ -8,10 +8,10 @@ import pytest
 
 from aegis_core.errors import WorkspaceError
 from aegis_core.workspace.base import Workspace
+from aegis_core.rules import validate_rule_names
 from aegis_core.workspace import (
     confine_path,
     resolve_workspace,
-    validate_rule_names,
 )
 
 
