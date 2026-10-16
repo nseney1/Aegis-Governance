@@ -167,10 +167,19 @@ def _build_parser(prog: str = PROG) -> argparse.ArgumentParser:
 
 
 def _attach_workspace(args: argparse.Namespace) -> None:
-    """Resolve the workspace the command acts on (``args.ws``, ``args._project_root``)."""
+    """Resolve the workspace the command acts on (``args.ws``, ``args._project_root``).
+
+    The raw ``--workspace`` value stays on ``args._workspace_arg`` (``args.workspace``
+    is replaced by the resolved root). Commands without their own rule resolve through
+    ``resolve_cli_root``: never above the target's git toplevel, never ``$HOME``.
+    """
+    from aegis_core.config import env_workspace
+    from aegis_core.errors import WorkspaceNotFoundError
     from aegis_core.workspace.base import Workspace
+    from aegis_core.workspace.binding import resolve_cli_root
 
     raw_ws = getattr(args, "workspace", None)
+    args._workspace_arg = raw_ws
     if args.command == "scan":
         # scan resolves its own workspace so that a workspace error exits 2.
         args.ws = None
@@ -203,9 +212,42 @@ def _attach_workspace(args: argparse.Namespace) -> None:
             args.workspace = str(p)
             return
     else:
-        args.ws = Workspace.resolve(raw_ws)
+        try:
+            args.ws = Workspace(root=resolve_cli_root(raw_ws, Path.cwd(), env_workspace()))
+        except WorkspaceNotFoundError:
+            if args.command not in _HOST_LEVEL_COMMANDS:
+                raise
+            # Host-level checks still run from $HOME; the command decides what a
+            # workspace means there.
+            args.ws = None
+            start = Path(raw_ws).expanduser().resolve() if raw_ws else Path.cwd().resolve()
+            args._project_root = start
+            args.workspace = str(start)
+            return
     args._project_root = args.ws.root
     args.workspace = str(args.ws.root)
+
+
+# Commands that inspect the machine (hosts, registrations) as well as a workspace.
+_HOST_LEVEL_COMMANDS = frozenset({"doctor"})
+
+
+def _print_hold(args: argparse.Namespace, exc: Exception) -> None:
+    """A workspace hold: machine-readable with --json, one stderr line otherwise."""
+    import json
+    from datetime import datetime, timezone
+
+    binding = exc.binding.as_dict()  # type: ignore[attr-defined]
+    if getattr(args, "json", False):
+        print(json.dumps({
+            **binding,
+            "source": f"{PROG} {args.command}",
+            "aegis_version": _version(),
+            "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "scope": {"command": args.command, "workspace": None},
+        }, indent=2))
+    else:
+        print(f"Hold ({binding['reason']}): {binding['message']}", file=sys.stderr)
 
 
 def main(argv: Optional[List[str]] = None, prog: str = PROG) -> int:
@@ -229,11 +271,16 @@ def main(argv: Optional[List[str]] = None, prog: str = PROG) -> int:
         return 0
 
     command = get_default_registry().get(args.command)
+    from aegis_core.workspace.binding import WorkspaceHold
+
     try:
         _attach_workspace(args)
         return command.execute(args)
     except KeyboardInterrupt:
         return 130
+    except WorkspaceHold as hold:
+        _print_hold(args, hold)
+        return 1
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

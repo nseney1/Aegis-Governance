@@ -12,6 +12,7 @@ from pathlib import Path
 
 from aegis_core.config import env_workspace
 from aegis_core.errors import WorkspaceError, WorkspaceNotFoundError
+from aegis_core.workspace.binding import bounded_walk_up
 from aegis_core.workspace.layout import LEGACY_SOMA_DIRNAME, has_rules_dir, is_aegis_workspace
 
 LEGACY_SOMA_UPGRADE_MSG = (
@@ -71,46 +72,46 @@ def resolve_workspace_root(
         elif os.path.isdir(aegis_ws):
             return Path(aegis_ws).resolve()
 
-    # 3. Explicit start path walk-up
+    # 3. Explicit start path walk-up, bounded like every walk below (see _walk_up)
     if start is not None:
         cand = os.path.abspath(str(start))
         d = cand if os.path.isdir(cand) else os.path.dirname(cand)
         check_legacy_soma_sentinel(d)
-        while d != os.path.dirname(d):
-            if _is_workspace_dir(d):
-                return Path(d).resolve()
-            check_legacy_soma_sentinel(d)
-            d = os.path.dirname(d)
-        return Path(cand if os.path.isdir(cand) else os.path.dirname(cand)).resolve()
+        found = _walk_up(d)
+        return found if found is not None else Path(d).resolve()
 
-    # 4. Check CWD directly
+    # 4-5. The cwd, then up from it
     cwd = os.getcwd()
     check_legacy_soma_sentinel(cwd)
-    if _is_workspace_dir(cwd):
-        return Path(cwd).resolve()
-
-    # 5. Walk up from CWD
-    d = cwd
-    while d != os.path.dirname(d):
-        if _is_workspace_dir(d):
-            return Path(d).resolve()
-        check_legacy_soma_sentinel(d)
-        d = os.path.dirname(d)
+    found = _walk_up(cwd)
+    if found is not None:
+        return found
 
     # 6. Walk up from caller_file (skipping vendor/ directories)
     if caller_file is not None:
-        d = os.path.dirname(os.path.abspath(str(caller_file)))
-        while d != os.path.dirname(d):
-            if (
-                _is_workspace_dir(d)
-                and "/vendor/" not in d
-                and os.path.basename(os.path.dirname(d)) != "vendor"
-            ):
-                return Path(d).resolve()
-            d = os.path.dirname(d)
+        def _not_vendored(d: Path) -> bool:
+            return _is_workspace_dir(str(d)) and "vendor" not in d.parts[:-1]
+
+        found = bounded_walk_up(os.path.dirname(os.path.abspath(str(caller_file))), accept=_not_vendored)
+        if found is not None:
+            return found
 
     # 7. Fallback to CWD
     return Path(cwd).resolve()
+
+
+def _walk_up(start: str) -> Path | None:
+    """The nearest workspace from ``start`` upwards (AD-4's bounded walk-up): never above
+    the git toplevel around ``start``, never ``$HOME`` or the filesystem root. A
+    legacy ``.soma/`` met on the way raises, as before."""
+
+    def accept(d: Path) -> bool:
+        if _is_workspace_dir(str(d)):
+            return True
+        check_legacy_soma_sentinel(d)
+        return False
+
+    return bounded_walk_up(start, accept=accept)
 
 
 __all__ = [

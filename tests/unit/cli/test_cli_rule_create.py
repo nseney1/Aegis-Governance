@@ -119,15 +119,19 @@ def test_resolution_never_crosses_the_git_toplevel(home, monkeypatch, capsys) ->
 
 
 def test_rule_list_does_not_resolve_to_home(home, monkeypatch, capsys) -> None:
+    """The walk-up stops at the repo's git toplevel (AD-4), so the uninitialized repo is
+    listed as having no rules; the user layer in ~/.aegis/rules is never listed."""
     repo = _git_repo(home / "code" / "repo", initialized=False)
     monkeypatch.chdir(repo)
+    before = _tree(home)
 
     rc = main(["rule", "list"])
 
     captured = capsys.readouterr()
-    assert rc == 1
-    assert _not_a_workspace(repo) in captured.err
+    assert rc == 0
+    assert captured.out.strip() == "No rules directory found."
     assert "user-plane" not in captured.out
+    assert _tree(home) == before
 
 
 def test_create_from_subdirectory_of_initialized_repo(home, monkeypatch, capsys) -> None:
@@ -226,16 +230,14 @@ def test_explicit_workspace_never_resolves_above_its_git_toplevel(home, elsewher
 
 
 def test_preserved_global_workspace_flag_is_bounded_like_the_subcommand_flag(home, elsewhere, capsys) -> None:
-    """`aegis --workspace INNER rule create`: cli.main walks INNER up to OUTER before dispatch.
-
-    This is the namespace rule.py receives once cli.main also keeps the raw
-    flag as ``_workspace_arg``; the bound must then be checked against INNER.
+    """A namespace whose resolved workspace was walked past INNER's git toplevel (as
+    cli.main once did) still fails: rule.py checks the bound against the raw flag kept
+    as ``_workspace_arg``. Discovery itself no longer walks out (test_workspace_binding).
     """
     outer = home / "code"
     (outer / ".aegis" / "rules").mkdir(parents=True)
     inner = _git_repo(outer / "inner", initialized=False)
-    walked = Workspace.resolve(str(inner))
-    assert walked.root == outer.resolve()
+    walked = Workspace(root=outer)
     before = _tree(home)
     args = argparse.Namespace(
         rule_action="create", hypothesis="crossing", id="crossing", json=False,
@@ -249,19 +251,12 @@ def test_preserved_global_workspace_flag_is_bounded_like_the_subcommand_flag(hom
     assert _tree(home) == before
 
 
-_NEEDS_CLI_MAIN = pytest.mark.xfail(
-    strict=True,
-    reason="needs aegis_cli/cli.py (outside lane A2) to keep the raw global --workspace as args._workspace_arg",
-)
-
-
-@_NEEDS_CLI_MAIN
 @pytest.mark.parametrize("position", ["before-rule", "before-action"])
 def test_global_workspace_flag_never_resolves_above_its_git_toplevel(home, elsewhere, capsys, position: str) -> None:
     """`aegis --workspace INNER rule create` and `aegis rule --workspace INNER create`.
 
-    Both store into the shared top-level ``--workspace`` that cli.main
-    overwrites with its unbounded walk-up before rule.py runs.
+    Both store into the shared top-level ``--workspace``; cli.main keeps the raw value
+    as ``args._workspace_arg`` and resolves it no further than its git toplevel.
     """
     outer = home / "code"
     (outer / ".aegis" / "rules").mkdir(parents=True)
