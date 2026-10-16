@@ -249,7 +249,9 @@ class _SpellingIndex:
         self._qual_suffixes: dict[str, frozenset[str]] = {}
 
     def matches(self, ref: str, pattern: str) -> bool:
-        if not ref or not pattern:
+        # An empty pattern names nothing. An empty reference needs no guard: it has no
+        # spelling a non-empty pattern ends, and evaluate_forbid_ast drops empty ones anyway.
+        if not pattern:
             return False
         if self._enumerate:
             spellings = _spellings(ref, self._quals, self._aliases, qualify_heads=self._qualify_heads)
