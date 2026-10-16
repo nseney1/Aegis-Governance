@@ -62,6 +62,7 @@ import re
 import shutil
 import stat
 from typing import Any, Dict, List, Optional, Tuple
+import zlib
 
 from aegis_core.errors import PathTraversalError, WorkspaceError
 from aegis_core.rules import is_legacy_key
@@ -366,7 +367,7 @@ def _read_archive(path: Path) -> Tuple[Optional[bytes], JsonlRead]:
         raw = path.read_bytes()
         with gzip.GzipFile(fileobj=io.BytesIO(raw)) as fh:
             data = fh.read(_ARCHIVE_LIMIT + 1)
-    except (OSError, EOFError, ValueError) as exc:
+    except (OSError, EOFError, ValueError, zlib.error) as exc:  # zlib.error: a damaged deflate stream
         return None, JsonlRead([], [], [], error=f"cannot read {path}: {exc}")
     if len(data) > _ARCHIVE_LIMIT:
         return raw, JsonlRead([], [], [], error=f"cannot read {path}: larger than {_ARCHIVE_LIMIT >> 20} MiB")
@@ -492,6 +493,7 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     from aegis_core.ast.detect import names_packaged_driver, packaged_driver_for_extension
     from aegis_core.config import ConfigError, _read_json
     from aegis_core.yaml_engine.frontmatter import AegisYAML
+    from aegis_core.yaml_engine.parser import parse_yaml_subset
 
     config: Dict[str, Any] = {"v": 1}
     try:
@@ -584,7 +586,9 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
         result.removals.append(rel)
         _record(result, other)
         try:
-            keys = sorted((AegisYAML.parse_text(other.read_text(encoding="utf-8-sig")) or {}).keys())
+            # The parser itself, not AegisYAML: an AegisDocument adds rule defaults (type,
+            # target_paths, decay) the file never held.
+            keys = sorted(map(str, (parse_yaml_subset(other.read_text(encoding="utf-8-sig")) or {}).keys()))
         except Exception:
             keys = ["(unparseable)"]
         for key in keys:

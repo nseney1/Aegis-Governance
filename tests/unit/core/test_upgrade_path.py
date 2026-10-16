@@ -203,6 +203,32 @@ def test_an_unreadable_archive_is_reported_not_fatal(tmp_path):
     assert report["ledger"]["rows"] == 1
 
 
+def test_an_archive_with_a_corrupt_body_is_reported_not_fatal(tmp_path):
+    """A valid gzip header over a damaged deflate stream raises zlib.error, not OSError."""
+    root = tmp_path / "repo"
+    bad = _gz(root / ".aegis" / "evidence" / "archive" / "signals-2026-07.jsonl.gz",
+              [_row("no-eval", f"e{i}") for i in range(50)])
+    data = bytearray(bad.read_bytes())
+    for i in range(10, 40):
+        data[i] ^= 0xFF
+    bad.write_bytes(bytes(data))
+    _gz(root / ".aegis" / "evidence" / "archive" / "signals-2026-08.jsonl.gz", [_row("no-eval", "x1")])
+
+    report = migrate.plan(root).to_dict()
+
+    assert bad.relative_to(root).as_posix() in report["unreadable"]
+    assert report["ledger"]["rows"] == 1
+
+
+def test_config_yaml_reports_only_the_keys_the_file_holds(tmp_path):
+    root = tmp_path / "repo"
+    _write(root / ".aegis" / "config.yaml", "x: 1\n")
+
+    report = migrate.plan(root).to_dict()
+
+    assert [line for line in report["dropped"] if "config.yaml" in line] == [".aegis/config.yaml: x (no v4 setting)"]
+
+
 def test_a_symlinked_archive_is_never_followed_and_is_listed(tmp_path):
     root = tmp_path / "repo"
     elsewhere = _gz(tmp_path / "elsewhere" / "signals-2026-08.jsonl.gz", [_row("no-eval", "e1")]).parent

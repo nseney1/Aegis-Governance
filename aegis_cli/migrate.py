@@ -55,7 +55,12 @@ def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
     for entry in report["conflicts"]:
         print(f"  ! {entry['to']} already exists: {entry['path']} left in place")
     for path in report["unreadable"]:
-        print(f"  ! cannot read {path}: left in place")
+        removed_with = next((r for r in report["remove"] if path == r or path.startswith(r.rstrip("/") + "/")), None)
+        if removed_with is None:
+            print(f"  ! cannot read {path}: left in place")
+        else:  # its directory goes, so the backup is the only copy left
+            where = f"the backup {backup}" if backup else "the backup"
+            print(f"  ! cannot read {path}: not converted; removed with {removed_with}, kept only in {where}")
     for entry in report["skipped"]:
         print(f"  ! {entry['path']}: {entry['reason']}")
     for path in report["already_moved"]:

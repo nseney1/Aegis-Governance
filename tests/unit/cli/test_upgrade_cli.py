@@ -113,6 +113,32 @@ def test_migrate_lists_what_it_does_not_convert(tmp_path, monkeypatch, capsys):
     assert [e["path"] for e in payload["not_converted"]] == [".aegis/evidence/checkpoint_rollup.json", "steering.conf"]
 
 
+def test_an_unreadable_file_inside_a_removed_directory_is_said_to_survive_only_in_the_backup(
+        tmp_path, monkeypatch, capsys):
+    import gzip
+
+    repo = _git_repo(tmp_path / "repo")
+    _write(repo / ".aegis" / "evidence" / "signals.jsonl", "")
+    archive = repo / ".aegis" / "evidence" / "archive" / "signals-2026-08.jsonl.gz"
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(gzip.compress(b'{"rule_id": "x", "signal": "tp"}\n' * 20)[:-12])  # truncated
+    monkeypatch.chdir(repo)
+    rel = ".aegis/evidence/archive/signals-2026-08.jsonl.gz"
+
+    assert _exit(["migrate"]) == 0
+    out = capsys.readouterr().out
+    assert f"  ! cannot read {rel}: not converted; removed with .aegis/evidence, kept only in the backup" in out
+    assert "left in place" not in out
+
+    assert _exit(["migrate", "--apply"]) == 1
+    out = capsys.readouterr().out
+    backups = sorted((repo / ".aegis" / "state").glob("migrate-backup-*"))
+    assert len(backups) == 1
+    assert f"kept only in the backup {backups[0]}" in out
+    assert not archive.exists()
+    assert (backups[0] / rel).is_file()
+
+
 # ── unmigrated v3 state: status, scan and sync refuse; check warns ───────────
 
 @pytest.fixture
