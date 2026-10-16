@@ -297,6 +297,104 @@ class TestMutantReachesEveryImporter:
         assert ev.lines == [-1]
 
 
+_CLASSES = """\
+    class Base:
+        def verify(self, x):
+            return x
+
+
+    class Doubler(Base):
+        def verify(self, x):
+            return x + x
+
+
+    def outer(x):
+        def inner(y):
+            return y * 3
+        return inner(x)
+"""
+_DOUBLER_TEST = """\
+    from pkg.mod import Doubler
+
+    def test_doubler_verify():
+        assert Doubler().verify(2) == 4
+"""
+
+
+class TestQualifiedTargets:
+    """A method is targeted as Class.method and a nested function as outer.inner, each once,
+    so the mutants land in the definition that changed, not in the first one with its name."""
+
+    def test_discovery_qualifies_methods_and_nested_functions(self, tmp_path):
+        mod = tmp_path / "mod.py"
+        mod.write_text(textwrap.dedent(_CLASSES), encoding="utf-8")
+
+        found = runner._discover_functions(str(mod))
+
+        assert sorted(found) == ["Base.verify", "Doubler.verify", "outer", "outer.inner"]
+
+    def test_discovery_lists_a_redefined_function_once(self, tmp_path):
+        mod = tmp_path / "mod.py"
+        mod.write_text(textwrap.dedent("""\
+            import sys
+
+            if sys.platform == "win32":
+                def tidy(text):
+                    return text.strip()
+            else:
+                def tidy(text):
+                    return text.rstrip()
+        """), encoding="utf-8")
+
+        assert runner._discover_functions(str(mod)) == ["tidy"]
+
+    def test_discovery_selects_the_method_on_the_changed_lines(self, tmp_path):
+        mod = tmp_path / "mod.py"
+        mod.write_text(textwrap.dedent(_CLASSES), encoding="utf-8")
+
+        assert runner._discover_functions(str(mod), target_lines={8}) == ["Doubler.verify"]
+
+    def test_a_qualified_method_is_the_one_mutated(self, tmp_path):
+        root = _repo(tmp_path, {"tests/test_mod.py": _DOUBLER_TEST}, sources={"pkg/mod.py": _CLASSES})
+        args = (str(root / "pkg/mod.py"),)
+        test = str(root / "tests/test_mod.py")
+
+        doubler = mutation_tester.check(*args, "Doubler.verify", test)
+        base = mutation_tester.check(*args, "Base.verify", test)
+
+        assert (doubler.verdict, doubler.detail) == (True, "0/2 survived (1 test file ran)")
+        assert (base.verdict, base.detail, base.lines) == (False, "1/1 survived (1 test file ran)", [3])
+
+    def test_a_nested_function_is_mutated_through_its_outer_name(self, tmp_path):
+        root = _repo(tmp_path, {"tests/test_mod.py": """\
+            from pkg.mod import outer
+
+            def test_outer():
+                assert outer(2) == 6
+        """}, sources={"pkg/mod.py": _CLASSES})
+
+        ev = mutation_tester.check(str(root / "pkg/mod.py"), "outer.inner", str(root / "tests/test_mod.py"))
+
+        assert (ev.verdict, ev.detail) == (True, "0/3 survived (1 test file ran)")
+
+    def test_an_unknown_qualified_name_fails_closed(self, tmp_path):
+        root = _repo(tmp_path, {"tests/test_mod.py": _DOUBLER_TEST}, sources={"pkg/mod.py": _CLASSES})
+
+        ev = mutation_tester.check(str(root / "pkg/mod.py"), "Tripler.verify", str(root / "tests/test_mod.py"))
+
+        assert ev.verdict is False
+        assert ev.detail == "could not assess: no function named Tripler.verify in mod.py"
+
+    def test_layer1_reports_each_method_under_its_class(self, tmp_path):
+        root = _repo(tmp_path, {"tests/test_mod.py": _DOUBLER_TEST}, sources={"pkg/mod.py": _CLASSES})
+
+        results = runner.run_layer1(["pkg/mod.py"], str(root))
+        targets = sorted(r.target.rpartition("::")[2] for r in results if r.tool == "mutation_tester")
+
+        assert targets == ["Base.verify", "Doubler.verify", "outer"]
+        assert _mutation_evidence(results, "Doubler.verify").detail == "0/2 survived (1 test file ran)"
+
+
 class TestRunTimeouts:
     """T2: the per-run timeout grows with the files that run; a baseline timeout names its cause."""
 
