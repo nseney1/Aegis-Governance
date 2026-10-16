@@ -129,10 +129,12 @@ def _subsection(entry: str, title: str) -> str:
     return " ".join(match.group(1).split())
 
 
-def test_the_4_1_0_entry_sits_above_4_0_0_and_is_unreleased():
+def test_the_4_1_0_entry_is_dated_and_sits_above_4_0_0():
     text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    first = re.search(r"^## \[(.*?)\](.*)$", text, re.M)
-    assert first.group(1) == "4.1.0" and first.group(2).strip() == "- Unreleased"
+    headings = re.findall(r"^## \[(.*?)\] - (.*)$", text, re.M)
+    versions = [v for v, _ in headings]
+    assert versions.index("4.1.0") < versions.index("4.0.0")
+    assert dict(headings)["4.1.0"] == "2026-10-16"
 
 
 def test_the_4_1_0_entry_names_every_command_4_1_added():

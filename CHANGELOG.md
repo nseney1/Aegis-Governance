@@ -2,7 +2,7 @@
 
 All notable changes to Aegis Guardrails are documented here. The project uses [Semantic Versioning](https://semver.org/). Releases before 1.0.0 are summarized at the end.
 
-## [4.1.0] - Unreleased
+## [4.1.0] - 2026-10-16
 
 v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel agents, and skills projection, as designed in [ADR 0005](docs/adr/0005-v4-plan-of-record.md) AD-7 and AD-8 (amended 2026-10-16). Nothing from 4.0 is removed. The details are in [How Aegis works](docs/how-it-works.md) section 8.
 
@@ -22,6 +22,9 @@ v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel a
 - `aegis_scan` writes its scan activity row again once the last one for the same session and files is older than half of `jit.scan_window_s` (4.0 wrote one per server process), and accepts a file inside the workspace that does not exist yet, so a new file can be scanned before it is created.
 - `aegis scan FILE...` records a scan row with host `cli`, so the shell fallback satisfies the scan-before-edit hook too.
 - `aegis doctor`'s Best-effort tier reports `unknown` with each registered host's tier when hooks are installed (doctor reads files only and cannot confirm a host runs them), `inactive` outside a governed repository and `unavailable` when no selected host can run them.
+
+- **Host surfaces and Kiro.** Each host row lists the apps and IDEs that share its config plane, and `--host` accepts their names (`codex-ide`, `codex-app`, `chatgpt-desktop`, `claude-desktop-code`, `antigravity-app`, `antigravity-ide`, `kiro-ide`, `kiro-cli`); the config stores the plane id. New experimental `kiro` host: `aegis init --host kiro` writes `~/.kiro/settings/mcp.json`. `--host auto` also detects hosts by config directory and app bundle. `aegis doctor` warns when a host reads the `AGENTS.md` bootstrap but has no Aegis MCP registration (`bootstrap_without_tools`). Registering the Kiro workspace file (`.kiro/settings/mcp.json`) is not offered: a committed MCP file would run whatever a pull request puts there.
+- **First run.** `aegis init` seeds one active rule, the `no-eval` invariant (`--rules none-active` leaves it out), prints the next step, and prints a CI workflow that `--ci` writes to `.github/workflows/aegis.yml`. The PATH hint names the script by its full path (and `~/Library/Python/3.x/bin` on macOS) instead of `python -m aegis_cli`.
 
 ### Fixed
 

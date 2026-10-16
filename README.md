@@ -46,6 +46,9 @@ If pip stops with `externally-managed-environment` (PEP 668, as many Linux distr
     ✅ cost-optimization
     ✅ git-workflow
     They apply to no file until you set their target_paths (aegis status lists them).
+  Active rule in .aegis/rules/invariants/:
+    ✅ no-eval: bans eval() and exec() in **/*.py; aegis check and the pre-commit hook enforce it
+    Next: add a rule for your own code with aegis rule create (aegis rule create --help)
   ✅ AGENTS.md: created
   ✅ ~/.aegis/workspaces.json: added
   ✅ codex-cli: registered (codex mcp add aegis --env AEGIS_CLIENT=codex-cli -- ~/.local/bin/aegis-mcp)
@@ -53,7 +56,7 @@ If pip stops with `externally-managed-environment` (PEP 668, as many Linux distr
     🪝 Pre-commit hook installed (~/code/my-app/.git/hooks/pre-commit)
 ```
 
-Now add a rule that agents will see and `aegis check` will enforce. Save this as `.aegis/rules/invariants/no-eval.md`:
+`init` seeds one rule that is active from day one: `.aegis/rules/invariants/no-eval.md` (leave it out with `--rules none-active`). Here is what it looks like, as a template for your own (`aegis rule create` writes one for you):
 
 ```markdown
 ---
@@ -99,6 +102,7 @@ Commit `.aegis/` and `AGENTS.md`; the local ledger in `.aegis/state/` is git-ign
 | **Claude Code** (`claude-code`) | `claude mcp add --scope user aegis` | `AGENTS.md`, but only when there is no `CLAUDE.md`. If the repo has one, `init` adds an `@AGENTS.md` block to it; it never creates one. |
 | **Codex CLI** (`codex-cli`) | `codex mcp add aegis` | `AGENTS.md` (Codex truncates it past 32 KiB) |
 | **Antigravity** (`antigravity`: app, IDE and `agy`) | an `aegis` entry in `~/.gemini/config/mcp_config.json` | `AGENTS.md` (24,000 bytes per file). Antigravity tells the server no workspace, so run `aegis init` once per repo on each machine. |
+| **Kiro** (`kiro`, experimental: IDE and CLI) | an `aegis` entry in `~/.kiro/settings/mcp.json` | `AGENTS.md` |
 | **Gemini CLI** | Retired: Google refuses the client for individual Code Assist accounts, and Antigravity is the Gemini-family host. `aegis init --host gemini-cli` exits with status 2 and points you to `--host antigravity`. | — |
 
 On every host, rules are advisory through the bootstrap and `aegis_scan`, the git pre-commit hook is the local floor, and CI is the authority. `aegis hook install --host <host>` adds a pre-tool hook that stops destructive commands and edits to files nobody scanned first, with a different strength on each host (the tier table under "What Aegis does not do" lists them; `aegis doctor` shows what is installed). It writes your user's host settings; `--scope project` writes the repository's instead, which your teammates' hosts will run. Claude Desktop chat sessions are recognized but not registered. Every host runs `aegis-mcp` and the hooks with your own user's permissions.
@@ -116,6 +120,7 @@ The full story, with diagrams, is in [How Aegis works](https://github.com/nseney
 ## What's included
 
 - **A CLI** with 12 commands (`init`, `uninstall`, `doctor`, `migrate`, `check`, `scan`, `status`, `rule`, `sync`, `hook`, `team`, `skills`) and **an MCP server** with 4 tools (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`).
+- **Host surfaces.** A host is the config plane its apps share: `codex-cli` covers the Codex CLI, IDE extension and ChatGPT desktop app; `claude-code` covers the CLI, IDE extensions and the desktop app's Code tab; `antigravity` the app, IDE and `agy`; `kiro` (experimental) the Kiro IDE and CLI. `--host` accepts the surface names too (for example `codex-app`, `kiro-ide`), and `--host auto` finds apps by their config directories and app bundles as well as CLIs on PATH. `aegis doctor` warns when a host reads the `AGENTS.md` bootstrap but has no Aegis MCP registration.
 - **12 starter [rules](https://github.com/nseney1/Aegis-Guardrails/tree/main/rules)**: grounding claims in the code before acting, dry runs before destructive commands, behavioral tests, test-first development, git hygiene and more. `aegis init --rules minimal|standard|full` seeds 2, 5 or all 12. They apply to no file until you set their `target_paths`.
 - **15 [skills](https://github.com/nseney1/Aegis-Guardrails/tree/main/skills)**, `SKILL.md` playbooks for reviews, audits, incident debugging, refactoring and more. `aegis skills sync` (or `aegis init --skills`) copies them into `.claude/skills/` for Claude Code and `.agents/skills/` for Codex CLI and Antigravity, and later runs replace only Aegis's own unedited copies.
 - **AST checks for Python** (in process), plus drivers that ship in the wheel for Rust, TypeScript/JavaScript (needs `node`) and Go (needs `go`); `aegis init` turns them on for the languages it detects.
