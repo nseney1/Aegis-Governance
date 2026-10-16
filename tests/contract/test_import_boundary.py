@@ -57,6 +57,7 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core.skills": 1,
     "aegis_core.command_safety": 1,
     "aegis_core.scan": 2,
+    "aegis_core.scan_compliance": 2,
     "aegis_core.sync": 2,
     "aegis_core.lifecycle": 2,
     "aegis_core.migrate": 2,

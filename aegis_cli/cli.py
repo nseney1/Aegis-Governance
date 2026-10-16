@@ -8,6 +8,7 @@ with one line on stderr naming its replacement.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -148,45 +149,111 @@ def _build_parser(prog: str = PROG) -> argparse.ArgumentParser:
 
 
 def _attach_workspace(args: argparse.Namespace) -> None:
-    """Resolve the workspace the command acts on (``args.ws``, ``args._project_root``)."""
+    """Resolve the workspace the command acts on (``args.ws``, ``args._project_root``).
+
+    The raw ``--workspace`` value stays on ``args._workspace_arg`` (``args.workspace``
+    is replaced by the resolved root). Every command resolves through
+    ``resolve_cli_root``: never above the target's git toplevel, never ``$HOME``, and a
+    WorkspaceHold when an ``AEGIS_WORKSPACE`` pin disagrees with ``--workspace``.
+    ``aegis init`` keeps its target as given but takes the same hold. An unmigrated
+    ``.soma/`` on the walk (or at the pin) raises the upgrade message, except for the
+    ``_LEGACY_TOLERANT_COMMANDS``; ``aegis migrate`` stops at it to convert it.
+    """
+    from aegis_core.config import env_workspace
+    from aegis_core.errors import WorkspaceNotFoundError
     from aegis_core.workspace.base import Workspace
+    from aegis_core.workspace.binding import check_pin_agrees, resolve_cli_root
+    from aegis_core.workspace.discovery import refuse_unmigrated_v3
 
     raw_ws = getattr(args, "workspace", None)
-    if args.command == "scan":
-        # scan resolves its own workspace so that a workspace error exits 2.
+    args._workspace_arg = raw_ws
+    pin = env_workspace()
+    if args.command == "scan" and raw_ws and not os.path.exists(raw_ws):
+        # scan names the missing path itself (exit 2); resolving it would name a parent.
         args.ws = None
         return
     if args.command == "init":
+        if raw_ws and pin:
+            check_pin_agrees(raw_ws, pin, Path.cwd())
         args._allow_home_fallback = True
         args.ws = Workspace.for_init(raw_ws or Path.cwd())
     elif args.command == "migrate":
+        # A legacy .soma/ is a workspace to migrate too.
+        root = resolve_cli_root(raw_ws, Path.cwd(), pin, accept=_migratable)
         args.ws = None
-        start_dir = Path(raw_ws).resolve() if raw_ws else Path.cwd().resolve()
-        target_root = start_dir
-        curr = start_dir
-        while curr != curr.parent:
-            if is_aegis_workspace(curr) or (curr / LEGACY_SOMA_DIRNAME).is_dir():
-                target_root = curr
-                break
-            curr = curr.parent
-        args._project_root = target_root
-        args.workspace = str(target_root)
+        args._project_root = root
+        args.workspace = str(root)
         return
-    elif args.command == "uninstall":
-        try:
-            args.ws = Workspace.resolve(raw_ws)
-        except Exception:
-            # Uninstall must work in a directory that no longer resolves
-            # (for example one holding only a legacy .soma/).
-            args.ws = None
-            p = Path(raw_ws).resolve() if raw_ws else Path.cwd().resolve()
-            args._project_root = p
-            args.workspace = str(p)
-            return
     else:
-        args.ws = Workspace.resolve(raw_ws)
+        try:
+            if args.command in _LEGACY_TOLERANT_COMMANDS:
+                root = resolve_cli_root(raw_ws, Path.cwd(), pin)
+            else:
+                root = resolve_cli_root(raw_ws, Path.cwd(), pin, accept=_refuse_legacy)
+                refuse_unmigrated_v3(root)  # a pin is not walked
+            args.ws = Workspace(root=root)
+        except WorkspaceNotFoundError:
+            if args.command not in _HOST_LEVEL_COMMANDS:
+                raise
+            # Host-level checks still run from $HOME; the command decides what a
+            # workspace means there.
+            args.ws = None
+            start = Path(os.path.abspath(os.path.expanduser(raw_ws))) if raw_ws else Path.cwd().resolve()
+            try:
+                start = start.resolve()
+            except (RuntimeError, ValueError):  # a symlink loop before 3.13; doctor reports the path
+                pass
+            args._project_root = start
+            args.workspace = str(start)
+            return
     args._project_root = args.ws.root
     args.workspace = str(args.ws.root)
+
+
+def _migratable(directory: Path) -> bool:
+    return is_aegis_workspace(directory) or (directory / LEGACY_SOMA_DIRNAME).is_dir()
+
+
+def _refuse_legacy(directory: Path) -> bool:
+    """The walk stops at a workspace and raises the upgrade message at an unmigrated
+    ``.soma/``, so a v3 repository is refused instead of read as an empty workspace
+    (where ``aegis check --hook`` would pass vacuously)."""
+    from aegis_core.workspace.discovery import refuse_unmigrated_v3
+
+    if is_aegis_workspace(directory):
+        return True
+    refuse_unmigrated_v3(directory)
+    return False
+
+
+# Commands that inspect the machine (hosts, registrations) as well as a workspace.
+_HOST_LEVEL_COMMANDS = frozenset({"doctor"})
+
+# Commands that must still work in an unmigrated v3 repository (migrate has its own
+# branch): doctor diagnoses it, uninstall removes what an older version installed.
+_LEGACY_TOLERANT_COMMANDS = frozenset({"doctor", "uninstall"})
+
+# scan's exit codes are a contract (aegis_cli/scan.py): a workspace error, a hold
+# included, is 2 there; every other command exits 1.
+_WORKSPACE_ERROR_EXIT: Dict[str, int] = {"scan": 2}
+
+
+def _print_hold(args: argparse.Namespace, exc: Exception) -> None:
+    """A workspace hold: machine-readable with --json, one stderr line otherwise."""
+    import json
+    from datetime import datetime, timezone
+
+    binding = exc.binding.as_dict()  # type: ignore[attr-defined]
+    if getattr(args, "json", False):
+        print(json.dumps({
+            **binding,
+            "source": f"{PROG} {args.command}",
+            "aegis_version": __version__,
+            "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "scope": {"command": args.command, "workspace": None},
+        }, indent=2))
+    else:
+        print(f"Hold ({binding['reason']}): {binding['message']}", file=sys.stderr)
 
 
 def main(argv: Optional[List[str]] = None, prog: str = PROG) -> int:
@@ -210,8 +277,18 @@ def main(argv: Optional[List[str]] = None, prog: str = PROG) -> int:
         return 0
 
     command = get_default_registry().get(args.command)
+    from aegis_core.errors import WorkspaceError
+    from aegis_core.workspace.binding import WorkspaceHold
+
     try:
-        _attach_workspace(args)
+        try:
+            _attach_workspace(args)
+        except WorkspaceError as exc:
+            if isinstance(exc, WorkspaceHold):
+                _print_hold(args, exc)
+            else:
+                print(f"Error: {exc}", file=sys.stderr)
+            return _WORKSPACE_ERROR_EXIT.get(args.command, 1)
         return command.execute(args)
     except KeyboardInterrupt:
         return 130

@@ -1,10 +1,17 @@
 """aegis_report_outcome: advisory self-reports appended to the outcome ledger."""
 from __future__ import annotations
 
+from pathlib import PurePath
+import sys
+from typing import List, Optional, Set, Tuple
+
 from aegis_core.rule_inventory import RuleInventoryError
 from aegis_core.rules import validate_rule_names
 from aegis_core.telemetry_engine import ledger
 from aegis_mcp.registry import _STATUS_FAIL, _VALID_OUTCOMES, _get_workspace
+
+# (workspace root, session, idempotency key) whose edit event is recorded.
+_RECORDED: Set[Tuple[str, str, str]] = set()
 
 _LEDGER_OUTCOME = {
     "success": "tp",
@@ -57,6 +64,15 @@ def handle_report_outcome(args: dict) -> dict:
         return _fail(f"Cannot check 'rules_used' against the rules: {exc}")
     if invalid:
         return _fail(f"Unknown rule(s): {invalid}. Only existing rules can be reported.")
+    files = args.get("files")
+    edited: Optional[List[str]] = None
+    if files is not None:
+        if not isinstance(files, (list, tuple)) or not all(isinstance(f, str) for f in files):
+            return _fail("'files' must be a list of file paths")
+        try:
+            edited = sorted({PurePath(workspace.confine_path(f)[1]).as_posix() for f in files})
+        except ValueError as exc:
+            return _fail(str(exc))
 
     meta = {
         "notes": args.get("notes", ""),
@@ -64,16 +80,19 @@ def handle_report_outcome(args: dict) -> dict:
         "rework_count": args.get("rework_count", 0),
     }
     # Attribution comes from the server (clientInfo and its session), never the caller.
-    # A retry from a new session (after a reconnect) returns the row stored under the
-    # original session: the ledger identity is (key, rule) and attribution is not payload.
+    # The key is scoped by host and session (host-matrix §3.8): two sessions that pick
+    # the same key ("report-1") are two reports. The cost: a retry after a reconnect,
+    # which starts a new session, records again.
+    host, session = args.get("_host"), args.get("_session")
+    ledger_key = f"{host}/{session}/{idempotency_key}" if session else idempotency_key
     events = [
         {
             "rule": rule,
             "outcome": _LEDGER_OUTCOME[outcome],
             "source": "mcp",
-            "host": args.get("_host"),
-            "session": args.get("_session"),
-            "key": idempotency_key,
+            "host": host,
+            "session": session,
+            "key": ledger_key,
             "meta": meta,
         }
         for rule in rules_used
@@ -87,4 +106,28 @@ def handle_report_outcome(args: dict) -> dict:
         )
     except Exception as exc:
         return _fail(f"Failed to record outcome: {exc}")
+    if edited:
+        _record_edit(workspace, args, idempotency_key, edited)
     return {"status": "recorded", "records": records}
+
+
+def _record_edit(workspace, args: dict, idempotency_key: str, files: List[str]) -> None:
+    """One ``edit`` activity event per report, for aegis status --compliance."""
+    from aegis_core import scan_compliance
+
+    session = args.get("_session")
+    if not session:
+        return
+    key = (str(workspace.root), str(session), idempotency_key)
+    if key in _RECORDED:
+        return
+    try:
+        scan_compliance.record(
+            workspace, "edit", host=str(args.get("_host") or "generic"), session=str(session), files=files,
+            client={"name": args.get("_client_name") or "", "version": args.get("_client_version") or ""},
+            binding=args.get("_binding"), basis="report", key=idempotency_key,
+        )
+    except Exception as exc:  # telemetry only: the outcome is recorded
+        print(f"aegis-mcp: edit event not recorded: {exc}", file=sys.stderr)
+        return
+    _RECORDED.add(key)

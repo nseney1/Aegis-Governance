@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,24 @@ class TestWorkspaceCore:
         # Path traversal rejection
         with pytest.raises(ValueError, match="path traversal blocked"):
             confine_path("../outside.txt", ws)
+
+    @pytest.mark.parametrize("name", ["loop", "loop/x.py"])
+    def test_confine_path_through_a_symlink_loop_never_escapes_as_runtime_error(self, tmp_path: Path, name: str):
+        """Before 3.13 resolve() raises RuntimeError on a loop; callers catch ValueError only."""
+        from aegis_core.errors import PathTraversalError
+
+        ws = tmp_path / "sandbox"
+        (ws / ".aegis" / "rules").mkdir(parents=True)
+        try:
+            os.symlink(ws / "loop", ws / "loop")
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+
+        if sys.version_info < (3, 13):
+            with pytest.raises(PathTraversalError, match=r"cannot be resolved"):
+                confine_path(name, ws)
+        else:  # 3.13 resolves a loop leniently: the unresolved remainder stays inside the workspace
+            assert Path(confine_path(name, ws)[1]).as_posix() == name
 
     def test_validate_rule_names(self, tmp_path: Path):
         ws = tmp_path / "rules_ws"

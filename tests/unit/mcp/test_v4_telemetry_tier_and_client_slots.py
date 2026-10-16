@@ -57,7 +57,7 @@ def test_initialize_detects_client_platform_and_interpolates_slots_in_scan(tmp_p
             "clientInfo": {"name": "claude-code", "version": "1.0"},
         },
     })
-    assert server_module._client_platform == "claude"
+    assert server_module._client_platform == "claude-code"
 
     scan_resp = handle_request({
         "jsonrpc": "2.0",
@@ -74,7 +74,7 @@ def test_initialize_detects_client_platform_and_interpolates_slots_in_scan(tmp_p
     assert "haiku" in scan_data["guidance"]
     assert "${SLOT." not in scan_data["guidance"]
 
-    # Re-initialize as default (gemini)
+    # Re-initialize as Antigravity: its own host id, never "gemini"
     handle_request({
         "jsonrpc": "2.0",
         "id": 12,
@@ -83,7 +83,7 @@ def test_initialize_detects_client_platform_and_interpolates_slots_in_scan(tmp_p
             "clientInfo": {"name": "antigravity-client", "version": "2.0"},
         },
     })
-    assert server_module._client_platform == "gemini"
+    assert server_module._client_platform == "antigravity"
 
 
 def test_unknown_client_gets_the_generic_slot_table_not_another_vendors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

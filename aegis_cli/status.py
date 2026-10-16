@@ -14,7 +14,7 @@ from aegis_core.taxonomy import (
     RULE_TYPES,
 )
 
-__all__ = ["run_status", "StatusCommand"]
+__all__ = ["run_status", "run_compliance", "StatusCommand"]
 
 from aegis_core.yaml_engine.frontmatter import parse_rule_file
 
@@ -525,6 +525,64 @@ def _print_problems(inventory_error: str | None, problems: dict, ledger_missing:
         print()
 
 
+# ── aegis status --compliance (ADR 0005 AD-9) ───────────────────────────────
+
+COMPLIANCE_HELP = (
+    "Show the per-host scan-before-edit rate from the MCP activity log "
+    "(.aegis/state/activity.jsonl), per session and per host. Edits are the files a session "
+    "named in aegis_report_outcome 'files' plus the files of commits inside exactly one "
+    "session's window (first to last event, plus 15 minutes). Limits: an edit time is an upper "
+    "bound (report or commit time), so the rate can overstate compliance; uncommitted edits "
+    "that were never reported are not seen; commits in overlapping sessions count as "
+    "ambiguous, not as misses; a session with no observed edit is unknown, never 0. A host "
+    "rate is an aggregate over sessions, not a per-attempt verdict. Reads only."
+)
+
+
+def _rate_text(row: dict) -> str:
+    return f"{round(row['rate'] * 100)}%" if row.get("rate") is not None else "unknown"
+
+
+def run_compliance(args: argparse.Namespace) -> int:
+    """``aegis status --compliance [--json]``: read-only; writes, syncs and fetches nothing."""
+    import json
+    import sys
+
+    from aegis_core._version import __version__
+    from aegis_core.scan_compliance import report
+    from aegis_core.workspace.layout import is_aegis_workspace
+
+    root = Path(_project_root(args)).resolve()
+    if not is_aegis_workspace(root):
+        print(f"Error: not an Aegis workspace (no .aegis/ in {root}); run aegis init", file=sys.stderr)
+        return 1
+    data = report(root)
+    data = {"schema": data.pop("schema"), "source": data.pop("source"), "aegis_version": __version__, **data}
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+        return 0
+
+    print("Scan-before-edit compliance (aegis status --compliance)\n")
+    if not data["hosts"]:
+        print("  No MCP activity recorded yet: the rate is unknown.")
+    else:
+        print(f"  {'Host':<16}{'Sessions':>9}{'Measured':>10}{'Edits':>7}{'Scanned first':>15}{'Rate':>9}")
+        for row in data["hosts"]:
+            scanned = "—" if row["scanned_before_edit"] is None else str(row["scanned_before_edit"])
+            print(f"  {sanitize_display(row['host'], 16):<16}{row['sessions']:>9}{row['sessions_measured']:>10}"
+                  f"{row['edits_observed']:>7}{scanned:>15}{_rate_text(row):>9}")
+        print("\n  Host rates are aggregates over sessions, not a per-attempt verdict; "
+              "--json lists every session.")
+    if data["git"]["status"] != "used":
+        print("  Commits were not read (no git repository or git unavailable): only reported edits count.")
+    elif data["git"]["ambiguous_edits"]:
+        print(f"  {data['git']['ambiguous_edits']} committed file(s) fell in overlapping sessions and were not attributed.")
+    if data["activity"]["skipped"]:
+        print(f"  {data['activity']['skipped']} activity row(s) could not be used.")
+    print(f"\n  How it is measured: {data['heuristic']['edits']}")
+    return 0
+
+
 class StatusCommand(AegisCommand):
     """Command to show active rules, rule inventory, and health stats."""
 
@@ -533,8 +591,11 @@ class StatusCommand(AegisCommand):
     help = "Show active rules and stats"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        """status takes only the global flags."""
+        """status takes the global flags and --compliance."""
+        parser.add_argument("--compliance", action="store_true", help=COMPLIANCE_HELP)
 
     def execute(self, args: argparse.Namespace) -> int:
+        if getattr(args, "compliance", False):
+            return run_compliance(args)
         return run_status(args)
 

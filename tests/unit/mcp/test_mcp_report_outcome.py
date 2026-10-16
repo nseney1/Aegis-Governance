@@ -2,9 +2,9 @@
 
 A row records ``source: "mcp"`` plus the client host and the server session, both
 owned by the server: nothing in the tool arguments can choose them. A report needs
-an idempotency key, so a retried call is recorded once, even when the retry comes
-from a new session after a reconnect. A report names at least one rule: an outcome
-with no rule has nothing to credit.
+an idempotency key, scoped by host and session (host-matrix §3.8): a retry within a
+session is recorded once, and two sessions that pick the same key are two reports. A
+report names at least one rule: an outcome with no rule has nothing to credit.
 """
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def test_row_records_source_host_and_server_session(served):
     assert response["result"]["isError"] is False, payload
     row, = _rows(served)
     assert (row["rule"], row["outcome"], row["source"]) == ("trap-x", "tp", "mcp")
-    assert row["host"] == "claude"
+    assert row["host"] == "claude-code"
     assert row["session"] == server._session_id
     assert len(server._session_id) == 32
 
@@ -92,7 +92,7 @@ def test_tool_arguments_cannot_choose_host_session_source_or_workspace(served, t
     assert response["result"]["isError"] is False, payload
     row, = _rows(served)
     assert row["source"] == "mcp"
-    assert row["host"] == "claude"
+    assert row["host"] == "claude-code"
     assert row["session"] == server._session_id
     assert _rows(other) == []
 
@@ -145,7 +145,7 @@ def test_legacy_argument_names_are_rejected(served, alias):
 def test_outcome_maps_to_ledger_outcome(served, outcome, ledger_outcome):
     _call({"outcome": outcome, "rules_used": ["trap-x"], "idempotency_key": f"k-{outcome}"})
     row, = _rows(served)
-    assert (row["v"], row["outcome"], row["key"]) == (2, ledger_outcome, f"k-{outcome}")
+    assert (row["v"], row["outcome"], row["key"]) == (2, ledger_outcome, f"claude-code/{server._session_id}/k-{outcome}")
 
 
 def test_invalid_outcome_is_rejected(served):
@@ -200,26 +200,23 @@ def _reconnect(client_name="claude-code", req_id=5):
                            "params": {"clientInfo": {"name": client_name}}})
 
 
-def test_retry_from_a_new_session_returns_the_original_record(served):
+def test_a_new_session_is_a_new_scope_for_the_same_key(served):
+    """The trade-off of scoping keys by session: a retry after a reconnect records again,
+    and a key another session already used never swallows or blocks a new report."""
     args = {"outcome": "tp", "rules_used": ["trap-x"], "idempotency_key": "cross-session"}
-    _, first = _call(args)
+    _call(args)
     first_session = server._session_id
     _reconnect()
     assert server._session_id != first_session
 
-    response, payload = _call(args, req_id=6)
+    response, payload = _call(dict(args, outcome="fp"), req_id=6)
 
     assert response["result"]["isError"] is False, payload
-    assert payload == first
-    row, = _rows(served)
-    assert row["session"] == first_session
+    assert [(r["session"], r["outcome"]) for r in _rows(served)] == [(first_session, "tp"), (server._session_id, "fp")]
 
 
-@pytest.mark.parametrize("reconnect", [False, True])
-def test_reusing_a_key_for_a_different_report_is_refused(served, reconnect):
+def test_reusing_a_key_for_a_different_report_is_refused(served):
     _call({"outcome": "tp", "rules_used": ["trap-x"], "idempotency_key": "reused"})
-    if reconnect:
-        _reconnect()
 
     response, payload = _call({"outcome": "fp", "rules_used": ["trap-x"], "idempotency_key": "reused"}, req_id=6)
 
@@ -252,9 +249,9 @@ def test_schema_requires_a_key_and_at_least_one_rule():
 
 
 @pytest.mark.parametrize("client_name,host", [
-    ("claude-code", "claude"),
-    ("antigravity-client", "gemini"),
-    ("codex-mcp-client", "codex"),
+    ("claude-code", "claude-code"),
+    ("antigravity-client", "antigravity"),
+    ("codex-mcp-client", "codex-cli"),
     ("some-new-agent", "generic"),
     ("", "generic"),
 ])

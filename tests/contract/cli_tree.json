@@ -1699,6 +1699,19 @@
             "nargs": null,
             "required": false,
             "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "compliance",
+            "flags": [
+              "--compliance"
+            ],
+            "help": "Show the per-host scan-before-edit rate from the MCP activity log (.aegis/state/activity.jsonl), per session and per host. Edits are the files a session named in aegis_report_outcome 'files' plus the files of commits inside exactly one session's window (first to last event, plus 15 minutes). Limits: an edit time is an upper bound (report or commit time), so the rate can overstate compliance; uncommitted edits that were never reported are not seen; commits in overlapping sessions count as ambiguous, not as misses; a session with no observed edit is unknown, never 0. A host rate is an aggregate over sessions, not a per-attempt verdict. Reads only.",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
           }
         ],
         "description": null,

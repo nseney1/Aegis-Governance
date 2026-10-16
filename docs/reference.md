@@ -131,6 +131,10 @@ Show active rules and stats
 
 Category: Daily Workflow & Verification.
 
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--compliance` |  |  | Show the per-host scan-before-edit rate from the MCP activity log (.aegis/state/activity.jsonl), per session and per host. Edits are the files a session named in aegis_report_outcome 'files' plus the files of commits inside exactly one session's window (first to last event, plus 15 minutes). Limits: an edit time is an upper bound (report or commit time), so the rate can overstate compliance; uncommitted edits that were never reported are not seen; commits in overlapping sessions count as ambiguous, not as misses; a session with no observed edit is unknown, never 0. A host rate is an aggregate over sessions, not a per-attempt verdict. Reads only. |
+
 ### `aegis rule`
 
 Manage rule lifecycle (list, create, promote, demote, archive)
@@ -334,6 +338,7 @@ Report whether the rules you were shown helped. Each report is an advisory self-
 | `tests_passed` | boolean | no |  |
 | `rework_count` | integer | no |  |
 | `notes` | string | no |  |
+| `files` | array of string | no | Optional: the files this change edited (workspace-relative). They measure scan-before-edit compliance (aegis status --compliance); they credit no rule. |
 | `view` | string: one of `"full"`, `"summary"`, `"ids"` | no | Optional response projection: full (default), summary or ids. |
 
 Input schema:
@@ -378,6 +383,13 @@ Input schema:
     "notes": {
       "type": "string",
       "maxLength": 4096
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional: the files this change edited (workspace-relative). They measure scan-before-edit compliance (aegis status --compliance); they credit no rule."
     },
     "view": {
       "type": "string",
