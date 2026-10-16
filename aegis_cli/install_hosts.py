@@ -21,7 +21,8 @@ are (BOM included).
 
 **MCP registration** uses each host's row in :mod:`aegis_core.hosts`: a native CLI
 (``codex mcp add``, ``claude mcp add --scope user``) run as an argv with no shell, or a
-JSON merge into the host's config file (Antigravity's ``~/.gemini/config/mcp_config.json``).
+JSON merge into the host's config file (Antigravity's ``~/.gemini/config/mcp_config.json``),
+whose previous bytes are first copied to ``~/.aegis/backups/<UTC stamp>/``.
 The server is always registered as ``aegis``, with an absolute command and the env
 ``AEGIS_CLIENT=<host id>`` (plus ``AEGIS_WORKSPACE`` only for an explicit pin).
 Unregistering removes ``aegis`` and the legacy ``soma`` entry and nothing else.
@@ -67,20 +68,24 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from aegis_core import hosts as host_table
 from aegis_core.config import ENV_CLIENT, ENV_WORKSPACE
 from aegis_core.storage import atomic_write_bytes
-from aegis_core.workspace.layout import UserLayout
+from aegis_core.workspace.layout import AEGIS_DIRNAME, UserLayout
 
 __all__ = [
     "BLOCK_VERSION",
     "HostAction",
     "InstallError",
     "LEGACY_SERVER_NAME",
+    "REGISTRY_LABEL",
     "REGISTRY_VERSION",
+    "backup_dir",
     "SERVER_NAME",
     "detect_hosts",
+    "find_workspace",
     "display_command",
     "is_denied_root",
     "mcp_command",
     "mcp_entry",
+    "ordered_hosts",
     "merge_mcp_json",
     "parse_hosts",
     "read_registry",
@@ -93,10 +98,13 @@ __all__ = [
     "unregister_argv",
     "unregister_host",
     "unregister_workspace",
+    "workspace_hosts",
     "write_managed_block",
 ]
 
 SERVER_NAME = "aegis"
+# How output names the registry file (the path itself comes from UserLayout).
+REGISTRY_LABEL = f"~/{AEGIS_DIRNAME}/workspaces.json"
 LEGACY_SERVER_NAME = "soma"
 BLOCK_VERSION = 1
 REGISTRY_VERSION = 1
@@ -385,8 +393,28 @@ def _dump(data: Dict[str, Any]) -> bytes:
     return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _rewrite_config(path: Path, raw: Optional[bytes], data: Dict[str, Any], backup_dir: Optional[Path]) -> None:
+    """Replace a user's config, copying its current bytes into ``backup_dir`` first."""
+    if raw is not None and backup_dir is not None:
+        try:
+            atomic_write_bytes(Path(backup_dir) / path.name, raw)
+        except OSError as exc:
+            raise InstallError(f"{path}: cannot back it up to {backup_dir} ({exc.strerror or exc}); "
+                               "left unchanged") from exc
+    _replace(path, raw, _dump(data))
+
+
+def backup_dir(home: Union[str, Path]) -> Path:
+    """A fresh ``~/.aegis/backups/<UTC stamp>/`` for the user configs one run rewrites."""
+    layout = UserLayout(Path(home))
+    if layout.aegis_dir.is_symlink():
+        raise InstallError(f"{layout.aegis_dir}: is a symlink; Aegis keeps its user files only in a real "
+                           "directory. Replace the link, then re-run.")
+    return layout.backups_dir / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+
+
 def merge_mcp_json(path: Union[str, Path], name: str, entry: Dict[str, Any], *, key: str = "mcpServers",
-                   dry_run: bool = False) -> str:
+                   dry_run: bool = False, backup_dir: Optional[Path] = None) -> str:
     """Set ``key[name] = entry`` in the JSON file at ``path``, keeping everything else.
 
     Returns ``added``, ``updated`` or ``unchanged``. Raises InstallError for a symlink,
@@ -401,12 +429,12 @@ def merge_mcp_json(path: Union[str, Path], name: str, entry: Dict[str, Any], *, 
     status = "updated" if name in servers else "added"
     servers[name] = entry
     if not dry_run:
-        _replace(path, raw, _dump(data))
+        _rewrite_config(path, raw, data, backup_dir)
     return status
 
 
 def remove_mcp_json(path: Union[str, Path], names: Sequence[str], *, key: str = "mcpServers",
-                    dry_run: bool = False) -> str:
+                    dry_run: bool = False, backup_dir: Optional[Path] = None) -> str:
     """Delete ``names`` from ``key`` in the JSON file at ``path``; ``removed`` or ``absent``."""
     path = Path(path)
     raw, data = _load_json_object(path)
@@ -419,7 +447,7 @@ def remove_mcp_json(path: Union[str, Path], names: Sequence[str], *, key: str = 
     for n in present:
         del servers[n]
     if not dry_run:
-        _replace(path, raw, _dump(data))
+        _rewrite_config(path, raw, data, backup_dir)
     return "removed"
 
 
@@ -468,7 +496,8 @@ def read_registry(home: Union[str, Path]) -> Dict[str, Any]:
     return _load_registry(_registry_file(home))[1]
 
 
-def _ordered_hosts(names: Sequence[str]) -> List[str]:
+def ordered_hosts(names: Sequence[str]) -> List[str]:
+    """``names`` once each, in host-table order (unknown names last, sorted)."""
     known = [h.id for h in host_table.all_hosts()]
     unique = set(names)
     return [h for h in known if h in unique] + sorted(unique - set(known))
@@ -484,11 +513,11 @@ def register_workspace(home: Union[str, Path], root: Union[str, Path], hosts: Se
     entry = next((e for e in entries if _root_key(e["root"]) == key), None)
     if entry is None:
         entries.append({"root": os.path.realpath(os.fspath(root)), "added_at": now or _utc_now(),
-                        "added_by": "aegis init", "hosts": _ordered_hosts(hosts)})
+                        "added_by": "aegis init", "hosts": ordered_hosts(hosts)})
         status = "added"
     else:
         current = entry.get("hosts") if isinstance(entry.get("hosts"), list) else []
-        merged = _ordered_hosts([h for h in current if isinstance(h, str)] + list(hosts))
+        merged = ordered_hosts([h for h in current if isinstance(h, str)] + list(hosts))
         if merged == current:
             return "unchanged"
         entry["hosts"] = merged
@@ -564,7 +593,7 @@ def parse_hosts(value: str) -> Union[str, List[str]]:
             raise ValueError(f"{name} is identity only: Aegis does not register there (ADR 0005 H4)")
         if name not in registrable:
             raise ValueError(f"{name}: registration lands in v4.1; hosts now: {', '.join(sorted(registrable))}")
-    return _ordered_hosts(names)
+    return ordered_hosts(names)
 
 
 def mcp_command(path: Optional[str] = None) -> List[str]:
@@ -617,8 +646,8 @@ def _run_cli(argv: List[str]) -> "subprocess.CompletedProcess[str]":
     """Run a host CLI: no shell, no stdin, a neutral cwd (a repository's own host config
     must not redirect a user-scope registration), bounded time."""
     with tempfile.TemporaryDirectory(prefix="aegis-host-") as cwd:
-        return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                              timeout=CLI_TIMEOUT_SECONDS, cwd=cwd, check=False)
+        return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8",
+                              errors="replace", timeout=CLI_TIMEOUT_SECONDS, cwd=cwd, check=False)
 
 
 @dataclass(frozen=True)
@@ -681,7 +710,7 @@ def register_host(host_id: str, *, home: Union[str, Path], command: Sequence[str
         raise InstallError(f"{host_id} is identity only: Aegis does not register there")
     if reg.kind == "json_file":
         status = merge_mcp_json(_json_path(host, Path(home)), SERVER_NAME, mcp_entry(host_id, command, pin),
-                                key=reg.key, dry_run=dry_run)
+                                key=reg.key, dry_run=dry_run, backup_dir=backup_dir(home))
         result = "unchanged" if status == "unchanged" else ("would_run" if dry_run else "registered")
         return HostAction(host_id, result, None, str(_json_path(host, Path(home))))
     return _native(host, [unregister_argv(host), register_argv(host, command, pin)], path, dry_run, "registered")
@@ -696,7 +725,8 @@ def unregister_host(host_id: str, *, home: Union[str, Path], path: Optional[str]
         raise InstallError(f"{host_id} is identity only: Aegis does not register there")
     if reg.kind == "json_file":
         target = _json_path(host, Path(home))
-        status = remove_mcp_json(target, (SERVER_NAME, LEGACY_SERVER_NAME), key=reg.key, dry_run=dry_run)
+        status = remove_mcp_json(target, (SERVER_NAME, LEGACY_SERVER_NAME), key=reg.key, dry_run=dry_run,
+                                 backup_dir=backup_dir(home))
         result = "absent" if status == "absent" else ("would_run" if dry_run else "removed")
         return HostAction(host_id, result, None, str(target))
     steps = [unregister_argv(host, SERVER_NAME), unregister_argv(host, LEGACY_SERVER_NAME)]

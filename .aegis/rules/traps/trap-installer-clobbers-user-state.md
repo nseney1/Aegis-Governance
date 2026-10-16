@@ -11,7 +11,7 @@ expiry_days: 60
 created: "2026-10-15T16:11:59Z"
 impact_weight: 1.0
 tags: ["debrief", "citadel", "installer", "config"]
-target_paths: ["aegis_cli/init.py", "aegis_cli/platforms/mcp.py", "aegis_cli/platforms/base.py", "aegis_core/skills/slots.py", "aegis_mcp/server.py", "tests/unit/cli/**"]
+target_paths: ["aegis_cli/init.py", "aegis_cli/install_hosts.py", "aegis_cli/uninstall.py", "aegis_core/skills/slots.py", "aegis_mcp/server.py", "tests/unit/cli/**"]
 lineage:
   parent_id: null
   created_by: "manual"
@@ -51,6 +51,6 @@ release.
    hand-built `argparse.Namespace`.
 2. Each writer test starts from a config with foreign entries, a customized env
    and non-canonical formatting, and asserts those bytes survive.
-3. Writes are atomic (`write_json_atomic` in aegis_cli/platforms/base.py) and
-   back up the file they replace.
+3. Writes are atomic (`_replace` in aegis_cli/install_hosts.py) and
+   back up the user config they replace (`~/.aegis/backups/`).
 4. Heading and client matching uses equality, not substring or prefix tests.

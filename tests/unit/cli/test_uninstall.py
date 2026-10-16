@@ -1,80 +1,246 @@
-"""aegis uninstall: removes the git hook block, keeps user hooks, and purges .aegis/ only on --purge."""
-import argparse
+"""`aegis uninstall`: undo what `aegis init` did on this machine, and never touch .aegis/.
+
+It removes the git hook block, the Aegis managed blocks, this workspace's registry
+entry and the hosts' ``aegis`` (and legacy ``soma``) registrations. A host another
+registered workspace still uses keeps its registration unless named with ``--host``.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
 from pathlib import Path
+
 import pytest
 
+from conftest import symlink_or_skip
+
+import aegis_cli.install_hosts as ih
+from aegis_cli.cli import main
 from aegis_cli.hooks.management import _AEGIS_HOOK_START, generate_hook_block
-from aegis_cli.uninstall import run_uninstall
 
 
-def test_uninstall_removes_pre_commit_hook(tmp_path, capsys):
-    """aegis uninstall removes the aegis hook block from .git/hooks/pre-commit."""
-    git_dir = tmp_path / ".git" / "hooks"
-    git_dir.mkdir(parents=True)
-    hook_file = git_dir / "pre-commit"
-    user_script = "#!/bin/sh\n# custom user hook\necho 'hello'\n"
-    soma_block = generate_hook_block("/usr/bin/python3")
-    hook_file.write_text(user_script + "\n" + soma_block, encoding="utf-8")
+class Runner:
+    def __init__(self):
+        self.calls: list = []
 
-    args = argparse.Namespace(
-        platform="claude",
-        local=True,
-        dry_run=False,
-        purge=False,
-        _project_root=tmp_path,
-    )
-    rc = run_uninstall(args)
-    assert rc == 0
-    assert hook_file.is_file()
-    remaining = hook_file.read_text(encoding="utf-8")
-    assert "custom user hook" in remaining
-    assert _AEGIS_HOOK_START not in remaining
-    assert "check --hook" not in remaining
+    def __call__(self, argv):
+        self.calls.append([Path(argv[0]).name.replace(".exe", ""), *argv[1:]])
+        return subprocess.CompletedProcess(argv, 0, "", "")
 
 
-def test_uninstall_purge_removes_soma_dir(tmp_path, capsys):
-    """aegis uninstall --purge removes .aegis/ while non-purge preserves it."""
-    soma_dir = tmp_path / ".aegis"
-    soma_dir.mkdir()
-    (soma_dir / "slots.yaml").write_text("dummy: 1\n", encoding="utf-8")
-
-    # 1. Non-purge preserves .soma
-    args = argparse.Namespace(
-        platform="claude",
-        local=True,
-        dry_run=False,
-        purge=False,
-        _project_root=tmp_path,
-    )
-    rc = run_uninstall(args)
-    assert rc == 0
-    assert soma_dir.is_dir()
-
-    # 2. Purge deletes .soma
-    args.purge = True
-    rc = run_uninstall(args)
-    assert rc == 0
-    assert not soma_dir.exists()
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name in ("codex", "claude", "aegis-mcp"):
+        exe = bindir / (name + (".exe" if os.name == "nt" else ""))
+        exe.write_bytes(b"#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    runner = Runner()
+    monkeypatch.setattr(ih, "_run_cli", runner)
+    project = tmp_path / "project"
+    project.mkdir()
+    return type("Env", (), {"tmp": tmp_path, "project": project, "home": Path.home(), "runner": runner,
+                            "bin": bindir})
 
 
-def test_uninstall_dry_run_leaves_files(tmp_path, capsys):
-    """aegis uninstall --dry-run prints would remove and leaves files untouched."""
-    soma_dir = tmp_path / ".aegis"
-    soma_dir.mkdir()
-    claude_md = tmp_path / "CLAUDE.md"
-    claude_md.write_text("<!-- SOMA:START -->\n# Soma\n<!-- SOMA:END -->\n", encoding="utf-8")
+def init(env, project: Path, hosts: str) -> None:
+    assert main(["init", "--workspace", str(project), "--yes", "--no-hooks", "--rules", "minimal",
+                 "--host", hosts]) == 0
 
-    args = argparse.Namespace(
-        platform="claude",
-        local=True,
-        dry_run=True,
-        purge=True,
-        _project_root=tmp_path,
-    )
-    rc = run_uninstall(args)
-    assert rc == 0
-    captured = capsys.readouterr()
-    assert "[dry-run] Would uninstall" in captured.out
-    assert "[dry-run] Would remove" in captured.out
-    assert soma_dir.is_dir()
-    assert claude_md.is_file()
+
+def uninstall(project: Path, *flags) -> int:
+    return main(["uninstall", "--workspace", str(project), *flags])
+
+
+def snapshot(*roots: Path) -> dict:
+    out = {}
+    for root in roots:
+        for dirpath, dirs, names in os.walk(root):
+            for name in dirs + names:
+                p = Path(dirpath, name)
+                out[str(p)] = "<dir>" if p.is_dir() else p.read_bytes()
+    return out
+
+
+def registry(env) -> dict:
+    return json.loads((env.home / ".aegis" / "workspaces.json").read_text(encoding="utf-8"))
+
+
+class TestUndoesInit:
+    def test_full_round_trip(self, env):
+        claude = env.project / "CLAUDE.md"
+        claude.write_bytes(b"# Claude\r\nmine\r\n")
+        cfg = env.home / ".gemini" / "config" / "mcp_config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(json.dumps({"mcpServers": {"github": {"command": "gh"}}}), encoding="utf-8")
+        init(env, env.project, "codex-cli,antigravity")
+        rules_before = snapshot(env.project / ".aegis" / "rules")
+        config_before = (env.project / ".aegis" / "config.json").read_bytes()
+        env.runner.calls.clear()
+
+        assert uninstall(env.project) == 0
+
+        assert not (env.project / "AGENTS.md").exists()  # it held only the Aegis block
+        assert claude.read_bytes() == b"# Claude\r\nmine\r\n"
+        assert registry(env) == {"v": 1, "workspaces": []}
+        assert json.loads(cfg.read_text(encoding="utf-8")) == {"mcpServers": {"github": {"command": "gh"}}}
+        assert env.runner.calls == [["codex", "mcp", "remove", "aegis"], ["codex", "mcp", "remove", "soma"]]
+        assert snapshot(env.project / ".aegis" / "rules") == rules_before
+        assert (env.project / ".aegis" / "config.json").read_bytes() == config_before
+
+    def test_user_text_in_agents_md_is_kept(self, env):
+        agents = env.project / "AGENTS.md"
+        agents.write_text("# Ours\n", encoding="utf-8")
+        init(env, env.project, "codex-cli")
+        assert uninstall(env.project) == 0
+        assert agents.read_text(encoding="utf-8") == "# Ours\n"
+
+    def test_second_uninstall_changes_nothing(self, env):
+        init(env, env.project, "antigravity")
+        assert uninstall(env.project) == 0
+        before = snapshot(env.project, env.home)
+        assert uninstall(env.project) == 0
+        assert snapshot(env.project, env.home) == before
+
+    def test_git_hook_block_is_removed_and_user_lines_kept(self, env):
+        hooks = env.project / ".git" / "hooks"
+        hooks.mkdir(parents=True)
+        hook = hooks / "pre-commit"
+        hook.write_text("#!/bin/sh\n# custom user hook\necho hello\n\n" + generate_hook_block("/usr/bin/python3"),
+                        encoding="utf-8")
+        assert uninstall(env.project) == 0
+        remaining = hook.read_text(encoding="utf-8")
+        assert "custom user hook" in remaining
+        assert _AEGIS_HOOK_START not in remaining
+
+
+class TestSharedHosts:
+    def test_a_host_another_workspace_uses_is_kept(self, env, capsys):
+        other = env.tmp / "other"
+        other.mkdir()
+        init(env, env.project, "codex-cli,antigravity")
+        init(env, other, "codex-cli")
+        env.runner.calls.clear()
+
+        assert uninstall(env.project) == 0
+
+        assert env.runner.calls == []  # codex-cli is still registered for `other`
+        assert [w["root"] for w in registry(env)["workspaces"]] == [str(other.resolve())]
+        cfg = env.home / ".gemini" / "config" / "mcp_config.json"
+        assert "aegis" not in json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]
+        assert "codex-cli: kept" in capsys.readouterr().out
+
+    def test_naming_a_host_unregisters_it_anyway_and_warns(self, env, capsys):
+        other = env.tmp / "other"
+        other.mkdir()
+        init(env, env.project, "codex-cli")
+        init(env, other, "codex-cli")
+        env.runner.calls.clear()
+
+        assert uninstall(env.project, "--host", "codex-cli") == 0
+
+        assert env.runner.calls[0] == ["codex", "mcp", "remove", "aegis"]
+        assert "still lists codex-cli" in capsys.readouterr().err
+
+    def test_without_a_registry_entry_the_config_hosts_are_used(self, env):
+        init(env, env.project, "codex-cli")
+        (env.home / ".aegis" / "workspaces.json").write_text('{"v": 1, "workspaces": []}', encoding="utf-8")
+        env.runner.calls.clear()
+        assert uninstall(env.project) == 0
+        assert env.runner.calls[0] == ["codex", "mcp", "remove", "aegis"]
+
+    def test_missing_host_cli_prints_the_command(self, env, capsys):
+        init(env, env.project, "claude-code")
+        (env.bin / ("claude" + (".exe" if os.name == "nt" else ""))).unlink()
+        env.runner.calls.clear()
+        assert uninstall(env.project) == 0
+        assert env.runner.calls == []
+        assert "claude mcp remove --scope user aegis" in capsys.readouterr().out
+
+
+class TestSafety:
+    def test_dry_run_changes_nothing(self, env, capsys):
+        init(env, env.project, "codex-cli,antigravity")
+        env.runner.calls.clear()
+        before = snapshot(env.project, env.home)
+        assert uninstall(env.project, "--dry-run") == 0
+        assert snapshot(env.project, env.home) == before
+        assert env.runner.calls == []
+        assert "codex mcp remove aegis" in capsys.readouterr().out
+
+    def test_hand_edited_block_refuses_everything_without_force(self, env, capsys):
+        init(env, env.project, "antigravity")
+        agents = env.project / "AGENTS.md"
+        agents.write_text(agents.read_text(encoding="utf-8").replace("Aegis", "Our Aegis"), encoding="utf-8")
+        before = snapshot(env.project, env.home)
+        assert uninstall(env.project) == 1
+        assert snapshot(env.project, env.home) == before
+        assert "--force" in capsys.readouterr().err
+        assert uninstall(env.project, "--force") == 0
+        assert not agents.exists()
+
+    def test_unparseable_host_config_refuses_everything(self, env, capsys):
+        init(env, env.project, "antigravity,codex-cli")
+        cfg = env.home / ".gemini" / "config" / "mcp_config.json"
+        cfg.write_bytes(b"{ // jsonc\n}")
+        env.runner.calls.clear()
+        before = snapshot(env.project, env.home)
+        assert uninstall(env.project) == 1
+        assert snapshot(env.project, env.home) == before
+        assert env.runner.calls == []
+        assert "not valid JSON" in capsys.readouterr().err
+
+    def test_symlinked_agents_md_is_refused(self, env, tmp_path, capsys):
+        outside = tmp_path / "outside.md"
+        outside.write_text("<!-- aegis:begin id=bootstrap v=1 sha=" + ih._digest("x\n") + " -->\nx\n"
+                           "<!-- aegis:end id=bootstrap -->\n", encoding="utf-8")
+        symlink_or_skip(outside, env.project / "AGENTS.md")
+        assert uninstall(env.project) == 1
+        assert "aegis:begin" in outside.read_text(encoding="utf-8")
+
+    def test_force_never_deletes_aegis_dir(self, env):
+        init(env, env.project, "codex-cli")
+        assert uninstall(env.project, "--force") == 0
+        assert (env.project / ".aegis" / "rules" / "personas" / "providence.md").is_file()
+        assert (env.project / ".aegis" / "config.json").is_file()
+
+    def test_json_result(self, env, capsys):
+        init(env, env.project, "codex-cli")
+        capsys.readouterr()
+        assert main(["--json", "uninstall", "--workspace", str(env.project)]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["source"] == "aegis uninstall"
+        assert payload["scope"]["workspace"] == str(env.project.resolve())
+        assert payload["scope"]["hosts"] == ["codex-cli"]
+        assert {a["target"]: a["result"] for a in payload["actions"]}["codex-cli"] == "removed"
+        assert {"aegis_version", "checked_at", "status"} <= set(payload)
+
+
+class TestCommandLine:
+    @pytest.mark.parametrize("argv, line", [
+        (["uninstall", "--platform", "claude"], "aegis uninstall --platform was removed in v4: use aegis uninstall --host"),
+        (["uninstall", "-p", "gemini"], "aegis uninstall --platform was removed in v4: use aegis uninstall --host"),
+        (["uninstall", "--local"], "aegis uninstall --local was removed in v4: use aegis uninstall"),
+        (["uninstall", "--purge"], "aegis uninstall --purge was removed in v4: aegis uninstall never deletes "
+                                   ".aegis/; remove it yourself (git rm -r .aegis)"),
+    ])
+    def test_removed_flags_exit_2_with_one_pointer_line(self, env, argv, line, capsys):
+        init(env, env.project, "codex-cli")
+        capsys.readouterr()
+        before = snapshot(env.project, env.home)
+        with pytest.raises(SystemExit) as exc:
+            main(argv + ["--workspace", str(env.project)])
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert (captured.out, captured.err) == ("", line + "\n")
+        assert snapshot(env.project, env.home) == before
+
+    @pytest.mark.parametrize("value, message", [("auto", "names hosts"), ("cursor", "unknown host")])
+    def test_bad_host_is_a_usage_error(self, env, value, message, capsys):
+        with pytest.raises(SystemExit) as exc:
+            uninstall(env.project, "--host", value)
+        assert exc.value.code == 2
+        assert message in capsys.readouterr().err

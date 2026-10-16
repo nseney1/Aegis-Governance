@@ -23,9 +23,7 @@ def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):
         ws=Workspace.for_init(tmp_path),
         _project_root=tmp_path,
         dry_run=False,
-        platform="gemini",
         rules="minimal",
-        mcp=False,
         yes=True,
         force=True,
     )
@@ -59,9 +57,7 @@ def test_init_provisions_polyglot_ts_go_drivers(tmp_path: Path, monkeypatch):
         ws=Workspace.for_init(tmp_path),
         _project_root=tmp_path,
         dry_run=False,
-        platform="gemini",
         rules="minimal",
-        mcp=False,
         yes=True,
         force=True,
     )

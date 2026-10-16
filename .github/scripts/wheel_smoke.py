@@ -20,10 +20,9 @@ import sysconfig
 import tempfile
 
 PACKAGES = ("aegis_cli", "aegis_sdk", "aegis_core", "aegis_mcp")
-# Shipped rule floors (D16): rules/ has 4 rules plus META.md and rules/.oracles/
-# has 8; the full preset installs all 12 rules (not META.md).
+# Shipped rule floor (D16): rules/ has 4 rules plus META.md and rules/.oracles/ has 8;
+# init's rule locator and the full preset see all 12 rules (not META.md).
 FULL_PRESET_RULES = 12
-SOURCE_RULE_FILES = 13
 # The author's dogfood rules live in the repository's .aegis/rules (D16), and
 # desktop-automation is not shipped; none of them may reach the wheel.
 UNSHIPPED_RULES = ("gitflow-review-gate", "ci-green-before-release", "core-change-protocol",
@@ -135,22 +134,42 @@ def check_full_rule_preset(ws):
     print(f"ok  packaged full rule preset ({len(installed)} rules)")
 
 
-def check_packaged_skills_and_platform_adapter(ws):
-    """Prove the wheel packages skills/ and PlatformAdapter resolves rules + skills from site-packages."""
+def check_packaged_rules_and_skills(ws):
+    """Prove the wheel packages rules/ (seen through init's one rule locator) and skills/."""
+    import importlib.resources
     from pathlib import Path
-    from aegis_cli.platforms.gemini import GeminiPlatformAdapter
+    from aegis_cli.init import packaged_rules
     from aegis_mcp.registry import TOOL_DEFINITIONS
 
     if len(TOOL_DEFINITIONS) != 4:
         fail(f"TOOL_DEFINITIONS expected the 4 v4 tools, got {len(TOOL_DEFINITIONS)}")
-    adapter = GeminiPlatformAdapter(workspace=Path(ws), home=Path(ws))
-    rules = adapter.get_source_rules()
-    skills = adapter.get_source_skills()
-    if len(rules) < SOURCE_RULE_FILES:
-        fail(f"GeminiPlatformAdapter.get_source_rules() found only {len(rules)} rules in wheel: {rules!r}")
+    rules = packaged_rules()
+    if len(rules) < FULL_PRESET_RULES:
+        fail(f"packaged_rules() found only {len(rules)} rules in the wheel: {sorted(rules)!r}")
+    skills_root = Path(str(importlib.resources.files("skills")))
+    skills = sorted(d.name for d in skills_root.iterdir() if (d / "SKILL.md").is_file())
     if len(skills) < 15:
-        fail(f"GeminiPlatformAdapter.get_source_skills() found only {len(skills)} skills in wheel: {skills!r}")
-    print(f"ok  packaged platform adapter ({len(rules)} rules, {len(skills)} skills, 4 MCP tools)")
+        fail(f"the wheel packages only {len(skills)} skills: {skills!r}")
+    print(f"ok  packaged rules and skills ({len(rules)} rules, {len(skills)} skills, 4 MCP tools)")
+
+
+def check_init_dry_run(ws):
+    """`aegis init --dry-run --json` plans from the wheel and writes nothing."""
+    repo = tempfile.mkdtemp(prefix="aegis-smoke-init-")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    proc = subprocess.run([sys.executable, _SUBPROC_FLAG, "-m", "aegis_cli.cli", "--json", "init",
+                           "--workspace", repo, "--dry-run", "--rules", "full"],
+                          capture_output=True, text=True, timeout=60, cwd=ws, env=env)
+    if proc.returncode != 0:
+        fail(f"aegis init --dry-run exited {proc.returncode}: {proc.stderr[-500:]}")
+    payload = json.loads(proc.stdout)
+    if payload.get("source") != "aegis init" or payload.get("status") != "ok" or not payload.get("dry_run"):
+        fail(f"aegis init --dry-run --json returned {payload!r}")
+    if not {"aegis_version", "checked_at", "scope", "actions"} <= set(payload):
+        fail(f"aegis init --json lacks provenance keys: {sorted(payload)!r}")
+    if os.listdir(repo):
+        fail(f"aegis init --dry-run wrote {os.listdir(repo)!r}")
+    print("ok  aegis init --dry-run --json (writes nothing)")
 
 
 def main():
@@ -164,7 +183,8 @@ def main():
     check_mcp(ws)
     check_governance_fitness(ws)
     check_full_rule_preset(ws)
-    check_packaged_skills_and_platform_adapter(ws)
+    check_packaged_rules_and_skills(ws)
+    check_init_dry_run(ws)
     print("wheel smoke passed")
 
 

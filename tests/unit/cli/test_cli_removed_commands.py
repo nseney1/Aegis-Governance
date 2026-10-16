@@ -173,19 +173,7 @@ def test_the_replacement_table_covers_every_named_replacement():
     assert named == set(_REPLACEMENT_ARGV)
 
 
-@pytest.mark.parametrize(
-    "named",
-    [
-        pytest.param(
-            name,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="init --host lands with the host table in wave C (v4.0-c); drop this mark then",
-            ),
-        ) if name == "aegis init --host" else name
-        for name in sorted(_REPLACEMENT_ARGV)
-    ],
-)
+@pytest.mark.parametrize("named", sorted(_REPLACEMENT_ARGV))
 def test_every_named_replacement_parses(named):
     try:
         _build_parser().parse_args(_REPLACEMENT_ARGV[named])

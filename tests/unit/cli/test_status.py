@@ -307,38 +307,6 @@ class TestStatus:
             assert cmd.execute(parsed) == 0
             mock_run.assert_called_once_with(parsed)
 
-    def test_status_with_project_root_counts_platform_rules(self, tmp_path, capsys):
-        """Regression test for BUG-090: _project_root set by cli.py must not skip rule counting."""
-        proj = tmp_path / "project"
-        proj.mkdir()
-        home = tmp_path / "home"
-        claude_dir = home / ".claude"
-        claude_dir.mkdir(parents=True)
-        (claude_dir / "rule1.md").write_text("# Rule 1\n")
-        (claude_dir / "rule2.md").write_text("# Rule 2\n")
-
-        args = argparse.Namespace(_project_root=proj, _home=home)
-        ret = run_status(args)
-        assert ret == 0
-        captured = capsys.readouterr()
-        assert "2 active" in captured.out
-
-    def test_genome_heading_map_coverage(self, tmp_path):
-        from aegis_cli.status import _genome_heading_map
-        # Test fallback to genome
-        g_dir = tmp_path / "fallback" / "genome"
-        g_dir.mkdir(parents=True)
-        (g_dir / "r1.md").write_text("# R1 Heading\nBody", encoding="utf-8")
-        mapping = _genome_heading_map(tmp_path / "fallback")
-        assert mapping.get("R1 Heading") == "r1"
-
-        # Test rules dir
-        r_dir = tmp_path / "primary" / "rules"
-        r_dir.mkdir(parents=True)
-        (r_dir / "r2.md").write_text("# R2 Heading\nBody", encoding="utf-8")
-        mapping2 = _genome_heading_map(tmp_path / "primary")
-        assert mapping2.get("R2 Heading") == "r2"
-
     def test_status_branded_aegis_header_and_no_soma(self, tmp_path, capsys):
         """v3.0.0: status prints Aegis Workspace Status, token budget bar, and zero 'Soma' references."""
         (tmp_path / "rules").mkdir()

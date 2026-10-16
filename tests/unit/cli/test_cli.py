@@ -47,7 +47,7 @@ class TestCLIDispatch:
     """Verify subcommands dispatch to their handlers."""
 
     @pytest.mark.parametrize("cmd,extra_args", [
-        ("init", ["--dry-run", "--platform", "gemini", "--yes"]),
+        ("init", ["--dry-run", "--yes"]),
         ("status", []),
         ("check", ["--dry-run"]),
         ("rule", ["list"]),
@@ -111,12 +111,14 @@ class TestNonUtf8Console:
 
 
 def _run_init_in(tmp_path, extra_args=None):
-    """Helper: invoke soma init targeting tmp_path using a subprocess."""
-    argv = [sys.executable, "-m", "aegis_cli.cli", "init", "--platform", "gemini", "--yes"]
+    """Helper: invoke aegis init targeting tmp_path using a subprocess (no --host: nothing is registered)."""
+    argv = [sys.executable, "-m", "aegis_cli.cli", "init", "--yes"]
     if extra_args:
         argv.extend(extra_args)
 
-    env = dict(os.environ, HOME=str(tmp_path), USERPROFILE=str(tmp_path))
+    home = tmp_path.parent / f"{tmp_path.name}-home"
+    home.mkdir(exist_ok=True)
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
     repo_root = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
     env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"] if "PYTHONPATH" in env else "")
     proc = subprocess.run(argv, cwd=str(tmp_path), capture_output=True, text=True, env=env)
@@ -124,8 +126,8 @@ def _run_init_in(tmp_path, extra_args=None):
 
 
 def _installed_rules(tmp_path):
-    """Return set of .md filenames in the gemini rules dir under tmp_path."""
-    rules_dir = tmp_path / ".gemini" / "config" / "rules"
+    """Return set of .md filenames seeded into the workspace's persona rules."""
+    rules_dir = tmp_path / ".aegis" / "rules" / "personas"
     if not rules_dir.is_dir():
         return set()
     return {f.name for f in rules_dir.iterdir() if f.suffix == ".md"}
@@ -186,113 +188,6 @@ class TestRulePresetFull:
         installed = _installed_rules(tmp_path)
         assert "META.md" not in installed, "META.md should be excluded from full preset"
         assert "README.md" not in installed, "README.md should be excluded from full preset"
-
-
-# ── TDD Red Phase: --mcp config tests ──────────────────────────────────────
-
-
-import json
-
-
-def _run_init_mcp(tmp_path, extra_args=None):
-    """Helper: invoke run_init with --mcp targeting tmp_path."""
-    argv = [sys.executable, "-m", "aegis_cli.cli", "init", "--platform", "gemini", "--yes", "--mcp"]
-    if extra_args:
-        argv.extend(extra_args)
-
-    env = dict(os.environ, HOME=str(tmp_path), USERPROFILE=str(tmp_path))
-    repo_root = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
-    env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"] if "PYTHONPATH" in env else "")
-    proc = subprocess.run(argv, cwd=str(tmp_path), capture_output=True, text=True, env=env)
-    return proc.returncode
-
-
-class TestMCPConfig:
-    """--mcp should create/merge .mcp.json with server config."""
-
-    def test_init_mcp_creates_config(self, tmp_path):
-        """--mcp should create .mcp.json with mcpServers entry."""
-        rc = _run_init_mcp(tmp_path)
-        assert rc == 0
-        mcp_file = tmp_path / ".mcp.json"
-        assert mcp_file.exists(), ".mcp.json was not created"
-        data = json.loads(mcp_file.read_text())
-        assert "mcpServers" in data, "Missing mcpServers key"
-        assert "aegis" in data["mcpServers"] or "soma" in data["mcpServers"]
-
-    def test_init_mcp_uses_relative_paths(self, tmp_path):
-        """MCP config must use relative paths, not hardcoded absolutes."""
-        _run_init_mcp(tmp_path)
-        mcp_file = tmp_path / ".mcp.json"
-        data = json.loads(mcp_file.read_text())
-        soma_cfg = data["mcpServers"].get("aegis") or data["mcpServers"].get("soma")
-        # Check cwd and AEGIS_ROOT are relative (not absolute)
-        cfg_str = json.dumps(soma_cfg)
-        assert "/home/" not in cfg_str, f"Absolute path detected in MCP config: {cfg_str}"
-
-    def test_init_mcp_merges_existing(self, tmp_path):
-        """--mcp should merge into existing .mcp.json, not clobber."""
-        mcp_file = tmp_path / ".mcp.json"
-        existing = {
-            "mcpServers": {
-                "gemini-api-docs": {"command": "npx", "args": ["gemini-docs"]}
-            }
-        }
-        mcp_file.write_text(json.dumps(existing))
-
-        _run_init_mcp(tmp_path)
-
-        data = json.loads(mcp_file.read_text())
-        assert "gemini-api-docs" in data["mcpServers"], "Existing server was clobbered"
-        assert "aegis" in data["mcpServers"] or "soma" in data["mcpServers"]
-
-    def test_init_mcp_dry_run_no_file(self, tmp_path):
-        """--mcp --dry-run should NOT create .mcp.json."""
-        _run_init_mcp(tmp_path, ["--dry-run"])
-        mcp_file = tmp_path / ".mcp.json"
-        assert not mcp_file.exists(), ".mcp.json should not be created during dry run"
-
-    def test_init_mcp_idempotent(self, tmp_path):
-        """Running --mcp twice should not duplicate config."""
-        _run_init_mcp(tmp_path)
-        _run_init_mcp(tmp_path)
-        mcp_file = tmp_path / ".mcp.json"
-        data = json.loads(mcp_file.read_text())
-        # Should still have exactly one entry
-        cfg = data["mcpServers"].get("aegis") or data["mcpServers"].get("soma")
-        assert isinstance(cfg, dict), (
-            "Server config should be a dict, not duplicated"
-        )
-
-
-# ── TDD Red Phase: Integration ─────────────────────────────────────────────
-
-
-class TestInitIntegration:
-    """Combined --rules and --mcp integration tests."""
-
-    def test_init_full_with_mcp(self, tmp_path):
-        """--rules full --mcp should install all rules AND create MCP config."""
-        from aegis_cli.cli import _build_parser
-        from aegis_cli.init import run_init
-
-        argv = ["init", "--platform", "gemini", "--yes",
-                "--rules", "full", "--mcp"]
-        parser = _build_parser()
-        args = parser.parse_args(argv)
-        args._project_root = tmp_path
-        args._home = tmp_path
-
-        rc = run_init(args)
-        assert rc == 0
-
-        assert _installed_rules(tmp_path) == FULL_PRESET
-
-        # MCP config exists
-        mcp_file = tmp_path / ".mcp.json"
-        assert mcp_file.exists(), ".mcp.json was not created"
-        data = json.loads(mcp_file.read_text())
-        assert "aegis" in data.get("mcpServers", {}) or "soma" in data.get("mcpServers", {})
 
 
 # ── Registry-only dispatch ──────────────────────────────────────────────────

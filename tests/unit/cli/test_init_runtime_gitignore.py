@@ -22,8 +22,7 @@ pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 
 def _init_args(project: Path, home: Path, **overrides) -> argparse.Namespace:
     values = dict(
-        dry_run=False, platform="gemini", yes=True, force=False, local=False,
-        rules="minimal", mcp=False, no_hooks=True, _project_root=project, _home=home,
+        dry_run=False, yes=True, force=False, rules="minimal", no_hooks=True, _project_root=project,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -144,7 +143,7 @@ class TestInitWritesRuntimeGitignore:
         assert run_init(_init_args(repo, home)) == 0
 
         assert shared.read_text(encoding="utf-8") == "shared-rule\n"
-        assert ".aegis/.gitignore is a symlink" in capsys.readouterr().out
+        assert ".aegis/.gitignore is a symlink" in capsys.readouterr().err
 
 
 class TestLineEndingsAreKept:

@@ -20,6 +20,9 @@ from conftest import symlink_or_skip
 import aegis_cli.install_hosts as ih
 from aegis_core import hosts
 
+# Captured at import, before the autouse fixture swaps it for a refusing stub.
+_REAL_RUN_CLI = ih._run_cli
+
 BEGIN = "<!-- aegis:begin id={id} v=1 sha={sha} -->"
 END = "<!-- aegis:end id={id} -->"
 
@@ -587,3 +590,50 @@ class TestRegisterHost:
         cfg.write_text(json.dumps({"mcpServers": {"aegis": {}, "soma": {}, "x": {}}}), encoding="utf-8")
         assert ih.unregister_host("antigravity", home=tmp_path).result == "removed"
         assert json.loads(cfg.read_text(encoding="utf-8")) == {"mcpServers": {"x": {}}}
+
+
+class TestUserConfigBackups:
+    """A host config Aegis rewrites is copied to ~/.aegis/backups/<UTC stamp>/ first."""
+
+    def _backups(self, home: Path) -> list:
+        root = home / ".aegis" / "backups"
+        return sorted(p for p in root.rglob("*") if p.is_file()) if root.is_dir() else []
+
+    def test_merge_backs_up_the_original_bytes(self, tmp_path):
+        target = tmp_path / "mcp_config.json"
+        original = b'{"mcpServers": {"github": {"command": "gh"}}}'
+        target.write_bytes(original)
+        assert ih.merge_mcp_json(target, "aegis", ENTRY, backup_dir=tmp_path / "bk") == "added"
+        assert (tmp_path / "bk" / "mcp_config.json").read_bytes() == original
+
+    def test_no_backup_for_a_new_file_an_unchanged_one_or_a_dry_run(self, tmp_path):
+        target = tmp_path / "mcp_config.json"
+        ih.merge_mcp_json(target, "aegis", ENTRY, backup_dir=tmp_path / "bk")
+        ih.merge_mcp_json(target, "aegis", ENTRY, backup_dir=tmp_path / "bk")
+        ih.remove_mcp_json(target, ("aegis",), backup_dir=tmp_path / "bk", dry_run=True)
+        assert not (tmp_path / "bk").exists()
+
+    def test_register_and_unregister_back_up_the_antigravity_config(self, tmp_path):
+        cfg = tmp_path / ".gemini" / "config" / "mcp_config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_bytes(b'{"mcpServers": {}}')
+        ih.register_host("antigravity", home=tmp_path, command=["/x/aegis-mcp"])
+        (first,) = self._backups(tmp_path)
+        assert first.name == "mcp_config.json" and first.read_bytes() == b'{"mcpServers": {}}'
+        registered = cfg.read_bytes()
+        ih.unregister_host("antigravity", home=tmp_path)
+        assert registered in [p.read_bytes() for p in self._backups(tmp_path)]
+
+
+class TestHostCliRunner:
+    def test_runs_without_shell_stdin_or_the_callers_cwd(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        code = ("import os, sys; print(os.getcwd()); print(repr(sys.stdin.read())); sys.stdout.flush(); "
+                "sys.stdout.buffer.write(b'caf\\xc3\\xa9 \\xff\\n')")
+        proc = _REAL_RUN_CLI([sys.executable, "-c", code])
+        cwd, stdin, text = proc.stdout.splitlines()
+        assert proc.returncode == 0
+        assert Path(cwd).resolve() != tmp_path.resolve()
+        assert not Path(cwd).exists()  # a throwaway directory, removed afterwards
+        assert stdin == "''"
+        assert text == "café \ufffd"  # UTF-8 decoded; an invalid byte cannot crash init

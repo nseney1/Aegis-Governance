@@ -1,610 +1,319 @@
-"""Tests for soma init — Phase B test gate.
+"""`aegis init` (host-matrix spec §3.2-3.4): the repository plane, seeding, prompts and output.
 
-All tests use tmp_path to avoid touching the real filesystem.
+The host plane (registrations, ~/.aegis/workspaces.json, refusals of user files) is
+covered in test_init_hosts.py. Every test runs with an empty HOME (tests/unit/cli/conftest.py).
 """
+from __future__ import annotations
+
 import argparse
+import json
+import os
+from pathlib import Path
 
 import pytest
-from conftest import symlink_or_skip
-
-
-class TestDetectPlatform:
-    """Platform detection based on directory markers."""
-
-    def test_gemini_detected(self, tmp_path):
-        (tmp_path / ".gemini").mkdir()
-        from aegis_cli.init import detect_platform
-        assert detect_platform(tmp_path) == "gemini"
-
-    def test_claude_detected(self, tmp_path):
-        (tmp_path / ".claude").mkdir()
-        from aegis_cli.init import detect_platform
-        assert detect_platform(tmp_path) == "claude"
-
-    def test_cursor_detected_dir(self, tmp_path):
-        (tmp_path / ".cursor").mkdir()
-        from aegis_cli.init import detect_platform
-        assert detect_platform(tmp_path) == "cursor"
-
-    def test_cursor_detected_file(self, tmp_path):
-        (tmp_path / ".cursorrules").write_text("")
-        from aegis_cli.init import detect_platform
-        assert detect_platform(tmp_path) == "cursor"
-
-    def test_copilot_detected(self, tmp_path):
-        gh = tmp_path / ".github" / "copilot"
-        gh.mkdir(parents=True)
-        from aegis_cli.init import detect_platform
-        assert detect_platform(tmp_path) == "copilot"
-
-    def test_kiro_detected(self, tmp_path):
-        (tmp_path / ".kiro").mkdir()
-        from aegis_cli.init import detect_platform
-        assert detect_platform(tmp_path) == "kiro"
-
-    def test_unknown_when_empty(self, tmp_path):
-        from aegis_cli.init import detect_platform
-        assert detect_platform(tmp_path) == "unknown"
-
-    def test_gemini_takes_priority(self, tmp_path):
-        """When multiple markers exist, gemini wins (most common)."""
-        (tmp_path / ".gemini").mkdir()
-        (tmp_path / ".cursor").mkdir()
-        from aegis_cli.init import detect_platform
-        assert detect_platform(tmp_path) == "gemini"
-
-
-class TestDetectProjectType:
-    """Project type detection based on config files."""
-
-    def test_python_pyproject(self, tmp_path):
-        (tmp_path / "pyproject.toml").write_text("")
-        from aegis_cli.init import detect_project_type
-        assert detect_project_type(tmp_path) == "python"
-
-    def test_python_setup_py(self, tmp_path):
-        (tmp_path / "setup.py").write_text("")
-        from aegis_cli.init import detect_project_type
-        assert detect_project_type(tmp_path) == "python"
-
-    def test_python_setup_cfg(self, tmp_path):
-        (tmp_path / "setup.cfg").write_text("")
-        from aegis_cli.init import detect_project_type
-        assert detect_project_type(tmp_path) == "python"
-
-    def test_javascript(self, tmp_path):
-        (tmp_path / "package.json").write_text("{}")
-        from aegis_cli.init import detect_project_type
-        assert detect_project_type(tmp_path) == "javascript"
-
-    def test_rust(self, tmp_path):
-        (tmp_path / "Cargo.toml").write_text("")
-        from aegis_cli.init import detect_project_type
-        assert detect_project_type(tmp_path) == "rust"
-
-    def test_go(self, tmp_path):
-        (tmp_path / "go.mod").write_text("")
-        from aegis_cli.init import detect_project_type
-        assert detect_project_type(tmp_path) == "go"
-
-    def test_unknown_when_empty(self, tmp_path):
-        from aegis_cli.init import detect_project_type
-        assert detect_project_type(tmp_path) == "unknown"
-
-    def test_accepts_str_path(self, tmp_path):
-        (tmp_path / "pyproject.toml").write_text("")
-        from aegis_cli.init import detect_project_type
-        assert detect_project_type(str(tmp_path)) == "python"
-
-
-class TestGetRulesDir:
-    """Verify correct rules directory per platform."""
-
-    def test_gemini_rules_dir(self, tmp_path):
-        from aegis_cli.init import get_rules_dir
-        result = get_rules_dir("gemini", tmp_path)
-        assert result.parts[-3:] == (".gemini", "config", "rules")
-
-    def test_cursor_rules_dir(self, tmp_path):
-        from aegis_cli.init import get_rules_dir
-        result = get_rules_dir("cursor", tmp_path)
-        assert result.parts[-2:] == (".cursor", "rules")
-
-    def test_claude_rules_dir(self, tmp_path):
-        from aegis_cli.init import get_rules_dir
-        result = get_rules_dir("claude", tmp_path)
-        assert str(result).endswith(".claude")
-
-    def test_kiro_rules_dir(self, tmp_path):
-        from aegis_cli.init import get_rules_dir
-        result = get_rules_dir("kiro", tmp_path)
-        assert result.parts[-2:] == (".kiro", "steering")
-
-    def test_unknown_raises(self, tmp_path):
-        from aegis_cli.init import get_rules_dir
-        with pytest.raises(ValueError, match="Unsupported platform"):
-            get_rules_dir("unknown", tmp_path)
-
-    def test_unknown_raises_local(self, tmp_path):
-        from aegis_cli.init import get_rules_dir
-        with pytest.raises(ValueError, match="Unsupported platform"):
-            get_rules_dir("unknown", tmp_path, local=True)
-
-    def test_default_home_is_path_home_even_when_home_differs(self, tmp_path, monkeypatch):
-        # Path.home() is USERPROFILE on Windows, where the agent CLIs read their rules;
-        # a different HOME (Git Bash, CI) must not send the rules somewhere else.
-        from aegis_cli.init import get_rules_dir
-        profile = tmp_path / "profile"
-        monkeypatch.setattr("pathlib.Path.home", lambda: profile)
-        monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
-        assert get_rules_dir("cursor", project_root=tmp_path) == profile / ".cursor" / "rules"
-
-
-class TestInstallStarterRules:
-    """Verify starter rule installation."""
-
-    def test_dry_run_creates_no_files(self, tmp_path):
-        from aegis_cli.init import install_starter_rules
-        rules_dir = tmp_path / "rules"
-        installed = install_starter_rules(rules_dir, dry_run=True)
-        assert len(installed) == 5
-        assert not rules_dir.exists()
-
-    def test_installs_five_rules(self, tmp_path):
-        from aegis_cli.init import install_starter_rules
-        rules_dir = tmp_path / "rules"
-        installed = install_starter_rules(rules_dir, dry_run=False)
-        assert len(installed) == 5
-        assert rules_dir.exists()
-        # Each rule should be a .md file in the target
-        for name in installed:
-            rule_file = rules_dir / f"{name}.md"
-            assert rule_file.exists(), f"Missing: {rule_file}"
-            content = rule_file.read_text()
-            assert len(content) > 100, f"Rule {name} seems too short"
-
-    def test_starter_rules_are_the_right_five(self, tmp_path):
-        from aegis_cli.init import STARTER_RULES
-        assert len(STARTER_RULES) == 5
-        expected = {"providence", "destructive-ops", "testing",
-                    "cost-optimization", "git-workflow"}
-        assert set(STARTER_RULES) == expected
-
-
-class TestExistingWorkspaceDir:
-    """Verify behavior when .aegis/ or .aegis/ already exists."""
-
-    def test_existing_aegis_dir_detected(self, tmp_path):
-        (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-        from aegis_cli.init import check_existing_install
-        assert check_existing_install(tmp_path) is True
-
-    def test_existing_soma_dir_detected(self, tmp_path):
-        (tmp_path / ".aegis").mkdir()
-        from aegis_cli.init import check_existing_install
-        assert check_existing_install(tmp_path) is True
-
-    def test_no_governance_dir(self, tmp_path):
-        from aegis_cli.init import check_existing_install
-        assert check_existing_install(tmp_path) is False
-
-
-
-class TestRunInit:
-    """End-to-end init flow."""
-
-    def test_init_dry_run(self, tmp_path, capsys):
-        from aegis_cli.init import run_init
-        (tmp_path / ".gemini").mkdir()
-        (tmp_path / "pyproject.toml").write_text("")
-        args = argparse.Namespace(
-            dry_run=True, platform=None, yes=True,
-            _project_root=tmp_path,  # test override
-        )
-        result = run_init(args)
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "Detected platform" in captured.out or "gemini" in captured.out.lower()
-
-    def test_init_with_forced_platform(self, tmp_path, capsys):
-        from aegis_cli.init import run_init
-        (tmp_path / "pyproject.toml").write_text("")
-        args = argparse.Namespace(
-            dry_run=True, platform="claude", yes=True,
-            _project_root=tmp_path,
-        )
-        result = run_init(args)
-        assert result == 0
-        captured = capsys.readouterr()
-        assert "claude" in captured.out.lower()
-
-
-class TestSkipExistingAndForce:
-    """Tests for skip-existing and --force overwrite logic."""
-
-    def test_skips_existing_rules(self, tmp_path):
-        """Pre-existing rule with custom content is preserved without --force."""
-        from aegis_cli.init import install_starter_rules
-        rules_dir = tmp_path / "rules"
-        rules_dir.mkdir()
-        custom_content = "# My custom providence rule\nDo not touch."
-        (rules_dir / "providence.md").write_text(custom_content)
-
-        install_starter_rules(rules_dir, dry_run=False, force=False)
-
-        assert (rules_dir / "providence.md").read_text() == custom_content
-
-    def test_force_overwrites_existing(self, tmp_path):
-        """Pre-existing rule is overwritten when force=True."""
-        from aegis_cli.init import install_starter_rules
-        rules_dir = tmp_path / "rules"
-        rules_dir.mkdir()
-        (rules_dir / "providence.md").write_text("old content")
-
-        install_starter_rules(rules_dir, dry_run=False, force=True)
-
-        new_content = (rules_dir / "providence.md").read_text()
-        assert new_content != "old content"
-        assert len(new_content) > 100  # real rule content
-
-
-class TestSymlinkGuard:
-    """Tests for symlink destination guard in install_starter_rules."""
-
-    def test_symlink_destination_skipped(self, tmp_path):
-        """Symlink destinations in rules_dir are not followed."""
-        from aegis_cli.init import install_starter_rules
-        rules_dir = tmp_path / "rules"
-        rules_dir.mkdir()
-        target_file = tmp_path / "target.txt"
-        target_file.write_text("original target content")
-        symlink_or_skip(target_file, rules_dir / "providence.md")
-
-        install_starter_rules(rules_dir, dry_run=False, force=True)
-
-        # Symlink should still be a symlink (skipped, not overwritten)
-        assert (rules_dir / "providence.md").is_symlink()
-        # Target file should be untouched
-        assert target_file.read_text() == "original target content"
-
-
-class TestCopilotInstructionsDetection:
-    """Tests for copilot-instructions.md detection."""
-
-    def test_copilot_detected_instructions_file(self, tmp_path):
-        """copilot-instructions.md triggers copilot platform detection."""
-        from aegis_cli.init import detect_platform
-        gh_dir = tmp_path / ".github"
-        gh_dir.mkdir()
-        (gh_dir / "copilot-instructions.md").write_text("# Instructions")
-
-        assert detect_platform(tmp_path) == "copilot"
-
-
-class TestClaudeMd:
-    """Tests for Claude CLAUDE.md concatenation."""
-
-    def test_claude_md_created(self, tmp_path):
-        """CLAUDE.md is created when installing for Claude platform."""
-        from aegis_cli.init import _install_claude_md, install_starter_rules
-        rules_dir = tmp_path / "claude_rules"
-        install_starter_rules(rules_dir, dry_run=False)
-        _install_claude_md(rules_dir)
-
-        claude_md = rules_dir / "CLAUDE.md"
-        assert claude_md.exists()
-        content = claude_md.read_text()
-        assert "<!-- SOMA:START -->" in content
-        assert "<!-- SOMA:END -->" in content
-        assert "providence" in content.lower()
-
-    def test_claude_md_appends_to_existing(self, tmp_path):
-        """CLAUDE.md appends Soma section to existing content."""
-        from aegis_cli.init import _install_claude_md, install_starter_rules
-        rules_dir = tmp_path / "claude_rules"
-        install_starter_rules(rules_dir, dry_run=False)
-
-        claude_md = rules_dir / "CLAUDE.md"
-        claude_md.write_text("# Existing project instructions\n")
-        _install_claude_md(rules_dir)
-
-        content = claude_md.read_text()
-        assert content.startswith("# Existing project instructions")
-        assert "<!-- SOMA:START -->" in content
-
-    def test_claude_md_skips_without_force(self, tmp_path):
-        """CLAUDE.md soma section not replaced without --force."""
-        from aegis_cli.init import _install_claude_md, install_starter_rules
-        rules_dir = tmp_path / "claude_rules"
-        install_starter_rules(rules_dir, dry_run=False)
-
-        claude_md = rules_dir / "CLAUDE.md"
-        claude_md.write_text("<!-- SOMA:START -->\nPLACEHOLDER_ORIGINAL_CONTENT_XYZ\n<!-- SOMA:END -->\n")
-        _install_claude_md(rules_dir, force=False)
-
-        assert "PLACEHOLDER_ORIGINAL_CONTENT_XYZ" in claude_md.read_text()
-
-    def test_claude_md_replaces_with_force(self, tmp_path):
-        """CLAUDE.md soma section replaced with --force."""
-        from aegis_cli.init import _install_claude_md, install_starter_rules
-        rules_dir = tmp_path / "claude_rules"
-        install_starter_rules(rules_dir, dry_run=False)
-
-        claude_md = rules_dir / "CLAUDE.md"
-        claude_md.write_text("<!-- SOMA:START -->\nPLACEHOLDER_ORIGINAL_CONTENT_XYZ\n<!-- SOMA:END -->\n")
-        _install_claude_md(rules_dir, force=True)
-
-        content = claude_md.read_text()
-        assert "PLACEHOLDER_ORIGINAL_CONTENT_XYZ" not in content
-        assert "providence" in content.lower()
-
-
-class TestConfirmation:
-    """Tests for --yes confirmation prompt."""
-
-    def test_init_aborts_without_yes(self, tmp_path, monkeypatch, capsys):
-        """Init aborts when user says no to confirmation."""
-        from aegis_cli.init import run_init
-        (tmp_path / ".gemini").mkdir()
+
+from aegis_cli.cli import _build_parser, main
+from aegis_cli.init import InitCommand, install_rules, packaged_rules, preset_rules, run_init
+
+STANDARD = {"providence", "destructive-ops", "testing", "cost-optimization", "git-workflow"}
+MINIMAL = {"providence", "destructive-ops"}
+# Every shipped rule in rules/ and rules/.oracles/ except META.md (D16).
+FULL = {
+    "cost-optimization", "destructive-ops", "providence", "subagent-delegation",
+    "architectural-tenets", "atomic-workstream-protocol", "documentation",
+    "feature-specs", "git-workflow", "polyglot-standards", "tdd-protocol", "testing",
+}
+REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    root.mkdir()
+    # No host CLI and no aegis-mcp on PATH: nothing here may be detected or run.
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    return root
+
+
+def _args(root: Path, *flags: str, yes: bool = True, hooks: bool = False,
+          rules: "str | None" = "minimal") -> argparse.Namespace:
+    """Arguments as the real parser builds them from argv (never a hand-made Namespace)."""
+    argv = ["init", "--workspace", str(root)]
+    argv += ["--yes"] if yes else []
+    argv += [] if hooks else ["--no-hooks"]
+    argv += ["--rules", rules] if rules else []
+    return _build_parser().parse_args(argv + list(flags))
+
+
+def _seeded(root: Path) -> set:
+    return {p.stem for p in (root / ".aegis" / "rules" / "personas").glob("*.md")}
+
+
+# ── The one rule-source locator (defense #20) ────────────────────────────────
+
+
+class TestRuleSourceLocator:
+    def test_packaged_rules_come_from_the_shipped_rules_package(self):
+        found = packaged_rules()
+        assert set(found) == FULL
+        for name, path in found.items():
+            assert path.name == f"{name}.md"
+            assert path.resolve().parent in {REPO_ROOT / "rules", REPO_ROOT / "rules" / ".oracles"}
+
+    @pytest.mark.parametrize("preset, names", [("minimal", MINIMAL), ("standard", STANDARD), ("full", FULL)])
+    def test_presets_resolve_through_the_locator(self, preset, names):
+        assert {p.stem for p in preset_rules(preset)} == names
+
+    def test_unknown_preset_is_refused(self):
+        with pytest.raises(ValueError, match="unknown rule preset"):
+            preset_rules("huge")
+
+    def test_install_rules_copies_the_packaged_bytes_flat(self, tmp_path):
+        installed = install_rules(tmp_path, preset="standard")
+        assert set(installed) == STANDARD
+        for name in STANDARD:
+            assert (tmp_path / f"{name}.md").read_bytes() == packaged_rules()[name].read_bytes()
+
+    def test_install_rules_keeps_existing_files_unless_forced(self, tmp_path):
+        (tmp_path / "providence.md").write_text("mine", encoding="utf-8")
+        assert "providence" in install_rules(tmp_path, preset="minimal")
+        assert (tmp_path / "providence.md").read_text(encoding="utf-8") == "mine"
+        install_rules(tmp_path, preset="minimal", force=True)
+        assert (tmp_path / "providence.md").read_bytes() == packaged_rules()["providence"].read_bytes()
+
+    def test_install_rules_dry_run_writes_nothing(self, tmp_path):
+        assert set(install_rules(tmp_path / "x", preset="minimal", dry_run=True)) == MINIMAL
+        assert not (tmp_path / "x").exists()
+
+
+# ── Seeding the workspace ────────────────────────────────────────────────────
+
+
+class TestSeeding:
+    @pytest.mark.parametrize("preset, names", [("minimal", MINIMAL), ("standard", STANDARD), ("full", FULL)])
+    def test_preset_is_seeded_into_the_persona_rules(self, project, preset, names):
+        assert run_init(_args(project, rules=preset)) == 0
+        assert _seeded(project) == names
+
+    def test_default_preset_is_standard(self, project):
+        assert run_init(_args(project, rules=None)) == 0
+        assert _seeded(project) == STANDARD
+
+    def test_seeded_rules_load_without_errors(self, project):
+        from aegis_core.rules import load_rules
+
+        assert run_init(_args(project, rules="standard")) == 0
+        ruleset = load_rules(project)
+        assert not ruleset.errors
+        assert {r.id for r in ruleset.rules} == STANDARD
+
+    def test_an_existing_rule_with_the_same_id_is_never_overwritten_or_duplicated(self, project):
+        mine = project / ".aegis" / "rules" / "invariants" / "providence.md"
+        mine.parent.mkdir(parents=True)
+        mine.write_text("---\nid: providence\nhypothesis: mine\n---\n# Mine\n", encoding="utf-8")
+        edited = project / ".aegis" / "rules" / "personas" / "testing.md"
+        edited.parent.mkdir(parents=True)
+        edited.write_text("my testing rule", encoding="utf-8")
+
+        assert run_init(_args(project, rules="standard")) == 0
+
+        assert not (project / ".aegis" / "rules" / "personas" / "providence.md").exists()
+        assert mine.read_text(encoding="utf-8").endswith("# Mine\n")
+        assert edited.read_text(encoding="utf-8") == "my testing rule"
+
+    def test_a_symlinked_rules_dir_is_refused_and_nothing_is_written(self, project, tmp_path):
+        from conftest import symlink_or_skip
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (project / ".aegis" / "rules").mkdir(parents=True)
+        symlink_or_skip(elsewhere, project / ".aegis" / "rules" / "personas", target_is_directory=True)
+
+        assert run_init(_args(project)) == 1
+
+        assert list(elsewhere.iterdir()) == []
+        assert not (project / "AGENTS.md").exists()
+
+
+# ── Prompt, dry run, output ──────────────────────────────────────────────────
+
+
+def _snapshot(*roots: Path) -> dict:
+    out = {}
+    for root in roots:
+        for dirpath, dirs, files in os.walk(root):
+            for name in dirs + files:
+                p = Path(dirpath, name)
+                out[str(p)] = None if p.is_dir() else p.read_bytes()
+    return out
+
+
+class TestPromptAndDryRun:
+    def test_declining_the_prompt_writes_nothing(self, project, monkeypatch, capsys):
         monkeypatch.setattr("builtins.input", lambda _: "n")
-        args = argparse.Namespace(
-            dry_run=False, platform="gemini", yes=False, force=False,
-            _project_root=tmp_path, _home=tmp_path,
-        )
-        result = run_init(args)
-        assert result == 0
+        home = Path.home()
+        before = _snapshot(project, home)
+        assert run_init(_args(project, yes=False)) == 0
         assert "Aborted" in capsys.readouterr().out
+        assert _snapshot(project, home) == before
 
-    def test_init_proceeds_with_yes(self, tmp_path, capsys):
-        """Init proceeds when --yes is passed."""
-        from aegis_cli.init import run_init
-        (tmp_path / ".gemini").mkdir()
-        args = argparse.Namespace(
-            dry_run=False, platform="gemini", yes=True, force=False,
-            _project_root=tmp_path, _home=tmp_path,
-        )
-        result = run_init(args)
-        assert result == 0
+    def test_end_of_input_at_the_prompt_aborts(self, project, monkeypatch):
+        def eof(_):
+            raise EOFError
+        monkeypatch.setattr("builtins.input", eof)
+        assert run_init(_args(project, yes=False)) == 0
+        assert not (project / ".aegis").exists()
+
+    def test_accepting_the_prompt_proceeds(self, project, monkeypatch, capsys):
+        monkeypatch.setattr("builtins.input", lambda _: "")
+        assert run_init(_args(project, yes=False)) == 0
         assert "Done!" in capsys.readouterr().out
+        assert (project / "AGENTS.md").is_file()
+
+    def test_dry_run_writes_nothing_and_says_what_it_would_do(self, project, capsys):
+        home = Path.home()
+        before = _snapshot(project, home)
+        assert run_init(_args(project, "--dry-run", yes=False, hooks=True)) == 0
+        out = capsys.readouterr().out
+        assert _snapshot(project, home) == before
+        assert "Aegis Guardrails — Workspace Setup" in out
+        assert "[DRY-RUN] providence" in out
+        assert "AGENTS.md" in out
+        assert "Dry run complete. No files were created." in out
+
+    def test_header_and_next_step(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert "Aegis Guardrails — Workspace Setup" in out
+        assert "After a session, run: aegis status" in out
+        assert "Soma" not in out
+
+    def test_home_directory_is_refused(self, tmp_path, monkeypatch, capsys):
+        home = Path.home()
+        assert run_init(_args(home)) == 1
+        assert "home directory" in capsys.readouterr().err
+        assert not (home / ".aegis").exists()
+        assert not (home / "AGENTS.md").exists()
 
 
-class TestPolyglotInit:
-    """Tests for zero-touch polyglot driver provisioning in soma init."""
-
-    def test_init_polyglot_language_detection_and_provisioning(self, tmp_path, capsys):
-        from aegis_cli.init import run_init
+class TestPolyglot:
+    def test_languages_are_detected_and_drivers_provisioned(self, project, capsys):
         from aegis_core.skills.slots import SlotRegistry
 
-        (tmp_path / "Cargo.toml").write_text("[package]\nname = 'rust_app'\n", encoding="utf-8")
-        src = tmp_path / "src"
-        src.mkdir()
-        (src / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
-        (tmp_path / ".git").mkdir()
-
-        args = argparse.Namespace(
-            dry_run=False, platform="gemini", yes=True, force=True,
-            _project_root=tmp_path, _home=tmp_path, mcp=False, rules="minimal",
-        )
-        result = run_init(args)
-        assert result == 0
+        (project / "Cargo.toml").write_text("[package]\nname = 'rust_app'\n", encoding="utf-8")
+        (project / "src").mkdir()
+        (project / "src" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+        assert run_init(_args(project)) == 0
         out = capsys.readouterr().out
         assert "Detected language(s): Rust" in out
         assert "Configured AST driver (.rs):" in out
+        assert SlotRegistry.load(project).get_ast_driver(".rs") is not None
+        assert not (project / ".aegis" / "drivers").exists()
 
-        registry = SlotRegistry.load(tmp_path)
-        assert registry.get_ast_driver(".rs") is not None
-        assert not (tmp_path / ".aegis" / "drivers").exists()
+    def test_dry_run_only_says_it_would_configure(self, project, capsys):
+        (project / "Cargo.toml").write_text("[package]\nname = 'rust_app'\n", encoding="utf-8")
+        assert run_init(_args(project, "--dry-run")) == 0
+        assert "Would configure AST driver (.rs):" in capsys.readouterr().out
+        assert not (project / ".aegis" / "config.json").exists()
 
-    def test_init_polyglot_dry_run(self, tmp_path, capsys):
-        from aegis_cli.init import run_init
+    def test_unknown_project_type(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        assert "Project type: unknown" in capsys.readouterr().out
 
-        (tmp_path / "Cargo.toml").write_text("[package]\nname = 'rust_app'\n", encoding="utf-8")
-        src = tmp_path / "src"
-        src.mkdir()
-        (src / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
-        (tmp_path / ".git").mkdir()
 
-        args = argparse.Namespace(
-            dry_run=True, platform="gemini", yes=True, force=True,
-            _project_root=tmp_path, _home=tmp_path, mcp=False, rules="minimal",
-        )
-        result = run_init(args)
-        assert result == 0
+# ── JSON output (fleet dashboards read it) ───────────────────────────────────
+
+
+class TestJsonOutput:
+    def test_json_result_carries_provenance_and_actions(self, project, capsys):
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks",
+                     "--rules", "minimal"]) == 0
         out = capsys.readouterr().out
-        assert "Would configure AST driver (.rs):" in out
-        assert not (tmp_path / ".aegis" / "config.json").exists()
+        payload = json.loads(out)
+        assert payload["source"] == "aegis init"
+        assert isinstance(payload["aegis_version"], str) and payload["aegis_version"]
+        assert payload["checked_at"].endswith("Z") and "T" in payload["checked_at"]
+        assert payload["scope"]["workspace"] == str(project.resolve())
+        assert payload["scope"]["hosts"] == []
+        assert payload["dry_run"] is False
+        assert payload["status"] == "ok"
+        targets = {a["target"]: a["result"] for a in payload["actions"]}
+        assert targets["AGENTS.md"] == "created"
+        assert targets["~/.aegis/workspaces.json"] == "added"
 
-    def test_init_detected_project_type_fallback(self, tmp_path, capsys):
-        from aegis_cli.init import run_init
+    def test_json_dry_run_plans_and_writes_nothing(self, project, capsys):
+        assert main(["--json", "init", "--workspace", str(project), "--dry-run"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["dry_run"] is True
+        assert not (project / ".aegis").exists()
 
-        (tmp_path / "README.md").write_text("# Readme\n", encoding="utf-8")
-        (tmp_path / ".git").mkdir()
+    def test_json_without_yes_or_dry_run_is_a_usage_error(self, project, capsys):
+        assert main(["--json", "init", "--workspace", str(project)]) == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "--yes or --dry-run" in captured.err
+        assert not (project / ".aegis").exists()
 
-        args = argparse.Namespace(
-            dry_run=False, platform="gemini", yes=True, force=True,
-            _project_root=tmp_path, _home=tmp_path, mcp=False, rules="minimal",
-        )
-        result = run_init(args)
-        assert result == 0
-        out = capsys.readouterr().out
-        assert "Project type: unknown" in out
+    def test_json_refusal_is_reported_as_json(self, project, capsys):
+        (project / "AGENTS.md").write_text(
+            "<!-- aegis:begin id=bootstrap v=1 sha=000000000000 -->\nmine\n<!-- aegis:end id=bootstrap -->\n",
+            encoding="utf-8")
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks"]) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "refused"
+        assert any("edited by hand" in e for e in payload["errors"])
 
-    def test_init_command_contract(self):
-        from unittest.mock import patch
-        from aegis_cli.init import InitCommand
-        cmd = InitCommand()
+
+# ── Command line surface ─────────────────────────────────────────────────────
+
+
+class TestCommandLine:
+    def test_parser_contract(self):
         parser = argparse.ArgumentParser()
-        cmd.configure_parser(parser)
-        parsed = parser.parse_args([
-            "--dry-run", "--platform", "claude", "--rules", "full",
-            "--mcp", "--yes", "--force"
-        ])
-        assert parsed.dry_run is True
-        assert parsed.platform == "claude"
-        assert parsed.rules == "full"
-        assert parsed.mcp is True
-        assert parsed.yes is True
-        assert parsed.force is True
+        InitCommand().configure_parser(parser)
+        ns = parser.parse_args(["--host", "antigravity,codex-cli", "--rules", "full", "--dry-run",
+                                "--yes", "--force", "--pin", "--no-hooks"])
+        assert ns.host == ["codex-cli", "antigravity"]
+        assert (ns.rules, ns.dry_run, ns.yes, ns.force, ns.pin, ns.no_hooks) == ("full", True, True, True, True, True)
+        defaults = parser.parse_args([])
+        assert (defaults.host, defaults.rules, defaults.pin) == (None, "standard", False)
+        assert parser.parse_args(["--host", "auto"]).host == "auto"
 
-        with patch("aegis_cli.init.run_init", return_value=0) as mock_run:
-            assert cmd.execute(parsed) == 0
-            mock_run.assert_called_once_with(parsed)
+    def test_execute_delegates_to_run_init(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr("aegis_cli.init.run_init", lambda a: seen.append(a) or 0)
+        ns = argparse.Namespace()
+        assert InitCommand().execute(ns) == 0 and seen == [ns]
 
-    def test_init_claude_uses_home_directory_not_project_root(self, tmp_path, monkeypatch):
-        """BUG-089 (#143): soma init --platform claude must install to ~/.claude, not <project>/.claude."""
-        from aegis_cli.init import run_init
-        from aegis_core.workspace.base import Workspace
+    @pytest.mark.parametrize("argv, line", [
+        (["init", "--platform", "claude"], "aegis init --platform was removed in v4: use aegis init --host"),
+        (["init", "--platform=gemini", "--yes"], "aegis init --platform was removed in v4: use aegis init --host"),
+        (["init", "--mcp"], "aegis init --mcp was removed in v4: use aegis init --host (no project MCP file is written)"),
+        (["init", "--local"], "aegis init --local was removed in v4: rules live in .aegis/rules; use aegis init"),
+    ])
+    def test_removed_flags_exit_2_with_one_pointer_line(self, project, argv, line, capsys):
+        with pytest.raises(SystemExit) as exc:
+            main(argv + ["--workspace", str(project)])
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == line + "\n"
+        assert not (project / ".aegis").exists()
 
-        project_dir = tmp_path / "project"
-        project_dir.mkdir()
-        home_dir = tmp_path / "home"
-        home_dir.mkdir()
+    def test_removed_flags_are_not_in_help(self, capsys):
+        with pytest.raises(SystemExit):
+            main(["init", "--help"])
+        out = capsys.readouterr().out
+        assert "--host" in out
+        for gone in ("--platform", "--mcp", "--local"):
+            assert gone not in out
 
-        monkeypatch.setenv("HOME", str(home_dir))
-        monkeypatch.setattr("pathlib.Path.home", lambda: home_dir)
-
-        args = argparse.Namespace(
-            project=str(project_dir),
-            _project_root=project_dir,
-            ws=Workspace.for_init(project_dir),
-            platform="claude",
-            rules="minimal",
-            mcp=False,
-            yes=True,
-            force=True,
-            dry_run=False,
-        )
-
-        rc = run_init(args)
-        assert rc == 0
-        assert not (project_dir / ".claude").exists(), "Claude rules were incorrectly installed into <project>/.claude!"
-        assert (home_dir / ".claude").is_dir(), "Claude rules were not installed to ~/.claude!"
-        assert (home_dir / ".claude" / "CLAUDE.md").is_file()
-
-    def test_init_claude_local_installs_to_project_root(self, tmp_path, monkeypatch):
-        """BUG-092: soma init --platform claude --local installs to <project>/.claude and <project>/CLAUDE.md."""
-        from aegis_cli.init import run_init
-        from aegis_core.workspace.base import Workspace
-
-        project_dir = tmp_path / "project"
-        project_dir.mkdir()
-        home_dir = tmp_path / "home"
-        home_dir.mkdir()
-
-        monkeypatch.setenv("HOME", str(home_dir))
-        monkeypatch.setattr("pathlib.Path.home", lambda: home_dir)
-
-        args = argparse.Namespace(
-            project=str(project_dir),
-            _project_root=project_dir,
-            ws=Workspace.for_init(project_dir),
-            platform="claude",
-            rules="minimal",
-            local=True,
-            mcp=False,
-            yes=True,
-            force=True,
-            dry_run=False,
-        )
-
-        rc = run_init(args)
-        assert rc == 0
-        assert (project_dir / ".claude").is_dir(), "Claude rules were not installed into <project>/.claude!"
-        assert (project_dir / "CLAUDE.md").is_file(), "CLAUDE.md was not created in project root!"
-        assert not (home_dir / ".claude").exists(), "Home directory was unexpectedly modified in local mode!"
-
-
-class TestRuleDiscovery:
-    """Tests for _get_soma_root and _discover_full_rules."""
-
-    def test_discover_full_rules_empty(self, monkeypatch, tmp_path):
-        from aegis_cli.init import _discover_full_rules
-        monkeypatch.setattr("aegis_cli.init._get_soma_root", lambda: tmp_path)
-        assert _discover_full_rules() == []
-
-    def test_discover_full_rules_rules_dir(self, monkeypatch, tmp_path):
-        from aegis_cli.init import _discover_full_rules
-        rules_dir = tmp_path / "rules"
-        rules_dir.mkdir()
-        (rules_dir / "rule1.md").write_text("# Rule 1", encoding="utf-8")
-        (rules_dir / "META.md").write_text("# Meta", encoding="utf-8")
-        (rules_dir / "README.md").write_text("# Readme", encoding="utf-8")
-        oracles = rules_dir / ".oracles"
-        oracles.mkdir()
-        (oracles / "oracle1.md").write_text("# Oracle 1", encoding="utf-8")
-
-        monkeypatch.setattr("aegis_cli.init._get_soma_root", lambda: tmp_path)
-        discovered = _discover_full_rules()
-        names = [f.name for f in discovered]
-        assert "rule1.md" in names
-        assert "oracle1.md" in names
-        assert "META.md" not in names
-        assert "README.md" not in names
-
-    def test_discover_full_rules_genome_dir(self, monkeypatch, tmp_path):
-        from aegis_cli.init import _discover_full_rules
-        genome_dir = tmp_path / "genome"
-        genome_dir.mkdir()
-        (genome_dir / "rule2.md").write_text("# Rule 2", encoding="utf-8")
-        oracles = genome_dir / ".oracles"
-        oracles.mkdir()
-        (oracles / "oracle2.md").write_text("# Oracle 2", encoding="utf-8")
-
-        monkeypatch.setattr("aegis_cli.init._get_soma_root", lambda: tmp_path)
-        discovered = _discover_full_rules()
-        names = [f.name for f in discovered]
-        assert "rule2.md" in names
-        assert "oracle2.md" in names
-
-    def test_get_soma_root_fallbacks(self, monkeypatch, tmp_path):
-        from aegis_cli import init as init_mod
-        empty_dir = tmp_path / "empty"
-        empty_dir.mkdir()
-        monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
-        monkeypatch.setattr("importlib.resources.files", lambda mod: empty_dir / "pkg")
-        assert init_mod._get_soma_root() == tmp_path
-
-        # Case with genome in pkg_root
-        pkg_with_genome = tmp_path / "pkg_root_genome"
-        (pkg_with_genome / "genome").mkdir(parents=True)
-        monkeypatch.setattr("importlib.resources.files", lambda mod: pkg_with_genome / "aegis_cli")
-        assert init_mod._get_soma_root() == pkg_with_genome
-
-        # Case with rules in pkg_root
-        pkg_with_rules = tmp_path / "pkg_root_rules"
-        (pkg_with_rules / "rules").mkdir(parents=True)
-        monkeypatch.setattr("importlib.resources.files", lambda mod: pkg_with_rules / "aegis_cli")
-        assert init_mod._get_soma_root() == pkg_with_rules
-
-    def test_init_delegates_detect_platform_and_get_rules_dir_to_platforms_module(self):
-        """v3.0.0: init.py re-exports detect_platform and get_rules_dir from aegis_cli.platforms."""
-        from aegis_cli import init as init_mod
-        from aegis_cli import platforms as platforms_mod
-
-        assert hasattr(platforms_mod, "detect_platform")
-        assert hasattr(platforms_mod, "get_rules_dir")
-        assert init_mod.detect_platform is platforms_mod.detect_platform
-        assert init_mod.get_rules_dir is platforms_mod.get_rules_dir
-
-    def test_init_branded_aegis_header_and_dry_run_badges(self, tmp_path, capsys):
-        """init prints the Aegis Guardrails header, points at aegis status (v4: report is gone), and [DRY-RUN]/[SKIP] badges."""
-        from aegis_cli.init import run_init
-
-        (tmp_path / ".gemini").mkdir()
-        args_dry = argparse.Namespace(
-            dry_run=True,
-            platform="gemini",
-            yes=True,
-            force=False,
-            rules="minimal",
-            _project_root=tmp_path,
-            _home=tmp_path,
-        )
-        assert run_init(args_dry) == 0
-        out_dry = capsys.readouterr().out
-        assert "Aegis Guardrails — Workspace Setup" in out_dry
-        assert "Soma Governance" not in out_dry
-        assert "After a session, run: aegis status" in out_dry
-        assert "aegis report" not in out_dry
-        assert "[DRY-RUN] providence" in out_dry
-        assert "✅ providence" not in out_dry
+    @pytest.mark.parametrize("value, message", [
+        ("cursor", "unknown host 'cursor'"),
+        ("claude-desktop", "identity only"),
+    ])
+    def test_bad_host_is_a_usage_error(self, project, value, message, capsys):
+        with pytest.raises(SystemExit) as exc:
+            main(["init", "--host", value, "--workspace", str(project)])
+        assert exc.value.code == 2
+        assert message in capsys.readouterr().err

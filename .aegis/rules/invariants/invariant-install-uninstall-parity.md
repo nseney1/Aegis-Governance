@@ -7,7 +7,7 @@ hypothesis: Every platform in the installer must have a matching uninstall path
 prediction: Adding a new platform to install.sh without updating uninstall.sh creates orphaned files
 falsification: Platform count matches between install.sh and uninstall.sh for 10 sessions → maintain
 target_paths:
-  - "aegis_cli/platforms/*.py"
+  - aegis_cli/install_hosts.py
   - aegis_cli/cli.py
 expiry_sessions: 15
 expiry_days: 60

@@ -651,43 +651,15 @@
             "type": "str"
           },
           {
-            "const": true,
-            "default": false,
-            "dest": "dry_run",
-            "flags": [
-              "--dry-run"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "gemini",
-              "claude",
-              "cursor",
-              "copilot",
-              "kiro"
-            ],
             "default": null,
-            "dest": "platform",
+            "dest": "host",
             "flags": [
-              "--platform"
+              "--host"
             ],
             "kind": "store",
             "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "local",
-            "flags": [
-              "--local"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
+            "required": false,
+            "type": "_host_option"
           },
           {
             "choices": [
@@ -707,9 +679,9 @@
           {
             "const": true,
             "default": false,
-            "dest": "mcp",
+            "dest": "dry_run",
             "flags": [
-              "--mcp"
+              "--dry-run"
             ],
             "kind": "store_true",
             "nargs": 0,
@@ -741,11 +713,52 @@
           {
             "const": true,
             "default": false,
+            "dest": "pin",
+            "flags": [
+              "--pin"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
             "dest": "no_hooks",
             "flags": [
               "--no-hooks"
             ],
             "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "platform",
+            "flags": [
+              "--platform"
+            ],
+            "kind": "RemovedOption",
+            "nargs": "?",
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "mcp",
+            "flags": [
+              "--mcp"
+            ],
+            "kind": "RemovedOption",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "kind": "RemovedOption",
             "nargs": 0,
             "required": false
           }
@@ -1536,33 +1549,15 @@
             "type": "str"
           },
           {
-            "choices": [
-              "gemini",
-              "kiro",
-              "copilot",
-              "claude",
-              "mcp"
-            ],
             "default": null,
-            "dest": "platform",
+            "dest": "host",
             "flags": [
-              "--platform",
-              "-p"
+              "--host"
             ],
             "kind": "store",
             "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "local",
-            "flags": [
-              "--local"
-            ],
-            "kind": "store_true",
-            "nargs": 0,
-            "required": false
+            "required": false,
+            "type": "_host_ids"
           },
           {
             "const": true,
@@ -1578,11 +1573,42 @@
           {
             "const": true,
             "default": false,
+            "dest": "force",
+            "flags": [
+              "--force"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "platform",
+            "flags": [
+              "--platform",
+              "-p"
+            ],
+            "kind": "RemovedOption",
+            "nargs": "?",
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "kind": "RemovedOption",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
             "dest": "purge",
             "flags": [
               "--purge"
             ],
-            "kind": "store_true",
+            "kind": "RemovedOption",
             "nargs": 0,
             "required": false
           }
@@ -1612,7 +1638,7 @@
     {
       "aliases": [],
       "category": "Setup & Environment",
-      "help": "Set up governance for this project",
+      "help": "Set up governance for this project and register it with your agent hosts",
       "name": "init"
     },
     {
@@ -1648,7 +1674,7 @@
     {
       "aliases": [],
       "category": "Setup & Environment",
-      "help": "Uninstall Aegis governance rules and configuration",
+      "help": "Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/)",
       "name": "uninstall"
     }
   ],
