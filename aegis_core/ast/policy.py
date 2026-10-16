@@ -205,6 +205,8 @@ def extract_normalized_ast(
             ast_runner = ASTDriverRunner()
         if not ast_runner.registry.resolve_driver(ext, workspace_root=workspace_root):
             return None
-        return ast_runner.parse_file(path_str, workspace_root=workspace_root, confine_root=confine_root)
+        # Only the index snapshot needs confine_root; other runners keep the two-argument call.
+        extra = {"confine_root": confine_root} if confine_root is not None else {}
+        return ast_runner.parse_file(path_str, workspace_root=workspace_root, **extra)
     except Exception as exc:
         raise ASTExtractionError(path_str, f"{type(exc).__name__}: {exc}") from exc
