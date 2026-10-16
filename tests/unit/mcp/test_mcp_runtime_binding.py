@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -139,6 +140,40 @@ def test_mcp_roots_bind_once_the_client_answers(home, tmp_path, monkeypatch, cap
     assert {r["_name"] for r in _payload(frames[1])[1]["rules"]} == {"rule-rooted"}
 
 
+@pytest.mark.parametrize("uri", ["file://evil.example/etc", "file://evil.example{root}"], ids=["etc", "governed"])
+def test_a_roots_answer_naming_a_remote_host_is_ignored(home, tmp_path, monkeypatch, capsys, uri):
+    """A ``file://host/...`` root lives on another machine; read locally it could name any directory."""
+    root = _governed(tmp_path / "rooted", "rule-rooted")
+    initialized = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    remote = uri.format(root="/" + root.as_posix().lstrip("/"))
+    roots_reply = json.dumps({"jsonrpc": "2.0", "id": "aegis-roots-1", "result": {"roots": [{"uri": remote}]}})
+
+    frames = _serve(monkeypatch, capsys, [
+        _init("claude-code", {"roots": {"listChanged": True}}), initialized, roots_reply,
+        _call(1, "aegis_list_rules", {}),
+    ])
+
+    is_error, payload = _payload(frames[1])
+    assert is_error
+    assert (payload["status"], payload["binding"]["reason"]) == ("not_governed", "no_workspace")
+
+
+def test_a_relative_codex_meta_workspace_is_ignored(home, tmp_path, monkeypatch, capsys):
+    """Only absolute host roots attest a session; a relative one would resolve against the server cwd."""
+    cwd = tmp_path / "cwd"
+    (cwd / ".git").mkdir(parents=True)
+    _governed(cwd / "a", "rule-a")
+    monkeypatch.chdir(cwd)
+
+    frames = _serve(monkeypatch, capsys, [
+        _init(), _call(1, "aegis_list_rules", {}, {"x-codex-turn-metadata": {"workspaces": {"a": {}}}}),
+    ])
+
+    is_error, payload = _payload(frames[1])
+    assert is_error
+    assert (payload["status"], payload["binding"]["reason"]) == ("not_governed", "no_workspace")
+
+
 def test_several_host_roots_choose_by_the_files_and_otherwise_hold(home, tmp_path, monkeypatch, capsys):
     a = _governed(tmp_path / "a", "rule-a")
     b = _governed(tmp_path / "b", "rule-b")
@@ -219,6 +254,19 @@ def test_absolute_files_select_a_registered_workspace_for_antigravity(home, tmp_
     is_error, payload = _payload(frames[1])
     assert not is_error
     assert [r["name"] for r in payload["relevant_rules"]] == ["rule-b"]
+
+
+def test_relative_files_in_two_registered_workspaces_follow_the_server_cwd(home, tmp_path, monkeypatch, capsys):
+    a = _governed(tmp_path / "a", "rule-a")
+    b = _governed(tmp_path / "b", "rule-b")
+    _registry(home, a, b)
+    monkeypatch.chdir(a)
+
+    frames = _serve(monkeypatch, capsys, [_init("antigravity-client"), _call(1, "aegis_scan", {"files": ["src/app.py"]})])
+
+    is_error, payload = _payload(frames[1])
+    assert not is_error, payload
+    assert [r["name"] for r in payload["relevant_rules"]] == ["rule-a"]
 
 
 def test_the_server_cwd_walks_up_to_its_workspace(home, tmp_path, monkeypatch, capsys):
@@ -380,6 +428,24 @@ def test_a_pin_through_a_symlink_loop_keeps_the_server_up_in_an_error_state(home
     assert (payload["binding"]["status"], payload["binding"]["reason"]) == ("error", "pin_missing")
 
 
+@pytest.mark.parametrize("params", [
+    {"name": "no_such_tool", "arguments": {}},
+    "not an object",
+    {"name": "aegis_list_rules", "arguments": ["not", "an", "object"]},
+], ids=["unknown_tool", "params_not_an_object", "arguments_not_an_object"])
+def test_a_pin_error_answers_every_tool_call_before_its_params_are_read(home, tmp_path, monkeypatch, capsys, params):
+    """While the pin is unusable the server says so first: nothing about the call can route around it."""
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(_loop(tmp_path / "links")))
+
+    frames = _serve(monkeypatch, capsys, [_init(), _frame(1, "tools/call", params)])
+
+    assert "error" not in frames[1], frames[1]
+    is_error, payload = _payload(frames[1])
+    assert is_error
+    assert payload["status"] == "FAIL"
+    assert (payload["binding"]["status"], payload["binding"]["reason"]) == ("error", "pin_missing")
+
+
 def test_call_files_through_a_symlink_loop_answer_a_tool_result(home, tmp_path, monkeypatch, capsys):
     a = _governed(tmp_path / "a", "rule-a")
     _loop(a)
@@ -394,6 +460,32 @@ def test_call_files_through_a_symlink_loop_answer_a_tool_result(home, tmp_path, 
     for req_id in (1, 2):
         assert "error" not in frames[req_id], frames[req_id]
         assert frames[req_id]["result"]["content"][0]["type"] == "text"
+
+
+def test_call_files_through_a_symlink_loop_in_a_bound_workspace_fail_cleanly(home, tmp_path, monkeypatch, capsys):
+    a = _governed(tmp_path / "a", "rule-a")
+    try:
+        os.symlink(a / "src" / "loop", a / "src" / "loop")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    before = _tree(a / ".aegis")
+
+    frames = _serve(monkeypatch, capsys, [
+        _init(),
+        _call(1, "aegis_scan", {"files": ["src/loop"]}, _codex_meta(a)),
+        _call(2, "aegis_report_outcome", {"outcome": "tp", "rules_used": ["rule-a"], "idempotency_key": "k",
+                                          "files": ["src/loop"]}, _codex_meta(a)),
+    ])
+
+    for req_id in (1, 2):
+        text = frames[req_id]["result"]["content"][0]["text"]
+        assert not text.startswith("Tool execution failed"), text
+        payload = json.loads(text)
+        if sys.version_info < (3, 13):  # 3.13 resolves a loop leniently and serves the call
+            assert payload["status"] == "FAIL"
+            assert "src/loop cannot be resolved" in payload["error"].replace("\\", "/")
+    if sys.version_info < (3, 13):
+        assert _tree(a / ".aegis") == before  # no ledger or activity row for a refused call
 
 
 # ── the user layer (H8) ──────────────────────────────────────────────────────

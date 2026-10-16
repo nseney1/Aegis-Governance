@@ -239,6 +239,55 @@ def test_a_registered_root_without_aegis_or_at_home_is_ignored(home, tmp_path):
     assert binding.status == "unbound"
 
 
+def test_relative_files_held_by_the_cwd_workspace_bind_it_over_another_registered_one(home, tmp_path):
+    """A clone with a committed .aegis/ that was never registered: README.md in it is its own, not B's."""
+    cwd_ws = _governed(tmp_path / "clone")
+    b = _governed(tmp_path / "b")
+    for root in (cwd_ws, b):
+        (root / "README.md").write_text("x\n", encoding="utf-8")
+    binding = resolve_binding(files=["README.md"], registry=read_registry(_registry(home, [b])), cwd=cwd_ws)
+    assert (binding.status, binding.root, binding.source) == ("bound", cwd_ws, "walk_up")
+
+
+def test_relative_files_in_two_registered_workspaces_follow_the_cwd(home, tmp_path):
+    a = _governed(tmp_path / "a")
+    b = _governed(tmp_path / "b")
+    for root in (a, b):
+        (root / "src").mkdir()
+        (root / "src" / "x.py").write_text("x\n", encoding="utf-8")
+    binding = resolve_binding(files=["src/x.py"], registry=read_registry(_registry(home, [a, b])), cwd=a / "src")
+    assert (binding.status, binding.root, binding.source) == ("bound", a, "registry")
+
+
+def test_relative_files_only_in_another_registered_workspace_hold_against_the_cwd(home, tmp_path):
+    cwd_ws = _governed(tmp_path / "a")
+    b = _governed(tmp_path / "b")
+    (b / "only_in_b.py").write_text("x\n", encoding="utf-8")
+    binding = resolve_binding(files=["only_in_b.py"], registry=read_registry(_registry(home, [cwd_ws, b])), cwd=cwd_ws)
+    assert (binding.status, binding.root, binding.reason) == ("hold", None, "cwd_conflicts_with_registry")
+    assert binding.as_dict()["details"] == {"cwd_root": str(cwd_ws), "candidates": [str(b)]}
+
+
+def test_absolute_files_still_select_a_registered_workspace_from_a_governed_cwd(home, tmp_path):
+    cwd_ws = _governed(tmp_path / "a")
+    b = _governed(tmp_path / "b")
+    binding = resolve_binding(files=[str(b / "new.py")], registry=read_registry(_registry(home, [b])), cwd=cwd_ws)
+    assert (binding.status, binding.root, binding.source) == ("bound", b, "registry")
+
+
+@pytest.mark.parametrize("files", [["proj/app.py"], ["{home}/proj/app.py"]], ids=["relative", "absolute"])
+def test_a_registry_listing_home_and_the_filesystem_root_never_binds_them(home, files):
+    """$HOME holds .aegis/ (the user layer) and every file under it; the denylist alone keeps it out."""
+    (home / "proj").mkdir()
+    (home / "proj" / "app.py").write_text("x\n", encoding="utf-8")
+    registry = read_registry(_registry(home, [home, Path(home.anchor)]))
+    assert registry.roots == (home, Path(home.anchor))
+
+    binding = resolve_binding(files=[f.format(home=home) for f in files], registry=registry)
+
+    assert (binding.status, binding.root, binding.reason) == ("unbound", None, "no_workspace")
+
+
 @pytest.mark.parametrize("content,problem", [
     ("{not json", "not valid JSON"),
     ('{"v": 2, "workspaces": []}', "unsupported registry version 2"),

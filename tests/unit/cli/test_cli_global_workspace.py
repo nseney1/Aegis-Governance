@@ -300,3 +300,91 @@ def test_uninstall_below_home_targets_the_project_not_the_user_plane(home, capsy
     out = capsys.readouterr().out
     assert rc == 0
     assert f"Would remove {home / '.aegis'}" not in out
+
+
+# ── an unmigrated v3 workspace (.soma/ without .aegis/) is refused, as before AD-4 ──
+
+def _legacy_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "leg"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".soma" / "cells" / "walls").mkdir(parents=True)
+    (repo / "sub").mkdir()
+    return repo.resolve()
+
+
+def _stub_execute(monkeypatch: pytest.MonkeyPatch, command: str) -> list:
+    from aegis_cli.registry import get_default_registry
+
+    ran: list = []
+    monkeypatch.setattr(type(get_default_registry().get(command)), "execute", lambda self, args: ran.append(args) or 0)
+    return ran
+
+
+@pytest.mark.parametrize("where", ["cwd_root", "cwd_sub", "flag_sub", "pin"])
+@pytest.mark.parametrize("argv", [
+    ["status"], ["check", "--hook"], ["rule", "list"], ["hook", "status"], ["sync"], ["scan", "x.py"],
+], ids=lambda argv: " ".join(argv))
+def test_a_legacy_soma_workspace_is_refused_with_the_migrate_hint(home, tmp_path, capsys, monkeypatch, argv, where):
+    """`aegis check --hook` is a gate: in a v3 repo it must refuse, never pass against a phantom workspace."""
+    from aegis_core.workspace.discovery import LEGACY_SOMA_UPGRADE_MSG
+
+    repo = _legacy_repo(tmp_path)
+    ran = _stub_execute(monkeypatch, argv[0])
+    flags: list = []
+    if where == "cwd_root":
+        monkeypatch.chdir(repo)
+    elif where == "cwd_sub":
+        monkeypatch.chdir(repo / "sub")
+    elif where == "flag_sub":
+        monkeypatch.chdir(tmp_path)
+        flags = ["--workspace", str(repo / "sub")]
+    else:
+        monkeypatch.setenv("AEGIS_WORKSPACE", str(repo))
+        monkeypatch.chdir(repo / "sub")
+    before = _tree(repo)
+
+    rc = main([*flags, *argv])
+
+    captured = capsys.readouterr()
+    assert rc == (2 if argv[0] == "scan" else 1)
+    assert ran == []
+    assert captured.out == ""
+    assert captured.err == f"Error: {LEGACY_SOMA_UPGRADE_MSG.format(path=repo)}\n"
+    assert _tree(repo) == before
+
+
+@pytest.mark.parametrize("command", ["migrate", "uninstall"])
+def test_migrate_and_uninstall_still_run_in_a_legacy_soma_workspace(home, tmp_path, monkeypatch, command):
+    repo = _legacy_repo(tmp_path)
+    ran = _stub_execute(monkeypatch, command)
+    monkeypatch.chdir(repo)
+
+    rc = main([command])
+
+    assert rc == 0
+    assert [Path(a._project_root) for a in ran] == [repo]
+
+
+def test_uninstall_dry_run_completes_in_a_legacy_soma_workspace(home, tmp_path, capsys, monkeypatch):
+    repo = _legacy_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    before = _tree(repo)
+
+    rc = main(["uninstall", "--dry-run"])
+
+    assert rc == 0, capsys.readouterr().err
+    assert _tree(repo) == before
+
+
+def test_doctor_still_runs_in_a_legacy_soma_workspace(home, tmp_path, monkeypatch):
+    import argparse
+
+    from aegis_cli.cli import _attach_workspace
+
+    repo = _legacy_repo(tmp_path)
+    monkeypatch.chdir(repo / "sub")
+    args = argparse.Namespace(command="doctor", workspace=None)
+
+    _attach_workspace(args)
+
+    assert args._project_root == repo / "sub"

@@ -174,12 +174,15 @@ def _attach_workspace(args: argparse.Namespace) -> None:
     is replaced by the resolved root). Every command resolves through
     ``resolve_cli_root``: never above the target's git toplevel, never ``$HOME``, and a
     WorkspaceHold when an ``AEGIS_WORKSPACE`` pin disagrees with ``--workspace``.
-    ``aegis init`` keeps its target as given but takes the same hold.
+    ``aegis init`` keeps its target as given but takes the same hold. An unmigrated
+    ``.soma/`` on the walk (or at the pin) raises the upgrade message, except for the
+    ``_LEGACY_TOLERANT_COMMANDS``; ``aegis migrate`` stops at it to convert it.
     """
     from aegis_core.config import env_workspace
     from aegis_core.errors import WorkspaceNotFoundError
     from aegis_core.workspace.base import Workspace
     from aegis_core.workspace.binding import check_pin_agrees, resolve_cli_root
+    from aegis_core.workspace.discovery import check_legacy_soma_sentinel
 
     raw_ws = getattr(args, "workspace", None)
     args._workspace_arg = raw_ws
@@ -202,7 +205,12 @@ def _attach_workspace(args: argparse.Namespace) -> None:
         return
     else:
         try:
-            args.ws = Workspace(root=resolve_cli_root(raw_ws, Path.cwd(), pin))
+            if args.command in _LEGACY_TOLERANT_COMMANDS:
+                root = resolve_cli_root(raw_ws, Path.cwd(), pin)
+            else:
+                root = resolve_cli_root(raw_ws, Path.cwd(), pin, accept=_refuse_legacy)
+                check_legacy_soma_sentinel(root)  # a pin is not walked
+            args.ws = Workspace(root=root)
         except WorkspaceNotFoundError:
             if args.command not in _HOST_LEVEL_COMMANDS:
                 raise
@@ -225,8 +233,24 @@ def _migratable(directory: Path) -> bool:
     return is_aegis_workspace(directory) or (directory / LEGACY_SOMA_DIRNAME).is_dir()
 
 
+def _refuse_legacy(directory: Path) -> bool:
+    """The walk stops at a workspace and raises the upgrade message at an unmigrated
+    ``.soma/``, so a v3 repository is refused instead of read as an empty workspace
+    (where ``aegis check --hook`` would pass vacuously)."""
+    from aegis_core.workspace.discovery import check_legacy_soma_sentinel
+
+    if is_aegis_workspace(directory):
+        return True
+    check_legacy_soma_sentinel(directory)
+    return False
+
+
 # Commands that inspect the machine (hosts, registrations) as well as a workspace.
 _HOST_LEVEL_COMMANDS = frozenset({"doctor"})
+
+# Commands that must still work in an unmigrated v3 repository (migrate has its own
+# branch): doctor diagnoses it, uninstall removes what an older version installed.
+_LEGACY_TOLERANT_COMMANDS = frozenset({"doctor", "uninstall"})
 
 # scan's exit codes are a contract (aegis_cli/scan.py): a workspace error, a hold
 # included, is 2 there; every other command exits 1.

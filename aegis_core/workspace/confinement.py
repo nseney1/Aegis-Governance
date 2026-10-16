@@ -54,8 +54,13 @@ def confine_path_internal(
         if base in _WINDOWS_DEVICE_NAMES:
             raise PathTraversalError(f"reserved Windows device name not permitted: {p_str!r}")
 
-    resolved_root = workspace_root.resolve()
-    candidate = Path(os.path.join(str(resolved_root), p_str)).resolve()
+    try:
+        resolved_root = workspace_root.resolve()
+        candidate = Path(os.path.join(str(resolved_root), p_str)).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        # A symlink loop raises RuntimeError before Python 3.13; callers (the MCP tool
+        # handlers among them) handle confinement failures as ValueError only.
+        raise PathTraversalError(f"{p_str} cannot be resolved: {exc}") from exc
 
     if candidate == resolved_root:
         raise PathTraversalError("refusing to treat the workspace root as a file")

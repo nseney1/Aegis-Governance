@@ -12,13 +12,17 @@ The first source that yields a governed root wins:
    the call's files choose; when they decide nothing, the first source in that order
    wins if it names one root, and otherwise the result is a HOLD.
 3. **Registry** (``~/.aegis/workspaces.json``, written by ``aegis init``): the call's
-   files may only *select among* registered roots, never introduce one.
+   files may only *select among* registered roots, never introduce one. Relative files
+   name a path in the project the server runs in, so they select only when the cwd
+   walk-up (4) finds no workspace; when it finds one, that workspace binds if it holds
+   them, and otherwise the result is a HOLD.
 4. **Bounded walk-up** from the server cwd (see ``bounded_walk_up``).
 
 Nothing else ever names a workspace: there is no model-supplied workspace argument.
 When the sources that are present disagree (a pin against a host root or against the
 registered workspace holding the call's files; an ungoverned host root against a
-registered one), the result is a **hold** with a machine-readable ``reason``; Aegis
+registered one; the cwd's workspace against the registered one holding the call's
+relative files), the result is a **hold** with a machine-readable ``reason``; Aegis
 never silently governs another project. Nothing resolved is ``unbound`` ("not governed
 here"). Resolution only reads: it creates no directory and writes no file.
 
@@ -454,6 +458,21 @@ def resolve_binding(
     if files:
         usable = [r for r in registry.roots if _usable(r)]
         holding = _holding(usable, files)
+        walked = None
+        if holding and cwd is not None and not any(os.path.isabs(f) for f in files):
+            # A relative name means "in the project the server runs in": the registry
+            # chooses only when the cwd resolves to no workspace (README.md exists in
+            # every repository; an unregistered clone must not govern a registered one).
+            walked = bounded_walk_up(cwd)
+        if walked is not None:
+            if _holding([walked], files):
+                return _bound(walked, "registry" if walked in holding else "walk_up")
+            return _not_bound(
+                HOLD, "cwd_conflicts_with_registry",
+                f"the server runs in the workspace {walked}, but the files exist only in the registered "
+                f"workspace(s) {', '.join(str(r) for r in holding)}; pass absolute paths",
+                cwd_root=str(walked), candidates=[str(r) for r in holding],
+            )
         if holding:
             chosen = _innermost_chain(holding)
             if chosen is None:
