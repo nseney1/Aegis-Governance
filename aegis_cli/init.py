@@ -8,8 +8,10 @@ registration of each selected host and the workspace entry in ``~/.aegis/workspa
 (see :mod:`aegis_cli.install_hosts` for its schema). Plus the git pre-commit hook.
 
 Host detection only proposes: hosts are registered only when named with ``--host``
-(``--host auto`` takes the detected ones). Every step is checked before anything is
-written, so a file Aegis cannot change safely stops init with nothing written. A
+(``--host auto`` takes the detected ones). A host is found by its CLI on PATH, its config
+directory or its desktop app, since an IDE or desktop app puts nothing on PATH; ``--host``
+also takes a surface alias (``codex-app``, ``kiro-ide``) and stores the plane id. Every
+step is checked before anything is written, so a file Aegis cannot change safely stops init with nothing written. A
 ``CLAUDE.md`` that is a link is never written through: a link to ``AGENTS.md`` already
 gives Claude Code the bootstrap, and a link elsewhere is left alone with a warning.
 """
@@ -31,13 +33,14 @@ from aegis_cli.install_hosts import (
     REGISTRY_LABEL,
     InstallError,
     ordered_hosts,
-    detect_hosts,
+    detection_evidence,
     display_command,
     is_denied_root,
     mcp_command,
     parse_hosts,
     register_host,
     register_workspace,
+    registrable_hosts,
     write_managed_block,
 )
 from aegis_core.storage import atomic_write_bytes
@@ -243,6 +246,24 @@ def _host_option(value: str):
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
+def _host_help() -> str:
+    """--host's help, from the host table: each plane with its surfaces and aliases."""
+    planes = []
+    for host in registrable_hosts():
+        tag = ", experimental" if not host.verified else ""
+        also = f"; also {', '.join(host.aliases)}" if host.aliases else ""
+        planes.append(f"{host.id}{tag} ({', '.join(host.surfaces)}{also})")
+    return ("Register the Aegis MCP server with these hosts, or 'auto' for the ones found on this machine "
+            "(by CLI on PATH, config directory or desktop app). Without it, found hosts are only listed. A host "
+            "is the config plane its surfaces share, so a surface name selects its host: " + "; ".join(planes))
+
+
+def _with_surfaces(host_ids: Sequence[str]) -> str:
+    from aegis_core import hosts as host_table
+
+    return ", ".join(f"{h} ({', '.join(host_table.get(h).surfaces)})" for h in host_ids)
+
+
 # ── The pre-commit hook ──────────────────────────────────────────────────────
 
 def _within(path: Path, boundary: Path) -> bool:
@@ -412,6 +433,7 @@ class Report:
             return
         self.warnings.append(line)
         if not self.json_mode:
+            sys.stdout.flush()  # keep the order of stdout and stderr lines in a pipe
             print(f"  ⚠️  {line}", file=sys.stderr)
 
     def error(self, line: str) -> None:
@@ -741,7 +763,8 @@ def run_init(args: argparse.Namespace) -> int:
     home = Path.home()
     path_env = os.environ.get("PATH")
 
-    detected = detect_hosts(home, path_env)
+    found = detection_evidence(home, path_env)
+    detected = list(found)
     host_arg = getattr(args, "host", None)
     if isinstance(host_arg, str):
         host_arg = parse_hosts(host_arg)
@@ -767,13 +790,21 @@ def run_init(args: argparse.Namespace) -> int:
     else:
         report.say("  Project type: unknown (rules are language-agnostic)")
     if selected:
-        report.say(f"  Hosts: {', '.join(selected)}")
+        report.say(f"  Hosts: {_with_surfaces(selected)}")
     else:
         report.say("  Hosts: none selected (only the repository is set up)")
         if detected and host_arg is None:
-            report.say(f"  Detected on this machine: {', '.join(detected)}. To register Aegis with them:")
+            report.say("  Found on this machine: "
+                       f"{', '.join(f'{h} ({_home_label(v, home)})' for h, v in found.items())}. "
+                       "To register Aegis with them:")
             report.say(f"       aegis init --host {','.join(detected)}")
     report.say()
+    from aegis_core import hosts as host_table
+
+    for host_id in selected:
+        spec = host_table.get(host_id)
+        if not spec.verified:
+            report.warn(f"{host_id} is an experimental host. {' '.join(spec.notes)}")
 
     ctx = _Context(ws=ws, root=root, home=home, selected=selected, preset=preset,
                    force=bool(getattr(args, "force", False)), no_hooks=_no_hooks(args),
@@ -869,6 +900,16 @@ def run_init(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _home_label(evidence: str, home: Path) -> str:
+    """``evidence`` (a path that found a host) as ``~/...`` when it is under ``home``."""
+    if evidence.startswith("~/"):
+        return evidence
+    try:
+        return "~/" + Path(evidence).relative_to(home).as_posix()
+    except ValueError:
+        return evidence
+
+
 def _no_hooks(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "no_hooks", False)) or not getattr(args, "hooks", True)
 
@@ -894,7 +935,7 @@ class InitCommand(AegisCommand):
         "workspace's entry in ~/.aegis/workspaces.json {\"v\": 1, \"workspaces\": [{root, added_at, "
         "added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with "
         "--host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add "
-        "--scope user; antigravity: ~/.gemini/config/mcp_config.json)."
+        "--scope user; antigravity: ~/.gemini/config/mcp_config.json; kiro: ~/.kiro/settings/mcp.json)."
     )
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -903,8 +944,7 @@ class InitCommand(AegisCommand):
             type=_host_option,
             default=None,
             metavar="HOST[,HOST]|auto",
-            help="Register the Aegis MCP server with these hosts (codex-cli, claude-code, antigravity), "
-                 "or 'auto' for the ones detected on this machine. Without it, detected hosts are only listed.",
+            help=_host_help(),
         )
         parser.add_argument(
             "--rules",

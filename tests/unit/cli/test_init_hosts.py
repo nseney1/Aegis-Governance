@@ -145,6 +145,44 @@ class TestExactFilesPerHostSelection:
         assert [c[0] for c in env.runner.calls] == ["claude", "claude"]
         assert not (env.home / ".gemini").exists()
 
+    def test_kiro_by_a_surface_alias_merges_its_user_mcp_json_and_stores_the_plane_id(self, env, capsys):
+        assert init(env, "--host", "kiro-ide") == 0
+        assert files(env.project) == REPO_FILES
+        assert files(env.home) == {".aegis/workspaces.json", ".kiro/settings/mcp.json"}
+        assert env.runner.calls == []
+        data = json.loads((env.home / ".kiro" / "settings" / "mcp.json").read_text(encoding="utf-8"))
+        assert data == {"mcpServers": {"aegis": {"command": env.mcp, "args": [], "env": {"AEGIS_CLIENT": "kiro"}}}}
+        config = json.loads((env.project / ".aegis" / "config.json").read_text(encoding="utf-8"))
+        assert config == {"v": 1, "hosts": ["kiro"]}
+        (entry,) = json.loads((env.home / ".aegis" / "workspaces.json").read_text(encoding="utf-8"))["workspaces"]
+        assert entry["hosts"] == ["kiro"]
+        out = capsys.readouterr().out
+        assert "Hosts: kiro (Kiro IDE, Kiro CLI)" in out
+
+    def test_an_unverified_host_is_registered_with_a_warning_that_says_so(self, env, capsys):
+        assert init(env, "--host", "kiro,codex-cli") == 0
+        captured = capsys.readouterr()
+        warning = [line for line in captured.err.splitlines() if "kiro" in line]
+        assert warning and "experimental" in warning[0] and "not yet checked on a real install" in warning[0]
+        assert warning[0].lower().count("experimental") == 1
+        assert not [line for line in captured.err.splitlines() if "codex-cli" in line]
+
+    def test_auto_takes_an_ide_found_only_by_its_config_dir(self, env, capsys):
+        for name in ("codex", "claude", "agy"):
+            (env.bin / (name + (".exe" if os.name == "nt" else ""))).unlink()
+        (env.home / ".kiro").mkdir()
+        assert init(env, "--host", "auto") == 0
+        assert env.runner.calls == []
+        assert (env.home / ".kiro" / "settings" / "mcp.json").is_file()
+        assert json.loads((env.project / ".aegis" / "config.json").read_text(encoding="utf-8"))["hosts"] == ["kiro"]
+
+    def test_without_host_the_proposal_names_what_found_each_plane(self, env, capsys):
+        (env.home / ".kiro").mkdir()
+        assert init(env) == 0
+        out = capsys.readouterr().out
+        assert "aegis init --host codex-cli,claude-code,antigravity,kiro" in out
+        assert "kiro (~/.kiro)" in out
+
     def test_pin_adds_the_workspace_env(self, env):
         assert init(env, "--host", "codex-cli,antigravity", "--pin") == 0
         root = str(env.project.resolve())

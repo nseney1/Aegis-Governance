@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -680,6 +681,26 @@ class TestCommandLine:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == line + "\n"
+        assert not (project / ".aegis").exists()
+
+    def test_help_names_every_host_with_its_surfaces_and_aliases(self, capsys):
+        from aegis_cli.install_hosts import registrable_hosts
+
+        with pytest.raises(SystemExit):
+            main(["init", "--help"])
+        # argparse wraps help at spaces and after hyphens; undo both before matching.
+        out = re.sub(r"-\s+", "-", " ".join(capsys.readouterr().out.split()))
+        for host in registrable_hosts():
+            assert host.id in out
+            for text in host.surfaces + host.aliases:
+                assert text in out, text
+
+    def test_claude_desktop_is_refused_with_the_host_that_covers_its_code_tab(self, project, capsys):
+        with pytest.raises(SystemExit) as exc:
+            main(["init", "--host", "claude-desktop", "--workspace", str(project)])
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "identity only" in err and "use --host claude-code" in err
         assert not (project / ".aegis").exists()
 
     def test_removed_flags_are_not_in_help(self, capsys):

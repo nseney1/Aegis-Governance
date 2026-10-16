@@ -2,18 +2,28 @@
 
 A *host* is a product whose surfaces share one configuration plane: the Codex
 CLI, IDE extension and desktop app all read ``~/.codex``, so they are one host.
-Vendor is metadata only. Installers, the doctor and the MCP server read this
-table; a host gets real code only when it needs logic the table cannot express.
+``surfaces`` names them for people, and ``aliases`` lets ``--host`` take a surface
+name (``codex-app``, ``kiro-ide``); :func:`resolve` maps it to the plane id, which is
+what configs and the registry store. Vendor is metadata only. Installers, the doctor
+and the MCP server read this table; a host gets real code only when it needs logic
+the table cannot express.
+
+Evidence labels in comments (v4.1 rev 3.1 research): DOC is the vendor's
+documentation, SECONDARY an issue or user report, UNVERIFIED an inference neither
+documented nor checked on a real install.
 
 Rows marked ``verified=False`` describe documented behaviour that has not been
 checked on a real install; ``aegis init`` warns before using them.
 """
 from __future__ import annotations
 
-__all__ = ["GENERIC", "HOSTS", "INSTRUCTION_MODES", "HostSpec", "Registration", "all_hosts", "get", "identify"]
+__all__ = ["APP_DIRS", "GENERIC", "HOSTS", "INSTRUCTION_MODES", "HostSpec", "Registration", "all_hosts",
+           "app_paths", "get", "identify", "resolve"]
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+import os
+import re
+from typing import List, Mapping, Optional, Tuple, Union
 
 #: Instruction-file behaviour of a host.
 #: ``agents_md``                  reads AGENTS.md natively.
@@ -25,6 +35,14 @@ from typing import Optional, Tuple
 INSTRUCTION_MODES = ("agents_md", "agents_md_unless_claude_md", "gemini_md", "none")
 
 GENERIC = "generic"
+
+#: Where each platform (``sys.platform``) installs desktop apps, for host detection.
+#: ``~/`` is the user's home and ``%NAME%/`` an environment variable; the rest are
+#: machine-wide. A host's ``apps`` names its app in these directories.
+APP_DIRS = {
+    "darwin": ("/Applications", "~/Applications"),
+    "win32": ("%LOCALAPPDATA%/Programs",),
+}
 
 
 @dataclass(frozen=True)
@@ -50,7 +68,9 @@ class HostSpec:
     client_names: Tuple[str, ...] = ()
     client_prefixes: Tuple[str, ...] = ()
     binaries: Tuple[str, ...] = ()
-    user_dirs: Tuple[str, ...] = ()
+    #: Files or directories (``~/`` is home) whose presence shows the plane is on this
+    #: machine, as an IDE or desktop app leaves no binary on PATH.
+    config_paths: Tuple[str, ...] = ()
     instructions: str = "none"
     budget_bytes: Optional[int] = None
     registration: Optional[Registration] = None
@@ -67,6 +87,14 @@ class HostSpec:
     #: Whether ``skills_dir`` was checked on a real install. Separate from ``verified``,
     #: which covers the rest of the row.
     skills_verified: bool = False
+    #: The products that read this plane (CLI, IDE extension, desktop app), for output.
+    surfaces: Tuple[str, ...] = ()
+    #: Surface names ``--host`` also accepts for this plane (see :func:`resolve`).
+    aliases: Tuple[str, ...] = ()
+    #: (``sys.platform``, app name in that platform's APP_DIRS) of the plane's desktop apps.
+    apps: Tuple[Tuple[str, str], ...] = ()
+    #: For a host Aegis never registers: where a surface of it that Aegis does govern goes.
+    redirect: str = ""
 
 
 HOSTS: Tuple[HostSpec, ...] = (
@@ -76,7 +104,7 @@ HOSTS: Tuple[HostSpec, ...] = (
         vendor="OpenAI",
         client_names=("codex-mcp-client",),
         binaries=("codex",),
-        user_dirs=("~/.codex",),
+        config_paths=("~/.codex",),
         instructions="agents_md",
         budget_bytes=32 * 1024,
         registration=Registration(
@@ -85,6 +113,11 @@ HOSTS: Tuple[HostSpec, ...] = (
         ),
         slot_profile="codex-cli",
         skills_dir=".agents/skills",  # UNVERIFIED: neither documented nor probed
+        # DOC: "The ChatGPT desktop app, Codex CLI, and IDE extension share this
+        # configuration" ($CODEX_HOME); the IDE and the app run bundled copies of the core.
+        surfaces=("Codex CLI", "Codex IDE extension", "ChatGPT desktop app (Codex mode)"),
+        aliases=("codex", "codex-ide", "codex-app", "chatgpt-desktop"),
+        apps=(("darwin", "Codex.app"),),  # DOC: the app's retained /Applications/Codex.app path
         notes=(
             "AGENTS.md over 32 KiB is truncated silently.",
             "Hooks need trust in /hooks and fail open on errors.",
@@ -96,7 +129,7 @@ HOSTS: Tuple[HostSpec, ...] = (
         vendor="Anthropic",
         client_names=("claude-code",),
         binaries=("claude",),
-        user_dirs=("~/.claude",),
+        config_paths=("~/.claude", "~/.claude.json"),
         instructions="agents_md_unless_claude_md",
         budget_bytes=40 * 1024,
         registration=Registration(
@@ -106,6 +139,10 @@ HOSTS: Tuple[HostSpec, ...] = (
         slot_profile="claude-code",
         skills_dir=".claude/skills",  # DOC: official docs, not probed
         notes=("PreToolUse hooks can block with exit 2.",),
+        # DOC: "Desktop and CLI read the same configuration files"; the VS Code extension
+        # bundles the CLI and the JetBrains plugin runs the installed one.
+        surfaces=("Claude Code CLI", "Claude Code IDE extensions", "Claude desktop app (Code tab)"),
+        aliases=("claude-desktop-code",),
     ),
     HostSpec(
         id="claude-desktop",
@@ -115,6 +152,10 @@ HOSTS: Tuple[HostSpec, ...] = (
         instructions="none",
         slot_profile=GENERIC,
         notes=("Identity only: Aegis does not register here (ADR 0005 H4).",),
+        # Chat and Cowork read claude_desktop_config.json, have no workspace and no AGENTS.md
+        # (DOC), and the MCP roots they send are the union of open sessions (live probe).
+        surfaces=("Claude desktop app (chat)", "Claude desktop app (Cowork)"),
+        redirect="the Claude desktop app's Code tab shares Claude Code's configuration: use --host claude-code",
     ),
     HostSpec(
         id="antigravity",
@@ -122,13 +163,16 @@ HOSTS: Tuple[HostSpec, ...] = (
         vendor="Google",
         client_names=("antigravity-client",),
         binaries=("agy",),
-        user_dirs=("~/.gemini/config", "~/.gemini/antigravity"),
+        config_paths=("~/.gemini/config", "~/.gemini/antigravity"),
         instructions="agents_md",
         budget_bytes=24000,
         registration=Registration(kind="json_file", path="~/.gemini/config/mcp_config.json", key="mcpServers"),
         slot_profile="antigravity",
         skills_dir=".agents/skills",  # DOC: official docs, not probed
         notes=("Sends no MCP roots; the workspace registry is its only binding route.",),
+        # DOC for hooks, rules and AGENTS.md; the app's MCP file is UNVERIFIED (same format).
+        surfaces=("Antigravity app", "Antigravity IDE", "agy CLI"),
+        aliases=("antigravity-app", "antigravity-ide"),
     ),
     HostSpec(
         id="gemini-cli",
@@ -136,7 +180,7 @@ HOSTS: Tuple[HostSpec, ...] = (
         vendor="Google",
         client_names=("gemini-cli-mcp-client",),
         binaries=("gemini",),
-        user_dirs=("~/.gemini",),
+        config_paths=("~/.gemini",),
         instructions="gemini_md",
         registration=None,
         slot_profile="gemini-cli",
@@ -149,6 +193,34 @@ HOSTS: Tuple[HostSpec, ...] = (
         retired=("gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
                  "accounts; use --host antigravity."),
     ),
+    HostSpec(
+        id="kiro",
+        display_name="Kiro",
+        vendor="AWS",
+        # SECONDARY: a Kiro IDE 0.11 log shows clientInfo "kiro"; the Kiro CLI's name is
+        # UNVERIFIED (closed source), so it is identified by AEGIS_CLIENT alone.
+        client_names=("kiro",),
+        binaries=("kiro-cli",),  # DOC
+        # DOC: "your .kiro configuration is shared across all of them" (IDE and CLI).
+        # KIRO_HOME relocates it for CLI V3 only; the IDE is not documented to honor it.
+        config_paths=("~/.kiro",),
+        instructions="agents_md",  # DOC: AGENTS.md is always included
+        # DOC: ~/.kiro/settings/mcp.json {"mcpServers": {name: {command, args, env}}}. The
+        # workspace .kiro/settings/mcp.json is not written: no committed MCP files (§3.2).
+        registration=Registration(kind="json_file", path="~/.kiro/settings/mcp.json", key="mcpServers"),
+        slot_profile=GENERIC,
+        verified=False,
+        notes=(
+            "Its row follows the vendor's documentation and is not yet checked on a real install.",
+            "No Aegis hooks in v4.1: Kiro's hook semantics for blocking are not verified.",
+            "MCP support must be switched on in Kiro's settings.",
+        ),
+        surfaces=("Kiro IDE", "Kiro CLI"),
+        aliases=("kiro-ide", "kiro-cli"),
+        # darwin: UNVERIFIED (the usual bundle name); win32: SECONDARY (issue #10486 shows
+        # %LOCALAPPDATA%\Programs\Kiro as the install directory).
+        apps=(("darwin", "Kiro.app"), ("win32", "Kiro")),
+    ),
 )
 
 _BY_ID = {h.id: h for h in HOSTS}
@@ -160,6 +232,48 @@ def get(host_id: str) -> HostSpec:
         return _BY_ID[host_id]
     except KeyError:
         raise KeyError(f"unknown host {host_id!r}; known hosts: {', '.join(_BY_ID)}") from None
+
+
+_BY_ALIAS = {alias: h.id for h in HOSTS for alias in h.aliases}
+
+
+def resolve(name: str) -> str:
+    """The plane id ``name`` names: a host id, or a surface alias of one; KeyError otherwise."""
+    if name in _BY_ID:
+        return name
+    try:
+        return _BY_ALIAS[name]
+    except KeyError:
+        raise KeyError(f"unknown host {name!r}; known hosts: {', '.join(_BY_ID)}; "
+                       f"surface aliases: {', '.join(_BY_ALIAS)}") from None
+
+
+_ENV_PREFIX = re.compile(r"^%([A-Za-z_][A-Za-z0-9_]*)%/")
+
+
+def _place(directory: str, home: Union[str, "os.PathLike[str]"], environ: Mapping[str, str]) -> Optional[str]:
+    """``directory`` of APP_DIRS made concrete, or None when its variable names no absolute path."""
+    if directory.startswith("~/"):
+        return os.path.join(os.fspath(home), *directory[2:].split("/"))
+    match = _ENV_PREFIX.match(directory)
+    if match:
+        base = environ.get(match.group(1), "")
+        if not base or not os.path.isabs(base):
+            return None
+        return os.path.join(base, *directory[match.end():].split("/"))
+    return directory
+
+
+def app_paths(host: HostSpec, home: Union[str, "os.PathLike[str]"], environ: Mapping[str, str],
+              platform: str) -> List[str]:
+    """Where ``host``'s desktop apps would be installed on ``platform``, in APP_DIRS order."""
+    names = [name for plat, name in host.apps if plat == platform]
+    found = []
+    for directory in APP_DIRS.get(platform, ()):
+        place = _place(directory, home, environ)
+        if place is not None:
+            found.extend(os.path.join(place, name) for name in names)
+    return found
 
 
 def all_hosts(phase: Optional[int] = None) -> Tuple[HostSpec, ...]:
