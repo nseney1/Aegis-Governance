@@ -342,3 +342,29 @@ class TestResolveTargetFilesFallbacks:
         assert resolve_target_files(args) == ["core/pr_feature.py"]
         assert args._diff_base == "origin/release-1.0...HEAD"
 
+
+    # Through `aegis check`: what resolve_target_files found decides what the run says.
+
+    def test_a_clean_tree_whose_base_diffs_are_empty_is_a_clean_repository(self, tmp_path, monkeypatch, capsys):
+        from aegis_cli.cli import main
+
+        monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
+        repo = self._repo(tmp_path)
+        (repo / ".aegis" / "rules").mkdir(parents=True)
+        self._git(repo, "commit", "-q", "--allow-empty", "-m", "nothing changed")
+        assert main(["check", "--workspace", str(repo)]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1: 0 files changed (clean repository)" in out
+        assert "no base commit" not in out
+
+    def test_hook_without_git_fails_closed(self, tmp_path, monkeypatch, capsys):
+        from aegis_cli.cli import main
+
+        ws = tmp_path / "ws"
+        (ws / ".aegis" / "rules").mkdir(parents=True)
+        (tmp_path / "no-git").mkdir()
+        monkeypatch.setenv("PATH", str(tmp_path / "no-git"))
+        assert main(["check", "--hook", "--workspace", str(ws)]) == 1
+        captured = capsys.readouterr()
+        assert "cannot read the staged changes" in captured.err
+        assert "PASSED" not in captured.out
