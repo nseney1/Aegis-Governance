@@ -10,6 +10,8 @@ checked on a real install; ``aegis init`` warns before using them.
 """
 from __future__ import annotations
 
+__all__ = ["GENERIC", "HOSTS", "INSTRUCTION_MODES", "HostSpec", "Registration", "all_hosts", "get", "identify"]
+
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 

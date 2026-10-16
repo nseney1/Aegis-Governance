@@ -11,7 +11,7 @@ expiry_days: 60
 created: "2026-10-15T16:18:02Z"
 impact_weight: 1.0
 tags: ["dogfood", "process", "review"]
-target_paths: [".github/**", "pyproject.toml", "VERSION", "README.md"]
+target_paths: [".github/**", "pyproject.toml", "aegis_core/_version.py", "README.md"]
 lineage:
   parent_id: null
   created_by: "manual"
@@ -52,7 +52,7 @@ Every PR review (human or subagent) must verify:
 1. All tests pass (`python3 -m pytest -q`)
 2. No merge conflict markers in any file
 3. Diff is scoped — no unrelated changes smuggled in
-4. Version strings are consistent (pyproject.toml, VERSION, README badge)
+4. Version strings are consistent (pyproject.toml, aegis_core/_version.py, README badge)
 
 ## 4. Why This Rule Exists
 

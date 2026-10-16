@@ -9,7 +9,7 @@ falsification: 0 findings in 20 sessions → prune
 target_paths:
   - docs/project/ROADMAP.md
   - docs/project/CHANGELOG.md
-  - VERSION
+  - aegis_core/_version.py
   - pyproject.toml
 triggers:
   - release
@@ -35,6 +35,6 @@ Phase 4.5 at all. This rule ensures that every release that ships features liste
 the roadmap also updates their status markers, and that new phases are added to the
 roadmap as they are defined.
 
-Detection: when a commit touches VERSION or CHANGELOG.md (release indicators), check
+Detection: when a commit touches aegis_core/_version.py or CHANGELOG.md (release indicators), check
 that ROADMAP.md is also in the changeset. If ROADMAP.md is not modified alongside a
 release, flag for review.

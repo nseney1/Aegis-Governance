@@ -40,6 +40,9 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core._version": 0,
     "aegis_core.errors": 0,
     "aegis_core.taxonomy": 0,
+    # Pure data, no aegis imports: the host table and the bootstrap text.
+    "aegis_core.hosts": 0,
+    "aegis_core.bootstrap": 0,
     "aegis_core.storage": 0,
     "aegis_core.gitsafe": 0,
     "aegis_core.config": 0,

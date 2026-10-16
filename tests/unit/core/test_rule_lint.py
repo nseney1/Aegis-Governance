@@ -149,12 +149,7 @@ def _repo_files() -> tuple[str, ...]:
 # files are outside lane b2c-contract, so their stale `VERSION` patterns are a strict
 # xfail logged for the rules owner: retarget them at aegis_core/_version.py, and the
 # xfail turns into a failure that removes the entry. The set must shrink, never grow.
-KNOWN_DEAD_TARGETS = {
-    ("invariant-ci-green-before-release.md", "VERSION"),
-    ("invariant-gitflow-review-gate.md", "VERSION"),
-    ("trap-roadmap-status-drift.md", "VERSION"),
-    ("trap-version-drift.md", "VERSION"),
-}
+KNOWN_DEAD_TARGETS: set = set()
 _DEAD = pytest.mark.xfail(
     strict=True, reason="D18 removed VERSION; the rule file is outside lane b2c-contract (retarget it)"
 )

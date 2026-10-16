@@ -11,7 +11,7 @@ expiry_days: 60
 created: "2026-10-15T16:18:02Z"
 impact_weight: 1.0
 tags: ["dogfood", "process", "release"]
-target_paths: ["VERSION", "pyproject.toml", ".github/workflows/**", ".github/scripts/**"]
+target_paths: ["aegis_core/_version.py", "pyproject.toml", ".github/workflows/**", ".github/scripts/**"]
 lineage:
   parent_id: null
   created_by: "manual"
@@ -20,7 +20,7 @@ lineage:
 ---
 # CI Green Before Release
 
-**Activation**: Any git tag creation, version bump (pyproject.toml, VERSION), release branch creation, or merge to main.
+**Activation**: Any git tag creation, version bump (pyproject.toml, aegis_core/_version.py), release branch creation, or merge to main.
 
 > **Role**: Blocks release operations when CI is failing on the target branch.
 
@@ -28,7 +28,7 @@ lineage:
 
 Before any of the following operations, CI must be **green** on the target branch:
 - Creating a git tag
-- Bumping version strings (pyproject.toml, VERSION, README badge)
+- Bumping version strings (pyproject.toml, aegis_core/_version.py, README badge)
 - Creating a `release/*` branch
 - Merging to `main`
 
