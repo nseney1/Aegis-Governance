@@ -12,6 +12,12 @@ concurrency guarantees live in one place:
   git. ``shared_locked(workspace, name)`` holds a lock file there with the same
   primitive as ``locked``. Lock order: the workspace lock first; a shared lock is a
   leaf, so nothing else is taken while holding one (LockOrderError otherwise).
+- ``ledger_site(workspace)`` / ``ledger_locked(workspace)``: where the outcome ledger and
+  its lock are (v4.2 #7). In git every worktree shares
+  ``<git common dir>/aegis/state/<ws-id>/{ledger.jsonl,lock}``, ``<ws-id>`` being
+  ``workspace_id``; the lock is a shared lock (a leaf, taken after the workspace lock when
+  a caller holds it). Outside git the ledger is ``.aegis/state/ledger.jsonl`` under the
+  workspace lock.
 - ``state_dir(workspace)``: ``.aegis/state``, refused when it (or ``.aegis``, or any
   entry directly inside it: the ledger, the lock, a log, a backup) is a symlink or
   resolves outside the workspace, so machine-local state is never written through a
@@ -32,6 +38,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -39,7 +46,7 @@ import secrets
 import stat
 import threading
 import time
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Set
+from typing import Any, Dict, Iterable, Iterator, List, NamedTuple, Optional, Set
 
 from aegis_core import gitsafe
 from aegis_core.errors import AegisError, LockTimeoutError, PathTraversalError
@@ -64,6 +71,7 @@ except ImportError:  # POSIX
 
 __all__ = [
     "JsonlRead",
+    "LedgerSite",
     "LockOrderError",
     "LockTimeoutError",
     "append_jsonl",
@@ -71,11 +79,16 @@ __all__ = [
     "atomic_write_bytes",
     "atomic_write_text",
     "fsync_dir",
+    "ledger_locked",
+    "ledger_site",
     "locked",
     "read_jsonl",
     "shared_locked",
     "shared_state_dir",
     "state_dir",
+    "workspace_id",
+    "workspace_relative",
+    "worktree_label",
 ]
 
 _O_BINARY = getattr(os, "O_BINARY", 0)
@@ -312,29 +325,47 @@ def shared_state_dir(workspace: Any, create: bool = True) -> Path:
     root = Path(os.fspath(workspace)).resolve()
     common = gitsafe.common_dir(root)
     if common is None:
-        if create:
-            return state_dir(root)
-        layout = WorkspaceLayout(root)
-        # state_dir()'s checks, without creating anything.
-        _confined(layout.aegis_dir, layout.root, _link_error, _outside_error, entries=False)
-        _confined(layout.state_dir, layout.root, _link_error, _outside_error)
-        return layout.state_dir
-    base = Path(_resolved(common))
-    shared = base / _SHARED_DIR_NAME
+        return _local_state_dir(root, create)
+    return _shared_dir(Path(_resolved(common)), create)
 
+
+def _local_state_dir(root: Path, create: bool) -> Path:
+    """The workspace's ``.aegis/state`` with ``state_dir``'s refusals; with ``create`` False
+    nothing is created."""
+    if create:
+        return state_dir(root)
+    layout = WorkspaceLayout(root)
+    _confined(layout.aegis_dir, layout.root, _link_error, _outside_error, entries=False)
+    _confined(layout.state_dir, layout.root, _link_error, _outside_error)
+    return layout.state_dir
+
+
+def _shared_errors(base: Path):
     def link_error(path: Path) -> PathTraversalError:
         return _shared_link_error(path, base)
 
     def outside_error(path: Path) -> PathTraversalError:
         return _shared_outside_error(path, base)
 
-    _confined(shared, base, link_error, outside_error)
-    if create and not os.path.lexists(shared):
+    return link_error, outside_error
+
+
+def _confined_shared(directory: Path, base: Path, create: bool) -> None:
+    """``_confined`` for a directory of the shared state under ``base`` (the resolved common
+    dir); with ``create`` a missing one is made private and checked again."""
+    link_error, outside_error = _shared_errors(base)
+    _confined(directory, base, link_error, outside_error)
+    if create and not os.path.lexists(directory):
         try:
-            shared.mkdir(mode=_SHARED_DIR_MODE)
+            directory.mkdir(mode=_SHARED_DIR_MODE)
         except FileExistsError:
             pass  # another worktree's process made it first; checked again below
-        _confined(shared, base, link_error, outside_error)
+        _confined(directory, base, link_error, outside_error)
+
+
+def _shared_dir(base: Path, create: bool) -> Path:
+    shared = base / _SHARED_DIR_NAME
+    _confined_shared(shared, base, create)
     return shared
 
 
@@ -368,6 +399,117 @@ def shared_locked(workspace: Any, name: str, timeout: float = LOCK_TIMEOUT_SECON
     key = os.path.join(_real(directory), name)
     with _hold(lock_path, key, timeout, shared=True) as path:
         yield path
+
+
+# ── The outcome ledger: one file for every worktree of a repository (v4.2 #7) ──
+
+_LEDGER_STATE_DIRNAME = "state"
+_LEDGER_FILE = "ledger.jsonl"
+_LEDGER_LOCK = "lock"
+_WORKSPACE_ID_LENGTH = 16
+
+
+class LedgerSite(NamedTuple):
+    """Where one workspace's ledger is. ``path``: the ledger file; ``lock``: the lock every
+    writer holds; ``shared``: whether it is the worktree-shared one (in the git common
+    dir) rather than ``.aegis/state/ledger.jsonl``; ``worktree``: the top of the work tree
+    asking, in POSIX spelling, set only when ``shared`` (rows carry it)."""
+
+    path: Path
+    lock: Path
+    shared: bool
+    worktree: Optional[str] = None
+
+
+def _relative_posix(root: Path, top: Path) -> Optional[str]:
+    """``root`` below ``top`` as one POSIX spelling per location ("." for the top itself),
+    or None when it cannot be named (another drive on Windows). Both are resolved, so a
+    link to the repository answers as the repository does, and normcase folds the case
+    Windows ignores, so the same workspace has one name in every worktree."""
+    try:
+        relative = os.path.relpath(os.path.normcase(_resolved(root)), os.path.normcase(_resolved(top)))
+    except ValueError:
+        return None
+    return relative.replace(os.sep, "/")
+
+
+def _id_of(relative: str) -> str:
+    # surrogatepass: a path from a non-UTF-8 file name still has an id.
+    return hashlib.sha256(relative.encode("utf-8", "surrogatepass")).hexdigest()[:_WORKSPACE_ID_LENGTH]
+
+
+def workspace_relative(workspace: Any) -> Optional[str]:
+    """``workspace``'s POSIX path relative to the git toplevel ("." for the toplevel itself):
+    one spelling for a workspace in every worktree of its repository. None outside a work
+    tree."""
+    root = Path(os.fspath(workspace)).resolve()
+    top = gitsafe.toplevel(root)
+    return None if top is None else _relative_posix(root, top)
+
+
+def workspace_id(workspace: Any) -> Optional[str]:
+    """The id naming this workspace's shared ledger directory: the first 16 hex characters
+    of the SHA-256 of ``workspace_relative``, the same in every worktree of the repository.
+    None outside a work tree."""
+    relative = workspace_relative(workspace)
+    return None if relative is None else _id_of(relative)
+
+
+def worktree_label(top: Any) -> str:
+    """How a work tree's top directory is written in a ledger row's ``worktree``: resolved,
+    POSIX spelling."""
+    return Path(_resolved(Path(os.fspath(top)))).as_posix()
+
+
+def ledger_site(workspace: Any, create: bool = True) -> LedgerSite:
+    """Where ``workspace``'s ledger and its lock are.
+
+    In a git work tree: ``<git common dir>/aegis/state/<ws-id>/ledger.jsonl`` and ``lock``
+    (see ``workspace_id``), with the confinement of ``shared_state_dir``: PathTraversalError
+    when ``aegis``, ``state`` or ``<ws-id>`` is a symlink, is not a directory or resolves
+    outside the common dir, or when an entry directly inside one of them is a symlink
+    (the ledger and the lock included) or a directory that resolves outside it. OSError
+    when one cannot be listed or created. The directories are made mode 0o700 when
+    ``create``; with it False nothing is created and the paths are returned whether or not
+    they exist. Outside a work tree, or when git cannot run: ``.aegis/state/ledger.jsonl``
+    and ``.aegis/state/lock`` with ``state_dir``'s refusals.
+    """
+    root = Path(os.fspath(workspace)).resolve()
+    common = gitsafe.common_dir(root)
+    top = gitsafe.toplevel(root) if common is not None else None
+    relative = _relative_posix(root, top) if top is not None else None
+    if common is None or top is None or relative is None:
+        local = _local_state_dir(root, create)
+        return LedgerSite(local / _LEDGER_FILE, local / _LEDGER_LOCK, False)
+    base = Path(_resolved(common))
+    state = _shared_dir(base, create) / _LEDGER_STATE_DIRNAME
+    _confined_shared(state, base, create)
+    directory = state / _id_of(relative)
+    _confined_shared(directory, base, create)
+    return LedgerSite(directory / _LEDGER_FILE, directory / _LEDGER_LOCK, True, worktree_label(top))
+
+
+@contextmanager
+def ledger_locked(workspace: Any, timeout: Optional[float] = None) -> Iterator[LedgerSite]:
+    """Hold the ledger lock of ``workspace`` for the block and yield its ``LedgerSite``.
+
+    In a git work tree that is ``<ws-id>/lock`` in the common dir, shared by every
+    worktree: the same primitive as ``locked`` (re-entrant per thread, bounded wait,
+    the OS lock across processes), and a leaf like ``shared_locked`` (take it after the
+    worktree lock, never before; take no lock while holding it: LockOrderError). Outside
+    git it is the workspace lock itself, so a ledger writer there also excludes whatever
+    else holds that lock. ``timeout`` defaults to LOCK_TIMEOUT_SECONDS, read when called.
+    Raises LockTimeoutError naming the lock file and the errors of ``ledger_site``.
+    """
+    wait = LOCK_TIMEOUT_SECONDS if timeout is None else timeout
+    site = ledger_site(workspace, create=True)
+    if not site.shared:
+        with locked(workspace, wait):
+            yield site
+        return
+    key = os.path.join(_real(site.lock.parent), site.lock.name)
+    with _hold(site.lock, key, wait, shared=True):
+        yield site
 
 
 def _open_regular(path: Path, flags: int) -> int:

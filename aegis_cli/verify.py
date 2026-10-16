@@ -11,6 +11,11 @@ With --lane, `aegis check` is the post-lane gate instead (aegis_core.lane_gate):
 lane's commits since its merge base with the base branch, checked for containment and
 Python test integrity.
 
+The v4.2 modes work on the whole workspace and take no FILES: --card (aegis_core.card),
+--write-baseline and --prune-baseline (aegis_core.baseline) and --partition
+(aegis_core.partition). A plain check with a baseline fails only on the findings the
+baseline does not hold (aegis_core.baseline); --base names where the baseline is read from.
+
 Exit codes: 0 pass, 1 findings or a failed run, 2 usage error.
 """
 from __future__ import annotations
@@ -95,6 +100,8 @@ def resolve_target_files(args: argparse.Namespace) -> list[str]:
     sets ``args._diff_base`` to the base ref the changes came from, or
     ``args._no_diff_base`` when nothing changed and no base ref could be diffed against
     (a shallow clone, a repository with no main branch), so a clean tree is not assumed.
+    With ``--base REF`` the targets are the uncommitted changes plus those since the merge
+    base of REF and HEAD; ``args._base_unreadable`` is set when git cannot give them.
     """
     git_cwd = _resolve_git_cwd(args)
     explicit = getattr(args, "files", None)
@@ -144,6 +151,16 @@ def resolve_target_files(args: argparse.Namespace) -> list[str]:
 
     # `git diff HEAD` plus `git diff --cached`: what a commit of the working tree would add.
     files = _workspace_relative(gitsafe.changed_files(git_cwd, "working") or [], git_cwd)
+    explicit_base = getattr(args, "base", None)
+    if explicit_base:
+        # --base names the commit the baseline is read from, so the files checked are everything
+        # this candidate changed since it: committed since the merge base, and uncommitted.
+        ranged = gitsafe.changed_files(git_cwd, "range", base=explicit_base)
+        if ranged is None:
+            setattr(args, "_base_unreadable", True)
+            return []
+        setattr(args, "_diff_base", f"{explicit_base}...HEAD")
+        return list(dict.fromkeys(files + _workspace_relative(ranged, git_cwd)))
     if not files:
         # Nothing uncommitted: check what this branch adds to its base, else the last commit.
         diffed = False
@@ -227,23 +244,25 @@ def _print_checkpoint(issues: list[dict], strict: bool) -> None:
         print(f"{label} {issue['message']}")
 
 
-def _run_lane_gate(args: argparse.Namespace) -> int:
-    """`aegis check --lane`: the post-lane gate (aegis_core.lane_gate). 0 pass, 1 findings
-    or a gate that could not run, 2 usage."""
-    from aegis_cli import sanitize_display
-    from aegis_core import gitsafe, lane_gate, team
+_MODE_FLAGS = (
+    ("--lane", "lane"),
+    ("--partition", "partition"),
+    ("--card", "card"),
+    ("--write-baseline", "write_baseline"),
+    ("--prune-baseline", "prune_baseline"),
+)
 
-    use_json = bool(getattr(args, "json", False) or str(getattr(args, "format", None) or "text").lower() == "json")
-    root = _resolve_git_cwd(args)
 
-    def fail(message: str, code: int) -> int:
-        if use_json:
-            print(json.dumps(lane_gate.error_report(root, args.lane, message), indent=2))
-        else:
-            print(f"Error: {sanitize_display(message, max_len=len(message))}", file=sys.stderr)
-        return code
+def _given_modes(args: argparse.Namespace) -> list[str]:
+    """The mode flags set on *args*, in the grammar's order. A namespace built by hand
+    (older SDK callers) lacks the v4.2 attributes: those count as not given."""
+    return [flag for flag, attr in _MODE_FLAGS
+            if (getattr(args, attr, None) is not None if attr == "lane" else bool(getattr(args, attr, False)))]
 
-    others = [flag for flag, given in (
+
+def _other_options(args: argparse.Namespace) -> list[str]:
+    """The options a mode would ignore, as the user wrote them."""
+    return [flag for flag, given in (
         ("FILES", bool(getattr(args, "files", None))),
         ("--full", bool(getattr(args, "full", False))),
         ("--plan", getattr(args, "plan", None) is not None),
@@ -253,6 +272,29 @@ def _run_lane_gate(args: argparse.Namespace) -> int:
         ("--dry-run", bool(getattr(args, "dry_run", False))),
         ("--llm-cmd", getattr(args, "llm_cmd", None) is not None),
     ) if given]
+
+
+def _wants_json(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "json", False) or str(getattr(args, "format", None) or "text").lower() == "json")
+
+
+def _run_lane_gate(args: argparse.Namespace) -> int:
+    """`aegis check --lane`: the post-lane gate (aegis_core.lane_gate). 0 pass, 1 findings
+    or a gate that could not run, 2 usage."""
+    from aegis_cli import sanitize_display
+    from aegis_core import gitsafe, lane_gate, team
+
+    use_json = _wants_json(args)
+    root = _resolve_git_cwd(args)
+
+    def fail(message: str, code: int) -> int:
+        if use_json:
+            print(json.dumps(lane_gate.error_report(root, args.lane, message), indent=2))
+        else:
+            print(f"Error: {sanitize_display(message, max_len=len(message))}", file=sys.stderr)
+        return code
+
+    others = _other_options(args)
     if others:
         return fail(f"--lane does not combine with {', '.join(others)}: it checks the lane's committed range", 2)
     try:
@@ -271,17 +313,259 @@ def _run_lane_gate(args: argparse.Namespace) -> int:
     return 0 if result.passed else 1
 
 
+# ── The v4.2 modes: whole-workspace reports, no FILES ───────────────────────
+
+_MODE_WHY = {
+    "--partition": "it reads the whole workspace's lanes",
+    "--card": "it reports on the whole workspace",
+    "--write-baseline": "it records the whole workspace's findings",
+    "--prune-baseline": "it re-checks the whole workspace against the baseline",
+}
+
+
+def _event_warning(root: str, kind: str, result: str, detail: dict) -> list[str]:
+    """Append an event; a log that cannot be written is a warning, never a failure."""
+    from aegis_core import events
+    from aegis_core.errors import AegisError
+
+    try:
+        events.append(root, kind, result, detail)
+    except (ValueError, TypeError, OSError, AegisError) as exc:
+        return [f"event not recorded: {exc}"]
+    return []
+
+
+def _shown(text: str, limit: int = 200) -> str:
+    from aegis_cli import sanitize_display
+
+    return sanitize_display(text, max_len=limit)
+
+
+def _run_mode(flag: str, args: argparse.Namespace) -> int:
+    """`aegis check --card | --write-baseline | --prune-baseline | --partition`. 0 done,
+    1 could not run, 2 usage. Every option the mode would ignore is refused."""
+    from aegis_cli import sanitize_display
+    from aegis_core import baseline
+
+    use_json = _wants_json(args)
+    root = _resolve_git_cwd(args)
+    source = f"aegis check {flag}"
+
+    def fail(message: str, code: int) -> int:
+        if use_json:
+            document = baseline.envelope(source, {"workspace": str(root)})
+            document.update(status="error", error=message)
+            print(json.dumps(document, indent=2))
+        else:
+            print(f"Error: {sanitize_display(message, max_len=len(message))}", file=sys.stderr)
+        return code
+
+    for lane_option, given in (("--paths", getattr(args, "paths", None) is not None),
+                               ("--base-policy", bool(getattr(args, "base_policy", False)))):
+        if given:
+            return fail(f"{lane_option} only applies with --lane", 2)
+    others = _other_options(args) + (["--base"] if getattr(args, "base", None) is not None else [])
+    if others:
+        return fail(f"{flag} does not combine with {', '.join(others)}: {_MODE_WHY[flag]}", 2)
+    if not os.path.isdir(root):
+        return fail(f"workspace does not exist: {root}", 1)
+    runner_for = {
+        "--card": _run_card,
+        "--write-baseline": _run_write_baseline,
+        "--prune-baseline": _run_prune_baseline,
+        "--partition": _run_partition,
+    }[flag]
+    return runner_for(args, str(root), use_json, source, fail)
+
+
+def _unbaselinable_lines(blocked: Any) -> list[str]:
+    lines = [f"    - {_shown(e.tool, 80)}: {_shown(e.target, 120)}: {_shown(e.detail)}" for e in list(blocked)[:20]]
+    if len(blocked) > 20:
+        lines.append(f"    ... and {len(blocked) - 20} more")
+    return lines
+
+
+def _unbaselinable_rows(blocked: Any) -> list[dict]:
+    return [{"tool": e.tool, "target": e.target, "detail": e.detail} for e in blocked]
+
+
+def _layer1_everywhere(root: str) -> tuple[list, Any, list[str]]:
+    """Layer 1 on every file of the workspace it has something to say about: the pairs,
+    their sources and the files checked."""
+    from aegis_core import baseline
+
+    files, _origin = baseline.list_files(root)
+    targets = baseline.checkable(root, files)
+    pairs, sources = baseline.run_fast(root, targets)
+    return pairs, sources, targets
+
+
+def _run_write_baseline(args: argparse.Namespace, root: str, use_json: bool, source: str, fail: Any) -> int:
+    from aegis_core import baseline
+
+    try:
+        pairs, sources, targets = _layer1_everywhere(root)
+    except Exception as exc:
+        return fail(f"Layer 1 could not run: {exc}", 1)
+    collected = baseline.collect(pairs, sources)
+    entries = {f.entry for f in collected.findings}
+    previous: frozenset = frozenset()
+    note = ""
+    try:
+        previous = baseline.load(root).entries
+    except baseline.BaselineError as exc:  # replaced below; a symlink is refused by write
+        note = f"the previous baseline was not valid ({exc})"
+    had_one = os.path.lexists(os.path.join(root, baseline.BASELINE_FILE))
+    try:
+        baseline.write(root, entries)
+    except (baseline.BaselineError, OSError) as exc:
+        return fail(str(exc), 1)
+    added, removed = len(entries - previous), len(previous - entries)
+    warnings = _event_warning(root, "baseline_written", "written", {
+        "mode": "write", "entries": len(entries), "added": added, "removed": removed,
+        "files_checked": len(targets), "unbaselinable": len(collected.blocked)})
+    if use_json:
+        document = baseline.envelope(source, {"workspace": root})
+        document.update(status="written", path=baseline.BASELINE_FILE, entries=len(entries), added=added,
+                        removed=removed, files_checked=len(targets),
+                        unbaselinable=_unbaselinable_rows(collected.blocked), warnings=warnings,
+                        notes=[note] if note else [])
+        print(json.dumps(document, indent=2))
+        return 0
+    delta = f" ({added} added, {removed} removed since the last baseline)" if had_one and not note else ""
+    print(f"aegis check --write-baseline: wrote {baseline.BASELINE_FILE}: {len(entries)} finding(s) "
+          f"from {len(targets)} file(s) checked{delta}")
+    if note:
+        print(f"  {note}")
+    if collected.blocked:
+        print(f"  {len(collected.blocked)} failure(s) cannot be baselined and keep failing aegis check:")
+        for line in _unbaselinable_lines(collected.blocked):
+            print(line)
+    print(f"  Commit {baseline.BASELINE_FILE}. aegis check then fails only on findings it does not hold.")
+    print("  In CI run aegis check --base <ref>: the baseline is then read from the base branch, not the candidate.")
+    for warning in warnings:
+        print(f"warning: {_shown(warning, 300)}")
+    return 0
+
+
+def _run_prune_baseline(args: argparse.Namespace, root: str, use_json: bool, source: str, fail: Any) -> int:
+    from aegis_core import baseline
+
+    try:
+        held = baseline.load(root)
+    except baseline.BaselineError as exc:
+        return fail(str(exc), 1)
+    if not held.active:
+        return fail(f"no baseline to prune: {baseline.BASELINE_FILE} does not exist", 1)
+    try:
+        pairs, sources, targets = _layer1_everywhere(root)
+    except Exception as exc:
+        return fail(f"Layer 1 could not run: {exc}", 1)
+    collected = baseline.collect(pairs, sources)
+    unjudged = set()
+    for (path, evidence), found in zip(pairs, collected.by_evidence):
+        if evidence.verdict or found is not None:
+            continue
+        if path is None:  # a check that covers no one file, such as a rule that cannot load
+            return fail(f"cannot prune: a check could not run ({_shown(evidence.tool, 80)}: "
+                        f"{_shown(evidence.detail)}); fix it first, then prune", 1)
+        unjudged.add(path)
+    current = {f.entry for f in collected.findings}
+    checked = set(targets)
+    kept, dropped = [], []
+    for entry in sorted(held.entries):
+        file_exists = os.path.isfile(os.path.join(root, *entry.path.split("/")))
+        judged = file_exists and entry.path in checked and entry.path not in unjudged
+        (dropped if entry not in current and (not file_exists or judged) else kept).append(entry)
+    not_added = len(current - held.entries)
+    warnings: list[str] = []
+    if dropped:
+        try:
+            baseline.write(root, kept)
+        except (baseline.BaselineError, OSError) as exc:
+            return fail(str(exc), 1)
+        warnings = _event_warning(root, "baseline_written", "pruned", {
+            "mode": "prune", "entries": len(kept), "added": 0, "removed": len(dropped),
+            "files_checked": len(targets), "unbaselinable": len(collected.blocked)})
+    if use_json:
+        document = baseline.envelope(source, {"workspace": root})
+        document.update(status="pruned" if dropped else "unchanged", path=baseline.BASELINE_FILE,
+                        entries=len(kept), removed=len(dropped), kept=len(kept), not_added=not_added,
+                        files_checked=len(targets), warnings=warnings)
+        print(json.dumps(document, indent=2))
+        return 0
+    if dropped:
+        print(f"aegis check --prune-baseline: pruned {baseline.BASELINE_FILE}: dropped {len(dropped)} fixed "
+              f"finding(s), {len(kept)} kept")
+    else:
+        print("aegis check --prune-baseline: nothing to prune: every entry still matches a finding")
+    if not_added:
+        print(f"  {not_added} current finding(s) are not in the baseline and were not added: aegis check fails on "
+              "them; --write-baseline records them")
+    for warning in warnings:
+        print(f"warning: {_shown(warning, 300)}")
+    return 0
+
+
+def _print_lines(lines: list[str]) -> None:
+    """Report lines carry repository-chosen text (paths, rule ids, matched code): no terminal controls."""
+    for line in lines:
+        print(_shown(line, max(len(line), 80)))
+
+
+def _run_card(args: argparse.Namespace, root: str, use_json: bool, source: str, fail: Any) -> int:
+    """`aegis check --card`: the day-0 card (aegis_core.card). Read-only."""
+    from aegis_core import card
+
+    try:
+        built = card.build(root)
+    except Exception as exc:
+        return fail(f"the card could not be built: {type(exc).__name__}: {exc}", 1)
+    if use_json:
+        print(json.dumps(built.as_dict(), indent=2))
+    else:
+        _print_lines(built.text_lines())
+    return 0
+
+
+def _run_partition(args: argparse.Namespace, root: str, use_json: bool, source: str, fail: Any) -> int:
+    """`aegis check --partition --split ...`: the cross-lane edge report (aegis_core.partition).
+    A report: exit 0 even when it finds edges."""
+    from aegis_core import partition
+
+    try:
+        lanes = partition.parse_splits(getattr(args, "split", None))
+    except partition.PartitionUsage as exc:
+        return fail(str(exc), 2)
+    try:
+        report = partition.check(root, lanes)
+    except Exception as exc:
+        return fail(f"the partition report could not be built: {type(exc).__name__}: {exc}", 1)
+    if use_json:
+        print(json.dumps(report.as_dict(), indent=2))
+    else:
+        _print_lines(report.text_lines())
+    return 0
+
+
 def run_verify(args: argparse.Namespace) -> int:
     """Run `aegis check` for *args*. Returns 0, 1 or 2 (see the module docstring)."""
+    from aegis_core import baseline
     from aegis_core.inference_provider import MISSING_BACKEND, LLMCommandError, resolve_backend
     from aegis_core.verification.pipeline import VerificationPipeline
     from aegis_core.verification import runner
     from aegis_core.workspace.base import Workspace
 
-    if getattr(args, "lane", None) is not None:
+    modes = _given_modes(args)
+    if len(modes) > 1:
+        return _usage_error(f"{modes[0]} and {modes[1]} are modes of their own: give one")
+    if getattr(args, "split", None) and modes != ["--partition"]:
+        return _usage_error("--split only applies with --partition")
+    if modes == ["--lane"]:
         return _run_lane_gate(args)
+    if modes:
+        return _run_mode(modes[0], args)
     stray = [flag for flag, given in (
-        ("--base", getattr(args, "base", None) is not None),
         ("--paths", getattr(args, "paths", None) is not None),
         ("--base-policy", bool(getattr(args, "base_policy", False))),
     ) if given]
@@ -326,6 +610,16 @@ def run_verify(args: argparse.Namespace) -> int:
         print(f"Error: repo root does not exist: {repo_root}", file=sys.stderr)
         return 1
 
+    held = baseline.Baseline(frozenset(), None, "none")
+    if not getattr(args, "dry_run", False):
+        try:
+            held = baseline.load(repo_root, getattr(args, "base", None))
+        except baseline.BaselineUsage as exc:
+            return _usage_error(_shown(str(exc), 300))
+        except baseline.BaselineError as exc:
+            print(f"Error: {_shown(str(exc), 300)}", file=sys.stderr)
+            return 1
+
     task_plan = None
     if layer2:
         task_plan = resolve_task_plan(args, repo_root)
@@ -341,6 +635,10 @@ def run_verify(args: argparse.Namespace) -> int:
 
     target_files = resolve_target_files(args)
     if getattr(args, "files", None) and not target_files:
+        return 1
+    if getattr(args, "_base_unreadable", False):
+        print(f"Error: cannot list what changed since {_shown(str(args.base), 120)}: needs history: fetch with "
+              "fetch-depth 0 (no merge base with HEAD)", file=sys.stderr)
         return 1
     staged = hook and not getattr(args, "files", None)
     if staged and getattr(args, "_staged_unreadable", False):
@@ -387,11 +685,15 @@ def run_verify(args: argparse.Namespace) -> int:
         if use_json:
             payload = format_layer1_json_payload(not blocking, [], [], summary)
             payload["checkpoint_issues"] = issues
+            if held.active:
+                payload["baseline"] = {**held.as_dict(), "grandfathered": 0, "new": [], "blocked": []}
             if layer2:
                 payload["layer2"] = {"verdict": None, "summary": layer2_summary}
             print(json.dumps(payload, indent=2))
         else:
             print(summary)
+            if held.active:
+                print(f"{held.label}: 0 finding(s) grandfathered, 0 new")
             if layer2:
                 print(layer2_summary)
         return 1 if blocking else 0
@@ -399,18 +701,31 @@ def run_verify(args: argparse.Namespace) -> int:
     try:
         if staged:
             # What `git commit` records is the index, not the working tree.
-            results = runner.run_layer1_on_index(target_files, repo_root)
+            pairs = baseline.run_grouped(
+                lambda group: runner.run_layer1_on_index(group, repo_root), target_files, root=repo_root)
         else:
             # Mutation testing is slow; it runs only behind --full (fast_mode otherwise).
-            results = runner.run_layer1(
-                changed_files=target_files,
-                repo_root=repo_root,
-                fast_mode=not layer2,
-                diff_base=getattr(args, "_diff_base", None),
-            )
+            pairs = baseline.run_grouped(
+                lambda group: runner.run_layer1(
+                    changed_files=group,
+                    repo_root=repo_root,
+                    fast_mode=not layer2,
+                    diff_base=getattr(args, "_diff_base", None),
+                ),
+                target_files, root=repo_root)
     except Exception as exc:
         print(f"Error: Layer 1 could not run: {exc}", file=sys.stderr)
         return 1
+    results = [evidence for _path, evidence in pairs]
+    applied = None
+    if held.active:
+        # The baseline decides which failed checks count. Evidence it does not hold stays failing.
+        try:
+            applied = baseline.apply(pairs, baseline.Sources(repo_root, staged=staged), held)
+        except Exception as exc:  # fail closed: a baseline that cannot be applied excuses nothing
+            print(f"Error: the baseline could not be applied: {_shown(str(exc), 300)}", file=sys.stderr)
+            return 1
+        results = list(applied.effective)
 
     tools_pass = runner.gate_verdict(results)
     layer1_pass = tools_pass and not blocking
@@ -426,6 +741,20 @@ def run_verify(args: argparse.Namespace) -> int:
             elif r.tool == runner.INDEX_NOTE_TOOL:  # what the hook could not read from git
                 print(f"note: {r.detail}")
         print(summary)
+        if applied is not None:
+            print(f"{held.label}: {len(applied.grandfathered)} finding(s) grandfathered, {len(applied.new)} new")
+            for f in applied.new:
+                print(_shown(f"new: {f.path}:{f.line} {f.rule}  {f.text}", 300))
+
+    def _record_baseline(passed: bool) -> None:
+        if applied is None:
+            return
+        for warning in _event_warning(repo_root, "baseline_check", "pass" if passed else "fail", {
+            "label": held.label, "source": held.source, "commit": held.commit,
+            "entries": len(held.entries), "files": len(target_files),
+            "grandfathered": len(applied.grandfathered), "new": len(applied.new), "blocked": len(applied.blocked),
+        }):
+            print(f"warning: {_shown(warning, 300)}", file=sys.stderr)
 
     def _record_telemetry(passed: bool, verdict: Any) -> None:
         # Advisory rule-trigger telemetry: it must never change the verdict.
@@ -445,12 +774,20 @@ def run_verify(args: argparse.Namespace) -> int:
     def _emit_json(passed: bool, layer2_result: Any = None) -> None:
         payload = format_layer1_json_payload(passed, target_files, results, summary)
         payload["checkpoint_issues"] = issues
+        if applied is not None:
+            payload["baseline"] = {
+                **held.as_dict(),
+                "grandfathered": len(applied.grandfathered),
+                "new": [f.as_dict() for f in applied.new],
+                "blocked": _unbaselinable_rows(applied.blocked),
+            }
         if layer2_result is not None:
             payload["layer2"] = format_layer2_json(layer2_result.arbitration_result, layer2_result.verdict)
         print(json.dumps(payload, indent=2))
 
     if not layer2:
         _record_telemetry(tools_pass, "PASS" if tools_pass else "FAIL")
+        _record_baseline(layer1_pass)
         if use_json:
             _emit_json(layer1_pass)
         return 0 if layer1_pass else 1
@@ -480,6 +817,7 @@ def run_verify(args: argparse.Namespace) -> int:
 
     passed = layer1_pass and verdict_to_exit_code(pipeline_res.verdict) == 0
     _record_telemetry(tools_pass and pipeline_res.passed, pipeline_res.verdict)
+    _record_baseline(passed)
     if use_json:
         _emit_json(passed, pipeline_res)
     elif pipeline_res.arbitration_result:

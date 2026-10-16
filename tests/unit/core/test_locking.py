@@ -400,5 +400,7 @@ def test_state_written_before_any_migration_never_shows_in_git_status(tmp_path: 
     with locked(repo):
         pass
 
-    assert (repo / ".aegis" / "state" / "ledger.jsonl").is_file()
+    # The worktree's own state (its lock) is in .aegis/state; the ledger is shared, in the common dir.
+    assert (repo / ".aegis" / "state" / "lock").is_file()
+    assert ledger.ledger_path(repo).is_file() and not (repo / ".aegis" / "state" / "ledger.jsonl").exists()
     assert _git(repo, "status", "--porcelain", "--untracked-files=all") == ""

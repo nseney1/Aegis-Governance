@@ -1,10 +1,12 @@
 {
   "command_resolution": {
+    "benchmark": "benchmark",
     "check": "check",
     "doctor": "doctor",
     "hook": "hook",
     "init": "init",
     "migrate": "migrate",
+    "package": "package",
     "rule": "rule",
     "scan": "scan",
     "skills": "skills",
@@ -91,6 +93,78 @@
       }
     ],
     "commands": {
+      "benchmark": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": 20,
+            "dest": "runs",
+            "flags": [
+              "--runs"
+            ],
+            "help": "Timed runs of each measurement, 1 to 1000 (default 20); one untimed warm-up of the hook and Layer 1 comes first",
+            "kind": "store",
+            "metavar": "N",
+            "nargs": null,
+            "required": false,
+            "type": "_runs"
+          }
+        ],
+        "description": "Time the aegis_scan answer (latency p50/p95, payload bytes, approximate tokens), the `aegis hook run pre-tool` hook as a host starts it (a fresh Python process), and Layer 1 throughput (files per second), on a built-in fixture corpus in a temporary directory: nothing in your repository is read or written. It appends one benchmark event to this workspace's events log. This is not an efficacy measure: it says nothing about whether Aegis makes an agent's code better. Compare only runs of the same corpus (its sha256 is in the output) on the same machine.",
+        "help": "Measure scan and hook latency, payload size and Layer 1 throughput (not an efficacy measure)"
+      },
       "check": {
         "aliases": [],
         "arguments": [
@@ -273,12 +347,76 @@
             "required": false
           },
           {
+            "const": true,
+            "default": false,
+            "dest": "partition",
+            "flags": [
+              "--partition"
+            ],
+            "help": "Report the cross-lane call, def and import edges between lanes planned with --split (at least two), and the [FROZEN_SIGNATURES] of the functions that cross a lane boundary. Python, and Rust when its driver is enabled. A report: it changes nothing and exits 0 even when it finds edges",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "card",
+            "flags": [
+              "--card"
+            ],
+            "help": "Print the day-0 card: languages, AST drivers, rules by type, the Layer 1 pass rate on the files and the 5 files with the most findings (above 2000 files it samples, and says so). Changes nothing and never reads baseline.json; --json for the machine-readable form",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "write_baseline",
+            "flags": [
+              "--write-baseline"
+            ],
+            "help": "Record every current Layer 1 finding in .aegis/baseline.json, so that aegis check then fails only on new ones. Findings are fingerprinted by rule, path, matched line and its occurrence, not by line number. A failure that is not about a line (a rule that cannot load, a file that cannot be parsed) is listed and is never recorded",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "prune_baseline",
+            "flags": [
+              "--prune-baseline"
+            ],
+            "help": "Drop the entries of .aegis/baseline.json whose findings are fixed (or whose file is gone). It never adds a finding, and it refuses to run while a check cannot run",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "split",
+            "flags": [
+              "--split"
+            ],
+            "help": "With --partition: one planned lane and the globs of its files; give at least two. They match as rule target_paths do: a glob without '/' matches at any depth",
+            "kind": "append",
+            "metavar": "NAME=GLOB[,GLOB...]",
+            "nargs": null,
+            "required": false
+          },
+          {
             "default": null,
             "dest": "base",
             "flags": [
               "--base"
             ],
-            "help": "With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0",
+            "help": "With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection",
             "kind": "store",
             "metavar": "REF",
             "nargs": null,
@@ -981,7 +1119,7 @@
             "flags": [
               "--host"
             ],
-            "help": "Register the Aegis MCP server with these hosts, or 'auto' for the ones found on this machine (by CLI on PATH, config directory or desktop app). Without it, found hosts are only listed. A host is the config plane its surfaces share, so a surface name selects its host: codex-cli (Codex CLI, Codex IDE extension, ChatGPT desktop app (Codex mode); also codex, codex-ide, codex-app, chatgpt-desktop); claude-code (Claude Code CLI, Claude Code IDE extensions, Claude desktop app (Code tab); also claude-desktop-code); antigravity (Antigravity app, Antigravity IDE, agy CLI; also antigravity-app, antigravity-ide); kiro, experimental (Kiro IDE, Kiro CLI; also kiro-ide, kiro-cli)",
+            "help": "Register the Aegis MCP server with these hosts, or 'auto' for the ones found on this machine (by CLI on PATH, config directory or desktop app). Without it, found hosts are only listed. A host is the config plane its surfaces share, so a surface name selects its host: codex-cli (Codex CLI, Codex IDE extension, ChatGPT desktop app (Codex mode); also codex, codex-ide, codex-app, chatgpt-desktop); claude-code (Claude Code CLI, Claude Code IDE extensions, Claude desktop app (Code tab); also claude-desktop-code); antigravity (Antigravity app, Antigravity IDE, agy CLI; also antigravity-app, antigravity-ide); kiro, experimental (Kiro IDE, Kiro CLI; also kiro-ide, kiro-cli); cursor, experimental (Cursor IDE, Cursor CLI (cursor-agent); also cursor-ide, cursor-cli); copilot, experimental (GitHub Copilot in VS Code (agent mode), GitHub Copilot CLI; also github-copilot, copilot-cli, vscode-copilot); windsurf, experimental (Windsurf IDE; also windsurf-ide)",
             "kind": "store",
             "metavar": "HOST[,HOST]|auto",
             "nargs": null,
@@ -1222,6 +1360,102 @@
         ],
         "description": "Plan, then with --apply perform, the move to the v4 layout: the v3 ledger becomes .aegis/state/ledger.jsonl (v2 rows), aegis.conf/slots.yaml/config.yaml become .aegis/config.json, .soma cells move to .aegis/rules/<type>/, derived counters leave rule frontmatter and v3 runtime state is removed. Every changed file is backed up to .aegis/state/migrate-backup-<time>/ first; running it again changes nothing.",
         "help": "Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply)"
+      },
+      "package": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "host",
+            "flags": [
+              "--host"
+            ],
+            "help": "The host to package for; only claude-code",
+            "kind": "store",
+            "metavar": "claude-code",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "out",
+            "flags": [
+              "--out"
+            ],
+            "help": "Where to write the plugin (default ./aegis-claude-plugin in the workspace); an existing directory must be empty or an earlier Aegis plugin",
+            "kind": "store",
+            "metavar": "DIR",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "help": "Report what would be written; write nothing",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "description": "Write a Claude Code plugin directory: .claude-plugin/plugin.json, the Aegis MCP server (.mcp.json), the pre-tool hook (hooks/hooks.json) and the packaged skills (skills/). Experimental: nothing is published, and the directory names absolute paths on this machine, so it works only here. Only --host claude-code is supported; the Gemini CLI is retired. In an Aegis workspace a real run appends one package event.",
+        "help": "Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published"
       },
       "rule": {
         "aliases": [],
@@ -1630,6 +1864,203 @@
             "description": null,
             "help": "Demote a rule down lifecycle tiers (no RULE_ID: list candidates)"
           },
+          "export": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "out",
+                "flags": [],
+                "help": "The pack file to write",
+                "kind": "store",
+                "metavar": "OUT",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "choices": [
+                  "invariant",
+                  "trap",
+                  "gate",
+                  "boundary",
+                  "persona",
+                  "contract"
+                ],
+                "default": null,
+                "dest": "types",
+                "flags": [
+                  "--type"
+                ],
+                "help": "Export only rules of this type (repeatable): invariant, trap, gate, boundary, persona, contract",
+                "kind": "append",
+                "metavar": "TYPE",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "min_fitness",
+                "flags": [
+                  "--min-fitness"
+                ],
+                "help": "Export only rules whose fitness in this repository's ledger is at least X",
+                "kind": "store",
+                "metavar": "X",
+                "nargs": null,
+                "required": false,
+                "type": "float"
+              }
+            ],
+            "description": "Write the workspace's rules to OUT as a pack: their text and digests, no ledger rows. The pack is unsigned: its sha256 shows it was not altered after export, not who made it. A rule that cannot be loaded, or that still has derived or retired keys (run aegis migrate --apply), stops the export; an expired rule is skipped and reported. An existing regular file at OUT is replaced; a link is refused.",
+            "help": "Write the workspace's rules to an unsigned pack file"
+          },
+          "import": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "pack",
+                "flags": [],
+                "help": "The pack file to read",
+                "kind": "store",
+                "metavar": "PACK",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "rename",
+                "flags": [
+                  "--rename"
+                ],
+                "help": "Give a rule whose id is taken a free id (<id>-imported, -imported-2, ...) instead of refusing",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Check the pack and report what would be added; write nothing",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "description": "Add the rules of PACK to the workspace's .aegis/rules. The pack is unsigned: its digests show it was not altered after export, not who made it, so every entry is checked (its path must be exactly <type dir>/<id>.md, and the rule loader must accept it) and the pack is imported whole or not at all. An id the workspace already has refuses the pack unless --rename gives the incoming rule a free id. With --workspace DIR, DIR itself must hold .aegis (there is no walk-up from it). Review the imported rules before you rely on them.",
+            "help": "Add the rules of an unsigned pack file to the workspace"
+          },
           "list": {
             "aliases": [],
             "arguments": [
@@ -1819,7 +2250,7 @@
           }
         },
         "description": null,
-        "help": "Manage rule lifecycle (list, create, promote, demote, archive)"
+        "help": "Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs"
       },
       "scan": {
         "aliases": [],
@@ -3014,6 +3445,12 @@
   "registry": [
     {
       "aliases": [],
+      "category": "Plumbing",
+      "help": "Measure scan and hook latency, payload size and Layer 1 throughput (not an efficacy measure)",
+      "name": "benchmark"
+    },
+    {
+      "aliases": [],
       "category": "Daily Workflow & Verification",
       "help": "Verify changes: Layer 1 checks, plus a Layer 2 model review with --full",
       "name": "check"
@@ -3044,8 +3481,14 @@
     },
     {
       "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published",
+      "name": "package"
+    },
+    {
+      "aliases": [],
       "category": "Rule Evolution & Intelligence",
-      "help": "Manage rule lifecycle (list, create, promote, demote, archive)",
+      "help": "Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs",
       "name": "rule"
     },
     {

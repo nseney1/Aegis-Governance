@@ -332,14 +332,14 @@ def _description() -> str:
 def test_the_opening_names_every_host_init_registers_with_no_version_qualifier():
     """The opening words name every verified host `aegis init --host` registers (search
     snippets stop near 160 characters), and neither they nor the PyPI summary qualify one
-    of them with a later version. An experimental row (verified=False, such as Kiro) is
+    of them with a later version. An experimental row (verified=False, such as Kiro or Cursor) is
     listed in the host table, not promised in the opening."""
     from aegis_cli.install_hosts import parse_hosts, registrable_hosts
 
     lead = _lead(README.read_text(encoding="utf-8"))
     named = [h for h in registrable_hosts() if h.verified]
     assert {h.display_name for h in named} == {"Claude Code", "Codex CLI", "Antigravity"}
-    assert {h.id for h in registrable_hosts() if not h.verified} == {"kiro"}
+    assert {h.id for h in registrable_hosts() if not h.verified} == {"kiro", "cursor", "copilot", "windsurf"}
     for host in named:
         assert parse_hosts(host.id) == [host.id]
         assert host.display_name in lead[:160], host.display_name

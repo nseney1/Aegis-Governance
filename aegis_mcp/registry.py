@@ -154,10 +154,10 @@ TOOL_DEFINITIONS = [
             "self-report row in the outcome ledger; it never promotes a rule by itself."
         ),
         "annotations": {
+            # Only readOnlyHint is declared: hosts treat annotations as untrusted hints and no host
+            # is documented to skip the prompt for a self-declared non-destructive write, so the
+            # write tool claims nothing beyond "not read-only" and the MCP defaults apply.
             "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
             "title": "Report Outcome",
         },
         "inputSchema": {

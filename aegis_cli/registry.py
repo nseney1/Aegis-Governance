@@ -132,11 +132,13 @@ def create_default_registry() -> CommandRegistry:
     """Create a CommandRegistry holding the v4 command set."""
     reg = CommandRegistry()
 
+    from aegis_cli.benchmark import BenchmarkCommand
     from aegis_cli.check import CheckCommand
     from aegis_cli.doctor import DoctorCommand
     from aegis_cli.hooks import HookCommand
     from aegis_cli.init import InitCommand
     from aegis_cli.migrate import MigrateCommand
+    from aegis_cli.package import PackageCommand
     from aegis_cli.rule import RuleCommand
     from aegis_cli.scan import ScanCommand
     from aegis_cli.skills_sync import SkillsCommand
@@ -158,6 +160,8 @@ def create_default_registry() -> CommandRegistry:
         HookCommand,
         TeamCommand,
         SkillsCommand,
+        BenchmarkCommand,
+        PackageCommand,
     ):
         reg.register(cmd_cls)
 

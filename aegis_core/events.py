@@ -54,6 +54,9 @@ KINDS = (
     "pack_import",
     "init_host",
     "benchmark",
+    "baseline_written",
+    "baseline_check",
+    "package",
 )
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 

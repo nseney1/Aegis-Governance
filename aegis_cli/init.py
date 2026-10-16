@@ -987,6 +987,25 @@ def report_partial(report: Report, exc: Exception, actions: Sequence[Step], done
         report.error(f"Nothing was {done}.")
 
 
+def _print_card(report: Report, root: Path) -> None:
+    """The day-0 card (aegis_core.card), as `aegis check --card` prints it: what this
+    repository looks like to Aegis now that it is set up. Advisory: init never fails for it."""
+    if report.json_mode:
+        return
+    from aegis_cli import sanitize_display
+
+    try:
+        from aegis_core import card
+
+        lines = card.build(root).text_lines()
+    except Exception as exc:
+        report.warn(f"the day-0 card could not be built: {type(exc).__name__}: {exc}")
+        return
+    for line in lines:
+        report.say(sanitize_display(f"  {line}", max_len=max(len(line) + 2, 80)))
+    report.say()
+
+
 def run_init(args: argparse.Namespace) -> int:
     """Main init flow. Returns the exit code (0 ok, 1 refused or failed, 2 usage)."""
     from aegis_core.ast.detect import detect_project_languages
@@ -1125,6 +1144,7 @@ def run_init(args: argparse.Namespace) -> int:
     else:
         report.say("  Done! No agent host was registered; to add one: aegis init --host HOST[,HOST]")
     report.say()
+    _print_card(report, root)
     report.say("  After a session, run: aegis status")
     report.say()
     _report_ci(report, actions)
