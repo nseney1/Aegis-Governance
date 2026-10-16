@@ -32,7 +32,7 @@
     "organism": 0,
     "metabolism": 0,
     "homeostasis": 0,
-    "contract_snapshots": 2,
+    "contract_snapshots": 5,
     "soma_imports": 0,
     "soma_classes": 0,
     "organelle_type_literals": 0
