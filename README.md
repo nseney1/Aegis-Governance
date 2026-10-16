@@ -70,7 +70,7 @@ forbid_ast:
 Never call `eval` or `exec` on data. Parse it with `json.loads` or `ast.literal_eval`.
 ```
 
-An agent that calls `aegis_scan` before editing `app.py` gets this rule (`aegis scan app.py` shows the same thing in a shell). If the change calls `eval` anyway, the check fails, and so does `git commit`, because the pre-commit hook runs the same check. With no file arguments, `aegis check` looks only at tracked files: your changes and staged files (on a clean tree, what the branch adds to its base). It skips untracked files, so `git add` a new file first, or name it: `aegis check app.py`.
+An agent that calls `aegis_scan` before editing `app.py` gets this rule (`aegis scan app.py` shows the same thing in a shell). If the change calls `eval` anyway, the check fails, and so does `git commit`, because the pre-commit hook runs the same check on the staged content, which is what the commit records. If the repository already has a shell pre-commit hook, the Aegis block goes first in it, after the old file is copied to `~/.aegis/backups/`; a hook written in another language stops `aegis init` before it writes anything, and `aegis hook install --force` replaces it (keeping the copy). With no file arguments, `aegis check` looks only at tracked files: your changes and staged files (on a clean tree, what the branch adds to its base). It skips untracked files, so `git add` a new file first, or name it: `aegis check app.py`.
 
 ```text
 $ git add app.py
@@ -154,7 +154,7 @@ Aegis does not claim enforcement it lacks. `aegis doctor` reports these tiers, i
 
 **Does Aegis send my code anywhere?** No. The CLI and the MCP server make no network calls, and the ledger stays in `.aegis/state/` on your machine. The exception is Layer 2: `aegis check --full` pipes the change to the model command you name with `--llm-cmd`, for example `claude -p`. `aegis init --host` also runs your hosts' own CLIs to register the server.
 
-**I used Aegis 3.x. How do I upgrade?** Run `aegis migrate` to see the plan, then `aegis migrate --apply` (it backs up every file it changes). Then run `aegis init --host <your hosts>` (for example `--host claude-code,codex-cli`, or `--host auto`) to register the MCP server and write the `AGENTS.md` bootstrap. Last, run `aegis doctor --fix` to remove stale v3 MCP entries (such as `soma`) and legacy rule blocks in instruction files, again backing up each file first. The [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md#upgrading-from-3x) lists what `aegis migrate` converts.
+**I used Aegis 3.x. How do I upgrade?** Run `aegis migrate` to see the plan, then `aegis migrate --apply` (it backs up every file it changes). Until you do, `aegis status`, `aegis scan` and `aegis sync` refuse to run in that repository and name the v3 files v4 does not read, `aegis check` warns and still runs, and `aegis init` refuses while `.soma/` holds rules. Then run `aegis init --host <your hosts>` (for example `--host claude-code,codex-cli`, or `--host auto`) to register the MCP server and write the `AGENTS.md` bootstrap. Last, run `aegis doctor --fix` to remove stale v3 MCP entries (such as `soma`) and legacy rule blocks in instruction files, again backing up each file first. The [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md#upgrading-from-3x) lists what `aegis migrate` converts.
 
 ## Documentation, contributing, security, license
 

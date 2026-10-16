@@ -304,6 +304,27 @@ def test_the_readme_never_advises_running_aegis_with_python_dash_m():
     assert "-m aegis_mcp" not in how.replace("never registers `python -m aegis_mcp`", "")
 
 
+UNSAFE_KINDS = "a Python that runs `-m` or `-c` without `-I` or a script by a relative path, or either behind `env`"
+
+
+def test_the_docs_name_the_unsafe_registrations_doctor_reports():
+    """how-it-works, SECURITY and the changelog list what `aegis doctor` calls an unsafe MCP
+    registration: each kind they name is one launch_risk flags, and isolated mode is not."""
+    import sys
+
+    from aegis_cli.install_hosts import launch_risk
+
+    for doc in (HOW, ROOT / "SECURITY.md", ROOT / "CHANGELOG.md"):
+        assert UNSAFE_KINDS in doc.read_text(encoding="utf-8"), doc.name
+    py = sys.executable
+    env = os.path.join(os.path.dirname(py), "env")
+    for argv in (["aegis-mcp"], [py, "-m", "aegis_mcp"], [py, "-c", "x"], [py, "aegis_mcp/server.py"],
+                 [env, "python3", "-m", "aegis_mcp"], [env, py, "aegis_mcp/server.py"]):
+        assert launch_risk(argv), argv
+    for argv in ([py, "-I", "-m", "aegis_mcp"], [py, "-I", "-c", "x"], [env, py, "-I", "-c", "x"]):
+        assert launch_risk(argv) is None, argv
+
+
 def _description() -> str:
     return re.search(r'^description = "(.*)"$', PYPROJECT.read_text(encoding="utf-8"), re.M).group(1)
 
