@@ -110,8 +110,8 @@ class TestSomaReportOutcome:
             'idempotency_key': 'test-report-1',
         })
         assert isinstance(result, dict)
-        assert result.get('status') == 'recorded'
-        assert 'records' in result
+        assert result.get('status') == 'claimed'
+        assert result.get('witness') == 'self' and result.get('credited') == []
 
     def test_invalid_outcome_returns_error(self, tmp_path, monkeypatch):
         ws = _setup_workspace(tmp_path)

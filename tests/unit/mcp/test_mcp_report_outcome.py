@@ -1,10 +1,11 @@
-"""aegis_report_outcome: one advisory ledger row per rule, attributed by the server.
+"""aegis_report_outcome: attributed by the server; without a check row, one unwitnessed claim.
 
-A row records ``source: "mcp"`` plus the client host and the server session, both
-owned by the server: nothing in the tool arguments can choose them. A report needs
-an idempotency key, scoped by host and session (host-matrix §3.8): a retry within a
-session is recorded once, and two sessions that pick the same key are two reports. A
-report names at least one rule: an outcome with no rule has nothing to credit.
+With no ``aegis check --record`` row for the current tree (v4.3 T1), a report is one ``claimed``
+row per (session, tree) with ``witness: self``: it carries ``source: "mcp"`` plus the client
+host and the server session, both owned by the server, and the outcome as ``result``; it is
+never a per-rule fitness row. A report needs an idempotency key, scoped by host and session
+(host-matrix §3.8): a retry within a session is recorded once, and two sessions that pick the
+same key are two reports. A report names at least one rule.
 """
 from __future__ import annotations
 
@@ -70,7 +71,8 @@ def test_row_records_source_host_and_server_session(served):
     response, payload = _call({"outcome": "success", "rules_used": ["trap-x"], "idempotency_key": "r-1"})
     assert response["result"]["isError"] is False, payload
     row, = _rows(served)
-    assert (row["rule"], row["outcome"], row["source"]) == ("trap-x", "tp", "mcp")
+    assert (row["event"], row["witness"], row["result"], row["source"]) == ("claimed", "self", "tp", "mcp")
+    assert "rule" not in row and "outcome" not in row  # an unwitnessed claim is never fitness evidence
     assert row["host"] == "claude-code"
     assert row["session"] == server._session_id
     assert len(server._session_id) == 32
@@ -145,7 +147,8 @@ def test_legacy_argument_names_are_rejected(served, alias):
 def test_outcome_maps_to_ledger_outcome(served, outcome, ledger_outcome):
     _call({"outcome": outcome, "rules_used": ["trap-x"], "idempotency_key": f"k-{outcome}"})
     row, = _rows(served)
-    assert (row["v"], row["outcome"], row["key"]) == (2, ledger_outcome, f"claude-code/{server._session_id}/k-{outcome}")
+    assert (row["v"], row["result"], row["report_key"]) == (2, ledger_outcome,
+                                                           f"claude-code/{server._session_id}/k-{outcome}")
 
 
 def test_invalid_outcome_is_rejected(served):
@@ -175,7 +178,7 @@ def test_in_process_call_without_a_server_is_attributed_to_no_host(tmp_path):
     result = execute_tool("aegis_report_outcome", {
         "workspace": str(ws), "outcome": "tp", "rules_used": ["trap-x"], "idempotency_key": "local-1",
     })
-    assert result["status"] == "recorded"
+    assert result["status"] == "claimed"
     row, = _rows(ws)
     assert row["source"] == "mcp"
     assert row["host"] is None
@@ -212,7 +215,7 @@ def test_a_new_session_is_a_new_scope_for_the_same_key(served):
     response, payload = _call(dict(args, outcome="fp"), req_id=6)
 
     assert response["result"]["isError"] is False, payload
-    assert [(r["session"], r["outcome"]) for r in _rows(served)] == [(first_session, "tp"), (server._session_id, "fp")]
+    assert [(r["session"], r["result"]) for r in _rows(served)] == [(first_session, "tp"), (server._session_id, "fp")]
 
 
 def test_reusing_a_key_for_a_different_report_is_refused(served):
@@ -227,7 +230,7 @@ def test_reusing_a_key_for_a_different_report_is_refused(served):
                  "send a new key for each new report.",
     }
     row, = _rows(served)
-    assert row["outcome"] == "tp"
+    assert row["result"] == "tp"
 
 
 @pytest.mark.parametrize("arguments", [

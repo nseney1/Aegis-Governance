@@ -228,15 +228,15 @@ _EXPOSED: Dict[Tuple[str, str, str], Set[str]] = {}
 _MAX_EXPOSED_SESSIONS = 256
 
 
-def record_exposure(root: Any, host: str, session: str, rules: Iterable[str]) -> None:
-    key = (str(root), host, session)
+def record_exposure(root: Any, host: Optional[str], session: Optional[str], rules: Iterable[str]) -> None:
+    key = (str(root), host or "", session or "")
     if key not in _EXPOSED and len(_EXPOSED) >= _MAX_EXPOSED_SESSIONS:
         _EXPOSED.pop(next(iter(_EXPOSED)))
     _EXPOSED.setdefault(key, set()).update(r for r in rules if isinstance(r, str))
 
 
-def exposed_rules(root: Any, host: str, session: str) -> Set[str]:
-    return set(_EXPOSED.get((str(root), host, session), ()))
+def exposed_rules(root: Any, host: Optional[str], session: Optional[str]) -> Set[str]:
+    return set(_EXPOSED.get((str(root), host or "", session or ""), ()))
 
 
 # ── Writing ──────────────────────────────────────────────────────────────────
@@ -300,24 +300,25 @@ def confirm(root: Any, *, client: Any, workflow: str, landed: Optional[Callable[
     return summary
 
 
-def _count(rows: Iterable[Mapping[str, Any]], session: str) -> int:
+def _count(rows: Iterable[Mapping[str, Any]], session: Optional[str]) -> int:
     return sum(1 for r in rows if r.get("event") in ("claimed", "report") and r.get("session") == session)
 
 
-def submit_report(root: Any, *, tree: Optional[str], session: str, host: str, key: str, outcome: str,
-                  rules_for: Callable[[Mapping[str, Any]], Sequence[str]],
-                  cap: Optional[int] = None) -> Dict[str, Any]:
+def submit_report(root: Any, *, tree: Optional[str], session: Optional[str], host: Optional[str], key: str,
+                  outcome: str, rules_for: Callable[[Mapping[str, Any]], Sequence[str]],
+                  cap: Optional[int] = None, source: str = "mcp") -> Dict[str, Any]:
     """Record one ``aegis_report_outcome`` call and say what it earned.
 
     ``tree`` is the tree the server computed now. With a passing ``check`` row for it, one
     ``report`` row per credited rule (``rules_for(check_row)``, the server's choice, never the
     agent's); without one, a single ``claimed`` row per (session, tree) that earns nothing. A
     session at its cap gets ``rate_limited`` and nothing is written. Raises ReportConflict when
-    the session's key was used for a different outcome.
+    the session's key was used for a different outcome. ``host`` and ``session`` are the
+    server's own (None for an in-process call, whose key is then not scoped).
     """
     limit = MAX_REPORT_ROWS_PER_SESSION if cap is None else cap
     result = _RESULT.get(outcome, "trigger")
-    namespaced = f"{host}/{session}/{key}"
+    namespaced = f"{host}/{session}/{key}" if session else key
     # The ledger dedupes on (key, rule) and these rows carry no 'rule', so 'key' is each row's own
     # identity: (check, rule) for a credit, (session, tree) for a claim. The caller's key, namespaced
     # by server session, is 'report_key'.
@@ -336,7 +337,7 @@ def submit_report(root: Any, *, tree: Optional[str], session: str, host: str, ke
             if used >= limit:
                 return {"status": "rate_limited", "limit": limit, "witness": "self", "credited": []}
             ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "claimed", "witness": "self",
-                                       "tree": tree, "session": session, "host": host,
+                                       "tree": tree, "source": source, "session": session, "host": host,
                                        "key": f"claim:{host}/{session}:{tree}", "report_key": namespaced,
                                        "result": result}])
             return {"status": "claimed", "witness": "self", "credited": [], "tree": tree, "recorded": True}
@@ -349,7 +350,7 @@ def submit_report(root: Any, *, tree: Optional[str], session: str, host: str, ke
             stamp = _now()
             ledger.append_rows(root, [
                 {"v": ledger.LEDGER_VERSION, "ts": stamp, "event": "report", "witness": "aegis", "check": check["id"],
-                 "tree": tree, "for_rule": rule, "result": result, "session": session, "host": host,
+                 "tree": tree, "for_rule": rule, "result": result, "source": source, "session": session, "host": host,
                  "key": f"credit:{check['id']}:{rule}", "report_key": namespaced}
                 for rule in fresh])
         return {"status": "recorded", "witness": "aegis", "credited": rules, "check": check["id"], "tree": tree}

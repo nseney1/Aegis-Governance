@@ -17,6 +17,7 @@ Given/When/Then, written before the code and never weakened to make it pass:
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 
@@ -185,6 +186,21 @@ def test_sabotage_after_the_check_changes_the_tree_and_loses_the_label(tmp_path)
 
 
 # ── 3. File swaps do not fool the snapshot ───────────────────────────────────
+
+@needs_git
+@pytest.mark.skipif(os.name == "nt", reason="symlinks are POSIX here")
+def test_a_tree_holding_any_symlink_gets_no_witness_label(tmp_path):
+    repo = hv.make_project(tmp_path)
+    hv.use_stub_runner(repo.home.path)
+    _edit_app(repo)
+    os.symlink("app.py", repo.root / "src" / "alias.py")  # inside the tree, still refused
+    _scan(repo)
+    out = checkrun.record(repo.root, tests=True, base="main")
+    assert out.status == "unbindable" and out.row is None and "src/alias.py" in out.reason
+    res = _report(repo)
+    assert res["witness"] == "self" and res["status"] == "claimed"
+    assert _credits(repo) == []
+
 
 @needs_git
 def test_a_swap_during_the_run_does_not_reach_the_snapshot(tmp_path):

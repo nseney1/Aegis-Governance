@@ -3,8 +3,10 @@
 One run is bound to one tree (``aegis_core.treeid``). The files of that tree are exported to a
 private snapshot and Layer 1 and, with ``tests=True``, the project's tests run *there*, so a file
 swapped in the work tree mid-run, or an ignored file the tests quietly import, cannot change what
-was verified. What it records is a **label**: a same-uid agent can write any row, so a ``check``
-row is evidence only once CI on the landing commit confirms it (``aegis_core.credit``).
+was verified. A tree holding any symbolic link is refused (``unbindable``, no row): a link can
+point the run back at files outside the snapshot. What it records is a **label**: a same-uid
+agent can write any row, so a ``check`` row is evidence only once CI on the landing commit
+confirms it (``aegis_core.credit``).
 
 The test command comes from the **user-scope** config (``~/.aegis/config.json``
 ``tests.command``, a string or an argv list), never from the repository: a repository must not
@@ -295,16 +297,6 @@ def _layer1(snapshot: Path, changed: Sequence[str]) -> Dict[str, int]:
     return {"findings": sum(1 for _path, evidence in pairs if not evidence.verdict), "files": len(targets)}
 
 
-def _unsafe_links(snapshot: Path, links: Sequence[str]) -> List[str]:
-    root = os.path.realpath(snapshot)
-    bad = []
-    for rel in links:
-        target = os.path.realpath(snapshot / rel)
-        if target != root and not target.startswith(root.rstrip(os.sep) + os.sep):
-            bad.append(rel)
-    return bad
-
-
 def record(root: object, *, tests: bool = False, base: Optional[str] = None, timeout: Optional[float] = None,
            now: Optional[datetime] = None) -> CheckOutcome:
     """Bind the work tree of ``root`` to a tree, run the checks on its snapshot, write one ``check``
@@ -315,6 +307,11 @@ def record(root: object, *, tests: bool = False, base: Optional[str] = None, tim
             binding = bound.binding
             if not binding.bound:
                 return CheckOutcome("unbindable", None, binding.reason, binding)
+            links = sorted(bound.symlinks())
+            if links:
+                named = ", ".join(links[:5]) + (f" and {len(links) - 5} more" if len(links) > 5 else "")
+                return CheckOutcome("unbindable", None, f"the tree holds symbolic links, which the snapshot refuses: "
+                                    f"{named}", binding)
             top = bound.top
             head = gitsafe.head_commit(top)
             if not head:
@@ -334,10 +331,6 @@ def record(root: object, *, tests: bool = False, base: Optional[str] = None, tim
             try:
                 snapshot = scratch / "snapshot"
                 bound.export(snapshot)
-                escaping = _unsafe_links(snapshot, bound.symlinks())
-                if escaping:
-                    return CheckOutcome("error", None, "the tree holds symbolic links that leave the snapshot: "
-                                        + ", ".join(escaping[:5]), binding)
                 layer1 = _layer1(snapshot, changed)
                 run: Optional[TestsRun] = None
                 logical = list(DEFAULT_COMMAND)
