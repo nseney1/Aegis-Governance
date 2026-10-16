@@ -2,7 +2,8 @@
 
 - With no governed workspace (no AEGIS_WORKSPACE and a cwd without .aegis/, or $HOME),
   the server used to either exit 1 or mkdir ~/.aegis/rules and govern $HOME with zero
-  rules. It must stay up, create nothing, and answer every tools/call with an error.
+  rules. It must stay up, create nothing, and answer "not governed here" (aegis_scan
+  serves the read-only user layer). An unusable pin is an error on every tools/call.
 - A valid-JSON line that is not an object (`5`, `[]`, `null`) killed the server.
 """
 from __future__ import annotations
@@ -104,14 +105,14 @@ def _pin_missing_dir(home: Path, tmp_path: Path, monkeypatch) -> Path:
 
 @pytest.mark.parametrize(
     "setup",
-    [_cwd_is_home, _cwd_is_home_with_v33_user_rules, _cwd_without_aegis,
-     _pin_without_aegis, _pin_missing_dir],
-    ids=["cwd-is-home", "cwd-is-home-with-v33-user-rules", "cwd-without-aegis",
-         "pin-without-aegis", "pin-missing-dir"],
+    [_cwd_is_home, _cwd_is_home_with_v33_user_rules, _cwd_without_aegis],
+    ids=["cwd-is-home", "cwd-is-home-with-v33-user-rules", "cwd-without-aegis"],
 )
-def test_ungoverned_server_stays_up_creates_nothing_and_errors_every_tool_call(
+def test_ungoverned_server_stays_up_creates_nothing_and_answers_not_governed(
     tmp_path: Path, home: Path, setup, monkeypatch, server_state, capsys
 ) -> None:
+    """Nothing resolves (AD-4): aegis_scan serves the read-only user layer (H8); every
+    other tool answers "not governed here"."""
     watched = setup(home, tmp_path, monkeypatch)
     home_before, watched_before = _tree(home), _tree(watched)
 
@@ -124,8 +125,40 @@ def test_ungoverned_server_stays_up_creates_nothing_and_errors_every_tool_call(
     for call_id in _CALLS:
         assert "error" not in by_id[call_id], by_id[call_id]
         result = by_id[call_id]["result"]
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["status"] == "not_governed"
+        if call_id == 4:  # aegis_scan
+            assert result["isError"] is False
+            assert payload["message"] == NOT_GOVERNED
+        else:
+            assert result["isError"] is True
+            assert payload["error"] == NOT_GOVERNED
+    assert _tree(home) == home_before
+    assert _tree(watched) == watched_before
+
+
+@pytest.mark.parametrize(
+    "setup,reason",
+    [(_pin_without_aegis, "pin_not_a_workspace"), (_pin_missing_dir, "pin_missing")],
+    ids=["pin-without-aegis", "pin-missing-dir"],
+)
+def test_unusable_pin_keeps_the_server_up_and_errors_every_tool_call(
+    tmp_path: Path, home: Path, setup, reason, monkeypatch, server_state, capsys
+) -> None:
+    watched = setup(home, tmp_path, monkeypatch)
+    home_before, watched_before = _tree(home), _tree(watched)
+
+    rc, frames = _serve(monkeypatch, capsys, [_INIT, _LIST, *_CALLS.values()])
+
+    assert rc == 0
+    by_id = {f.get("id"): f for f in frames}
+    assert by_id[2]["result"]["tools"], "tools/list must answer normally"
+    for call_id in _CALLS:
+        result = by_id[call_id]["result"]
+        payload = json.loads(result["content"][0]["text"])
         assert result["isError"] is True
-        assert result["content"][0]["text"] == NOT_GOVERNED
+        assert (payload["status"], payload["binding"]["reason"]) == ("FAIL", reason)
+        assert payload["error"].startswith("AEGIS_WORKSPACE is set to ")
     assert _tree(home) == home_before
     assert _tree(watched) == watched_before
 

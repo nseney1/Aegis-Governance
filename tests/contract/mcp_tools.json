@@ -83,6 +83,13 @@
             "type": "string",
             "maxLength": 4096
           },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional: the files this change edited (workspace-relative). They measure scan-before-edit compliance (aegis status --compliance); they credit no rule."
+          },
           "view": {
             "type": "string",
             "enum": [

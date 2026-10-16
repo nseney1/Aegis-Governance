@@ -17,7 +17,9 @@ _TOOL_HANDLERS = {
 }
 
 # Set by the server (or passed by an in-process caller), never part of a tool schema.
-_SERVER_INJECTED = frozenset({"workspace", "_host", "_session"})
+_SERVER_INJECTED = frozenset({
+    "workspace", "_host", "_session", "_client_name", "_client_version", "_binding", "_unbound",
+})
 
 
 _PROPERTIES = {tool["name"]: tool["inputSchema"].get("properties", {}) for tool in TOOL_DEFINITIONS}

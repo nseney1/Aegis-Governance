@@ -12,6 +12,7 @@ from aegis_core.workspace.base import Workspace
 from aegis_core.workspace import resolve_workspace
 
 _STATUS_FAIL = "FAIL"
+NOT_GOVERNED_MESSAGE = 'not an Aegis workspace: run "aegis init" in your repository'
 # A client whose clientInfo names no known host: its ledger rows say "generic" and its
 # scans get the generic slot table, never another vendor's (host-matrix §3.5).
 DEFAULT_CLIENT_PLATFORM = "generic"
@@ -177,6 +178,14 @@ TOOL_DEFINITIONS = [
                 "tests_passed": {"type": "boolean"},
                 "rework_count": {"type": "integer", "default": 0},
                 "notes": {"type": "string", "maxLength": 4096},
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional: the files this change edited (workspace-relative). They measure "
+                        "scan-before-edit compliance (aegis status --compliance); they credit no rule."
+                    ),
+                },
                 "view": _VIEW_PROPERTY,
             },
             "required": ["outcome", "rules_used", "idempotency_key"],

@@ -23,9 +23,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import PurePath
+import posixpath
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from aegis_core.fitness import Fitness, for_rules
+from aegis_core.fitness import Fitness, compute, for_rules
 from aegis_core.match import normalize_path, workspace_files
 from aegis_core.rule_inventory import RuleInventoryError
 from aegis_core.rules import Rule, RuleCache, RuleSet, workspace_root
@@ -46,6 +48,7 @@ __all__ = [
     "estimate_tokens",
     "resolve_token_budget",
     "scan",
+    "scan_user_layer",
 ]
 
 # Per-process cache of parsed rules; the MCP server keeps it across tool calls.
@@ -300,7 +303,6 @@ def scan(
     from aegis_core.sync import read_derived, stale_rules
 
     token_budget = resolve_token_budget(workspace, max_tokens)
-    slots = JIT_DEFAULT_RULE_COUNT_BUDGET if budget is None else max(0, int(budget))
     try:
         ruleset = RULE_CACHE.get(workspace)
     except RuleInventoryError as exc:
@@ -310,8 +312,72 @@ def scan(
 
     # Workspace-relative, each file once, as every other surface matches them.
     files = workspace_files(workspace_root(workspace), changed_files if changed_files else _git_changed_files(workspace))
-    served = list(ruleset.served)
     stale = stale_rules(ruleset, read_derived(workspace))
+    return _select(ruleset, files, budget, token_budget, stale, lambda served: for_rules(workspace, served))
+
+
+def scan_user_layer(
+    changed_files: Optional[List[str]] = None,
+    budget: Optional[int] = None,
+    max_tokens: Optional[int] = None,
+) -> Dict[str, Any]:
+    """The rules of the read-only user layer (``~/.aegis/rules``, ADR 0005 H8) for files
+    in no governed workspace.
+
+    There is no workspace, so there is no ledger (every rule has neutral fitness), no
+    derived state, no repository config and no git diff: only the given files are
+    matched. Nothing is created or written; a missing layer serves no rules.
+    ``user_layer`` reports the directory and how many rules it serves.
+    """
+    from aegis_core.workspace.layout import UserLayout
+
+    token_budget = resolve_token_budget(None, max_tokens)
+    layout = UserLayout.current()
+    ruleset = RuleSet(())
+    if layout is not None and layout.rules_dir.is_dir() and not layout.rules_dir.is_symlink():
+        try:
+            ruleset = RULE_CACHE.get(layout.home)
+        except RuleInventoryError as exc:
+            return _failure(f"the user rules directory cannot be read safely: {exc}")
+        if ruleset.errors:
+            return _broken(ruleset)
+    neutral = compute({})
+    payload = _select(ruleset, _layer_files(changed_files or []), budget, token_budget, [],
+                      lambda served: {rule.id: neutral for rule in served})
+    rules_dir = layout.rules_dir.resolve() if layout is not None else None
+    payload["user_layer"] = {"path": str(rules_dir) if rules_dir else None, "rules": len(ruleset.served)}
+    return payload
+
+
+def _layer_files(files: List[str]) -> List[str]:
+    """Files as POSIX paths for the user layer: there is no root to make them relative
+    to, so an absolute path loses only its anchor (``**/`` and basename patterns match)."""
+    out: List[str] = []
+    for raw in files:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        pure = PurePath(raw)
+        if pure.is_absolute():
+            rel = pure.as_posix()[len(pure.anchor.replace("\\", "/")):]
+        else:
+            rel = posixpath.normpath(normalize_path(raw))
+        if rel in ("", ".", "..") or rel.startswith("../") or rel in out:
+            continue
+        out.append(rel)
+    return out
+
+
+def _select(
+    ruleset: RuleSet,
+    files: List[str],
+    budget: Optional[int],
+    token_budget: int,
+    stale: List[Dict[str, Any]],
+    fitness_of: Callable[[List[Rule]], Dict[str, Fitness]],
+) -> Dict[str, Any]:
+    """Match, rank, slot and clamp ``ruleset``'s served rules for ``files``."""
+    slots = JIT_DEFAULT_RULE_COUNT_BUDGET if budget is None else max(0, int(budget))
+    served = list(ruleset.served)
     warnings = [_ignored_warning(ruleset)] if ruleset.ignored else []
     stats = {
         "total_rules": len(served),
@@ -327,7 +393,7 @@ def scan(
         payload["stats"]["estimated_tokens"] = _tokens(payload)
         return payload
 
-    fits = for_rules(workspace, served)
+    fits = fitness_of(served)
     matches = [m for m in (_match(r, files, fits[r.id]) for r in served) if m is not None]
     stats["matched"] = len(matches)
     mandatory = _rank([m for m in matches if m.rule.mandatory], mandatory=True)
