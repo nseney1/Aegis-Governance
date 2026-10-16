@@ -5,7 +5,8 @@ The packaged ``skills/<id>/SKILL.md`` are projected to ``.claude/skills/<id>/SKI
 Antigravity share it, neutral slot wording). Each copy carries exactly ``name`` and
 ``description`` and, right after the closing ``---``, the provenance marker
 ``<!-- aegis:skill id=<id> v=1 sha=<12 hex> -->`` whose sha covers the LF-normalized
-text after it. Only Aegis's own unedited copies are replaced; links, junctions and
+copy without that line: the frontmatter (the description too) and the body. Only Aegis's
+own unedited copies are replaced; links, junctions and
 anything outside the workspace are refused, and ``--force`` never overrides a refusal.
 Every test runs with an empty HOME (tests/unit/cli/conftest.py).
 """
@@ -82,14 +83,29 @@ def _render(body: str, profile: str) -> str:
     return SLOT_REF_PATTERN.sub(lambda m: values[m.group(1)], body)
 
 
+def _stamped(head: str, body: str, skill_id: str, eol: str = "\n") -> str:
+    """``head`` (the frontmatter, delimiters included), the marker, then ``body``: the marker's
+    sha covers the copy without the marker line."""
+    return head + f"<!-- aegis:skill id={skill_id} v=1 sha={_sha(head + body)} -->{eol}" + body
+
+
+def _restamp(text: str) -> str:
+    """``text`` with its marker's sha recomputed over the text without the marker line, as
+    if Aegis had written it that way."""
+    lines = _lf_lines(text.encode("utf-8"))
+    close = next(i for i, line in enumerate(lines[1:], 1) if line.rstrip("\r\n") == "---")
+    sha = _sha("".join(lines[:close + 1] + lines[close + 2:]))
+    lines[close + 1] = re.sub(r"sha=[0-9a-f]{12}", f"sha={sha}", lines[close + 1])
+    return "".join(lines)
+
+
 def _expected(skill_id: str, profile: str) -> bytes:
     """The projection built independently of aegis_cli.skills_sync."""
     eol, frontmatter, body = _source_parts(skill_id)
     description = [line for line in frontmatter if line.startswith("description:")]
     assert len(description) == 1
-    rendered = _render(body, profile)
-    return (f"---{eol}name: {skill_id}{eol}" + description[0] + f"---{eol}"
-            + f"<!-- aegis:skill id={skill_id} v=1 sha={_sha(rendered)} -->{eol}" + rendered).encode("utf-8")
+    head = f"---{eol}name: {skill_id}{eol}" + description[0] + f"---{eol}"
+    return _stamped(head, _render(body, profile), skill_id, eol).encode("utf-8")
 
 
 def _files(root: Path) -> dict:
@@ -156,7 +172,7 @@ def test_frontmatter_is_exactly_name_and_the_verbatim_description(ws):
             assert lines[:4] == [f"---{eol}", f"name: {skill_id}{eol}", source_description, f"---{eol}"]
             marker = MARKER.fullmatch(lines[4].rstrip("\r\n"))
             assert marker and marker.group(1) == skill_id
-            assert marker.group(2) == _sha("".join(lines[5:]))
+            assert marker.group(2) == _sha("".join(lines[:4] + lines[5:]))
 
 
 def test_a_fixture_skill_is_projected_byte_for_byte(ws, tmp_path):
@@ -166,8 +182,8 @@ def test_a_fixture_skill_is_projected_byte_for_byte(ws, tmp_path):
     result = sync_skills(ws, ["claude-code"], source=source)
 
     body = "\n# Demo\nUse `Edit` on the haiku tier. Keep ${HOME}.\n"
-    expected = (f"---\nname: demo\ndescription: Does one thing well.\n---\n"
-                f"<!-- aegis:skill id=demo v=1 sha={_sha(body)} -->\n{body}").encode("utf-8")
+    head = "---\nname: demo\ndescription: Does one thing well.\n---\n"
+    expected = (head + f"<!-- aegis:skill id=demo v=1 sha={_sha(head + body)} -->\n{body}").encode("utf-8")
     assert (ws / CLAUDE_DIR / "demo" / "SKILL.md").read_bytes() == expected
     assert result.status == "ok"
     assert [(e.id, e.result) for t in result.targets for e in t.entries] == [("demo", "created")]
@@ -180,8 +196,9 @@ def test_a_crlf_source_keeps_its_line_endings_and_the_lf_sha(ws, tmp_path):
     sync_skills(ws, ["claude-code"], source=source)
 
     body_lf = "\n# Demo\nRun Bash.\n"
-    expected = (f"---\nname: demo\ndescription: Does one thing well.\n---\n"
-                f"<!-- aegis:skill id=demo v=1 sha={_sha(body_lf)} -->\n{body_lf}").replace("\n", "\r\n")
+    head_lf = "---\nname: demo\ndescription: Does one thing well.\n---\n"
+    expected = (head_lf + f"<!-- aegis:skill id=demo v=1 sha={_sha(head_lf + body_lf)} -->\n{body_lf}"
+                ).replace("\n", "\r\n")
     assert (ws / CLAUDE_DIR / "demo" / "SKILL.md").read_bytes() == expected.encode("utf-8")
 
 
@@ -194,8 +211,8 @@ def test_a_source_ending_at_its_closing_delimiter_projects_an_empty_body(ws, tmp
     result = sync_skills(ws, ["claude-code"], source=source)
 
     assert result.status == "ok"
-    assert (ws / CLAUDE_DIR / "bare" / "SKILL.md").read_text(encoding="utf-8") == (
-        f"---\nname: bare\ndescription: Nothing else.\n---\n<!-- aegis:skill id=bare v=1 sha={_sha('')} -->\n")
+    assert (ws / CLAUDE_DIR / "bare" / "SKILL.md").read_text(encoding="utf-8") == _stamped(
+        "---\nname: bare\ndescription: Nothing else.\n---\n", "", "bare")
 
 
 @pytest.mark.parametrize("name,text,problem", [
@@ -231,11 +248,9 @@ def test_a_multi_line_description_is_copied_verbatim(ws, tmp_path):
 
     result = sync_skills(ws, ["claude-code"], source=source)
 
-    sha = _sha("Body\n")
     assert result.status == "ok"
-    assert (ws / CLAUDE_DIR / "folded" / "SKILL.md").read_text(encoding="utf-8") == (
-        "---\nname: folded\ndescription: >\n  First line\n  second line.\n---\n"
-        f"<!-- aegis:skill id=folded v=1 sha={sha} -->\nBody\n")
+    assert (ws / CLAUDE_DIR / "folded" / "SKILL.md").read_text(encoding="utf-8") == _stamped(
+        "---\nname: folded\ndescription: >\n  First line\n  second line.\n---\n", "Body\n", "folded")
 
 
 def test_a_description_on_the_first_frontmatter_line_is_copied(ws, tmp_path):
@@ -246,9 +261,8 @@ def test_a_description_on_the_first_frontmatter_line_is_copied(ws, tmp_path):
 
     assert sync_skills(ws, ["claude-code"], source=source).status == "ok"
 
-    sha = _sha("Body\n")
-    assert (ws / CLAUDE_DIR / "first" / "SKILL.md").read_text(encoding="utf-8") == (
-        f"---\nname: first\ndescription: Comes first.\n---\n<!-- aegis:skill id=first v=1 sha={sha} -->\nBody\n")
+    assert (ws / CLAUDE_DIR / "first" / "SKILL.md").read_text(encoding="utf-8") == _stamped(
+        "---\nname: first\ndescription: Comes first.\n---\n", "Body\n", "first")
 
 
 def test_blank_lines_inside_a_block_description_are_kept_and_trailing_ones_dropped(ws, tmp_path):
@@ -260,10 +274,8 @@ def test_blank_lines_inside_a_block_description_are_kept_and_trailing_ones_dropp
 
     assert sync_skills(ws, ["claude-code"], source=source).status == "ok"
 
-    sha = _sha("Body\n")
-    assert (ws / CLAUDE_DIR / "blocky" / "SKILL.md").read_text(encoding="utf-8") == (
-        "---\nname: blocky\ndescription: |\n  One.\n\n  Two.\n---\n"
-        f"<!-- aegis:skill id=blocky v=1 sha={sha} -->\nBody\n")
+    assert (ws / CLAUDE_DIR / "blocky" / "SKILL.md").read_text(encoding="utf-8") == _stamped(
+        "---\nname: blocky\ndescription: |\n  One.\n\n  Two.\n---\n", "Body\n", "blocky")
 
 
 def test_a_last_description_before_blank_lines_and_the_closing_delimiter(ws, tmp_path):
@@ -399,6 +411,66 @@ def test_force_replaces_a_hand_edited_copy(ws, capsys):
 
 
 @pytest.mark.parametrize("force", [False, True])
+def test_a_copy_whose_description_alone_was_edited_counts_as_edited(ws, capsys, force):
+    """The description drives when a host loads the skill, so it is the line users tune
+    most: the marker's sha covers it, and a sync keeps the edit unless --force."""
+    assert _sync(ws, "--host", "claude-code") == 0
+    target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
+    lines = _lf_lines(target.read_bytes())
+    assert lines[2].startswith("description: ")
+    lines[2] = "description: MY HAND-WRITTEN DESCRIPTION\n"
+    target.write_bytes("".join(lines).encode("utf-8"))
+    edited = target.read_bytes()
+    capsys.readouterr()
+
+    rc, doc = _json(ws, capsys, "--host", "claude-code", *(["--force"] if force else []))
+
+    assert rc == 0
+    entry = next(e for e in doc["targets"][0]["skills"] if e["id"] == "genesis")
+    if force:
+        assert (entry["result"], entry["reason"]) == ("overwritten", None)
+        assert target.read_bytes() == _expected("genesis", "claude-code")
+    else:
+        assert (entry["result"], entry["reason"]) == ("skipped", "edited")
+        assert target.read_bytes() == edited
+
+
+def test_an_aegis_copy_saved_with_a_byte_order_mark_is_still_aegis_s_copy(ws, capsys):
+    """Some Windows editors prepend a UTF-8 BOM on save; like CRLF endings, it is no edit."""
+    assert _sync(ws, "--host", "claude-code") == 0
+    target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
+    target.write_bytes(b"\xef\xbb\xbf" + target.read_bytes())
+    capsys.readouterr()
+
+    rc, doc = _json(ws, capsys, "--host", "claude-code")
+
+    assert rc == 0
+    entry = next(e for e in doc["targets"][0]["skills"] if e["id"] == "genesis")
+    assert (entry["result"], entry["reason"]) == ("updated", None)
+    assert target.read_bytes() == _expected("genesis", "claude-code")
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_an_edited_aegis_copy_with_a_byte_order_mark_is_edited_not_foreign(ws, capsys, force):
+    assert _sync(ws, "--host", "claude-code") == 0
+    target = _edited(ws)
+    target.write_bytes(b"\xef\xbb\xbf" + target.read_bytes())
+    edited = target.read_bytes()
+    capsys.readouterr()
+
+    rc, doc = _json(ws, capsys, "--host", "claude-code", *(["--force"] if force else []))
+
+    assert rc == 0
+    entry = next(e for e in doc["targets"][0]["skills"] if e["id"] == "genesis")
+    if force:
+        assert entry["result"] == "overwritten"
+        assert target.read_bytes() == _expected("genesis", "claude-code")
+    else:
+        assert (entry["result"], entry["reason"]) == ("skipped", "edited")
+        assert target.read_bytes() == edited
+
+
+@pytest.mark.parametrize("force", [False, True])
 def test_a_file_without_the_marker_is_never_replaced(ws, capsys, force):
     target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
     target.parent.mkdir(parents=True)
@@ -419,11 +491,14 @@ def test_a_file_without_the_marker_is_never_replaced(ws, capsys, force):
     pytest.param(lambda t: t.replace("id=genesis ", "id=staff-review "), id="other-id"),
     pytest.param(lambda t: t.replace(" v=1 ", " v=2 "), id="other-version"),
     pytest.param(lambda t: t.replace("name: genesis\n", "name: renamed\n"), id="renamed"),
+    pytest.param(lambda t: t.replace("name: genesis\n", 'name: "genesis\n'), id="unparseable"),
 ])
 def test_a_copy_whose_marker_or_frontmatter_is_not_aegis_s_counts_as_edited(ws, capsys, mutate):
+    """Even with the sha recomputed to match: Aegis never writes another id, version, name
+    or key, so such a file is not its unedited copy."""
     assert _sync(ws, "--host", "claude-code") == 0
     target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
-    changed = mutate(target.read_text(encoding="utf-8"))
+    changed = _restamp(mutate(target.read_text(encoding="utf-8")))
     target.write_text(changed, encoding="utf-8")
     capsys.readouterr()
 
@@ -469,7 +544,7 @@ def test_files_without_a_marker_after_their_frontmatter_are_the_user_s_own(ws, c
 def test_an_aegis_marker_over_an_empty_frontmatter_counts_as_edited(ws, capsys):
     target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
     target.parent.mkdir(parents=True)
-    target.write_bytes(f"---\n---\n<!-- aegis:skill id=genesis v=1 sha={_sha('x')} -->\nx".encode("utf-8"))
+    target.write_bytes(_stamped("---\n---\n", "x", "genesis").encode("utf-8"))
 
     _rc, doc = _json(ws, capsys, "--host", "claude-code")
 
@@ -644,6 +719,43 @@ def test_a_directory_that_cannot_be_written_fails_the_copy(ws, capsys):
 
 
 @needs_posix_permissions
+def test_a_dry_run_reports_a_skills_directory_that_cannot_be_made(ws, capsys):
+    """A dry run (init's check pass among them) predicts the write's failure."""
+    (ws / ".claude").mkdir()
+    os.chmod(ws / ".claude", 0o555)
+    try:
+        rc, doc = _json(ws, capsys, "--host", "claude-code", "--dry-run")
+    finally:
+        os.chmod(ws / ".claude", 0o755)
+
+    assert rc == 1 and doc["status"] == "failed"
+    assert doc["counts"]["failed"] == 15 and list((ws / ".claude").iterdir()) == []
+    entry = doc["targets"][0]["skills"][0]
+    assert (entry["result"], entry["reason"]) == ("failed", "write")
+    assert entry["detail"] == f"{entry['path']} cannot be written ({ws.resolve() / '.claude'} is not a writable directory)"
+
+
+@needs_posix_permissions
+def test_a_dry_run_reports_a_skill_directory_whose_copy_cannot_be_replaced(ws, capsys):
+    assert _sync(ws, "--host", "claude-code") == 0
+    target = _edited(ws)
+    edited = target.read_bytes()
+    os.chmod(target.parent, 0o555)
+    capsys.readouterr()
+    try:
+        rc, doc = _json(ws, capsys, "--host", "claude-code", "--dry-run", "--force")
+    finally:
+        os.chmod(target.parent, 0o755)
+
+    assert rc == 1 and target.read_bytes() == edited
+    assert doc["counts"] == {"created": 0, "updated": 0, "unchanged": 14, "overwritten": 0,
+                             "skipped": 0, "refused": 0, "failed": 1}
+    entry = next(e for e in doc["targets"][0]["skills"] if e["id"] == "genesis")
+    assert entry["detail"] == (f"{entry['path']} cannot be written "
+                               f"({ws.resolve() / CLAUDE_DIR / 'genesis'} is not a writable directory)")
+
+
+@needs_posix_permissions
 def test_a_skill_file_that_cannot_be_read_is_refused(ws, capsys):
     target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
     target.parent.mkdir(parents=True)
@@ -731,8 +843,7 @@ def test_text_output_lists_what_changed_and_counts_the_rest(ws, capsys):
 
     captured = capsys.readouterr()
     assert captured.out.splitlines() == [
-        ".claude/skills/ for claude-code (claude-code wording, unverified: the host's documented location, "
-        "not checked on a real install)",
+        ".claude/skills/ for claude-code (claude-code wording, unverified: not checked on a real install)",
         "  ⚠️  genesis: skipped (edited since Aegis wrote it; left as it is (aegis skills sync --force replaces it))",
         "  14 unchanged",
         "Done: 14 unchanged, 1 skipped.",
@@ -754,8 +865,7 @@ def test_text_output_reports_a_packaged_skill_that_cannot_be_projected(ws, tmp_p
 
     captured = capsys.readouterr()
     assert captured.out.splitlines() == [
-        ".claude/skills/ for claude-code (claude-code wording, unverified: the host's documented location, "
-        "not checked on a real install)",
+        ".claude/skills/ for claude-code (claude-code wording, unverified: not checked on a real install)",
         "  ✅ good: created",
         "Done: 1 created.",
     ]

@@ -804,6 +804,23 @@ class TestInitSkills:
         assert list(outside.iterdir()) == []
         assert any(".claude" in e and "symlink" in e and "--skills" in e for e in payload["errors"])
 
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX permission bits that apply to this user")
+    def test_a_skills_directory_that_cannot_be_written_stops_init_before_anything_is_written(self, project, capsys):
+        (project / ".claude").mkdir()
+        os.chmod(project / ".claude", 0o555)
+        try:
+            rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+        finally:
+            os.chmod(project / ".claude", 0o755)
+
+        assert rc == 1 and payload["status"] == "refused"
+        assert not (project / ".aegis").exists() and not (project / "AGENTS.md").exists()
+        assert list((project / ".claude").iterdir()) == []
+        assert payload["errors"][0] == (
+            f"skills: .claude/skills/{PACKAGED_SKILLS[0]}/SKILL.md cannot be written "
+            f"({project.resolve() / '.claude'} is not a writable directory). Fix it, or re-run without --skills.")
+
     def test_a_user_s_own_skill_file_is_kept_with_a_warning(self, project, capsys):
         mine = project / ".claude" / "skills" / "genesis" / "SKILL.md"
         mine.parent.mkdir(parents=True)
@@ -833,10 +850,9 @@ class TestInitSkills:
         target = project / ".claude/skills/genesis/SKILL.md"
         lines = target.read_text(encoding="utf-8").splitlines(True)
         # An older Aegis copy: unedited (its marker matches its text), but not today's text.
-        old_body = "\nAn older genesis.\n"
-        sha = hashlib.sha256(old_body.encode("utf-8")).hexdigest()[:12]
-        target.write_text("".join(lines[:4]) + f"<!-- aegis:skill id=genesis v=1 sha={sha} -->\n" + old_body,
-                          encoding="utf-8")
+        head, old_body = "".join(lines[:4]), "\nAn older genesis.\n"
+        sha = hashlib.sha256((head + old_body).encode("utf-8")).hexdigest()[:12]
+        target.write_text(head + f"<!-- aegis:skill id=genesis v=1 sha={sha} -->\n" + old_body, encoding="utf-8")
         capsys.readouterr()
 
         rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")

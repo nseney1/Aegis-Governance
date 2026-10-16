@@ -10,13 +10,16 @@ committed files).
 
 A copy is the source with its frontmatter reduced to ``name: <id>`` and the source's
 ``description`` lines verbatim, the marker ``<!-- aegis:skill id=<id> v=1 sha=<12 hex> -->``
-right after the closing ``---`` (sha256 of the LF-normalized text after the marker), and
-the body with its slots rendered, otherwise byte for byte (line endings included).
+right after the closing ``---``, and the body with its slots rendered, otherwise byte for
+byte (line endings included). The sha is the sha256 of the LF-normalized copy without the
+marker line, so it covers the description (the line users tune most) as well as the body.
 
 An existing ``SKILL.md`` is replaced only when it is Aegis's unedited copy: the marker
-names this id and version 1, its sha matches the text after it, and the frontmatter is
-exactly ``name: <id>`` and a description. A copy edited since is skipped unless
-``--force``; a file without the marker is the user's own and is never replaced. Every
+names this id and version 1, its sha matches the rest of the file, and the frontmatter is
+exactly ``name: <id>`` and a description. CRLF line endings and a leading UTF-8 byte
+order mark, which git checkouts and some editors add, are no edit. A copy edited since is
+skipped unless ``--force``; a file without the marker is the user's own and is never
+replaced. Every
 directory on the way must be a real directory exactly where it is in the workspace
 (no symlink, junction or a path resolving anywhere else) and ``SKILL.md`` a regular file
 with one link; ``--force`` never overrides those refusals.
@@ -42,7 +45,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from aegis_cli import sanitize_display
 from aegis_cli.base import AegisCommand, CommandCategory
-from aegis_cli.init import _host_option, _real_key, packaged_dir
+from aegis_cli.init import _host_option, _real_key, _unwritable, packaged_dir
 from aegis_core import hosts as host_table
 
 __all__ = ["RESULTS", "Entry", "SkillsCommand", "SyncResult", "TargetResult", "run_skills", "summary", "sync_skills"]
@@ -223,17 +226,18 @@ def _render(skill: _Skill, profile: str) -> bytes:
     registry = SlotRegistry({**DEFAULT_SLOTS, **PLATFORM_SLOT_PROFILES[profile]}).sanitized()
     body = registry.resolve(skill.body, strict=False)
     eol = skill.eol
-    marker = f"<!-- aegis:skill id={skill.id} v={MARKER_VERSION} sha={_sha(body)} -->"
-    head = f"---{eol}name: {skill.id}{eol}{''.join(skill.description)}---{eol}{marker}{eol}"
-    return (head + body).encode("utf-8")
+    head = f"---{eol}name: {skill.id}{eol}{''.join(skill.description)}---{eol}"
+    marker = f"<!-- aegis:skill id={skill.id} v={MARKER_VERSION} sha={_sha(head + body)} -->"
+    return (head + marker + eol + body).encode("utf-8")
 
 
 def _is_aegis_copy(data: bytes, skill_id: str) -> Optional[bool]:
     """True: Aegis's unedited copy. False: an Aegis copy edited since (or another id's,
     or another marker version). None: no marker right after the frontmatter, so the
-    user's own file."""
+    user's own file. The marker is found and the sha compared after a leading byte order
+    mark is dropped and line endings are LF-normalized."""
     try:
-        lines = _lines(data.decode("utf-8"))
+        lines = _lines(data.decode("utf-8-sig"))
     except UnicodeDecodeError:
         return None
     close = _closing(lines)
@@ -243,7 +247,7 @@ def _is_aegis_copy(data: bytes, skill_id: str) -> Optional[bool]:
         return None
     meta = _parse_frontmatter(lines[1:close])
     return (marker.group(1) == skill_id and marker.group(2) == str(MARKER_VERSION)
-            and marker.group(3) == _sha("".join(lines[close + 2:]))
+            and marker.group(3) == _sha("".join(lines[:close + 1] + lines[close + 2:]))
             and meta is not None and set(meta) == {"name", "description"} and meta["name"] == skill_id)
 
 
@@ -374,11 +378,19 @@ def _sync_one(root: Path, target: _Target, skill: _Skill, *, force: bool, dry_ru
         entry.detail = f"{rel} is read-only; left as it is, {_FORCE_NOTE}"
         return entry
     if dry_run:
+        # A dry run (init's check pass among them) predicts the write's failure, so init
+        # stops before its first write; a real run reports what the OS says instead.
+        unwritable = _unwritable(path.parent)
+        if unwritable:
+            entry.result, entry.reason = "failed", "write"
+            entry.detail = f"{rel} cannot be written ({unwritable})"
         return entry
     from aegis_core.storage import atomic_write_bytes
 
-    # The checks above ran just now; atomic_write_bytes makes the missing directories and
-    # replaces the file whole, so a reader never sees a partial copy.
+    # atomic_write_bytes makes the missing directories and replaces the file whole, so a
+    # reader never sees a partial copy. It resolves the path, so a link planted between the
+    # checks above and this call would be followed: only a concurrent local writer can win
+    # that race, and no portable stdlib call (no dir_fd/O_NOFOLLOW on Windows) closes it.
     try:
         atomic_write_bytes(path, data)
     except OSError as exc:
@@ -430,7 +442,7 @@ _DRY = {"created": "would create", "updated": "would update", "overwritten": "wo
 
 def _print_text(result: SyncResult) -> None:
     for target in result.targets:
-        label = "" if target.verified else ", unverified: the host's documented location, not checked on a real install"
+        label = "" if target.verified else ", unverified: not checked on a real install"
         print(f"{target.dir}/ for {', '.join(target.hosts)} ({target.profile} wording{label})")
         unchanged = 0
         for entry in target.entries:
