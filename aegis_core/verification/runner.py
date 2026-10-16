@@ -5,8 +5,10 @@ The output feeds directly into the Arbiter as Layer 1 evidence.
 """
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
+import re
 import sys
 from aegis_core.match import is_test_path
 from aegis_core.workspace.layout import RULES_RELDIR
@@ -145,6 +147,94 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
     return None
 
 
+def _module_names(filepath: str, repo_root: str) -> set[str]:
+    """The dotted names a test can import ``filepath`` by: its package path and its path from the root."""
+    full = os.path.abspath(os.path.join(repo_root, filepath))
+    stem = os.path.splitext(os.path.basename(full))[0]
+    parts = [stem]
+    parent = os.path.dirname(full)
+    while os.path.isfile(os.path.join(parent, "__init__.py")):
+        parts.insert(0, os.path.basename(parent))
+        parent = os.path.dirname(parent)
+    names = {".".join(parts)}
+    try:
+        names.add(".".join(Path(os.path.relpath(os.path.splitext(full)[0], repo_root)).parts))
+    except ValueError:  # another drive on Windows
+        pass
+    return names
+
+
+def _imports_module(tree: ast.AST, names: set[str]) -> bool:
+    """Whether a module imports one of ``names``: ``import a.b``, ``from a.b import x`` or ``from a import b``."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name in names for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            if node.module in names or any(f"{node.module}.{alias.name}" in names for alias in node.names):
+                return True
+    return False
+
+
+class _TestModules:
+    """The test modules under ``tests/``, in path order, each read and parsed at most once per run."""
+
+    def __init__(self, repo_root: str):
+        base = os.path.join(repo_root, "tests")
+        found: list[str] = []
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__" and not d.startswith(".")]
+            for name in filenames:
+                stem, ext = os.path.splitext(name)
+                if ext == ".py" and (stem.startswith("test_") or stem.endswith("_test")):
+                    found.append(os.path.join(dirpath, name))
+        self.paths = sorted(found, key=lambda path: Path(os.path.relpath(path, base)).as_posix())
+        self._text: dict[str, str] = {}
+        self._tree: dict[str, Optional[ast.AST]] = {}
+
+    def text(self, path: str) -> str:
+        if path not in self._text:
+            try:
+                self._text[path] = Path(path).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                self._text[path] = ""
+        return self._text[path]
+
+    def tree(self, path: str) -> Optional[ast.AST]:
+        if path not in self._tree:
+            try:
+                self._tree[path] = ast.parse(self.text(path))
+            except (SyntaxError, ValueError, RecursionError):
+                self._tree[path] = None
+        return self._tree[path]
+
+
+def _find_mutation_test_files(filepath: str, repo_root: str, func_name: str, tests: _TestModules) -> list[str]:
+    """The test files that face mutants of ``func_name`` in ``filepath``.
+
+    The convention file (``_find_test_file``) first, then, in path order, every test
+    module under ``tests/`` that imports the module and names the function. A mutant
+    that survives them has met every test that could plausibly detect it, not just the
+    one conventionally named file. mutation_tester caps how many run.
+    """
+    convention = _find_test_file(filepath, repo_root)
+    names = _module_names(filepath, repo_root)
+    tails = {name.rpartition(".")[2] for name in names}
+    mentions = re.compile(rf"\b{re.escape(func_name)}\b")
+    ordered = [convention] if convention else []
+    seen = {os.path.normcase(os.path.abspath(path)) for path in ordered}
+    for path in tests.paths:
+        text = tests.text(path)
+        if not mentions.search(text) or not any(tail in text for tail in tails):
+            continue
+        tree = tests.tree(path)
+        key = os.path.normcase(os.path.abspath(path))
+        if tree is not None and key not in seen and _imports_module(tree, names):
+            seen.add(key)
+            ordered.append(path)
+    return ordered
+
+
 def _discover_functions(filepath: str, target_lines: Optional[set[int]] = None) -> list[str]:
     """Extract top-level function names from a Python file via AST.
 
@@ -251,7 +341,8 @@ def run_layer1(
         persistence_targets: List of (filepath, dict_name) tuples for
             persistence checking. If None, auto-detects from changed_files.
         mutation_targets: List of (source_file, func_name, test_file) tuples.
-            If None, auto-discovers from changed_files using convention.
+            If None, auto-discovers the changed functions of changed_files and,
+            for each, the test files that exercise it (_find_mutation_test_files).
         max_mutations: Maximum mutations per function (default: 5).
 
     Returns:
@@ -400,21 +491,25 @@ def run_layer1(
                         src_path, func, tst_path, max_mutations=max_mutations,
                     ))
         else:
-            # Auto-discover: for each changed .py file, find test file and functions
+            # Auto-discover: for each changed .py file, its changed functions and the
+            # test files that exercise each of them.
+            test_modules: Optional[_TestModules] = None
             for filepath in changed_files:
                 if not filepath.endswith('.py') or _is_test_or_support(filepath):
                     continue
                 full_path = os.path.join(repo_root_str, filepath)
                 if not os.path.exists(full_path):
                     continue
-                test_file = _find_test_file(filepath, repo_root_str)
-                if test_file is None:
-                    continue
                 mod_lines = _get_modified_lines(filepath, repo_root_str, diff_base=diff_base)
                 funcs = _discover_functions(full_path, target_lines=mod_lines)
                 for func_name in funcs[:3]:  # Limit auto-discovery to 3 functions
+                    if test_modules is None:
+                        test_modules = _TestModules(repo_root_str)
+                    test_files = _find_mutation_test_files(filepath, repo_root_str, func_name, test_modules)
+                    if not test_files:
+                        continue
                     results.append(mutation_tester.check(
-                        full_path, func_name, test_file,
+                        full_path, func_name, test_files,
                         max_mutations=max_mutations,
                         target_lines=mod_lines,
                     ))
