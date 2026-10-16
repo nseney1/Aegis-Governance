@@ -113,11 +113,10 @@ def evaluate_forbid_ast(
             if any(_match_ImportNode_against_pattern(imp_tuple, mod) for imp_tuple in parsed_imports):
                 violations.append(f"Forbidden import '{mod}' matched rule forbid_ast.imports")
 
+    # NormalizedAST.calls is derived from call_sites: the targets are read from the field alone.
     raw_call_sites = getattr(normalized_ast, "call_sites", ()) or ()
-    raw_calls_attr = getattr(normalized_ast, "calls", ()) or ()
-    all_call_items = list(raw_call_sites) + list(raw_calls_attr)
     # Each distinct target once: the verdict per pattern is "any call matches".
-    call_targets = list(dict.fromkeys(t for t in map(_call_target, all_call_items) if t))
+    call_targets = list(dict.fromkeys(t for t in map(_call_target, raw_call_sites) if t))
     call_index = _SpellingIndex(imported_qual_map, aliases, qualify_heads=True)
 
     forbidden_calls = forbid_spec.get("calls")

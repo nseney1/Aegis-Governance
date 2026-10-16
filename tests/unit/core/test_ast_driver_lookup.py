@@ -316,6 +316,27 @@ def test_a_driver_path_resolves_against_the_workspace_root_never_the_cwd(ws, tmp
     assert resolve_driver_executable(str(tmp_path / "missing")) is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows runs any file; POSIX needs the execute bit")
+def test_a_driver_path_names_a_program_only_when_it_is_an_executable_file(tmp_path):
+    tools = tmp_path / "tools"
+    runnable = _write_executable(tools / "mddriver", "print('{}')\n")
+    plain = tools / "notes.txt"
+    plain.write_text("not a program\n", encoding="utf-8")
+
+    assert resolve_driver_executable(str(runnable)) == str(runnable)
+    assert resolve_driver_executable(str(plain)) is None
+    assert resolve_driver_executable(str(tools)) is None  # a directory: searchable, not runnable
+
+
+def test_a_registered_driver_is_found_for_any_spelling_of_its_extension(tmp_path):
+    registry = ASTDriverRegistry({".md": "mddriver --json"})
+
+    assert registry.resolve_driver(".MD") == "mddriver --json"
+    assert registry.resolve_driver("md") == "mddriver --json"
+    assert registry.plan_driver(".Md").label == "mddriver --json"
+    assert registry.resolve_driver(".rst") is None  # nothing registered, no workspace to ask
+
+
 @pytest.mark.parametrize("layout", sorted(PLANTED_ENTRIES))
 def test_a_toolchain_planted_in_the_repository_is_not_detected(ws, tmp_path, monkeypatch, layout):
     (ws / "tsconfig.json").write_text("{}", encoding="utf-8")

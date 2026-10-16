@@ -79,11 +79,34 @@ def _is_mutable_return(node: ast.AST) -> bool:
     return not (isinstance(node.value, ast.Constant) and node.value.value is None)
 
 
-def _function_node(tree: ast.AST, function_name: str) -> Optional[ast.FunctionDef]:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == function_name:
-            return node
+_SCOPES = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _defined_in(scope: ast.AST, name: str, kinds: tuple[type, ...]) -> Optional[ast.AST]:
+    """The first ``kinds`` definition of ``name`` that belongs to ``scope`` itself: in its
+    body or in a block there (if/else, try, with, loops), never inside a nested scope."""
+    todo = list(ast.iter_child_nodes(scope))
+    for node in todo:  # grows while iterated: breadth first, as runner._discover_functions
+        if isinstance(node, _SCOPES):
+            if isinstance(node, kinds) and node.name == name:
+                return node
+            continue
+        todo.extend(ast.iter_child_nodes(node))
     return None
+
+
+def _function_node(tree: ast.AST, function_name: str) -> Optional[ast.FunctionDef]:
+    """The function ``function_name`` names: a module-level ``f``, a method ``Class.method``
+    or a nested ``outer.inner`` (runner._discover_functions); the first definition when its
+    scope defines it more than once."""
+    *outer, name = function_name.split(".")
+    scope: Optional[ast.AST] = tree
+    for part in outer:
+        scope = _defined_in(scope, part, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        if scope is None:
+            return None
+    found = _defined_in(scope, name, (ast.FunctionDef,))
+    return found if isinstance(found, ast.FunctionDef) else None
 
 
 def _collect_mutations(source: str, function_name: str) -> list[_Mutation]:

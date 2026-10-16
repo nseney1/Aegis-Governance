@@ -838,6 +838,14 @@ class TestSpellingSemantics:
             assert evaluate_forbid_ast(norm_ast, spec) == expected, (case, imports, targets, decorators, spec)
 
 
+    def test_a_pattern_that_is_empty_when_matched_matches_nothing(self):
+        # '()()' loses one '()' when read and the other when matched: the empty pattern is
+        # no spelling and no dot-suffix of one, so it names no call.
+        norm_ast = NormalizedAST(file_path="m.py", call_sites=[CallSiteNode(target="eval"), CallSiteNode(target="os.system")])
+        assert evaluate_forbid_ast(norm_ast, {"calls": ["()()"]}) == []
+        assert evaluate_forbid_ast(norm_ast, {"calls": ["()()", "eval"]}) == ["Forbidden call 'eval' matched rule forbid_ast.calls"]
+
+
 # ── Review round 3, finding 3: nesting depth must not make a file unverifiable ──
 
 class TestDeepNestingIsChecked:

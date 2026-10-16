@@ -33,7 +33,7 @@ import secrets
 import stat
 import threading
 import time
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set
 
 from aegis_core.errors import LockTimeoutError, PathTraversalError
 from aegis_core.taxonomy import (
@@ -83,7 +83,7 @@ _NEW_FILE_MODE = 0o666
 
 _GUARD = threading.Lock()
 _THREAD_LOCKS: Dict[str, "threading.RLock"] = {}
-_HELD = threading.local()  # .depth: {lock path: (depth, fd or None)}
+_HELD = threading.local()  # .keys: the lock keys this thread holds
 
 
 def _reset_after_fork() -> None:
@@ -106,10 +106,10 @@ def _thread_lock(key: str) -> "threading.RLock":
         return lock
 
 
-def _held() -> Dict[str, Tuple[int, Optional[int]]]:
-    held = getattr(_HELD, "depth", None)
+def _held() -> Set[str]:
+    held = getattr(_HELD, "keys", None)
     if held is None:
-        held = _HELD.depth = {}
+        held = _HELD.keys = set()
     return held
 
 
@@ -199,9 +199,9 @@ def state_dir(workspace: Any) -> Path:
 
     Raises PathTraversalError when ``.aegis`` or ``.aegis/state`` is a symlink or
     otherwise resolves outside the workspace (nothing is created then), or when an entry
-    directly inside ``.aegis/state`` is a symlink or a directory that resolves outside
-    it: the ledger, the lock, the logs and migration backups would be written wherever
-    it points. Writes ``state/.gitignore`` ("*") when it is missing.
+    directly inside ``.aegis/state`` is a symlink or resolves outside it (a Windows
+    junction): the ledger, the lock, the logs and migration backups would be written
+    wherever it points. Writes ``state/.gitignore`` ("*") when it is missing.
     """
     layout = WorkspaceLayout(Path(os.fspath(workspace)).resolve())
     for path in (layout.aegis_dir, layout.state_dir):
@@ -214,7 +214,8 @@ def state_dir(workspace: Any) -> Path:
         for entry in entries:
             if entry.is_symlink():
                 raise _link_error(Path(entry.path))
-            if entry.is_dir(follow_symlinks=False) and not _within(Path(entry.path), layout.root):
+            # Every entry, not only directories: a file here always resolves inside it.
+            if not _within(Path(entry.path), layout.root):
                 raise _outside_error(Path(entry.path))
     if not os.path.lexists(layout.state_gitignore):
         atomic_write_bytes(layout.state_gitignore, _STATE_GITIGNORE)
@@ -257,7 +258,9 @@ def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Pa
 
     ``workspace`` is a Workspace, a path or a string; every spelling of one root shares
     one lock. Re-entrant per thread: a nested ``locked()`` in the thread that holds it
-    returns immediately. Raises LockTimeoutError, naming the lock file, when another
+    returns immediately. While another process holds it, the wait between tries starts
+    at LOCK_RETRY_INTERVAL_SECONDS and grows by half each time, up to
+    LOCK_MAX_BACKOFF_SECONDS. Raises LockTimeoutError, naming the lock file, when another
     thread or process holds it for longer than ``timeout`` seconds, and
     PathTraversalError when the state directory is not confined (``state_dir``).
     """
@@ -269,14 +272,10 @@ def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Pa
     # two keys for one lock file would make a nested locked() wait on itself.
     key = os.path.join(_real(state), lock_path.name)
     held = _held()
-    depth, fd = held.get(key, (0, None))
-    if depth:
-        held[key] = (depth + 1, fd)
-        try:
-            yield lock_path
-        finally:
-            d, f = held[key]
-            held[key] = (d - 1, f)
+    if key in held:
+        # Re-entrant: this thread's outermost locked() holds the lock and releases it, so
+        # a nested block keeps no count of its own.
+        yield lock_path
         return
 
     deadline = time.monotonic() + max(0.0, timeout)
@@ -292,11 +291,11 @@ def locked(workspace: Any, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[Pa
                 raise _timeout_error(lock_path, timeout)
             time.sleep(interval)
             interval = min(interval * 1.5, LOCK_MAX_BACKOFF_SECONDS)
-        held[key] = (1, fd)
+        held.add(key)
         try:
             yield lock_path
         finally:
-            held.pop(key, None)
+            held.discard(key)
             _os_unlock(fd)
     finally:
         if fd is not None:

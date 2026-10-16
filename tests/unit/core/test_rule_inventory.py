@@ -132,3 +132,21 @@ def test_inventory_covers_the_workspace_rules_directory(tmp_path):
     _write_rule(rule, "inv1")
     inventory = inventory_rules(str(tmp_path))
     assert [e.relative_path for e in inventory.entries] == [".aegis/rules/invariants/inv1.md"]
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="needs POSIX permissions that apply to this user")
+def test_an_unlistable_rule_directory_fails_closed_naming_it(tmp_path):
+    from aegis_core.rule_inventory import RuleInventoryError, inventory_rules
+
+    _write_rule(tmp_path / ".aegis" / "rules" / "traps" / "a.md")
+    sealed = tmp_path / ".aegis" / "rules" / "invariants"
+    _write_rule(sealed / "hidden.md", "hidden")
+    sealed.chmod(0)
+    try:
+        with pytest.raises(RuleInventoryError) as caught:
+            inventory_rules(str(tmp_path))
+    finally:
+        sealed.chmod(0o755)
+
+    assert (caught.value.operation, caught.value.path) == ("list", str(sealed))
+    assert str(caught.value).startswith(f"rule inventory list failed for {sealed}: ")

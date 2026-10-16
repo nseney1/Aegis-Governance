@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -44,6 +45,10 @@ FAKE_LLM = textwrap.dedent(
         sys.exit(7)
     elif mode == "sleep":
         time.sleep(30)
+    elif mode == "seal":  # answer, leaving a directory the caller cannot remove
+        os.makedirs("sealed/inner")
+        os.chmod("sealed", 0o500)
+        sys.stdout.write("ECHO:" + prompt)
     """
 )
 
@@ -90,6 +95,14 @@ class TestCommandBackend:
         with pytest.raises(LLMCommandError, match=r"cannot run .*no-such-llm"):
             backend.generate("x")
 
+    def test_a_command_that_cannot_start_is_named_with_the_reason_the_os_gives(self, tmp_path):
+        missing = tmp_path / "no-such-llm"
+        with pytest.raises(LLMCommandError) as caught:
+            CommandBackend([str(missing)]).generate("x")
+        with pytest.raises(OSError) as os_said:
+            os.stat(missing)
+        assert str(caught.value) == f"cannot run LLM command {missing}: {os_said.value.strerror}"
+
     @pytest.mark.parametrize("then", ["echo", "fail", "sleep"])
     def test_the_command_runs_in_a_fresh_empty_directory(self, fake_llm, tmp_path, monkeypatch, then):
         # The checked repo's own agent config (.claude/, .gemini/, AGENTS.md...) must not steer
@@ -111,6 +124,18 @@ class TestCommandBackend:
         assert seen["listing"] == []
         assert not Path(seen["cwd"]).exists()
         assert Path.cwd().resolve() == repo.resolve()
+
+    @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="needs POSIX permissions that apply to this user")
+    def test_a_directory_the_command_leaves_behind_does_not_lose_its_reply(self, fake_llm, tmp_path):
+        where = tmp_path / "where.json"
+        backend = CommandBackend([sys.executable, str(fake_llm), "where", str(where), "seal"], timeout=10)
+        try:
+            assert backend.generate("x") == "ECHO:x"
+        finally:
+            workdir = Path(json.loads(where.read_text(encoding="utf-8"))["cwd"])
+            if (workdir / "sealed").exists():
+                (workdir / "sealed").chmod(0o700)
+            shutil.rmtree(workdir, ignore_errors=True)
 
     def test_empty_argv_is_rejected(self):
         with pytest.raises(LLMCommandError, match="empty"):

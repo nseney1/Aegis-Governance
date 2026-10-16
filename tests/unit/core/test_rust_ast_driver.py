@@ -98,3 +98,13 @@ def test_rust_call_graph_reachability(tmp_path: Path):
     # dead_uncalled_fn is uncalled, so verdict is False (orphan detected)
     assert evidence.verdict is False
     assert "dead_uncalled_fn" in evidence.detail
+
+
+def test_a_malformed_use_statement_does_not_stop_the_parse():
+    """Code mid-edit still parses: a use with a stray brace is recorded as written."""
+    from aegis_core.ast.drivers.templates.rust_ast import parse_rust_source
+
+    result = parse_rust_source("use crate::net::client};\nfn run() {}\n", "lib.rs")
+
+    assert [d["name"] for d in result["definitions"]] == ["run"]
+    assert [i["module"] for i in result["imports"]] == ["crate::net::client}"]

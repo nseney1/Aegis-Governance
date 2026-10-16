@@ -249,7 +249,9 @@ class _SpellingIndex:
         self._qual_suffixes: dict[str, frozenset[str]] = {}
 
     def matches(self, ref: str, pattern: str) -> bool:
-        if not ref or not pattern:
+        # An empty pattern names nothing. An empty reference needs no guard: it has no
+        # spelling a non-empty pattern ends, and evaluate_forbid_ast drops empty ones anyway.
+        if not pattern:
             return False
         if self._enumerate:
             spellings = _spellings(ref, self._quals, self._aliases, qualify_heads=self._qualify_heads)
@@ -303,8 +305,6 @@ class _SpellingIndex:
         return sets[0] if len(sets) == 1 else frozenset().union(*sets)
 
 
-# _call_target and _decorator_name are not orphans: aegis_core.ast.policy passes them to
-# map(), a reference that call_graph's cross-module pass does not count as a call site.
 def _call_target(call_item: Any) -> str:
     if isinstance(call_item, str):
         return _normalize_ast_token(call_item)

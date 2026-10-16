@@ -236,14 +236,15 @@ def _find_mutation_test_files(filepath: str, repo_root: str, func_name: str, tes
     """The test files that face mutants of ``func_name`` in ``filepath``.
 
     The convention file (``_find_test_file``) first, then, in path order, every test
-    module under ``tests/`` that imports the module and names the function. A mutant
-    that survives them has met every test that could plausibly detect it, not just the
-    one conventionally named file. mutation_tester caps how many run.
+    module under ``tests/`` that imports the module and names the function (a method or
+    nested function by its own name: ``Class.method`` is called as ``obj.method``). A
+    mutant that survives them has met every test that could plausibly detect it, not just
+    the one conventionally named file. mutation_tester caps how many run.
     """
     convention = _find_test_file(filepath, repo_root)
     names = _module_names(filepath, repo_root)
     tails = {name.rpartition(".")[2] for name in names}
-    mentions = re.compile(rf"\b{re.escape(func_name)}\b")
+    mentions = re.compile(rf"\b{re.escape(func_name.rpartition('.')[2])}\b")
     ordered = [convention] if convention else []
     convention_key = os.path.normcase(os.path.abspath(convention)) if convention else None
     for path in tests.paths:
@@ -258,31 +259,35 @@ def _find_mutation_test_files(filepath: str, repo_root: str, func_name: str, tes
 
 
 def _discover_functions(filepath: str, target_lines: Optional[set[int]] = None) -> list[str]:
-    """Extract top-level function names from a Python file via AST.
+    """The public functions of a Python file, by the qualified name mutation_tester resolves.
 
-    If target_lines is provided, only functions intersecting target_lines are returned.
+    A method is ``Class.method`` and a nested function ``outer.inner``; each name is listed
+    once, outer scopes first (breadth first), even when it is defined twice (a platform
+    branch). Unqualified, every method was mutated as the first definition in the file with
+    its name. With target_lines, only the functions intersecting them.
     """
-    import ast
+    from aegis_core.ast.drivers.python import read_python_source
+
     try:
-        with open(filepath) as f:
-            tree = ast.parse(f.read())
-    except (SyntaxError, OSError):
+        tree = ast.parse(read_python_source(filepath))
+    except (SyntaxError, OSError, UnicodeError, ValueError):
         return []
-    funcs: list[str] = []
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.FunctionDef)
-            and not node.name.startswith('_')
-            and not node.name.startswith('test_')
-        ):
-            if target_lines is not None:
-                start = node.lineno
-                end = getattr(node, "end_lineno", start)
-                fn_lines = set(range(start, end + 1))
-                if not (fn_lines & target_lines):
-                    continue
-            funcs.append(node.name)
-    return funcs
+    found: dict[str, None] = {}
+    todo: list[tuple[ast.AST, str]] = [(tree, "")]
+    for node, scope in todo:  # grows while iterated: a breadth-first walk, as ast.walk
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                inner = f"{scope}{child.name}."
+                if (
+                    isinstance(child, ast.FunctionDef)
+                    and not child.name.startswith(("_", "test_"))
+                    and (target_lines is None
+                         or not target_lines.isdisjoint(range(child.lineno, (child.end_lineno or child.lineno) + 1)))
+                ):
+                    found.setdefault(inner[:-1], None)
+            todo.append((child, inner))
+    return list(found)
 
 
 def _get_modified_lines(filepath: str, repo_root: str, diff_base: Optional[str] = None) -> Optional[set[int]]:

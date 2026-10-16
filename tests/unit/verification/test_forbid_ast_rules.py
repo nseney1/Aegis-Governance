@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from aegis_core.ast.policy import evaluate_forbid_ast
 from aegis_core.ast.schema import CallSiteNode, ImportNode, NormalizedAST
 from aegis_core.verification.pipeline import DeterministicVerifier
@@ -83,6 +85,45 @@ class TestEvaluateForbidAST:
             },
         )
         assert violations == []
+
+
+_SUBPROCESS_AST = NormalizedAST(
+    file_path="src/runner.py",
+    language="python",
+    imports=(ImportNode(source="subprocess", imported_symbols=("run",)),),
+    call_sites=(CallSiteNode(target="subprocess.run", line=3), CallSiteNode(target="eval", line=4)),
+)
+
+
+class TestSpecsThatForbidNothing:
+    """What evaluate_forbid_ast cannot use forbids nothing here; Layer 1 reports such a
+    rule itself (runner._forbid_ast_spec_error), so a gate is never silently empty."""
+
+    @pytest.mark.parametrize("spec", [["subprocess"], "subprocess", None, {}])
+    def test_a_spec_that_is_not_a_mapping_is_ignored(self, spec):
+        assert evaluate_forbid_ast(_SUBPROCESS_AST, spec) == []
+
+    def test_no_ast_means_no_violation(self):
+        assert evaluate_forbid_ast(None, {"imports": ["subprocess"], "calls": ["eval"]}) == []
+
+    @pytest.mark.parametrize("key, value", [("imports", "subprocess"), ("calls", "eval"), ("decorators", "x")])
+    def test_patterns_given_as_one_string_are_ignored(self, key, value):
+        norm_ast = NormalizedAST(
+            file_path="src/runner.py",
+            imports=(ImportNode(source="subprocess"),),
+            call_sites=(CallSiteNode(target="eval"),),
+            decorators=["x"],
+        )
+        assert evaluate_forbid_ast(norm_ast, {key: value}) == []
+
+    def test_an_empty_decorator_list_never_reads_the_file(self, tmp_path):
+        broken = tmp_path / "broken.py"
+        broken.write_text("def (:\n", encoding="utf-8")
+        norm_ast = NormalizedAST(file_path=str(broken), call_sites=(CallSiteNode(target="eval"),))
+
+        assert evaluate_forbid_ast(norm_ast, {"calls": ["eval"], "decorators": []}) == [
+            "Forbidden call 'eval' matched rule forbid_ast.calls"
+        ]
 
 
 class TestLayer1DeterministicVerifierForbidAST:

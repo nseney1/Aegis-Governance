@@ -170,8 +170,8 @@ class ExternalModuleInspector(ast.NodeVisitor):
     def __init__(self, target_stems: set[str], target_func_names: set[str]):
         self.target_stems = target_stems
         self.target_func_names = target_func_names
-        # Bound names in this external file that point to our target functions
-        self.bound_direct_names: set[str] = set()
+        # Local name in this external file -> the target function it is bound to
+        self.bound_direct_names: dict[str, str] = {}
         # Aliases/module identifiers that refer to our target module
         self.bound_module_aliases: set[str] = set()
         # Confirmed called functions
@@ -196,29 +196,51 @@ class ExternalModuleInspector(ast.NodeVisitor):
                 if alias.name == "*":
                     self.has_wildcard_import = True
                 elif alias.name in self.target_func_names:
-                    local_name = alias.asname or alias.name
-                    self.bound_direct_names.add(local_name)
+                    self.bound_direct_names[alias.asname or alias.name] = alias.name
                 else:
                     # Could be an imported class whose methods are called
                     self.bound_module_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
+    def _match_reference(self, node: ast.AST) -> None:
+        """Record the target function ``node`` names: ``f`` bound by an import from the
+        target module, or ``alias.f`` through an alias of the module or of a class in it."""
+        if isinstance(node, ast.Name):
+            if node.id in self.bound_direct_names:
+                self.matched_calls.add(self.bound_direct_names[node.id])
+            elif self.has_wildcard_import and node.id in self.target_func_names:
+                self.matched_calls.add(node.id)
+        elif isinstance(node, ast.Attribute) and node.attr in self.target_func_names:
+            if isinstance(node.value, ast.Name):
+                if node.value.id in self.bound_module_aliases or node.value.id in self.target_stems:
+                    self.matched_calls.add(node.attr)
+            elif self.has_wildcard_import:
+                self.matched_calls.add(node.attr)
+
     def visit_Call(self, node: ast.Call):
-        if isinstance(node.func, ast.Name):
-            callee = node.func.id
-            if callee in self.bound_direct_names:
-                self.matched_calls.add(callee)
-            elif self.has_wildcard_import and callee in self.target_func_names:
-                self.matched_calls.add(callee)
-        elif isinstance(node.func, ast.Attribute):
-            attr = node.func.attr
-            if attr in self.target_func_names:
-                # If receiver is an alias to target module or class imported from target
-                if isinstance(node.func.value, ast.Name):
-                    if node.func.value.id in self.bound_module_aliases or node.func.value.id in self.target_stems:
-                        self.matched_calls.add(attr)
-                elif self.has_wildcard_import:
-                    self.matched_calls.add(attr)
+        self._match_reference(node.func)
+        # A function passed as a value (map(f, ...), key=f) is used, as InternalCallCollector
+        # counts it within the module.
+        for arg in node.args:
+            self._match_reference(arg.value if isinstance(arg, ast.Starred) else arg)
+        for kw in node.keywords:
+            self._match_reference(kw.value)
+        self.generic_visit(node)
+
+    def visit_Dict(self, node: ast.Dict):
+        for val in node.values:
+            self._match_reference(val)
+        self.generic_visit(node)
+
+    def _visit_elements(self, node: ast.List | ast.Tuple | ast.Set):
+        for elt in node.elts:
+            self._match_reference(elt)
+        self.generic_visit(node)
+
+    visit_List = visit_Tuple = visit_Set = _visit_elements
+
+    def visit_Assign(self, node: ast.Assign):
+        self._match_reference(node.value)
         self.generic_visit(node)
 
 

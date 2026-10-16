@@ -182,3 +182,23 @@ class TestPipelineFailClosed:
         assert len(discovered) == 1, "Partial test evidence (test_results=None) must trigger discovery for missing results"
         assert captured_kwargs["test_names"] == ["provided_test"]
         assert captured_kwargs["test_results"] == "discovered test output"
+
+
+def test_layer2_reads_only_the_changed_source_modules(tmp_path):
+    """Tests and package markers are not the implementation under review; neither are
+    deleted files or non-Python ones."""
+    from aegis_core.verification.pipeline import AdversarialVerifier
+
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("def exported():\n    return 0\n", encoding="utf-8")
+    (tmp_path / "pkg" / "mod.py").write_text("def transfer(amount: int) -> int:\n    return amount\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_mod.py").write_text("def test_transfer():\n    assert True\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("def nothing(): pass\n", encoding="utf-8")
+
+    signatures, implementation = AdversarialVerifier().extract_target_data(
+        ["pkg/__init__.py", "tests/test_mod.py", "pkg/mod.py", "notes.md", "pkg/deleted.py"], tmp_path,
+    )
+
+    assert implementation == "def transfer(amount: int) -> int:\n    return amount\n"
+    assert len(signatures) == 1 and "def transfer(" in signatures[0]

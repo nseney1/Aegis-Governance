@@ -167,6 +167,37 @@ def test_lock_held_by_another_process_times_out_with_exact_error(tmp_path: Path)
         pass
 
 
+def test_a_waiter_backs_off_from_10_ms_by_half_again_each_try_up_to_50_ms(tmp_path: Path, monkeypatch):
+    """Polling a lock another process holds neither spins nor stalls: waits of 10, 15,
+    22.5 and 33.75 ms, then 50 ms (LOCK_RETRY_INTERVAL_SECONDS, LOCK_MAX_BACKOFF_SECONDS)."""
+    from aegis_core import storage
+
+    waits = []
+    real_sleep = time.sleep
+
+    def sleep(seconds):
+        waits.append(seconds)
+        real_sleep(seconds)
+
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _HOLD_UNTIL_EOF, str(tmp_path)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env=_child_env(tmp_path), cwd=REPO_ROOT,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "held", holder.stderr.read()
+        monkeypatch.setattr(storage.time, "sleep", sleep)
+        with pytest.raises(LockTimeoutError):
+            with locked(tmp_path, timeout=0.5):
+                pytest.fail("acquired a lock another process holds")
+        monkeypatch.undo()
+    finally:
+        holder.stdin.close()
+        holder.wait(timeout=30)
+    assert waits[:5] == pytest.approx([0.01, 0.015, 0.0225, 0.03375, 0.05])
+    assert len(waits) > 5 and set(waits[5:]) == {0.05}
+
+
 def test_threads_never_lose_an_update(tmp_path: Path):
     counter = tmp_path / "counter.txt"
     counter.write_text("0", encoding="utf-8")

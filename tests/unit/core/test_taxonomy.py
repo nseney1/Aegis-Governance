@@ -23,6 +23,7 @@ from aegis_core.taxonomy import (
     ReviewProng,
     RuleType,
     WILSON_CONFIDENCE_Z_SCORES,
+    legacy_rule_type,
     normalize_review_mode,
 )
 
@@ -121,3 +122,18 @@ def test_statistical_and_operational_constants():
         "VERIFICATION",
         "CHECKPOINT",
     }
+
+
+def test_a_type_name_of_any_version_stands_for_its_v4_type():
+    assert legacy_rule_type("invariant") == "invariant"
+    assert legacy_rule_type(" Trap ") == "trap"  # any case and padding
+    assert legacy_rule_type("walls") == "invariant"  # a v3 type directory
+    assert legacy_rule_type("Vacuoles") == "trap"  # a v2 organelle
+    assert legacy_rule_type("traps") == "trap"
+
+
+def test_a_name_no_version_used_stands_for_no_type():
+    assert legacy_rule_type("widget") is None
+    assert legacy_rule_type("") is None
+    assert legacy_rule_type(None) is None
+    assert legacy_rule_type(3) is None

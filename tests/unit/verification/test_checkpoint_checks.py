@@ -154,3 +154,37 @@ def test_legacy_encoded_test_file_is_parsed(tmp_path):
         "# -*- coding: latin-1 -*-\ndef test_cafe():\n    assert 'café'\n".encode("latin-1")
     )
     assert _messages(tmp_path) == []
+
+
+def _rule(root: Path, rule_dir: str, rule_id: str, fields: str) -> None:
+    path = root / ".aegis" / "rules" / rule_dir / f"{rule_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\nid: {rule_id}\n{fields}---\nBody\n", encoding="utf-8")
+
+
+def test_each_missing_required_rule_field_is_an_issue(tmp_path):
+    from aegis_core.verification.checkpoint_checks import check_rule_conventions
+
+    _rule(tmp_path, "invariants", "inv-bare", "type: invariant\n")
+    _rule(tmp_path, "traps", "trap-ok", "type: trap\ndomain: io\nenforcement: advisory\n")
+    _rule(tmp_path, "personas", "persona-ok", "type: persona\ndomain: style\n")  # needs no enforcement
+
+    issues = check_rule_conventions(tmp_path)
+
+    assert issues == [
+        {"check": "rule_conventions", "file": ".aegis/rules/invariants/inv-bare.md",
+         "message": f".aegis/rules/invariants/inv-bare.md: missing required field '{name}'"}
+        for name in ("domain", "enforcement")
+    ]
+
+
+def test_an_unreadable_ledger_is_a_rule_fitness_issue(tmp_path):
+    from aegis_core.verification.checkpoint_checks import check_rule_fitness
+
+    (tmp_path / ".aegis" / "state" / "ledger.jsonl").mkdir(parents=True)  # not a regular file
+
+    issues = check_rule_fitness(tmp_path)
+
+    assert [(i["check"], i["file"]) for i in issues] == [("rule_fitness", ".aegis/state/ledger.jsonl")]
+    assert issues[0]["message"].startswith(".aegis/state/ledger.jsonl: cannot read ")
+    assert issues[0]["message"].endswith("it is not a regular file")

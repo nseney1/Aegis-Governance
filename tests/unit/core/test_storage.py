@@ -388,3 +388,34 @@ def test_a_state_dir_resolving_elsewhere_is_still_refused_in_the_extended_length
     with pytest.raises(PathTraversalError, match="resolves outside the workspace"):
         state_dir(ws)
     assert list(outside.iterdir()) == []
+
+
+def test_a_state_dir_holding_subdirectories_is_used(tmp_path: Path):
+    from aegis_core.storage import state_dir
+
+    ws = tmp_path / "ws"
+    (ws / ".aegis" / "state" / "backups" / "2026").mkdir(parents=True)
+    (ws / ".aegis" / "state" / "ledger.jsonl").write_text("", encoding="utf-8")
+
+    assert state_dir(ws) == Path(os.path.realpath(ws)) / ".aegis" / "state"
+
+
+def test_an_entry_of_the_state_dir_resolving_elsewhere_is_refused(tmp_path: Path, monkeypatch):
+    """A junction inside .aegis/state: not a symlink, but what is written through it lands outside."""
+    from aegis_core.errors import PathTraversalError
+    from aegis_core.storage import state_dir
+
+    ws = tmp_path / "ws"
+    (ws / ".aegis" / "state" / "backups").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real = os.path.realpath
+
+    def realpath(path, *args, **kwargs):
+        resolved = real(path, *args, **kwargs)
+        return str(outside) if os.path.basename(resolved) == "backups" else resolved
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+
+    with pytest.raises(PathTraversalError, match="backups: it resolves outside the workspace"):
+        state_dir(ws)
