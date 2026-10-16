@@ -335,7 +335,7 @@ def run_compliance(args: argparse.Namespace) -> int:
         return 1
     data = report(root)
     data = {"schema": data.pop("schema"), "source": data.pop("source"), "aegis_version": __version__, **data}
-    if getattr(args, "json", False):
+    if args.json:  # AegisParser.parse_args always sets it
         print(json.dumps(data, indent=2))
         return 0
 
