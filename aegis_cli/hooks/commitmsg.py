@@ -89,7 +89,7 @@ def install(hooks_dir: Path) -> str:
         if current == script:
             return "unchanged"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(script, encoding="utf-8", newline="\n")
+    target.write_bytes(script.encode("utf-8"))
     target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return "installed"
 
