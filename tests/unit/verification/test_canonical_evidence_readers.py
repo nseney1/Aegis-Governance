@@ -73,8 +73,11 @@ def test_ledger_reader_reports_bad_lines_and_keeps_weights(tmp_path):
 def test_status_uses_ledger_triggers(tmp_path, capsys):
     from aegis_cli.status import run_status
 
-    (tmp_path / "genome").mkdir()
-    (tmp_path / "genome" / "canonical.md").write_text("# canonical\n", encoding="utf-8")
+    # A workspace rule: status lists core rules only in the Aegis checkout they ship from.
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    (traps / "canonical.md").write_text("---\nid: canonical\ntarget_paths: ['*.py']\n---\n# canonical\n",
+                                        encoding="utf-8")
     _write_jsonl(_ledger(tmp_path), [
         _signal("canonical", "trigger", "2026-01-01T00:00:00Z"),
         _signal("canonical", "trigger", "2026-01-01T00:01:00Z"),
