@@ -1726,10 +1726,16 @@ def _selection(root: Path, governed: bool) -> Tuple[Tuple[Any, ...], str, List[_
     if not chosen:
         return default, "default", []
     known = {h.id: h for h in hosts.HOSTS if h.registration is not None}
-    unknown = [h for h in chosen if h not in known]
-    notes = [_Finding("unknown_host", config,
-                      f"{config.name} selects {', '.join(repr(h) for h in unknown)}, which doctor "
-                      "cannot check", severity="info")] if unknown else []
+    table = {h.id: h for h in hosts.HOSTS}
+    named = list(dict.fromkeys(chosen))
+    retired = [h for h in named if h in table and table[h].retired]
+    unknown = [h for h in named if h not in known and h not in retired]
+    notes = [_Finding("retired_host", config, f"{config.name} selects {h!r}, a retired host: {table[h].retired}",
+                      severity="info") for h in retired]
+    if unknown:
+        notes.append(_Finding("unknown_host", config,
+                              f"{config.name} selects {', '.join(repr(h) for h in unknown)}, which doctor "
+                              "cannot check", severity="info"))
     picked = tuple(h for h in hosts.HOSTS if h.id in set(chosen) and h.id in known)
     return picked, "config", notes
 

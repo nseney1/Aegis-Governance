@@ -39,12 +39,12 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_profiles_are_keyed_by_host_slot_profile_ids():
-    assert set(PLATFORM_SLOT_PROFILES) == {"codex-cli", "claude-code", "antigravity", "generic"}
+    assert set(PLATFORM_SLOT_PROFILES) == {"codex-cli", "claude-code", "antigravity", "gemini-cli", "generic"}
     for host in hosts.HOSTS:
         assert host.slot_profile in PLATFORM_SLOT_PROFILES, host.id
 
 
-@pytest.mark.parametrize("profile", sorted(["codex-cli", "claude-code", "antigravity", "generic"]))
+@pytest.mark.parametrize("profile", sorted(["codex-cli", "claude-code", "antigravity", "gemini-cli", "generic"]))
 def test_every_profile_binds_every_capability_to_a_value_the_sanitizer_keeps(profile):
     values = PLATFORM_SLOT_PROFILES[profile]
     for key in CAPABILITY_KEYS:
@@ -61,8 +61,8 @@ def test_every_profile_binds_every_capability_to_a_value_the_sanitizer_keeps(pro
         ("codex-cli", "exec_command", "apply_patch", "spawn_agent", "fast"),
         ("claude-code", "Read", "Edit", "Task", "haiku"),
         ("antigravity", "view_file", "replace_file_content", "invoke_subagent", "flash"),
-        # Retired, identity only: the generic profile, never its old tool names.
-        ("gemini-cli", "read_file", "edit_file", "subagent", "fast"),
+        # Retired, but a connected client is still identified and renders its own tools.
+        ("gemini-cli", "read_file", "replace", "subagent", "fast"),
         ("generic", "read_file", "edit_file", "subagent", "fast"),
     ],
 )
@@ -70,6 +70,12 @@ def test_for_platform_renders_each_host_with_its_own_tools(host_id, read, edit, 
     reg = SlotRegistry.for_platform(host_id)
     template = "${SLOT.TOOL_READ}|${SLOT.TOOL_EDIT}|${SLOT.TOOL_SUBAGENT}|${SLOT.MODEL_FAST}"
     assert reg.resolve(template) == f"{read}|{edit}|{subagent}|{fast}"
+
+
+def test_the_retired_gemini_cli_client_keeps_its_documented_search_and_run_tools():
+    assert hosts.get("gemini-cli").slot_profile == "gemini-cli"
+    reg = SlotRegistry.for_platform("gemini-cli")
+    assert reg.resolve("${SLOT.TOOL_SEARCH}|${SLOT.TOOL_RUN}") == "grep_search|run_shell_command"
 
 
 def test_identity_only_desktop_gets_the_generic_profile_from_the_host_table():

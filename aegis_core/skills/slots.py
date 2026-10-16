@@ -92,10 +92,23 @@ _GENERIC_PROFILE: dict[str, str] = {
     "MODEL_HEAVY": "heavy",
 }
 
+# Gemini CLI is retired (aegis_core.hosts), but identify() still names its client when it
+# connects, so it renders its documented tool names; the subagent tool and the model tiers
+# stay generic, as no real install ever confirmed them.
+_GEMINI_CLI_PROFILE: dict[str, str] = {
+    **_GENERIC_PROFILE,
+    "TOOL_READ": "read_file",
+    "TOOL_EDIT": "replace",
+    "TOOL_WRITE": "write_file",
+    "TOOL_SEARCH": "grep_search",
+    "TOOL_RUN": "run_shell_command",
+}
+
 PLATFORM_SLOT_PROFILES: dict[str, dict[str, str]] = {
     "codex-cli": dict(_CODEX_PROFILE),
     "claude-code": dict(_CLAUDE_PROFILE),
     "antigravity": dict(_ANTIGRAVITY_PROFILE),
+    "gemini-cli": dict(_GEMINI_CLI_PROFILE),
     GENERIC: dict(_GENERIC_PROFILE),
 }
 

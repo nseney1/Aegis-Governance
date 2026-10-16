@@ -658,7 +658,7 @@ class TestCommandLine:
         assert captured.out == ""
         assert captured.err.splitlines()[-1] == (
             "aegis init: error: argument --host: gemini-cli is not supported: Google retired Gemini CLI "
-            "for individual Code Assist accounts; use --host antigravity. You can still register "
-            "aegis-mcp by hand with `gemini mcp add`.")
+            "for individual Code Assist accounts; use --host antigravity.")
+        assert "gemini mcp" not in captured.err
         assert "v4.1" not in captured.err
         assert not (project / ".aegis").exists()

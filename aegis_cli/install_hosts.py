@@ -644,13 +644,13 @@ def find_workspace(registry: Dict[str, Any], root: Union[str, Path]) -> Optional
 
 # ── Hosts ────────────────────────────────────────────────────────────────────
 
-#: Hosts kept in the table only so identify() can name their client; naming one with
-#: --host says why and what to use instead.
-_RETIRED_HOSTS = {
-    "gemini-cli": "gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
-                  "accounts; use --host antigravity. You can still register aegis-mcp by hand with "
-                  "`gemini mcp add`.",
-}
+def _never_registered(host: host_table.HostSpec) -> str:
+    """Why Aegis never registers ``host`` (retired, or identity only), or '' if it may."""
+    if host.retired:
+        return host.retired
+    if host.registration is None:
+        return f"{host.id} is identity only: Aegis does not register there (ADR 0005 H4)"
+    return ""
 
 
 def registrable_hosts() -> Tuple[host_table.HostSpec, ...]:
@@ -688,10 +688,9 @@ def parse_hosts(value: str) -> Union[str, List[str]]:
             spec = host_table.get(name)
         except KeyError as exc:
             raise ValueError(f"unknown host {name!r}; hosts: {', '.join(sorted(registrable))}") from exc
-        if name in _RETIRED_HOSTS:
-            raise ValueError(_RETIRED_HOSTS[name])
-        if spec.registration is None:
-            raise ValueError(f"{name} is identity only: Aegis does not register there (ADR 0005 H4)")
+        refusal = _never_registered(spec)
+        if refusal:
+            raise ValueError(refusal)
         if name not in registrable:
             raise ValueError(f"{name}: Aegis does not register this host in this release; "
                              f"hosts now: {', '.join(sorted(registrable))}")
@@ -808,8 +807,8 @@ def register_host(host_id: str, *, home: Union[str, Path], command: Sequence[str
     """
     host = host_table.get(host_id)
     reg = host.registration
-    if reg is None:
-        raise InstallError(f"{host_id} is identity only: Aegis does not register there")
+    if reg is None or host.retired:
+        raise InstallError(_never_registered(host))
     if reg.kind == "json_file":
         status = merge_mcp_json(_json_path(host, Path(home)), SERVER_NAME, mcp_entry(host_id, command, pin),
                                 key=reg.key, dry_run=dry_run, backup_dir=backup_dir(home))
@@ -823,8 +822,8 @@ def unregister_host(host_id: str, *, home: Union[str, Path], path: Optional[str]
     """Remove the ``aegis`` and legacy ``soma`` registrations from one host."""
     host = host_table.get(host_id)
     reg = host.registration
-    if reg is None:
-        raise InstallError(f"{host_id} is identity only: Aegis does not register there")
+    if reg is None or host.retired:
+        raise InstallError(_never_registered(host))
     if reg.kind == "json_file":
         target = _json_path(host, Path(home))
         status = remove_mcp_json(target, (SERVER_NAME, LEGACY_SERVER_NAME), key=reg.key, dry_run=dry_run,

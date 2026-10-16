@@ -624,17 +624,27 @@ def test_a_registration_waiting_for_an_approval_doctor_cannot_see_has_an_unknown
     assert tier(payload, "advisory")["status"] != "active"
 
 
-def test_the_retired_gemini_cli_is_never_a_checked_host_nor_promised(env):
+def test_the_retired_gemini_cli_is_described_as_retired_never_promised_nor_checked(env):
     env.all_ok()
     env.stub("gemini")
-    (env.ws / ".aegis" / "config.json").write_text(json.dumps({"v": 1, "hosts": ["gemini-cli"]}))
+    (env.ws / ".aegis" / "config.json").write_text(
+        json.dumps({"v": 1, "hosts": ["gemini-cli", "cursor", "gemini-cli"]}))
     payload = env.doctor()
     assert [h["id"] for h in payload["hosts"]] == []
-    notes = [f for f in payload["findings"] if f["code"] == "unknown_host"]
-    assert len(notes) == 1 and notes[0]["severity"] == "info" and "'gemini-cli'" in notes[0]["message"]
+    by_code = {}
+    for f in payload["findings"]:
+        by_code.setdefault(f["code"], []).append(f)
+    (retired,) = by_code["retired_host"]
+    assert retired["severity"] == "info"
+    assert retired["message"] == (
+        "config.json selects 'gemini-cli', a retired host: gemini-cli is not supported: Google retired "
+        "Gemini CLI for individual Code Assist accounts; use --host antigravity.")
+    (unknown,) = by_code["unknown_host"]  # an id the table does not know is a different note
+    assert "'cursor'" in unknown["message"] and "gemini-cli" not in unknown["message"]
     said = list(_strings(payload)) + env.run()[1].splitlines()
     about = [text for text in said if "gemini-cli" in text or "Gemini CLI" in text]
-    assert about and not [text for text in about if "v4." in text]
+    assert about and all("retired" in text for text in about)
+    assert not [text for text in about if "v4." in text or "identity only" in text]
 
 
 def tier(payload: Dict[str, Any], name: str) -> Dict[str, Any]:

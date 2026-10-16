@@ -22,7 +22,7 @@ class TestCrossModelSlotRegistry:
 
     def test_platform_slot_profiles_and_defaults(self):
         # Keyed by host slot_profile id (D16); v3 platform names are not profiles.
-        assert set(PLATFORM_SLOT_PROFILES) == {"codex-cli", "claude-code", "antigravity", "generic"}
+        assert set(PLATFORM_SLOT_PROFILES) == {"codex-cli", "claude-code", "antigravity", "gemini-cli", "generic"}
 
         for key in (
             "TEST_RUNNER",
