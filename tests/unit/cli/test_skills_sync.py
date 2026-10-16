@@ -595,13 +595,16 @@ def test_a_link_to_a_directory_inside_the_workspace_is_refused_too(ws, capsys):
 
 def test_a_junction_like_directory_resolving_elsewhere_is_refused(ws, tmp_path, capsys, monkeypatch):
     """A Windows junction is no symlink to os.path.islink before Python 3.12; the realpath
-    check refuses it anyway. Simulated by hiding a symlink from islink (the OS boundary)."""
+    check refuses it anyway. Simulated by hiding a symlink from the link test the command
+    uses. os.path.islink itself must stay intact: posixpath.realpath calls it on Python
+    < 3.10 and would stop resolving the link, which no real junction does."""
+    from aegis_cli import skills_sync
+
     outside = tmp_path / "outside"
     outside.mkdir()
     symlink_or_skip(outside, ws / ".claude", target_is_directory=True)
-    real_islink = os.path.islink
-    monkeypatch.setattr(os.path, "islink", lambda p: False if Path(p) == ws / ".claude" else real_islink(p))
-    monkeypatch.setattr(os.path, "isjunction", lambda p: False, raising=False)
+    real_is_link = skills_sync._is_link
+    monkeypatch.setattr(skills_sync, "_is_link", lambda p: False if Path(p) == ws / ".claude" else real_is_link(p))
 
     rc, doc = _json(ws, capsys, "--host", "claude-code", "--force")
 
