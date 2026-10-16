@@ -160,7 +160,7 @@ Use a reviewer from a different vendor than the agent that wrote the change. A m
 
 `aegis sync --apply`, `aegis rule promote|demote RULE_ID` or `aegis rule archive` (every misfiring rule) moves the rule file; commit it and review it like code. `derived.json` also records a hash of each rule file, which is how `aegis_scan` and `aegis_list_rules` flag rules edited since the last sync. It is not a signature and never excludes a rule.
 
-**Why Aegis never rewrites a rule file on its own.** v3 wrote fitness numbers back into each rule's frontmatter. Its integrity manifest then saw "edited" rules and dropped them, so a scan in the author's own session returned 0 rules, and unlocked rewrites lost about 80 of 120 updates under concurrency. In v4 the ledger is the only record of outcomes and rule files change only when a person changes them ([why-aegis.md](why-aegis.md) section 5.3).
+**Why Aegis never rewrites a rule file on its own.** v3 wrote fitness numbers back into each rule's frontmatter. Its integrity manifest then saw "edited" rules and dropped them, so a scan in the author's own session returned 0 rules, and unlocked rewrites lost about 80 of 120 updates under concurrency. In v4 the ledger is the only record of outcomes and rule files change only when a person changes them (the full account is in [Why Aegis is built this way](why-aegis.md)).
 
 **What the score means today.** The credit is coarse. Every rule matching a change's files gets that whole run's pass or fail, and agent self-reports count as much as check runs. For a gate this is backwards. In the README's quick start, after the pre-commit hook and `aegis check` both blocked the `eval`, `aegis sync` shows `no-eval` with 0 true positives and 2 false positives: the gate did its job and was scored as wrong. So fitness only ranks which rules agents see first, and promotion stays a reviewed human step. The fix, a per-rule credit model, is planned for v4.3 (section 10 and [ADR 0005](adr/0005-v4-plan-of-record.md) §8b).
 
@@ -226,7 +226,7 @@ v4.0 removed claims the v3 code could not back, such as self-written release rec
 - **Security checks**: a banned-API policy and established scanners, with SARIF output for code-scanning tools.
 - **Human insights**: corrections you make become reviewed rules, and recurrence of the problem is measured.
 
-The reasons it waits for its own release are in [why-aegis.md](why-aegis.md), section 6.
+Why it waits for its own release is explained in [Why Aegis is built this way](why-aegis.md).
 
 ## 11. Cheat sheet
 
