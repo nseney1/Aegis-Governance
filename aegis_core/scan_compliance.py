@@ -7,9 +7,19 @@ activity log; the outcome ledger and fitness never read it)::
      "session": "<server instance id>", "files": ["src/a.py"], "client": {"name", "version"},
      "binding": "pin", "basis": "files" | "git_diff" | "report"}
 
-``scan``: an aegis_scan, once per (session, files). ``edit``: the ``files`` an
-aegis_report_outcome named. ``report()`` reads the log (and, when the workspace is a git
-repository, the commits on HEAD) and computes, per session and per host:
+``scan``: an aegis_scan, once per (session, files) and again when that row is older than
+half of ``jit.scan_window_s``; also every ``aegis scan FILE...`` CLI run, with host
+``cli`` (CLI_HOST) and a session per run. ``edit``: the ``files`` an aegis_report_outcome
+named.
+
+``scan_covers()`` is what the scan-before-edit hook (``aegis hook run pre-tool``) asks:
+does one ``scan`` row, of any host or session, name every edited path within the window?
+It keys on workspace and exact path, never on a session id, and reads only the tail of
+the log.
+
+``report()`` reads the log (and, when the workspace is a git repository, the commits on
+HEAD) and computes, per session and per host (CLI rows are left out: they carry no host
+session, and their windows would make commits ambiguous):
 
     rate = edited files the same session scanned no later than its first recorded edit
            / edited files observed
@@ -31,8 +41,10 @@ Reading never writes, syncs or touches the network: git is asked through gitsafe
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 import os
 from pathlib import Path, PurePath
+import stat
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from aegis_core.storage import append_jsonl, locked, read_jsonl
@@ -40,6 +52,7 @@ from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = [
     "ACTIVITY_VERSION",
+    "CLI_HOST",
     "EVENTS",
     "GRACE_SECONDS",
     "HEURISTIC",
@@ -48,12 +61,20 @@ __all__ = [
     "activity_path",
     "record",
     "report",
+    "scan_covers",
 ]
 
 ACTIVITY_VERSION = 1
 EVENTS = ("scan", "edit")
 SCHEMA = "aegis.compliance/v1"
 GRACE_SECONDS = 15 * 60
+#: The host of a scan row written by the ``aegis scan`` CLI.
+CLI_HOST = "cli"
+#: How much of the log's end ``scan_covers`` reads: the hook runs on every edit and the
+#: log only grows, and a window's rows sit at the end (rows are appended in time order).
+GATE_TAIL_BYTES = 4 * 1024 * 1024
+#: How far ahead of the reader's clock a row may be and still count.
+FUTURE_SKEW_SECONDS = 300
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 HEURISTIC = (
@@ -70,6 +91,8 @@ LIMITS = (
     "only commits reachable from HEAD are read",
     "a session with no observed edit has rate unknown, never 0",
     "a host rate is an aggregate over sessions, not a per-attempt verdict",
+    "scans by the aegis scan CLI (host cli) carry no host session and are not counted here; "
+    "the scan-before-edit hook still counts them",
 )
 
 
@@ -134,6 +157,72 @@ def record(
     with locked(workspace):
         append_jsonl(activity_path(workspace), [row])
     return row
+
+
+# ── the scan-before-edit gate ────────────────────────────────────────────────
+
+def _read_tail(path: Path, limit: int) -> List[Dict[str, Any]]:
+    """The JSON object rows in the last ``limit`` bytes of ``path``, a partial first line
+    dropped; [] when it is missing, unreadable, a symlink or not a regular file (the
+    checks ``storage.read_jsonl`` makes)."""
+    try:
+        if os.path.islink(path):
+            return []
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
+    except OSError:
+        return []
+    try:
+        found = os.fstat(fd)
+        if not stat.S_ISREG(found.st_mode):
+            return []
+        size = found.st_size
+        start = max(0, size - limit)
+        os.lseek(fd, start, os.SEEK_SET)
+        chunks = []
+        remaining = size - start
+        while remaining > 0:
+            chunk = os.read(fd, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    except OSError:
+        return []
+    finally:
+        os.close(fd)
+    lines = b"".join(chunks).split(b"\n")
+    if start:
+        lines = lines[1:]
+    rows = []
+    for raw in lines:
+        try:
+            row = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def scan_covers(workspace: Any, paths: Iterable[str], window_s: float, now: Optional[datetime] = None) -> bool:
+    """True when one usable ``scan`` row names every path in ``paths`` (workspace-relative,
+    compared exactly in POSIX spelling) and was written no more than ``window_s`` seconds
+    before ``now`` (and at most FUTURE_SKEW_SECONDS after it). Any host and any session
+    count. Nothing to cover is covered. Reads only."""
+    wanted = {PurePath(p).as_posix() for p in paths}
+    if not wanted:
+        return True
+    moment = now or _utc_now()
+    oldest = moment - timedelta(seconds=window_s)
+    newest = moment + timedelta(seconds=FUTURE_SKEW_SECONDS)
+    for row in _read_tail(activity_path(workspace), GATE_TAIL_BYTES):
+        if not _usable(row) or row["event"] != "scan":
+            continue
+        written = _parse_ts(row["ts"])
+        if written is not None and oldest <= written <= newest and wanted <= set(row["files"]):
+            return True
+    return False
 
 
 # ── reading ──────────────────────────────────────────────────────────────────
@@ -257,7 +346,7 @@ def report(workspace: Any, now: Optional[datetime] = None) -> Dict[str, Any]:
     read = read_jsonl(activity_path(root))
     usable = [row for row in read.rows if _usable(row)]
     skipped = len(read.skipped_lines) + (len(read.rows) - len(usable))
-    sessions = _sessions(usable)
+    sessions = _sessions(row for row in usable if row["host"] != CLI_HOST)
 
     git: Dict[str, Any] = {"status": "unavailable", "ambiguous_edits": None, "grace_seconds": GRACE_SECONDS}
     if sessions:
