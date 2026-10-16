@@ -135,11 +135,17 @@ def _escape_annotation(text: str, prop: bool = False) -> str:
     return text.replace(":", "%3A").replace(",", "%2C") if prop else text
 
 
-def _print_ci(report, fmt: str, root: str) -> None:
+def _print_ci(report, fmt: str, root: str, reg_report=None) -> None:
     from aegis_cli import sanitize_display
 
+    reg_blocking = bool(reg_report is not None and reg_report.blocking)
     if fmt == "json":
-        print(json.dumps(report.as_dict(root), indent=2))
+        document = report.as_dict(root)
+        if reg_report is not None:
+            document["regression"] = reg_report.as_dict(root)
+            if reg_blocking:
+                document["status"] = "fail"
+        print(json.dumps(document, indent=2))
         return
     approved = bool(report.weakenings) and report.passed
     if fmt == "github":
@@ -147,32 +153,66 @@ def _print_ci(report, fmt: str, root: str) -> None:
         for item in report.weakenings:
             print(f"::{level} file={_escape_annotation(item.path, True)},title={_escape_annotation(title, True)}"
                   f"::{_escape_annotation(f'{item.code}: {item.rule}: {item.message}')}")
+        if reg_report is not None:
+            reg_level = "error" if reg_report.tier == "gate" else "warning"
+            reg_title = "regression check failed" if reg_report.tier == "gate" else "regression check warning"
+            for finding in reg_report.findings:
+                print(
+                    f"::{reg_level} file={_escape_annotation(finding.path, True)},"
+                    f"title={_escape_annotation(reg_title, True)}"
+                    f"::{_escape_annotation(f'{finding.code}: {finding.message}')}"
+                )
     short = lambda sha: sha[:10]  # noqa: E731
     span = f"{short(report.merge_base)}..{short(report.head)}"
     if not report.weakenings:
-        print(f"aegis check --ci: PASSED, no rule weakened ({report.rules_checked} binding rule(s) at the merge base, {span})")
-        return
-    count = len(report.weakenings)
-    if approved:
-        signer = report.approval.signer or "a key in the base allowed_signers"
-        print(f"aegis check --ci: PASSED, {count} weakening(s) approved by {sanitize_display(signer, 120)} ({span})")
+        if reg_blocking:
+            print(f"aegis check --ci: FAILED: regression check failed ({len(reg_report.findings)} finding(s), {span})")
+        else:
+            print(f"aegis check --ci: PASSED, no rule weakened ({report.rules_checked} binding rule(s) at the merge base, {span})")
     else:
-        print(f"aegis check --ci: FAILED: weakening without approval ({count} finding{'' if count == 1 else 's'}, {span})")
-    for item in report.weakenings:
-        print(sanitize_display(f"  [{item.code}] {item.rule} ({item.path}): {item.message}", 400))
-    if not approved:
-        print("  A weakening passes only with a signed approval: aegis approve (a key listed in allowed_signers on the base branch).")
+        count = len(report.weakenings)
+        if approved and not reg_blocking:
+            signer = report.approval.signer or "a key in the base allowed_signers"
+            print(f"aegis check --ci: PASSED, {count} weakening(s) approved by {sanitize_display(signer, 120)} ({span})")
+        else:
+            print(f"aegis check --ci: FAILED: weakening without approval ({count} finding{'' if count == 1 else 's'}, {span})")
+        for item in report.weakenings:
+            print(sanitize_display(f"  [{item.code}] {item.rule} ({item.path}): {item.message}", 400))
+        if not approved:
+            print("  A weakening passes only with a signed approval: aegis approve (a key listed in allowed_signers on the base branch).")
+    if reg_report is not None:
+        for finding in reg_report.findings:
+            tag = "FAIL" if reg_report.tier == "gate" else "WARN"
+            print(sanitize_display(f"  [{tag}:regression/{finding.code}] ({finding.path}): {finding.message}", 400))
+        if reg_report.total_fix_commits > 0 and reg_report.exempted_count > 0:
+            rate_pct = f"{reg_report.exemption_rate * 100:.1f}%"
+            prune_note = " (exceeds 25% prune-box threshold)" if reg_report.prune_box_exceeded else ""
+            print(
+                sanitize_display(
+                    f"  regression exemptions: {reg_report.exempted_count}/{reg_report.total_fix_commits} "
+                    f"({rate_pct}){prune_note}",
+                    400,
+                )
+            )
+        for untested in reg_report.untested_changes:
+            files_str = ", ".join(untested.source_files[:5])
+            print(
+                sanitize_display(
+                    f"  [untested-change] {untested.commit[:10]} ({untested.subject}): {files_str}",
+                    400,
+                )
+            )
 
 
 def _run_ci(args: argparse.Namespace) -> int:
     """`aegis check --ci`: 0 nothing weakened or every weakening approved, 1 otherwise, 2 usage."""
     from aegis_cli import sanitize_display
-    from aegis_core import gitsafe, rule_integrity
+    from aegis_core import gitsafe, regression, rule_integrity
 
     stray = [flag for flag, given in (
         ("FILES", bool(getattr(args, "files", None))), ("--full", bool(getattr(args, "full", False))),
         ("--plan", getattr(args, "plan", None) is not None), ("--plan-file", getattr(args, "plan_file", None) is not None),
-        ("--hook", bool(getattr(args, "hook", False))), ("--strict", bool(getattr(args, "strict", False))),
+        ("--hook", bool(getattr(args, "hook", False))),
         ("--dry-run", bool(getattr(args, "dry_run", False))), ("--llm-cmd", getattr(args, "llm_cmd", None) is not None),
         ("--paths", getattr(args, "paths", None) is not None), ("--base-policy", bool(getattr(args, "base_policy", False))),
         ("--split", bool(getattr(args, "split", None))),
@@ -191,13 +231,17 @@ def _run_ci(args: argparse.Namespace) -> int:
         print("Error: --ci needs a base to compare with: pass --base REF (a pull request job has it in the event file)",
               file=sys.stderr)
         return 1
+    force_gate = bool(getattr(args, "strict", False) or getattr(args, "require_regression", False))
+    reg_tier = "gate" if force_gate else None
     try:
         report = rule_integrity.check_ci(root, base, head)
-    except (rule_integrity.IntegrityError, gitsafe.GitError) as exc:
+        reg_report = regression.check_ci_regressions(root, base, head, tier=reg_tier)
+    except (rule_integrity.IntegrityError, regression.RegressionError, gitsafe.GitError) as exc:
         print(f"Error: {sanitize_display(str(exc), 400)}", file=sys.stderr)
         return 1
-    _print_ci(report, fmt, root)
-    return 0 if report.passed else 1
+    _print_ci(report, fmt, root, reg_report)
+    overall_passed = report.passed and not reg_report.blocking
+    return 0 if overall_passed else 1
 
 
 class CheckCommand(AegisCommand):
