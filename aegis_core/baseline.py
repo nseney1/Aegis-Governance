@@ -7,7 +7,7 @@
 
 ``aegis check`` then fails only on findings the baseline does not hold. A finding is one
 failed Layer 1 check on one file, down to the line that matched; its fingerprint is
-``fp = sha256(rule | path | normalized matched line | occurrence index)[:16]``, where the
+``fp = sha256(rule | path | normalized matched line | occurrence index)`` (the full 64-hex digest), where the
 occurrence index counts the earlier lines of the file with the same normalized text.
 The fingerprint therefore survives a line moving (an insertion above it), does not
 survive the line changing, and tells two copies of one line apart. Nothing in it is a
@@ -90,7 +90,7 @@ MAX_BYTES = 8 * 1024 * 1024
 LABEL_WORKING = "baseline: working tree (self-attested)"
 LABEL_ABSENT = "baseline: absent at base"
 _KEYS = ("rule", "path", "fp")
-_FP = re.compile(r"\A[0-9a-f]{16}\Z")
+_FP = re.compile(r"\A[0-9a-f]{64}\Z")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
@@ -168,7 +168,7 @@ def occurrence_index(lines: List[str], number: int) -> int:
 
 def fingerprint(rule: str, path: str, text: str, index: int) -> str:
     joined = "|".join((rule, path, text, str(index)))
-    return hashlib.sha256(joined.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+    return hashlib.sha256(joined.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -239,7 +239,7 @@ def parse(data: bytes) -> FrozenSet[Entry]:
     """The entries in ``data`` (the bytes of a baseline.json). Raises BaselineFileError for
     a file over MAX_BYTES, invalid UTF-8 or JSON (a duplicated key, NaN), a non-object, an
     unknown key, ``v`` other than the integer 1, or a finding that is not exactly a rule
-    (text), a workspace-relative POSIX path and a 16-character lowercase hex ``fp``. A
+    (text), a workspace-relative POSIX path and a 64-character lowercase hex ``fp``. A
     UTF-8 byte order mark is accepted, as in config.json."""
     if len(data) > MAX_BYTES:
         raise BaselineFileError(f"larger than {MAX_BYTES // (1024 * 1024)} MiB")
@@ -276,7 +276,7 @@ def parse(data: bytes) -> FrozenSet[Entry]:
         if not _path_ok(path):
             raise BaselineFileError(f"finding {ordinal}: path must be a workspace-relative POSIX path")
         if not isinstance(fp, str) or not _FP.match(fp):
-            raise BaselineFileError(f"finding {ordinal}: fp must be 16 lowercase hex characters")
+            raise BaselineFileError(f"finding {ordinal}: fp must be 64 lowercase hex characters")
         entries.append(Entry(rule, path, fp))
     return frozenset(entries)
 

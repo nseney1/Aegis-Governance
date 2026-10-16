@@ -1,7 +1,7 @@
 """The ratchet baseline (v4.2 #2): fingerprints, the file format, where it is read from.
 
 A finding is a failed Layer 1 check on one file, down to the line that matched. Its
-fingerprint is ``sha256(rule | path | normalized matched line | occurrence index)[:16]``:
+fingerprint is ``sha256(rule | path | normalized matched line | occurrence index)`` (full digest):
 it survives a line moving and does not survive the line changing, and a second copy of
 the same line is a different finding. The baseline is read from the base when a base is
 used, never from the candidate; a base that cannot be read is an error, not an empty
@@ -23,7 +23,7 @@ from tests.helpers_checkmodes import commit, git, init_repo, write
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 
-GOOD_FP = "0123456789abcdef"
+GOOD_FP = "0123456789abcdef" * 4
 
 
 def _doc(*entries, v=1, **extra):
@@ -34,10 +34,10 @@ def _doc(*entries, v=1, **extra):
 
 # ── Fingerprints ─────────────────────────────────────────────────────────────
 
-def test_the_fingerprint_is_the_first_16_hex_of_sha256_over_the_four_fields():
-    expected = hashlib.sha256("forbid_ast:no-eval|src/a.py|x = eval(y)|0".encode("utf-8")).hexdigest()[:16]
+def test_the_fingerprint_is_the_full_hex_of_sha256_over_the_four_fields():
+    expected = hashlib.sha256("forbid_ast:no-eval|src/a.py|x = eval(y)|0".encode("utf-8")).hexdigest()
     assert baseline.fingerprint("forbid_ast:no-eval", "src/a.py", "x = eval(y)", 0) == expected
-    assert len(expected) == 16
+    assert len(expected) == 64
 
 
 @pytest.mark.parametrize("field, other", [
@@ -107,7 +107,7 @@ def test_an_empty_baseline_renders_and_parses():
 
 
 def test_parse_round_trips_render():
-    entries = {Entry("forbid_ast:no-eval", "src/a.py", GOOD_FP), Entry("call_graph", "z.py", "f" * 16)}
+    entries = {Entry("forbid_ast:no-eval", "src/a.py", GOOD_FP), Entry("call_graph", "z.py", "f" * 64)}
     assert baseline.parse(baseline.render(entries).encode()) == frozenset(entries)
 
 
@@ -139,9 +139,9 @@ def test_parse_accepts_a_byte_order_mark():
     (b'{"v": 1, "findings": [{"rule": "r", "path": "../x", "fp": "0123456789abcdef"}]}', "finding 1: path must be a workspace-relative POSIX path"),
     (b'{"v": 1, "findings": [{"rule": "r", "path": "a\\\\b.py", "fp": "0123456789abcdef"}]}',
      "finding 1: path must be a workspace-relative POSIX path"),
-    (b'{"v": 1, "findings": [{"rule": "r", "path": "a.py", "fp": "0123456789ABCDEF"}]}', "finding 1: fp must be 16 lowercase hex characters"),
-    (b'{"v": 1, "findings": [{"rule": "r", "path": "a.py", "fp": "0123"}]}', "finding 1: fp must be 16 lowercase hex characters"),
-    (b'{"v": 1, "findings": [{"rule": "r", "path": "a.py", "fp": 5}]}', "finding 1: fp must be 16 lowercase hex characters"),
+    (b'{"v": 1, "findings": [{"rule": "r", "path": "a.py", "fp": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"}]}', "finding 1: fp must be 64 lowercase hex characters"),
+    (b'{"v": 1, "findings": [{"rule": "r", "path": "a.py", "fp": "0123"}]}', "finding 1: fp must be 64 lowercase hex characters"),
+    (b'{"v": 1, "findings": [{"rule": "r", "path": "a.py", "fp": 5}]}', "finding 1: fp must be 64 lowercase hex characters"),
 ])
 def test_parse_refuses_anything_but_the_v1_format(data, reason):
     with pytest.raises(BaselineError) as info:
@@ -209,7 +209,7 @@ def test_with_a_base_the_baseline_comes_from_the_base_commit(repo: Path):
     write(repo, baseline.BASELINE_FILE, _doc(("r", "app.py", GOOD_FP)).decode())
     tip = commit(repo, "baseline on main")
     git(repo, "checkout", "-q", "-b", "feature")
-    write(repo, baseline.BASELINE_FILE, _doc(("r", "app.py", GOOD_FP), ("r", "new.py", "f" * 16)).decode())
+    write(repo, baseline.BASELINE_FILE, _doc(("r", "app.py", GOOD_FP), ("r", "new.py", "f" * 64)).decode())
     commit(repo, "candidate widens the baseline")
     loaded = baseline.load(repo, "main")
     assert loaded.source == "base" and loaded.commit == tip
