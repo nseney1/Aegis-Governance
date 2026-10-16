@@ -276,3 +276,52 @@ def test_command_exception_is_reported_and_exits_1(tmp_path, monkeypatch, capsys
 
     assert cli.main(["boom"]) == 1
     assert capsys.readouterr().err == "Error: kaboom\n"
+
+
+# ── `aegis hook run`: dispatched before the parser and the workspace attachment ──
+
+def _governed(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    (root / ".aegis" / "rules").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    return root.resolve()
+
+
+def _hook_stdin(monkeypatch, payload: dict) -> None:
+    import io
+    import json
+    import types
+
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode("utf-8"))))
+
+
+def test_hook_run_decides_from_the_payload_where_no_workspace_attaches(tmp_path, monkeypatch, capsys):
+    """The registered form runs from any cwd: a directory the CLI cannot attach (here an
+    unmigrated .soma/) must not stop the handler, which reads the workspace from stdin."""
+    ws = _governed(tmp_path)
+    legacy = tmp_path / "legacy"
+    (legacy / ".soma").mkdir(parents=True)
+    monkeypatch.chdir(legacy)
+    monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    _hook_stdin(monkeypatch, {"cwd": str(ws), "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                              "tool_input": {"command": "git reset --hard"}, "tool_use_id": "t"})
+    assert cli.main(["hook", "run", "pre-tool", "--host", "claude-code"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("aegis: blocked git-reset-hard")
+
+
+def test_hook_run_never_reaches_a_usage_error(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    _hook_stdin(monkeypatch, {})
+    assert cli.main(["hook", "run", "pre-tool", "--bogus"]) == 0
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("argv", [["hook", "run", "--help"], ["hook", "run", "pre-tool", "-h"]])
+def test_hook_run_help_goes_through_the_parser(argv, monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as exited:
+        cli.main(argv)
+    assert exited.value.code == 0
+    assert "--host" in capsys.readouterr().out

@@ -159,3 +159,19 @@ def test_spawn_detection_sees_imports_os_calls_and_ignores_plain_modules():
     assert _starts_programs(ast.parse("from os import system\n"))
     assert _starts_programs(ast.parse("import asyncio\nasyncio.create_subprocess_exec('x')\n"))
     assert not _starts_programs(ast.parse("import os\nos.path.join('a', 'b')\nimport shutil\n"))
+
+
+# v4.1 writes host hook registrations and git refs; the policy says what each one is.
+def test_security_names_every_hook_registration_file_and_what_it_is_not(tmp_path):
+    from aegis_cli.hooks import registrar
+
+    text = " ".join(_security_text().split())
+    home, repo = Path("~"), Path("<repo>")
+    for host in registrar.HOOK_HOSTS:
+        for scope, base in (("user", home), ("project", repo)):
+            path = registrar.hook_file(host, scope, home=home, root=repo, environ={}).as_posix()
+            assert f"`{path}`" in text, (host, scope, path)
+    assert f"`{registrar.codex_rules_file(home, {}).as_posix()}`" in text
+    for phrase in ("guardrails, not a security boundary", "teammates", "/hooks", "exit 75",
+                   "not an identity", "refs/aegis/lanes"):
+        assert phrase in text, phrase

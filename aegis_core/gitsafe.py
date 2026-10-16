@@ -14,8 +14,14 @@ every call here:
   and Git for Windows keeps ``core.autocrlf=true`` there, without which every file of a
   Windows checkout (CRLF in the work tree, LF in the repository) looks modified;
 - uses plumbing: ``rev-parse``, ``merge-base``, ``diff-tree``, ``diff-index``,
-  ``ls-tree``, ``ls-files``, ``cat-file --batch``, ``hash-object`` and ``config``
-  (reads only). ``diff-index`` without ``--cached``, ``ls-files --others`` and
+  ``ls-tree``, ``ls-files``, ``cat-file --batch``/``--batch-check``, ``for-each-ref``,
+  ``check-ref-format``, ``hash-object``, ``version`` and ``config`` (reads only). It
+  writes in three places only, never to the work tree, the index, a branch or a tag:
+  ``hash-object -w`` stores a blob, ``update-ref --no-deref --stdin`` creates, swaps
+  or deletes one ref under compare-and-swap, always under ``refs/aegis/`` (the team's
+  leases; ``update_ref`` refuses any other name), and ``merge-tree --write-tree``
+  stores the objects of a trial merge that nothing references (git's gc collects
+  them). ``diff-index`` without ``--cached``, ``ls-files --others`` and
   ``hash-object --stdin-paths`` read the working tree, which is where an fsmonitor or
   a clean filter would run; they are needed (no plumbing lists changed or untracked
   files otherwise, and only git knows its line-ending conversion). The forced
@@ -27,6 +33,14 @@ every call here:
 
 Blob content read through ``cat-file`` is checked against the object id it was asked
 for, so a replaced or corrupted object is an error rather than silent input.
+
+The query helpers answer None when git cannot answer. The ref, object, diff and merge
+primitives the team lanes use (``write_blob``, ``update_ref``, ``read_ref``,
+``list_refs``, ``read_object``, ``diff_entries``, ``merge_tree_conflicted``) raise
+GitError instead, so "git could not say" is never mistaken for "nothing there".
+``merge-tree`` runs merge drivers and, with ``merge.renormalize``, filters: a merge
+driver the repository's own config defines makes it unavailable, and the repository's
+filter drivers and renormalization are switched off for it.
 """
 from __future__ import annotations
 
@@ -34,8 +48,10 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
+import time
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from aegis_core import pathlookup
@@ -44,21 +60,44 @@ from aegis_core.errors import AegisError
 __all__ = [
     "CHANGE_MODES",
     "GIT_TIMEOUT_SECONDS",
+    "MERGE_TREE_MIN_VERSION",
+    "UPDATE_REF_ATTEMPTS",
+    "UPDATE_REF_BACKOFF_SECONDS",
     "GitError",
+    "MergeTreeUnavailable",
+    "RefConflict",
+    "RefNameError",
+    "blob_oid",
     "changed_files",
+    "common_dir",
+    "diff_entries",
     "git_path",
+    "git_version",
     "head_commit",
     "list_files",
+    "list_refs",
     "merge_base",
+    "merge_tree_conflicted",
     "read_blob",
+    "read_object",
+    "read_ref",
     "resolve_base_ref",
     "resolve_commit",
     "run",
     "toplevel",
+    "update_ref",
+    "write_blob",
 ]
 
 GIT_TIMEOUT_SECONDS = 10.0
 CHANGE_MODES = ("working", "staged", "head", "range")
+#: A failed update_ref whose ref still holds the expected value is retried this many
+#: times in all, sleeping 0.05 s, 0.1 s, 0.2 s and 0.4 s between attempts.
+UPDATE_REF_ATTEMPTS = 5
+UPDATE_REF_BACKOFF_SECONDS = 0.05
+MERGE_TREE_MIN_VERSION = (2, 38)
+#: The only ref hierarchy update_ref writes: never a branch, a tag or a remote ref.
+_WRITABLE_REFS = "refs/aegis/"
 _ACMR = "--diff-filter=ACMR"
 _HARDENING_KEEP_HOOKS_PATH = (
     "-c", "core.fsmonitor=false",
@@ -77,6 +116,29 @@ _ENV = {
 
 class GitError(AegisError):
     """git is missing, timed out, or gave an answer that cannot be trusted."""
+
+
+class RefNameError(GitError):
+    """A ref name (or ref hierarchy) git would not accept, or one update_ref may not write
+    (anything outside ``refs/aegis/``); refused before anything is written."""
+
+
+class RefConflict(GitError):
+    """A compare-and-swap ``update_ref`` lost: the ref holds something other than the
+    caller expected. ``expected`` and ``current`` are object ids, None meaning absent.
+
+    ``current`` equal to the value the caller tried to write means its own write landed
+    and only git's acknowledgement was lost.
+    """
+
+    def __init__(self, message: str = "", ref: str = "", expected: Optional[str] = None,
+                 current: Optional[str] = None, **kwargs) -> None:
+        super().__init__(message, ref=ref, expected=expected, current=current, **kwargs)
+
+
+class MergeTreeUnavailable(GitError):
+    """``git merge-tree --write-tree`` cannot answer here (git older than 2.38, or a merge
+    driver from the repository's own config it would run)."""
 
 
 def _git_executable() -> str:
@@ -155,6 +217,32 @@ def toplevel(cwd: Path | str) -> Optional[Path]:
     """The work tree root containing ``cwd``, or None outside a work tree."""
     text = _text(["rev-parse", "--show-toplevel"], cwd)
     return Path(text) if text else None
+
+
+def common_dir(cwd: Path | str) -> Optional[Path]:
+    """The repository's common git directory (``rev-parse --git-common-dir``) as an
+    absolute path, links unresolved; None outside a repository.
+
+    Every worktree of a repository answers the same directory (the main ``.git``), unlike
+    ``--git-path``, which answers ``.git/worktrees/<name>/...`` in a linked worktree.
+    """
+    text = _text(["rev-parse", "--git-common-dir"], cwd)
+    if not text:
+        return None
+    path = Path(text)
+    # git names it relative to the directory it ran in (e.g. "../.git" from a subdirectory).
+    return path if path.is_absolute() else Path(os.path.abspath(cwd)) / path
+
+
+_VERSION = re.compile(rb"git version (\d+)\.(\d+)(?:\.(\d+))?")
+
+
+def git_version(cwd: Path | str) -> Optional[Tuple[int, int, int]]:
+    """The running git's (major, minor, patch), or None when git cannot say."""
+    found = _VERSION.match((_out(["version"], cwd) or b"").strip())
+    if found is None:
+        return None
+    return int(found.group(1)), int(found.group(2)), int(found.group(3) or 0)
 
 
 def git_path(cwd: Path | str, name: str) -> Optional[Path]:
@@ -463,3 +551,345 @@ def read_blob(cwd: Path | str, rev: str, path: str) -> Optional[bytes]:
     if len(data) != size or _blob_id(data, len(entry.oid)) != entry.oid:
         raise GitError(f"git returned content for {path} at {rev} that does not match object {entry.oid}")
     return data
+
+
+
+# ── Objects and refs (the team leases, v4.1 §1) ──────────────────────────────
+
+_OID = re.compile(r"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+
+
+def _full_oid(value: object) -> str:
+    if not isinstance(value, str) or not _OID.match(value):
+        raise ValueError(f"not a full object id (40 or 64 lowercase hex characters): {value!r}")
+    return value
+
+
+def _hashed_blob(cwd: Path | str, data: bytes, write: bool) -> str:
+    # From stdin with no --path, hash-object applies no attribute, filter or line-ending
+    # conversion: the blob is exactly ``data``, named in the repository's hash format.
+    args = ["hash-object", *(["-w"] if write else []), "--no-filters", "--stdin"]
+    out = _out(args, cwd, stdin=bytes(data))
+    oid = (out or b"").strip().decode("ascii", "replace")
+    if not _OID.match(oid):
+        raise GitError(f"git hash-object {'-w ' if write else ''}failed in {cwd}")
+    if _blob_id(bytes(data), len(oid)) != oid:
+        raise GitError(f"git named the blob {oid}, which does not hash its content")
+    return oid
+
+
+def blob_oid(cwd: Path | str, data: bytes) -> str:
+    """The object id ``data`` gets as a blob in this repository; writes nothing.
+
+    A writer computes it first, so after an error it can tell whether a ref ended up
+    holding its own blob (a lost acknowledgement). Raises GitError.
+    """
+    return _hashed_blob(cwd, data, write=False)
+
+
+def write_blob(cwd: Path | str, data: bytes) -> str:
+    """Store ``data`` as a blob (``hash-object -w --stdin``) and return its object id.
+
+    The bytes are stored as given (no filters or line-ending conversion). Raises GitError
+    when git cannot store it (not a repository, git missing).
+    """
+    return _hashed_blob(cwd, data, write=True)
+
+
+def _check_ref_name(cwd: Path | str, ref: object, what: str = "ref name") -> str:
+    """``ref`` when it is a full ref under ``refs/`` that ``git check-ref-format``
+    accepts; RefNameError otherwise. Nothing that git could read as an option, a
+    pattern or a stdin record separator gets through."""
+    ok = (
+        isinstance(ref, str)
+        and ref.startswith("refs/")
+        and not any(ch in ref for ch in "\0\n\r")
+    )
+    if ok:
+        res = _completed(["check-ref-format", ref], cwd)
+        if res is None:
+            raise GitError(f"git cannot check the {what} {ref!r}")
+        ok = res.returncode == 0
+    if not ok:
+        raise RefNameError(f"invalid {what}: {ref!r}")
+    return ref  # type: ignore[return-value]
+
+
+_REF_FORMAT = "--format=%(objectname)%00%(symref)%00%(refname)"
+
+
+def _refs_under(cwd: Path | str, pattern: str) -> Optional[List[Tuple[str, str]]]:
+    """(ref, oid) of every ref equal to ``pattern`` or inside it as a hierarchy; None
+    when git cannot answer. Raises GitError for a symbolic ref or unreadable output."""
+    out = _out(["for-each-ref", _REF_FORMAT, pattern], cwd)
+    if out is None:
+        return None
+    found: List[Tuple[str, str]] = []
+    for line in out.split(b"\n"):
+        if not line:
+            continue
+        parts = line.split(b"\0")
+        if len(parts) != 3:
+            raise GitError(f"git for-each-ref gave an unreadable line under {pattern}")
+        oid, symref, name = (os.fsdecode(part) for part in parts)
+        if name != pattern and not name.startswith(pattern + "/"):
+            continue  # for-each-ref also matches by glob; a validated pattern has none
+        if symref:
+            raise GitError(f"{name} is a symbolic ref (to {symref}); aegis never reads or writes through one")
+        found.append((name, oid))
+    return found
+
+
+def read_ref(cwd: Path | str, ref: str) -> Optional[str]:
+    """The object id ``ref`` holds, or None when it does not exist.
+
+    The name is exact: unlike ``rev-parse``, ``refs/aegis/lanes/x`` never resolves to
+    ``refs/heads/refs/aegis/lanes/x``. Raises RefNameError for an invalid name, and
+    GitError when git cannot answer or the ref is symbolic.
+    """
+    _check_ref_name(cwd, ref)
+    found = _refs_under(cwd, ref)
+    if found is None:
+        raise GitError(f"cannot read {ref}: git for-each-ref failed in {cwd}")
+    return next((oid for name, oid in found if name == ref), None)
+
+
+def list_refs(cwd: Path | str, prefix: str) -> List[Tuple[str, str]]:
+    """(ref, oid) for every ref in the hierarchy ``prefix`` (``refs/aegis/lanes`` lists
+    ``refs/aegis/lanes/<x>``, never ``refs/aegis/lanesx/...``), sorted by name.
+
+    Raises RefNameError for a prefix that is not a ref hierarchy, and GitError when git
+    cannot answer or a listed ref is symbolic.
+    """
+    pattern = prefix.rstrip("/") if isinstance(prefix, str) else prefix
+    _check_ref_name(cwd, pattern, what="ref hierarchy")
+    found = _refs_under(cwd, pattern)
+    if found is None:
+        raise GitError(f"cannot list {pattern}: git for-each-ref failed in {cwd}")
+    return found
+
+
+def _has_object(cwd: Path | str, oid: str) -> Optional[bool]:
+    """Whether the repository has object ``oid`` (an id of the other hash format is
+    missing); None when git cannot answer."""
+    out = _out(["cat-file", "--batch-check"], cwd, stdin=oid.encode("ascii") + b"\n")
+    if out is None:
+        return None
+    return out.strip().split()[1:] != [b"missing"]
+
+
+def _never_writable(cwd: Path | str, ref: str, new: Optional[str]) -> Optional[str]:
+    """Why a write that failed while ``ref`` still held the expected value can never
+    succeed, judged by the repository's state (never by git's message); None when
+    nothing permanent is in the way, such as another writer's lock."""
+    if new is not None and _has_object(cwd, new) is False:
+        return f"{new} is not an object in this repository"
+    try:
+        existing = _refs_under(cwd, _WRITABLE_REFS.rstrip("/")) or []
+    except GitError:  # a link elsewhere in refs/aegis: cannot tell, so the retries decide
+        existing = []
+    for name, _oid in existing:
+        if name.startswith(ref + "/") or ref.startswith(name + "/"):
+            return f"{ref} cannot exist alongside {name}"
+    return None
+
+
+def update_ref(cwd: Path | str, ref: str, new: Optional[str], old: Optional[str]) -> None:
+    """Compare-and-swap ``ref`` from ``old`` to ``new`` (object ids; None means absent).
+
+    - ``old`` None, ``new`` set: create; fails if the ref exists.
+    - both set: update; fails unless the ref holds ``old``.
+    - ``new`` None, ``old`` set: delete; fails unless the ref holds ``old``.
+
+    ``ref`` must be under ``refs/aegis/``: a branch, a tag or any other ref is refused.
+    One ``update-ref --no-deref --stdin`` transaction with the ``create``, ``update`` or
+    ``delete`` verb, so no all-zero id is spelled and SHA-1 and SHA-256 repositories
+    behave alike. A symbolic ref is never written through: an update or delete of one
+    is refused (GitError), and a link that appears after that check, or a dangling one
+    a create meets, is replaced by a direct ref, its target left alone. After a failure
+    the ref is read again and the failure classified by state, never by git's message:
+
+    - it holds something other than ``old`` (another oid, or absent when ``old`` was
+      set): RefConflict, with ``current`` (which equals ``new`` when this write landed
+      and only its acknowledgement was lost);
+    - it still holds ``old`` (absent for a create) but can never take ``new``, because
+      ``new`` is not an object in this repository (absent, or of the other hash format)
+      or a ref in the same hierarchy is in the way (``refs/aegis/x`` versus
+      ``refs/aegis/x/y``): GitError at once;
+    - otherwise transient, such as another writer's ref lock: retried up to
+      UPDATE_REF_ATTEMPTS times with doubling sleeps, then GitError.
+
+    Raises RefNameError for an invalid name or one outside ``refs/aegis/`` (nothing is
+    written), ValueError for a malformed object id or for ``new`` and ``old`` both None
+    (an unconditional write is no CAS).
+    """
+    if new is None and old is None:
+        raise ValueError("update_ref needs a new value, an expected old value, or both")
+    if new is not None:
+        _full_oid(new)
+    if old is not None:
+        _full_oid(old)
+    _check_ref_name(cwd, ref)
+    if not ref.startswith(_WRITABLE_REFS):
+        raise RefNameError(f"refusing to write {ref!r}: aegis writes only refs under {_WRITABLE_REFS}")
+    if old is not None:
+        # ``old`` cannot have been read from a link (read_ref refuses one), yet git would
+        # compare it with the link's target. This read refuses a symbolic ref; one that
+        # appears after it is replaced under --no-deref, never written through.
+        read_ref(cwd, ref)
+    name = os.fsencode(ref)
+    if new is not None and old is not None:
+        command = b"update " + name + b"\0" + new.encode() + b"\0" + old.encode() + b"\0"
+    elif new is not None:
+        command = b"create " + name + b"\0" + new.encode() + b"\0"
+    else:
+        command = b"delete " + name + b"\0" + old.encode() + b"\0"  # type: ignore[union-attr]
+
+    delay = UPDATE_REF_BACKOFF_SECONDS
+    detail = ""
+    for attempt in range(UPDATE_REF_ATTEMPTS):
+        res = _completed(["update-ref", "--no-deref", "-z", "--stdin"], cwd, stdin=command)
+        if res is not None and res.returncode == 0:
+            return
+        current = read_ref(cwd, ref)
+        if current != old:
+            raise RefConflict(
+                f"{ref} holds {current or 'nothing'}, not {old or 'nothing'} as expected",
+                ref=ref, expected=old, current=current,
+            )
+        permanent = _never_writable(cwd, ref, new)
+        if permanent:
+            raise GitError(f"git update-ref {ref} failed: {permanent}")
+        # Kept for the person reading the final error; it never decides anything.
+        lines = (res.stderr if res is not None else b"timed out").strip().splitlines()
+        detail = os.fsdecode(lines[-1]) if lines else ""
+        if attempt + 1 < UPDATE_REF_ATTEMPTS:
+            time.sleep(delay)
+            delay *= 2
+    raise GitError(
+        f"git update-ref {ref} failed {UPDATE_REF_ATTEMPTS} times while the ref still held the "
+        f"expected value" + (f": {detail}" if detail else "")
+    )
+
+
+def read_object(cwd: Path | str, oid: str, max_bytes: int) -> bytes:
+    """The content of blob ``oid`` (a full object id, never a revision expression).
+
+    Raises ValueError for a malformed id or a negative cap, and GitError when the object
+    is missing, is not a blob, is larger than ``max_bytes`` (checked before its content
+    is read) or comes back with content that does not hash to ``oid``.
+    """
+    _full_oid(oid)
+    if max_bytes < 0:
+        raise ValueError(f"max_bytes must be at least 0, got {max_bytes}")
+    request = oid.encode("ascii") + b"\n"
+    checked = _out(["cat-file", "--batch-check"], cwd, stdin=request)
+    if checked is None:
+        raise GitError(f"git cannot describe object {oid} in {cwd}")
+    header = checked.strip().split()
+    if len(header) == 2 and header[1] == b"missing":
+        raise GitError(f"object {oid} is missing")
+    if len(header) != 3 or header[0].decode("ascii", "replace") != oid or not header[2].isdigit():
+        raise GitError(f"git cannot describe object {oid} in {cwd}")
+    kind, size = header[1].decode("ascii", "replace"), int(header[2])
+    if kind != "blob":
+        raise GitError(f"object {oid} is a {kind}, not a blob")
+    if size > max_bytes:
+        raise GitError(f"object {oid} is {size} bytes, over the {max_bytes}-byte cap")
+    out = _out(["cat-file", "--batch"], cwd, stdin=request)
+    if out is None:
+        raise GitError(f"git cannot read object {oid} in {cwd}")
+    head, _, rest = out.partition(b"\n")
+    data = rest[:size]
+    if head.split()[1:] != [b"blob", str(size).encode()] or len(data) != size or _blob_id(data, len(oid)) != oid:
+        raise GitError(f"git returned content for {oid} that does not match the object id")
+    return data
+
+
+def _tree_of(cwd: Path | str, rev: str) -> str:
+    tree = None
+    if isinstance(rev, str) and rev and not rev.startswith("-"):
+        tree = _text(["rev-parse", "--verify", "--quiet", f"{rev}^{{tree}}"], cwd)
+    if not tree:
+        raise GitError(f"cannot resolve {rev!r} to a tree in {cwd}")
+    return tree
+
+
+def diff_entries(cwd: Path | str, a: str, b: str) -> List[Tuple[str, str, str, str]]:
+    """Every path that differs between tree-ishes ``a`` and ``b``, as
+    (status, old_mode, new_mode, path) in git's order.
+
+    ``diff-tree -r -z --raw --no-renames`` with no ``--diff-filter``: additions (A),
+    deletions (D), modifications (M, a mode change included), type changes (T, such as a
+    file becoming a symlink) and gitlinks (mode 160000) are all listed; a move is a D
+    and an A. A side that has no entry has mode ``000000``. Paths are repo-relative
+    POSIX. Raises GitError when a revision cannot be resolved or git fails.
+    """
+    first, second = _tree_of(cwd, a), _tree_of(cwd, b)
+    out = _out(["diff-tree", "-r", "-z", "--raw", "--no-renames", "--ignore-submodules=none", first, second], cwd)
+    if out is None:
+        raise GitError(f"git diff-tree failed for {a}..{b} in {cwd}")
+    fields = out.split(b"\0")
+    entries: List[Tuple[str, str, str, str]] = []
+    for meta, raw_path in zip(fields[0::2], fields[1::2]):
+        parts = meta.lstrip(b":").split()
+        if len(parts) != 5 or not raw_path:
+            raise GitError(f"git diff-tree gave an unreadable entry for {a}..{b}")
+        old_mode, new_mode, status = (p.decode("ascii", "replace") for p in (parts[0], parts[1], parts[4]))
+        entries.append((status[:1], old_mode, new_mode, os.fsdecode(raw_path)))
+    return entries
+
+
+def _repository_merge_drivers(cwd: Path | str) -> Optional[List[str]]:
+    """Names of merge drivers defined outside the user's and the system's config (the
+    repository's own, which a clone or a hostile commit's setup may control); None when
+    git cannot list them."""
+    res = _completed(["config", "--show-scope", "--null", "--name-only", "--get-regexp", r"^merge\..+\.driver$"], cwd)
+    if res is None or res.returncode not in (0, 1):
+        return None
+    fields = res.stdout.split(b"\0") if res.returncode == 0 else []
+    names = [
+        os.fsdecode(key)[len("merge."):-len(".driver")]
+        for scope, key in zip(fields[0::2], fields[1::2])
+        if key and scope.decode("ascii", "replace") not in _TRUSTED_SCOPES
+    ]
+    return list(dict.fromkeys(names))
+
+
+def merge_tree_conflicted(cwd: Path | str, p1: str, p2: str) -> bool:
+    """Whether merging commits ``p1`` and ``p2`` has textual conflicts
+    (``merge-tree --write-tree --name-only``: exit 1 is a conflict, 0 is clean).
+
+    Needs git 2.38 or later; raises MergeTreeUnavailable otherwise, and when the
+    repository's own config defines a merge driver (merge-tree would run it) or its
+    filter drivers cannot be switched off. Raises GitError when a commit cannot be
+    resolved or git fails. The trial merge's objects are written but referenced by
+    nothing.
+    """
+    version = git_version(cwd)
+    if version is None:
+        raise MergeTreeUnavailable("cannot tell which git version runs; git merge-tree --write-tree needs git 2.38 or later")
+    if version[:2] < MERGE_TREE_MIN_VERSION:
+        raise MergeTreeUnavailable(
+            "git merge-tree --write-tree needs git 2.38 or later; this git is " + ".".join(map(str, version))
+        )
+    first, second = resolve_commit(cwd, p1), resolve_commit(cwd, p2)
+    if not first or not second:
+        raise GitError(f"cannot resolve {p1 if not first else p2!r} to a commit in {cwd}")
+    drivers = _repository_merge_drivers(cwd)
+    if drivers is None:
+        raise MergeTreeUnavailable("git cannot list the repository's merge drivers; the merge metric is unavailable here")
+    if drivers:
+        raise MergeTreeUnavailable(
+            f"the repository config defines merge driver {', '.join(drivers)}, which git merge-tree would run; "
+            "the merge metric is unavailable here"
+        )
+    overrides = _filter_overrides(cwd)
+    if overrides is None:
+        raise MergeTreeUnavailable("cannot switch off the repository's filter drivers; the merge metric is unavailable here")
+    hardening = (*_HARDENING, "-c", "merge.renormalize=false", *overrides)
+    res = _completed(["merge-tree", "--write-tree", "--name-only", first, second], cwd, _hardening=hardening)
+    if res is None or res.returncode not in (0, 1):
+        code = "timed out" if res is None else f"exit {res.returncode}"
+        raise GitError(f"git merge-tree failed ({code}) for {p1} and {p2} in {cwd}")
+    return res.returncode == 1

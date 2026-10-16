@@ -746,8 +746,10 @@ def _layer1_on_snapshot(
             if ext == ".py":
                 results.append(call_graph.check(full_path, repo_root, exclude_names=entry_points, fast_mode=True))
             elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root):
+                # The snapshot sits outside the repository: confine to it, resolve drivers from the repo.
                 results.append(call_graph.check(
                     full_path, repo_root, exclude_names=entry_points, fast_mode=True, ast_runner=ast_runner,
+                    confine_root=snapshot,
                 ))
         except Exception as exc:
             results.append(_tool_failure("call_graph", rel, exc))
@@ -793,7 +795,9 @@ def _layer1_on_snapshot(
         if not applicable:
             continue
         try:
-            norm_ast = extract_normalized_ast(_snapshot_file(snapshot, rel), workspace_root=repo_root, ast_runner=ast_runner)
+            norm_ast = extract_normalized_ast(
+                _snapshot_file(snapshot, rel), workspace_root=repo_root, ast_runner=ast_runner, confine_root=snapshot,
+            )
         except ASTExtractionError as exc:
             norm_ast = exc
         except Exception as exc:

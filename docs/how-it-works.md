@@ -1,6 +1,6 @@
 # How Aegis works, end to end
 
-This page follows one change from an agent's first tool call to a merged commit, and explains each part of Aegis on the way: rules, just-in-time delivery over MCP, checks, the evidence ledger, hosts and enforcement. It describes Aegis 4.0. Sections 8 to 10 describe planned work and say so.
+This page follows one change from an agent's first tool call to a merged commit, and explains each part of Aegis on the way: rules, just-in-time delivery over MCP, checks, the evidence ledger, hosts and enforcement. It describes Aegis 4.1: section 8 covers what 4.1 adds (agent hooks, teams and skills), and sections 9 and 10 describe planned work and say so.
 
 For a two-minute setup, start with the [README](../README.md). For every command, flag and MCP tool schema, see the generated [reference](reference.md). For why Aegis is built this way, and what went wrong before v4, see [Why Aegis is built this way](why-aegis.md). The decisions behind this page are in [ADR 0005](adr/0005-v4-plan-of-record.md).
 
@@ -32,16 +32,21 @@ flowchart TD
 
 | Path | Committed? | What it holds |
 |---|---|---|
-| `.aegis/config.json` | yes | `hosts`, `jit.max_tokens`, rule `expiry`, `ast.packaged_drivers`. It can never name a command: such keys are ignored with a warning. |
+| `.aegis/config.json` | yes | `hosts`, `jit.max_tokens`, `jit.scan_window_s` (how recent a scan must be for the edit hook, section 8), rule `expiry`, `ast.packaged_drivers`. It can never name a command: such keys are ignored with a warning. |
 | `.aegis/rules/<type>/*.md` | yes | the rules, one file each |
+| `.aegis/team.json` | yes | optional: the `shared` globs any lane may change and committed per-lane paths (section 8) |
 | `.aegis/.gitignore` | yes | ignores `state/` |
 | `.aegis/state/` | no | `ledger.jsonl` (outcomes), `activity.jsonl` (scans and edits per session), `derived.json` (written by `aegis sync`), `lock` |
 | `AGENTS.md` | yes | one marked bootstrap block; the rest of the file is yours |
+| `.claude/skills/`, `.agents/skills/` | yes | skill copies written by `aegis skills sync`, each with an Aegis marker line |
+| `refs/aegis/lanes/<lane>` | git ref | a lane's lease, written by `aegis team` |
+| `<git common dir>/aegis/` | no | `events.jsonl`, the events log every worktree shares, and its lock |
 | `CLAUDE.md` | yes | an `@AGENTS.md` block, only if the file already existed |
 | `~/.aegis/workspaces.json` | user | the repos you ran `aegis init` in on this machine |
 | `~/.aegis/rules/` | user | an optional personal rule layer, served read-only where no repo is governed |
 | `~/.aegis/config.json` | user | the only place for command-like settings, such as an AST driver command |
-| `~/.aegis/backups/` | user | a copy of each file taken before Aegis changes it, one timestamped folder per run: the host config `aegis init --host` and `aegis uninstall` merge (Antigravity's `mcp_config.json`), the files `aegis doctor --fix` edits, and the pre-commit hook `aegis hook install` (or `init`) rewrites |
+| `~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.codex/rules/aegis.rules`, `~/.gemini/config/hooks.json` | user | the hook entries `aegis hook install --host` writes (or the repository's `.claude/settings.json`, `.codex/hooks.json` and `.agents/hooks.json` with `--scope project`) |
+| `~/.aegis/backups/` | user | a copy of each file taken before Aegis changes it, one timestamped folder per run: the host config `aegis init --host` and `aegis uninstall` merge (Antigravity's `mcp_config.json`), the files `aegis doctor --fix` edits, the host hook files `aegis hook install --host` and `uninstall --host` change, and the pre-commit hook `aegis hook install` (or `init`) rewrites |
 
 Four environment variables are read: `AEGIS_WORKSPACE` (pin the server to one repo, which must hold `.aegis/`; `aegis init --pin` writes it into the registration, and the CLI honors it too, as section 4 describes), `AEGIS_CLIENT` (host identity, written by `aegis init`), `AEGIS_MAX_JIT_TOKENS` (scan budget) and `AEGIS_LLM_CMD` (the Layer 2 model command).
 
@@ -113,7 +118,7 @@ Never call `eval` or `exec` on data. Parse it with `json.loads` or `ast.literal_
 }
 ```
 
-Without MCP, `aegis scan FILE...` prints the same rules for a person or a shell-only agent.
+Without MCP, `aegis scan FILE...` prints the same rules for a person or a shell-only agent, and records the scan as `aegis_scan` does, so it also satisfies the scan-before-edit hook (section 8).
 
 **Which repository a call governs.** One `aegis-mcp` process can serve sessions in several repos, so every call is bound to a workspace. The first source that names a governed repo (one with `.aegis/`) wins:
 
@@ -182,37 +187,115 @@ Use a reviewer from a different vendor than the agent that wrote the change. A m
 
 **Enforcement tiers**, as `aegis doctor` prints them:
 
-| Tier | Mechanism | Status in 4.0 |
+| Tier | Mechanism | Status in 4.1 |
 |---|---|---|
 | Advisory | AGENTS.md bootstrap, MCP instructions, JIT rules | every host |
-| Best-effort | per-host pre-tool hooks | none in 4.0. Planned for v4.1: Claude Code blocks with exit 2 (documented); Codex blocks with exit 2 once you trust the hook in `/hooks` (documented); Antigravity blocks only destructive commands (exit 1, verified live) and records scan-before-edit. Each fails open when Aegis errors |
+| Best-effort | per-host pre-tool hooks | after `aegis hook install --host <h>`: Claude Code blocking (documented; fails open on error); Codex blocking once trusted in /hooks (documented; fails open); Antigravity blocks destructive commands (live), scan gate records only, and is unavailable on Windows (section 8) |
 | Local floor | git pre-commit runs aegis check --hook (--no-verify bypasses it) | every host that commits through git |
 | Authoritative | CI runs aegis check on the exact SHA; a human merges | your CI and branch protection |
 
-**`aegis doctor`** reads; it changes nothing, makes no network calls and starts no host CLI except `codex mcp get aegis --json` (Codex keeps its registrations in TOML). For each host it reports one state: `missing_binary`, `unregistered`, `auth_unknown` (it cannot confirm the host loads `aegis`), `policy_gap` (the server loads, but the rules do not fully reach the agent, for example a `CLAUDE.md` shadowing `AGENTS.md` or an instructions file past the host's limit) or `ok`. It also reports the strongest tier known to be in force for that host (`local_floor`, `advisory`, `none` or `unknown`), never a guess: the local floor counts only when the Aegis pre-commit hook is installed, current and reached by git (an earlier `exec` or `exit` in the hook, or a hook that is not a shell script, means it never runs). `--json` prints the same as one document. `aegis doctor --fix` removes only what doctor reported, such as stale v3 `soma` entries and legacy instruction blocks, after confirmation, and copies each file to `~/.aegis/backups/` first.
+**`aegis doctor`** reads; it changes nothing, makes no network calls and starts no host CLI except `codex mcp get aegis --json` (Codex keeps its registrations in TOML). For each host it reports one state: `missing_binary`, `unregistered`, `auth_unknown` (it cannot confirm the host loads `aegis`), `policy_gap` (the server loads, but the rules do not fully reach the agent, for example a `CLAUDE.md` shadowing `AGENTS.md` or an instructions file past the host's limit) or `ok`. It also shows the host's hook entries and their tier (section 8), and reports the strongest tier known to be in force for that host (`local_floor`, `advisory`, `none` or `unknown`), never a guess: the local floor counts only when the Aegis pre-commit hook is installed, current and reached by git (an earlier `exec` or `exit` in the hook, or a hook that is not a shell script, means it never runs). `--json` prints the same as one document. `aegis doctor --fix` removes only what doctor reported, such as stale v3 `soma` entries, v3 hook entries and legacy instruction blocks, after confirmation, and copies each file to `~/.aegis/backups/` first.
 
 **`aegis uninstall`** removes the hook block, the `AGENTS.md`/`CLAUDE.md` blocks, the registry entry and the host registrations, keeping a host that another registered repo still uses. It never deletes `.aegis/`.
 
 **Upgrading from v3.** `aegis migrate` shows the plan and `aegis migrate --apply` performs it: the v3 ledger becomes `.aegis/state/ledger.jsonl`, the old config files become `.aegis/config.json`, `.soma` rules move to `.aegis/rules/<type>/`, and every changed file is backed up first (the [changelog](../CHANGELOG.md#upgrading-from-3x) lists every file it converts). Then run `aegis init --host <hosts>` to register the server and write the bootstrap, and `aegis doctor --fix` to remove v3 leftovers. Until the workspace is migrated, `aegis status`, `aegis scan` and `aegis sync` refuse to run in it and name the v3 state v4 does not read (a v3 or v2 ledger, `aegis.conf` or `soma.conf`, `.aegis/slots.yaml` or `.aegis/config.yaml`, v3 keys, receipts or rule manifest); `aegis check` warns and still runs, `aegis init` refuses while `.soma/` holds rules, and `aegis doctor` lists the files. In a `.soma` workspace, `aegis doctor` says to run `aegis migrate`, not `aegis init`.
 
-## 8. Planned for v4.1: agent teams, per-host hooks and skills
+## 8. Agent hooks, teams and skills
 
-Not in 4.0. The design is in [ADR 0005](adr/0005-v4-plan-of-record.md) AD-7 and AD-8, as amended on 2026-10-16.
+New in 4.1. The design is in [ADR 0005](adr/0005-v4-plan-of-record.md) AD-7 and AD-8, as amended on 2026-10-16. Claims below carry the evidence labels doctor uses: **LIVE** (probed on a real host), **DOC** (the host's official docs or source, not probed) and **UNVERIFIED** (neither).
 
-- **Lanes and leases.** Each agent works in its own git worktree and branch (a lane). Whoever dispatches the agents claims the lane with `aegis team claim <lane> --paths <globs>`: a lease, stored as a git ref under `refs/aegis/lanes/<lane>` that points to a small JSON record, written with an atomic compare-and-swap (`git update-ref --stdin`) and visible from every worktree. Leases expire after a time-to-live of at most a day, so no daemon is needed, and a claim whose paths may overlap another live lane's is refused (when unsure, Aegis assumes they overlap). `renew`, `transfer`, `release`, `list` and `gc` complete the set. A lease is cooperative conflict input: not a lock, not an identity and not proof that an agent is alive. Its role and owner are display labels that nothing checks. There is no MCP tool for teams, and nothing is renewed on tool calls.
-- **`.aegis/team.json`** (optional, committed) lists `shared` globs that any lane may change and, optionally, a committed set of paths per lane.
-- **Post-lane gate.** `aegis check --lane <lane>` looks at everything the lane changed since its merge base. Every changed path must be inside the lane's paths or the shared ones (containment), and no Python test may disappear, gain a skip or xfail, or be dropped by a change to pytest's collection settings (test integrity). Weakened asserts are not detected. Any finding fails the check, and there is no exemption flag: the reviewer or the person merging decides with the itemized findings in view. With `--base-policy` the allowed paths come from `team.json` on the base branch, so the result is witnessed rather than self-attested. In CI the job is advisory in v4.1.
-- **Merge metrics.** `aegis team metrics` counts lease denials and, for each merge on the current branch, whether both sides changed a common path and whether git reports a conflict. They decide whether leases earn their place: if no lease is denied in 30 days of multi-lane use, leases go, and `check --lane` and the metrics stay. For scale: of the 23 lane merges that built v4.0 up to `2965be5`, 8 had both sides change a common path and 7 had textual conflicts.
-- **Per-host hooks** for Claude Code, Codex CLI and Antigravity. `aegis hook install --host <h>` registers one handler, `aegis hook run pre-tool --host <h>`, which checks two things:
-  - **Scan-before-edit**: an edit to a file that no `aegis_scan` (or `aegis scan`) covered in the last hour (by default) is blocked on Claude Code, and on Codex once you trust the hook in `/hooks`. Antigravity only records it.
-  - **Destructive commands**: force pushes, `git reset --hard`, `git clean -f`, `rm -r` of `/`, `~`, `$HOME`, `*`, `.` or `..`, `mkfs*` and `dd of=/dev/…` are blocked on all three hosts (on Codex, once trusted). Merges, `sudo` and the like are only recorded.
+### Per-host hooks
 
-  The handler fails open: an error, a timeout or a payload it cannot read lets the call through. Edits made through shell commands never reach the edit check. The hooks are guardrails, not a security boundary. Until they ship, `aegis hook safety-gate --cmd "..."` checks one command line and prints a JSON decision.
-- **Skills**: `aegis skills sync` (or `aegis init --skills`) will copy the 15 packaged [skills](../skills/) into `.claude/skills/` for Claude Code and `.agents/skills/` for Antigravity and Codex (documented for Antigravity, not yet verified for Codex). A marker line in each copy lets Aegis replace only its own unedited copies. Today, copy the ones you want by hand.
+`aegis hook install --host <h>` registers one handler, `aegis hook run pre-tool --host <h>`, as the PreToolUse hook of Claude Code, Codex CLI or Antigravity. `aegis hook install` without `--host` still manages the git pre-commit hook, and `aegis hook uninstall --host <h>` removes only Aegis's entries.
+
+| Host | User scope (default) | `--scope project` | How it runs |
+|---|---|---|---|
+| Claude Code | `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`) | `.claude/settings.json` | exec form, no shell (Claude Code 2.1.139 or later, DOC); no `permissions.deny` entries are written, because the hook parses commands and deny patterns cannot |
+| Codex CLI | `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`), plus `~/.codex/rules/aegis.rules` | `.codex/hooks.json` (Codex loads it only in trusted projects) | through `$SHELL -lc` (DOC). Codex runs a new or changed hook only after you trust it in its `/hooks` screen, and skips it silently until then; `codex exec` has no documented trust path besides `--dangerously-bypass-hook-trust` on each run |
+| Antigravity | `~/.gemini/config/hooks.json` (LIVE) | `.agents/hooks.json` (LIVE) | through a shell wrapper that turns the handler's exit 75 into agy's blocking exit 1 and every other exit code into 0. Not available on Windows, where agy's hook shell is unverified |
+
+The hook matchers keep the handler off read-only tools: `Bash|PowerShell|Monitor|Write|Edit|NotebookEdit` on Claude Code, `Bash|apply_patch` on Codex and `run_command|write_to_file|replace_file_content|multi_replace_file_content` on Antigravity (only `*` was probed live there; if agy ignored the regex, the hook would never fire, which fails open). Every registration has a 10 s timeout. The install merges into the file and keeps everything else in it, refuses a file it cannot parse or one that is a symlink or hard-linked, copies the old file to `~/.aegis/backups/<stamp>/<scope>/`, writes atomically and re-reads the result: a broken Claude settings file silently drops all of its hooks (DOC). A host never gets an Aegis entry at both scopes. `--scope project` writes a file your teammates' hosts will execute once they pull it. The Codex entry stays byte-identical across upgrades, because any change makes Codex ask for trust again.
+
+**What the handler sees.** It reads the payload on stdin and turns it into one shape: the tool, whether it is a shell command or an edit, the command, the edited paths and the workspace.
+
+- Claude Code: `Bash`, `PowerShell` and `Monitor` carry `tool_input.command`; `Write` and `Edit` carry `tool_input.file_path`, `NotebookEdit` `tool_input.notebook_path`. The workspace is `CLAUDE_PROJECT_DIR`, then the payload's `cwd`.
+- Codex CLI: `Bash` carries `tool_input.command`; for `apply_patch` (and a `Bash` command that runs an `apply_patch` heredoc, which Codex intercepts) the paths come from the patch's `*** Add File:`, `*** Update File:`, `*** Delete File:` and `*** Move to:` headers. The workspace is the payload's `cwd`.
+- Antigravity: `run_command` carries `toolCall.args.CommandLine`; `write_to_file`, `replace_file_content` and `multi_replace_file_content` carry `toolCall.args.TargetFile`. The workspace is `workspacePaths[0]`.
+
+The workspace goes through the same resolver `aegis-mcp` binds with (section 4): the nearest `.aegis/` inside the git top level, never `$HOME`. User-scope hooks fire in every repository, so in one without `.aegis/` the handler does nothing. Edited paths are made relative to that workspace; a path outside it is not checked.
+
+**Fail-open is the design.** The handler keeps a 5 s deadline and catches every error. An error, the deadline, a payload it cannot read, an unknown host or event and an ungoverned workspace all exit 0, which lets the call through, and it never writes to stdout. It blocks with exit 2 and the reason on stderr on Claude Code and Codex CLI, and with exit 75 on Antigravity, which the wrapper turns into exit 1. It never answers `ask`.
+
+**Scan-before-edit** (edit tools). An edit passes when one `scan` row in `.aegis/state/activity.jsonl`, from any host or session, names every edited path and was written within `jit.scan_window_s` (default 3600, from 60 to 86400) seconds. Rows are matched on workspace and path, never on session id, because a Claude Code `/clear` starts a new hook session while `aegis-mcp` keeps the old one (LIVE). `aegis_scan` writes such a row, and writes it again once the last one for the same session and files is older than half the window; `aegis scan FILE...` writes one with host `cli`; and `aegis_scan` accepts a file that does not exist yet, so a new file can be scanned before it is created. A path is covered only by itself: scanning a directory does not cover its files. When no row covers the edit:
+
+- Claude Code exits 2 with `aegis: call aegis_scan with <paths> before editing (or run: aegis scan <paths>)` on stderr, which blocks the edit (DOC).
+- Codex CLI does the same, which blocks once you trust the hook (DOC).
+- Antigravity only records it: stderr after exit 0 has no visible effect there (LIVE), and a visible deny waits for a live probe.
+
+Edits to the rule files under `.aegis/rules/` are only recorded on every host: one broken rule file makes every scan fail and write no row, so blocking its repair would block every edit for good.
+
+**Destructive-command guard** (shell tools). The command is parsed with the same tokenizer as `aegis hook safety-gate`. An empty or unparseable command never matches.
+
+- The **block set** is irreversible operations only: `git-push-force` (`--force`, `-f`, `--force-with-lease`), `git-push-refspec` (`+refspec`), `git-reset-hard`, `git-clean-force` (`git clean -f`), `rm-recursive-dangerous` (`rm -r` of `/`, `~`, `$HOME`, `*`, `.` or `..`), `mkfs` and `dd-device` (`dd of=/dev/…`). It blocks with `aegis: blocked <rule>: <reason>` on stderr, on all three hosts (on Codex, once trusted). Codex also gets the same set as `forbidden` prefix rules in `~/.codex/rules/aegis.rules`; Aegis never touches `default.rules`.
+- The **record set** is only recorded: `git-merge`, `gh-pr-merge`, `git-add-bulk` (`git add -A`, `--all` or `.`), `git-push-protected` (a push to `main` or `master`), `sudo`, `chmod-777` and `sql-destructive`. Merges are never blocked, because ADR 0005 AD-10 lets agents merge after the release gates.
+
+**What doctor reports.** For each host, `aegis doctor` shows whether Aegis's entries are present at each scope and point at an executable `aegis`, and the tier such an entry gives, with its evidence label:
+
+| Host | Tier | Evidence |
+|---|---|---|
+| Claude Code | `blocking (documented; fails open on error)` | DOC: documented by Anthropic, never probed |
+| Codex CLI | `blocking once trusted in /hooks (documented; fails open)`, and `needs approval in /hooks (cannot be checked)` | DOC: documented by OpenAI, never probed; exit 1 was verified live to fail open |
+| Antigravity | `blocks destructive commands (live); scan gate records only`, or `unavailable` on Windows | LIVE: exit-1 blocking probed on `agy` 1.3.6 |
+
+Doctor reads files only, so a registered hook never counts as enforcement in force: the Best-effort tier then reads `unknown`. It also flags duplicate entries, entries edited by hand, and v3 leftovers: the stale Antigravity plugin `~/.gemini/config/plugins/governance/hooks.json` and hook entries that call `soma hook …` or a removed `aegis hook` phase. `aegis doctor --fix` removes those leftovers, backing each file up first.
+
+**Known gaps.** The hooks are guardrails, not a security boundary, as OpenAI's own docs say of Codex hooks. Doctor prints these, and they hold on 4.1:
+
+- Edits made through shell commands never reach the edit gate on any host.
+- Codex write_stdin into an interactive shell has no PreToolUse payload, and the Codex Bash payload carries no working directory.
+- Antigravity manage_task with send_input types into a background terminal past run_command.
+- Aegis never emits an 'ask' decision (it fails open on Codex and soft-denies in agy headless runs).
+- The hooks fail open on any Aegis error: they are guardrails, not a security boundary.
+
+### Agent teams: leases and the lane gate
+
+A lane is one agent's worktree and branch. Whoever dispatches the agents, usually a script or a person, declares each lane's paths with `aegis team claim <lane> --paths <globs> [--role R] [--owner O] [--ttl S] [--branch B]`. There is no MCP tool for teams and nothing renews on tool calls.
+
+- **A lease** is the ref `refs/aegis/lanes/<lane>`, pointing to a small JSON record (`lane`, `role`, `owner`, `claim_id`, `gen`, `branch`, `paths`, `ts`, `ttl_s`). It is written by compare-and-swap through `git update-ref --stdin`, so every worktree sees it, and it expires after its time-to-live (at most 86400 s), so no daemon is needed. Lane names match `[a-z0-9][a-z0-9._-]{0,62}`.
+- **A claim is refused** when a live lease of another lane may overlap its paths. The check is conservative: two globs overlap when the literal text before the first wildcard of one, compared without case, starts the other's, and a glob without `/` overlaps everything, because it matches a file name at any depth. An expired lease is taken over with a new `claim_id`.
+- `renew`, `transfer` and `release` take `--expect <oid>`, the lease they last saw; `gc` deletes expired leases and `list [--json]` shows them, with `expired`, `clock_skew` (written more than 300 s in the reader's future; still live) and `overlaps`.
+- **A lease is cooperative conflict input**: not a lock, not an identity and not proof that an agent is alive. Claims of different lanes can race, and `owner` and `role` are display labels that nothing compares. Anyone, a person included, may release a lease.
+
+**`.aegis/team.json`** (optional, committed) is `{"v":1,"shared":["CHANGELOG.md"],"lanes":{"docs":["docs/**","README.md"]}}`. `shared` lists globs any lane may change; `lanes` holds committed path sets per lane. It is parsed strictly: an unknown key, a bad glob or an invalid lane name exits 2. Globs match as rule `target_paths` do, so `shared: ["CHANGELOG.md"]` also admits `docs/CHANGELOG.md`.
+
+**The post-lane gate**, `aegis check --lane <lane> [--base <ref>] [--paths G...] [--base-policy]`, looks at every change from the merge base of the base branch and `HEAD` to `HEAD`. A shallow clone fails: fetch with `fetch-depth: 0`.
+
+- **Containment**: every changed path, including deletions, type changes, both sides of a move and submodules, must be inside the allowed set. `.aegis/**` and `.github/workflows/**` are allowed only through the base branch's `team.json`, never through a lease or `--paths`.
+- **Test integrity** (Python test files; other test files are listed as not checked): a test present at the base and gone at `HEAD`; a skip or xfail added at `HEAD` (pytest and unittest decorators, `pytestmark`, `pytest.skip`, `pytest.xfail`, `pytest.importorskip`, `self.skipTest`, `raise unittest.SkipTest`); and changes to pytest collection (`collect_ignore`, `pytest_collection_modifyitems` in `conftest.py`, or `addopts`, `testpaths` and the `python_*` and `norecursedirs` settings in the pytest config). Assert weakening is not detected.
+- **Provenance**: by default the allowed paths come from the lane's live lease or `--paths`, plus `shared` from the working tree, and the result is labeled **self-attested**: the lane can write all of those. With `--base-policy` they come from `lanes.<lane>` and `shared` in `team.json` at the base branch's tip, never the merge base or the candidate, `--paths` is refused, and the result is labeled **witnessed: base policy**.
+- Any finding fails the check, and there is no exemption flag: the reviewer or the person merging decides with the itemized findings in view.
+- **In CI** the `check --lane` job is advisory (not a required check) in v4.1. Under `pull_request` the workflow itself comes from the candidate, so a witness is only as strong as the protection on `.github/**` and on the base branch. Run the gate from a workflow defined on the base branch.
+
+**`aegis team metrics [--base REF]`** counts claims and denials from the events log and, for each first-parent merge since the base, whether both sides changed a common path and whether `git merge-tree` reports a conflict (git 2.38 or later; GitHub's synthetic `refs/pull/*/merge` commits are left out). These numbers decide whether leases earn their place: if no lease is denied in 30 days of multi-lane use, leases go, and `check --lane` and the metrics stay. For scale: of the 23 lane merges that built v4.0 up to `2965be5`, 8 had both sides change a common path and 7 had textual conflicts.
+
+A read-only reviewer claims nothing and never blocks a writer; its verdict applies to the exact tree it read. Aegis records no review verdicts in 4.1: the record is the pull request review.
+
+### Skills projection
+
+`aegis skills sync [--host ...] [--force] [--dry-run]`, or `aegis init --skills`, copies the 15 packaged [skills](../skills/) into the workspace for the hosts in `.aegis/config.json` (or `--host`):
+
+- `.claude/skills/<id>/SKILL.md` for Claude Code (DOC), with Claude Code's wording;
+- `.agents/skills/<id>/SKILL.md` for Codex CLI and Antigravity, which share the directory, with neutral wording (Antigravity DOC, Codex UNVERIFIED). Neither directory has been checked on a real install yet, and sync says so.
+
+Each copy keeps only `name` and `description` in its frontmatter, renders the slots and is otherwise the packaged file byte for byte. Right after the frontmatter it carries the marker `<!-- aegis:skill id=<id> v=1 sha=<12 hex> -->`, where the sha covers the rest of the file with LF line endings. A later sync replaces a copy whose sha still matches (CRLF line endings and a byte order mark are no edit), skips a copy edited since unless `--force`, and leaves a file without the marker alone: it is yours and is never replaced, even with `--force`. Every directory on the way must be a real directory inside the workspace and `SKILL.md` a regular file with one link; `--force` never overrides a link or a path that leaves the workspace. Whether a host then uses a skill is up to the host and cannot be measured.
+
+### The events log
+
+The commands above record what the prune conditions count in an events log: `<git common dir>/aegis/events.jsonl`, shared by every worktree of the repository (`.aegis/state/events.jsonl` outside git), under its own lock. Each row is `{"v":1,"ts","event","worktree","host"?,"result","detail"}`. 4.1 writes `lease_claimed` and `lease_denied` (`aegis team`), `lane_check` (`aegis check --lane`), `scan_gate` and `guard_match` (the hooks) and `skills_sync`. Fitness and `aegis status --compliance` never read it, and it is not the ledger. Rows written on a CI runner are lost with the runner unless you upload them.
 
 ## 9. Planned for v4.2: adoption tools
 
-Not in 4.0. Each feature ships with a stated metric and a prune condition, and is removed if it does not earn its place.
+Not in 4.1. Each feature ships with a stated metric and a prune condition, and is removed if it does not earn its place.
 
 - **Day-0 card**: `aegis check --card`, also printed at the end of `aegis init`: languages, drivers, rule counts, the Layer 1 pass rate and the files with the most findings, for an existing repository.
 - **Ratchet baseline**: `aegis check --write-baseline` records today's findings in `.aegis/baseline.json`, so `aegis check` fails only on new ones. With `--base`, the baseline is read from the base branch, never from the change under review.
@@ -252,6 +335,10 @@ Flags and defaults for every command are in the [reference](reference.md); this 
 | rebuild fitness and get suggestions | `aegis sync` (`--apply` to apply them) |
 | promote or demote one rule | `aegis rule promote RULE_ID` / `aegis rule demote RULE_ID` |
 | manage the pre-commit hook | `aegis hook install` / `status` / `uninstall` |
+| add or remove a host's pre-tool hook | `aegis hook install --host claude-code` / `aegis hook uninstall --host claude-code` |
+| declare a lane's paths | `aegis team claim LANE --paths 'docs/**'` (`aegis team list` to see leases) |
+| check what a lane changed | `aegis check --lane LANE` (`--base-policy` for the witnessed form) |
+| copy the skills into the repo | `aegis skills sync` (`--dry-run` first) |
 | upgrade a v3 workspace | `aegis migrate`, then `aegis migrate --apply`, `aegis init --host ...` and `aegis doctor --fix` |
 | remove Aegis from a repo | `aegis uninstall` (keeps `.aegis/`) |
 | use Aegis from Python | `from aegis_sdk import Governance; Governance(project_root=".").scan(["app.py"])` |

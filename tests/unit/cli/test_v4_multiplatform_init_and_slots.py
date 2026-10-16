@@ -126,4 +126,5 @@ class TestInitWorkspaceRules:
         # The seeded starter rules load cleanly; nothing under .aegis/rules is ignored.
         ruleset = load_rules(project_root)
         assert ruleset.errors == () and ruleset.ignored == ()
-        assert {r.type for r in ruleset.rules} == {"persona"}
+        # The guidance is seeded as personas; the one active starter is an invariant (v4.1 d5).
+        assert {(r.type, r.id == "no-eval") for r in ruleset.rules} == {("persona", False), ("invariant", True)}

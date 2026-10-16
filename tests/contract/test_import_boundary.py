@@ -48,6 +48,8 @@ CORE_LAYERS: Dict[str, int] = {
     # The one PATH lookup of a program Aegis runs or registers (stdlib only).
     "aegis_core.pathlookup": 0,
     "aegis_core.config": 0,
+    # The events log (prune metrics): storage and gitsafe only, so any layer may record.
+    "aegis_core.events": 0,
     "aegis_core.workspace": 0,
     "aegis_core.rules": 1,
     "aegis_core.rule_inventory": 1,
@@ -58,6 +60,12 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core.ast": 1,
     "aegis_core.skills": 1,
     "aegis_core.command_safety": 1,
+    # Team leases and team.json: gitsafe, config, events and the matcher.
+    "aegis_core.team": 1,
+    # Host hook payload normalization (stdlib only).
+    "aegis_core.hook_events": 1,
+    # The post-lane gate (aegis check --lane): team, the matcher, gitsafe and events.
+    "aegis_core.lane_gate": 1,
     "aegis_core.scan": 2,
     "aegis_core.scan_compliance": 2,
     "aegis_core.sync": 2,

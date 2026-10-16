@@ -35,19 +35,21 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis doctor` | Setup & Environment | System health and governance audit |
 | `aegis init` | Setup & Environment | Set up governance for this project and register it with your agent hosts |
 | `aegis migrate` | Setup & Environment | Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply) |
+| `aegis skills` | Setup & Environment | Copy the packaged skills into your hosts' project skills folders (sync) |
 | `aegis uninstall` | Setup & Environment | Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/) |
 | `aegis check` | Daily Workflow & Verification | Verify changes: Layer 1 checks, plus a Layer 2 model review with --full |
 | `aegis scan` | Daily Workflow & Verification | Show which rules apply to the given files (run before editing them) |
 | `aegis status` | Daily Workflow & Verification | Show active rules and stats |
+| `aegis team` | Daily Workflow & Verification | Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics) |
 | `aegis rule` | Rule Evolution & Intelligence | Manage rule lifecycle (list, create, promote, demote, archive) |
 | `aegis sync` | Rule Evolution & Intelligence | Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them) |
-| `aegis hook` | Plumbing | Install, inspect or remove the git pre-commit hook |
+| `aegis hook` | Plumbing | Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks |
 
 ### `aegis doctor`
 
 System health and governance audit
 
-Read-only health checks, the host matrix (binary, registration, identity, workspace, bootstrap, budget per host) and the enforcement tiers in force here. --fix changes only what doctor reported (stale v3 and misplaced MCP entries, legacy rule blocks, unedited v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up to ~/.aegis/backups/<UTC stamp>/ first.
+Read-only health checks, the host matrix (binary, registration, identity, workspace, bootstrap, budget per host) and the enforcement tiers in force here. --fix changes only what doctor reported (stale v3 and misplaced MCP entries, v3 hook entries, legacy rule blocks, unedited v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up to ~/.aegis/backups/<UTC stamp>/ first.
 
 Category: Setup & Environment.
 
@@ -61,19 +63,21 @@ Category: Setup & Environment.
 
 Set up governance for this project and register it with your agent hosts
 
-Set up .aegis/ (config, starter rules, .gitignore), the Aegis block in AGENTS.md (and an @AGENTS.md block in an existing CLAUDE.md), the git pre-commit hook, and this workspace's entry in ~/.aegis/workspaces.json {"v": 1, "workspaces": [{root, added_at, added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with --host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add --scope user; antigravity: ~/.gemini/config/mcp_config.json).
+Set up .aegis/ (config, starter rules, .gitignore), the Aegis block in AGENTS.md (and an @AGENTS.md block in an existing CLAUDE.md), the git pre-commit hook, and this workspace's entry in ~/.aegis/workspaces.json {"v": 1, "workspaces": [{root, added_at, added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with --host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add --scope user; antigravity: ~/.gemini/config/mcp_config.json; kiro: ~/.kiro/settings/mcp.json). A new workspace also gets one active rule, the no-eval invariant; --ci writes the CI workflow .github/workflows/aegis.yml, which init otherwise only prints.
 
 Category: Setup & Environment.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--host` | `HOST[,HOST]|auto` |  | Register the Aegis MCP server with these hosts (codex-cli, claude-code, antigravity), or 'auto' for the ones detected on this machine. Without it, detected hosts are only listed. |
-| `--rules` | one of `minimal`, `standard`, `full` | `"standard"` | Starter rules to seed into .aegis/rules/personas/ (default: standard) |
+| `--host` | `HOST[,HOST]|auto` |  | Register the Aegis MCP server with these hosts, or 'auto' for the ones found on this machine (by CLI on PATH, config directory or desktop app). Without it, found hosts are only listed. A host is the config plane its surfaces share, so a surface name selects its host: codex-cli (Codex CLI, Codex IDE extension, ChatGPT desktop app (Codex mode); also codex, codex-ide, codex-app, chatgpt-desktop); claude-code (Claude Code CLI, Claude Code IDE extensions, Claude desktop app (Code tab); also claude-desktop-code); antigravity (Antigravity app, Antigravity IDE, agy CLI; also antigravity-app, antigravity-ide); kiro, experimental (Kiro IDE, Kiro CLI; also kiro-ide, kiro-cli) |
+| `--rules` | one of `minimal`, `standard`, `full`, `none-active` | `"standard"` | Starter rules: guidance seeded into .aegis/rules/personas/ (minimal 2, standard 5, full every shipped one), which applies to no file until you set its target_paths; a new workspace also gets one active rule, the no-eval invariant in .aegis/rules/invariants/ (bans eval and exec in **/*.py). none-active seeds the standard guidance without it (default: standard) |
 | `--dry-run` |  |  | Check and show every step without writing anything or running a host CLI |
 | `--yes`, `-y` |  |  | Skip the confirmation prompt |
 | `--force` |  |  | Replace Aegis blocks in AGENTS.md/CLAUDE.md even if they were edited by hand |
 | `--pin` |  |  | Pin the host registrations to this workspace (AEGIS_WORKSPACE) |
 | `--no-hooks` |  |  | Skip installing the git pre-commit hook |
+| `--skills` |  |  | Also copy the packaged skills into the hosts' project skills folders (.claude/skills, .agents/skills), as aegis skills sync does |
+| `--ci` |  |  | Also write .github/workflows/aegis.yml, a GitHub Actions workflow that runs aegis check on every pull request (CI is the floor: git commit --no-verify skips the pre-commit hook). Without it, init prints that workflow when no workflow runs aegis check |
 
 ### `aegis migrate`
 
@@ -87,6 +91,22 @@ Category: Setup & Environment.
 | --- | --- | --- | --- |
 | `--apply` |  |  | Perform the migration (default: dry run) |
 | `--dry-run` |  |  | Only report what would change (the default) |
+
+### `aegis skills`
+
+Copy the packaged skills into your hosts' project skills folders (sync)
+
+Category: Setup & Environment. Subcommands: `sync`.
+
+### `aegis skills sync`
+
+Copy the packaged skills to .claude/skills (Claude Code) and .agents/skills (Codex CLI, Antigravity), replacing only Aegis's own unedited copies
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--host` | `HOST[,HOST]|auto` |  | Hosts to copy skills for (default: the hosts in .aegis/config.json); 'auto' takes the ones detected on this machine |
+| `--force` |  |  | Also replace Aegis copies edited by hand (never a file without the Aegis marker, a link or anything outside the workspace) |
+| `--dry-run` |  |  | Report what would change; write nothing |
 
 ### `aegis uninstall`
 
@@ -119,6 +139,10 @@ Category: Daily Workflow & Verification.
 | `--llm-cmd` | `CMD` |  | Layer 2 model command, e.g. 'claude -p': gets the prompt on stdin, prints the reply. It runs in an empty temporary directory, never the repository, so give scripts absolute paths (default: $AEGIS_LLM_CMD; never read from repository files) |
 | `--dry-run` |  |  | Show what would be checked without running anything |
 | `--format` | one of `text`, `json` | `"text"` | Output format |
+| `--lane` | `LANE` |  | Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment (every changed path, deletions and both sides of a move included, inside the lane's globs) and Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong as the protection on .github/** and on the base branch |
+| `--base` | `REF` |  | With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0 |
+| `--paths` | `GLOB [GLOB ...]` |  | With --lane: the lane's globs instead of its live lease (self-attested). They match as rule target_paths do: a glob without '/' matches at any depth, so CHANGELOG.md also admits docs/CHANGELOG.md. They never allow .aegis/** or .github/workflows/** |
+| `--base-policy` |  |  | With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may .aegis/** and .github/workflows/** change |
 
 ### `aegis scan`
 
@@ -139,6 +163,87 @@ Category: Daily Workflow & Verification.
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--compliance` |  |  | Show the per-host scan-before-edit rate from the MCP activity log (.aegis/state/activity.jsonl), per session and per host. Edits are the files a session named in aegis_report_outcome 'files' plus the files of commits inside exactly one session's window (first to last event, plus 15 minutes). Limits: an edit time is an upper bound (report or commit time), so the rate can overstate compliance; uncommitted edits that were never reported are not seen; commits in overlapping sessions count as ambiguous, not as misses; a session with no observed edit is unknown, never 0. A host rate is an aggregate over sessions, not a per-attempt verdict. Reads only. |
+
+### `aegis team`
+
+Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics)
+
+Leases under refs/aegis/lanes/<lane> declare which paths a lane works on. A lease is cooperative conflict input, not a lock, not an identity and not proof that an agent is alive: claims of different lanes can race, and owner and role are display labels. The backstops are the post-lane gate (aegis check --lane) and aegis team metrics.
+
+Category: Daily Workflow & Verification. Subcommands: `claim`, `gc`, `list`, `metrics`, `release`, `renew`, `transfer`.
+
+### `aegis team claim`
+
+Lease a lane's paths; prints the lease oid
+
+Refuse when a live lease of another lane may overlap the paths; otherwise create the lane's lease, or take over its expired lease. Prints the new lease oid.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `lane` | `LANE` |  | Lane name: [a-z0-9][a-z0-9._-]{0,62} (required) |
+| `--paths` | `GLOB [GLOB ...]` |  | Globs the lane will change (the conflict scope) |
+| `--role` | `ROLE` |  | Display label (default: implementer) |
+| `--owner` | `OWNER` |  | Display label (default: <user>@<hostname>) |
+| `--ttl` | `SECONDS` | `3600` | Seconds until the lease expires, at most 86400 |
+| `--branch` | `BRANCH` |  | The lane's branch, recorded for display |
+
+### `aegis team gc`
+
+Delete expired leases
+
+Delete every expired lease by compare-and-swap; unreadable leases are kept.
+
+### `aegis team list`
+
+Show leases (conflict input, not liveness proof)
+
+A lease is conflict input, not liveness proof: it records which paths a lane declared and until when, not that its agent is still working. The backstops are the post-lane gate (aegis check --lane) and aegis team metrics.
+
+### `aegis team metrics`
+
+Lease events and merge outcomes
+
+Claims and denials from the events log, and for each first-parent merge since --base: whether both sides changed a common path and whether git merge-tree reports a conflict (unavailable before git 2.38). GitHub's synthetic refs/pull/*/merge commits are excluded.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--base` | `REF` |  | Count merges since this commit (default: the branch base, as for aegis check --lane: origin/main, main, origin/develop or develop; with none, the whole first-parent history) |
+
+### `aegis team release`
+
+Delete a lease
+
+Delete a lease by compare-and-swap. Anyone may release; the events log records the caller.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `lane` | `LANE` |  | Lane name: [a-z0-9][a-z0-9._-]{0,62} (required) |
+| `--expect` | `OID` |  | The lease oid the lane must hold now (printed by claim, renew, transfer and list) |
+
+### `aegis team renew`
+
+Extend a lease; prints the new lease oid
+
+Renew by compare-and-swap; an expired lease is re-claimed, overlap check included.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `lane` | `LANE` |  | Lane name: [a-z0-9][a-z0-9._-]{0,62} (required) |
+| `--expect` | `OID` |  | The lease oid the lane must hold now (printed by claim, renew, transfer and list) |
+| `--ttl` | `SECONDS` |  | New lifetime in seconds, at most 86400 (default: keep it) |
+
+### `aegis team transfer`
+
+Give a live lease to another owner
+
+Change a live lease's owner (and role) by compare-and-swap.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `lane` | `LANE` |  | Lane name: [a-z0-9][a-z0-9._-]{0,62} (required) |
+| `--expect` | `OID` |  | The lease oid the lane must hold now (printed by claim, renew, transfer and list) |
+| `--owner` | `OWNER` |  | The new owner label |
+| `--role` | `ROLE` |  | The new role label (default: keep it) |
 
 ### `aegis rule`
 
@@ -211,18 +316,33 @@ Category: Rule Evolution & Intelligence.
 
 ### `aegis hook`
 
-Install, inspect or remove the git pre-commit hook
+Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks
 
-Category: Plumbing. Subcommands: `install`, `safety-gate`, `status`, `uninstall`.
+Category: Plumbing. Subcommands: `install`, `run`, `safety-gate`, `status`, `uninstall`.
 
 ### `aegis hook install`
 
-Install the pre-commit hook into the git repository
+Install the git pre-commit hook, or with --host an agent host's PreToolUse hook
+
+Without --host: install the git pre-commit hook (it runs aegis check --hook). With --host claude-code\|codex-cli\|antigravity: register `aegis hook run pre-tool --host <h>` as that host's PreToolUse hook, at user scope (default) or, with --scope project, in the repository's host file, which teammates' hosts will execute. The merge keeps everything else in the file, refuses unparseable, symlinked or hard-linked files, and backs the old file up to ~/.aegis/backups/<stamp>/<scope>/. Codex also gets ~/.codex/rules/aegis.rules and runs the hook only after you trust it in /hooks; Antigravity hooks are unavailable on Windows. aegis doctor shows each host's entries and tier; it cannot confirm that a host runs them. Run it from any directory but your home directory, which Aegis never takes as a workspace, even for --scope user (which changes only your user files). Known gaps: - Edits made through shell commands never reach the edit gate on any host. - Codex write_stdin into an interactive shell has no PreToolUse payload, and the Codex Bash payload carries no working directory. - Antigravity manage_task with send_input types into a background terminal past run_command. - Aegis never emits an 'ask' decision (it fails open on Codex and soft-denies in agy headless runs). - The hooks fail open on any Aegis error: they are guardrails, not a security boundary.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--force` |  |  | Overwrite symlinks pointing outside repository |
+| `--force` |  |  | Git hook only: overwrite symlinks pointing outside repository |
 | `--dry-run` |  |  | Preview without creating or modifying hook |
+| `--host` | `HOST` |  | Register the PreToolUse hook with this host instead of the git hook: claude-code, codex-cli, antigravity |
+| `--scope` | one of `user`, `project` |  | With --host: user (default) or project |
+
+### `aegis hook run`
+
+Run the agent-host hook on the payload on stdin (what host hook registrations call)
+
+Reads the host's PreToolUse JSON on stdin and never prints on stdout. Exit 0 allows, and also follows any error, a timeout, an unknown host or event and an ungoverned workspace: the hooks fail open. Exit 2 blocks on claude-code and codex-cli (reason on stderr); exit 75 blocks on antigravity, whose registration maps it to 1.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `event` | `[EVENT]` |  | The hook event: pre-tool |
+| `--host` | `HOST` |  | The host whose payload is on stdin: claude-code, codex-cli or antigravity |
 
 ### `aegis hook safety-gate`
 
@@ -238,12 +358,16 @@ Inspect the pre-commit hook and the interpreter it runs
 
 ### `aegis hook uninstall`
 
-Remove the aegis block from the pre-commit hook
+Remove the aegis block from the pre-commit hook, or with --host an agent host's PreToolUse hook
+
+Without --host: remove the aegis block from the git pre-commit hook. With --host: remove Aegis's PreToolUse entries from that host's files at --scope (default: both scopes) and nothing else, backing each file up first; for Codex also ~/.codex/rules/aegis.rules once no Aegis Codex hook is left. Run it from any directory but your home directory, which Aegis never takes as a workspace, even for --scope user (which changes only your user files).
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--force` |  |  | Force removal |
+| `--force` |  |  | Git hook only: force removal |
 | `--dry-run` |  |  | Preview without modifying disk |
+| `--host` | `HOST` |  | Remove Aegis's PreToolUse hook entries from this host instead of the git hook: claude-code, codex-cli, antigravity |
+| `--scope` | one of `user`, `project` |  | With --host: only this scope (default: both) |
 
 ### Removed commands
 

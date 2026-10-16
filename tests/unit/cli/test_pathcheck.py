@@ -412,3 +412,96 @@ def test_pathcheck_on_path_handles_windows_colons():
     from aegis_cli.pathcheck import on_path
     path_env = r"C:\Python312\Scripts;C:\Windows\System32"
     assert on_path(r"C:\Python312\Scripts", path_env, sep=";", casefold=True)
+
+
+# ── macOS: pip --user puts aegis in ~/Library/Python/X.Y/bin (emulated darwin) ──
+
+_PY = f"{sys.version_info[0]}.{sys.version_info[1]}"
+_ON_MAC = pytest.mark.skipif(os.name == "nt", reason="emulates a macOS (POSIX) shell and home directory")
+
+
+@pytest.fixture
+def mac(tmp_path, monkeypatch):
+    """A macOS user whose `pip3 install --user aegis-guardrails` put the script in
+    ~/Library/Python/X.Y/bin (field report: Kiro's shell could not find `aegis`).
+
+    sysconfig answers for the Python running the tests, so it stands in for a framework
+    build's own scripts directory, which holds no aegis here."""
+    import aegis_cli.pathcheck as pathcheck
+
+    home = tmp_path / "Users" / "dev"
+    user_bin = home / "Library" / "Python" / _PY / "bin"
+    user_bin.mkdir(parents=True)
+    (user_bin / "aegis").write_text("#!/bin/sh\n")
+    framework_bin = tmp_path / "Library" / "Frameworks" / "Python.framework" / "Versions" / _PY / "bin"
+    framework_bin.mkdir(parents=True)
+    monkeypatch.setattr(pathcheck.sysconfig, "get_path", lambda *_a, **_k: str(framework_bin))
+    monkeypatch.setattr(pathcheck.sys, "platform", "darwin")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("ZDOTDIR", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    return home, user_bin
+
+
+def _mac_hint(home, shell):
+    return build_hint(env={"SHELL": shell, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+                      which=lambda *_a, **_k: None, home=str(home), os_name="posix", venv_prefix=None)
+
+
+@_ON_MAC
+def test_on_macos_the_candidates_include_the_pip_user_scripts_dir(mac):
+    from aegis_cli.pathcheck import default_candidates
+
+    home, user_bin = mac
+    assert str(user_bin) in default_candidates()
+
+
+def test_off_macos_the_library_dir_is_never_a_candidate(tmp_path, monkeypatch):
+    from aegis_cli.pathcheck import default_candidates
+
+    monkeypatch.setattr("aegis_cli.pathcheck.sys.platform", "linux")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    assert str(tmp_path / "Library" / "Python" / _PY / "bin") not in default_candidates()
+
+
+@_ON_MAC
+@pytest.mark.parametrize("shell, rc, line", [
+    ("/bin/zsh", "~/.zshrc", f'export PATH="$HOME/Library/Python/{_PY}/bin:$PATH"'),
+    ("/bin/bash", "~/.bash_profile", f'export PATH="$HOME/Library/Python/{_PY}/bin:$PATH"'),
+    ("/opt/homebrew/bin/fish", "~/.config/fish/config.fish", f'fish_add_path "$HOME/Library/Python/{_PY}/bin"'),
+])
+def test_the_macos_hint_names_the_user_scripts_dir_and_the_exact_rc_line(mac, shell, rc, line):
+    home, user_bin = mac
+    text = _mac_hint(home, shell)
+    lines = text.splitlines()
+    assert lines[0] == f"ℹ️  'aegis' was installed to {user_bin}, which is not on your {shell.rsplit('/', 1)[1]} PATH."
+    assert lines[1] == (f"    On macOS, pip install --user puts commands in ~/Library/Python/{_PY}/bin, "
+                        "which is not on PATH by default.")
+    assert lines[2] == f"    Add this line to {rc}, then open a new terminal:"
+    assert lines[3] == f"      {line}"
+    assert lines[4] == "    An IDE or desktop app started before this change keeps its old PATH: restart it."
+    assert lines[5] == f"    Until then you can run it by its full path: {user_bin / 'aegis'} <command>"
+
+
+@_ON_MAC
+def test_the_macos_line_appears_only_for_the_library_dir(mac, tmp_path):
+    home, _user_bin = mac
+    other = home / ".local" / "bin"
+    other.mkdir(parents=True)
+    (other / "aegis").write_text("#!/bin/sh\n")
+    text = build_hint(env={"SHELL": "/bin/zsh", "PATH": "/usr/bin"}, candidates=[str(other)],
+                      which=lambda *_a, **_k: None, home=str(home), os_name="posix", venv_prefix=None)
+    assert "Library/Python" not in text
+    assert 'export PATH="$HOME/.local/bin:$PATH"' in text
+
+
+def test_off_macos_the_hint_has_no_macos_line(tmp_path):
+    home = tmp_path / "home"
+    lib = home / "Library" / "Python" / _PY / "bin"
+    lib.mkdir(parents=True)
+    (lib / "aegis").write_text("#!/bin/sh\n")
+    text = build_hint(env={"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin"}, candidates=[str(lib)],
+                      which=lambda *_a, **_k: None, home=str(home), platform="linux", os_name="posix",
+                      venv_prefix=None)
+    assert "On macOS" not in text and "IDE" not in text

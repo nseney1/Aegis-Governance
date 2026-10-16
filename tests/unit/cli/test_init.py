@@ -6,9 +6,11 @@ covered in test_init_hosts.py. Every test runs with an empty HOME (tests/unit/cl
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -156,7 +158,7 @@ class TestSeeding:
         assert run_init(_args(project, rules="standard")) == 0
         ruleset = load_rules(project)
         assert not ruleset.errors
-        assert {r.id for r in ruleset.rules} == STANDARD
+        assert {r.id for r in ruleset.rules} == STANDARD | {"no-eval"}  # the one active starter
 
     def test_an_existing_rule_with_the_same_id_is_never_overwritten_or_duplicated(self, project):
         mine = project / ".aegis" / "rules" / "invariants" / "providence.md"
@@ -202,7 +204,9 @@ class TestSeededRulesAreLintClean:
         from aegis_core.yaml_engine.frontmatter import split_frontmatter
 
         assert run_init(_args(project, rules="standard")) == 0
-        for rule in load_rules(project).rules:
+        personas = [r for r in load_rules(project).rules if r.path.startswith(".aegis/rules/personas/")]
+        assert {r.id for r in personas} == STANDARD
+        for rule in personas:
             assert rule.ok and rule.type == "persona"
             assert rule.meta["type"] == "persona" and rule.meta["target_paths"] == []
             assert rule.target_paths == ()
@@ -681,6 +685,26 @@ class TestCommandLine:
         assert captured.err == line + "\n"
         assert not (project / ".aegis").exists()
 
+    def test_help_names_every_host_with_its_surfaces_and_aliases(self, capsys):
+        from aegis_cli.install_hosts import registrable_hosts
+
+        with pytest.raises(SystemExit):
+            main(["init", "--help"])
+        # argparse wraps help at spaces and after hyphens; undo both before matching.
+        out = re.sub(r"-\s+", "-", " ".join(capsys.readouterr().out.split()))
+        for host in registrable_hosts():
+            assert host.id in out
+            for text in host.surfaces + host.aliases:
+                assert text in out, text
+
+    def test_claude_desktop_is_refused_with_the_host_that_covers_its_code_tab(self, project, capsys):
+        with pytest.raises(SystemExit) as exc:
+            main(["init", "--host", "claude-desktop", "--workspace", str(project)])
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "identity only" in err and "use --host claude-code" in err
+        assert not (project / ".aegis").exists()
+
     def test_removed_flags_are_not_in_help(self, capsys):
         with pytest.raises(SystemExit):
             main(["init", "--help"])
@@ -711,3 +735,468 @@ class TestCommandLine:
         assert "gemini mcp" not in captured.err
         assert "v4.1" not in captured.err
         assert not (project / ".aegis").exists()
+
+
+# ── --skills: project the packaged skills for the hosts (v4.1 spec §3) ──────
+
+PACKAGED_SKILLS = sorted(p.parent.name for p in packaged_dir("skills").glob("*/SKILL.md"))
+
+
+def _projected(root: Path, directory: str) -> list:
+    return sorted(p.parent.name for p in (root / directory).glob("*/SKILL.md"))
+
+
+def _init_json(project: Path, capsys, *flags: str):
+    rc = main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks", "--rules", "minimal", *flags])
+    return rc, json.loads(capsys.readouterr().out)
+
+
+class TestInitSkills:
+    @pytest.fixture(autouse=True)
+    def _no_fsync(self, monkeypatch):
+        """os.fsync is the OS durability boundary; these tests check bytes, and the fsyncs
+        of 15 or 30 copies per test would double this module's run time on a slow disk
+        (the mutation gate's baseline has a fixed budget)."""
+        monkeypatch.setattr(os, "fsync", lambda fd: None)
+
+    def test_skills_projects_every_packaged_skill_for_the_selected_hosts(self, project, capsys):
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code,codex-cli")
+
+        assert rc == 0
+        assert len(PACKAGED_SKILLS) == 15
+        assert _projected(project, ".claude/skills") == PACKAGED_SKILLS
+        assert _projected(project, ".agents/skills") == PACKAGED_SKILLS
+        steps = {a["target"]: a for a in payload["actions"]}
+        assert steps[".agents/skills"]["result"] == "synced"
+        assert steps[".agents/skills"]["detail"] == "codex-cli, unverified: 15 created"
+        assert steps[".claude/skills"]["detail"] == "claude-code, unverified: 15 created"
+        genesis = (project / ".claude/skills/genesis/SKILL.md").read_text(encoding="utf-8")
+        assert genesis.startswith("---\nname: genesis\ndescription: ")
+
+    def test_text_output_names_each_skills_directory(self, project, capsys):
+        assert run_init(_args(project, "--skills", "--host", "antigravity")) == 0
+        out = capsys.readouterr().out
+        assert ".agents/skills: synced (antigravity, unverified: 15 created)" in out
+
+    def test_a_second_init_leaves_the_projected_skills_unchanged(self, project, capsys):
+        assert run_init(_args(project, "--skills", "--host", "claude-code")) == 0
+        before = {p: p.read_bytes() for p in (project / ".claude").rglob("SKILL.md")}
+        capsys.readouterr()
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 0
+        step = next(a for a in payload["actions"] if a["target"] == ".claude/skills")
+        assert (step["result"], step["detail"]) == ("unchanged", "claude-code, unverified: 15 unchanged")
+        assert {p: p.read_bytes() for p in (project / ".claude").rglob("SKILL.md")} == before
+
+    def test_without_skills_nothing_is_projected(self, project, capsys):
+        rc, payload = _init_json(project, capsys, "--host", "claude-code")
+        assert rc == 0
+        assert not (project / ".claude").exists()
+        assert not any("skills" in a["target"] for a in payload["actions"])
+
+    def test_skills_uses_the_hosts_already_in_the_config(self, project):
+        assert run_init(_args(project, "--host", "antigravity")) == 0
+        assert not (project / ".agents").exists()
+
+        assert run_init(_args(project, "--skills")) == 0
+
+        assert _projected(project, ".agents/skills") == PACKAGED_SKILLS
+        assert not (project / ".claude").exists()
+
+    def test_skills_without_any_host_is_skipped_with_a_pointer(self, project, capsys):
+        rc, payload = _init_json(project, capsys, "--skills")
+
+        assert rc == 0
+        step = next(a for a in payload["actions"] if a["target"] == "skills")
+        assert step["result"] == "skipped" and "--host" in step["detail"]
+        assert not (project / ".claude").exists() and not (project / ".agents").exists()
+
+    def test_a_refused_skills_directory_stops_init_before_anything_is_written(self, project, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        symlink_or_skip(outside, project / ".claude", target_is_directory=True)
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 1 and payload["status"] == "refused"
+        assert not (project / ".aegis").exists() and not (project / "AGENTS.md").exists()
+        assert list(outside.iterdir()) == []
+        assert any(".claude" in e and "symlink" in e and "--skills" in e for e in payload["errors"])
+
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX permission bits that apply to this user")
+    def test_a_skills_directory_that_cannot_be_written_stops_init_before_anything_is_written(self, project, capsys):
+        (project / ".claude").mkdir()
+        os.chmod(project / ".claude", 0o555)
+        try:
+            rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+        finally:
+            os.chmod(project / ".claude", 0o755)
+
+        assert rc == 1 and payload["status"] == "refused"
+        assert not (project / ".aegis").exists() and not (project / "AGENTS.md").exists()
+        assert list((project / ".claude").iterdir()) == []
+        assert payload["errors"][0] == (
+            f"skills: .claude/skills/{PACKAGED_SKILLS[0]}/SKILL.md cannot be written "
+            f"({project.resolve() / '.claude'} is not a writable directory). Fix it, or re-run without --skills.")
+
+    def test_a_user_s_own_skill_file_is_kept_with_a_warning(self, project, capsys):
+        mine = project / ".claude" / "skills" / "genesis" / "SKILL.md"
+        mine.parent.mkdir(parents=True)
+        mine.write_bytes(b"my genesis\n")
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 0
+        assert mine.read_bytes() == b"my genesis\n"
+        assert any(w.startswith(".claude/skills/genesis/SKILL.md: ") and "marker" in w for w in payload["warnings"])
+        step = next(a for a in payload["actions"] if a["target"] == ".claude/skills")
+        assert step["detail"] == "claude-code, unverified: 14 created, 1 skipped"
+
+    def test_dry_run_projects_nothing_and_records_no_event(self, project, capsys):
+        from aegis_core import events
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code", "--dry-run")
+
+        assert rc == 0 and payload["dry_run"] is True
+        step = next(a for a in payload["actions"] if a["target"] == ".claude/skills")
+        assert step["detail"] == "claude-code, unverified: 15 created"
+        assert not (project / ".claude").exists() and not (project / ".aegis").exists()
+        assert events.read(project, "skills_sync").rows == []
+
+    def test_an_aegis_copy_updated_alone_is_reported_synced(self, project, capsys):
+        assert run_init(_args(project, "--skills", "--host", "claude-code")) == 0
+        target = project / ".claude/skills/genesis/SKILL.md"
+        lines = target.read_text(encoding="utf-8").splitlines(True)
+        # An older Aegis copy: unedited (its marker matches its text), but not today's text.
+        head, old_body = "".join(lines[:4]), "\nAn older genesis.\n"
+        sha = hashlib.sha256((head + old_body).encode("utf-8")).hexdigest()[:12]
+        target.write_text(head + f"<!-- aegis:skill id=genesis v=1 sha={sha} -->\n" + old_body, encoding="utf-8")
+        capsys.readouterr()
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 0
+        step = next(a for a in payload["actions"] if a["target"] == ".claude/skills")
+        assert (step["result"], step["detail"]) == ("synced", "claude-code, unverified: 1 updated, 14 unchanged")
+        assert "An older genesis." not in target.read_text(encoding="utf-8")
+
+    def test_skills_with_an_unreadable_config_uses_the_hosts_named_now(self, project, capsys):
+        (project / ".aegis").mkdir()
+        (project / ".aegis" / "config.json").write_text("{not json", encoding="utf-8")
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "codex-cli")
+
+        assert rc == 0
+        assert _projected(project, ".agents/skills") == PACKAGED_SKILLS
+        assert any("config.json" in w for w in payload["warnings"])
+
+    def test_configured_hosts_without_skills_are_named_in_warnings(self, project, capsys):
+        (project / ".aegis").mkdir()
+        (project / ".aegis" / "config.json").write_text('{"v": 1, "hosts": ["claude-desktop"]}', encoding="utf-8")
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 0
+        assert "claude-desktop reads no project skills; nothing to copy for it" in payload["warnings"]
+
+    def test_a_packaged_skill_that_cannot_be_projected_stops_init(self, project, tmp_path, capsys, monkeypatch):
+        """The packaged data's location is the installation boundary; point it at a broken copy."""
+        from aegis_cli import skills_sync
+
+        source = tmp_path / "source"
+        (source / "broken").mkdir(parents=True)
+        (source / "broken" / "SKILL.md").write_text("no frontmatter\n", encoding="utf-8")
+        monkeypatch.setattr(skills_sync, "packaged_dir", lambda name: source)
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 1 and payload["status"] == "refused"
+        assert payload["errors"][0] == ("skills: packaged broken/SKILL.md: skill broken: no readable frontmatter. "
+                                        "Fix it, or re-run without --skills.")
+        assert not (project / ".aegis").exists() and not (project / ".claude").exists()
+
+    def test_a_caller_s_own_namespace_without_the_option_projects_nothing(self, project, capsys):
+        """run_init called with a Namespace built before --skills existed keeps the old behaviour."""
+        args = argparse.Namespace(workspace=str(project), yes=True, no_hooks=True, rules="minimal",
+                                  host=["claude-code"], json=True)
+
+        assert run_init(args) == 0
+
+        payload = json.loads(capsys.readouterr().out)
+        assert not (project / ".claude").exists()
+        assert not any("skills" in a["target"] for a in payload["actions"])
+
+    def test_a_real_run_records_an_init_triggered_skills_sync_event(self, project):
+        from aegis_core import events
+
+        assert run_init(_args(project, "--skills", "--host", "claude-code")) == 0
+
+        rows = events.read(project, "skills_sync").rows
+        assert [(r["result"], r["detail"]["trigger"], r["detail"]["hosts"]) for r in rows] == [
+            ("ok", "init", ["claude-code"])]
+
+
+# ── One active rule out of the box (v4.1 d5) ─────────────────────────────────
+
+ACTIVE = REPO_ROOT / "rules" / "no-eval.md"
+
+
+def _invariants(root: Path) -> set:
+    return {p.stem for p in (root / ".aegis" / "rules" / "invariants").glob("*.md")}
+
+
+def _check(root: Path, *files: str) -> int:
+    try:
+        return main(["check", "--workspace", str(root), *files])
+    except SystemExit as exc:
+        return exc.code
+
+
+class TestActiveStarterRule:
+    """Starter personas apply to no file, so a fresh init used to enforce nothing (field
+    report). A new workspace now gets one active, deterministic invariant."""
+
+    def test_the_active_starter_ships_beside_the_guidance_rules_but_in_no_persona_preset(self):
+        from aegis_cli.init import packaged_active_rules
+
+        assert packaged_active_rules() == {"no-eval": ACTIVE}
+        assert "no-eval" not in packaged_rules()
+        assert all("no-eval" not in {p.stem for p in preset_rules(p)} for p in ("minimal", "standard", "full"))
+
+    def test_a_new_workspace_gets_the_no_eval_invariant_as_shipped(self, project):
+        from aegis_core.rules import load_rules
+
+        assert run_init(_args(project)) == 0
+        seeded = project / ".aegis" / "rules" / "invariants" / "no-eval.md"
+        assert seeded.read_bytes() == ACTIVE.read_bytes()
+        rule = next(r for r in load_rules(project).rules if r.id == "no-eval")
+        assert (rule.ok, rule.type, rule.enforcement) == (True, "invariant", "gate")
+        assert rule.target_paths == ("**/*.py",)
+        assert rule.meta["forbid_ast"] == {"calls": ["eval", "exec"]}
+        # The personas still apply to no file: no-eval is the one active rule.
+        assert [r.id for r in load_rules(project).rules if r.target_paths] == ["no-eval"]
+
+    @pytest.mark.parametrize("preset", ["minimal", "standard", "full"])
+    def test_every_persona_preset_also_seeds_it(self, project, preset):
+        assert run_init(_args(project, rules=preset)) == 0
+        assert _invariants(project) == {"no-eval"}
+
+    def test_aegis_check_enforces_it_on_day_one(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        (project / "app.py").write_text("def load(text):\n    return eval(text)\n", encoding="utf-8")
+        (project / "ok.py").write_text("import json\n\n\ndef load(text):\n    return json.loads(text)\n",
+                                       encoding="utf-8")
+        capsys.readouterr()
+        assert _check(project, "app.py") == 1
+        assert "Forbidden call 'eval'" in capsys.readouterr().out
+        assert _check(project, "ok.py") == 0
+
+    def test_the_output_names_the_active_rule_and_the_next_step(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert "Active rule in .aegis/rules/invariants/:" in out
+        assert "✅ no-eval: bans eval() and exec() in **/*.py; aegis check and the pre-commit hook enforce it" in out
+        assert "Next: add a rule for your own code with aegis rule create (aegis rule create --help)" in out
+
+    def test_none_active_opts_out_and_keeps_the_standard_personas(self, project, capsys):
+        assert run_init(_args(project, rules="none-active")) == 0
+        assert _seeded(project) == STANDARD
+        assert _invariants(project) == set()
+        out = capsys.readouterr().out
+        assert "No active rule (--rules none-active): aegis check enforces no rule until one names files." in out
+        assert "Next: add a rule for your own code with aegis rule create (aegis rule create --help)" in out
+
+    def test_a_deleted_active_rule_is_never_seeded_again(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        (project / ".aegis" / "rules" / "invariants" / "no-eval.md").unlink()
+        capsys.readouterr()
+        assert run_init(_args(project, "--host", "codex-cli", "--dry-run")) == 0
+        assert run_init(_args(project)) == 0
+        assert _invariants(project) == set()
+        assert "no-eval" not in capsys.readouterr().out
+
+    def test_a_workspace_that_already_has_rules_gets_no_new_gate(self, project):
+        traps = project / ".aegis" / "rules" / "traps"
+        traps.mkdir(parents=True)
+        (traps / "mine.md").write_text("---\nid: mine\ntype: trap\ndomain: correctness\nenforcement: advisory\n"
+                                       "hypothesis: mine\n---\n# Mine\n", encoding="utf-8")
+        assert run_init(_args(project)) == 0
+        assert _invariants(project) == set()
+
+    def test_a_rerun_leaves_it_unchanged(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        before = (project / ".aegis" / "rules" / "invariants" / "no-eval.md").read_bytes()
+        capsys.readouterr()
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks"]) == 0
+        step = next(a for a in json.loads(capsys.readouterr().out)["actions"]
+                    if a["target"] == ".aegis/rules/invariants")
+        assert step["result"] == "unchanged"
+        assert (project / ".aegis" / "rules" / "invariants" / "no-eval.md").read_bytes() == before
+
+    def test_json_names_the_seeded_and_the_skipped_rule(self, project, tmp_path, capsys):
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks"]) == 0
+        steps = {a["target"]: a for a in json.loads(capsys.readouterr().out)["actions"]}
+        assert steps[".aegis/rules/invariants"]["result"] == "seeded"
+        assert "no-eval" in steps[".aegis/rules/invariants"]["detail"]
+        other = tmp_path / "other"
+        other.mkdir()
+        assert main(["--json", "init", "--workspace", str(other), "--yes", "--no-hooks",
+                     "--rules", "none-active"]) == 0
+        steps = {a["target"]: a for a in json.loads(capsys.readouterr().out)["actions"]}
+        assert steps[".aegis/rules/invariants"]["result"] == "skipped"
+
+    def test_dry_run_plans_it_and_writes_nothing(self, project, capsys):
+        assert run_init(_args(project, "--dry-run")) == 0
+        assert "[DRY-RUN] no-eval" in capsys.readouterr().out
+        assert not (project / ".aegis").exists()
+
+    def test_a_symlinked_invariants_dir_is_refused_and_nothing_is_written(self, project, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (project / ".aegis" / "rules").mkdir(parents=True)
+        symlink_or_skip(elsewhere, project / ".aegis" / "rules" / "invariants", target_is_directory=True)
+        assert run_init(_args(project)) == 1
+        assert "symlink" in capsys.readouterr().err
+        assert list(elsewhere.iterdir()) == []
+        assert not (project / "AGENTS.md").exists()
+
+
+# ── The CI floor (v4.1 d5) ───────────────────────────────────────────────────
+
+WORKFLOW = REPO_ROOT / ".github" / "workflows"  # this repository's own CI, for the action pins
+
+
+def _workflow_text() -> str:
+    from aegis_cli.init import ci_workflow
+
+    return ci_workflow()
+
+
+class TestCiWorkflow:
+    """`git commit --no-verify` skips the pre-commit hook, so CI is the floor. init prints
+    the workflow by default and writes .github/workflows/aegis.yml only with --ci."""
+
+    def test_by_default_the_workflow_is_printed_and_nothing_is_written(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert ("  CI is the floor: git commit --no-verify skips the pre-commit hook, so CI must run "
+                "aegis check too.") in out
+        assert ("  This repository has no GitHub Actions workflow yet. Save this as .github/workflows/aegis.yml, "
+                "or re-run aegis init with --ci to write it:") in out
+        for line in _workflow_text().splitlines():
+            assert ("      " + line).rstrip() in out.splitlines()
+        assert not (project / ".github").exists()
+
+    def test_ci_writes_exactly_the_printed_workflow(self, project, capsys):
+        assert run_init(_args(project, "--ci")) == 0
+        written = (project / ".github" / "workflows" / "aegis.yml").read_text(encoding="utf-8")
+        assert written == _workflow_text()
+        out = capsys.readouterr().out
+        assert "✅ .github/workflows/aegis.yml: created" in out
+        assert "CI is the floor" in out and "commit .github/workflows/aegis.yml" in out
+        assert "Save this as" not in out
+
+    def test_the_workflow_runs_aegis_check_with_the_aegis_that_wrote_it(self):
+        from aegis_cli import __version__
+
+        text = _workflow_text()
+        assert "  pull_request:\n" in text
+        assert "fetch-depth: 0" in text  # aegis check diffs the pull request against its base
+        assert f"pip install aegis-guardrails=={__version__}" in text
+        assert "      - run: aegis check\n" in text
+        assert "permissions:\n  contents: read\n" in text
+        assert "\t" not in text and text.endswith("\n")
+
+    def test_the_actions_it_uses_are_the_majors_this_repository_runs(self):
+        own = "\n".join(p.read_text(encoding="utf-8") for p in WORKFLOW.glob("*.yml"))
+        for action in re.findall(r"uses: (actions/[\w-]+)@(v\d+)", _workflow_text()):
+            assert re.search(rf"uses: {action[0]}@\w+ # {action[1]}\.", own), action
+
+    def test_an_existing_aegis_yml_is_never_overwritten(self, project, capsys):
+        mine = project / ".github" / "workflows" / "aegis.yml"
+        mine.parent.mkdir(parents=True)
+        mine.write_text("name: mine\n", encoding="utf-8")
+        assert run_init(_args(project, "--ci")) == 0
+        assert mine.read_text(encoding="utf-8") == "name: mine\n"
+        assert ".github/workflows/aegis.yml: kept" in capsys.readouterr().out
+
+    def test_a_workflow_that_runs_aegis_check_is_named_and_no_snippet_printed(self, project, capsys):
+        ci = project / ".github" / "workflows" / "ci.yaml"
+        ci.parent.mkdir(parents=True)
+        ci.write_text("jobs:\n  t:\n    steps:\n      - run: pip install aegis-guardrails && aegis check\n",
+                      encoding="utf-8")
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert "✅ CI: .github/workflows/ci.yaml runs aegis check" in out
+        assert "Save this as" not in out and "name: Aegis" not in out
+
+    def test_other_workflows_that_never_run_aegis_still_get_the_snippet(self, project, capsys):
+        ci = project / ".github" / "workflows" / "ci.yml"
+        ci.parent.mkdir(parents=True)
+        ci.write_text("jobs:\n  t:\n    steps:\n      - run: pytest\n", encoding="utf-8")
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert "  No GitHub Actions workflow here runs aegis check yet. Save this as .github/workflows/aegis.yml" in out
+        assert "      name: Aegis" in out.splitlines()
+
+    def test_ci_dry_run_writes_nothing(self, project, capsys):
+        assert run_init(_args(project, "--ci", "--dry-run")) == 0
+        assert ".github/workflows/aegis.yml: would create" in capsys.readouterr().out
+        assert not (project / ".github").exists()
+
+    def test_a_symlinked_workflows_dir_is_refused_with_ci_and_nothing_is_written(self, project, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (project / ".github").mkdir()
+        symlink_or_skip(elsewhere, project / ".github" / "workflows", target_is_directory=True)
+        assert run_init(_args(project, "--ci")) == 1
+        err = capsys.readouterr().err
+        assert ".github/workflows" in err and "symlink" in err and "Nothing was written." in err
+        assert list(elsewhere.iterdir()) == []
+        assert not (project / ".aegis").exists()
+
+    def test_a_file_where_the_workflows_dir_belongs_is_refused_with_ci(self, project, capsys):
+        (project / ".github").write_text("not a directory\n", encoding="utf-8")
+        assert run_init(_args(project, "--ci")) == 1
+        assert "not a directory" in capsys.readouterr().err
+        assert not (project / ".aegis").exists()
+
+    def test_json_mode_prints_no_snippet_and_reports_the_step(self, project, tmp_path, capsys):
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        step = next(a for a in payload["actions"] if a["target"] == ".github/workflows/aegis.yml")
+        assert step["result"] == "suggested" and "--ci" in step["detail"]
+        other = tmp_path / "other"
+        other.mkdir()
+        assert main(["--json", "init", "--workspace", str(other), "--yes", "--no-hooks", "--ci"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        step = next(a for a in payload["actions"] if a["target"] == ".github/workflows/aegis.yml")
+        assert step["result"] == "created"
+
+    def test_ci_is_in_the_parser_and_off_by_default(self):
+        parser = argparse.ArgumentParser()
+        InitCommand().configure_parser(parser)
+        assert parser.parse_args([]).ci is False
+        assert parser.parse_args(["--ci"]).ci is True
+        assert parser.parse_args(["--rules", "none-active"]).rules == "none-active"
+
+
+def test_the_wheel_smoke_expects_the_active_starters_init_seeds():
+    """wheel_smoke.py runs only in CI against the built wheel; its list must not drift."""
+    import ast as pyast
+
+    from aegis_cli.init import ACTIVE_STARTERS
+
+    tree = pyast.parse((REPO_ROOT / ".github" / "scripts" / "wheel_smoke.py").read_text(encoding="utf-8"))
+    node = next(n for n in tree.body if isinstance(n, pyast.Assign)
+                and any(getattr(t, "id", None) == "ACTIVE_STARTERS" for t in n.targets))
+    assert tuple(pyast.literal_eval(node.value)) == tuple(ACTIVE_STARTERS)

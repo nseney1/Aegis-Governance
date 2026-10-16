@@ -7,8 +7,10 @@
     "migrate": "migrate",
     "rule": "rule",
     "scan": "scan",
+    "skills": "skills",
     "status": "status",
     "sync": "sync",
+    "team": "team",
     "uninstall": "uninstall"
   },
   "parser": {
@@ -257,6 +259,55 @@
             "metavar": null,
             "nargs": null,
             "required": false
+          },
+          {
+            "default": null,
+            "dest": "lane",
+            "flags": [
+              "--lane"
+            ],
+            "help": "Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment (every changed path, deletions and both sides of a move included, inside the lane's globs) and Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong as the protection on .github/** and on the base branch",
+            "kind": "store",
+            "metavar": "LANE",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "base",
+            "flags": [
+              "--base"
+            ],
+            "help": "With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0",
+            "kind": "store",
+            "metavar": "REF",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "paths",
+            "flags": [
+              "--paths"
+            ],
+            "help": "With --lane: the lane's globs instead of its live lease (self-attested). They match as rule target_paths do: a glob without '/' matches at any depth, so CHANGELOG.md also admits docs/CHANGELOG.md. They never allow .aegis/** or .github/workflows/**",
+            "kind": "store",
+            "metavar": "GLOB",
+            "nargs": "+",
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "base_policy",
+            "flags": [
+              "--base-policy"
+            ],
+            "help": "With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may .aegis/** and .github/workflows/** change",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
           }
         ],
         "description": null,
@@ -357,7 +408,7 @@
             "required": false
           }
         ],
-        "description": "Read-only health checks, the host matrix (binary, registration, identity, workspace, bootstrap, budget per host) and the enforcement tiers in force here. --fix changes only what doctor reported (stale v3 and misplaced MCP entries, legacy rule blocks, unedited v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up to ~/.aegis/backups/<UTC stamp>/ first.",
+        "description": "Read-only health checks, the host matrix (binary, registration, identity, workspace, bootstrap, budget per host) and the enforcement tiers in force here. --fix changes only what doctor reported (stale v3 and misplaced MCP entries, v3 hook entries, legacy rule blocks, unedited v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up to ~/.aegis/backups/<UTC stamp>/ first.",
         "help": "System health and governance audit"
       },
       "hook": {
@@ -489,7 +540,7 @@
                 "flags": [
                   "--force"
                 ],
-                "help": "Overwrite symlinks pointing outside repository",
+                "help": "Git hook only: overwrite symlinks pointing outside repository",
                 "kind": "store_true",
                 "metavar": null,
                 "nargs": 0,
@@ -507,10 +558,119 @@
                 "metavar": null,
                 "nargs": 0,
                 "required": false
+              },
+              {
+                "default": null,
+                "dest": "host",
+                "flags": [
+                  "--host"
+                ],
+                "help": "Register the PreToolUse hook with this host instead of the git hook: claude-code, codex-cli, antigravity",
+                "kind": "store",
+                "metavar": "HOST",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "choices": [
+                  "user",
+                  "project"
+                ],
+                "default": null,
+                "dest": "scope",
+                "flags": [
+                  "--scope"
+                ],
+                "help": "With --host: user (default) or project",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
               }
             ],
-            "description": null,
-            "help": "Install the pre-commit hook into the git repository"
+            "description": "Without --host: install the git pre-commit hook (it runs aegis check --hook).\n\nWith --host claude-code|codex-cli|antigravity: register `aegis hook run pre-tool --host <h>` as that host's PreToolUse hook, at user scope (default) or, with --scope project, in the repository's host file, which teammates' hosts will execute. The merge keeps everything else in the file, refuses unparseable, symlinked or hard-linked files, and backs the old file up to ~/.aegis/backups/<stamp>/<scope>/. Codex also gets ~/.codex/rules/aegis.rules and runs the hook only after you trust it in /hooks; Antigravity hooks are unavailable on Windows. aegis doctor shows each host's entries and tier; it cannot confirm that a host runs them. Run it from any directory but your home directory, which Aegis never takes as a workspace, even for --scope user (which changes only your user files).\n\nKnown gaps:\n  - Edits made through shell commands never reach the edit gate on any host.\n  - Codex write_stdin into an interactive shell has no PreToolUse payload, and the Codex Bash payload carries no working directory.\n  - Antigravity manage_task with send_input types into a background terminal past run_command.\n  - Aegis never emits an 'ask' decision (it fails open on Codex and soft-denies in agy headless runs).\n  - The hooks fail open on any Aegis error: they are guardrails, not a security boundary.\n",
+            "help": "Install the git pre-commit hook, or with --host an agent host's PreToolUse hook"
+          },
+          "run": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "event",
+                "flags": [],
+                "help": "The hook event: pre-tool",
+                "kind": "store",
+                "metavar": "EVENT",
+                "nargs": "?",
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "host",
+                "flags": [
+                  "--host"
+                ],
+                "help": "The host whose payload is on stdin: claude-code, codex-cli or antigravity",
+                "kind": "store",
+                "metavar": "HOST",
+                "nargs": null,
+                "required": false
+              }
+            ],
+            "description": "Reads the host's PreToolUse JSON on stdin and never prints on stdout. Exit 0 allows, and also follows any error, a timeout, an unknown host or event and an ungoverned workspace: the hooks fail open. Exit 2 blocks on claude-code and codex-cli (reason on stderr); exit 75 blocks on antigravity, whose registration maps it to 1.",
+            "help": "Run the agent-host hook on the payload on stdin (what host hook registrations call)"
           },
           "safety-gate": {
             "aliases": [],
@@ -705,7 +865,7 @@
                 "flags": [
                   "--force"
                 ],
-                "help": "Force removal",
+                "help": "Git hook only: force removal",
                 "kind": "store_true",
                 "metavar": null,
                 "nargs": 0,
@@ -723,14 +883,42 @@
                 "metavar": null,
                 "nargs": 0,
                 "required": false
+              },
+              {
+                "default": null,
+                "dest": "host",
+                "flags": [
+                  "--host"
+                ],
+                "help": "Remove Aegis's PreToolUse hook entries from this host instead of the git hook: claude-code, codex-cli, antigravity",
+                "kind": "store",
+                "metavar": "HOST",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "choices": [
+                  "user",
+                  "project"
+                ],
+                "default": null,
+                "dest": "scope",
+                "flags": [
+                  "--scope"
+                ],
+                "help": "With --host: only this scope (default: both)",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
               }
             ],
-            "description": null,
-            "help": "Remove the aegis block from the pre-commit hook"
+            "description": "Without --host: remove the aegis block from the git pre-commit hook.\n\nWith --host: remove Aegis's PreToolUse entries from that host's files at --scope (default: both scopes) and nothing else, backing each file up first; for Codex also ~/.codex/rules/aegis.rules once no Aegis Codex hook is left. Run it from any directory but your home directory, which Aegis never takes as a workspace, even for --scope user (which changes only your user files).",
+            "help": "Remove the aegis block from the pre-commit hook, or with --host an agent host's PreToolUse hook"
           }
         },
         "description": null,
-        "help": "Install, inspect or remove the git pre-commit hook"
+        "help": "Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks"
       },
       "init": {
         "aliases": [],
@@ -793,7 +981,7 @@
             "flags": [
               "--host"
             ],
-            "help": "Register the Aegis MCP server with these hosts (codex-cli, claude-code, antigravity), or 'auto' for the ones detected on this machine. Without it, detected hosts are only listed.",
+            "help": "Register the Aegis MCP server with these hosts, or 'auto' for the ones found on this machine (by CLI on PATH, config directory or desktop app). Without it, found hosts are only listed. A host is the config plane its surfaces share, so a surface name selects its host: codex-cli (Codex CLI, Codex IDE extension, ChatGPT desktop app (Codex mode); also codex, codex-ide, codex-app, chatgpt-desktop); claude-code (Claude Code CLI, Claude Code IDE extensions, Claude desktop app (Code tab); also claude-desktop-code); antigravity (Antigravity app, Antigravity IDE, agy CLI; also antigravity-app, antigravity-ide); kiro, experimental (Kiro IDE, Kiro CLI; also kiro-ide, kiro-cli)",
             "kind": "store",
             "metavar": "HOST[,HOST]|auto",
             "nargs": null,
@@ -804,14 +992,15 @@
             "choices": [
               "minimal",
               "standard",
-              "full"
+              "full",
+              "none-active"
             ],
             "default": "standard",
             "dest": "rules",
             "flags": [
               "--rules"
             ],
-            "help": "Starter rules to seed into .aegis/rules/personas/ (default: standard)",
+            "help": "Starter rules: guidance seeded into .aegis/rules/personas/ (minimal 2, standard 5, full every shipped one), which applies to no file until you set its target_paths; a new workspace also gets one active rule, the no-eval invariant in .aegis/rules/invariants/ (bans eval and exec in **/*.py). none-active seeds the standard guidance without it (default: standard)",
             "kind": "store",
             "metavar": null,
             "nargs": null,
@@ -884,6 +1073,32 @@
             "required": false
           },
           {
+            "const": true,
+            "default": false,
+            "dest": "skills",
+            "flags": [
+              "--skills"
+            ],
+            "help": "Also copy the packaged skills into the hosts' project skills folders (.claude/skills, .agents/skills), as aegis skills sync does",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "ci",
+            "flags": [
+              "--ci"
+            ],
+            "help": "Also write .github/workflows/aegis.yml, a GitHub Actions workflow that runs aegis check on every pull request (CI is the floor: git commit --no-verify skips the pre-commit hook). Without it, init prints that workflow when no workflow runs aegis check",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
             "default": "==SUPPRESS==",
             "dest": "platform",
             "flags": [
@@ -920,7 +1135,7 @@
             "required": false
           }
         ],
-        "description": "Set up .aegis/ (config, starter rules, .gitignore), the Aegis block in AGENTS.md (and an @AGENTS.md block in an existing CLAUDE.md), the git pre-commit hook, and this workspace's entry in ~/.aegis/workspaces.json {\"v\": 1, \"workspaces\": [{root, added_at, added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with --host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add --scope user; antigravity: ~/.gemini/config/mcp_config.json).",
+        "description": "Set up .aegis/ (config, starter rules, .gitignore), the Aegis block in AGENTS.md (and an @AGENTS.md block in an existing CLAUDE.md), the git pre-commit hook, and this workspace's entry in ~/.aegis/workspaces.json {\"v\": 1, \"workspaces\": [{root, added_at, added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with --host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add --scope user; antigravity: ~/.gemini/config/mcp_config.json; kiro: ~/.kiro/settings/mcp.json). A new workspace also gets one active rule, the no-eval invariant; --ci writes the CI workflow .github/workflows/aegis.yml, which init otherwise only prints.",
         "help": "Set up governance for this project and register it with your agent hosts"
       },
       "migrate": {
@@ -1675,6 +1890,175 @@
         "description": null,
         "help": "Show which rules apply to the given files (run before editing them)"
       },
+      "skills": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "skills_action",
+            "flags": [],
+            "help": null,
+            "kind": "parsers",
+            "metavar": "ACTION",
+            "nargs": "A...",
+            "required": true
+          }
+        ],
+        "commands": {
+          "sync": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "host",
+                "flags": [
+                  "--host"
+                ],
+                "help": "Hosts to copy skills for (default: the hosts in .aegis/config.json); 'auto' takes the ones detected on this machine",
+                "kind": "store",
+                "metavar": "HOST[,HOST]|auto",
+                "nargs": null,
+                "required": false,
+                "type": "_host_option"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Also replace Aegis copies edited by hand (never a file without the Aegis marker, a link or anything outside the workspace)",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Report what would change; write nothing",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "description": null,
+            "help": "Copy the packaged skills to .claude/skills (Claude Code) and .agents/skills (Codex CLI, Antigravity), replacing only Aegis's own unedited copies"
+          }
+        },
+        "description": null,
+        "help": "Copy the packaged skills into your hosts' project skills folders (sync)"
+      },
       "status": {
         "aliases": [],
         "arguments": [
@@ -1818,6 +2202,676 @@
         ],
         "description": null,
         "help": "Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them)"
+      },
+      "team": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "team_action",
+            "flags": [],
+            "help": null,
+            "kind": "parsers",
+            "metavar": "ACTION",
+            "nargs": "A...",
+            "required": false
+          }
+        ],
+        "commands": {
+          "claim": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "lane",
+                "flags": [],
+                "help": "Lane name: [a-z0-9][a-z0-9._-]{0,62}",
+                "kind": "store",
+                "metavar": "LANE",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "paths",
+                "flags": [
+                  "--paths"
+                ],
+                "help": "Globs the lane will change (the conflict scope)",
+                "kind": "store",
+                "metavar": "GLOB",
+                "nargs": "+",
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "role",
+                "flags": [
+                  "--role"
+                ],
+                "help": "Display label (default: implementer)",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "owner",
+                "flags": [
+                  "--owner"
+                ],
+                "help": "Display label (default: <user>@<hostname>)",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": 3600,
+                "dest": "ttl",
+                "flags": [
+                  "--ttl"
+                ],
+                "help": "Seconds until the lease expires, at most 86400",
+                "kind": "store",
+                "metavar": "SECONDS",
+                "nargs": null,
+                "required": false,
+                "type": "int"
+              },
+              {
+                "default": null,
+                "dest": "branch",
+                "flags": [
+                  "--branch"
+                ],
+                "help": "The lane's branch, recorded for display",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              }
+            ],
+            "description": "Refuse when a live lease of another lane may overlap the paths; otherwise create the lane's lease, or take over its expired lease. Prints the new lease oid.",
+            "help": "Lease a lane's paths; prints the lease oid"
+          },
+          "gc": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ],
+            "description": "Delete every expired lease by compare-and-swap; unreadable leases are kept.",
+            "help": "Delete expired leases"
+          },
+          "list": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ],
+            "description": "A lease is conflict input, not liveness proof: it records which paths a lane declared and until when, not that its agent is still working. The backstops are the post-lane gate (aegis check --lane) and aegis team metrics.",
+            "help": "Show leases (conflict input, not liveness proof)"
+          },
+          "metrics": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "base",
+                "flags": [
+                  "--base"
+                ],
+                "help": "Count merges since this commit (default: the branch base, as for aegis check --lane: origin/main, main, origin/develop or develop; with none, the whole first-parent history)",
+                "kind": "store",
+                "metavar": "REF",
+                "nargs": null,
+                "required": false
+              }
+            ],
+            "description": "Claims and denials from the events log, and for each first-parent merge since --base: whether both sides changed a common path and whether git merge-tree reports a conflict (unavailable before git 2.38). GitHub's synthetic refs/pull/*/merge commits are excluded.",
+            "help": "Lease events and merge outcomes"
+          },
+          "release": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "lane",
+                "flags": [],
+                "help": "Lane name: [a-z0-9][a-z0-9._-]{0,62}",
+                "kind": "store",
+                "metavar": "LANE",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "expect",
+                "flags": [
+                  "--expect"
+                ],
+                "help": "The lease oid the lane must hold now (printed by claim, renew, transfer and list)",
+                "kind": "store",
+                "metavar": "OID",
+                "nargs": null,
+                "required": true
+              }
+            ],
+            "description": "Delete a lease by compare-and-swap. Anyone may release; the events log records the caller.",
+            "help": "Delete a lease"
+          },
+          "renew": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "lane",
+                "flags": [],
+                "help": "Lane name: [a-z0-9][a-z0-9._-]{0,62}",
+                "kind": "store",
+                "metavar": "LANE",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "expect",
+                "flags": [
+                  "--expect"
+                ],
+                "help": "The lease oid the lane must hold now (printed by claim, renew, transfer and list)",
+                "kind": "store",
+                "metavar": "OID",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "ttl",
+                "flags": [
+                  "--ttl"
+                ],
+                "help": "New lifetime in seconds, at most 86400 (default: keep it)",
+                "kind": "store",
+                "metavar": "SECONDS",
+                "nargs": null,
+                "required": false,
+                "type": "int"
+              }
+            ],
+            "description": "Renew by compare-and-swap; an expired lease is re-claimed, overlap check included.",
+            "help": "Extend a lease; prints the new lease oid"
+          },
+          "transfer": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "lane",
+                "flags": [],
+                "help": "Lane name: [a-z0-9][a-z0-9._-]{0,62}",
+                "kind": "store",
+                "metavar": "LANE",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "expect",
+                "flags": [
+                  "--expect"
+                ],
+                "help": "The lease oid the lane must hold now (printed by claim, renew, transfer and list)",
+                "kind": "store",
+                "metavar": "OID",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "owner",
+                "flags": [
+                  "--owner"
+                ],
+                "help": "The new owner label",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": true
+              },
+              {
+                "default": null,
+                "dest": "role",
+                "flags": [
+                  "--role"
+                ],
+                "help": "The new role label (default: keep it)",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              }
+            ],
+            "description": "Change a live lease's owner (and role) by compare-and-swap.",
+            "help": "Give a live lease to another owner"
+          }
+        },
+        "description": "Leases under refs/aegis/lanes/<lane> declare which paths a lane works on. A lease is cooperative conflict input, not a lock, not an identity and not proof that an agent is alive: claims of different lanes can race, and owner and role are display labels. The backstops are the post-lane gate (aegis check --lane) and aegis team metrics.",
+        "help": "Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics)"
       },
       "uninstall": {
         "aliases": [],
@@ -1973,7 +3027,7 @@
     {
       "aliases": [],
       "category": "Plumbing",
-      "help": "Install, inspect or remove the git pre-commit hook",
+      "help": "Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks",
       "name": "hook"
     },
     {
@@ -2002,6 +3056,12 @@
     },
     {
       "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Copy the packaged skills into your hosts' project skills folders (sync)",
+      "name": "skills"
+    },
+    {
+      "aliases": [],
       "category": "Daily Workflow & Verification",
       "help": "Show active rules and stats",
       "name": "status"
@@ -2011,6 +3071,12 @@
       "category": "Rule Evolution & Intelligence",
       "help": "Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them)",
       "name": "sync"
+    },
+    {
+      "aliases": [],
+      "category": "Daily Workflow & Verification",
+      "help": "Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics)",
+      "name": "team"
     },
     {
       "aliases": [],

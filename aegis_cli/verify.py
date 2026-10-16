@@ -7,6 +7,10 @@ staged content: what the commit records, whatever the working tree holds. Layer 
 adds the adversarial Spec/Code agent pair and the deterministic Arbiter, run
 by one model command (--llm-cmd or AEGIS_LLM_CMD).
 
+With --lane, `aegis check` is the post-lane gate instead (aegis_core.lane_gate): the
+lane's commits since its merge base with the base branch, checked for containment and
+Python test integrity.
+
 Exit codes: 0 pass, 1 findings or a failed run, 2 usage error.
 """
 from __future__ import annotations
@@ -223,12 +227,66 @@ def _print_checkpoint(issues: list[dict], strict: bool) -> None:
         print(f"{label} {issue['message']}")
 
 
+def _run_lane_gate(args: argparse.Namespace) -> int:
+    """`aegis check --lane`: the post-lane gate (aegis_core.lane_gate). 0 pass, 1 findings
+    or a gate that could not run, 2 usage."""
+    from aegis_cli import sanitize_display
+    from aegis_core import gitsafe, lane_gate, team
+
+    use_json = bool(getattr(args, "json", False) or str(getattr(args, "format", None) or "text").lower() == "json")
+    root = _resolve_git_cwd(args)
+
+    def fail(message: str, code: int) -> int:
+        if use_json:
+            print(json.dumps(lane_gate.error_report(root, args.lane, message), indent=2))
+        else:
+            print(f"Error: {sanitize_display(message, max_len=len(message))}", file=sys.stderr)
+        return code
+
+    others = [flag for flag, given in (
+        ("FILES", bool(getattr(args, "files", None))),
+        ("--full", bool(getattr(args, "full", False))),
+        ("--plan", getattr(args, "plan", None) is not None),
+        ("--plan-file", getattr(args, "plan_file", None) is not None),
+        ("--hook", bool(getattr(args, "hook", False))),
+        ("--strict", bool(getattr(args, "strict", False))),
+        ("--dry-run", bool(getattr(args, "dry_run", False))),
+        ("--llm-cmd", getattr(args, "llm_cmd", None) is not None),
+    ) if given]
+    if others:
+        return fail(f"--lane does not combine with {', '.join(others)}: it checks the lane's committed range", 2)
+    try:
+        result = lane_gate.check_lane(root, args.lane, base=getattr(args, "base", None),
+                                      paths=getattr(args, "paths", None),
+                                      base_policy=bool(getattr(args, "base_policy", False)))
+    except (lane_gate.LaneGateUsage, team.TeamUsageError, team.TeamFileError) as exc:
+        return fail(str(exc), 2)
+    except (lane_gate.LaneGateError, gitsafe.GitError) as exc:
+        return fail(str(exc), 1)
+    if use_json:
+        print(json.dumps(result.as_dict(), indent=2))
+    else:
+        for line in result.text_lines():  # warnings included, as "warning: ..." lines
+            print(sanitize_display(line, max_len=len(line)))
+    return 0 if result.passed else 1
+
+
 def run_verify(args: argparse.Namespace) -> int:
     """Run `aegis check` for *args*. Returns 0, 1 or 2 (see the module docstring)."""
     from aegis_core.inference_provider import MISSING_BACKEND, LLMCommandError, resolve_backend
     from aegis_core.verification.pipeline import VerificationPipeline
     from aegis_core.verification import runner
     from aegis_core.workspace.base import Workspace
+
+    if getattr(args, "lane", None) is not None:
+        return _run_lane_gate(args)
+    stray = [flag for flag, given in (
+        ("--base", getattr(args, "base", None) is not None),
+        ("--paths", getattr(args, "paths", None) is not None),
+        ("--base-policy", bool(getattr(args, "base_policy", False))),
+    ) if given]
+    if stray:
+        return _usage_error(f"{stray[0]} only applies with --lane")
 
     hook = bool(getattr(args, "hook", False))
     plan = getattr(args, "plan", None)

@@ -338,8 +338,14 @@ class ASTDriverRunner:
         file_path: Union[Path, str],
         workspace_root: Optional[Union[Path, str, Workspace]] = None,
         timeout: float = 3.0,
+        confine_root: Optional[Union[Path, str]] = None,
     ) -> NormalizedAST:
-        """Parse source file into NormalizedAST, failing closed on driver defects."""
+        """Parse source file into NormalizedAST, failing closed on driver defects.
+
+        Drivers are resolved from ``workspace_root``. The file must lie inside
+        ``confine_root`` when given (the pre-commit hook's index snapshot, which sits
+        outside the repository), else inside ``workspace_root``.
+        """
         ws_root = Path(as_workspace(workspace_root).root) if isinstance(workspace_root, Workspace) else Path(workspace_root or Path.cwd()).resolve()
         target_path = Path(file_path)
         if not target_path.is_absolute():
@@ -347,7 +353,14 @@ class ASTDriverRunner:
         else:
             target_path = target_path.resolve()
 
-        if workspace_root:
+        if confine_root is not None:
+            confine = Path(confine_root).resolve()
+            try:
+                target_path.relative_to(confine)
+            except ValueError as exc:
+                from aegis_core.errors import PathTraversalError
+                raise PathTraversalError(f"File {target_path} escapes {confine}") from exc
+        elif workspace_root:
             if isinstance(workspace_root, Workspace):
                 workspace_root.confine_path(target_path)
             else:

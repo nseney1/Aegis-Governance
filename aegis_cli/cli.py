@@ -293,6 +293,14 @@ def main(argv: Optional[List[str]] = None, prog: str = PROG) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:2] == ["hook", "run"] and not {"-h", "--help"} & set(argv[2:]):
+        # What the agent-host hook registrations run, from any cwd ($HOME, a v3 .soma/
+        # directory): the handler resolves its workspace from the payload and fails open,
+        # so it must reach neither _attach_workspace (exit 1) nor a usage error (exit 2,
+        # which Claude Code and Codex read as a block).
+        from aegis_cli.hooks.pretool import run_hook_argv
+
+        return run_hook_argv(argv[2:])
 
     pointer = removed_command_pointer(argv)
     if pointer is not None:
