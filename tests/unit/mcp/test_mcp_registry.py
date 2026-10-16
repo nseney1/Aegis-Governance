@@ -11,7 +11,8 @@ from aegis_mcp.registry import build_rule_create_prompt, list_rules
 def _rule(root: Path, folder: str, rule_id: str, rule_type: str, extra: str = "", body: str = "body\n") -> Path:
     path = root / ".aegis" / "rules" / folder / f"{rule_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"---\nid: {rule_id}\ntype: {rule_type}\nhypothesis: h\n{extra}---\n{body}", encoding="utf-8")
+    # write_bytes, not write_text: the server quotes raw bytes, and text mode would write CRLF on Windows
+    path.write_bytes(f"---\nid: {rule_id}\ntype: {rule_type}\nhypothesis: h\n{extra}---\n{body}".encode("utf-8"))
     return path
 
 
@@ -55,4 +56,3 @@ def test_the_creation_prompt_quotes_at_most_three_rules_cut_at_500_characters(tm
 
     assert sum(text[:500] in prompt for text in texts) == 3
     assert not any(text[:501] in prompt for text in texts)
-

@@ -47,15 +47,20 @@ def test_scan_rejects_bad_arguments(mcp_workspace: Path, args, error):
 
 
 def test_a_scan_in_a_session_records_one_scan_event_per_files(mcp_workspace: Path):
-    """aegis status --compliance reads these events; a repeated scan adds none."""
-    args = {"workspace": str(mcp_workspace), "files": ["src/b.py", "./src/a.py"], "_session": "s-1", "_host": "codex-cli"}
-    assert [r["name"] for r in handle_scan(dict(args))["relevant_rules"]] == ["sample-rule"]
-    handle_scan(dict(args, files=["src/a.py", "src/b.py"]))
+    """aegis status --compliance reads these events; rescanning the same files in any order adds none."""
+    names = [f"src/{letter}.py" for letter in "abcdefghijklmnopqr"]
+    order = names[::2] + names[1::2]
+    # 18 files in three orders: with this many, a dedup key built from an unsorted set
+    # depends on insertion order on more than 99% of hash seeds, so only a sorted key passes.
+    # The "./" copy in the first call names a file already listed, so the key must drop duplicates.
+    for files in (order + ["./" + order[0]], order[::-1], order[9:] + order[:9]):
+        args = {"workspace": str(mcp_workspace), "files": files, "_session": "s-1", "_host": "codex-cli"}
+        assert [r["name"] for r in handle_scan(args)["relevant_rules"]] == ["sample-rule"]
 
     lines = (mcp_workspace / ".aegis" / "state" / "activity.jsonl").read_text(encoding="utf-8").splitlines()
     events = [json.loads(line) for line in lines]
     assert [(e["event"], e["host"], e["session"], e["files"], e["basis"]) for e in events] == [
-        ("scan", "codex-cli", "s-1", ["src/a.py", "src/b.py"], "files"),
+        ("scan", "codex-cli", "s-1", names, "files"),
     ]
 
 
