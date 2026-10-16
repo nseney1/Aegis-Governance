@@ -51,6 +51,20 @@ def test_schema_roundtrip_dict_and_json():
     assert reconstructed == ast_obj
 
 
+def test_a_definitions_decorators_survive_the_json_round_trip():
+    """An external driver hands decorators over per definition; forbid_ast reads them there."""
+    ast_obj = NormalizedAST(
+        file_path="app.py",
+        definitions=(DefinitionNode(name="cached", decorators=("functools.lru_cache",)), DefinitionNode(name="plain")),
+    )
+
+    data = ast_obj.to_dict()
+
+    assert data["definitions"][0]["decorators"] == ["functools.lru_cache"]
+    assert "decorators" not in data["definitions"][1]
+    assert NormalizedAST.from_json(ast_obj.to_json()).definitions == ast_obj.definitions
+
+
 def test_schema_validation_rejects_malformed_payload():
     with pytest.raises(ValueError, match="file_path cannot be empty"):
         NormalizedAST(file_path="", language="python", definitions=(), call_sites=(), imports=())
