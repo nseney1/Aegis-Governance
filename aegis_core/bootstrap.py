@@ -7,6 +7,8 @@ time through ``aegis_scan``.
 """
 from __future__ import annotations
 
+__all__ = ["BOOTSTRAP_ID", "bootstrap_text", "instructions_text"]
+
 BOOTSTRAP_ID = "bootstrap"
 
 _BOOTSTRAP = """\
