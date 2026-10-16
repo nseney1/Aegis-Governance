@@ -8,6 +8,7 @@ workspaces; nothing in the JIT engine is patched.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 
@@ -230,3 +231,37 @@ def test_text_scan_prints_no_terminal_control_sequences_from_rule_files(slot_ws,
     assert rc == 0
     assert "\x1b" not in out and "\x07" not in out
     assert "Still shown." in out and "\n" in out.strip()  # lines are kept
+
+
+# Windows refuses control characters in file names; elsewhere a cloned repository can ship them.
+posix_names = pytest.mark.skipif(os.name == "nt", reason="Windows file names cannot hold control characters")
+_HOSTILE = "\x1b[31mX\x1b]0;pwned\x07\x1b[2J"
+
+
+@posix_names
+def test_a_failed_scan_prints_no_terminal_control_sequences_from_rule_file_names(ws, capsys):
+    (ws / ".aegis" / "rules" / "traps" / f"trap-bad{_HOSTILE}.md").write_text("---\nid: [x\n---\n",
+                                                                                encoding="utf-8")
+    assert main(["scan", "src/app.py"]) == 1
+    err = capsys.readouterr().err
+    assert "\x1b" not in err and "\x07" not in err
+    assert err.startswith("Error: 1 rule file(s) cannot be served") and err.endswith("\n")
+    assert "trap-bad" in err and "malformed YAML frontmatter" in err
+
+    # JSON keeps the name as it is on disk; json.dumps escapes it.
+    assert main(["scan", "src/app.py", "--json"]) == 1
+    out = capsys.readouterr().out
+    assert "\x1b" not in out
+    assert [e["path"] for e in json.loads(out)["rule_errors"]] == [f".aegis/rules/traps/trap-bad{_HOSTILE}.md"]
+
+
+@posix_names
+def test_a_workspace_error_prints_no_terminal_control_sequences_from_the_directory_name(tmp_path, monkeypatch,
+                                                                                        capsys):
+    bare = tmp_path / f"clone{_HOSTILE}"
+    bare.mkdir()
+    monkeypatch.chdir(bare)
+    assert main(["scan", "app.py"]) == 2
+    err = capsys.readouterr().err
+    assert "\x1b" not in err and "\x07" not in err
+    assert "not an Aegis workspace" in err and "clone" in err

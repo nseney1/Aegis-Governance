@@ -10,7 +10,8 @@ stdout carries only the JSON document.
 ${SLOT.*} placeholders in rule text are rendered as aegis_scan renders them, by the one
 renderer in aegis_core.skills.slots. The CLI has no host, so it uses the generic
 profile (with the user's ~/.aegis/config.json overrides); warnings go to stderr in
-text mode. Text from rule files reaches the terminal without control sequences.
+text mode. Text from rule files, and the errors naming them, reach the terminal without
+control sequences.
 """
 from __future__ import annotations
 
@@ -49,15 +50,15 @@ def run_scan(args: argparse.Namespace) -> int:
     raw_ws = getattr(args, "workspace", None)
     # Discovery walks up from a missing path, so its error would name a parent.
     if raw_ws and not os.path.exists(raw_ws):
-        print(f"Error: workspace path does not exist: {raw_ws}", file=sys.stderr)
+        _error(f"workspace path does not exist: {raw_ws}")
         return EXIT_USAGE
     try:
         root = Workspace.resolve(raw_ws).root.resolve()
     except WorkspaceError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(str(exc))
         return EXIT_USAGE
     if not is_aegis_workspace(root):
-        print(f"Error: not an Aegis workspace (no .aegis/ in {root}); run aegis init", file=sys.stderr)
+        _error(f"not an Aegis workspace (no .aegis/ in {root}); run aegis init")
         return EXIT_USAGE
 
     from aegis_core.scan import scan
@@ -72,12 +73,17 @@ def run_scan(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         print(json.dumps(result, indent=2, default=str))
     elif failed:
-        print(f"Error: {result.get('error')}", file=sys.stderr)
+        _error(str(result.get("error")))
     else:
         print(_terminal_text(result.get("guidance", "")))
         for warning in result.get("warnings") or []:
             print(f"Warning: {sanitize_display(str(warning), max_len=1024)}", file=sys.stderr)
     return EXIT_UNSERVED if failed else EXIT_SCANNED
+
+
+def _error(message: str) -> None:
+    # Errors name rule files and directories, which a cloned repository chooses.
+    print("Error: " + _terminal_text(message), file=sys.stderr)
 
 
 def _terminal_text(text: str) -> str:
