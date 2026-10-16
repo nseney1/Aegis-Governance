@@ -1,123 +1,75 @@
 # Contributing to Aegis Guardrails
 
-Thank you for your interest in contributing to **Aegis Guardrails**!
+Aegis is a Python package with no runtime dependencies. It supports Python 3.9 and later on Linux, macOS and Windows, so use the standard library only and no syntax newer than 3.9.
 
-Aegis is a zero-dependency, local-first adaptive governance framework, AST verification engine, and Model Context Protocol (MCP) server for AI coding agents.
+## Set up
 
----
-
-## 1. Development Setup
-
-### Prerequisites
-- **Python 3.10+** (pure standard library runtime; `pytest` and `hypothesis` for test execution)
-- **Git**
-
-### Clone & Editable Install
 ```bash
 git clone https://github.com/nseney1/Aegis-Guardrails.git
 cd Aegis-Guardrails
-pip install -e ".[dev]"
+make install   # editable install with the dev tools (pytest, ruff, build, ...)
+make test      # the full suite, with HOME pointed at a throwaway directory
+make lint      # ruff: syntax errors and undefined names
+make build     # wheel and sdist into dist/
 ```
 
-### Verify Environment Health
+From a checkout without installing, `./aegis` or `python3 -m aegis_cli` runs the CLI. Tests must never read or write your real `~/.aegis`, `~/.claude`, `~/.codex` or `~/.gemini`: use the `tmp_path` fixture and a fake `HOME`, and mock host CLIs at the subprocess boundary. `make test` (and CI on Linux and macOS) runs the suite in parallel with `pytest-xdist`, so a test may not depend on order or write outside its temporary directory.
+
+## Branches and reviews
+
+- Branch from `develop` as `feature/<name>` or `fix/<name>`, and open the pull request against `develop`.
+- The author of a change does not approve it. Every pull request gets an independent review: a maintainer, or an AI reviewer working in a separate context with a different lens than the author's.
+- `main` takes release merges only (see [Releases](#releases)).
+
+Larger work is split into lanes: one git worktree and branch per lane (`git worktree add -b lane/<name> ../lanes/<name> <base>`), each owning a disjoint set of files. A lane that needs a file outside its set stops and says so instead of editing it.
+
+## Tests first
+
+1. Write the tests for the new behavior, and run them: they must fail for the right reason (a missing name or a failed assertion, not a syntax error or a wrong call).
+2. Write the smallest change that makes them pass.
+3. Run the full suite (`make test`). Fix a regression in the code, not in the test, unless the test was wrong, and then say why in the commit.
+
+Test what a user can observe: the CLI's output and exit code, an MCP response, the files written. Cover the failure paths, assert exact errors, and mock only the OS and network boundaries. When you delete a feature, delete its dedicated tests in the same commit and keep the tests of behavior that survives.
+
+## Commits and the public surface
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`). A change to a command, an option or an MCP tool needs a `BREAKING CHANGE:` footer when it removes or changes something, plus three regenerated files in the same commit:
+
 ```bash
-aegis --version
-aegis system doctor
+PYTHONPATH=. python3 tests/contract/test_cli_contract.py --write
+PYTHONPATH=. python3 tests/contract/test_mcp_contract.py --write
+PYTHONPATH=. python3 tests/contract/gen_reference.py --write
 ```
 
----
+The last command writes [docs/reference.md](docs/reference.md); never edit that file by hand. Also update `.github/scripts/wheel_smoke.py`, which calls the CLI, the MCP tools and the SDK against the built wheel and runs only in CI.
 
-## 2. Running Tests & Verification
+Docs: relative links must resolve (`tests/unit/test_docs_links.py`), the README must not repeat a retracted claim (`tests/unit/core/test_readme_claims.py`), and `rules/`, `skills/`, `docs/` and the README may not contain a path under `/home/` (a CI step greps for it).
 
-Before opening a Pull Request, run the full test suite and Layer 1 deterministic verification:
+## Releases
+
+A release goes to `main` only after all of these hold for the exact commit being tagged ([ADR 0005](docs/adr/0005-v4-plan-of-record.md) AD-10):
+
+1. An independent review of the release pull request.
+2. CI green on that commit: `python3 .github/scripts/ci_green.py <sha>` exits 0 (it needs the `gh` CLI).
+3. `aegis check` passes Layer 1, and Layer 2 passes with a model from a different vendor than the one that wrote the change (`aegis check --full --plan-file <plan> --llm-cmd "<command>"`).
+
+For 4.0 to 4.2 the author lets the agent merge, tag and publish once these hold; otherwise a person merges to `main`. Publishing a GitHub Release runs `.github/workflows/publish.yml`, which ships the wheel CI already built and tested. The [CHANGELOG](CHANGELOG.md) entry describes what changed for users, and its date is set when the release is cut.
+
+## Writing a rule
+
+Rules are Markdown files with YAML frontmatter, one per file, in `.aegis/rules/<type>/<id>.md`. The six types are `invariant`, `trap`, `gate`, `boundary`, `persona` and `contract`. Create one with the CLI:
 
 ```bash
-# Run the full test suite
-python3 -m pytest -q
-
-# Run documentation & release contract checks
-python3 -m pytest tests/unit/core/test_documentation_accuracy.py -q
-
-# Run Layer 1 deterministic AST checks (syntax, import_guard, call_graph, pytest, mymut)
-aegis check
+aegis rule create --type trap --id trap-unbounded-retries --domain correctness \
+  --hypothesis "Retry loops without a cap hang the session when a dependency stays down" \
+  --prediction "Fires on edits to code that retries network calls" \
+  --falsification "0 findings in 20 sessions: prune" \
+  --target-paths "src/**/*.py" --body-file body.md
+aegis scan src/app.py   # shows the rule for a file it targets
 ```
 
-> **Note on Local Test Caches**: Property-based testing generates `.hypothesis/` and pytest generates `.pytest_cache/`. Never commit binary test caches to version control.
+A rule earns its place the same way a test does: it comes from a failure someone saw, it states what it predicts and when it should be pruned, and its `target_paths` name the files it is about (a rule with none applies to no file). Rules in this repository's `.aegis/rules/` govern Aegis itself. Rules in `rules/` ship to users, so they must be host-neutral, and `tests/unit/core/test_rule_lint.py` checks both sets.
 
----
+## License
 
-## 3. Branching & Pull Request Workflow (Gitflow + Independent Review Gate)
-
-Aegis enforces a strict Gitflow workflow with structural separation between code authors and reviewers (`rules/gitflow-review-gate.md`):
-
-| Target Branch | Purpose | Review & Merge Authority |
-|:--------------|:--------|:-------------------------|
-| `develop` | Feature and bugfix integration (`feature/*`, `fix/*`) | Independent AI audit subagent or maintainer review required before merge |
-| `main` | Production releases (`release/*`, `hotfix/*`) | Human maintainer review and merge only |
-
-### Submitting Changes
-1. Fork the repository and branch from `develop`:
-   ```bash
-   git checkout -b feature/your-change develop
-   ```
-2. Implement your change following existing architectural boundaries (`aegis_core`, `aegis_mcp`, `aegis_cli`, `aegis_sdk`).
-3. Ensure zero runtime third-party dependencies are added to `pyproject.toml` (`dependencies = []`). Any optional integration must be guarded with `try/except ImportError`.
-4. Add behavioral unit/integration tests covering both happy and sad paths.
-5. Verify all tests pass (`python3 -m pytest -q`) and run `aegis check`.
-6. Open a Pull Request targeting `develop`.
-
-### Release Gate 4.5 (`aegis check --release`)
-All release branches and tag candidates must pass **Release Gate 4.5**:
-```bash
-aegis check --release
-```
-Gate 4.5 cryptographically verifies that:
-- The working tree is clean.
-- The latest adversarial arbitration cycle concluded with a `SHIP` verdict.
-- The arbitration receipt's `tree_hash` matches `git rev-parse HEAD^{tree}`.
-- Every modified file in `origin/main...HEAD` is covered by the verified receipt.
-
----
-
-## 4. Authoring Rules & Skills
-
-### Adaptive Workspace Rules (`.aegis/rules/`)
-Workspace rules live in `.aegis/rules/{invariants,traps,gates,methods}/` and use `AegisYAML` frontmatter:
-- **`invariant`** (`invariants/`): Hard architectural and security constraints (`enforcement: gate`).
-- **`trap`** (`traps/`): Historical anti-patterns and regressions (`enforcement: advisory` or `gate`).
-- **`gate`** (`gates/`): Pre-commit, CI, and verification gates (`enforcement: gate`).
-- **`method`** (`methods/`): Workflow guidance, personas, and practices (`enforcement: advisory`).
-
-Create a new rule via CLI or MCP:
-```bash
-aegis rule create --type trap --id my-new-trap --title "Prevent Unbounded Retries"
-aegis rule list
-```
-
-### Core Rules (`rules/`) & Agent Skills (`skills/`)
-- **Core Rules (`rules/`)**: Foundational rules shipped with Aegis must trace back to an observed failure mode, include a falsifiable hypothesis, and pass `aegis check`.
-- **Agent Skills (`skills/<skill-name>/SKILL.md`)**: Horizontal capabilities defined with `AegisYAML` frontmatter (`id`, `tier`, `consumes`, `produces`, `handoff_targets`, `slot_constraints`). Inspect skills and slot bindings with:
-  ```bash
-  aegis skill list
-  aegis skill inspect <skill-id>
-  aegis skill slots
-  ```
-
----
-
-## 5. Privacy & Security Invariants
-
-All contributions must uphold Aegis's local-first privacy and security guarantees:
-- **Zero Telemetry Exfiltration**: Never add outbound network calls to `aegis_mcp` or default CLI workflows.
-- **Workspace Confinement**: All file operations must resolve through `confine_path_internal` / `Workspace.confine`.
-- **Privacy Invariant**: Evidence ledgers (`.aegis/evidence/`) record only sanitized aggregate counts, booleans, and rule IDs—never raw secrets, credentials, or external user PII.
-
-See [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), and [NOTICE](NOTICE) for complete details.
-
----
-
-## 6. Contributor License Agreement & Code of Conduct
-
-By submitting a pull request, you agree that your contributions are licensed under the **Apache License 2.0** ([LICENSE](LICENSE)) that covers this project, and you certify that you have the right to grant this license.
-
-Be respectful, constructive, and evidence-driven — the same principles that govern our AI agents govern our community.
+By submitting a pull request you agree that your contribution is licensed under the [Apache License 2.0](LICENSE). Data handling is described in [PRIVACY.md](PRIVACY.md), and vulnerabilities go through [SECURITY.md](SECURITY.md), not public issues.

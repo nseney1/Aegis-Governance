@@ -9,7 +9,7 @@ falsification: Agents reliably stop at prose human review gates without programm
 target_paths:
   - aegis_core/command_safety.py
   - "aegis_cli/hooks/**"
-  - docs/project/RELEASE_WORKFLOW.md
+  - CONTRIBUTING.md
   - .aegis/rules/invariants/invariant-gitflow-review-gate.md
 expiry_sessions: 100
 impact_weight: 1.0

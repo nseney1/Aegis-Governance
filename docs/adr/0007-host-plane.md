@@ -1,6 +1,8 @@
-# Spec: mix-and-match hosts (any vendor × any surface)
+# ADR 0007: The host plane: mix-and-match hosts (any vendor × any surface)
 
-- **Status**: v2, **accepted** with ADR 0005 (2026-10-15). It incorporates the author's H1–H8 answers, the adversarial review (feasibility, red team, scope), and the refactor sweep's layout consolidation. This spec is the build sheet for ADR 0005 §6 step 3 (v4.0-c).
+- **Status**: v2, **accepted** with [ADR 0005](0005-v4-plan-of-record.md) (2026-10-15). It incorporates the author's H1–H8 answers, the adversarial review (feasibility, red team, scope), and the refactor sweep's layout consolidation. It is the design for ADR 0005 §6 step 3 (v4.0-c).
+- **Implementation**: Phase 1 (§4) is implemented on the v4.0 branch (wave C): the host table in `aegis_core/hosts.py`, `aegis init --host` and `aegis uninstall`, the workspace registry, the `AGENTS.md` bootstrap and MCP `instructions`, the AD-4 resolver, and the `aegis doctor` host matrix with backed-up `--fix`. Phases 2 and 3 are planned for v4.1 and v4.2 ([ADR 0005](0005-v4-plan-of-record.md) Appendix C). [CHANGELOG](../../CHANGELOG.md) records what has shipped.
+- **History**: this was `docs/specs/host-matrix.md` until the v4.0 docs wave. Code, tests and commits cite it as "host-matrix §N"; the section numbers below are unchanged.
 - **Goal**: Aegis works for any combination of agent hosts on the same repos:
   - CLI only (Codex CLI + Claude Code CLI + `agy`);
   - IDE or desktop only;
@@ -53,7 +55,7 @@ Codex also sends a per-call `_meta.x-codex-turn-metadata.workspaces` (verified l
 
 ### 3.3 Host table (data, not classes)
 
-`aegis_cli/hosts.py` holds one `HostSpec` row per host:
+`aegis_core/hosts.py` holds one `HostSpec` row per host:
 
 - `id` and `client_names` (the exact clientInfo match);
 - `detect` (binary names, user dirs);

@@ -11,7 +11,7 @@ expiry_days: 60
 created: "2026-10-15T16:11:59Z"
 impact_weight: 1.0
 tags: ["debrief", "citadel", "refactor", "compat"]
-target_paths: ["aegis_core/__init__.py", "aegis_mcp/handlers/governance.py", "aegis_mcp/handlers/telemetry.py", "aegis_core/rule_inventory.py", "aegis_core/workspace/layout.py", "aegis_core/yaml_engine/parser.py", "docs/project/CHANGELOG.md"]
+target_paths: ["aegis_core/__init__.py", "aegis_mcp/handlers/governance.py", "aegis_mcp/handlers/telemetry.py", "aegis_core/rule_inventory.py", "aegis_core/workspace/layout.py", "aegis_core/yaml_engine/parser.py", "CHANGELOG.md"]
 lineage:
   parent_id: null
   created_by: "manual"

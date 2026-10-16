@@ -145,13 +145,12 @@ def _repo_files() -> tuple[str, ...]:
     return tuple(found)
 
 
-# D18 deleted the VERSION file (the version lives in aegis_core/_version.py). These rule
-# files are outside lane b2c-contract, so their stale `VERSION` patterns are a strict
-# xfail logged for the rules owner: retarget them at aegis_core/_version.py, and the
-# xfail turns into a failure that removes the entry. The set must shrink, never grow.
+# A rule file outside the lane that moved its target is a strict xfail logged for the
+# rules owner: retargeting the rule turns the xfail into a failure that removes the entry.
+# The set must shrink, never grow.
 KNOWN_DEAD_TARGETS: set = set()
 _DEAD = pytest.mark.xfail(
-    strict=True, reason="D18 removed VERSION; the rule file is outside lane b2c-contract (retarget it)"
+    strict=True, reason="the docs wave moved this target; the rule file is outside lane f2 (retarget it)"
 )
 
 

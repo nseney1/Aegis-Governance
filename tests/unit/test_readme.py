@@ -30,9 +30,7 @@ REPO_URL = "https://github.com/nseney1/Aegis-Guardrails"
 
 # Strict xfails for links whose target another lane of the same wave creates; an XPASS
 # fails the suite, so each entry must go when that lane lands.
-DEFERRED = {
-    "CHANGELOG.md": "lane f2-why-and-rest moves docs/project/CHANGELOG.md to the root CHANGELOG.md",
-}
+DEFERRED: dict = {}
 
 _REPO_LINK = re.compile(re.escape(REPO_URL) + r"/(blob|tree)/main/([^\s)\"'<>#?]+)")
 
