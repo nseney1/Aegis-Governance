@@ -124,3 +124,13 @@ def test_render_for_host_survives_an_unparseable_user_config(isolated_home: Path
     text, warnings = render_for_host("${SLOT.TOOL_EDIT}", "antigravity")
     assert text == "replace_file_content"
     assert warnings == ["~/.aegis/config.json could not be read or parsed; built-in slot values were used"]
+
+
+def test_render_for_host_names_both_config_files_when_a_workspace_is_given(tmp_path):
+    ws = tmp_path / "ws"
+    (ws / ".aegis").mkdir(parents=True)
+    (ws / ".aegis" / "config.json").write_text("{broken", encoding="utf-8")
+    text, warnings = render_for_host("${SLOT.TOOL_READ}", "codex-cli", workspace=ws)
+    assert text == "exec_command"
+    assert warnings == ["~/.aegis/config.json or .aegis/config.json could not be read or parsed; "
+                        "built-in slot values were used"]

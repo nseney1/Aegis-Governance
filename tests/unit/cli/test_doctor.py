@@ -432,3 +432,12 @@ def test_drivers_json_is_one_json_document(tmp_path, capsys):
     assert payload["schema"] == "aegis.doctor/v1"
     assert [c["id"] for c in payload["checks"]] == ["ast_drivers"]
     assert rc == 0 and payload["ok"] is True
+
+
+def test_doctor_fails_closed_on_a_rule_that_cannot_be_served(tmp_path, monkeypatch, capsys):
+    _governed(tmp_path)
+    (tmp_path / ".aegis" / "rules" / "invariants" / "broken.md").write_text("---\nid: [unclosed\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+        assert run_doctor(argparse.Namespace()) == 1
+    assert "cannot be served" in capsys.readouterr().out

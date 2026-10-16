@@ -317,7 +317,7 @@ class SlotRegistry:
         return exts
 
 
-_USER_CONFIG_UNREADABLE = "~/.aegis/config.json could not be read or parsed; built-in slot values were used"
+_CONFIG_UNREADABLE = "{files} could not be read or parsed; built-in slot values were used"
 
 
 def render_for_host(text: str, host: Optional[str], workspace: str | Path | None = None) -> Tuple[str, List[str]]:
@@ -334,5 +334,6 @@ def render_for_host(text: str, host: Optional[str], workspace: str | Path | None
     except (SlotResolutionError, OSError):
         merged = dict(DEFAULT_SLOTS)
         merged.update(PLATFORM_SLOT_PROFILES[profile_id(host)])
-        registry, warnings = SlotRegistry(merged), [_USER_CONFIG_UNREADABLE]
+        files = "~/.aegis/config.json" + (" or .aegis/config.json" if workspace is not None else "")
+        registry, warnings = SlotRegistry(merged), [_CONFIG_UNREADABLE.format(files=files)]
     return registry.sanitized().resolve(text, strict=False), warnings
