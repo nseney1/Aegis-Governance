@@ -2,7 +2,7 @@
 
 All notable changes to Aegis Guardrails are documented here. The project uses [Semantic Versioning](https://semver.org/). Releases before 1.0.0 are summarized at the end.
 
-## [4.0.0] - Unreleased
+## [4.0.0] - 2026-10-16
 
 v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has fewer commands and MCP tools, one config file, an append-only ledger as the only source of rule fitness, and a host plane that registers Aegis with Codex CLI, Claude Code and Antigravity. The reasons, with the evidence and the mistakes behind them, are in [docs/why-aegis.md](docs/why-aegis.md); the decisions are in [ADR 0005](docs/adr/0005-v4-plan-of-record.md). Every removed command and flag exits with status 2. Removed commands, and the removed `init` and `uninstall` flags, print one line naming the replacement (or saying there is none); the other removed flags get the argument parser's usage error, and the Breaking changes list below names their replacements.
 
