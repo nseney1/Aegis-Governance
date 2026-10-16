@@ -459,7 +459,8 @@ def test_fix_removes_only_the_v3_entries_and_backs_each_file_up(env):
     agy_original = agy.read_bytes()
 
     payload = env.fix()
-    assert payload["_rc"] == 0, (payload.get("fixes"), payload.get("findings"))
+    assert payload["_rc"] == 0, ([(f.get("code"), f.get("severity")) for f in payload.get("findings", [])],
+                                 [c["id"] for c in payload.get("checks", []) if c.get("status") not in ("pass", "skip")])
     assert {(f["action"], f["status"]) for f in payload["fixes"]} == {("remove_list_items", "applied")}
     after = json.loads(claude.read_text(encoding="utf-8"))
     assert after["model"] == "x"

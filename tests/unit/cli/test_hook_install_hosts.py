@@ -868,6 +868,8 @@ def cli_env(env, monkeypatch):
     monkeypatch.setenv("PATH", str(Path(env.stub).parent))
     monkeypatch.setattr(registrar, "_scripts_dirs", lambda: [])
     monkeypatch.chdir(env.repo)
+    if os.name == "nt":  # the stub is a text file there, which Windows cannot run; the probe has its own POSIX tests
+        monkeypatch.setattr(registrar, "probe_hook_run", lambda *args, **kwargs: None)
     return env
 
 
