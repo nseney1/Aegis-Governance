@@ -63,12 +63,18 @@ def _json(ws: Path, capsys, *flags: str):
     return rc, json.loads(capsys.readouterr().out)
 
 
+def _lf_lines(data: bytes) -> list:
+    """Lines split on LF only, each keeping its ending (CR LF included). Bytes, never
+    read_text: a Windows checkout (core.autocrlf) has CRLF skills, which sync keeps."""
+    return re.findall(r"[^\n]*\n|[^\n]+\Z", data.decode("utf-8"))
+
+
 def _source_parts(skill_id: str):
-    """(raw frontmatter lines without the delimiters, body after the closing ---)."""
-    text = (packaged_dir("skills") / skill_id / "SKILL.md").read_text(encoding="utf-8")
-    lines = text.splitlines(True)
+    """(line ending, raw frontmatter lines without the delimiters, body after the closing ---)."""
+    lines = _lf_lines((packaged_dir("skills") / skill_id / "SKILL.md").read_bytes())
     close = next(i for i, line in enumerate(lines[1:], 1) if line.rstrip("\r\n") == "---")
-    return lines[1:close], "".join(lines[close + 1:])
+    eol = "\r\n" if lines[0].endswith("\r\n") else "\n"
+    return eol, lines[1:close], "".join(lines[close + 1:])
 
 
 def _render(body: str, profile: str) -> str:
@@ -78,12 +84,12 @@ def _render(body: str, profile: str) -> str:
 
 def _expected(skill_id: str, profile: str) -> bytes:
     """The projection built independently of aegis_cli.skills_sync."""
-    frontmatter, body = _source_parts(skill_id)
+    eol, frontmatter, body = _source_parts(skill_id)
     description = [line for line in frontmatter if line.startswith("description:")]
     assert len(description) == 1
     rendered = _render(body, profile)
-    return ("---\n" + f"name: {skill_id}\n" + description[0] + "---\n"
-            + f"<!-- aegis:skill id={skill_id} v=1 sha={_sha(rendered)} -->\n" + rendered).encode("utf-8")
+    return (f"---{eol}name: {skill_id}{eol}" + description[0] + f"---{eol}"
+            + f"<!-- aegis:skill id={skill_id} v=1 sha={_sha(rendered)} -->{eol}" + rendered).encode("utf-8")
 
 
 def _files(root: Path) -> dict:
@@ -143,12 +149,12 @@ def test_frontmatter_is_exactly_name_and_the_verbatim_description(ws):
     assert _sync(ws, "--host", "claude-code,codex-cli") == 0
 
     for skill_id in SKILLS:
-        source_frontmatter, _body = _source_parts(skill_id)
+        eol, source_frontmatter, _body = _source_parts(skill_id)
         source_description = next(line for line in source_frontmatter if line.startswith("description:"))
         for directory in (CLAUDE_DIR, SHARED_DIR):
-            lines = (ws / directory / skill_id / "SKILL.md").read_text(encoding="utf-8").splitlines(True)
-            assert lines[:4] == ["---\n", f"name: {skill_id}\n", source_description, "---\n"]
-            marker = MARKER.fullmatch(lines[4].rstrip("\n"))
+            lines = _lf_lines((ws / directory / skill_id / "SKILL.md").read_bytes())
+            assert lines[:4] == [f"---{eol}", f"name: {skill_id}{eol}", source_description, f"---{eol}"]
+            marker = MARKER.fullmatch(lines[4].rstrip("\r\n"))
             assert marker and marker.group(1) == skill_id
             assert marker.group(2) == _sha("".join(lines[5:]))
 
