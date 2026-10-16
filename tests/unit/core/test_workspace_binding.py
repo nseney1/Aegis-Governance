@@ -17,6 +17,7 @@ from aegis_core.workspace.binding import (
     Attested,
     WorkspaceHold,
     bounded_walk_up,
+    git_boundary,
     read_registry,
     resolve_binding,
     resolve_cli_root,
@@ -73,6 +74,19 @@ def test_walk_up_never_crosses_a_real_git_toplevel(home, tmp_path):
     subprocess.run(["git", "init", "-q", str(inner)], check=True, capture_output=True)
     (inner / "src").mkdir()
     assert bounded_walk_up(inner / "src") is None
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_a_work_tree_moved_off_the_path_by_core_worktree_never_bounds_it(home, tmp_path):
+    # A repository's config is attacker-controlled: git's toplevel can name a directory
+    # that is not on the start's path, where a walk up could never stop.
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+    elsewhere = tmp_path / "a" / "b" / "c" / "d"
+    elsewhere.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(repo), "config", "core.worktree", str(elsewhere)], check=True, capture_output=True)
+    (repo / "src").mkdir()
+    assert git_boundary((repo / "src").resolve()) == repo.resolve()
 
 
 def test_walk_up_never_selects_home_even_with_v33_user_rules(home):

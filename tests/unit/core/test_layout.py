@@ -3,7 +3,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aegis_core.workspace.layout import GITIGNORE_ENTRIES, UserLayout, WorkspaceLayout
+import pytest
+
+from aegis_core.workspace.layout import (
+    GITIGNORE_ENTRIES,
+    UserLayout,
+    WorkspaceLayout,
+    has_rules_dir,
+    is_aegis_workspace,
+)
 
 
 def test_repository_plane_paths(tmp_path: Path):
@@ -60,3 +68,22 @@ def test_this_repository_never_tracks_machine_local_state():
         assert git("check-ignore", "-q", "--no-index", rel).returncode == 0, f"{rel} is not git-ignored"
     tracked = git("ls-files", "--", ".aegis/state", ".aegis/evidence")
     assert tracked.returncode == 0 and tracked.stdout.strip() == ""
+
+
+@pytest.mark.parametrize("made, workspace, rules", [
+    ((), False, False),
+    ((".aegis",), True, False),
+    ((".aegis", ".aegis/rules"), True, True),
+])
+def test_workspace_markers_are_directories_under_the_given_root(tmp_path: Path, made, workspace, rules):
+    for rel in made:
+        (tmp_path / rel).mkdir()
+    assert (is_aegis_workspace(tmp_path), has_rules_dir(str(tmp_path))) == (workspace, rules)
+
+
+def test_a_marker_that_is_a_file_does_not_count(tmp_path: Path):
+    (tmp_path / ".aegis").write_text("", encoding="utf-8")
+    other = tmp_path / "other"
+    (other / ".aegis").mkdir(parents=True)
+    (other / ".aegis" / "rules").write_text("", encoding="utf-8")
+    assert (is_aegis_workspace(tmp_path), has_rules_dir(other)) == (False, False)
