@@ -70,6 +70,12 @@ def test_sync_json_is_machine_readable(ws, capsys):
     assert payload["applied"] == [] and payload["errors"] == [] and payload["ignored"] == []
 
 
+def test_sync_json_is_one_two_space_indented_document(ws, capsys):
+    assert main(["sync", "--json"]) == 0
+    out = capsys.readouterr().out
+    assert out == json.dumps(json.loads(out), indent=2) + "\n"
+
+
 def test_apply_moves_the_suggested_rules(ws, capsys):
     rc = main(["sync", "--apply", "--json"])
 
