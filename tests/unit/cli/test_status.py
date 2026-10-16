@@ -364,3 +364,69 @@ class TestStatus:
         assert "soma" not in out_plain.lower()
 
 
+
+
+# ── `aegis status --compliance` through main() (more in test_status_compliance.py) ──
+
+
+def _compliance_workspace(tmp_path, monkeypatch, *rows):
+    root = tmp_path / "ws"
+    (root / ".aegis" / "rules" / "traps").mkdir(parents=True)
+    if rows:
+        (root / ".aegis" / "state").mkdir()
+        (root / ".aegis" / "state" / "activity.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    monkeypatch.chdir(root)
+    return root
+
+
+def _activity(event, session, host, files, ts):
+    return {"v": 1, "ts": ts, "event": event, "host": host, "session": session, "files": files,
+            "client": {"name": host, "version": "1"}}
+
+
+class TestStatusComplianceCLI:
+    def test_json_is_the_compliance_report_as_one_two_space_indented_document(self, tmp_path, monkeypatch, capsys):
+        from aegis_cli.cli import main
+
+        _compliance_workspace(tmp_path, monkeypatch)
+        assert main(["status", "--compliance", "--json"]) == 0
+        out = capsys.readouterr().out
+        assert out == json.dumps(json.loads(out), indent=2) + "\n"
+        assert json.loads(out)["schema"] == "aegis.compliance/v1"
+
+    def test_outside_a_workspace_fails_cleanly(self, tmp_path, monkeypatch, capsys):
+        from aegis_cli.cli import main
+
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        monkeypatch.chdir(plain)
+        assert main(["status", "--compliance", "--json"]) == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert f"not an Aegis workspace (no .aegis/ in {plain.resolve()})" in captured.err
+
+    def test_the_text_view_says_when_commits_were_not_read(self, tmp_path, monkeypatch, capsys):
+        from aegis_cli.cli import main
+        from aegis_core import gitsafe
+
+        monkeypatch.setattr(gitsafe, "toplevel", lambda cwd: None)
+        _compliance_workspace(tmp_path, monkeypatch,
+                              _activity("scan", "s1", "claude-code", ["a.py"], "2026-10-15T10:00:00Z"))
+        assert main(["status", "--compliance"]) == 0
+        assert "Commits were not read (no git repository or git unavailable)" in capsys.readouterr().out
+
+    def test_a_long_host_name_is_cut_to_keep_the_columns_aligned(self, tmp_path, monkeypatch, capsys):
+        from aegis_cli.cli import main
+
+        host = "h" * 30
+        _compliance_workspace(tmp_path, monkeypatch,
+                              _activity("scan", "s1", host, ["a.py"], "2026-10-15T10:00:00Z"),
+                              _activity("edit", "s1", host, ["a.py"], "2026-10-15T10:01:00Z"))
+        assert main(["status", "--compliance"]) == 0
+        lines = capsys.readouterr().out.splitlines()
+        header = next(line for line in lines if line.lstrip().startswith("Host"))
+        row = next(line for line in lines if "hhh" in line)
+        assert row.startswith("  " + "h" * 13 + "...")
+        assert len(row) == len(header)
+        assert row.endswith("100%")

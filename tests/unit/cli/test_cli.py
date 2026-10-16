@@ -42,6 +42,24 @@ class TestCLIHelp:
             main([cmd, "--help"])
         assert exc_info.value.code == 0
 
+    def test_top_level_help_lists_the_commands_by_category(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main(["--help"])
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert "usage: aegis <command> [options]" in out
+        assert "Setup & Environment:" in out and "Daily Workflow & Verification:" in out
+        for name in SUBCOMMANDS:
+            assert f"\n  {name} " in out
+
+    def test_a_subcommand_help_is_that_command_s_own_usage(self, capsys):
+        with pytest.raises(SystemExit):
+            cli.main(["status", "--help"])
+        out = capsys.readouterr().out
+        assert out.startswith("usage: aegis status ")
+        assert "--compliance" in out
+        assert "Setup & Environment:" not in out
+
 
 class TestCLIDispatch:
     """Verify subcommands dispatch to their handlers."""
@@ -67,6 +85,16 @@ class TestCLIDispatch:
         assert result in (0, 1)
         captured = capsys.readouterr()
         assert 'Traceback' not in captured.err
+
+    @pytest.mark.parametrize("argv", [["agent", "scan"], ["agent", "scan", "a.py"], ["agent", "scan", "a.py", "b.py"]])
+    def test_a_removed_command_action_gets_its_own_pointer_whatever_follows(self, argv, capsys):
+        assert cli.main(argv) == 2
+        assert capsys.readouterr().err == "aegis agent scan was removed in v4: use aegis scan\n"
+
+    def test_without_argv_main_reads_the_process_arguments(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", ["aegis", "agent", "scan"])
+        assert cli.main() == 2
+        assert capsys.readouterr().err == "aegis agent scan was removed in v4: use aegis scan\n"
 
     def test_unknown_command_returns_nonzero(self):
         from aegis_cli.cli import main

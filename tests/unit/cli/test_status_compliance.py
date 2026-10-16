@@ -176,17 +176,6 @@ def test_the_flag_help_documents_the_heuristic_and_its_limits(capsys):
         assert phrase in out, phrase
 
 
-def test_compliance_outside_a_workspace_fails_cleanly(tmp_path, monkeypatch, capsys):
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    monkeypatch.chdir(plain)
-    assert main(["status", "--compliance", "--json"]) == 1
-    assert f"not an Aegis workspace (no .aegis/ in {plain.resolve()})" in capsys.readouterr().err
-
-
 # ── commits in a session window ──────────────────────────────────────────────
 
 def _git(repo: Path, *args, date=None):

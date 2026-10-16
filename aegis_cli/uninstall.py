@@ -186,14 +186,12 @@ def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, d
 
 def run_uninstall(args: argparse.Namespace) -> int:
     """Uninstall flow. Returns the exit code (0 ok, 1 refused)."""
-    json_mode = bool(getattr(args, "json", False))
+    # The flags are this parser's own options (json: AegisParser.parse_args), always set.
+    json_mode, dry_run, force, explicit = args.json, args.dry_run, args.force, args.host
     report = Report(json_mode, "aegis uninstall")
     ws = getattr(args, "ws", None)
     root = Path(ws.root if ws is not None else (getattr(args, "_project_root", None) or Path.cwd())).resolve()
     home = Path.home()
-    dry_run = bool(getattr(args, "dry_run", False))
-    force = bool(getattr(args, "force", False))
-    explicit = getattr(args, "host", None)
     scope = {"workspace": str(root), "hosts": []}
 
     # Every step is checked first; a refusal stops uninstall before anything changes.
@@ -201,7 +199,7 @@ def run_uninstall(args: argparse.Namespace) -> int:
     try:
         plan = _steps(root, home, explicit, force, True, report)
     except InstallError as exc:
-        report.muted = False
+        # muted only silences warn(); a refusal reports through error() and finish().
         report.error(str(exc))
         report.error("Nothing was changed.")
         report.finish("refused", scope, dry_run, [])

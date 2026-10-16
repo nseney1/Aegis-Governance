@@ -70,7 +70,7 @@ def run_scan(args: argparse.Namespace) -> int:
     failed = result.get("status") == "FAIL"
     if not failed:
         result = render_scan_result(result, GENERIC, root)
-    if getattr(args, "json", False):
+    if args.json:  # AegisParser.parse_args always sets it
         print(json.dumps(result, indent=2, default=str))
     elif failed:
         _error(str(result.get("error")))

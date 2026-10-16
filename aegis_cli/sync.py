@@ -101,7 +101,7 @@ def run_sync(args: argparse.Namespace) -> int:
         return EXIT_USAGE
 
     try:
-        result = sync(root, apply=getattr(args, "apply", False))
+        result = sync(root, apply=args.apply)
     except (AegisError, RuntimeError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_PROBLEMS
@@ -109,7 +109,8 @@ def run_sync(args: argparse.Namespace) -> int:
     rel_path = result.path.relative_to(root).as_posix()
     failed = [a for a in result.applied if a["status"] not in _APPLIED_OK]
     rc = EXIT_PROBLEMS if (result.refused or result.derived["errors"] or failed) else EXIT_OK
-    if getattr(args, "json", False):
+    # Both are always set: --apply is this parser's flag, AegisParser.parse_args sets json.
+    if args.json:
         print(json.dumps({
             "status": _status(result),
             "path": rel_path,
