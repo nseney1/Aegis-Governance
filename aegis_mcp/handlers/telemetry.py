@@ -27,7 +27,7 @@ def _fail(message: str) -> dict:
     return {"status": _STATUS_FAIL, "error": message}
 
 
-def _credited_rules(workspace, check, host: str, session: str) -> List[str]:
+def _credited_rules(workspace, check, host: Optional[str], session: Optional[str]) -> List[str]:
     """Rules exposed in this server session's scans and matching ``diff(base, check tree)``."""
     from aegis_core.scan import RULE_CACHE
 
@@ -86,7 +86,7 @@ def handle_report_outcome(args: dict) -> dict:
     # Attribution comes from the server (clientInfo and its session), never the caller. The
     # credited rules are the server's: those this session's scans exposed that also match the
     # change the check covered. 'rules_used' above only had to be well formed.
-    host, session = str(args.get("_host") or ""), str(args.get("_session") or "")
+    host, session = args.get("_host"), args.get("_session")
     binding = treeid.tree_of(workspace.root)
     try:
         result = credit.submit_report(

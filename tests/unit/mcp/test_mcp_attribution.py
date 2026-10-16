@@ -81,11 +81,11 @@ def test_the_idempotency_key_is_scoped_by_host_and_session(ws):
 
     assert not is_error, payload
     rows = _ledger(ws)
-    assert [(r["host"], r["session"], r["outcome"]) for r in rows] == [
+    assert [(r["host"], r["session"], r["result"]) for r in rows] == [
         ("claude-code", first, "tp"), ("codex-cli", second, "fp"),
     ]
-    assert rows[0]["key"] == f"claude-code/{first}/report-1"
-    assert rows[1]["key"] == f"codex-cli/{second}/report-1"
+    assert rows[0]["report_key"] == f"claude-code/{first}/report-1"
+    assert rows[1]["report_key"] == f"codex-cli/{second}/report-1"
 
 
 def test_tool_arguments_cannot_set_the_client_identity(ws):

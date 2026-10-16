@@ -112,13 +112,13 @@ def test_a_long_bad_value_is_quoted_short(ws):
     assert len(result["error"]) < 200
 
 
-def test_values_within_the_schema_are_recorded_as_sent(ws):
+def test_values_within_the_schema_are_accepted_and_never_stored(ws):
     result = _report(ws, rework_count=2, tests_passed=False, notes="fine")
-    assert result["status"] == "recorded", result
+    assert result["status"] == "claimed", result
     row, = _rows(ws)
-    assert (row["meta"]["rework_count"], row["meta"]["tests_passed"], row["meta"]["notes"]) == (
-        2, False, "fine",
-    )
+    # Accepted, but agent-asserted free text and counters never reach the ledger (v4.3).
+    assert not {"meta", "notes", "tests_passed", "rework_count"} & set(row)
+    assert "fine" not in json.dumps(row)
 
 
 @pytest.mark.parametrize("field", ["notes", "idempotency_key"])
@@ -129,7 +129,7 @@ def test_report_strings_are_capped_at_their_published_max_length(ws, field):
         "error": f"Invalid {field!r}: {cap + 1} characters. Expected at most {cap}.",
     }
     assert _rows(ws) == []
-    assert _report(ws, **{field: "n" * cap})["status"] == "recorded"
+    assert _report(ws, **{field: "n" * cap})["status"] == "claimed"
 
 
 @pytest.mark.parametrize("tool, args", [

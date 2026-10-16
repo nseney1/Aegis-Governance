@@ -167,8 +167,11 @@ def test_mcp_report_outcome_appends_to_the_ledger_and_never_rewrites_rules(repo,
         },
     )
 
-    assert result.get("status") == "recorded", result
-    assert {r["rule"] for r in _ledger_rows(repo) if r["source"] == "mcp"} == set(RULE_IDS)
+    assert result.get("status") == "claimed", result
+    from aegis_core import credit
+
+    assert [(r["event"], r["source"]) for r in credit.read_rows(repo)] == [("claimed", "mcp")]
+    assert _ledger_rows(repo) == []  # no per-rule fitness row
     _assert_rules_untouched(repo, before)
 
 
