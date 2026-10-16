@@ -313,15 +313,55 @@ def test_the_opening_names_every_host_init_registers_with_no_version_qualifier()
             assert not qualified, f"{where}: {host.display_name}"
 
 
-@pytest.mark.xfail(strict=True, reason="deferred to the v4.0 docs lane: README.md and the pyproject "
-                                       "description still promise Gemini CLI registration in v4.1")
+def _keywords() -> List[str]:
+    block = re.search(r"^keywords = \[(.*?)\]", PYPROJECT.read_text(encoding="utf-8"), re.M | re.S).group(1)
+    return re.findall(r'"([^"]*)"', block)
+
+
 def test_the_retired_gemini_cli_is_promised_nowhere():
     """Gemini CLI is retired (aegis_core.hosts): `aegis init --host gemini-cli` is refused for
-    good, so no README line or PyPI summary that names it may promise a version."""
-    lines = README.read_text(encoding="utf-8").splitlines() + [_description()]
+    good, so no line of the README or how-it-works that names it may promise a version or
+    tell the reader to register it by hand, and the PyPI summary and keywords drop it."""
+    lines = (README.read_text(encoding="utf-8").splitlines() + HOW.read_text(encoding="utf-8").splitlines()
+             + [_description()])
     promises = [line for line in lines
                 if ("Gemini CLI" in line or "gemini-cli" in line) and re.search(r"\bv4\.\d", line)]
     assert promises == []
+    assert [line for line in lines if "gemini mcp add" in line] == []
+    assert "Gemini CLI" not in _description()
+    assert "gemini-cli" not in _keywords()
+
+
+def _refusal(capsys, argv: List[str]) -> Tuple[int, str]:
+    from aegis_cli.cli import main
+
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as exc:
+        main(argv)
+    return exc.value.code, capsys.readouterr().err
+
+
+def test_the_docs_state_the_gemini_cli_retirement_as_aegis_refuses_it(tmp_path, monkeypatch, capsys):
+    """`init` and `uninstall --host gemini-cli` exit 2 with the host table's retirement line. The
+    README host table says the host is retired and names Antigravity in its place, and the
+    CHANGELOG's 4.0.0 entry quotes the refusal word for word."""
+    from aegis_core.hosts import get
+
+    for name, value in (("HOME", tmp_path), ("USERPROFILE", tmp_path), ("XDG_CONFIG_HOME", tmp_path / ".config")):
+        monkeypatch.setenv(name, str(value))
+    retired = get("gemini-cli").retired
+    assert retired
+    for command in ("init", "uninstall"):
+        code, err = _refusal(capsys, [command, "--host", "gemini-cli", "--dry-run", "--workspace", str(tmp_path)])
+        assert code == 2 and err.rstrip().endswith(retired), (command, err)
+
+    row = next((line for line in _section(README.read_text(encoding="utf-8"), "Works with your agents").splitlines()
+                if line.startswith("| **Gemini CLI**")), "")
+    assert "retired" in row.lower() and "Antigravity" in row, row
+
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    entry = re.search(r"^## \[4\.0\.0\].*?(?=^## \[|\Z)", changelog, re.M | re.S).group(0)
+    assert retired in " ".join(entry.split())
 
 
 # --- the link checker itself ---------------------------------------------------------

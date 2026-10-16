@@ -2,6 +2,7 @@
 
 - **Status**: **ACCEPTED, signed off by the author on 2026-10-15** (§9). The remaining detailed calls, mainly the §5 cut list, are delegated to Claude, to be decided against the core tenets (`architectural-tenets`, README Core Architecture, the phylogeny Design Principles). Each such call is marked **[delegated]**.
 - **Date**: 2026-10-15
+- **Amended**: 2026-10-16, by author direction, in dated blocks: H1 and AD-4 (Gemini CLI retired), H3 and AD-7 (the team design shrinks), AD-8 (per-host hook tiers), two §5 rows, §6 steps 5 and 6, D5, D14 and D15, and Appendices C and D. The original text stays visible, struck or marked superseded.
 - **Supersedes**:
   - the v4.0→v4.2 blueprint (`~/.gemini/antigravity/brain/9638fd5e…/v4.0_to_v4.2_architectural_blueprint.md`)
   - `CLAUDE_V4_HANDOFF.md`
@@ -64,9 +65,9 @@ That is five foundational resets in about 21 hours. Over the project's life ther
 
 | # | Decision |
 |---|---|
-| H1 | Host ids split by product, with a **hard cut** in v4.0 and no aliases: `codex-cli`, `claude-code`, `claude-desktop` (identity only), `antigravity`, `gemini-cli` (later) |
+| H1 | Host ids split by product, with a **hard cut** in v4.0 and no aliases: `codex-cli`, `claude-code`, `claude-desktop` (identity only), `antigravity`, ~~`gemini-cli` (later)~~ `gemini-cli` (identity only: retired, see the amendment below) |
 | H2 | One ~500 B `AGENTS.md` bootstrap plus JIT rules via MCP. Rule text is never inlined into instruction files |
-| H3 | Agent team: `.aegis/team.json` declares **roles**; agents from any host **self-register at runtime** and claim roles and lanes (v4.1) |
+| H3 | ~~Agent team: `.aegis/team.json` declares **roles**; agents from any host **self-register at runtime** and claim roles and lanes (v4.1)~~ Superseded: see the amendment below and AD-7 |
 | H4 | Claude Code sessions use **user-scope** registration (`claude mcp add --scope user`), one server per session. The Desktop-config entry is migrated out |
 | H5 | Worktree-shared *ledger* is deferred (but see AD-7: swarm coordination state lives in the git common dir from the start) |
 | H6 | **Ledger-only fitness.** No automatic frontmatter fitness writes |
@@ -74,6 +75,13 @@ That is five foundational resets in about 21 hours. Over the project's life ther
 | H8 | Repos without `.aegis` get a **read-only user rule layer**: no ledger, no writes, and `$HOME` is never a workspace |
 | R1–R5 | `aegis rule import` is **shelved** (0 lost rules) |
 | L1 | Wipe the 170 legacy `cell_id` rows in `.aegis/evidence/outcomes.jsonl` and stop tracking it |
+
+**Amendment (author direction, 2026-10-16): H1, Gemini CLI is retired.** The author: "gemini cli is replaced by agy" (first recorded with the 2026-10-15 live probes) and "dont use gemini cli. use agy" (2026-10-16). In the live probes, Gemini CLI 0.64.0 failed to authenticate with `IneligibleTierError`: Google no longer supports the client for Gemini Code Assist for individuals.
+- `gemini-cli` stays in the host table only as an identity row: its MCP client name is still recognized, it has no registration, and `aegis init --host gemini-cli` and `aegis uninstall --host gemini-cli` exit 2 with `gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist accounts; use --host antigravity.`
+- Antigravity (`agy`) is the Gemini-family host. No Gemini CLI registration, hooks or extension will be built (§6 steps 5 and 6, Appendix C).
+- AD-4's "Gemini CLI roots" candidate has no host behind it any more. D14's `gemini -p` example is withdrawn from the docs; any command that reads the prompt on stdin still works as `--llm-cmd`.
+
+**Amendment (author direction, 2026-10-16): H3, roles are labels.** Lanes are claimed through the `aegis team` CLI, normally run by the dispatcher, not by agents self-registering at runtime. Roles are free display labels with no config vocabulary, and `team.json` declares no roles. AD-7's amendment has the design.
 
 ## 3. Architecture decisions (signed in §9)
 
@@ -144,7 +152,7 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
 
 - **Decision**: `WorkspaceBinding{root, source, confidence}`, resolved in this order:
   1. an operator pin (`AEGIS_WORKSPACE` in the registration env), final and strict: the server refuses to start if the pin doesn't resolve;
-  2. host-attested candidates: Claude `CLAUDE_PROJECT_DIR` or roots; Codex `_meta` workspaces (verified live); Gemini CLI roots;
+  2. host-attested candidates: Claude `CLAUDE_PROJECT_DIR` or roots; Codex `_meta` workspaces (verified live); ~~Gemini CLI roots~~ (retired, H1 amendment);
   3. a **user-scope registry** of governed workspaces (`~/.aegis/workspaces.json`, written by `aegis init`). A path from a tool call can only *select among* registered workspaces. This is the only route for the Antigravity app, which gives no roots and has a cwd equal to its launch dir (verified live);
   4. a bounded walk-up from cwd that stops at the git toplevel.
 
@@ -201,10 +209,10 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
 - **Decision**: use git itself as the coordination substrate for H3.
   - **Lanes**: one worktree and branch per lane, which is what Antigravity, Claude and Codex already do.
   - **Leases**: refs under `refs/aegis/lanes/<lane>`, written with `git update-ref <ref> <new> <old>`. That is an atomic compare-and-swap, shared across all worktrees through the common dir, needs no daemon (B2) and adds zero dependencies (B1).
-  - **Role claims and handoffs**: commit trailers (`Aegis-Lane:`, `Aegis-Role:`, `Aegis-Host:`).
-  - **Review verdicts**: PR reviews or git notes.
-  - **Cross-vendor pairing**: checkable from the trailers (prosecutor host ≠ author host).
-  - **Team definition**: `team.json` holds only role definitions. Membership is the set of live refs, refreshed by each host's aegis-mcp on tool calls, with a TTL, so there are no heartbeat threads.
+  - ~~**Role claims and handoffs**: commit trailers (`Aegis-Lane:`, `Aegis-Role:`, `Aegis-Host:`).~~ Superseded (amendment below).
+  - **Review verdicts**: PR reviews ~~or git notes~~.
+  - ~~**Cross-vendor pairing**: checkable from the trailers (prosecutor host ≠ author host).~~ Superseded (amendment below).
+  - ~~**Team definition**: `team.json` holds only role definitions. Membership is the set of live refs, refreshed by each host's aegis-mcp on tool calls, with a TTL, so there are no heartbeat threads.~~ Superseded (amendment below): leases have a TTL and are written only by the `aegis team` CLI, so there are still no heartbeat threads.
   - **Post-lane gate**: the "Bastion" containment and test-tampering check becomes a deterministic diff check in CI.
 - **Fixes**:
   - the H3/H5 conflict: leases in per-worktree `.aegis/` would not be shared, refs are;
@@ -215,17 +223,38 @@ Each decision lists the failure it fixes (evidence), the trade-offs, and a falsi
   - **Cost**: none.
   - Requires git, which all three hosts use.
   - Ref namespace hygiene: `aegis team gc`.
-- **Prediction**: in 20 multi-lane sessions, zero cross-lane write conflicts reach a merge; cross-vendor reviews find more true positives than same-vendor reviews.
-- **Prune if**: no lease ever denies a claim in 30 days of multi-lane use. In that case leases are unnecessary; keep trailers only.
+- **Prediction**: in 20 multi-lane sessions, zero cross-lane write conflicts reach a merge~~; cross-vendor reviews find more true positives than same-vendor reviews~~.
+- **Prune if**: no lease ever denies a claim in 30 days of multi-lane use. In that case leases are unnecessary; ~~keep trailers only~~ drop leases and keep `check --lane` and the merge metrics (amendment below).
+- **Amendment (author direction, 2026-10-16): the team design shrinks.** It adopts the swarm review of 2026-10-15, as recorded in the v4.1/v4.2 spec, revision 3. That spec is not in the repository, so its essentials are here and in Appendices C and D.
+  - **Claims**: lanes are claimed through the `aegis team` CLI (`claim`, `renew`, `transfer`, `release`, `list`, `gc`, `metrics`), normally run by the dispatcher. There is no MCP write tool (the MCP surface stays at D4's four tools), no renewal on tool calls, no commit trailers, no `verify-pairing` and no git notes.
+  - **Leases are cooperative conflict input**: not a lock, not an identity and not proof that a process is alive. The blob is `{"v":1,"lane","role","owner","claim_id","gen","branch","paths","ts","ttl_s"}`. `owner` and `role` are display labels that nothing compares. `claim_id` is 16 random hex characters, so a re-claim never reproduces a blob id. `gen` counts compare-and-swap writes and is not a fencing token. `ttl_s` is at most 86400. Writes use `git update-ref --stdin` with the `create`, `update` and `delete` verbs, which also work in SHA-256 repositories.
+  - **`team.json`** is optional: `{"v":1,"shared":[globs],"lanes":{"<lane>":[globs]}}`. The committed per-lane path sets are what make a CI containment result a witness.
+  - **Backstops**: `aegis check --lane` (containment and Python test integrity, with no exemption flag) and the merge metrics of `aegis team metrics`.
+  - **Reviews**: a read-only reviewer claims nothing and never blocks a writer, and its verdict applies to the exact tree it read. Aegis records no review verdicts in v4.1; the record is the PR review.
+  - **Partition**: the runtime partition *enforcer* stays unnecessary (Fixes, above). The static `aegis check --partition` report (v4.2) is kept, with its own prune row (Appendix D).
+  - **Prediction**: its second half, about cross-vendor reviews, has no metric once pairing is cut, so it is withdrawn here. Cross-vendor review stays a release gate under AD-10.
+  - **Prune fallback**: drop leases; keep `check --lane` and the merge metrics.
+  - **Baseline**, with no leases in place: feature/v4.0's first-parent history at `2965be5` has 23 `merge(lane/*)` commits (19 on 2026-10-15, 4 on 2026-10-16). In 8 of them both sides changed a common path since the merge base, and 7 had textual conflicts (`2965be5`, `41cd3f0`, `0efd5a2`, `355981a`, `02f825a`, `8ce4482`, `69fff31`), in source files and tests alike. To re-derive, run `git merge-tree --write-tree --name-only <first parent> <second parent>` on each of those merges (git 2.38 or later; it exits 1 on a conflict) and compare `git diff --name-only <merge base> <parent>` for each side.
 
 ### AD-8: Honest enforcement tiers
 
 - **Decision**:
   - CI running Layer-1 deterministic checks on every PR is the **authoritative floor**.
   - The local git pre-commit hook is fast feedback and can be bypassed with `--no-verify`.
-  - Per-host hooks are best-effort and vary by host: Claude's can block; Codex's fail open and need user trust.
+  - Per-host hooks are best-effort and vary by host: ~~Claude's can block; Codex's fail open and need user trust~~ (superseded by the amendment below).
   - `aegis doctor` reports each host's real tier, and the README states it verbatim.
 - **Fixes**: false assurance (Design Principle §5); `verify()` reporting success on inert hooks.
+- **Amendment (author direction, 2026-10-16): per-host hook tiers for v4.1.** Gemini CLI is retired (H1 amendment), so the v4.1 hooks cover Claude Code, Codex CLI and Antigravity. One handler, `aegis hook run pre-tool --host <h>`, reads the payload, keeps an internal 5 s deadline and fails open by design: an internal error, a timeout, an unusable payload or an ungoverned workspace exits 0 with empty stdout. The hooks are guardrails, not a security boundary, and CI stays the floor.
+
+  | Host | Scan-before-edit | Destructive-command guard | Evidence |
+  |---|---|---|---|
+  | Claude Code | blocks: exit 2, reason on stderr | blocks: exit 2 | documented by Anthropic, not probed; fails open if Aegis errors |
+  | Codex CLI | blocks with exit 2 once the user trusts the hook in `/hooks`; an untrusted or modified hook is skipped silently | blocks with exit 2 once trusted, plus `~/.codex/rules/aegis.rules` forbidden prefix rules | documented by OpenAI; exit 2 not probed, and exit 1 was live-verified to fail open |
+  | Antigravity | records only, until a live probe verifies a visible deny | blocks: exit 1 | exit-1 blocking live-verified on `agy` 1.3.6; unavailable on Windows, where the hook shell is unverified |
+
+  - `aegis doctor` states each tier in these words: Claude Code `blocking (documented; fails open on error)`; Codex `blocking once trusted in /hooks (documented; fails open)`; Antigravity `blocks destructive commands (live); scan gate records only`; and `unavailable` (Antigravity on Windows). A hook entry being present never claims enforcement.
+  - The block set covers irreversible operations only: force and `+refspec` pushes, `git reset --hard`, `git clean -f`, `rm -r` of `/`, `~`, `$HOME`, `*`, `.` or `..`, `mkfs*` and `dd of=/dev/…`. Merges are recorded, never blocked, because AD-10 lets agents merge after the gates.
+  - D15's "host-native deny rules come first" and §5's "wires it behind native host deny rules" are superseded: the hook is the guard on every host. No Claude Code `permissions.deny` entries are written, because the hook parses commands and deny patterns cannot (`Bash(git push *)` misses `git -C . push`).
 
 ### AD-9: Instructions via a bootstrap, with measured compliance
 
@@ -275,7 +304,7 @@ Every row cites the tenet it rests on (see the status line). Appendix A (delegat
 | MCP receipts (`aegis_request_receipt`, `receipt` params, HMAC keys) | **CUT**. Self-reports are advice-tier rows with server-owned `host` | AD-2, C1 |
 | Manifest HMAC signing, keys, auto-sync, tamper exclusion | **CUT**. An unsigned hash index written only by `aegis sync`, used only to show "edited since sync" | AD-1, AD-2 |
 | MCP surface | **17 → 4 tools** (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`). The async job engine (the only daemon thread) is cut | C1, B2 |
-| CLI surface | **12 commands** (`init uninstall doctor check status rule scan sync migrate hook`, plus `team` in v4.1 and `benchmark` in v4.2). `install system detect completion skill handoff agent report verify checkpoint` and every alias are hard-cut with a pointer message | C1, A1, H1 |
+| CLI surface | **12 commands** (`init uninstall doctor check status rule scan sync migrate hook`, plus `team` in v4.1 and `benchmark` in v4.2; the D5 amendment adds `skills` and `package`). `install system detect completion skill handoff agent report verify checkpoint` and every alias are hard-cut with a pointer message | C1, A1, H1 |
 | Unreachable or test-only code | **CUT**: quarantine, resilience, transcript verifier, sweep/sentinels/team-sync, insight pipeline, defect analytics and hot zones, metrics snapshot, proposals/TTC, shadow schemas, rollup/compaction, two-tier packer, shadowed handlers, meta-path redirect, facades | C1, A1, A4 |
 | Bug and claim registries, nested-pytest meta-tests | **CUT** (they re-ran 48% of the suite). A 20-line README overclaim deny-list test survives | C1, A2 |
 | `aegis_sdk` | **SHRINK** to a stable `Governance` facade, because citadel and mapleterm use it. Core never imports it | AD-3, AD-6 |
@@ -283,7 +312,7 @@ Every row cites the tenet it rests on (see the status line). Appendix A (delegat
 | Layout | `.aegis/{config.json, .gitignore, rules/, state/}`, with one lock. `aegis migrate` moves existing data | AD-1, AD-3, AD-5 |
 | Layer 2 | **SIMPLIFY**: `check --full` with one zero-dependency `--llm-cmd` backend. Vendor SDKs, keyring, extras and the in-band loop are cut | C1, B1, B3 |
 | `forbid_ast` | **KEEP**, with H2/H3 fixed: it is the gate tier's only deterministic mechanism. JIT `ast_triggers`/`planned_symbols` are cut (0 uses) | C1, AD-8 |
-| Agent-side hook phases | **CUT**. `command_safety` is kept isolated until v4.1 wires it behind native host deny rules | H7, AD-8 |
+| Agent-side hook phases | **CUT**. `command_safety` is kept isolated until v4.1 ~~wires it behind native host deny rules~~ uses it in the per-host hook (AD-8 amendment) | H7, AD-8 |
 | `doctor --fix-path`, `rule clean`/`cleanse.py` | **CUT** (rc-file and global-file mutation). Cleanup goes through backed-up `doctor --fix` | destructive-ops |
 | `branch_coverage`, SARIF | **CUT** (an unsafe template pattern; no consumer) | C1 |
 | Legacy `.soma` workspaces | **MIGRATE** via `aegis migrate`: 11 exist with 160 legacy-typed rules (verified, A4) | A4, AD-5 |
@@ -316,8 +345,10 @@ Every row cites the tenet it rests on (see the status line). Appendix A (delegat
    - `${SLOT.*}` rule rewrite;
    - `client.host` attribution.
 4. **Soak (AD-10), then tag v4.0.0** with CI attestation and a human merge.
-5. **v4.1**: AD-7 git-native team, per-host hooks (Claude scan-before-edit first), skills projection, gemini-cli row (Appendix C).
-6. **v4.2**: day-0 card, ratchet baseline, unsigned packs, benchmark (latency/tokens only), partition check, experimental host rows, worktree-shared ledger, plugin packaging (Appendix C). Each has a prune box (Appendix D).
+5. ~~**v4.1**: AD-7 git-native team, per-host hooks (Claude scan-before-edit first), skills projection, gemini-cli row (Appendix C).~~
+   **Amendment (author direction, 2026-10-16)**: **v4.1** is the AD-7 team as amended (CLI-only leases, `aegis check --lane`, `aegis team metrics` and an events log for the prune metrics); per-host hooks for Claude Code, Codex CLI and Antigravity with the AD-8 tiers as amended; and skills projection (`aegis skills sync`, `aegis init --skills`). The gemini-cli row is cut (H1 amendment). Appendix C has the design.
+6. ~~**v4.2**: day-0 card, ratchet baseline, unsigned packs, benchmark (latency/tokens only), partition check, experimental host rows, worktree-shared ledger, plugin packaging (Appendix C). Each has a prune box (Appendix D).~~
+   **Amendment (author direction, 2026-10-16)**: **v4.2** is the day-0 card (`aegis check --card`), the ratchet baseline, unsigned packs, the benchmark (latency and tokens only, hook runs included), the AST partition report (`aegis check --partition`), experimental host rows, the worktree-shared ledger, Claude Code plugin packaging (`aegis package`; the Gemini CLI extension is cut) and the stability statement (Appendix C). Each has a prune row (Appendix D).
 
 **Scope amendment (author, 2026-10-15):** "include in the goal to do all the way up until 4.2.0." v4.1 and v4.2 are *implemented* on the branch now. The AD-10 soak, CI-on-SHA and human-merge gates still apply to each *tag*.
 
@@ -382,8 +413,8 @@ These are the **[delegated]** calls behind §5, plus the author's extension of s
 | D11 | **Env vars** are cut to `AEGIS_WORKSPACE` (operator pin), `AEGIS_CLIENT` (host identity, written by `init`), `AEGIS_MAX_JIT_TOKENS` and `AEGIS_LLM_CMD` (the Layer-2 backend). | A1 |
 | D12 | **Layout** is `.aegis/{config.json, .gitignore("state/\n"), rules/<type>/, state/{ledger.jsonl, derived.json, lock}}`. The user plane is `~/.aegis/{rules/ (read-only layer, H8), workspaces.json (AD-4), backups/}`. The **one lock** is `.aegis/state/lock`. | AD-1, AD-3, AD-4 |
 | D13 | **Ledger rows are versioned**: `{"v":2,"ts","rule","outcome","source","host","session","key",…}`. Readers accept v1 (the `cell`/`rule_id` keys). `aegis migrate` (dry run by default, `--apply`) upgrades rows and the layout, and converts `aegis.conf`/`slots.yaml`/`config.yaml` into `config.json`. Writes are always v2. L1: the 170 legacy `outcomes.jsonl` rows are wiped and the file is untracked. | AD-5, A4 |
-| D14 | **Verification**:<br>• **Layer 1** (`aegis check`) keeps the checkpoint checks, `forbid_ast` (fixed, not cut: it is the gate tier's only deterministic teeth) and `call_graph`/`import_guard`. Assertion density moves to `quality_gate`'s AST checks plus `check_no_bare_pass`, skipping fixtures.<br>• **Layer 2** (`aegis check --full [--plan/--plan-file]`) keeps `adversarial_verify` + `arbiter` + `mutation_tester` with **one zero-dependency backend**: `--llm-cmd CMD` / `AEGIS_LLM_CMD`. The command (argv, no shell) receives the prompt on stdin and returns stdout, for example `codex exec`, `claude -p` or `gemini -p`, which gives cross-vendor review with no keys or packages in Aegis. `--full` without a backend exits 2. The command is never read from workspace config (BUG-073 guard).<br>• **Cut**: the Gemini, Anthropic and OpenAI SDK wrappers; keyring; the extras; `PromptOnlyProvider`; the in-band charge sheet and `--in-band`; the cloud oracle; `MCPSamplingBackend`; `attribution.py`; `run_layer2` (keep `_strip_code_fence`); `review_adapter` cycles; `branch_coverage`; `format_sarif_report` (other formatters kept); JIT-side `ast_triggers`/`planned_symbols`. | C1, B1, B3, A5 |
-| D15 | **Agent-side hook phases are cut**: `pre-invocation`, `session-close`, `post-session`, `stop`, `governance-monitor`, `immune-init`, the duplicate `hooks/__main__.py`, `evidence_collector` and the transcript helpers.<br>• `command_safety.py`, `hooks/safety.py` and `redaction.py` stay **isolated** behind `aegis hook safety-gate --cmd`. In v4.1, host-native deny rules come first and `command_safety` is the fallback matcher for hosts without them.<br>• `aegis hook pre-commit` merges into `aegis check --hook`. Its tests are ported first. | H7, AD-8 |
+| D14 | **Verification**:<br>• **Layer 1** (`aegis check`) keeps the checkpoint checks, `forbid_ast` (fixed, not cut: it is the gate tier's only deterministic teeth) and `call_graph`/`import_guard`. Assertion density moves to `quality_gate`'s AST checks plus `check_no_bare_pass`, skipping fixtures.<br>• **Layer 2** (`aegis check --full [--plan/--plan-file]`) keeps `adversarial_verify` + `arbiter` + `mutation_tester` with **one zero-dependency backend**: `--llm-cmd CMD` / `AEGIS_LLM_CMD`. The command (argv, no shell) receives the prompt on stdin and returns stdout, for example `codex exec` or `claude -p` ~~or `gemini -p`~~ (withdrawn, H1 amendment), which gives cross-vendor review with no keys or packages in Aegis. `--full` without a backend exits 2. The command is never read from workspace config (BUG-073 guard).<br>• **Cut**: the Gemini, Anthropic and OpenAI SDK wrappers; keyring; the extras; `PromptOnlyProvider`; the in-band charge sheet and `--in-band`; the cloud oracle; `MCPSamplingBackend`; `attribution.py`; `run_layer2` (keep `_strip_code_fence`); `review_adapter` cycles; `branch_coverage`; `format_sarif_report` (other formatters kept); JIT-side `ast_triggers`/`planned_symbols`. | C1, B1, B3, A5 |
+| D15 | **Agent-side hook phases are cut**: `pre-invocation`, `session-close`, `post-session`, `stop`, `governance-monitor`, `immune-init`, the duplicate `hooks/__main__.py`, `evidence_collector` and the transcript helpers.<br>• `command_safety.py`, `hooks/safety.py` and `redaction.py` stay **isolated** behind `aegis hook safety-gate --cmd`. ~~In v4.1, host-native deny rules come first and `command_safety` is the fallback matcher for hosts without them.~~ Superseded by the AD-8 amendment.<br>• `aegis hook pre-commit` merges into `aegis check --hook`. Its tests are ported first. | H7, AD-8 |
 | D16 | **The 5 dogfood rules move** (`gitflow-review-gate`, `ci-green-before-release`, `core-change-protocol`, `no-pre-existing-excuse`, `optional-import-guard`) from shipped `rules/` to this repo's `.aegis/rules/`. `desktop-automation` leaves the shipped set. `starter_rules/` becomes a list of names read from `rules/`, so there is no second copy. Rule and skill text uses `${SLOT.*}` instead of Antigravity tool names. | C5, A1 |
 | D17 | **`doctor --fix-path`** (rc-file mutation) and **`rule clean`/`cleanse.py`** are cut. Cleanup goes through backed-up `doctor --fix` ([ADR 0007](0007-host-plane.md) §3.10). | destructive-ops, M4 |
 | D18 | **Single version source**: `aegis_core/_version.py`, read by pyproject (dynamic), the CLI and the server. The doc-coupling tests are replaced by contract snapshots (AD-6): the argparse tree JSON and `tools/list` JSON under `tests/contract/`, which also generate `docs/reference.md`. | AD-6 |
@@ -392,6 +423,8 @@ These are the **[delegated]** calls behind §5, plus the author's extension of s
 | D21 | **Legacy `.soma` workspaces are migrated, not just refused.** 11 exist on the dev machine with 160 legacy-typed rules (artifacts verified, A4). `aegis migrate` converts `.soma/cells/<type>` to `.aegis/rules/<canonical type>` using the existing type-normalization table. It is a dry run by default and reports any unmapped type instead of guessing. | A4, AD-5 |
 | D22 | **AST drivers**: the TypeScript, Go and Rust templates ship in the wheel and work (keep-advocate built a wheel and ran them), so they stay. Only the byte-identical `install/drivers/` copies are deleted. | C1 |
 | D23 | **The README overclaim guard survives as a 20-line deny-list test** (no nested pytest). It fails if the README contains a retracted phrase. | C1, AD-6 |
+
+**Amendment (author direction, 2026-10-16): D5.** The v4 command surface adds `skills` (v4.1: `aegis skills sync [--host …] [--force] [--dry-run]`, also reached through `aegis init --skills`) and `package` (v4.2: `aegis package --host claude-code`, experimental). With `team` (v4.1) and `benchmark` (v4.2) that makes 14 top-level commands by v4.2, against the 12 in §5's "CLI surface" row. This settles Appendix C's open point.
 
 ## Appendix B: Binding conditions from the keep-advocate defenses
 
@@ -421,7 +454,29 @@ Each §5 cut was argued by a keep-advocate before it was made. The conditions be
 
 Accepted 2026-10-15, when the author extended implementation scope through v4.2.0 (§6 scope amendment). Tags still follow AD-10. This summarizes the v4.1/v4.2 spec used during the build; the waves that build each feature own the details.
 
-**Evidence for the lease design**: a git 2.43 ref probe (2026-10-15) showed that a create-only `update-ref <ref> <new> 0{40}` refuses an existing ref, that compare-and-swap works from another worktree, that a stale old value is rejected with the current value, and that blob-valued refs survive `gc --prune=now`.
+**Evidence for the lease design**: a git 2.43 ref probe (2026-10-15) showed that a create-only `update-ref <ref> <new> 0{40}` refuses an existing ref, that compare-and-swap works from another worktree, that a stale old value is rejected with the current value, and that blob-valued refs survive `gc --prune=now`. (The amended design writes through `update-ref --stdin` with the `create` verb instead of an all-zero old value, which SHA-256 repositories do not accept.)
+
+**Amendment (author direction, 2026-10-16).** The rows below replace the table accepted on 2026-10-15, which stays visible under "Superseded rows". They summarize the v4.1/v4.2 spec, revision 3 (2026-10-16), which is not in the repository, so each row carries the design its wave needs. "Live" means probed on `agy` 1.3.6, Claude Code 2.1.301 or Codex 0.162.1; "documented" means official docs or vendor source, not probed.
+
+| Release | Feature | Decision | Key constraints |
+|---|---|---|---|
+| v4.1 | Git-native agent team (AD-7 as amended) | `aegis team claim <lane> --paths G… [--role R] [--owner O] [--ttl S] [--branch B]`, `renew <lane> --expect <oid>`, `transfer <lane> --expect <oid> --owner O`, `release <lane> --expect <oid>`, `gc` and `list [--json]`. A lease is the ref `refs/aegis/lanes/<lane>` pointing to a JSON blob (`v`, `lane`, `role`, `owner`, `claim_id`, `gen`, `branch`, `paths`, `ts`, `ttl_s`). A claim is create-only; an expired lease is taken over by compare-and-swap after the same overlap check, with `gen` + 1 and a new `claim_id`. Lane names match `[a-z0-9][a-z0-9._-]{0,62}`. The optional `.aegis/team.json` is `{"v":1,"shared":[…],"lanes":{…}}`, parsed strictly: unknown keys, bad globs or an invalid lane name exit 2 | CLI only: no MCP tool, no renewal on tool calls, no trailers, no git notes. The overlap check is conservative: two globs overlap when one's literal prefix (casefolded, up to the first wildcard) starts the other's, and a glob with no `/` overlaps everything. `ttl_s` is at most 86400. A lease whose `ts` is more than 300 s ahead of the reader is flagged `clock_skew` and still counts as live. `list` has no side effects and states that a lease is conflict input, not proof of liveness. A failed ref update is classified by re-reading the ref, never by stderr |
+| v4.1 | Post-lane gate | `aegis check --lane <lane> [--base <ref>] [--paths G…] [--base-policy]` over `merge-base(base, HEAD)..HEAD`. **Containment**: every changed path (deletions, type changes, both sides of a move, gitlinks) is inside the lease's paths or `--paths`, plus `shared`. **Test integrity** (Python files only): a test id present at base and gone at HEAD, an added skip or xfail (the pytest and unittest decorators, `pytestmark`, `pytest.skip`/`xfail`/`importorskip`, `self.skipTest`, `raise unittest.SkipTest`), or a change to pytest's collection settings is an itemized finding with a stable id. Any finding fails the check and sets `protected_changed` | Results are self-attested by default. `--base-policy` reads `lanes[<lane>]` and `shared` from the base tip only, refuses `--paths`, and labels the result `witnessed: base policy`. `.github/workflows/**` and `.aegis/**` are allowed only through base policy. There is no exemption flag: the reviewer or the merger decides. Assert weakening is not detected. A shallow clone fails with `needs history`. Advisory in CI in v4.1 |
+| v4.1 | Events log and merge metrics | `<git-common-dir>/aegis/events.jsonl` (`.aegis/state/events.jsonl` outside git), under its own lock, with rows `{"v":1,"ts","event","worktree","host"?,"result","detail"}` for lease, lane-check, hook, skills, partition, pack-import, init-host and benchmark events. `aegis team metrics [--base <ref>] [--json]` reports denials and claims, and for each first-parent merge whether it was an `overlapping_merge` and a `conflicting_merge` (`git merge-tree --write-tree`) | Read only for prune metrics: fitness and compliance never read it. Confined to the git common dir like the state dir. The conflict metric needs git 2.38 or later, otherwise it is `unavailable`. CI rows are lost unless uploaded |
+| v4.1 | Per-host hooks (host Phase 2, AD-8 as amended) | `aegis hook install --host <h> [--scope user\|project]` and `aegis hook uninstall --host <h>` register one handler, `aegis hook run pre-tool --host <h>`, for Claude Code (`~/.claude/settings.json`, exec form), Codex CLI (`~/.codex/hooks.json`) and Antigravity (`~/.gemini/config/hooks.json` or `<repo>/.agents/hooks.json`). `aegis hook install` without `--host` still manages the git pre-commit hook. The handler checks scan-before-edit (a `scan` row covering every edited path, written by `aegis_scan` or `aegis scan` within `jit.scan_window_s`, default 3600) and a destructive-command block set, with the AD-8 tiers | Fail-open by design, and stdout always empty. The workspace comes from the payload through the AD-4 resolver (Claude `CLAUDE_PROJECT_DIR` then `cwd`, Codex `cwd`, agy `workspacePaths[0]`). The merge is atomic with a backup, refuses unparseable or linked files, finds its own entries by command, and refuses a second Aegis entry at another scope. The agy command maps exit 75 to 1 and every other code to 0; agy hooks are unavailable on Windows. The `aegis` path must match `[A-Za-z0-9._/+-]+`. Aegis never emits `ask`. p95 under 300 ms per run. Doctor flags v3 `soma hook` leftovers, and `doctor --fix` removes them (a new `remove_list_items` fix action) |
+| v4.1 | Skills projection | `aegis skills sync [--host …] [--force] [--dry-run]` and `aegis init --skills` copy the packaged `skills/<id>/SKILL.md` to `.claude/skills/<id>/` (Claude Code, documented) and `.agents/skills/<id>/` (Antigravity documented, Codex unverified), with the frontmatter reduced to `name` and `description` and the slots rendered | Provenance is a marker line `<!-- aegis:skill id=<id> v=1 sha=<12 hex> -->`, with no sidecar file. A matching sha is overwritten; a differing sha is skipped unless `--force`; a file without the marker is never touched. Every path component must be a real directory inside the workspace, and `--force` never overrides a link or a confinement refusal |
+| v4.1 | ~~gemini-cli host row~~ | Cut: Gemini CLI is retired (H1 amendment) | — |
+| v4.2 | Day-0 card | `aegis check --card [--json]`, also printed at the end of `init`: languages, AST drivers, rules by type, the Layer-1 pass rate on tracked files and the 5 files with the most findings | Under 2 s on this repo; above 2,000 files it samples and says so. It never touches `baseline.json` |
+| v4.2 | Ratchet baseline | `aegis check --write-baseline` writes `.aegis/baseline.json` `{"v":1,"findings":[{"rule","path","fp"}]}`, where `fp` is the first 16 hex characters of a sha256 over the rule, the path, the normalized matched line and that line's occurrence index. `check` then fails only on new findings; `--prune-baseline` drops fixed ones | With `--base`, the baseline is read from the base (`baseline: base@<sha>`), never from the candidate; otherwise from the working tree (`self-attested`). A baseline absent at base counts as empty |
+| v4.2 | Rule packs (unsigned) | `aegis rule export <out.json> [--min-fitness X] [--type …]` writes `{"v":1,"rules":[{path,text,sha256}],"sha256":…}` with derived and legacy keys stripped and no ledger rows. `aegis rule import <pack> [--rename] [--dry-run]` | Each `path` must be exactly `<type dir>/<id>.md` with a valid, servable id, or the whole pack is refused. Validation runs the one loader on a staged inventory. Id collisions are refused unless `--rename`. Writes are atomic. No signing claim |
+| v4.2 | Benchmark | `aegis benchmark [--json]`: `aegis_scan` latency (p50/p95), payload bytes and approximate tokens, `hook run` latency, and Layer-1 throughput on a built-in corpus | Explicitly not an efficacy measure |
+| v4.2 | AST partition report | `aegis check --partition --split A=glob… --split B=glob…` (at least two) reports cross-lane call, def and import edges and a `[FROZEN_SIGNATURES]` block | Python driver, plus Rust when present. `--lane`, `--partition`, `--card`, `--write-baseline` and `--prune-baseline` are mutually exclusive modes of `check` |
+| v4.2 | Experimental host rows | `cursor`, `copilot`, `kiro` and `windsurf` with documented registration paths and `verified: false`. `init --host` warns; doctor labels them experimental | A row becomes verified only after 3 clean runs ([ADR 0007](0007-host-plane.md) §4) |
+| v4.2 | Worktree-shared ledger (H5) | `<common>/aegis/state/<ws-id>/ledger.jsonl`, where `<ws-id>` is the first 16 hex characters of a sha256 of the workspace path relative to the git top level. Rows carry `worktree`. `aegis migrate --apply` merges per-worktree ledgers, deduplicating rows, and renumbers `seq` | Every ledger writer takes the common lock (after the worktree lock when it holds one). Outside git the ledger stays at `.aegis/state/ledger.jsonl` |
+| v4.2 | Packaging (host Phase 3, experimental) | `aegis package --host claude-code` writes a Claude Code plugin directory (`.claude-plugin/plugin.json`, the MCP server, hooks and skills) | Nothing is published. The Gemini CLI extension is cut (H1 amendment) |
+| v4.2 | Stability statement | The README states the v4 public contract (the generated reference) and that the 4.x line takes only bug fixes, security fixes and evidence-backed changes | — |
+
+### Superseded rows (as accepted on 2026-10-15)
 
 | Release | Feature | Decision | Key constraints |
 |---|---|---|---|
@@ -441,11 +496,31 @@ Accepted 2026-10-15, when the author extended implementation scope through v4.2.
 | v4.2 | Packaging (host Phase 3, experimental) | Write a Claude Code plugin directory and a Gemini CLI extension | Nothing is published |
 | v4.2 | Stability statement | The README states the v4 public contract (the generated reference) and that the 4.x line takes only bug fixes, security fixes and evidence-backed changes | The "Let It Cook" freeze ends when the metrics stabilize (AD-10) |
 
-**Open point.** The v4.1/v4.2 spec named two commands that are not in D5's list, `aegis skills sync` and `aegis package`. The waves that build them either fold them into existing commands (for example `aegis init --skills`) or amend D5 first.
+**Open point** (settled by the D5 amendment in Appendix A). The v4.1/v4.2 spec named two commands that are not in D5's list, `aegis skills sync` and `aegis package`. The waves that build them either fold them into existing commands (for example `aegis init --skills`) or amend D5 first.
 
 ## Appendix D: Hypothesis and prune boxes for v4.1 and v4.2 features
 
 Principle C6: every new feature states what it predicts, how that is measured, and when it is removed.
+
+**Amendment (author direction, 2026-10-16).** The prune rows below replace the 2026-10-15 table, which follows under "Superseded rows"; the last column compares each row with the superseded table in this appendix. Metrics come from the v4.1 events log (Appendix C) or from git.
+
+| Feature | Hypothesis | Metric (source) | Prune when | Change vs App D |
+|---|---|---|---|---|
+| Leases | Leases prevent cross-lane write conflicts | `lease_denied` (events); `conflicting_merge` (`team metrics`) | 0 denials in 30 days of multi-lane use (at least 2 lanes per `team metrics`) | same |
+| Containment (`check --lane`) | Lanes stray outside their paths | `lane_check` containment failures (events) | 0 in 30 days of multi-lane use | new row |
+| Test integrity | Agents delete or skip tests to go green | itemized findings (events) | 0 findings in 60 days that a reviewer did not override | reworded: findings a reviewer did not override, instead of catches a human confirmed |
+| Scan-before-edit hook | The hook raises scan-before-edit compliance | `status --compliance` rate before and after install; `scan_gate` | compliance not higher than bootstrap-only after 30 days | same test ("vs bootstrap only"), now with a 30-day window |
+| Destructive guard | Agents run destructive commands | `guard_match` (events) | 0 block-set matches in 90 days (keep Claude Code's and Codex's native layers) | new row |
+| Skills projection | Projected skills get used | `skills_sync` runs only; host use is **manual and unverifiable** | author judgement after 60 days | new row, labelled manual |
+| Day-0 card / ratchet baseline | Adoption stalls on existing findings | baseline written; new-finding failures (events) | unused in 60 days | merges the baseline-card row (30 days of no `check --baseline` runs) and the ratchet row (no adopters) |
+| Packs | Rules travel between repos | `pack_import` | 0 imports in 90 days | counts imports, not imported rules reaching invariant tier; 90 days instead of 60 |
+| Benchmark | Latency regressions go unnoticed | `benchmark` events | no regression caught in 3 releases | same |
+| Partition report | Lanes collide through call edges | `partition_check`; edges later confirmed by a conflicting merge | precision < 50% over 20 runs | same (a report, not a check) |
+| Experimental hosts | They work as documented | doctor green on a real install | row unverified after 2 minor releases | same |
+| Shared ledger | Per-worktree ledgers lose evidence | rows merged by migrate | no multi-worktree users in 90 days | adds the 90-day window |
+| Packaging | The plugin form eases install | plugin directories written | 0 in 90 days | new row |
+
+### Superseded rows (as accepted on 2026-10-15)
 
 | Feature | Hypothesis | Metric (ledger or git) | Prune if |
 |---|---|---|---|

@@ -136,7 +136,7 @@ There is no workspace argument a model could set, and `$HOME` or `/` is never a 
 - **Per changed file**: a call-graph check (code that is defined but never wired in), an import guard (every import is standard library, allowed or guarded) and every `forbid_ast` rule that applies. A file a `forbid_ast` rule cannot parse fails; it is never skipped. Mutation tests run only with `--full`.
 - **Languages**: Python is parsed in process. Drivers for Rust, TypeScript/JavaScript (needs `node`) and Go (needs `go`) ship in the wheel, and `aegis init` turns them on for the languages it detects (`ast.packaged_drivers`). A repository can only opt in to those packaged drivers; any other driver command comes from `~/.aegis/config.json`, so a cloned repo cannot make Aegis run a program it chose. The driver protocol is in [ADR 0015](adr/0015-normalized-ast-driver-protocol.md).
 
-**Layer 2** is optional: `aegis check --full --plan "what the change should do" --llm-cmd 'claude -p'`. The plan comes from `--plan`, `--plan-file`, or else the first of `docs/plan.md`, `.aegis/plan.md` and `PLAN.md` in the repository; without one, Layer 2 refuses to run. Any command that reads a prompt on stdin and prints a reply works (`codex exec --skip-git-repo-check`, `gemini -p`, a script). Aegis builds two prompts that never see each other's input: a spec reviewer gets the plan and the function signatures and predicts what could go wrong; a code reviewer gets the implementation, the tests and the Layer 1 results and makes claims about them. An arbiter compares the two by risk category, using Layer 1 as the tiebreaker, without asking a model to judge, and returns `SHIP`, `REVISE` or `BLOCK`. The command runs in an empty temporary directory, never in the repository, so the code under review cannot steer its reviewer through project config; and it comes only from `--llm-cmd` or `AEGIS_LLM_CMD`, never from a file in the repository. **This sends your change to whichever vendor the command calls.**
+**Layer 2** is optional: `aegis check --full --plan "what the change should do" --llm-cmd 'claude -p'`. The plan comes from `--plan`, `--plan-file`, or else the first of `docs/plan.md`, `.aegis/plan.md` and `PLAN.md` in the repository; without one, Layer 2 refuses to run. Any command that reads a prompt on stdin and prints a reply works (`codex exec --skip-git-repo-check`, a script). Aegis builds two prompts that never see each other's input: a spec reviewer gets the plan and the function signatures and predicts what could go wrong; a code reviewer gets the implementation, the tests and the Layer 1 results and makes claims about them. An arbiter compares the two by risk category, using Layer 1 as the tiebreaker, without asking a model to judge, and returns `SHIP`, `REVISE` or `BLOCK`. The command runs in an empty temporary directory, never in the repository, so the code under review cannot steer its reviewer through project config; and it comes only from `--llm-cmd` or `AEGIS_LLM_CMD`, never from a file in the repository. **This sends your change to whichever vendor the command calls.**
 
 Use a reviewer from a different vendor than the agent that wrote the change. A model reviewing its own vendor's output tends to share its blind spots, and the Aegis release process itself requires a cross-vendor `--llm-cmd` review ([ADR 0005](adr/0005-v4-plan-of-record.md) AD-10). The arbiter's verdict is not yet calibrated against outcomes; scoring it is v4.3 work (section 10).
 
@@ -173,17 +173,17 @@ Use a reviewer from a different vendor than the agent that wrote the change. A m
 | `claude-code` | `claude mcp add --scope user aegis -e AEGIS_CLIENT=claude-code -- <aegis-mcp>` | `CLAUDE_PROJECT_DIR`, MCP roots | `AGENTS.md` only when no `CLAUDE.md` exists; otherwise the `@AGENTS.md` block in `CLAUDE.md` |
 | `codex-cli` | `codex mcp add aegis --env AEGIS_CLIENT=codex-cli -- <aegis-mcp>` | per-turn workspace metadata | `AGENTS.md` (32 KiB, truncated silently) |
 | `antigravity` (app, IDE, `agy`) | an `aegis` entry in `~/.gemini/config/mcp_config.json` | the registry only: it sends no roots | `AGENTS.md` (24,000 bytes per file) |
-| `gemini-cli` | v4.1; until then by hand | MCP roots | `GEMINI.md`, unless `context.fileName` lists `AGENTS.md` |
+| `gemini-cli` | never: retired (`init` exits 2 and names `--host antigravity`) | — | — |
 | `claude-desktop` | never: identity only | — | — |
 
-`<aegis-mcp>` is the absolute path of the `aegis-mcp` script `init` finds on `PATH`, or, when there is none, the Python interpreter running `aegis` with `-m aegis_mcp`. Until v4.1 adds `--host gemini-cli`, the command Aegis plans to run for Gemini CLI is `gemini mcp add -s user aegis -e AEGIS_CLIENT=gemini-cli -- <aegis-mcp>`; Aegis has not verified it on a real install. Every host runs `aegis-mcp` unsandboxed with your user's permissions, so the server's own confinement is the only boundary. Repository files never register a server: a committed `.mcp.json` would run whatever command a pull request put there.
+`<aegis-mcp>` is the absolute path of the `aegis-mcp` script `init` finds on `PATH`, or, when there is none, the Python interpreter running `aegis` with `-m aegis_mcp`. Gemini CLI is retired: Google refuses the client for individual Code Assist accounts, so `aegis init --host gemini-cli` and `aegis uninstall --host gemini-cli` exit with status 2 and point to `--host antigravity`, the Gemini-family host. Every host runs `aegis-mcp` unsandboxed with your user's permissions, so the server's own confinement is the only boundary. Repository files never register a server: a committed `.mcp.json` would run whatever command a pull request put there.
 
 **Enforcement tiers**, as `aegis doctor` prints them:
 
 | Tier | Mechanism | Status in 4.0 |
 |---|---|---|
 | Advisory | AGENTS.md bootstrap, MCP instructions, JIT rules | every host |
-| Best-effort | per-host pre-tool hooks | v4.1: Claude Code's can block; Codex's fail open and need user trust |
+| Best-effort | per-host pre-tool hooks | none in 4.0. Planned for v4.1: Claude Code blocks with exit 2 (documented); Codex blocks with exit 2 once you trust the hook in `/hooks` (documented); Antigravity blocks only destructive commands (exit 1, verified live) and records scan-before-edit. Each fails open when Aegis errors |
 | Local floor | git pre-commit runs aegis check --hook (--no-verify bypasses it) | every host that commits through git |
 | Authoritative | CI runs aegis check on the exact SHA; a human merges | your CI and branch protection |
 
@@ -195,24 +195,28 @@ Use a reviewer from a different vendor than the agent that wrote the change. A m
 
 ## 8. Planned for v4.1: agent teams, per-host hooks and skills
 
-Not in 4.0. The design is in [ADR 0005](adr/0005-v4-plan-of-record.md) AD-7.
+Not in 4.0. The design is in [ADR 0005](adr/0005-v4-plan-of-record.md) AD-7 and AD-8, as amended on 2026-10-16.
 
-- **Lanes and leases.** Each agent works in its own git worktree and branch (a lane). It claims the lane with a lease: a git ref under `refs/aegis/lanes/<lane>`, written with an atomic compare-and-swap (`git update-ref <ref> <new> <old>`) and visible from every worktree. Leases expire after a time-to-live, so no daemon is needed, and a claim whose paths overlap another live lane's is refused. `.aegis/team.json` declares only roles, such as `implementer` and `reviewer`; agents from any host claim them at runtime.
-- **Trailers.** Commits carry `Aegis-Lane:`, `Aegis-Role:` and `Aegis-Host:` trailers, so anyone can check that a reviewer's host differs from the implementer's.
-- **Post-lane gate.** A deterministic diff check in CI before a lane merges: the lane changed only its own paths, and it did not delete, skip or weaken tests without saying so.
-- **Per-host hooks**: a scan-before-edit hook (blocking on Claude Code, a warning elsewhere) and a destructive-command guard built on each host's own deny rules. Until then, `aegis hook safety-gate --cmd "..."` checks one command line and prints a JSON decision.
-- **Skills**: `aegis init --skills` will copy the 15 packaged [skills](../skills/) into `.agents/skills/` and `.claude/skills/`. Today, copy the ones you want by hand.
-- **Gemini CLI**: `aegis init --host gemini-cli`.
+- **Lanes and leases.** Each agent works in its own git worktree and branch (a lane). Whoever dispatches the agents claims the lane with `aegis team claim <lane> --paths <globs>`: a lease, stored as a git ref under `refs/aegis/lanes/<lane>` that points to a small JSON record, written with an atomic compare-and-swap (`git update-ref --stdin`) and visible from every worktree. Leases expire after a time-to-live of at most a day, so no daemon is needed, and a claim whose paths may overlap another live lane's is refused (when unsure, Aegis assumes they overlap). `renew`, `transfer`, `release`, `list` and `gc` complete the set. A lease is cooperative conflict input: not a lock, not an identity and not proof that an agent is alive. Its role and owner are display labels that nothing checks. There is no MCP tool for teams, and nothing is renewed on tool calls.
+- **`.aegis/team.json`** (optional, committed) lists `shared` globs that any lane may change and, optionally, a committed set of paths per lane.
+- **Post-lane gate.** `aegis check --lane <lane>` looks at everything the lane changed since its merge base. Every changed path must be inside the lane's paths or the shared ones (containment), and no Python test may disappear, gain a skip or xfail, or be dropped by a change to pytest's collection settings (test integrity). Weakened asserts are not detected. Any finding fails the check, and there is no exemption flag: the reviewer or the person merging decides with the itemized findings in view. With `--base-policy` the allowed paths come from `team.json` on the base branch, so the result is witnessed rather than self-attested. In CI the job is advisory in v4.1.
+- **Merge metrics.** `aegis team metrics` counts lease denials and, for each merge on the current branch, whether both sides changed a common path and whether git reports a conflict. They decide whether leases earn their place: if no lease is denied in 30 days of multi-lane use, leases go, and `check --lane` and the metrics stay. For scale: of the 23 lane merges that built v4.0 up to `2965be5`, 8 had both sides change a common path and 7 had textual conflicts.
+- **Per-host hooks** for Claude Code, Codex CLI and Antigravity. `aegis hook install --host <h>` registers one handler, `aegis hook run pre-tool --host <h>`, which checks two things:
+  - **Scan-before-edit**: an edit to a file that no `aegis_scan` (or `aegis scan`) covered in the last hour (by default) is blocked on Claude Code, and on Codex once you trust the hook in `/hooks`. Antigravity only records it.
+  - **Destructive commands**: force pushes, `git reset --hard`, `git clean -f`, `rm -r` of `/`, `~`, `$HOME`, `*`, `.` or `..`, `mkfs*` and `dd of=/dev/…` are blocked on all three hosts (on Codex, once trusted). Merges, `sudo` and the like are only recorded.
+
+  The handler fails open: an error, a timeout or a payload it cannot read lets the call through. Edits made through shell commands never reach the edit check. The hooks are guardrails, not a security boundary. Until they ship, `aegis hook safety-gate --cmd "..."` checks one command line and prints a JSON decision.
+- **Skills**: `aegis skills sync` (or `aegis init --skills`) will copy the 15 packaged [skills](../skills/) into `.claude/skills/` for Claude Code and `.agents/skills/` for Antigravity and Codex (documented for Antigravity, not yet verified for Codex). A marker line in each copy lets Aegis replace only its own unedited copies. Today, copy the ones you want by hand.
 
 ## 9. Planned for v4.2: adoption tools
 
 Not in 4.0. Each feature ships with a stated metric and a prune condition, and is removed if it does not earn its place.
 
-- **Day-0 baseline card**: languages, drivers, rule counts, the Layer 1 pass rate and the files with the most findings, for an existing repository.
-- **Ratchet baseline**: record today's findings in `.aegis/baseline.json`, so `aegis check` fails only on new ones.
-- **Rule packs**: export rules to a bundle checked by sha256 digests and import them elsewhere. Packs are not signed.
-- **Benchmark**: scan latency, payload size and Layer 1 throughput. It measures speed, not whether rules help.
-- **Also**: a cross-lane conflict check before dispatching parallel agents, experimental rows for more hosts, a ledger shared by all worktrees, and host plugin packaging.
+- **Day-0 card**: `aegis check --card`, also printed at the end of `aegis init`: languages, drivers, rule counts, the Layer 1 pass rate and the files with the most findings, for an existing repository.
+- **Ratchet baseline**: `aegis check --write-baseline` records today's findings in `.aegis/baseline.json`, so `aegis check` fails only on new ones. With `--base`, the baseline is read from the base branch, never from the change under review.
+- **Rule packs**: `aegis rule export` and `aegis rule import` move rules between repositories in a bundle checked by sha256 digests. Packs are not signed.
+- **Benchmark**: `aegis benchmark` measures scan and hook latency, payload size and Layer 1 throughput. It measures speed, not whether rules help.
+- **Also**: a report of the call and import edges between planned lanes (`aegis check --partition`), experimental rows for Cursor, Copilot, Kiro and Windsurf, a ledger shared by all worktrees, and an experimental Claude Code plugin directory (`aegis package --host claude-code`; nothing is published).
 
 ## 10. Planned for v4.3: trust and evidence
 

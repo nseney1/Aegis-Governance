@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aegis-guardrails"
 dynamic = ["version"]
-description = "Rules and an MCP server that keep AI coding agents on track: Claude Code, Codex CLI, Antigravity and Gemini CLI (manual registration until v4.1)"
+description = "Rules and an MCP server that keep AI coding agents on track: Claude Code, Codex CLI and Antigravity"
 
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -15,7 +15,7 @@ authors = [
 ]
 keywords = [
     "ai-coding-agents", "guardrails", "mcp", "agents-md", "claude-code",
-    "codex", "gemini-cli", "antigravity", "code-review"
+    "codex", "antigravity", "code-review"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

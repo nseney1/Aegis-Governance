@@ -22,6 +22,10 @@ v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has
 - `aegis rule clean` and `aegis doctor --fix-path` are removed (they rewrote global files and shell rc files). `aegis doctor --fix` removes legacy rule blocks and unedited v3 rule copies; remove edited copies by hand.
 - `aegis hook pre-commit` is replaced by `aegis check --hook`. The agent-side hook phases `pre-invocation`, `governance-monitor`, `immune-init`, `session-close`, `stop` and `post-session` are removed; remove them from your host's hook config. `python -m aegis_cli.hooks` no longer exists. Git hooks installed by v3 are reported as outdated, and `aegis hook install` rewrites them.
 
+**Hosts**
+
+- Gemini CLI is retired: Google refuses the client for individual Code Assist accounts, and Antigravity is the Gemini-family host. `aegis init --host gemini-cli` and `aegis uninstall --host gemini-cli` exit with status 2 and print `gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist accounts; use --host antigravity.` The MCP server still recognizes a connecting Gemini CLI client by name; no Gemini CLI registration, hooks or extension are planned.
+
 **Flags**
 
 - Global flags are `--json`, `--plain` and `--workspace`. `--plumbing`, `--internal`, `-q`, `-v`, `--no-emoji` and the global `--format` are removed.
@@ -56,7 +60,7 @@ v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has
 
 **Layer 2 (`aegis check --full`)**
 
-- One backend: the command given with `--llm-cmd` or `AEGIS_LLM_CMD`, for example `claude -p`, `codex exec` or `gemini -p`. It runs as an argument list (no shell) in an empty temporary directory, gets the prompt on stdin and returns its reply on stdout. It is never read from repository files. The Gemini, Anthropic and OpenAI SDK wrappers, the keyring, the in-band charge sheet and MCP sampling are removed.
+- One backend: the command given with `--llm-cmd` or `AEGIS_LLM_CMD`, for example `claude -p` or `codex exec`. It runs as an argument list (no shell) in an empty temporary directory, gets the prompt on stdin and returns its reply on stdout. It is never read from repository files. The Gemini, Anthropic and OpenAI SDK wrappers, the keyring, the in-band charge sheet and MCP sampling are removed.
 - `--full`, `--plan` or `--plan-file` without a backend exits 2 instead of skipping Layer 2.
 
 **Output and Python API**
@@ -97,7 +101,7 @@ These are the v3.3 defects found by the v4 review ([evidence review](docs/adr/00
 
 - `aegis check` records each run's pass or fail against every rule whose paths match the checked files, and self-reports from MCP clients count toward fitness too. So a gate that blocks a bad commit is scored as a miss. Fitness only ranks guidance and drives `sync` suggestions; no rule changes tier without an explicit command. A per-rule credit model is planned for v4.3 ([why-aegis](docs/why-aegis.md) §6).
 - The starter rules `aegis init` seeds have no `target_paths`, so they apply to no file until you add patterns; `aegis status` lists them.
-- Per-host agent hooks arrive in v4.1. In v4.0 the enforcement points are the git pre-commit hook (`--no-verify` skips it) and CI.
+- Per-host agent hooks for Claude Code, Codex CLI and Antigravity are planned for v4.1. In v4.0 the enforcement points are the git pre-commit hook (`--no-verify` skips it) and CI.
 - Rule frontmatter has no schema version yet; the ledger, the config files, the derived view and the workspace registry do.
 
 ## [3.3.0] — 2026-10-14 — "Cryptographic Provenance, Declarative AST Rules, Telemetry Compaction, SARIF 2.1.0 & Multi-Platform Claude Desktop Support"

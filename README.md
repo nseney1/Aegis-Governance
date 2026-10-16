@@ -1,6 +1,6 @@
 # Aegis Guardrails: rules and an MCP server that keep AI coding agents on track
 
-Aegis keeps Claude Code, Codex CLI, Antigravity and Gemini CLI (manual registration until v4.1) on your project's rules. It gives each agent the rules for the files it is about to edit, then checks the change before commit and in CI.
+Aegis keeps Claude Code, Codex CLI and Antigravity on your project's rules. It gives each agent the rules for the files it is about to edit, then checks the change before commit and in CI.
 
 [![PyPI](https://img.shields.io/pypi/v/aegis-guardrails)](https://pypi.org/project/aegis-guardrails/)
 [![Python](https://img.shields.io/pypi/pyversions/aegis-guardrails)](https://pypi.org/project/aegis-guardrails/)
@@ -99,9 +99,9 @@ Commit `.aegis/` and `AGENTS.md`; the local ledger in `.aegis/state/` is git-ign
 | **Claude Code** (`claude-code`) | `claude mcp add --scope user aegis` | `AGENTS.md`, but only when there is no `CLAUDE.md`. If the repo has one, `init` adds an `@AGENTS.md` block to it; it never creates one. |
 | **Codex CLI** (`codex-cli`) | `codex mcp add aegis` | `AGENTS.md` (Codex truncates it past 32 KiB) |
 | **Antigravity** (`antigravity`: app, IDE and `agy`) | an `aegis` entry in `~/.gemini/config/mcp_config.json` | `AGENTS.md` (24,000 bytes per file). Antigravity tells the server no workspace, so run `aegis init` once per repo on each machine. |
-| **Gemini CLI** | Not yet: `--host gemini-cli` lands in v4.1. Until then, register `aegis-mcp` with `gemini mcp add` yourself. | `GEMINI.md`, unless its `context.fileName` setting lists `AGENTS.md` |
+| **Gemini CLI** | Retired: Google refuses the client for individual Code Assist accounts, and Antigravity is the Gemini-family host. `aegis init --host gemini-cli` exits with status 2 and points you to `--host antigravity`. | — |
 
-On every host the enforcement is the same today: advisory rules through the bootstrap and `aegis_scan`, the git pre-commit hook as the local floor, and CI as the authority. Per-host agent hooks (Claude Code's can block an edit; Codex's fail open) are planned for v4.1. Claude Desktop chat sessions are recognized but not registered. Every host runs `aegis-mcp` with your own user's permissions.
+On every host the enforcement is the same today: advisory rules through the bootstrap and `aegis_scan`, the git pre-commit hook as the local floor, and CI as the authority. Per-host agent hooks are planned for v4.1, with a different strength on each host (the tier table under "What Aegis does not do" lists them). Claude Desktop chat sessions are recognized but not registered. Every host runs `aegis-mcp` with your own user's permissions.
 
 ## How it works
 
@@ -134,11 +134,11 @@ Aegis does not claim enforcement it lacks. `aegis doctor` reports these tiers, i
 | Tier | Mechanism | What gets past it |
 |---|---|---|
 | Advisory | AGENTS.md bootstrap, MCP instructions, JIT rules | any agent: it is guidance |
-| Best-effort | per-host pre-tool hooks | planned for v4.1: Claude Code's can block, Codex's fail open |
+| Best-effort | per-host pre-tool hooks | everything: 4.0 has no agent hooks. Planned for v4.1: Claude Code blocks with exit 2 (documented by Anthropic); Codex blocks with exit 2 once you trust the hook in `/hooks` (documented by OpenAI); Antigravity blocks only destructive commands (exit 1, verified live) and only records whether a file was scanned before an edit. Every hook lets the call through when Aegis itself errors, and edits made through shell commands never reach the edit check |
 | Local floor | git pre-commit runs aegis check --hook (--no-verify bypasses it) | anyone using `git commit --no-verify` |
 | Authoritative | CI runs aegis check on the exact SHA; a human merges | a pull request that also weakens the rules or the CI workflow it is checked with, unless a person reviews those changes |
 
-**CI is the floor.** Put `aegis check` in CI and require it before merge: it is the strongest tier, but not tamper-proof. CI checks a pull request against the rules in the pull request itself, so a pull request that deletes a rule and breaks it passes. Review every change under `.aegis/` and to your CI workflow like code; protecting the reviewed rules from the change they judge is planned for v4.3.
+**CI is the floor.** Agent hooks are guardrails, not a security boundary. Put `aegis check` in CI and require it before merge: it is the strongest tier, but not tamper-proof. CI checks a pull request against the rules in the pull request itself, so a pull request that deletes a rule and breaks it passes. Review every change under `.aegis/` and to your CI workflow like code; protecting the reviewed rules from the change they judge is planned for v4.3.
 
 - It does not force an agent to scan. Hosts are prompted to, and `aegis status --compliance` measures each host's scan-before-edit rate.
 - It does not sandbox agents or sign anything. Rule files are protected only by your review of the pull requests that change them.
