@@ -87,6 +87,15 @@ def test_an_error_is_returned_whole_whatever_the_view(view):
     assert result["error"]
 
 
+@pytest.mark.parametrize("view", ["ids", "summary"])
+@pytest.mark.parametrize("error", [
+    {"error": "boom", "rules": [{"_name": "a", "hypothesis": "h"}]},  # an error without a FAIL status
+    {"status": "FAIL", "rules": [{"_name": "a", "hypothesis": "h"}]},  # a FAIL without an error text
+])
+def test_a_result_that_names_an_error_or_a_failure_is_never_projected(error, view):
+    assert project_response(error, view=view) == error
+
+
 def test_ids_view_skips_an_item_with_no_identity_instead_of_dumping_it():
     assert project_response([{"hypothesis": "secret-ish body"}, {"name": "kept"}], view="ids") == ["kept"]
 

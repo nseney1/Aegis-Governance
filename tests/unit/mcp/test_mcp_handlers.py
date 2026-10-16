@@ -1,6 +1,7 @@
 """Direct tests of the four MCP handlers (one implementation each)."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,24 @@ def test_scan_rejects_bad_arguments(mcp_workspace: Path, args, error):
     assert res["status"] == "FAIL"
     if error:
         assert res["error"] == error
+
+
+def test_a_scan_in_a_session_records_one_scan_event_per_files(mcp_workspace: Path):
+    """aegis status --compliance reads these events; rescanning the same files in any order adds none."""
+    names = [f"src/{letter}.py" for letter in "abcdefghijklmnopqr"]
+    order = names[::2] + names[1::2]
+    # 18 files in three orders: with this many, a dedup key built from an unsorted set
+    # depends on insertion order on more than 99% of hash seeds, so only a sorted key passes.
+    # The "./" copy in the first call names a file already listed, so the key must drop duplicates.
+    for files in (order + ["./" + order[0]], order[::-1], order[9:] + order[:9]):
+        args = {"workspace": str(mcp_workspace), "files": files, "_session": "s-1", "_host": "codex-cli"}
+        assert [r["name"] for r in handle_scan(args)["relevant_rules"]] == ["sample-rule"]
+
+    lines = (mcp_workspace / ".aegis" / "state" / "activity.jsonl").read_text(encoding="utf-8").splitlines()
+    events = [json.loads(line) for line in lines]
+    assert [(e["event"], e["host"], e["session"], e["files"], e["basis"]) for e in events] == [
+        ("scan", "codex-cli", "s-1", names, "files"),
+    ]
 
 
 def test_scan_blocks_path_traversal(mcp_workspace: Path):
@@ -142,4 +161,25 @@ def test_report_outcome_fails_cleanly_when_the_rules_tree_is_unsafe(mcp_workspac
     assert res["status"] == "FAIL"
     assert res["error"].startswith("Cannot check 'rules_used' against the rules: rule inventory validate failed")
     assert "symlinked directory is not allowed" in res["error"]
+    assert not (mcp_workspace / ".aegis" / "state" / "ledger.jsonl").exists()
+
+
+_RULE_NAMES = "'rules_used' must be a list of rule names."
+_FILE_PATHS = "'files' must be a list of file paths"
+_KEY_REQUIRED = (
+    "'idempotency_key' is required: send a unique key per report so a retry is never recorded twice."
+)
+
+
+@pytest.mark.parametrize("args, error", [
+    ({"rules_used": ["sample-rule"]}, _KEY_REQUIRED),
+    ({"rules_used": ["sample-rule"], "idempotency_key": " \t"}, _KEY_REQUIRED),
+    ({"rules_used": "sample-rule", "idempotency_key": "k"}, _RULE_NAMES),
+    ({"rules_used": ["sample-rule", 3], "idempotency_key": "k"}, _RULE_NAMES),
+    ({"rules_used": ["sample-rule"], "idempotency_key": "k", "files": "src/main.py"}, _FILE_PATHS),
+    ({"rules_used": ["sample-rule"], "idempotency_key": "k", "files": ["src/main.py", None]}, _FILE_PATHS),
+])
+def test_report_outcome_rejects_malformed_arguments_and_records_nothing(mcp_workspace: Path, args, error):
+    res = handle_report_outcome({"workspace": str(mcp_workspace), "outcome": "success", **args})
+    assert res == {"status": "FAIL", "error": error}
     assert not (mcp_workspace / ".aegis" / "state" / "ledger.jsonl").exists()

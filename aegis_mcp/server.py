@@ -106,10 +106,9 @@ _tool_call_times: Dict[str, list] = defaultdict(list)
 _rate_limit_lock = threading.Lock()
 
 
-def strip_server_owned(args: Any) -> Dict[str, Any]:
+def strip_server_owned(args: Dict[str, Any]) -> Dict[str, Any]:
     """Return a copy of client arguments without server-owned keys."""
-    if not isinstance(args, dict):
-        return {}
+    # Only an object reaches here: tools/call answers other arguments with -32602 first.
     return {k: v for k, v in args.items() if k not in SERVER_OWNED_KEYS}
 
 

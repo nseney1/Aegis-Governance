@@ -194,6 +194,20 @@ def test_unreadable_lines_are_skipped_and_counted(tmp_path: Path):
     assert view.unusable_rows == 1
 
 
+def test_a_v2_row_with_only_a_rule_or_only_an_outcome_is_unusable(tmp_path: Path):
+    # Only a row with neither (an epoch) is bookkeeping; half an outcome is a broken row.
+    path = _path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '{"v":2,"seq":1,"ts":"t","rule":"a","source":"ci"}\n'
+        '{"v":2,"seq":2,"ts":"t","outcome":"tp","source":"ci"}\n'
+        '{"v":2,"seq":3,"ts":"t","migrated_from":[],"rows":0}\n',
+        encoding="utf-8",
+    )
+    view = ledger.read(tmp_path)
+    assert (view.rows, view.skipped_lines, view.unusable_rows) == ([], [], 2)
+
+
 def _append_unterminated(ws: Path, row: dict) -> None:
     """A complete row whose newline never reached the disk (a crash cut the write there)."""
     with open(_path(ws), "ab") as fh:

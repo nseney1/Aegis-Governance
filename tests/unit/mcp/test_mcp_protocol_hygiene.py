@@ -94,6 +94,16 @@ def test_client_host_name_and_version_are_server_owned():
     assert server.strip_server_owned({"client_host": "x", "client_name": "y", "client_version": "z", "files": []}) == {"files": []}
 
 
+@pytest.mark.parametrize("arguments", [["src/a.py"], "files", 3])
+def test_tool_arguments_that_are_not_an_object_are_invalid_params(arguments):
+    _initialize({"clientInfo": {"name": "claude-code"}})
+    response = server.handle_request({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "aegis_scan", "arguments": arguments},
+    })
+    assert response == {"jsonrpc": "2.0", "id": 2, "error": {"code": -32602, "message": "Tool arguments must be an object."}}
+
+
 # ── initialize ───────────────────────────────────────────────────────────────
 
 def test_initialize_returns_the_bootstrap_instructions():

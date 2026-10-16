@@ -27,13 +27,14 @@ def split_frontmatter(content: str) -> Tuple[str, Optional[str], str]:
             content = content[len(zw):]
     if not content.startswith("---"):
         return "none", None, content
-    nl = content.find("\n")
-    if nl == -1:
+    # Partitioned rather than offset: '^' matches where ``rest`` starts, no index to miscount.
+    _opening, newline, rest = content.partition("\n")
+    if not newline:
         return "unterminated", None, content
-    m = _CLOSING_DELIM_RE.search(content, nl + 1)
+    m = _CLOSING_DELIM_RE.search(rest)
     if not m:
         return "unterminated", None, content
-    return "ok", content[nl + 1 : m.start()], content[m.end():]
+    return "ok", rest[: m.start()], rest[m.end():]
 
 
 def _get_body(content: str) -> str:
@@ -49,7 +50,7 @@ def parse_frontmatter(content: str) -> Optional[Dict[str, Any]]:
     status, fm_text, _body = split_frontmatter(content)
     if status == "none":
         return {}
-    if status == "unterminated" or fm_text is None:
+    if fm_text is None:  # "unterminated": only an "ok" split carries frontmatter text
         return None
     fm_text = fm_text.strip()
     if not fm_text:
@@ -71,7 +72,7 @@ def parse_rule_frontmatter(content_or_path: str) -> Tuple[Dict[str, Any], str]:
     status, fm_text, body = split_frontmatter(content)
     if status == "none":
         raise ValueError("No frontmatter delimiter")
-    if status == "unterminated" or fm_text is None:
+    if fm_text is None:  # "unterminated": only an "ok" split carries frontmatter text
         raise ValueError("Unclosed frontmatter")
     fm_text = fm_text.strip()
     data = {} if not fm_text else parse_yaml_subset(fm_text)

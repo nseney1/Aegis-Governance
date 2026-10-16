@@ -8,7 +8,7 @@ import pytest
 from aegis_core.skills.slots import (
     SlotRegistry,
     SlotResolutionError,
-    SLOT_REF_PATTERN,
+    profile_id,
 )
 
 
@@ -115,3 +115,19 @@ def test_slot_registry_get_configured_extensions():
     })
     exts = reg.get_configured_extensions()
     assert exts == {".py", ".rs", ".go", ".ts"}
+
+
+@pytest.mark.parametrize("host, profile", [
+    ("claude-code", "claude-code"),
+    ("  codex-cli\n", "codex-cli"),  # surrounding whitespace is not part of the id
+    ("antigravity", "antigravity"),
+    ("claude-desktop", "generic"),  # identity only: its host row names the generic profile
+    ("claude", "claude-code"),  # v3 platform names keep the profile they had
+    ("gemini", "antigravity"),
+    ("generic", "generic"),
+    ("no-such-host", "generic"),  # an unknown host never borrows a vendor's profile
+    ("", "generic"),
+    (None, "generic"),
+])
+def test_profile_id_names_the_slot_profile_a_host_renders_with(host, profile):
+    assert profile_id(host) == profile
