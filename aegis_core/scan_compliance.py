@@ -62,6 +62,7 @@ __all__ = [
     "record",
     "report",
     "scan_covers",
+    "utc_now",
 ]
 
 ACTIVITY_VERSION = 1
@@ -96,7 +97,9 @@ LIMITS = (
 )
 
 
-def _utc_now() -> datetime:
+def utc_now() -> datetime:
+    """The clock activity rows are stamped with. aegis-mcp's re-record decision reads it
+    too, so that decision and the gate's window share one (wall-clock) timeline."""
     return datetime.now(timezone.utc)
 
 
@@ -143,7 +146,7 @@ def record(
         raise ValueError("host and session must be non-empty strings")
     row: Dict[str, Any] = {
         "v": ACTIVITY_VERSION,
-        "ts": _stamp(_utc_now()),
+        "ts": _stamp(utc_now()),
         "event": event,
         "host": host,
         "session": session,
@@ -161,21 +164,21 @@ def record(
 
 # ── the scan-before-edit gate ────────────────────────────────────────────────
 
-def _read_tail(path: Path, limit: int) -> List[Dict[str, Any]]:
-    """The JSON object rows in the last ``limit`` bytes of ``path``, a partial first line
-    dropped; [] when it is missing, unreadable, a symlink or not a regular file (the
+def _tail(path: Path, limit: int) -> bytes:
+    """The whole lines in the last ``limit`` bytes of ``path`` (a partial first line
+    dropped); b"" when it is missing, unreadable, a symlink or not a regular file (the
     checks ``storage.read_jsonl`` makes)."""
     try:
         if os.path.islink(path):
-            return []
+            return b""
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
         fd = os.open(path, flags)
     except OSError:
-        return []
+        return b""
     try:
         found = os.fstat(fd)
         if not stat.S_ISREG(found.st_mode):
-            return []
+            return b""
         size = found.st_size
         start = max(0, size - limit)
         os.lseek(fd, start, os.SEEK_SET)
@@ -188,39 +191,72 @@ def _read_tail(path: Path, limit: int) -> List[Dict[str, Any]]:
             chunks.append(chunk)
             remaining -= len(chunk)
     except OSError:
-        return []
+        return b""
     finally:
         os.close(fd)
-    lines = b"".join(chunks).split(b"\n")
-    if start:
-        lines = lines[1:]
-    rows = []
-    for raw in lines:
-        try:
-            row = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError, RecursionError):
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
+    data = b"".join(chunks)
+    return data[data.find(b"\n") + 1:] if start else data
+
+
+def _spellings(path: str) -> Tuple[bytes, ...]:
+    """The bytes a JSON row holds for ``path``: the writer escapes non-ASCII
+    (``ensure_ascii``), another writer may not."""
+    return tuple(sorted({json.dumps(path).encode("ascii"), json.dumps(path, ensure_ascii=False).encode("utf-8")}))
+
+
+def _lines_naming(data: bytes, spellings: Tuple[bytes, ...]) -> Iterable[bytes]:
+    """The lines of ``data`` that hold one of ``spellings``, last line first."""
+    end = len(data)
+    while True:
+        at = max(data.rfind(spelling, 0, end) for spelling in spellings)
+        if at < 0:
+            return
+        start = data.rfind(b"\n", 0, at) + 1
+        stop = data.find(b"\n", at)
+        yield data[start:] if stop < 0 else data[start:stop]
+        end = start
 
 
 def scan_covers(workspace: Any, paths: Iterable[str], window_s: float, now: Optional[datetime] = None) -> bool:
     """True when one usable ``scan`` row names every path in ``paths`` (workspace-relative,
     compared exactly in POSIX spelling) and was written no more than ``window_s`` seconds
     before ``now`` (and at most FUTURE_SKEW_SECONDS after it). Any host and any session
-    count. Nothing to cover is covered. Reads only."""
+    count. Nothing to cover is covered. Reads only.
+
+    The hook runs this on every edit and the log is never rotated, so it reads only the
+    last GATE_TAIL_BYTES and parses only the scan lines holding every path's JSON
+    spelling, found from the end through the rarest path. The first such row older than
+    the window less FUTURE_SKEW_SECONDS ends the search: rows are appended in time order,
+    so the ones before it are older still (a clock stepped back by more than the slack
+    can hide one; the agent's rescan then appends a new row).
+    """
     wanted = {PurePath(p).as_posix() for p in paths}
     if not wanted:
         return True
-    moment = now or _utc_now()
+    data = _tail(activity_path(workspace), GATE_TAIL_BYTES)
+    spellings = {path: _spellings(path) for path in wanted}
+    counts = {path: sum(data.count(s) for s in spellings[path]) for path in sorted(wanted)}
+    rarest = min(counts, key=counts.__getitem__)
+    if not counts[rarest]:
+        return False
+    moment = now or utc_now()
     oldest = moment - timedelta(seconds=window_s)
     newest = moment + timedelta(seconds=FUTURE_SKEW_SECONDS)
-    for row in _read_tail(activity_path(workspace), GATE_TAIL_BYTES):
-        if not _usable(row) or row["event"] != "scan":
+    floor = oldest - timedelta(seconds=FUTURE_SKEW_SECONDS)
+    for line in _lines_naming(data, spellings[rarest]):
+        if b'"scan"' not in line or not all(any(s in line for s in spellings[p]) for p in wanted):
+            continue
+        try:
+            row = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            continue
+        if not isinstance(row, dict) or not _usable(row) or row["event"] != "scan":
             continue
         written = _parse_ts(row["ts"])
-        if written is not None and oldest <= written <= newest and wanted <= set(row["files"]):
+        assert written is not None  # _usable checked it
+        if written < floor:
+            break
+        if oldest <= written <= newest and wanted <= set(row["files"]):
             return True
     return False
 
@@ -412,7 +448,7 @@ def report(workspace: Any, now: Optional[datetime] = None) -> Dict[str, Any]:
     return {
         "schema": SCHEMA,
         "source": "aegis status --compliance",
-        "checked_at": _stamp(now or _utc_now()),
+        "checked_at": _stamp(now or utc_now()),
         "scope": {
             "workspace": str(root),
             "hosts": sorted(per_host),

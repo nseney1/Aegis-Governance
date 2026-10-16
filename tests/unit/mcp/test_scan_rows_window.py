@@ -9,12 +9,13 @@ prerequisites (a) and (c)).
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
 import pytest
 
-import aegis_mcp.handlers.core as core
+from aegis_core import scan_compliance
 import aegis_mcp.server as server
 from aegis_core.workspace.binding import Registry
 from aegis_core.yaml_engine.serializer import dump_frontmatter
@@ -36,12 +37,21 @@ def ws(tmp_path, monkeypatch) -> Path:
     return root.resolve()
 
 
+class _Clock:
+    def __init__(self) -> None:
+        self.now = datetime(2026, 10, 16, 12, 0, 0, tzinfo=timezone.utc)
+
+    def advance(self, seconds: float) -> None:
+        self.now += timedelta(seconds=seconds)
+
+
 @pytest.fixture
 def clock(monkeypatch):
-    """aegis-mcp's monotonic clock, moved by hand."""
-    now = [1000.0]
-    monkeypatch.setattr(core, "_clock", lambda: now[0])
-    return now
+    """The wall clock the activity rows are stamped with, moved by hand. aegis-mcp's
+    re-record decision must read the same clock: the hook compares the rows' stamps."""
+    moved = _Clock()
+    monkeypatch.setattr(scan_compliance, "utc_now", lambda: moved.now)
+    return moved
 
 
 def _initialize(client="claude-code"):
@@ -73,16 +83,40 @@ def test_a_rescan_writes_a_new_row_after_half_the_default_window(ws, monkeypatch
     _pin(monkeypatch, ws)
     session = _initialize()
     _scan(["src/a.py"])
-    clock[0] += 1799
+    clock.advance(1799)
     _scan(["src/a.py"], 2)
     assert len(_rows(ws)) == 1
-    clock[0] += 1
+    clock.advance(1)
     _scan(["src/a.py"], 3)
     rows = _rows(ws)
     assert [(r["event"], r["session"], r["files"]) for r in rows] == [("scan", session, ["src/a.py"])] * 2
-    clock[0] += 10
+    clock.advance(10)
     _scan(["./src/a.py"], 4)
     assert len(_rows(ws)) == 2  # the new row restarts the half window
+
+
+def test_a_rescan_after_a_suspend_writes_a_row_the_hook_counts(ws, monkeypatch, clock):
+    """A laptop sleeps for hours: the wall clock jumps, a monotonic clock would not. The
+    old row has left the window, so the scan the hook asks for must write a new one."""
+    _pin(monkeypatch, ws)
+    _initialize()
+    _scan(["src/a.py"])
+    clock.advance(3 * 3600)
+    assert not scan_compliance.scan_covers(ws, ["src/a.py"], 3600, clock.now)
+    _scan(["src/a.py"], 2)
+    assert len(_rows(ws)) == 2
+    assert scan_compliance.scan_covers(ws, ["src/a.py"], 3600, clock.now)
+
+
+def test_a_wall_clock_set_back_writes_a_row_again(ws, monkeypatch, clock):
+    """The previous row now lies in the future, where the hook does not count it."""
+    _pin(monkeypatch, ws)
+    _initialize()
+    _scan(["src/a.py"])
+    clock.advance(-2 * 3600)
+    _scan(["src/a.py"], 2)
+    assert len(_rows(ws)) == 2
+    assert scan_compliance.scan_covers(ws, ["src/a.py"], 3600, clock.now)
 
 
 def test_the_half_window_follows_jit_scan_window_s(ws, monkeypatch, clock):
@@ -90,10 +124,10 @@ def test_the_half_window_follows_jit_scan_window_s(ws, monkeypatch, clock):
     _pin(monkeypatch, ws)
     _initialize()
     _scan(["src/a.py"])
-    clock[0] += 59
+    clock.advance(59)
     _scan(["src/a.py"], 2)
     assert len(_rows(ws)) == 1
-    clock[0] += 1
+    clock.advance(1)
     _scan(["src/a.py"], 3)
     assert len(_rows(ws)) == 2
 

@@ -193,6 +193,61 @@ def test_an_edit_through_a_symlink_is_gated_on_its_target(ws, capsys):
     assert _run(capsys, "claude-code", claude(ws, "Edit", {"file_path": str(ws / "src" / "link.py")}))[0] == 0
 
 
+# A broken rule file makes every scan fail closed (no scan row), so blocking its repair
+# would leave the gate unsatisfiable: edits of the rules tree are recorded, never blocked.
+
+@pytest.mark.parametrize("host", ["claude-code", "codex-cli"])
+def test_an_unscanned_edit_of_a_rule_file_is_recorded_not_blocked(ws, capsys, host):
+    rule = ws / ".aegis" / "rules" / "traps" / "trap-x.md"
+    if host == "claude-code":
+        payload = claude(ws, "Edit", {"file_path": str(rule), "old_string": "a", "new_string": "b"})
+    else:
+        payload = codex(ws, "apply_patch", "*** Begin Patch\n*** Update File: .aegis/rules/traps/trap-x.md\n@@\n-a\n+b\n*** End Patch\n")
+    assert _run(capsys, host, payload) == (0, "", "")
+    assert _events(ws) == [("scan_gate", host, "record", {"paths": 1})]
+
+
+def test_a_scanned_rule_edit_passes(ws, capsys):
+    _fresh_row(ws, [".aegis/rules/traps/trap-x.md"])
+    payload = claude(ws, "Write", {"file_path": str(ws / ".aegis" / "rules" / "traps" / "trap-x.md")})
+    assert _run(capsys, "claude-code", payload) == (0, "", "")
+    assert _events(ws) == [("scan_gate", "claude-code", "pass", {"paths": 1})]
+
+
+def test_a_patch_of_a_rule_and_a_source_file_is_gated_on_the_source_file(ws, capsys):
+    patch = ("*** Begin Patch\n*** Update File: .aegis/rules/traps/trap-x.md\n@@\n-a\n+b\n"
+             "*** Update File: src/a.py\n@@\n-a\n+b\n*** End Patch\n")
+    code, out, err = _run(capsys, "codex-cli", codex(ws, "apply_patch", patch))
+    assert (code, out) == (2, "")
+    assert err == "aegis: call aegis_scan with src/a.py before editing (or run: aegis scan src/a.py)\n"
+    _fresh_row(ws, ["src/a.py"])
+    assert _run(capsys, "codex-cli", codex(ws, "apply_patch", patch)) == (0, "", "")
+    assert [e[2] for e in _events(ws)] == ["block", "record"]
+
+
+@pytest.mark.parametrize("name", [".aegis/config.json", ".aegis/rulesx/a.md", "rules/a.md", "src/rules/a.md"])
+def test_other_paths_near_the_rules_tree_are_still_gated(ws, capsys, name):
+    assert _run(capsys, "claude-code", claude(ws, "Write", {"file_path": str(ws / name)}))[0] == 2
+
+
+def test_a_broken_rule_file_can_be_repaired_through_the_hook(ws, home):
+    """The deadlock: the scan of the broken rule fails closed and records nothing, and the
+    Edit that would repair it must still be allowed."""
+    broken = ws / ".aegis" / "rules" / "traps" / "trap-broken.md"
+    broken.parent.mkdir(parents=True, exist_ok=True)
+    broken.write_text("---\nid: [unclosed\n---\nbody\n", encoding="utf-8")
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(REPO), env.get("PYTHONPATH", "")) if p)
+    env.pop("AEGIS_WORKSPACE", None)
+    scan = subprocess.run([sys.executable, "-m", "aegis_cli", "scan", ".aegis/rules/traps/trap-broken.md"],
+                          cwd=str(ws), env=env, capture_output=True, timeout=60)
+    assert scan.returncode == 1 and b"cannot be served" in scan.stderr
+    assert not scan_compliance.activity_path(ws).exists()
+    payload = claude(ws, "Edit", {"file_path": str(broken), "old_string": "[unclosed", "new_string": "trap-broken"})
+    proc = _cli(["pre-tool", "--host", "claude-code"], payload, ws, home)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, b"", b"")
+
+
 # ── destructive-command guard ────────────────────────────────────────────────
 
 @pytest.mark.parametrize("host,payload_of,expected", [
@@ -378,40 +433,112 @@ def test_the_cli_exits_0_silently_for_an_unknown_event_or_host(ws, home, args):
     assert (proc.returncode, proc.stdout, proc.stderr) == (0, b"", b"")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "deferred: aegis_cli/cli.py (outside this lane) attaches a workspace before any command runs, and "
-    "from $HOME that fails with exit 1; `hook run` must be dispatched before _attach_workspace"))
+@pytest.fixture
+def legacy_dir(tmp_path) -> Path:
+    path = tmp_path / "legacy"
+    (path / ".soma").mkdir(parents=True)
+    return path
+
+
+@pytest.mark.parametrize("where", ["home", "legacy", "plain"])
+def test_the_cli_decides_from_the_payload_whatever_the_process_cwd(ws, home, legacy_dir, tmp_path, where):
+    """User-scope hooks fire from any cwd: $HOME (the global agy hooks file runs outside
+    every repository, LIVE), a directory with an unmigrated .soma/, or any plain one. The
+    workspace comes from the payload; the CLI's own workspace attachment must not run."""
+    cwd = {"home": home, "legacy": legacy_dir, "plain": tmp_path}[where]
+    proc = _cli(["pre-tool", "--host", "antigravity"], agy(ws, "run_command", {"CommandLine": "rm -rf ~"}), cwd, home)
+    assert (proc.returncode, proc.stdout) == (75, b"")
+    assert proc.stderr.decode().startswith("aegis: blocked rm-recursive-dangerous")
+    proc = _cli(["pre-tool", "--host", "claude-code"], claude(ws, "Bash", {"command": "git push --force"}), cwd, home)
+    assert (proc.returncode, proc.stdout) == (2, b"")
+    assert proc.stderr.decode().startswith("aegis: blocked git-push-force")
+
+
 def test_the_cli_is_silent_from_the_home_directory(ws, home):
-    """User-scope hooks fire everywhere, $HOME included: the hook resolves its workspace
-    from the payload and must not depend on the CLI's own workspace attachment."""
     proc = _cli(["pre-tool", "--host", "claude-code"], claude(ws, "Bash", {"command": "ls"}, cwd=home), home, home)
     assert (proc.returncode, proc.stdout, proc.stderr) == (0, b"", b"")
 
 
-# The handler in a fresh interpreter, as a hook runs it. Until `aegis hook run` is
-# dispatched before the CLI builds its full parser (the cli.py deferral above), the
-# registered `aegis hook run` form adds that build (about 125 ms on the author's machine).
-_HANDLER = (
-    "import os, sys\n"
-    "from aegis_cli.hooks.pretool import run_pre_tool\n"
-    "sys.exit(run_pre_tool(sys.argv[1], sys.stdin.buffer, os.environ))\n"
-)
+def test_an_aegis_workspace_pin_at_an_ungoverned_directory_is_a_silent_no_op(ws, home, tmp_path):
+    """The pin takes part in the resolution as it does for aegis-mcp: an ungoverned pin
+    governs nothing, so the hook allows silently instead of failing in the CLI."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    proc = _cli(["pre-tool", "--host", "claude-code"], claude(ws, "Bash", {"command": "git push --force"}), ws, home,
+                {"AEGIS_WORKSPACE": str(plain)})
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, b"", b"")
 
 
-def test_hook_run_latency_p95_is_under_300_ms(ws, home):
-    """One Python start per matching tool call (v4.1 §2 Behaviour 3); the expensive path:
-    an edit in a governed repository with a scan row to find and an event to append."""
-    scan_compliance.record(ws, "scan", host="claude-code", session="s-1", files=["src/a.py"])  # now
-    data = json.dumps(claude(ws, "Write", {"file_path": str(ws / "src" / "a.py")})).encode("utf-8")
+@pytest.mark.parametrize("args", [
+    ["pre-tool", "--host"],
+    ["pre-tool", "--host", "claude-code", "--bogus"],
+    ["pre-tool", "extra", "--host", "claude-code"],
+    ["pre-tool", "--host", "claude-code", "--host", "codex-cli"],
+    ["pre-tool", "--host", "claude-code", "--json"],
+    ["-x"],
+])
+def test_a_malformed_invocation_exits_0_silently(ws, home, args):
+    """A usage error is exit 2 in argparse, which Claude Code and Codex read as a block."""
+    proc = _cli(args, claude(ws, "Bash", {"command": "git push --force"}), ws, home)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, b"", b"")
+
+
+def test_the_host_may_be_given_as_one_word(ws, home, tmp_path):
+    proc = _cli(["--host=claude-code", "pre-tool"], claude(ws, "Bash", {"command": "git push --force"}), tmp_path, home)
+    assert (proc.returncode, proc.stdout) == (2, b"")
+
+
+def test_hook_run_help_is_still_the_cli_help(ws, home):
+    proc = _cli(["--help"], b"", home, home)
+    assert proc.returncode == 0 and b"--host" in proc.stdout and proc.stderr == b""
+
+
+def test_a_global_option_before_the_command_takes_the_full_cli_path(ws, home):
+    """`aegis --plain hook run ...` is not the registered form: the CLI parses it and
+    attaches the cwd's workspace first, then runs the same handler."""
+    env_cmd = [sys.executable, "-m", "aegis_cli", "--plain", "hook", "run", "pre-tool", "--host", "claude-code"]
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
     env["PYTHONPATH"] = os.pathsep.join(p for p in (str(REPO), env.get("PYTHONPATH", "")) if p)
+    for key in ("AEGIS_WORKSPACE", "CLAUDE_PROJECT_DIR"):
+        env.pop(key, None)
+    data = json.dumps(claude(ws, "Bash", {"command": "git push --force"})).encode("utf-8")
+    proc = subprocess.run(env_cmd, input=data, cwd=str(ws), env=env, capture_output=True, timeout=60)
+    assert (proc.returncode, proc.stdout) == (2, b"")
+    assert proc.stderr.decode().startswith("aegis: blocked git-push-force")
+
+
+def _busy_log(ws: Path, covering) -> None:
+    """A large activity log, all of it inside the window: the scan row naming
+    ``covering`` (when given) about 4 MiB from the end, then a busy hour of other scans."""
+    path = scan_compliance.activity_path(ws)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc) - timedelta(seconds=1800)
+    row = {"v": 1, "ts": stamp.strftime("%Y-%m-%dT%H:%M:%SZ"), "event": "scan", "host": "claude-code",
+           "session": "s-1", "files": [covering or "src/other.py"]}
+    lines = [json.dumps(row, separators=(",", ":"))]
+    for i in range(27000):
+        other = dict(row, session=f"s-{i % 50}", files=[f"src/pkg{i % 97}/module_{i}.py", f"tests/test_{i}.py"])
+        lines.append(json.dumps(other, separators=(",", ":")))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("covered", [True, False], ids=["deep-scan-row", "no-scan-row"])
+def test_hook_run_latency_p95_is_under_300_ms(ws, home, covered):
+    """One Python start per matching tool call (v4.1 §2 Behaviour 3), timed as the hosts
+    run it (`aegis hook run pre-tool --host claude-code`, payload on stdin) on the
+    expensive path: an edit in a governed repository whose activity log is a full, busy
+    tail (the covering scan row deep in it, or none), and an event to append."""
+    _busy_log(ws, "src/a.py" if covered else None)
+    assert scan_compliance.activity_path(ws).stat().st_size > 3.5 * 1024 * 1024
+    data = json.dumps(claude(ws, "Write", {"file_path": str(ws / "src" / "a.py")})).encode("utf-8")
+    expected = (0, b"", b"") if covered else (2, b"", b"aegis: call aegis_scan with src/a.py before editing "
+                                                      b"(or run: aegis scan src/a.py)\n")
 
     def once() -> float:
         started = time.perf_counter()
-        proc = subprocess.run([sys.executable, "-c", _HANDLER, "claude-code"], input=data, cwd=str(ws), env=env,
-                              capture_output=True, timeout=60)
+        proc = _cli(["pre-tool", "--host", "claude-code"], data, ws, home)
         elapsed = time.perf_counter() - started
-        assert (proc.returncode, proc.stdout) == (0, b""), proc.stderr
+        assert (proc.returncode, proc.stdout, proc.stderr) == expected
         return elapsed
 
     once()  # warm the OS file cache
@@ -420,4 +547,4 @@ def test_hook_run_latency_p95_is_under_300_ms(ws, home):
     if p95 > 1.0:
         pytest.skip(f"this machine is too slow to judge the 300 ms budget: p95 {p95 * 1000:.0f} ms")
     assert p95 < 0.3, f"p95 {p95 * 1000:.0f} ms over the 300 ms budget: {[round(t * 1000) for t in timings]}"
-    assert [r["result"] for r in events.read(ws, "scan_gate").rows] == ["pass"] * 13
+    assert [r["result"] for r in events.read(ws, "scan_gate").rows] == ["pass" if covered else "block"] * 13

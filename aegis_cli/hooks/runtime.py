@@ -3,7 +3,9 @@ and the isolated safety gate.
 
 The commit gate itself is `aegis check --hook`, which the installed hook runs.
 `aegis hook run pre-tool --host <h>` is what the per-host hook registrations call
-(aegis_cli/hooks/pretool.py). Agent-side lifecycle phases (pre-invocation,
+(aegis_cli/hooks/pretool.py); ``cli.main`` dispatches that form before it parses or
+attaches a workspace, so the parser below serves its help and a form with global
+options first (``aegis --plain hook run ...``). Agent-side lifecycle phases (pre-invocation,
 session-close, post-session, ...) were cut in v4 (ADR 0005 D15). `safety-gate`
 stays as a manual check of one command (it fails closed: it asks).
 """

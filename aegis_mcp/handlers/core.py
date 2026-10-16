@@ -1,9 +1,9 @@
 """aegis_scan: the rules that apply to the files about to change."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 import sys
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from aegis_core import hosts
@@ -11,15 +11,15 @@ from aegis_core.scan import scan, scan_user_layer
 from aegis_core.skills.slots import render_scan_result
 from aegis_mcp.registry import _STATUS_FAIL, DEFAULT_CLIENT_PLATFORM, NOT_GOVERNED_MESSAGE, _get_workspace
 
-# (workspace root, session, files) -> when its last scan row was written (_clock seconds).
-# A rescan writes again once that row is older than half of jit.scan_window_s: the
-# scan-before-edit hook only counts rows inside the window, and aegis-mcp outlives a
-# Claude /clear, so a once-per-process row would leave a long session blocked for good.
-_RECORDED: Dict[Tuple[str, str, Tuple[str, ...]], float] = {}
-
-
-def _clock() -> float:
-    return time.monotonic()
+# (workspace root, session, files) -> the stamp of its last scan row. A rescan writes
+# again once that row is older than half of jit.scan_window_s: the scan-before-edit hook
+# only counts rows inside the window, and aegis-mcp outlives a Claude /clear, so a
+# once-per-process row would leave a long session blocked for good. The age is read on
+# the rows' own wall clock (scan_compliance.utc_now), never a monotonic one: that stops
+# during a suspend, and after a night asleep the row would have left the hook's window
+# while a monotonic age still said it was fresh, so the scan the hook asks for would
+# write nothing.
+_RECORDED: Dict[Tuple[str, str, Tuple[str, ...]], datetime] = {}
 
 
 def _slot_profile(host: Any) -> str:
@@ -58,12 +58,14 @@ def _record_scan(workspace: Any, args: dict, files: Optional[List[str]]) -> None
     key = (str(workspace.root), str(session), paths)
     if not paths:
         return
-    now = _clock()
     last = _RECORDED.get(key)
-    if last is not None and now - last < scan_window_s(workspace.root) / 2:
-        return
+    if last is not None:
+        age = scan_compliance.utc_now() - last
+        # A negative age (the clock was set back) puts the row in the hook's future.
+        if timedelta(0) <= age < timedelta(seconds=scan_window_s(workspace.root) / 2):
+            return
     try:
-        scan_compliance.record(
+        row = scan_compliance.record(
             workspace, "scan", host=str(args.get("_host") or DEFAULT_CLIENT_PLATFORM), session=str(session),
             files=paths, client={"name": args.get("_client_name") or "", "version": args.get("_client_version") or ""},
             binding=args.get("_binding"), basis=basis,
@@ -71,7 +73,7 @@ def _record_scan(workspace: Any, args: dict, files: Optional[List[str]]) -> None
     except Exception as exc:  # telemetry only: never fail the scan
         print(f"aegis-mcp: scan event not recorded: {exc}", file=sys.stderr)
         return
-    _RECORDED[key] = now
+    _RECORDED[key] = datetime.strptime(row["ts"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
 def _scan_user_layer(args: dict) -> dict:

@@ -23,7 +23,10 @@ a path outside it is not gated.
    activity log, from any host or session (``aegis scan``'s host ``cli`` included), names
    every edited path within ``jit.scan_window_s``. Otherwise Claude and Codex exit 2 with
    ``aegis: call aegis_scan with <paths> before editing (or run: aegis scan <paths>)``;
-   agy only records (exit 0, no output).
+   agy only records (exit 0, no output). Files under the workspace's rules directory
+   (``.aegis/rules/``) are only recorded on every host: one broken rule file makes every
+   scan fail closed and write no row, so blocking its repair would block every edit for
+   good.
 2. **Destructive-command guard** (shell tools): ``command_safety.classify_command``. A
    BLOCK_SET match blocks (2, or 75 on agy) with its reason on stderr; a RECORD_SET match
    is recorded and runs.
@@ -44,12 +47,14 @@ import shlex
 import signal
 import sys
 import time
-from typing import Any, BinaryIO, Dict, Iterator, List, Mapping, Optional, Union
+from types import SimpleNamespace
+from typing import Any, BinaryIO, Dict, Iterator, List, Mapping, Optional, Sequence, Union
 
 from aegis_core import command_safety, events, hook_events, scan_compliance
 from aegis_core.config import env_workspace, scan_window_s
 from aegis_core.workspace.binding import Attested, read_registry, resolve_binding
 from aegis_core.workspace.confinement import confine_path_internal
+from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = [
     "DEADLINE_SECONDS",
@@ -58,6 +63,7 @@ __all__ = [
     "EXIT_ALLOW",
     "EXIT_BLOCK",
     "MAX_PAYLOAD_BYTES",
+    "run_hook_argv",
     "run_hook_run",
     "run_pre_tool",
 ]
@@ -158,12 +164,16 @@ def _scan_gate(call: hook_events.HookCall, environ: Mapping[str, str], now: Opti
     if not edited:
         return _ALLOW
     detail = {"paths": len(edited)}
-    if scan_compliance.scan_covers(root, edited, scan_window_s(root), now):
+    window = scan_window_s(root)
+    if scan_compliance.scan_covers(root, edited, window, now):
         return _Decision(root=root, event="scan_gate", result="pass", detail=detail)
-    if call.host == _AGY:
-        # Exit 0 with stderr has no visible effect on agy (LIVE); a visible deny waits for a probe.
+    rules = PurePath(os.path.relpath(WorkspaceLayout(root).rules_dir, root)).as_posix() + "/"
+    gated = [p for p in edited if not p.startswith(rules)]
+    # Exit 0 with stderr has no visible effect on agy (LIVE); a visible deny waits for a
+    # probe. A rule file stays editable: a broken one makes every scan fail closed.
+    if call.host == _AGY or not gated or scan_compliance.scan_covers(root, gated, window, now):
         return _Decision(root=root, event="scan_gate", result="record", detail=detail)
-    shown = " ".join(shlex.quote(p) for p in edited)
+    shown = " ".join(shlex.quote(p) for p in gated)
     message = f"aegis: call aegis_scan with {shown} before editing (or run: aegis scan {shown})"
     return _Decision(EXIT_BLOCK, message, root, "scan_gate", "block", detail)
 
@@ -216,8 +226,33 @@ def run_pre_tool(
         return EXIT_ALLOW
 
 
+def run_hook_argv(argv: Sequence[str]) -> int:
+    """`aegis hook run [EVENT] [--host HOST | --host=HOST]` as the host registrations call
+    it: ``cli.main`` dispatches here before it builds its parser or attaches a workspace
+    (user-scope hooks fire from any cwd, $HOME included; the workspace comes from the
+    payload). Arguments of any other shape exit 0 silently: argparse's usage error exits 2,
+    which Claude Code and Codex read as a block. Never raises."""
+    try:
+        event = host = None
+        words = list(argv)
+        while words:
+            word = words.pop(0)
+            if word == "--host" and words and host is None:
+                host = words.pop(0)
+            elif word.startswith("--host=") and host is None:
+                host = word[len("--host="):]
+            elif not word.startswith("-") and event is None:
+                event = word
+            else:
+                return EXIT_ALLOW
+        return run_hook_run(SimpleNamespace(event=event, host=host))
+    except BaseException:
+        return EXIT_ALLOW
+
+
 def run_hook_run(args: Any) -> int:
-    """`aegis hook run <event> --host <h>`: the payload is on stdin. Never raises."""
+    """`aegis hook run <event> --host <h>` from parsed arguments: the payload is on stdin.
+    Never raises."""
     try:
         if getattr(args, "event", None) not in EVENTS:
             return EXIT_ALLOW

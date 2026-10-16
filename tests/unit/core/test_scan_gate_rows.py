@@ -143,6 +143,92 @@ def test_only_the_tail_of_a_large_log_is_read(ws: Path, monkeypatch):
     assert not scan_covers(ws, ["src/old.py"], WINDOW, NOW)
 
 
+@pytest.mark.parametrize("ensure_ascii", [True, False])
+def test_a_non_ascii_path_is_covered_however_the_row_spells_it(ws: Path, ensure_ascii):
+    path = ws / ".aegis" / "state" / "activity.jsonl"
+    path.write_text(json.dumps(_row(["src/é ü.py"]), ensure_ascii=ensure_ascii) + "\n", encoding="utf-8")
+    assert scan_covers(ws, ["src/é ü.py"], WINDOW, NOW)
+    assert not scan_covers(ws, ["src/e u.py"], WINDOW, NOW)
+
+
+def test_the_real_writer_rows_are_covered(ws: Path, monkeypatch):
+    monkeypatch.setattr(scan_compliance, "utc_now", lambda: NOW - timedelta(seconds=5))
+    scan_compliance.record(ws, "scan", host="cli", session="c", files=["src/ü.py", 'src/q"uote.py'])
+    assert scan_covers(ws, ["src/ü.py", 'src/q"uote.py'], WINDOW, NOW)
+
+
+def _big_log(ws: Path, rows: int, covering_ago: int, others_ago: int) -> Path:
+    """``rows`` scans of other files after one scan of src/a.py, in the compact form the
+    writer uses (about 4 MiB for 20,000 rows)."""
+    path = ws / ".aegis" / "state" / "activity.jsonl"
+    compact = {"separators": (",", ":")}
+    lines = [json.dumps(_row(["src/a.py"], ago=covering_ago), **compact)]
+    for i in range(rows):
+        lines.append(json.dumps(_row([f"src/pkg{i % 97}/module_{i}.py", f"tests/test_{i}.py"],
+                                     ago=others_ago, session=f"s-{i % 50}"), **compact))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _best_of(times: int, fn) -> float:
+    import time
+
+    best = float("inf")
+    for _ in range(times):
+        started = time.perf_counter()
+        fn()
+        best = min(best, time.perf_counter() - started)
+    return best
+
+
+@pytest.mark.parametrize("others_ago", [10, WINDOW * 3])
+def test_a_full_tail_is_judged_fast(ws: Path, others_ago):
+    """The hook runs on every edit and the log is never rotated: a 4 MiB tail, busy or
+    old, must cost far less than the hook's 300 ms budget (Python start is ~100 ms)."""
+    path = _big_log(ws, 27000, covering_ago=60, others_ago=others_ago)
+    assert path.stat().st_size > 3.5 * 1024 * 1024
+    if others_ago > WINDOW:  # appended in time order: the recent scan comes last
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(_row(["src/a.py"], ago=60)) + "\n")
+    assert scan_covers(ws, ["src/a.py"], WINDOW, NOW)
+    assert not scan_covers(ws, ["src/missing.py"], WINDOW, NOW)
+    elapsed = _best_of(3, lambda: scan_covers(ws, ["src/missing.py"], WINDOW, NOW))
+    assert elapsed < 0.1, f"scan_covers took {elapsed * 1000:.0f} ms on a full tail"
+
+
+def test_a_covering_row_deep_in_a_busy_tail_is_found(ws: Path):
+    _big_log(ws, 27000, covering_ago=1800, others_ago=10)
+    assert scan_covers(ws, ["src/a.py"], WINDOW, NOW)
+    assert scan_covers(ws, ["src/pkg3/module_26484.py", "tests/test_26484.py"], WINDOW, NOW)
+
+
+def test_the_search_from_the_end_stops_at_a_row_older_than_the_window(ws: Path):
+    """Rows are appended in time order, so the first row naming the path that is older
+    than the window (less FUTURE_SKEW_SECONDS of slack for reordered appends) ends the
+    search: a row written before it is outside the window too, in an ordered log."""
+    skew = scan_compliance.FUTURE_SKEW_SECONDS
+    _write(ws, _row(["src/a.py"], ago=10), _row(["src/a.py", "src/b.py"], ago=WINDOW + skew + 1), _row(["src/c.py"], ago=5))
+    assert not scan_covers(ws, ["src/a.py"], WINDOW, NOW)  # behind an old row: never reached
+    assert scan_covers(ws, ["src/c.py"], WINDOW, NOW)
+    _write(ws, _row(["src/a.py"], ago=10), _row(["src/a.py", "src/b.py"], ago=WINDOW + skew), _row(["src/c.py"], ago=5))
+    assert scan_covers(ws, ["src/a.py"], WINDOW, NOW)  # within the slack: the search goes on
+    _write(ws, _row(["src/a.py"], ago=10), _row(["src/b.py"], ago=WINDOW * 2), _row(["src/c.py"], ago=5))
+    assert scan_covers(ws, ["src/a.py"], WINDOW, NOW)  # an old row about other files is skipped
+
+
+def test_a_path_named_outside_the_files_of_a_row_is_not_coverage(ws: Path):
+    _write(ws, _row(["src/x.py"], session="src/a.py"), _row(["src/x.py"], note=["src/a.py"]))
+    assert not scan_covers(ws, ["src/a.py"], WINDOW, NOW)
+
+
+def test_every_wanted_path_is_checked_whichever_is_searched_for(ws: Path):
+    _write(ws, _row(["src/a.py"]), _row(["src/b.py"]), _row(["src/z.py"]))
+    for paths in (["src/a.py", "src/z.py"], ["src/z.py", "src/a.py"], ["src/b.py", "src/a.py"]):
+        assert not scan_covers(ws, paths, WINDOW, NOW)
+    _write(ws, _row(["src/a.py", "src/z.py"]), _row(["src/z.py"]))
+    assert scan_covers(ws, ["src/z.py", "src/a.py"], WINDOW, NOW)
+
+
 def test_scan_covers_reads_only(ws: Path):
     path = _write(ws, _row(["src/a.py"]))
     before = (path.read_bytes(), sorted(p.name for p in (ws / ".aegis" / "state").iterdir()))
