@@ -24,9 +24,8 @@ A new aegis_core module fails here until it is given a layer in CORE_LAYERS.
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, NamedTuple, Optional, Sequence
 
 import pytest
 
@@ -74,8 +73,7 @@ ALLOWED_PACKAGES: Dict[str, Sequence[str]] = {
 }
 
 
-@dataclass(frozen=True)
-class Edge:
+class Edge(NamedTuple):
     source: str  # importing module
     target: str  # imported module (a submodule when `from pkg import submodule`)
     where: str  # path:line
