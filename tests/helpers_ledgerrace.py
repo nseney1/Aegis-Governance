@@ -27,3 +27,16 @@ def append_events(cwd: str, worker: str, count: int, shared_keys, barrier, resul
         results.put((worker, "ok", seqs))
     except BaseException as exc:  # reported to the parent, which fails the test
         results.put((worker, "error", repr(exc)))
+
+
+def merge(cwd: str, sources, barrier, results) -> None:
+    """Wait for every racer, then merge ``sources`` into the shared ledger of ``cwd``.
+    Puts ``(rows written, duplicates)`` or ``("error", repr)`` on ``results``."""
+    from aegis_core.telemetry_engine import ledger
+
+    try:
+        barrier.wait(timeout=60)
+        written, duplicates = ledger.merge_rows(cwd, sources)
+        results.put((len(written), duplicates))
+    except BaseException as exc:  # reported to the parent, which fails the test
+        results.put(("error", repr(exc)))

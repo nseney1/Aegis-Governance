@@ -31,6 +31,7 @@ Readers accept v1 rows (the ``cell``/``rule_id`` + ``signal`` shape of the v3
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -40,7 +41,7 @@ import math
 import os
 from pathlib import Path
 import threading
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from aegis_core.errors import PathTraversalError
 from aegis_core.storage import append_jsonl, ledger_locked, ledger_site, read_jsonl
@@ -58,7 +59,9 @@ __all__ = [
     "append_rows",
     "incomplete",
     "ledger_path",
+    "merge_rows",
     "normalize_rows",
+    "plan_merge",
     "read",
 ]
 
@@ -541,3 +544,103 @@ def append_rows(workspace: Any, rows: List[Dict[str, Any]]) -> List[Dict[str, An
         if new_rows:
             _write(path, new_rows)
         return new_rows
+
+
+# ── Merging the ledgers of several worktrees (v4.2 #7) ───────────────────────
+
+def _identity(row: Mapping[str, Any]) -> Optional[Tuple[str, Any]]:
+    key = row.get("key")
+    return (key, row.get("rule")) if isinstance(key, str) and key else None
+
+
+def _canonical(row: Mapping[str, Any]) -> str:
+    """A row as one string, equal for two rows that differ only in ``seq`` (the merge
+    renumbers it) or in a field one has with no value and the other lacks."""
+    fields = {k: v for k, v in row.items() if k != "seq" and v is not None and v != ""}
+    return json.dumps(fields, sort_keys=True, ensure_ascii=True, default=str)
+
+
+def _order(row: Mapping[str, Any]) -> Tuple[str, str, int]:
+    ts, worktree, seq = row.get("ts"), row.get("worktree"), row.get("seq")
+    return (
+        ts if isinstance(ts, str) else "",
+        worktree if isinstance(worktree, str) else "",
+        seq if type(seq) is int else 0,
+    )
+
+
+def plan_merge(
+    existing: Iterable[Dict[str, Any]], sources: Sequence[Sequence[Dict[str, Any]]],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Which rows of ``sources`` (normalized v2 outcome rows, one list per per-worktree
+    ledger) the ledger holding ``existing`` lacks, in the order they are to be appended,
+    and how many it already has (``(rows to add, duplicates)``).
+
+    - A keyed row is the same row as any other with its ``(key, rule)``: the earliest by
+      ``(ts, worktree, seq)`` is kept, and none that ``existing`` has.
+    - A keyless row is the same as any other with the same canonical row, that is every
+      field but ``seq``. Identical rows that ONE source holds several times are separate
+      events (two triggers in one second), so the shared ledger ends with as many copies
+      as the source with most has, not fewer: only a copy in another source, or of what
+      ``existing`` holds, is dropped. A re-run therefore adds nothing.
+    - What is added is sorted by ``(ts, worktree, seq)``, a missing or unusable field
+      sorting first; rows equal on all three keep their source order.
+    """
+    existing_keys = set()
+    existing_copies: Counter = Counter()
+    for row in existing:
+        identity = _identity(row)
+        if identity is not None:
+            existing_keys.add(identity)
+        else:
+            existing_copies[_canonical(row)] += 1
+
+    ordered: List[Tuple[Tuple[str, str, int], int, int, Dict[str, Any]]] = []
+    most_in_a_source: Counter = Counter()
+    for source_index, rows in enumerate(sources):
+        in_this_source: Counter = Counter()
+        for position, row in enumerate(rows):
+            ordered.append((_order(row), source_index, position, row))
+            if _identity(row) is None:
+                in_this_source[_canonical(row)] += 1
+        for canonical, count in in_this_source.items():
+            most_in_a_source[canonical] = max(most_in_a_source[canonical], count)
+    to_add = {canonical: count - existing_copies[canonical]
+              for canonical, count in most_in_a_source.items() if count > existing_copies[canonical]}
+
+    ordered.sort(key=lambda entry: entry[:3])
+    added: List[Dict[str, Any]] = []
+    duplicates = 0
+    seen = set(existing_keys)
+    for _sort_key, _source, _position, row in ordered:
+        identity = _identity(row)
+        if identity is not None:
+            if identity in seen:
+                duplicates += 1
+                continue
+            seen.add(identity)
+            added.append(row)
+            continue
+        canonical = _canonical(row)
+        if to_add.get(canonical, 0) > 0:
+            to_add[canonical] -= 1
+            added.append(row)
+        else:
+            duplicates += 1
+    return added, duplicates
+
+
+def merge_rows(
+    workspace: Any, sources: Sequence[Sequence[Dict[str, Any]]],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Append to ``workspace``'s ledger the rows of ``sources`` it lacks (``plan_merge``),
+    renumbering ``seq`` after the rows already there; ``(rows written, duplicates)``.
+
+    The ledger is read and written under one hold of the ledger lock, so two merges at
+    once, or a merge and a writer, never add a row twice. Each row keeps the ``worktree``
+    it has; one without gets the asking worktree's, as ``append_rows`` stamps it.
+    """
+    with ledger_locked(workspace) as site:
+        existing, _unusable = normalize_rows(read_jsonl(site.path).rows)
+        added, duplicates = plan_merge(existing, sources)
+        return (append_rows(workspace, added) if added else []), duplicates

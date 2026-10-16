@@ -87,6 +87,8 @@ __all__ = [
     "shared_state_dir",
     "state_dir",
     "workspace_id",
+    "workspace_relative",
+    "worktree_label",
 ]
 
 _O_BINARY = getattr(os, "O_BINARY", 0)
@@ -436,16 +438,27 @@ def _id_of(relative: str) -> str:
     return hashlib.sha256(relative.encode("utf-8", "surrogatepass")).hexdigest()[:_WORKSPACE_ID_LENGTH]
 
 
-def workspace_id(workspace: Any) -> Optional[str]:
-    """The id naming this workspace's shared ledger directory: the first 16 hex characters
-    of the SHA-256 of its POSIX path relative to the git toplevel ("." for the toplevel
-    itself), the same in every worktree of the repository. None outside a work tree."""
+def workspace_relative(workspace: Any) -> Optional[str]:
+    """``workspace``'s POSIX path relative to the git toplevel ("." for the toplevel itself):
+    one spelling for a workspace in every worktree of its repository. None outside a work
+    tree."""
     root = Path(os.fspath(workspace)).resolve()
     top = gitsafe.toplevel(root)
-    if top is None:
-        return None
-    relative = _relative_posix(root, top)
+    return None if top is None else _relative_posix(root, top)
+
+
+def workspace_id(workspace: Any) -> Optional[str]:
+    """The id naming this workspace's shared ledger directory: the first 16 hex characters
+    of the SHA-256 of ``workspace_relative``, the same in every worktree of the repository.
+    None outside a work tree."""
+    relative = workspace_relative(workspace)
     return None if relative is None else _id_of(relative)
+
+
+def worktree_label(top: Any) -> str:
+    """How a work tree's top directory is written in a ledger row's ``worktree``: resolved,
+    POSIX spelling."""
+    return Path(_resolved(Path(os.fspath(top)))).as_posix()
 
 
 def ledger_site(workspace: Any, create: bool = True) -> LedgerSite:
@@ -473,7 +486,7 @@ def ledger_site(workspace: Any, create: bool = True) -> LedgerSite:
     _confined_shared(state, base, create)
     directory = state / _id_of(relative)
     _confined_shared(directory, base, create)
-    return LedgerSite(directory / _LEDGER_FILE, directory / _LEDGER_LOCK, True, Path(_resolved(top)).as_posix())
+    return LedgerSite(directory / _LEDGER_FILE, directory / _LEDGER_LOCK, True, worktree_label(top))
 
 
 @contextmanager

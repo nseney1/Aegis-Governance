@@ -42,6 +42,16 @@ What a plan converts:
   user's changes), or that a printed driver command names: those are left in place and
   reported.
 
+- **Worktree ledgers** (v4.2): in a git repository the ledger is ONE file shared by every
+  worktree (``aegis_core.storage.ledger_site``), so the ledgers the worktrees kept in
+  ``.aegis/state/ledger.jsonl`` before are merged into it: the same workspace's file in
+  every worktree ``git worktree list`` names, deduplicated (a keyed row by ``(key, rule)``,
+  a keyless one by its canonical row), appended in ``(ts, worktree, seq)`` order with a
+  fresh ``seq``, then one epoch row. Those files are read, never changed or removed, so a
+  second run finds nothing to merge; they are re-read when applying, under the ledger
+  lock, so rows appended since the plan are merged too. A source that is a symlink, or
+  inside a symlinked ``.aegis`` or ``.aegis/state``, is reported and not read.
+
 A workspace the upgrade sentinel (aegis_core.workspace.discovery) would still refuse
 after the plan, with nothing to apply, gets a refusal naming what blocks it and how to
 clear it: never "nothing to do".
@@ -64,9 +74,20 @@ import stat
 from typing import Any, Dict, List, Optional, Tuple
 import zlib
 
+from aegis_core import gitsafe
 from aegis_core.errors import PathTraversalError, WorkspaceError
 from aegis_core.rules import is_legacy_key
-from aegis_core.storage import JsonlRead, atomic_write_bytes, atomic_write_text, locked, read_jsonl, state_dir
+from aegis_core.storage import (
+    JsonlRead,
+    atomic_write_bytes,
+    atomic_write_text,
+    ledger_site,
+    locked,
+    read_jsonl,
+    state_dir,
+    workspace_relative,
+    worktree_label,
+)
 from aegis_core.taxonomy import DIR_RULE_TYPES, RULE_TYPE_DIRS, legacy_rule_type
 from aegis_core.workspace.layout import (
     LEGACY_CONFIG_ENTRIES,
@@ -129,6 +150,12 @@ class MigrationPlan:
     ledger_sources: List[str] = field(default_factory=list)
     ledger_rows: List[Dict[str, Any]] = field(default_factory=list)
     ledger_stats: Dict[str, Any] = field(default_factory=dict)
+    # Per-worktree ledgers to merge into the shared one: (worktree label, that worktree's
+    # workspace root) of each that holds a readable ledger, how many rows the shared ledger
+    # lacks, and the report's counts (empty when nothing is to be merged).
+    worktree_sources: List[Tuple[str, Path]] = field(default_factory=list)
+    worktree_pending: int = 0
+    worktree_stats: Dict[str, Any] = field(default_factory=dict)
     config_sources: List[str] = field(default_factory=list)
     config: Optional[Dict[str, Any]] = None
     # Only what the legacy files contribute: apply() merges it into config.json as it is
@@ -163,7 +190,7 @@ class MigrationPlan:
             return False
         return bool(
             self.ledger_sources or self.config_sources or self.moves or self.strips
-            or self.removals or self.already_moved
+            or self.removals or self.already_moved or self.worktree_pending
         )
 
     def _rel(self, path: Path) -> str:
@@ -176,6 +203,7 @@ class MigrationPlan:
             "refusal": self.refusal,
             "root": str(self.root),
             "ledger": dict(self.ledger_stats, sources=self.ledger_sources) if self.ledger_sources else None,
+            "worktree_ledgers": dict(self.worktree_stats) if self.worktree_pending else None,
             "config": self.config if self.pending and (self.config_sources or self.creates_config) else None,
             "config_sources": self.config_sources,
             "user_config": self.user_config,
@@ -204,6 +232,8 @@ class MigrationResult:
     plan: MigrationPlan
     backup: Optional[Path] = None
     written: List[str] = field(default_factory=list)
+    # Rows merged into the shared ledger from the other worktrees' ledgers.
+    merged: int = 0
 
 
 # ── Frontmatter line editing ─────────────────────────────────────────────────
@@ -449,6 +479,130 @@ def _plan_ledger(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     stats["unusable_rows"] = unusable
     result.ledger_rows = converted
     result.ledger_stats = stats
+
+
+@dataclass
+class _WorktreeLedger:
+    """One worktree's own ledger as read for the merge: its usable rows (each with the
+    ``worktree`` it came from) and what could not be used, or why it was not read."""
+
+    label: str
+    workspace: Path
+    path: Path
+    rows: List[Dict[str, Any]] = field(default_factory=list)
+    skipped_lines: int = 0
+    unusable_rows: int = 0
+    problem: Optional[Tuple[str, str, str]] = None  # (unreadable|skipped, path, reason)
+
+
+def _listed_worktrees(root: Path) -> List[Path]:
+    """The work trees ``git worktree list`` names (a bare repository has none)."""
+    for args, sep in ((["worktree", "list", "--porcelain", "-z"], b"\0"), (["worktree", "list", "--porcelain"], b"\n")):
+        try:
+            done = gitsafe.run(args, root)
+        except gitsafe.GitError:
+            return []
+        if done.returncode == 0:  # -z needs git 2.36; older git exits 129 and the second form answers
+            break
+    else:
+        return []
+    paths: List[Path] = []
+    for token in done.stdout.split(sep):
+        if token.startswith(b"worktree "):
+            paths.append(Path(os.fsdecode(token[len(b"worktree "):])))
+        elif token == b"bare" and paths:
+            paths.pop()
+    return paths
+
+
+def _worktree_roots(root: Path) -> List[Tuple[str, Path]]:
+    """(label, workspace root) of ``root`` in every worktree of its repository, this one
+    included, sorted by label; only worktrees whose directory exists. Empty outside git."""
+    top = gitsafe.toplevel(root)
+    relative = workspace_relative(root)
+    if top is None or relative is None:
+        return []
+    found: Dict[str, Path] = {}
+    for tree in [top, *_listed_worktrees(root)]:
+        resolved = Path(os.path.realpath(tree))
+        if not resolved.is_dir():
+            continue  # a worktree whose directory was removed (git calls it prunable)
+        found[worktree_label(resolved)] = resolved if relative == "." else resolved.joinpath(*relative.split("/"))
+    return sorted(found.items())
+
+
+def _read_worktree_ledger(label: str, workspace: Path) -> Optional[_WorktreeLedger]:
+    """The ledger ``workspace`` (the workspace root inside one worktree) keeps, or None when
+    it has none. Read only, and never through a link: another worktree's ``.aegis`` or
+    ``.aegis/state`` is whatever its commits put there."""
+    from aegis_core.telemetry_engine import ledger
+
+    layout = WorkspaceLayout(workspace)
+    source = _WorktreeLedger(label, workspace, layout.ledger_file)
+    for directory in (layout.aegis_dir, layout.state_dir):
+        if directory.is_symlink() or (os.path.lexists(directory) and not _inside(workspace, directory)):
+            why = "is a symlink" if directory.is_symlink() else "resolves outside the workspace"
+            source.problem = ("skipped", directory.as_posix(),
+                              f"{why}; its ledger was not read (aegis migrate reads and writes only inside the workspace)")
+            return source
+    if not os.path.lexists(layout.ledger_file):
+        return None
+    read = read_jsonl(layout.ledger_file)
+    if read.error:
+        source.problem = ("unreadable", layout.ledger_file.as_posix(), read.error)
+        return source
+    rows, unusable = ledger.normalize_rows(read.rows)
+    for row in rows:
+        stamp = row["worktree"] if isinstance(row.get("worktree"), str) and row["worktree"] else label
+        source.rows.append(dict(row, worktree=stamp))
+    source.skipped_lines = read.skipped
+    source.unusable_rows = unusable
+    return source
+
+
+def _plan_worktree_ledgers(result: MigrationPlan, layout: WorkspaceLayout) -> None:
+    from aegis_core.telemetry_engine import ledger
+
+    roots = _worktree_roots(layout.root)
+    if not roots:
+        return  # not in git: the ledger is .aegis/state/ledger.jsonl and nothing is shared
+    try:
+        ledger_site(layout.root, create=False)
+    except PathTraversalError as exc:
+        result.refusal = str(exc)
+        return
+    except OSError as exc:
+        result.refusal = f"cannot use the shared ledger directory: {exc.strerror or exc}"
+        return
+    sources: List[_WorktreeLedger] = []
+    for label, workspace in roots:
+        found = _read_worktree_ledger(label, workspace)
+        if found is None:
+            continue
+        if found.problem is not None:
+            kind, path, reason = found.problem
+            if kind == "unreadable":
+                result.unreadable.append(path)
+            else:
+                result.skipped.append({"path": path, "reason": reason})
+            continue
+        sources.append(found)
+    if not sources:
+        return
+    shared = ledger.read(layout.root)
+    if shared.error:
+        result.refusal = f"cannot merge into the shared ledger: {shared.error}"
+        return
+    added, duplicates = ledger.plan_merge(shared.rows, [source.rows for source in sources])
+    result.worktree_sources = [(source.label, source.workspace) for source in sources]
+    result.worktree_pending = len(added)
+    result.worktree_stats = {
+        "sources": [source.path.as_posix() for source in sources],
+        "rows": len(added),
+        "duplicates": duplicates,
+        "unusable_rows": sum(source.unusable_rows for source in sources),
+        "skipped_lines": sum(source.skipped_lines for source in sources),
+    }
 
 
 def _plan_not_converted(result: MigrationPlan, layout: WorkspaceLayout) -> None:
@@ -869,6 +1023,9 @@ def plan(root: Any) -> MigrationPlan:
         if path.is_symlink():
             result.refusal = f"{result._rel(path)} is a symlink; aegis migrate reads and writes only inside the workspace"
             return result
+    _plan_worktree_ledgers(result, layout)
+    if result.refusal:
+        return result
     _plan_ledger(result, layout)
     _plan_config(result, layout)
     _plan_rules(result, layout)
@@ -913,6 +1070,27 @@ def _remove(path: Path) -> None:
         path.unlink()
 
 
+def _merge_worktree_ledgers(root: Path, sources: List[Tuple[str, Path]]) -> int:
+    """Merge the ledgers ``sources`` name into the shared ledger of ``root``, reading them
+    again now: a row appended since the plan is merged too. Returns the rows written."""
+    from aegis_core.telemetry_engine import ledger
+
+    read: List[_WorktreeLedger] = []
+    for label, workspace in sources:
+        found = _read_worktree_ledger(label, workspace)
+        if found is not None and found.problem is None:
+            read.append(found)
+    written, duplicates = ledger.merge_rows(root, [found.rows for found in read])
+    if written:
+        ledger.append_epoch(root, {
+            "migration": "worktree-ledgers",
+            "sources": sorted(found.label for found in read),
+            "rows": len(written),
+            "duplicates": duplicates,
+        })
+    return len(written)
+
+
 def apply(migration: MigrationPlan) -> MigrationResult:
     """Execute a plan: back up, write the v4 files, then remove what was converted."""
     from aegis_core.config import update_repo_config
@@ -928,6 +1106,7 @@ def apply(migration: MigrationPlan) -> MigrationResult:
     root = layout.root
     try:
         state_dir(root)  # what locked() checks first: a link planted since planning refuses here
+        ledger_site(root, create=False)  # likewise the shared ledger directory, before anything is written
     except PathTraversalError as exc:
         raise MigrationRefused(str(exc)) from exc
     with locked(root):
@@ -970,6 +1149,9 @@ def apply(migration: MigrationPlan) -> MigrationResult:
                 "rows": len(written),
                 "backup": backup.relative_to(root).as_posix(),
             })
+
+        if migration.worktree_pending:
+            result.merged = _merge_worktree_ledgers(root, migration.worktree_sources)
 
         moved: List[_RuleMove] = []
         for move in migration.moves:
