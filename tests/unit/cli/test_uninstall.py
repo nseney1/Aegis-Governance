@@ -219,6 +219,61 @@ class TestSafety:
         assert {"aegis_version", "checked_at", "status"} <= set(payload)
 
 
+class TestRefusalsTheCheckPassMustSee:
+    """A refusal found only while writing came after the hook had already been removed."""
+
+    def _hooked(self, env) -> Path:
+        hooks = env.project / ".git" / "hooks"
+        hooks.mkdir(parents=True)
+        hook = hooks / "pre-commit"
+        hook.write_text("#!/bin/sh\n" + generate_hook_block("/usr/bin/python3"), encoding="utf-8")
+        return hook
+
+    def test_read_only_agents_md_refuses_before_the_hook_is_removed(self, env, capsys):
+        agents = env.project / "AGENTS.md"
+        agents.write_text("# Ours\n", encoding="utf-8")
+        init(env, env.project, "antigravity")
+        hook = self._hooked(env)
+        agents.chmod(0o444)
+        try:
+            before = snapshot(env.project, env.home)
+            assert uninstall(env.project) == 1
+            assert snapshot(env.project, env.home) == before
+            assert _AEGIS_HOOK_START in hook.read_text(encoding="utf-8")
+            err = capsys.readouterr().err
+            assert "read-only" in err and "Nothing was changed." in err
+        finally:
+            agents.chmod(0o644)
+
+    def test_aegis_hook_behind_a_link_outside_the_repository_refuses_everything(self, env, tmp_path, capsys):
+        init(env, env.project, "antigravity")
+        outside = tmp_path / "dotfiles" / "pre-commit"
+        outside.parent.mkdir()
+        outside.write_text("#!/bin/sh\n" + generate_hook_block("/usr/bin/python3"), encoding="utf-8")
+        hooks = env.project / ".git" / "hooks"
+        hooks.mkdir(parents=True)
+        symlink_or_skip(outside, hooks / "pre-commit")
+        before = snapshot(env.project, env.home)
+        outside_before = outside.read_bytes()
+        assert uninstall(env.project) == 1
+        assert snapshot(env.project, env.home) == before
+        assert outside.read_bytes() == outside_before
+        err = capsys.readouterr().err
+        assert "outside the repository" in err and "aegis hook uninstall --force" in err
+
+    def test_a_foreign_hook_behind_a_link_is_left_alone(self, env, tmp_path):
+        init(env, env.project, "antigravity")
+        outside = tmp_path / "dotfiles" / "pre-commit"
+        outside.parent.mkdir()
+        outside.write_text("#!/bin/sh\necho mine\n", encoding="utf-8")
+        hooks = env.project / ".git" / "hooks"
+        hooks.mkdir(parents=True)
+        symlink_or_skip(outside, hooks / "pre-commit")
+        assert uninstall(env.project) == 0
+        assert outside.read_text(encoding="utf-8") == "#!/bin/sh\necho mine\n"
+        assert (hooks / "pre-commit").is_symlink()
+
+
 class TestCommandLine:
     @pytest.mark.parametrize("argv, line", [
         (["uninstall", "--platform", "claude"], "aegis uninstall --platform was removed in v4: use aegis uninstall --host"),

@@ -135,6 +135,141 @@ class TestSeeding:
         assert not (project / "AGENTS.md").exists()
 
 
+class TestSeededRulesAreLintClean:
+    """What init seeds passes the repository's own lint: `aegis check` and the pre-commit
+    hook print nothing about files init just wrote."""
+
+    @pytest.mark.parametrize("preset", ["minimal", "standard", "full"])
+    def test_a_fresh_init_leaves_every_check_clean(self, project, preset):
+        from aegis_core.verification.checkpoint_checks import run_all_checks
+
+        assert run_init(_args(project, rules=preset)) == 0
+        assert run_all_checks(project) == []
+
+    def test_seeded_rules_declare_their_type_and_that_they_target_no_file(self, project):
+        from aegis_core.rules import load_rules
+        from aegis_core.yaml_engine.frontmatter import split_frontmatter
+
+        assert run_init(_args(project, rules="standard")) == 0
+        for rule in load_rules(project).rules:
+            assert rule.ok and rule.type == "persona"
+            assert rule.meta["type"] == "persona" and rule.meta["target_paths"] == []
+            assert rule.target_paths == ()
+            packaged = packaged_rules()[rule.id].read_bytes().decode("utf-8").replace("\r\n", "\n")
+            # The guidance itself is as shipped (a Windows checkout may hold either line ending).
+            assert rule.body.replace("\r\n", "\n") == split_frontmatter(packaged)[2].strip()
+
+    def test_the_output_says_the_seeded_rules_apply_to_no_file_yet(self, project, capsys):
+        assert run_init(_args(project, rules="minimal")) == 0
+        assert "target_paths" in capsys.readouterr().out
+
+    def test_a_crlf_packaged_rule_is_seeded_with_crlf(self, project, tmp_path, monkeypatch):
+        source = tmp_path / "pkg" / "providence.md"
+        source.parent.mkdir()
+        source.write_bytes(b"---\r\nid: providence\r\ndomain: governance\r\n---\r\n# Body\r\n")
+        monkeypatch.setattr("aegis_cli.init.preset_rules", lambda preset: [source])
+        installed = install_rules(tmp_path / "out", preset="minimal", rule_type="persona")
+        assert installed == ["providence"]
+        assert (tmp_path / "out" / "providence.md").read_bytes() == (
+            b"---\r\nid: providence\r\ntype: persona\r\ntarget_paths: []\r\ndomain: governance\r\n"
+            b"---\r\n# Body\r\n")
+
+    def test_a_declared_type_is_replaced_by_the_seeded_one(self, project, tmp_path, monkeypatch):
+        source = tmp_path / "pkg" / "testing.md"
+        source.parent.mkdir()
+        source.write_bytes(b"---\nid: testing\ntype: trap\ntarget_paths: tests/**\n---\nBody\n")
+        monkeypatch.setattr("aegis_cli.init.preset_rules", lambda preset: [source])
+        install_rules(tmp_path / "out", preset="minimal", rule_type="persona")
+        assert (tmp_path / "out" / "testing.md").read_bytes() == (
+            b"---\nid: testing\ntype: persona\ntarget_paths: tests/**\n---\nBody\n")
+
+
+def _tree(*roots: Path) -> dict:
+    out = {}
+    for root in roots:
+        for dirpath, dirs, files in os.walk(root):
+            for name in dirs + files:
+                p = Path(dirpath, name)
+                out[str(p)] = ("link", os.readlink(p)) if p.is_symlink() else (
+                    None if p.is_dir() else p.read_bytes())
+    return out
+
+
+class TestHookRefusal:
+    """A pre-commit hook init cannot safely write (a link out of the repository, a dangling
+    link, a broken Aegis block) stops init before anything is written, with the real reason;
+    it was reported as 'skipped (not a git repository)' with status ok."""
+
+    @pytest.fixture
+    def hooks(self, project):
+        hooks = project / ".git" / "hooks"
+        hooks.mkdir(parents=True)
+        return hooks
+
+    def _refused(self, project, capsys, *flags, message):
+        home = Path.home()
+        before = _tree(project, home)
+        assert run_init(_args(project, *flags, hooks=True)) == 1
+        assert _tree(project, home) == before
+        err = capsys.readouterr().err
+        assert message in err and "--no-hooks" in err and "Nothing was written." in err
+        assert "Use --force" not in err  # init's --force does not apply to the hook
+        return err
+
+    def test_a_hook_linked_outside_the_repository(self, project, hooks, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        outside = tmp_path / "dotfiles" / "pre-commit"
+        outside.parent.mkdir()
+        outside.write_bytes(b"#!/bin/sh\necho shared\n")
+        symlink_or_skip(outside, hooks / "pre-commit")
+        err = self._refused(project, capsys, message="outside the repository")
+        assert "aegis hook install --force" in err
+        assert outside.read_bytes() == b"#!/bin/sh\necho shared\n"
+
+    def test_a_dangling_hook_link(self, project, hooks, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        symlink_or_skip(tmp_path / "gone", hooks / "pre-commit")
+        self._refused(project, capsys, message="dangling")
+
+    def test_an_unterminated_aegis_block(self, project, hooks, capsys):
+        (hooks / "pre-commit").write_bytes(b"#!/bin/sh\n# >>> aegis pre-commit >>>\necho half\n")
+        self._refused(project, capsys, message="unterminated")
+
+    def test_a_dry_run_reports_it_too(self, project, hooks, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        symlink_or_skip(tmp_path / "gone", hooks / "pre-commit")
+        self._refused(project, capsys, "--dry-run", message="dangling")
+
+    def test_json_reports_refused_not_ok(self, project, hooks, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        symlink_or_skip(tmp_path / "gone", hooks / "pre-commit")
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--rules", "minimal"]) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "refused"
+        assert any("dangling" in e for e in payload["errors"])
+
+    def test_no_hooks_sets_up_everything_else(self, project, hooks, tmp_path):
+        from conftest import symlink_or_skip
+
+        outside = tmp_path / "dotfiles" / "pre-commit"
+        outside.parent.mkdir()
+        outside.write_bytes(b"#!/bin/sh\n")
+        symlink_or_skip(outside, hooks / "pre-commit")
+        assert run_init(_args(project, hooks=False)) == 0
+        assert (project / "AGENTS.md").is_file()
+        assert outside.read_bytes() == b"#!/bin/sh\n"
+
+    def test_outside_a_git_repository_the_hook_is_skipped(self, project, capsys):
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--rules", "minimal"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert {a["target"]: a["result"] for a in payload["actions"]}["pre-commit hook"] == \
+            "skipped (not a git repository)"
+
+
 # ── Prompt, dry run, output ──────────────────────────────────────────────────
 
 

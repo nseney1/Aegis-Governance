@@ -273,6 +273,56 @@ class TestRefusalsWriteNothing:
         assert not (tmp_path / "planted.json").exists()
 
 
+class TestRefusalsTheCheckPassMustSee:
+    """Refusals that only the write used to notice: init had already written .aegis/,
+    AGENTS.md, the registry and a config backup when it stopped."""
+
+    def _refused(self, env, capsys, *flags, message):
+        before = snapshot(env.project, env.home)
+        assert init(env, *flags) == 1
+        assert snapshot(env.project, env.home) == before
+        assert env.runner.calls == []
+        err = capsys.readouterr().err
+        assert message in err and "Nothing was written." in err
+
+    def test_read_only_antigravity_config(self, env, capsys):
+        cfg = env.home / ".gemini" / "config" / "mcp_config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(json.dumps({"mcpServers": {"x": {"env": {"API_KEY": "k"}}}}), encoding="utf-8")
+        cfg.chmod(0o444)
+        try:
+            self._refused(env, capsys, "--host", "codex-cli,antigravity", message="read-only")
+        finally:
+            cfg.chmod(0o644)
+
+    def test_read_only_agents_md(self, env, capsys):
+        agents = env.project / "AGENTS.md"
+        agents.write_text("# Team guide\n", encoding="utf-8")
+        agents.chmod(0o444)
+        try:
+            self._refused(env, capsys, "--host", "antigravity", message="read-only")
+        finally:
+            agents.chmod(0o644)
+
+    def test_config_that_cannot_be_written_back(self, env, capsys):
+        cfg = env.home / ".gemini" / "config" / "mcp_config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_bytes(b'{"mcpServers": {"x": {"command": "\\ud800"}}}')
+        self._refused(env, capsys, "--host", "antigravity", message="surrogate")
+
+    def test_dry_run_reports_the_refusal(self, env, capsys):
+        agents = env.project / "AGENTS.md"
+        agents.write_text("# Team guide\n", encoding="utf-8")
+        agents.chmod(0o444)
+        try:
+            before = snapshot(env.project, env.home)
+            assert main(["init", "--workspace", str(env.project), "--dry-run", "--no-hooks"]) == 1
+            assert snapshot(env.project, env.home) == before
+            assert "read-only" in capsys.readouterr().err
+        finally:
+            agents.chmod(0o644)
+
+
 class TestDryRunAndFailures:
     def test_dry_run_writes_nothing_and_runs_no_host_cli(self, env, capsys):
         before = snapshot(env.project, env.home)

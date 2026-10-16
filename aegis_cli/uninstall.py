@@ -23,6 +23,7 @@ from aegis_cli.init import (
     RemovedOption,
     Step,
     Report,
+    hook_refusal,
 )
 from aegis_cli.install_hosts import (
     REGISTRY_LABEL,
@@ -73,6 +74,9 @@ def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, d
     actions: List[Step] = []
     hosts = explicit if explicit is not None else _recorded_hosts(root, home, report)
 
+    refusal = hook_refusal(root, removing=True)
+    if refusal:
+        raise InstallError(f"pre-commit hook: {refusal}.")
     removed = uninstall_hook(project_root=root, dry_run=dry_run)
     actions.append(Step("pre-commit hook", "removed" if removed else "absent"))
     actions.append(Step(AGENTS_FILE, remove_managed_block(

@@ -22,7 +22,9 @@ are (BOM included).
 **MCP registration** uses each host's row in :mod:`aegis_core.hosts`: a native CLI
 (``codex mcp add``, ``claude mcp add --scope user``) run as an argv with no shell, or a
 JSON merge into the host's config file (Antigravity's ``~/.gemini/config/mcp_config.json``),
-whose previous bytes are first copied to ``~/.aegis/backups/<UTC stamp>/``.
+whose previous bytes are first copied, owner-only, to ``~/.aegis/backups/<UTC stamp>/``.
+Host CLIs and ``aegis-mcp`` are looked up only in absolute ``PATH`` entries, never in
+the current directory (the repository being set up).
 The server is always registered as ``aegis``, with an absolute command and the env
 ``AEGIS_CLIENT=<host id>`` (plus ``AEGIS_WORKSPACE`` only for an explicit pin).
 Unregistering removes ``aegis`` and the legacy ``soma`` entry and nothing else.
@@ -58,7 +60,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -165,12 +166,34 @@ def _is_read_only(path: Path) -> bool:
     return not (mode & 0o222) or not os.access(path, os.W_OK)
 
 
-def _replace(path: Path, expected: Optional[bytes], data: bytes) -> None:
-    """Atomically write ``data`` if ``path`` still holds ``expected`` (None: still missing)."""
+def _writable_dir(path: Path, *, creating: bool) -> None:
+    """Refuse when the directory that holds (or will hold) ``path`` cannot take a new file:
+    the atomic write creates its temporary file there, and a missing directory is made
+    under the nearest one that exists."""
+    parent = path.parent
+    while not os.path.lexists(parent) and parent.parent != parent:
+        parent = parent.parent
+    if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
+        raise InstallError(f"{path}: cannot be {'created' if creating else 'replaced'} ({parent} is not a "
+                           "writable directory); left unchanged")
+
+
+def _preflight(path: Path, expected: Optional[bytes]) -> None:
+    """Every check a write of ``path`` makes before it changes a byte. A dry run (init's
+    check pass) runs exactly these, so whatever the write would refuse is refused first."""
     if _check_target(path) is not None and _is_read_only(path):
         raise InstallError(f"{path}: is read-only; left unchanged. Make it writable, then re-run.")
+    _writable_dir(path, creating=expected is None)
     if _read(path) != expected:
         raise InstallError(f"{path}: changed while Aegis was updating it; left unchanged. Re-run.")
+
+
+def _replace(path: Path, expected: Optional[bytes], data: bytes, *, dry_run: bool = False) -> None:
+    """Atomically write ``data`` if ``path`` still holds ``expected`` (None: still missing);
+    with ``dry_run`` only check that it could."""
+    _preflight(path, expected)
+    if dry_run:
+        return
     try:
         atomic_write_bytes(path, data)
     except OSError as exc:
@@ -279,8 +302,7 @@ def write_managed_block(path: Union[str, Path], block_id: str, text: str, *, for
     if raw is None:
         if not create:
             return "absent"
-        if not dry_run:
-            _replace(path, None, "".join(_render(block_id, text, "\n")).encode("utf-8"))
+        _replace(path, None, "".join(_render(block_id, text, "\n")).encode("utf-8"), dry_run=dry_run)
         return "created"
     content = _decode(path, raw)
     eol = "\r\n" if "\r\n" in content else "\n"
@@ -300,8 +322,7 @@ def write_managed_block(path: Union[str, Path], block_id: str, text: str, *, for
             return "unchanged"
         new_content = "".join(lines[:block.begin] + new_block + lines[block.end + 1:])
         status = "updated"
-    if not dry_run:
-        _replace(path, raw, new_content.encode("utf-8"))
+    _replace(path, raw, new_content.encode("utf-8"), dry_run=dry_run)
     return status
 
 
@@ -328,13 +349,14 @@ def remove_managed_block(path: Union[str, Path], block_id: str, *, force: bool =
         start -= 1
     remaining = "".join(lines[:start] + lines[block.end + 1:])
     if delete_if_empty and remaining == "":
+        _preflight(path, raw)
         if not dry_run:
-            if _read(path) != raw:
-                raise InstallError(f"{path}: changed while Aegis was updating it; left unchanged. Re-run.")
-            path.unlink()
+            try:
+                path.unlink()
+            except OSError as exc:
+                raise InstallError(f"{path}: cannot be deleted ({exc.strerror or exc}); left unchanged") from exc
         return "deleted"
-    if not dry_run:
-        _replace(path, raw, remaining.encode("utf-8"))
+    _replace(path, raw, remaining.encode("utf-8"), dry_run=dry_run)
     return "removed"
 
 
@@ -377,6 +399,14 @@ def _load_json_object(path: Path) -> Tuple[Optional[bytes], Dict[str, Any]]:
         raise InstallError(f"{path}: {message}; left unchanged. Fix the file, then re-run.") from exc
     if not isinstance(data, dict):
         raise InstallError(f"{path}: must hold a JSON object; left unchanged")
+    try:
+        _dump(data)
+    except UnicodeEncodeError as exc:
+        # json.loads turns an escape such as "\ud800" into a lone surrogate, which no UTF-8
+        # file can hold: writing the file back would fail after other files were written.
+        raise InstallError(f"{path}: holds an unpaired surrogate escape "
+                           f"({exc.object[exc.start:exc.end].encode('unicode_escape').decode()}) that cannot be "
+                           "written back as UTF-8; left unchanged. Fix the file, then re-run.") from exc
     return raw, data
 
 
@@ -393,15 +423,37 @@ def _dump(data: Dict[str, Any]) -> bytes:
     return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 
-def _rewrite_config(path: Path, raw: Optional[bytes], data: Dict[str, Any], backup_dir: Optional[Path]) -> None:
-    """Replace a user's config, copying its current bytes into ``backup_dir`` first."""
+def _private_dirs(directory: Path) -> None:
+    """Create ``directory`` and its missing parents owner-only (0700)."""
+    missing = []
+    while not os.path.lexists(directory) and directory.parent != directory:
+        missing.append(directory)
+        directory = directory.parent
+    for path in reversed(missing):
+        path.mkdir(mode=0o700, exist_ok=True)
+
+
+def _rewrite_config(path: Path, raw: Optional[bytes], data: Dict[str, Any], backup_dir: Optional[Path],
+                    dry_run: bool) -> None:
+    """Replace a user's config, copying its current bytes into ``backup_dir`` first.
+
+    The backup is written only once the replacement is known to be allowed, and owner-only
+    (file 0600 in 0700 directories): it holds whatever secrets the config holds, such as
+    other MCP servers' API keys.
+    """
+    payload = _dump(data)
+    _preflight(path, raw)
     if raw is not None and backup_dir is not None:
-        try:
-            atomic_write_bytes(Path(backup_dir) / path.name, raw)
-        except OSError as exc:
-            raise InstallError(f"{path}: cannot back it up to {backup_dir} ({exc.strerror or exc}); "
-                               "left unchanged") from exc
-    _replace(path, raw, _dump(data))
+        copy = Path(backup_dir) / path.name
+        _writable_dir(copy, creating=True)
+        if not dry_run:
+            try:
+                _private_dirs(Path(backup_dir))
+                atomic_write_bytes(copy, raw, mode=0o600)
+            except OSError as exc:
+                raise InstallError(f"{path}: cannot back it up to {backup_dir} ({exc.strerror or exc}); "
+                                   "left unchanged") from exc
+    _replace(path, raw, payload, dry_run=dry_run)
 
 
 def backup_dir(home: Union[str, Path]) -> Path:
@@ -428,8 +480,7 @@ def merge_mcp_json(path: Union[str, Path], name: str, entry: Dict[str, Any], *, 
         return "unchanged"
     status = "updated" if name in servers else "added"
     servers[name] = entry
-    if not dry_run:
-        _rewrite_config(path, raw, data, backup_dir)
+    _rewrite_config(path, raw, data, backup_dir, dry_run)
     return status
 
 
@@ -446,8 +497,7 @@ def remove_mcp_json(path: Union[str, Path], names: Sequence[str], *, key: str = 
         return "absent"
     for n in present:
         del servers[n]
-    if not dry_run:
-        _rewrite_config(path, raw, data, backup_dir)
+    _rewrite_config(path, raw, data, backup_dir, dry_run)
     return "removed"
 
 
@@ -522,8 +572,7 @@ def register_workspace(home: Union[str, Path], root: Union[str, Path], hosts: Se
             return "unchanged"
         entry["hosts"] = merged
         status = "updated"
-    if not dry_run:
-        _replace(path, raw, _dump({"v": data.pop("v"), **data}))
+    _replace(path, raw, _dump({"v": data.pop("v"), **data}), dry_run=dry_run)
     return status
 
 
@@ -537,8 +586,7 @@ def unregister_workspace(home: Union[str, Path], root: Union[str, Path], *,
     if len(remaining) == len(data["workspaces"]):
         return "absent", remaining
     data["workspaces"] = remaining
-    if not dry_run:
-        _replace(path, raw, _dump(data))
+    _replace(path, raw, _dump(data), dry_run=dry_run)
     return "removed", remaining
 
 
@@ -559,6 +607,35 @@ def registrable_hosts() -> Tuple[host_table.HostSpec, ...]:
     return tuple(h for h in host_table.all_hosts(phase=1) if h.registration is not None)
 
 
+def _exe_names(name: str) -> List[str]:
+    if sys.platform != "win32":
+        return [name]
+    exts = [e for e in (os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(os.pathsep) if e]
+    if os.path.splitext(name)[1].upper() in {e.upper() for e in exts}:
+        return [name]
+    return [name + e for e in exts]
+
+
+def _which(name: str, path: Optional[str] = None) -> Optional[str]:
+    """``shutil.which`` restricted to the absolute entries of ``path`` (default ``$PATH``).
+
+    init and uninstall run inside a repository the user may just have cloned. A relative
+    or empty PATH entry names the current directory, and on Windows shutil.which searches
+    the current directory first whatever PATH says (``path=`` does not stop it), so either
+    would let the repository supply the host CLI Aegis runs, or the aegis-mcp command it
+    writes into a host's user config (host-matrix §3.7).
+    """
+    search = os.environ.get("PATH", os.defpath) if path is None else path
+    for entry in search.split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        for candidate in _exe_names(name):
+            full = os.path.join(entry, candidate)
+            if os.path.isfile(full) and os.access(full, os.X_OK):
+                return full
+    return None
+
+
 def _user_dir(home: Path, spec: str) -> Path:
     return home / spec[2:] if spec.startswith("~/") else Path(spec)
 
@@ -568,7 +645,7 @@ def detect_hosts(home: Union[str, Path], path: Optional[str] = None) -> List[str
     home = Path(home)
     found = []
     for host in registrable_hosts():
-        if any(shutil.which(b, path=path) for b in host.binaries) or any(
+        if any(_which(b, path) for b in host.binaries) or any(
                 _user_dir(home, d).is_dir() for d in host.user_dirs):
             found.append(host.id)
     return found
@@ -598,7 +675,7 @@ def parse_hosts(value: str) -> Union[str, List[str]]:
 
 def mcp_command(path: Optional[str] = None) -> List[str]:
     """The absolute command that starts the Aegis MCP server."""
-    exe = shutil.which("aegis-mcp", path=path)
+    exe = _which("aegis-mcp", path)
     if exe:
         return [os.path.realpath(exe)]
     return [sys.executable, "-m", "aegis_mcp"]
@@ -678,7 +755,7 @@ def _call(argv: List[str]) -> Tuple[int, str]:
 
 def _native(host: host_table.HostSpec, steps: List[List[str]], path: Optional[str], dry_run: bool,
             done: str) -> HostAction:
-    binary = shutil.which(steps[-1][0], path=path)
+    binary = _which(steps[-1][0], path)
     if binary is None:
         return HostAction(host.id, "manual", steps[-1], f"{steps[-1][0]} is not on PATH")
     if dry_run:
@@ -730,7 +807,7 @@ def unregister_host(host_id: str, *, home: Union[str, Path], path: Optional[str]
         result = "absent" if status == "absent" else ("would_run" if dry_run else "removed")
         return HostAction(host_id, result, None, str(target))
     steps = [unregister_argv(host, SERVER_NAME), unregister_argv(host, LEGACY_SERVER_NAME)]
-    binary = shutil.which(steps[0][0], path=path)
+    binary = _which(steps[0][0], path)
     if binary is None:
         return HostAction(host_id, "manual", steps[0], f"{steps[0][0]} is not on PATH")
     if dry_run:

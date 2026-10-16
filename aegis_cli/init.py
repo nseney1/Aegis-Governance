@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import importlib.resources
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -61,6 +62,7 @@ __all__ = [
     "RemovedOption",
     "Report",
     "Step",
+    "hook_refusal",
     "install_rules",
     "packaged_rules",
     "preset_rules",
@@ -83,9 +85,11 @@ RULE_PRESETS: Dict[str, Optional[Tuple[str, ...]]] = {
     "full": None,  # every shipped rule
 }
 # The shipped rules are process guidance (what to do, not where), so they are seeded as
-# persona rules. They name no target_paths: `aegis status` lists them as untargeted until
-# the repository decides which files each applies to.
-SEED_TYPE_DIR = RULE_TYPES[RuleType.PERSONA].directory
+# persona rules whose frontmatter says so: ``type: persona`` (the repository's own lint,
+# `aegis check`, requires a declared type) and ``target_paths: []`` (they apply to no file
+# until the repository names the files each one governs; `aegis status` lists them).
+SEED_TYPE = RuleType.PERSONA
+SEED_TYPE_DIR = RULE_TYPES[SEED_TYPE].directory
 _NOT_RULES = {"META.md", "README.md"}
 
 
@@ -115,12 +119,42 @@ def preset_rules(preset: str) -> List[Path]:
     return [shipped[n] for n in names]
 
 
+_TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:")
+
+
+def _declare_type(source: Path, rule_type: str) -> bytes:
+    """The bytes of ``source`` with its frontmatter declaring ``type: <rule_type>`` and, when
+    it names no files, ``target_paths: []``; the rest of the file is kept as it is."""
+    text = source.read_bytes().decode("utf-8")
+    eol = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines(True)
+    close = next((i for i, line in enumerate(lines[1:], 1) if line.rstrip("\r\n") == "---"), None)
+    if not lines or lines[0].rstrip("\r\n") != "---" or close is None:
+        raise ValueError(f"packaged rule {source.name} has no frontmatter; reinstall aegis-guardrails")
+    keys: Dict[str, int] = {}
+    for index in range(1, close):
+        match = _TOP_LEVEL_KEY.match(lines[index])
+        if match:
+            keys.setdefault(match.group(1), index)
+    added = [] if "target_paths" in keys else [f"target_paths: []{eol}"]
+    if "type" in keys:
+        lines[keys["type"]] = f"type: {rule_type}{eol}"
+        at = keys["type"] + 1
+    else:
+        added.insert(0, f"type: {rule_type}{eol}")
+        at = keys.get("id", 0) + 1
+    lines[at:at] = added
+    return "".join(lines).encode("utf-8")
+
+
 def install_rules(rules_dir: Path, preset: str = "standard", dry_run: bool = False, force: bool = False,
-                  skip: Sequence[str] = ()) -> List[str]:
+                  skip: Sequence[str] = (), rule_type: Optional[str] = None) -> List[str]:
     """Copy the preset's packaged rules into ``rules_dir`` (flat); return the ids now there.
 
     An existing file is kept unless ``force``; a symlinked destination is never written
-    through; ids in ``skip`` are left out.
+    through; ids in ``skip`` are left out. With ``rule_type`` each copy's frontmatter
+    declares that type (and ``target_paths: []`` when it names none); without it the
+    packaged bytes are copied as they are.
     """
     rules_dir = Path(rules_dir)
     present: List[str] = []
@@ -134,8 +168,9 @@ def install_rules(rules_dir: Path, preset: str = "standard", dry_run: bool = Fal
         if dest.exists() and not force:
             present.append(name)
             continue
+        data = _declare_type(source, rule_type) if rule_type else source.read_bytes()
         if not dry_run:
-            atomic_write_bytes(dest, source.read_bytes())
+            atomic_write_bytes(dest, data)
         present.append(name)
     return present
 
@@ -157,7 +192,7 @@ def seed_workspace_rules(root: Path, preset: str, dry_run: bool = False) -> Tupl
     existing = {p.stem for p in rules_dir.glob("*/*.md")} if rules_dir.is_dir() else set()
     names = [p.stem for p in preset_rules(preset)]
     present = [n for n in names if n in existing]
-    seeded = install_rules(target, preset=preset, dry_run=dry_run, skip=present)
+    seeded = install_rules(target, preset=preset, dry_run=dry_run, skip=present, rule_type=SEED_TYPE)
     return seeded, present
 
 
@@ -181,6 +216,60 @@ def _host_option(value: str):
         return parse_hosts(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+# ── The pre-commit hook ──────────────────────────────────────────────────────
+
+def _within(path: Path, boundary: Path) -> bool:
+    try:
+        path.relative_to(boundary.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
+    """Why the pre-commit hook cannot be installed (or, ``removing``, uninstalled) safely.
+
+    install_hook and uninstall_hook print a refusal and return False, which a caller
+    cannot tell from "not a git repository", or warn and report success; and their dry
+    runs never look at the file. So init's and uninstall's check passes ask here first.
+    None when the hook can be changed, or when there is no git repository.
+    """
+    from aegis_core.workspace.hooks import resolve_git_hooks_dir
+    from aegis_cli.hooks.management import _replace_hook_block
+
+    root = Path(root).resolve()
+    hooks_dir = resolve_git_hooks_dir(root)
+    if not hooks_dir:
+        return None
+    hook = Path(hooks_dir) / "pre-commit"
+    target, outside = hook, False
+    if hook.is_symlink():
+        target = hook.resolve()
+        if not target.exists():
+            return None if removing else f"{hook} is a dangling symlink; to replace it, run: aegis hook install --force"
+        outside = not any(_within(target, b) for b in (root, Path(hooks_dir)))
+        if outside and not removing:
+            return (f"{hook} is a symlink to {target}, outside the repository; Aegis does not write through it. "
+                    "To add the hook to that file anyway, run: aegis hook install --force")
+    if not target.exists():
+        return None
+    try:
+        content = target.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return f"{target} is not UTF-8 text; Aegis cannot edit it"
+    except OSError as exc:
+        return f"{target} cannot be read ({exc.strerror or exc})"
+    if _AEGIS_HOOK_START not in content and _SOMA_HOOK_START not in content:
+        return None
+    if outside:
+        return (f"{hook} is a symlink to {target}, outside the repository, and that file holds the Aegis hook; "
+                "Aegis does not write through it. Remove the block from that file yourself, or run: "
+                "aegis hook uninstall --force")
+    if _replace_hook_block(content, "") is None:
+        return f"{target} has an unterminated Aegis hook block; fix or remove it"
+    return None
 
 
 # ── The run ──────────────────────────────────────────────────────────────────
@@ -309,6 +398,7 @@ def _steps(ctx: _Context, dry_run: bool) -> List[Step]:
     from aegis_core.ast.detect import detect_project_languages, provision_ast_driver_slots
     from aegis_core.bootstrap import BOOTSTRAP_ID, bootstrap_text
     from aegis_core.errors import PathTraversalError, WorkspaceBareRepoError
+    from aegis_core.workspace.hooks import resolve_git_hooks_dir
     from aegis_core.workspace.scaffold import ensure_runtime_gitignore
 
     report, root = ctx.report, ctx.root
@@ -346,7 +436,12 @@ def _steps(ctx: _Context, dry_run: bool) -> List[Step]:
         root / CLAUDE_FILE, CLAUDE_SHIM_ID, CLAUDE_SHIM_TEXT, force=ctx.force, create=False, dry_run=dry_run)))
 
     if not ctx.no_hooks:
+        refusal = hook_refusal(root)
+        if refusal:
+            raise InstallError(f"pre-commit hook: {refusal}. Or re-run with --no-hooks to set up everything else.")
         hooked = install_hook(root, dry_run=dry_run)
+        if not hooked and resolve_git_hooks_dir(root):
+            raise InstallError("the pre-commit hook could not be installed (see above); left unchanged")
         actions.append(Step("pre-commit hook", "installed" if hooked else "skipped (not a git repository)"))
 
     actions.append(Step(REGISTRY_LABEL, register_workspace(ctx.home, root, ctx.selected, dry_run=dry_run)))
@@ -368,6 +463,8 @@ def _print_actions(report: Report, actions: Sequence[Step], dry_run: bool, prese
                 report.say(f"    {'[DRY-RUN]' if dry_run else '✅'} {name}")
             for name in action.kept:
                 report.say(f"    [SKIP] {name} (a rule with this id exists)")
+            if action.names:
+                report.say("    They apply to no file until you set their target_paths (aegis status lists them).")
             continue
         if action.result == "absent":
             continue  # CLAUDE.md: Aegis never creates one

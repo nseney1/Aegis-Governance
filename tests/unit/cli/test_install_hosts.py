@@ -637,3 +637,194 @@ class TestHostCliRunner:
         assert not Path(cwd).exists()  # a throwaway directory, removed afterwards
         assert stdin == "''"
         assert text == "café \ufffd"  # UTF-8 decoded; an invalid byte cannot crash init
+
+
+# ── Review fixes: what a dry run (the check pass) must already refuse ────────
+
+
+class _ReadOnly:
+    """chmod a file read-only for the test, then make it writable again for cleanup."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def __enter__(self):
+        self.path.chmod(0o444)
+        return self.path
+
+    def __exit__(self, *exc):
+        if self.path.exists():
+            self.path.chmod(0o644)
+
+
+def _registry(home: Path) -> Path:
+    reg = home / ".aegis" / "workspaces.json"
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text(json.dumps({"v": 1, "workspaces": []}), encoding="utf-8")
+    return reg
+
+
+class TestDryRunRefusesWhatTheWriteRefuses:
+    """``dry_run`` is init's check pass, so it must refuse every input the write refuses;
+    otherwise init writes .aegis/ and AGENTS.md and only then fails."""
+
+    @pytest.mark.parametrize("call", [
+        lambda p: ih.write_managed_block(p, "bootstrap", "Hello\n", dry_run=True),
+        lambda p: ih.remove_managed_block(p, "bootstrap", dry_run=True),
+        lambda p: ih.remove_managed_block(p, "bootstrap", dry_run=True, delete_if_empty=True),
+    ], ids=["write-block", "remove-block", "delete-empty"])
+    def test_read_only_markdown(self, tmp_path, call):
+        target = tmp_path / "AGENTS.md"
+        target.write_text("# mine\n\n" + _block("bootstrap", "Old\n"), encoding="utf-8")
+        before = target.read_bytes()
+        with _ReadOnly(target):
+            with pytest.raises(ih.InstallError, match="read-only"):
+                call(target)
+        assert target.read_bytes() == before
+
+    def test_read_only_file_holding_only_the_block_is_not_deleted(self, tmp_path):
+        target = tmp_path / "AGENTS.md"
+        ih.write_managed_block(target, "bootstrap", "Hello\n")
+        with _ReadOnly(target):
+            with pytest.raises(ih.InstallError, match="read-only"):
+                ih.remove_managed_block(target, "bootstrap", delete_if_empty=True)
+            assert target.exists()
+
+    @pytest.mark.parametrize("call", [
+        lambda p: ih.merge_mcp_json(p, "aegis", ENTRY, dry_run=True),
+        lambda p: ih.remove_mcp_json(p, ("aegis", "soma"), dry_run=True),
+    ], ids=["merge", "remove"])
+    def test_read_only_json_config(self, tmp_path, call):
+        target = tmp_path / "mcp_config.json"
+        target.write_text(json.dumps({"mcpServers": {"soma": {"command": "s"}}}), encoding="utf-8")
+        with _ReadOnly(target):
+            with pytest.raises(ih.InstallError, match="read-only"):
+                call(target)
+
+    def test_read_only_registry(self, tmp_path):
+        home, root = tmp_path / "home", tmp_path / "repo"
+        root.mkdir()
+        reg = _registry(home)
+        with _ReadOnly(reg):
+            with pytest.raises(ih.InstallError, match="read-only"):
+                ih.register_workspace(home, root, ["codex-cli"], dry_run=True)
+        ih.register_workspace(home, root, [], now="t")
+        with _ReadOnly(reg):
+            with pytest.raises(ih.InstallError, match="read-only"):
+                ih.unregister_workspace(home, root, dry_run=True)
+
+    def test_new_file_in_a_read_only_directory(self, tmp_path):
+        if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):
+            pytest.skip("needs POSIX directory permissions as a non-root user")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        repo.chmod(0o555)
+        try:
+            with pytest.raises(ih.InstallError, match="cannot be created"):
+                ih.write_managed_block(repo / "AGENTS.md", "bootstrap", "Hello\n", dry_run=True)
+        finally:
+            repo.chmod(0o755)
+
+    def test_unpaired_surrogate_escape_is_refused_before_any_write(self, tmp_path):
+        """json.loads turns "\\ud800" into a lone surrogate that cannot be written back as UTF-8."""
+        target = tmp_path / "mcp_config.json"
+        raw = b'{"mcpServers": {"x": {"command": "\\ud800"}}}'
+        target.write_bytes(raw)
+        backups = tmp_path / "bk"
+        for dry_run in (True, False):
+            with pytest.raises(ih.InstallError, match="surrogate"):
+                ih.merge_mcp_json(target, "aegis", ENTRY, dry_run=dry_run, backup_dir=backups)
+            with pytest.raises(ih.InstallError, match="surrogate"):
+                ih.remove_mcp_json(target, ("x",), dry_run=dry_run, backup_dir=backups)
+        assert target.read_bytes() == raw
+        assert not backups.exists()
+
+    def test_a_refused_rewrite_leaves_no_backup(self, tmp_path):
+        target = tmp_path / "mcp_config.json"
+        target.write_bytes(b'{"mcpServers": {}}')
+        with _ReadOnly(target):
+            with pytest.raises(ih.InstallError, match="read-only"):
+                ih.merge_mcp_json(target, "aegis", ENTRY, backup_dir=tmp_path / "bk")
+        assert not (tmp_path / "bk").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+class TestBackupPermissions:
+    """A backup holds the same secrets as the config it copies (other servers' API keys)."""
+
+    def test_backup_is_never_more_readable_than_the_original(self, tmp_path):
+        cfg = tmp_path / ".gemini" / "config" / "mcp_config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(json.dumps({"mcpServers": {"x": {"env": {"API_KEY": "secret"}}}}), encoding="utf-8")
+        cfg.chmod(0o600)
+        old = os.umask(0o002)
+        try:
+            ih.register_host("antigravity", home=tmp_path, command=["/x/aegis-mcp"])
+        finally:
+            os.umask(old)
+        backups = tmp_path / ".aegis" / "backups"
+        (stamp,) = list(backups.iterdir())
+        (copy,) = list(stamp.iterdir())
+        assert b"secret" in copy.read_bytes()
+        assert stat.S_IMODE(copy.stat().st_mode) & ~0o600 == 0
+        assert stat.S_IMODE(stamp.stat().st_mode) == 0o700
+        assert stat.S_IMODE(backups.stat().st_mode) == 0o700
+        assert stat.S_IMODE(cfg.stat().st_mode) == 0o600
+
+
+def _plant(directory: Path, name: str) -> None:
+    """A repository-controlled executable named like a host CLI, in every form Windows runs."""
+    directory.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", ".exe", ".cmd", ".bat"):
+        path = directory / (name + suffix)
+        path.write_bytes(b"#!/bin/sh\necho planted\n")
+        path.chmod(0o755)
+
+
+class TestRepositoryExecutablesAreNeverRun:
+    """A host CLI or aegis-mcp is looked up only in absolute PATH entries: a cloned
+    repository (the current directory) can never supply the binary init runs or the MCP
+    command it writes into a host's user config (host-matrix §3.7)."""
+
+    @pytest.fixture
+    def repo(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        for name in ("codex", "claude", "agy", "aegis-mcp"):
+            _plant(repo, name)
+        monkeypatch.chdir(repo)
+        (tmp_path / "home").mkdir()
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+        return type("Repo", (), {"root": repo, "home": tmp_path / "home", "empty": str(empty)})
+
+    def _assert_nothing_from(self, repo, path, monkeypatch):
+        runner = _Runner()
+        monkeypatch.setattr(ih, "_run_cli", runner)
+        assert ih.detect_hosts(repo.home, path=path) == []
+        assert ih.mcp_command(path=path) == [sys.executable, "-m", "aegis_mcp"]
+        assert ih.register_host("codex-cli", home=repo.home, command=["/x"], path=path).result == "manual"
+        assert ih.unregister_host("claude-code", home=repo.home, path=path).result == "manual"
+        assert runner.calls == []
+
+    def test_relative_and_empty_path_entries_are_skipped(self, repo, monkeypatch):
+        path = os.pathsep.join(["", ".", "subdir", repo.empty])
+        self._assert_nothing_from(repo, path, monkeypatch)
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="shutil.which searches the cwd first only on Windows")
+    def test_the_current_directory_is_not_searched_on_windows(self, repo, monkeypatch):
+        self._assert_nothing_from(repo, repo.empty, monkeypatch)
+
+    def test_an_absolute_entry_after_a_planted_cwd_still_resolves(self, repo, tmp_path, monkeypatch):
+        exe = _fake_bin(tmp_path / "real-bin", "codex")
+        runner = _Runner()
+        monkeypatch.setattr(ih, "_run_cli", runner)
+        path = os.pathsep.join([".", str(tmp_path / "real-bin")])
+        assert ih.register_host("codex-cli", home=repo.home, command=["/x"], path=path).result == "registered"
+        assert {c[0] for c in runner.calls} == {str(exe.resolve())}
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="PATHEXT applies on Windows")
+    def test_windows_runs_a_cmd_shim_from_an_absolute_entry(self, tmp_path, monkeypatch):
+        bindir = tmp_path / "npm"
+        bindir.mkdir()
+        (bindir / "codex.cmd").write_bytes(b"@echo off\r\n")
+        assert ih.detect_hosts(tmp_path, path=str(bindir)) == ["codex-cli"]
