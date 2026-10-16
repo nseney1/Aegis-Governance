@@ -92,9 +92,10 @@ def append(
     Raises ValueError for an unknown ``kind``, an empty or non-string ``result`` or
     ``host``, or a ``detail`` that is not a dict; ValueError/TypeError when ``detail``
     is not JSON serializable (nothing is written then); PathTraversalError when the
-    shared state dir is not confined; LockOrderError when called while this thread
-    holds another shared lock; LockTimeoutError when the lock stays held. Callers that
-    must not fail on a metric catch these.
+    shared state dir is not confined; OSError when it cannot be created, listed or
+    written; LockOrderError when called while this thread holds another shared lock;
+    LockTimeoutError when the lock stays held. Callers that must not fail on a metric
+    catch these.
     """
     _kind(kind)
     if not isinstance(result, str) or not result:
@@ -165,8 +166,9 @@ def _usable(row: Dict[str, Any]) -> bool:
 
 def read(workspace: Any, kinds: Union[str, Iterable[str], None] = None) -> EventsRead:
     """The events of ``workspace``'s log, optionally only those of ``kinds`` (one kind or
-    an iterable). Creates nothing and never raises for the log's content; ValueError for
-    an unknown kind in ``kinds``."""
+    an iterable). Creates nothing and never raises for the log's content or an
+    unreadable log or shared dir (``error`` says why); ValueError for an unknown kind
+    in ``kinds``."""
     wanted = None
     if kinds is not None:
         wanted = {_kind(k) for k in ([kinds] if isinstance(kinds, str) else kinds)}
@@ -174,6 +176,8 @@ def read(workspace: Any, kinds: Union[str, Iterable[str], None] = None) -> Event
         path = events_path(workspace)
     except PathTraversalError as exc:
         return EventsRead([], error=str(exc))
+    except OSError as exc:  # the shared dir cannot be listed for its confinement check
+        return EventsRead([], error=f"cannot read {exc.filename or 'the shared state dir'}: {exc.strerror or exc}")
     found = read_jsonl(path)
     readable = _readable_versions()
     rows: List[Dict[str, Any]] = []

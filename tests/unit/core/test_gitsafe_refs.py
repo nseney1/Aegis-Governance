@@ -12,8 +12,10 @@ import os
 from pathlib import Path
 import queue
 import shutil
+import re
 import subprocess
-from typing import List, Optional
+import types
+from typing import Callable, List, Optional, Tuple
 
 import pytest
 
@@ -63,6 +65,31 @@ def _ref_value(repo: Path, ref: str) -> Optional[str]:
 
 def _oid_length(repo: Path) -> int:
     return len(_git(repo, "rev-parse", "HEAD").strip())
+
+
+def _two_commits(repo: Path) -> Tuple[str, str]:
+    """(the first commit, a second one now at the tip of main)."""
+    first = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "second")
+    return first, _git(repo, "rev-parse", "HEAD").strip()
+
+
+def _record_sleeps(monkeypatch, then: Optional[Callable[[List[float]], None]] = None) -> List[float]:
+    """The backoff sleeps update_ref takes, in order; ``then(sleeps)`` runs after each.
+
+    Only gitsafe's own ``time`` is replaced. ``subprocess.run(timeout=...)`` polls with
+    ``time.sleep`` on POSIX, so patching the time module itself would also record (or
+    fail on) those polls whenever git has not exited at the first poll, as under load.
+    """
+    sleeps: List[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if then is not None:
+            then(sleeps)
+
+    monkeypatch.setattr(gitsafe, "time", types.SimpleNamespace(sleep=sleep))
+    return sleeps
 
 
 # ── Blobs ────────────────────────────────────────────────────────────────────
@@ -168,14 +195,51 @@ def test_an_invalid_ref_name_is_refused_and_nothing_is_written(sha1_repo: Path, 
     assert gitsafe.list_refs(sha1_repo, "refs/aegis") == []
 
 
-def test_a_new_value_that_is_not_in_the_repository_is_not_a_conflict(sha1_repo: Path, monkeypatch):
-    sleeps: List[float] = []
-    monkeypatch.setattr(gitsafe.time, "sleep", sleeps.append)
-    with pytest.raises(gitsafe.GitError, match=f"failed {gitsafe.UPDATE_REF_ATTEMPTS} times") as info:
-        gitsafe.update_ref(sha1_repo, LANE, "1" * 40, None)
-    assert not isinstance(info.value, gitsafe.RefConflict)
-    assert len(sleeps) == gitsafe.UPDATE_REF_ATTEMPTS - 1
-    assert _ref_value(sha1_repo, LANE) is None
+def test_a_new_value_that_is_not_an_object_here_fails_at_once(repo: Path, monkeypatch):
+    # An absent object, or an id of the other hash format, can never be written: the
+    # failure is final at once (no backoff), and it is no lost swap.
+    sleeps = _record_sleeps(monkeypatch)
+    length = _oid_length(repo)
+    other_length = 64 if length == 40 else 40
+    claim = gitsafe.write_blob(repo, b"claim")
+    for value, old in (("1" * length, None), ("1" * other_length, None), ("1" * other_length, claim)):
+        if old is not None:
+            gitsafe.update_ref(repo, LANE, old, None)
+        with pytest.raises(gitsafe.GitError, match=f"{value} is not an object in this repository") as info:
+            gitsafe.update_ref(repo, LANE, value, old)
+        assert not isinstance(info.value, gitsafe.RefConflict)
+        assert _ref_value(repo, LANE) == old
+    assert sleeps == []
+
+
+def test_a_ref_hierarchy_in_the_way_fails_at_once(repo: Path, monkeypatch):
+    # refs/x and refs/x/y cannot both exist; no retry can change that.
+    sleeps = _record_sleeps(monkeypatch)
+    oid = gitsafe.write_blob(repo, b"claim")
+    gitsafe.update_ref(repo, "refs/aegis/lanes/a", oid, None)
+    gitsafe.update_ref(repo, "refs/aegis/lanes/b/c", oid, None)
+    for ref, blocker in (("refs/aegis/lanes/a/b", "refs/aegis/lanes/a"), ("refs/aegis/lanes/b", "refs/aegis/lanes/b/c")):
+        with pytest.raises(gitsafe.GitError, match=re.escape(f"{ref} cannot exist alongside {blocker}")) as info:
+            gitsafe.update_ref(repo, ref, oid, None)
+        assert not isinstance(info.value, (gitsafe.RefConflict, gitsafe.RefNameError))
+        assert _ref_value(repo, ref) is None
+    assert sleeps == []
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["refs/heads/main", "refs/heads/x", "refs/tags/v1", "refs/remotes/origin/x", "refs/notes/x", "refs/aegisx/lanes/a", "refs/aegis"],
+)
+def test_update_ref_writes_only_under_refs_aegis(sha1_repo: Path, ref: str):
+    first, second = _two_commits(sha1_repo)
+    before = _git(sha1_repo, "for-each-ref")
+    current = _ref_value(sha1_repo, ref)
+    attempts = [(first, None), (first, second), (None, second)] + ([(first, current), (None, current)] if current else [])
+    for new, old in attempts:
+        with pytest.raises(gitsafe.RefNameError, match="aegis writes only refs under refs/aegis/"):
+            gitsafe.update_ref(sha1_repo, ref, new, old)
+    assert _git(sha1_repo, "for-each-ref") == before
+    assert _git(sha1_repo, "rev-parse", "HEAD").strip() == second
 
 
 # ── Failure classification: by the ref's state, never by stderr ─────────────
@@ -206,14 +270,12 @@ def test_a_held_ref_lock_is_transient_and_retried_with_backoff(sha1_repo: Path, 
     lock.write_bytes(b"")
     oid = gitsafe.write_blob(sha1_repo, b"claim")
     _misleading_stderr(monkeypatch, b"fatal: reference already exists\n")  # a lie: the ref is absent
-    sleeps: List[float] = []
 
-    def sleep(seconds: float) -> None:
-        sleeps.append(seconds)
+    def release(sleeps: List[float]) -> None:
         if len(sleeps) == 2:
             lock.unlink()  # the other writer finishes
 
-    monkeypatch.setattr(gitsafe.time, "sleep", sleep)
+    sleeps = _record_sleeps(monkeypatch, release)
     gitsafe.update_ref(sha1_repo, LANE, oid, None)
     assert _ref_value(sha1_repo, LANE) == oid
     assert sleeps == [gitsafe.UPDATE_REF_BACKOFF_SECONDS, gitsafe.UPDATE_REF_BACKOFF_SECONDS * 2]
@@ -223,8 +285,7 @@ def test_a_transient_failure_gives_up_after_bounded_attempts(sha1_repo: Path, mo
     lock = _lock_file(sha1_repo, LANE)
     lock.write_bytes(b"")
     oid = gitsafe.write_blob(sha1_repo, b"claim")
-    sleeps: List[float] = []
-    monkeypatch.setattr(gitsafe.time, "sleep", sleeps.append)
+    sleeps = _record_sleeps(monkeypatch)
     with pytest.raises(gitsafe.GitError) as info:
         gitsafe.update_ref(sha1_repo, LANE, oid, None)
     assert not isinstance(info.value, gitsafe.RefConflict)
@@ -242,7 +303,11 @@ def test_a_lost_swap_is_a_conflict_whatever_git_says(sha1_repo: Path, monkeypatc
     gitsafe.update_ref(sha1_repo, LANE, one, None)
     gitsafe.update_ref(sha1_repo, LANE, two, one)
     _misleading_stderr(monkeypatch, b"error: cannot lock ref: Unable to create lock: File exists\n")
-    monkeypatch.setattr(gitsafe.time, "sleep", lambda s: pytest.fail("a lost swap is never retried"))
+
+    def never(sleeps: List[float]) -> None:
+        pytest.fail("a lost swap is never retried")
+
+    _record_sleeps(monkeypatch, never)
     with pytest.raises(gitsafe.RefConflict) as info:
         gitsafe.update_ref(sha1_repo, LANE, three, one)
     assert info.value.current == two
@@ -359,18 +424,48 @@ def test_read_ref_never_guesses_another_ref(sha1_repo: Path):
 
 
 def test_a_symbolic_ref_is_refused_and_never_written_through(sha1_repo: Path):
-    head = _git(sha1_repo, "rev-parse", "HEAD").strip()
-    _git(sha1_repo, "symbolic-ref", "refs/aegis/lanes/sym", "refs/heads/main")
+    first, main_head = _two_commits(sha1_repo)
+    sym = "refs/aegis/lanes/sym"
+    _git(sha1_repo, "symbolic-ref", sym, "refs/heads/main")
     with pytest.raises(gitsafe.GitError, match="symbolic ref"):
-        gitsafe.read_ref(sha1_repo, "refs/aegis/lanes/sym")
+        gitsafe.read_ref(sha1_repo, sym)
     with pytest.raises(gitsafe.GitError, match="symbolic ref"):
         gitsafe.list_refs(sha1_repo, "refs/aegis/lanes")
-    oid = gitsafe.write_blob(sha1_repo, b"claim")
-    try:
-        gitsafe.update_ref(sha1_repo, "refs/aegis/lanes/sym", oid, head)
-    except gitsafe.GitError:
-        pass
-    assert _ref_value(sha1_repo, "refs/heads/main") == head  # the branch it named is untouched
+    # Commit ids, and ``old`` is the value read through the link: git itself would
+    # accept each of these writes on refs/heads/main.
+    for new, old in ((first, main_head), (None, main_head), (first, None)):
+        with pytest.raises(gitsafe.GitError, match="symbolic ref") as info:
+            gitsafe.update_ref(sha1_repo, sym, new, old)
+        assert not isinstance(info.value, gitsafe.RefConflict)
+        assert _ref_value(sha1_repo, "refs/heads/main") == main_head  # the branch it names is untouched
+        assert _git(sha1_repo, "symbolic-ref", sym).strip() == "refs/heads/main"  # refused, not replaced
+
+
+def test_a_ref_made_symbolic_after_the_check_is_replaced_never_written_through(sha1_repo: Path, monkeypatch):
+    first, main_head = _two_commits(sha1_repo)
+    sym = "refs/aegis/lanes/sym"
+    gitsafe.update_ref(sha1_repo, sym, main_head, None)  # a direct ref holding main's commit
+    real_run = gitsafe.run
+
+    def run(args, cwd, **kwargs):
+        if "update-ref" in args:  # another process swaps in a link between the check and the write
+            _git(sha1_repo, "symbolic-ref", sym, "refs/heads/main")
+        return real_run(args, cwd, **kwargs)
+
+    monkeypatch.setattr(gitsafe, "run", run)
+    gitsafe.update_ref(sha1_repo, sym, first, main_head)
+    monkeypatch.undo()
+    assert _ref_value(sha1_repo, "refs/heads/main") == main_head
+    assert gitsafe.read_ref(sha1_repo, sym) == first  # the link itself was replaced
+
+
+def test_creating_over_a_dangling_symbolic_ref_never_creates_its_target(sha1_repo: Path):
+    first, _ = _two_commits(sha1_repo)
+    dangling = "refs/aegis/lanes/dangling"
+    _git(sha1_repo, "symbolic-ref", dangling, "refs/heads/nowhere")
+    gitsafe.update_ref(sha1_repo, dangling, first, None)
+    assert _ref_value(sha1_repo, "refs/heads/nowhere") is None
+    assert gitsafe.read_ref(sha1_repo, dangling) == first
 
 
 def test_list_refs_lists_one_hierarchy(repo: Path):

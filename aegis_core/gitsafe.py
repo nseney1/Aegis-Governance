@@ -16,11 +16,12 @@ every call here:
 - uses plumbing: ``rev-parse``, ``merge-base``, ``diff-tree``, ``diff-index``,
   ``ls-tree``, ``ls-files``, ``cat-file --batch``/``--batch-check``, ``for-each-ref``,
   ``check-ref-format``, ``hash-object``, ``version`` and ``config`` (reads only). It
-  writes in three places only, never to the work tree, the index or a branch:
-  ``hash-object -w`` stores a blob, ``update-ref --stdin`` creates, swaps or deletes one
-  ref under compare-and-swap (the team's ``refs/aegis/...`` leases), and ``merge-tree
-  --write-tree`` stores the objects of a trial merge that nothing references (git's
-  gc collects them). ``diff-index`` without ``--cached``, ``ls-files --others`` and
+  writes in three places only, never to the work tree, the index, a branch or a tag:
+  ``hash-object -w`` stores a blob, ``update-ref --no-deref --stdin`` creates, swaps
+  or deletes one ref under compare-and-swap, always under ``refs/aegis/`` (the team's
+  leases; ``update_ref`` refuses any other name), and ``merge-tree --write-tree``
+  stores the objects of a trial merge that nothing references (git's gc collects
+  them). ``diff-index`` without ``--cached``, ``ls-files --others`` and
   ``hash-object --stdin-paths`` read the working tree, which is where an fsmonitor or
   a clean filter would run; they are needed (no plumbing lists changed or untracked
   files otherwise, and only git knows its line-ending conversion). The forced
@@ -95,6 +96,8 @@ CHANGE_MODES = ("working", "staged", "head", "range")
 UPDATE_REF_ATTEMPTS = 5
 UPDATE_REF_BACKOFF_SECONDS = 0.05
 MERGE_TREE_MIN_VERSION = (2, 38)
+#: The only ref hierarchy update_ref writes: never a branch, a tag or a remote ref.
+_WRITABLE_REFS = "refs/aegis/"
 _ACMR = "--diff-filter=ACMR"
 _HARDENING_KEEP_HOOKS_PATH = (
     "-c", "core.fsmonitor=false",
@@ -116,7 +119,8 @@ class GitError(AegisError):
 
 
 class RefNameError(GitError):
-    """A ref name (or ref hierarchy) git would not accept; refused before anything is written."""
+    """A ref name (or ref hierarchy) git would not accept, or one update_ref may not write
+    (anything outside ``refs/aegis/``); refused before anything is written."""
 
 
 class RefConflict(GitError):
@@ -665,6 +669,31 @@ def list_refs(cwd: Path | str, prefix: str) -> List[Tuple[str, str]]:
     return found
 
 
+def _has_object(cwd: Path | str, oid: str) -> Optional[bool]:
+    """Whether the repository has object ``oid`` (an id of the other hash format is
+    missing); None when git cannot answer."""
+    out = _out(["cat-file", "--batch-check"], cwd, stdin=oid.encode("ascii") + b"\n")
+    if out is None:
+        return None
+    return out.strip().split()[1:] != [b"missing"]
+
+
+def _never_writable(cwd: Path | str, ref: str, new: Optional[str]) -> Optional[str]:
+    """Why a write that failed while ``ref`` still held the expected value can never
+    succeed, judged by the repository's state (never by git's message); None when
+    nothing permanent is in the way, such as another writer's lock."""
+    if new is not None and _has_object(cwd, new) is False:
+        return f"{new} is not an object in this repository"
+    try:
+        existing = _refs_under(cwd, _WRITABLE_REFS.rstrip("/")) or []
+    except GitError:  # a link elsewhere in refs/aegis: cannot tell, so the retries decide
+        existing = []
+    for name, _oid in existing:
+        if name.startswith(ref + "/") or ref.startswith(name + "/"):
+            return f"{ref} cannot exist alongside {name}"
+    return None
+
+
 def update_ref(cwd: Path | str, ref: str, new: Optional[str], old: Optional[str]) -> None:
     """Compare-and-swap ``ref`` from ``old`` to ``new`` (object ids; None means absent).
 
@@ -672,20 +701,27 @@ def update_ref(cwd: Path | str, ref: str, new: Optional[str], old: Optional[str]
     - both set: update; fails unless the ref holds ``old``.
     - ``new`` None, ``old`` set: delete; fails unless the ref holds ``old``.
 
+    ``ref`` must be under ``refs/aegis/``: a branch, a tag or any other ref is refused.
     One ``update-ref --no-deref --stdin`` transaction with the ``create``, ``update`` or
     ``delete`` verb, so no all-zero id is spelled and SHA-1 and SHA-256 repositories
-    behave alike; a symbolic ref is never written through. After a failure the ref is
-    read again and the failure classified by its state, never by git's message:
+    behave alike. A symbolic ref is never written through: an update or delete of one
+    is refused (GitError), and a link that appears after that check, or a dangling one
+    a create meets, is replaced by a direct ref, its target left alone. After a failure
+    the ref is read again and the failure classified by state, never by git's message:
 
     - it holds something other than ``old`` (another oid, or absent when ``old`` was
       set): RefConflict, with ``current`` (which equals ``new`` when this write landed
       and only its acknowledgement was lost);
-    - it still holds ``old`` (absent for a create): transient, such as another writer's
-      ref lock; retried up to UPDATE_REF_ATTEMPTS times with doubling sleeps, then
-      GitError.
+    - it still holds ``old`` (absent for a create) but can never take ``new``, because
+      ``new`` is not an object in this repository (absent, or of the other hash format)
+      or a ref in the same hierarchy is in the way (``refs/aegis/x`` versus
+      ``refs/aegis/x/y``): GitError at once;
+    - otherwise transient, such as another writer's ref lock: retried up to
+      UPDATE_REF_ATTEMPTS times with doubling sleeps, then GitError.
 
-    Raises RefNameError for an invalid name (nothing runs), ValueError for a malformed
-    object id or for ``new`` and ``old`` both None (an unconditional write is no CAS).
+    Raises RefNameError for an invalid name or one outside ``refs/aegis/`` (nothing is
+    written), ValueError for a malformed object id or for ``new`` and ``old`` both None
+    (an unconditional write is no CAS).
     """
     if new is None and old is None:
         raise ValueError("update_ref needs a new value, an expected old value, or both")
@@ -694,6 +730,13 @@ def update_ref(cwd: Path | str, ref: str, new: Optional[str], old: Optional[str]
     if old is not None:
         _full_oid(old)
     _check_ref_name(cwd, ref)
+    if not ref.startswith(_WRITABLE_REFS):
+        raise RefNameError(f"refusing to write {ref!r}: aegis writes only refs under {_WRITABLE_REFS}")
+    if old is not None:
+        # ``old`` cannot have been read from a link (read_ref refuses one), yet git would
+        # compare it with the link's target. This read refuses a symbolic ref; one that
+        # appears after it is replaced under --no-deref, never written through.
+        read_ref(cwd, ref)
     name = os.fsencode(ref)
     if new is not None and old is not None:
         command = b"update " + name + b"\0" + new.encode() + b"\0" + old.encode() + b"\0"
@@ -714,6 +757,9 @@ def update_ref(cwd: Path | str, ref: str, new: Optional[str], old: Optional[str]
                 f"{ref} holds {current or 'nothing'}, not {old or 'nothing'} as expected",
                 ref=ref, expected=old, current=current,
             )
+        permanent = _never_writable(cwd, ref, new)
+        if permanent:
+            raise GitError(f"git update-ref {ref} failed: {permanent}")
         # Kept for the person reading the final error; it never decides anything.
         lines = (res.stderr if res is not None else b"timed out").strip().splitlines()
         detail = os.fsdecode(lines[-1]) if lines else ""

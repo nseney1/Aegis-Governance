@@ -295,6 +295,22 @@ def test_read_reports_a_confinement_refusal_without_raising(repo: Path, tmp_path
     assert (outside / "events.jsonl").read_bytes() == _row()
 
 
+@needs_git
+@pytest.mark.skipif(
+    os.name != "posix" or os.geteuid() == 0, reason="needs POSIX permissions and a user they bind"
+)
+def test_read_reports_an_unreadable_shared_dir_without_raising(repo: Path):
+    events.append(repo, "benchmark", "ok", {})
+    _shared(repo).chmod(0)
+    try:
+        read = events.read(repo)
+    finally:
+        _shared(repo).chmod(0o700)
+    assert read.rows == []
+    assert read.error is not None and read.error.startswith("cannot read ") and "Permission denied" in read.error
+    assert len(events.read(repo).rows) == 1  # readable again: nothing was lost
+
+
 def test_fitness_and_compliance_never_read_the_events_log():
     root = Path(REPO_ROOT) / "aegis_core"
     readers = [root / "fitness.py", root / "scan_compliance.py", *sorted((root / "telemetry_engine").glob("*.py"))]

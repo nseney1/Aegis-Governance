@@ -304,8 +304,9 @@ def shared_state_dir(workspace: Any, create: bool = True) -> Path:
     path is returned whether or not it exists. Raises PathTraversalError (nothing is
     created) when ``<common>/aegis`` is a symlink, is not a directory or resolves outside
     the common dir, or when an entry directly inside it is a symlink or a directory that
-    resolves outside it. Outside a git repository, or when git cannot run, it is the
-    workspace's ``.aegis/state`` with ``state_dir``'s refusals.
+    resolves outside it. Raises OSError when it cannot be listed or created. Outside a
+    git repository, or when git cannot run, it is the workspace's ``.aegis/state`` with
+    ``state_dir``'s refusals.
     """
     root = Path(os.fspath(workspace)).resolve()
     common = gitsafe.common_dir(root)
