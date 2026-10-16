@@ -883,10 +883,14 @@ class GuardRule:
     """One operation the guard recognizes.
 
     ``tier`` is GUARD_BLOCK (the hook blocks it) or GUARD_RECORD (recorded, never
-    blocked). ``codex_prefixes`` feed the Codex ``aegis.rules`` generator. A prefix sees
-    only the front of a command, so each one forbids a subset of what the hook blocks
-    for this rule (a test pins that); an operation no argv prefix can express (a
-    ``+refspec`` push, ``dd of=/dev/...``) has none and is left to the hook.
+    blocked). ``codex_prefixes`` feed the Codex ``aegis.rules`` generator. Codex's
+    ``prefix_rule`` forbids every command that starts with a prefix, whatever follows
+    it, and the hook blocks each of those for the same rule with one exception: a git
+    clean dry run written after the forcing flag (``git clean -f -n``, ``git clean
+    --force --dry-run``) deletes nothing, so the hook allows it while Codex forbids it
+    (``git clean -n`` runs on both). Tests pin both. An operation no argv prefix can
+    express (a ``+refspec`` push, ``dd of=/dev/...``) has no prefix and is left to the
+    hook.
     """
 
     id: str
@@ -908,9 +912,12 @@ _HARMLESS_DEVICES = frozenset({"/dev/null", "/dev/zero", "/dev/stdout", "/dev/st
 _HARMLESS_DEVICE_DIRS = ("/dev/fd/", "/dev/shm/")
 _CHMOD_777 = re.compile(r"0*[0-7]?777")
 _SQL_DESTRUCTIVE = ("DROP TABLE", "DROP DATABASE", "DELETE FROM", "TRUNCATE TABLE")
-# A heredoc operator and its delimiter word (``<<EOF``, ``<<-'EOF'``, ``<< "END"``); a
-# ``<<<`` here-string is not one.
-_HEREDOC = re.compile(r"(?<!<)<<(-?)[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
+# A heredoc operator and its delimiter word (``<<EOF``, ``<<-'EOF'``, ``<< "END"``,
+# ``<<\EOF``), matched where _split_heredocs finds an unquoted ``<<`` that is not a
+# ``<<<`` here-string.
+_HEREDOC = re.compile(r"<<(-?)[ \t]*\\?(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
+# A heredoc these read is a script they run, so its body is checked as commands.
+_HEREDOC_SHELLS = SHELL_INTERPRETERS | {"ssh", "ash", "mksh"}
 
 BLOCK_SET: Tuple[GuardRule, ...] = (
     GuardRule(
@@ -1038,27 +1045,111 @@ def _guard_stage(cmd: UnwrappedCommand) -> List[GuardRule]:
     return found
 
 
-def _strip_heredoc_bodies(text: str) -> str:
-    """``text`` without the body lines of its heredocs: a body is data for the command
-    that reads it (Claude Code passes commit messages this way), not commands. An
-    unterminated heredoc swallows the rest, as the shell would."""
+def _feeds_a_shell(line: str, command_start: int, operator: int) -> bool:
+    """Whether the heredoc whose operator is at ``line[operator]`` goes to a shell (or
+    ssh): the command it belongs to, or a later stage of that command's pipeline on the
+    same line (``cat <<EOF | bash``)."""
+    for text in (line[command_start:], line[command_start:operator]):
+        try:
+            pipelines = decompose_command(tokenize_command(text))
+        except ValueError:  # an unbalanced quote that closes on a later line
+            continue
+        for stage in pipelines[0].stages if pipelines else []:
+            unwrapped, _ = unwrap_command_stage(stage.raw_tokens)
+            if unwrapped is not None and unwrapped.binary.split("<<", 1)[0] in _HEREDOC_SHELLS:
+                return True
+        return False
+    return False
+
+
+def _heredoc_operators(line: str, open_quotes: List[str]) -> List[Tuple[bool, str, bool]]:
+    """``(strip_tabs, delimiter, feeds_a_shell)`` for each heredoc operator on ``line``
+    outside quotes and comments, in order. ``open_quotes`` is the stack of quotes and
+    ``$(``/``(`` substitutions still open from earlier lines (a ``<<`` inside a
+    substitution counts, even within double quotes); it is updated in place."""
+    found: List[Tuple[bool, str, bool]] = []
+    command_start = 0
+    index = 0
+    while index < len(line):
+        char = line[index]
+        context = open_quotes[-1] if open_quotes else ""
+        if context == "'":
+            if char == "'":
+                open_quotes.pop()
+            index += 1
+            continue
+        if char == "\\":
+            index += 2
+            continue
+        if line.startswith("$(", index):
+            open_quotes.append("(")
+            index += 2
+            command_start = index
+            continue
+        if context == '"':
+            if char == '"':
+                open_quotes.pop()
+            index += 1
+            continue
+        if char in "'\"":
+            open_quotes.append(char)
+        elif char == "(":
+            open_quotes.append("(")
+            command_start = index + 1
+        elif char == ")":
+            if open_quotes:
+                open_quotes.pop()
+            command_start = index + 1
+        elif char in ";&" or line.startswith("||", index):
+            command_start = index + (2 if line.startswith("||", index) else 1)
+        elif char == "#" and (index == 0 or line[index - 1] in " \t;&|()"):
+            break  # a comment runs to the end of the line
+        elif line.startswith("<<<", index):
+            index += 3
+            continue
+        elif line.startswith("<<", index):
+            heredoc = _HEREDOC.match(line, index)
+            if heredoc is None:
+                index += 2
+                continue
+            found.append((heredoc.group(1) == "-", heredoc.group(3), _feeds_a_shell(line, command_start, index)))
+            index = heredoc.end()
+            continue
+        index += 1
+    return found
+
+
+def _split_heredocs(text: str) -> Tuple[str, List[str]]:
+    """``text`` without the body lines of its heredocs, and the bodies a shell reads.
+
+    A body is data for the command that reads it (Claude Code passes commit messages
+    this way), unless that command is a shell or ssh (``bash <<'EOF'``, ``bash -s``,
+    ``ssh host <<EOF``, ``cat <<EOF | sh``): then it is a script, returned to be checked
+    as commands. A ``<<`` inside quotes or a comment is not an operator. An unterminated
+    heredoc swallows the rest, as the shell would.
+    """
     if "<<" not in text:
-        return text
+        return text, []
     lines = text.split("\n")
     kept: List[str] = []
+    scripts: List[str] = []
+    open_quotes: List[str] = []
     index = 0
     while index < len(lines):
         line = lines[index]
         kept.append(line)
         index += 1
-        for heredoc in _HEREDOC.finditer(line):  # several on one line are read in order
-            strip_tabs, delimiter = heredoc.group(1) == "-", heredoc.group(3)
+        for strip_tabs, delimiter, feeds_a_shell in _heredoc_operators(line, open_quotes):
+            body: List[str] = []  # several heredocs on one line are read in order
             while index < len(lines):
-                body = lines[index].rstrip("\r")
+                raw = lines[index].rstrip("\r")
                 index += 1
-                if (body.lstrip("\t") if strip_tabs else body) == delimiter:
+                if (raw.lstrip("\t") if strip_tabs else raw) == delimiter:
                     break
-    return "\n".join(kept)
+                body.append(raw)
+            if feeds_a_shell:
+                scripts.append("\n".join(body))
+    return "\n".join(kept), scripts
 
 
 def _guard_scan(cmd: str, depth: int, found: List[GuardRule]) -> bool:
@@ -1066,11 +1157,13 @@ def _guard_scan(cmd: str, depth: int, found: List[GuardRule]) -> bool:
     (or nests deeper than MAX_DEPTH), which contributes nothing."""
     if depth >= MAX_DEPTH:
         return False
-    text = _strip_heredoc_bodies(cmd)
+    text, scripts = _split_heredocs(cmd)
     try:
         tokens = tokenize_command(text)
     except ValueError:
         return False
+    for script in scripts:
+        _guard_scan(script, depth + 1, found)
     if any(c in text for c in ("$", "`", "(", "<", ">")):
         for sub in extract_subshell_commands(text):
             _guard_scan(sub, depth + 1, found)

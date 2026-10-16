@@ -61,13 +61,24 @@ def _expansions(pattern):
     return [" ".join(words) for words in itertools.product(*positions)]
 
 
+# Codex's prefix_rule matches every command that STARTS with the prefix, whatever follows.
+_TRAILERS = ("", " x", " -- x", " -v", " --help", " -n", " --dry-run", " && ls")
+# The one documented superset: Codex forbids a git clean dry run written after the forcing
+# flag, which deletes nothing and which the hook allows.
+_CODEX_ONLY = {("git-clean-force", " -n"), ("git-clean-force", " --dry-run")}
+
+
 @pytest.mark.parametrize("rule", [r for r in BLOCK_SET if r.codex_prefixes], ids=lambda r: r.id)
-def test_every_codex_prefix_is_blocked_by_the_hook_as_the_same_rule(rule):
-    """The Codex rules are generated from the same constant: a command they forbid is one
-    the hook blocks for the same reason, so Codex never forbids more than the guard."""
-    commands = [c for pattern in rule.codex_prefixes for c in _expansions(pattern)]
-    assert commands
-    assert all(_id(c) == (GUARD_BLOCK, rule.id) for c in commands), [c for c in commands if _id(c) != (GUARD_BLOCK, rule.id)]
+def test_every_command_a_codex_prefix_forbids_is_blocked_by_the_hook_as_the_same_rule(rule):
+    """The Codex rules are generated from the same constant: a command they forbid (the
+    prefix and anything after it) is one the hook blocks for the same reason, except the
+    dry runs listed in _CODEX_ONLY, so Codex never forbids more than the guard otherwise."""
+    prefixes = [c for pattern in rule.codex_prefixes for c in _expansions(pattern)]
+    assert prefixes
+    for trailer in _TRAILERS:
+        expected = None if (rule.id, trailer) in _CODEX_ONLY else (GUARD_BLOCK, rule.id)
+        wrong = [p + trailer for p in prefixes if _id(p + trailer) != expected]
+        assert not wrong, (trailer, wrong)
 
 
 def test_operations_no_argv_prefix_can_express_have_no_codex_prefix():
@@ -231,6 +242,51 @@ def test_a_heredoc_body_is_text_not_commands():
     assert classify_command(commit) is None
     assert classify_command("cat <<EOF > notes.txt\ngit push --force\nEOF\n") is None
     assert classify_command("cat <<-END > notes.txt\n\trm -rf ~\n\tEND\ngit reset --hard") == classify_command("git reset --hard")
+
+
+@pytest.mark.parametrize("command,rule", [
+    ("bash <<'EOF'\ngit push --force\nEOF", "git-push-force"),
+    ("bash -s <<EOF\nrm -rf ~\nEOF\n", "rm-recursive-dangerous"),
+    ("sh <<-EOF\n\tgit reset --hard\n\tEOF", "git-reset-hard"),
+    ("ssh host <<EOF\nrm -rf /\nEOF", "rm-recursive-dangerous"),
+    ("sudo bash <<'EOF'\nmkfs.ext4 /dev/sdb1\nEOF", "mkfs"),
+    ("/bin/bash <<EOF\ngit clean -fdx\nEOF", "git-clean-force"),
+    ("cat <<'EOF' | bash\ngit push -f\nEOF", "git-push-force"),
+    ("out=$(bash <<'EOF'\ngit reset --hard\nEOF\n)", "git-reset-hard"),
+    ("bash<<EOF\ngit push -f\nEOF", "git-push-force"),
+])
+def test_a_heredoc_a_shell_reads_is_commands(command, rule):
+    """A shell (or ssh) runs its heredoc: the body is commands, not text."""
+    assert _id(command) == (GUARD_BLOCK, rule)
+
+
+@pytest.mark.parametrize("command", [
+    'echo "a <<EOF"\ngit push -f\n',
+    "git commit -m 'uses << EOF'\ngit push -f\n",
+    "echo 'it'\\''s <<EOF'\ngit push -f",
+    "# see <<EOF\ngit push -f",
+    "echo \\<<EOF\ngit push -f",
+])
+def test_a_heredoc_operator_inside_quotes_or_a_comment_hides_nothing(command):
+    assert _id(command) == (GUARD_BLOCK, "git-push-force")
+
+
+@pytest.mark.parametrize("command", [
+    "cat <<EOF > run.sh\ngit push --force\nEOF\nchmod +x run.sh",
+    "cat <<EOF > run.sh; bash other.sh\ngit push --force\nEOF",
+    "python3 - <<'EOF'\nprint('git push --force')\nEOF",
+    "bash -c 'echo hi' <<EOF\ngit push --force\nEOF",
+    'git commit -m "$(cat <<\'EOF\'\nfix: say "never" to git push --force\nrm -rf / is blocked\nEOF\n)"',
+    "cat <<\\EOF\ngit push --force\nEOF",
+    "x=$(( 1 << 2 ))",
+    "cat <<<'git push --force'",
+])
+def test_a_heredoc_body_other_commands_read_stays_text(command):
+    assert classify_command(command) is None
+
+
+def test_a_command_after_a_shell_heredoc_is_still_checked():
+    assert _id("bash <<'EOF'\necho hi\nEOF\ngit reset --hard") == (GUARD_BLOCK, "git-reset-hard")
 
 
 def test_a_command_after_an_unterminated_heredoc_is_text():
