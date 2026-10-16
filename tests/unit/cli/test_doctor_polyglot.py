@@ -72,7 +72,7 @@ def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch):
     args = argparse.Namespace(_project_root=tmp_path, fix=True, yes=True)
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/go"):
+    with patch("shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/go"):
         run_doctor(args)
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".go") is not None

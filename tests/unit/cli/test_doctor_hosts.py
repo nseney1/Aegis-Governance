@@ -1197,6 +1197,20 @@ def test_a_server_claude_code_turns_off_for_this_project_is_a_policy_gap(env, sc
     assert "disabledMcpServers" in out.split("Claude Code (claude-code)")[1].split("Antigravity")[0]
 
 
+def test_a_turned_off_server_is_advisory_exactly_like_an_unregistered_one(env):
+    # host-matrix §3.9: the advisory tier is the AGENTS.md bootstrap, MCP instructions or JIT
+    # rules. The bootstrap carries its own route when no aegis tool exists (the `aegis scan`
+    # line), so turning the server off leaves the same tier as never registering it.
+    assert "No MCP tools? Run `aegis scan FILE...` in a shell instead." in bootstrap_text()
+    env.all_ok()
+    _claude_disables(env, "user")
+    disabled = host(env.doctor(), "claude-code")
+    env.claude_json({"numStartups": 3})
+    absent = host(env.doctor(), "claude-code")
+    assert (disabled["state"], absent["state"]) == ("policy_gap", "unregistered")
+    assert disabled["enforcement_level"] == absent["enforcement_level"] == "advisory"
+
+
 def test_a_turned_off_server_without_the_bootstrap_has_no_enforcement(env):
     env.all_ok()
     _claude_disables(env, "user")
@@ -1399,3 +1413,64 @@ def test_a_claude_md_above_the_workspace_never_makes_an_unloaded_server_advisory
     assert claude["state"] == "unregistered"
     assert claude["enforcement_level"] == "unknown"
     assert tier(payload, "advisory")["status"] != "active"
+
+
+def _workspace_under_home(env: Env) -> Path:
+    import shutil
+    ws = env.home / "projects" / "repo"
+    shutil.copytree(str(env.ws), str(ws))
+    return ws
+
+
+def _user_memory(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "CLAUDE.md"
+    path.write_text("# My global notes\n\nNo import of any AGENTS.md here.\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("config_dir", [None, ".claude"], ids=["default", "CLAUDE_CONFIG_DIR"])
+def test_the_users_own_claude_md_never_shadows_agents_md(env, monkeypatch, config_dir):
+    # Claude Code loads ~/.claude/CLAUDE.md (CLAUDE_CONFIG_DIR/CLAUDE.md) as user memory and
+    # leaves it out of the walk up from the project that decides whether AGENTS.md is read.
+    env.all_ok()
+    ws = _workspace_under_home(env)
+    _user_memory(env.home / ".claude")
+    if config_dir:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(env.home / config_dir))
+        (env.home / ".claude.json").replace(env.home / config_dir / ".claude.json")
+    payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is True
+    assert claude["state"] == "ok" and claude["enforcement_level"] == "advisory"
+    assert "claude-code.bootstrap" not in payload["unknown"]
+    assert "claude_md_outside_workspace" not in codes(claude)
+
+
+def test_a_dot_claude_md_in_home_counts_when_claude_keeps_its_config_elsewhere(env, monkeypatch, tmp_path):
+    # With CLAUDE_CONFIG_DIR elsewhere, ~/.claude/CLAUDE.md is an ordinary .claude/CLAUDE.md above the
+    # project; the user memory is CLAUDE_CONFIG_DIR/CLAUDE.md, which is not above it.
+    env.all_ok()
+    ws = _workspace_under_home(env)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    _user_memory(tmp_path / "claude-config")
+    (env.home / ".claude.json").replace(tmp_path / "claude-config" / ".claude.json")
+    shadow = _user_memory(env.home / ".claude")
+    payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(shadow) in reason["message"]
+
+
+@pytest.mark.parametrize("name", ["CLAUDE.md", "CLAUDE.local.md"])
+def test_a_claude_md_directly_in_home_still_counts(env, name):
+    env.all_ok()
+    ws = _workspace_under_home(env)
+    _user_memory(env.home / ".claude")
+    (env.home / name).write_text("# notes\n", encoding="utf-8")
+    payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(env.home / name) in reason["message"]

@@ -18,7 +18,7 @@ from aegis_cli.doctor import (
 
 
 @pytest.fixture(autouse=True)
-def isolated_hosts(tmp_path, monkeypatch):
+def isolated_hosts(tmp_path, tmp_path_factory, monkeypatch):
     """Doctor reads host configs under HOME and may start a host CLI: keep both fake."""
     home = tmp_path / "fake-home"
     home.mkdir()
@@ -31,16 +31,35 @@ def isolated_hosts(tmp_path, monkeypatch):
         raise OSError("host CLIs are not run in these tests")
 
     monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
-    # Host CLIs and python3 are looked up in an empty private directory, never on this
-    # machine's PATH (doctor's own lookup; shutil.which patches do not reach it).
-    no_programs = tmp_path / "no-programs"
-    no_programs.mkdir()
+    # Doctor's own lookups (the aegis CLI, host CLIs, python3) search a private directory
+    # holding only an aegis stub, never this machine's PATH; shutil.which patches do not
+    # reach them. It lies outside tmp_path, which many of these tests use as the
+    # workspace. Tests of the CLI check itself use the real lookup (``real_lookup``).
+    programs = tmp_path_factory.mktemp("programs")
+    _stub(programs, "aegis")
     real_which, real_skipped = doctor.which, doctor.only_skipped
     monkeypatch.setattr(doctor, "which", lambda name, path=None, outside=None:
-                        real_which(name, str(no_programs), outside))
+                        real_which(name, str(programs), outside))
     monkeypatch.setattr(doctor, "only_skipped", lambda name, path=None, outside=None, base=None:
-                        real_skipped(name, str(no_programs), outside, base))
+                        real_skipped(name, str(programs), outside, base))
     return home
+
+
+def _stub(directory, name):
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / (name + (".exe" if os.name == "nt" else ""))
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.fixture
+def real_lookup(monkeypatch):
+    """Doctor's lookups search $PATH again, which each test sets to its own directories."""
+    from aegis_core import pathlookup
+
+    monkeypatch.setattr(doctor, "which", pathlookup.which)
+    monkeypatch.setattr(doctor, "only_skipped", pathlookup.only_skipped)
 
 
 def _governed(root):
@@ -79,7 +98,7 @@ def test_doctor_returns_zero_in_valid_env(tmp_path, monkeypatch):
     """run_doctor returns 0 when the workspace serves rules and aegis is on PATH."""
     _governed(tmp_path)
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+    with patch("shutil.which", side_effect=_only_aegis):
         result = run_doctor(argparse.Namespace())
     assert result == 0
 
@@ -87,7 +106,7 @@ def test_doctor_returns_zero_in_valid_env(tmp_path, monkeypatch):
 def test_doctor_fails_when_no_rule_is_served(tmp_path, monkeypatch, capsys):
     (tmp_path / ".aegis" / "rules").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+    with patch("shutil.which", side_effect=_only_aegis):
         assert run_doctor(argparse.Namespace()) == 1
     out = capsys.readouterr().out
     assert "No rules are served" in out and "aegis init" in out
@@ -104,7 +123,7 @@ def test_doctor_returns_one_on_failure(tmp_path, monkeypatch):
     fake_version = _VersionInfo(3, 8, 0, "final", 0)
 
     monkeypatch.setattr("aegis_cli.doctor.sys.version_info", fake_version)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+    with patch("shutil.which", side_effect=_only_aegis):
         args = argparse.Namespace()
         result = run_doctor(args)
 
@@ -115,45 +134,72 @@ def test_doctor_returns_one_on_failure(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shell remedy; Windows path covered in test_pathcheck")
-def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, capsys):
+def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, capsys, real_lookup):
     bindir = tmp_path / ".local" / "bin"
     bindir.mkdir(parents=True)
     (bindir / "aegis").write_text("#!/bin/sh\n")
+    (tmp_path / "empty").mkdir()
     monkeypatch.setenv("SHELL", "/usr/bin/zsh")
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     monkeypatch.delenv("ZDOTDIR", raising=False)
     monkeypatch.setattr("aegis_cli.pathcheck.default_candidates", lambda: [str(bindir)])
     monkeypatch.setattr("aegis_cli.pathcheck.sys.platform", "linux")
-    with patch("aegis_cli.doctor.shutil.which", return_value=None), \
-         patch("aegis_cli.pathcheck.shutil.which", return_value=None):
-        assert _check_cli_resolvable() is False
+    with patch("aegis_cli.pathcheck.shutil.which", return_value=None):
+        assert _check_cli_resolvable(tmp_path / "ws") is False
     out = capsys.readouterr().out
     assert "aegis CLI not found on PATH" in out
     assert "~/.zshrc" in out
     assert "python3 -m aegis_cli" in out
 
 
-def test_cli_check_never_says_aegis_is_where_only_a_v3_soma_script_is(tmp_path, monkeypatch, capsys):
+def test_cli_check_never_says_aegis_is_where_only_a_v3_soma_script_is(tmp_path, monkeypatch, capsys,
+                                                                      real_lookup):
     bindir = tmp_path / ".local" / "bin"
     bindir.mkdir(parents=True)
     (bindir / "soma").write_text("#!/bin/sh\n")
     monkeypatch.setenv("PATH", str(bindir))
     monkeypatch.setattr("aegis_cli.pathcheck.default_candidates", lambda: [str(bindir)])
-    with patch("aegis_cli.doctor.shutil.which", return_value=None), \
-         patch("aegis_cli.pathcheck.shutil.which", side_effect=lambda cmd, **kw: str(bindir / cmd) if cmd == "soma" else None):
-        assert _check_cli_resolvable() is False
+    with patch("aegis_cli.pathcheck.shutil.which", side_effect=lambda cmd, **kw: str(bindir / cmd) if cmd == "soma" else None):
+        assert _check_cli_resolvable(tmp_path / "ws") is False
     out = capsys.readouterr().out
     assert "The 'aegis' command is not installed" in out
     assert "pip install aegis-guardrails" in out
     assert str(bindir) not in out and "soma" not in out
 
 
-def test_cli_check_silent_remedy_when_resolvable(capsys):
-    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/aegis"):
-        assert _check_cli_resolvable() is True
+def test_cli_check_silent_remedy_when_resolvable(tmp_path, monkeypatch, capsys, real_lookup):
+    exe = _stub(tmp_path / "bin", "aegis")
+    monkeypatch.setenv("PATH", str(exe.parent))
+    assert _check_cli_resolvable(tmp_path / "ws") is True
     out = capsys.readouterr().out
+    assert f"aegis CLI resolvable ({exe})" in out
     assert "export PATH" not in out
+
+
+@pytest.mark.parametrize("entry", ["bin", "", "."])
+def test_an_aegis_reached_through_a_relative_path_entry_is_not_the_cli(tmp_path, monkeypatch, capsys,
+                                                                       real_lookup, entry):
+    # The bootstrap sends agents to `aegis scan` in a shell; an empty or relative PATH entry
+    # finds whatever `aegis` the directory the shell starts in (the repository) holds.
+    ws = tmp_path / "ws"
+    exe = _stub(ws / "bin" if entry == "bin" else ws, "aegis")
+    monkeypatch.chdir(ws)
+    monkeypatch.setenv("PATH", entry)
+    assert _check_cli_resolvable(ws) is False
+    out = capsys.readouterr().out
+    assert "aegis CLI resolvable" not in out and "aegis CLI not found on PATH" in out
+    assert f"{exe} is reached only through the relative PATH entry {entry!r}" in out
+
+
+def test_an_aegis_on_an_absolute_path_entry_inside_the_workspace_counts_and_says_where(tmp_path, monkeypatch,
+                                                                                      capsys, real_lookup):
+    # A project virtualenv the user activated: doctor runs nothing, and that is what `aegis` runs.
+    ws = tmp_path / "ws"
+    exe = _stub(ws / ".venv" / "bin", "aegis")
+    monkeypatch.setenv("PATH", str(exe.parent))
+    assert _check_cli_resolvable(ws) is True
+    assert f"aegis CLI resolvable ({exe}, inside the workspace)" in capsys.readouterr().out
 
 
 def test_check_ast_drivers_native_when_no_slots(tmp_path, capsys):
@@ -183,13 +229,13 @@ def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys, monkey
     tmp_path = ws
 
     # With both binaries resolvable
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd: f"/bin/{cmd}"):
+    with patch("shutil.which", side_effect=lambda cmd: f"/bin/{cmd}"):
         assert _check_ast_drivers(tmp_path) is True
     out = capsys.readouterr().out
     assert "AST driver (.ts): node resolvable" in out
 
     # With missing binary
-    with patch("aegis_cli.doctor.shutil.which", return_value=None):
+    with patch("shutil.which", return_value=None):
         assert _check_ast_drivers(tmp_path) is False
     out = capsys.readouterr().out
     assert "not found on PATH" in out
@@ -210,7 +256,7 @@ def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsy
     config.write_text('{"v": 1, "ast": {"packaged_drivers": ["ts"]}, "drivers": {"ts": "evil"}}')
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+    with patch("shutil.which", side_effect=_only_aegis):
         args = argparse.Namespace()
         result = run_doctor(args)
     assert result == 0
@@ -264,7 +310,7 @@ def test_run_doctor_with_fix_flag(tmp_path, monkeypatch, capsys):
     (tmp_path / "src" / "index.ts").write_text("console.log(1);")
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/node"):
+    with patch("shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/node"):
         res = run_doctor(argparse.Namespace(fix=True, yes=True))
     assert res == 0
     captured = capsys.readouterr().out
@@ -278,7 +324,7 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
     (tmp_path / "src" / "index.ts").write_text("console.log(1);")
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/node"):
+    with patch("shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/node"):
         run_doctor(argparse.Namespace())
     assert not (tmp_path / ".aegis" / "config.json").exists()
     out = capsys.readouterr().out
@@ -392,7 +438,7 @@ def test_doctor_json_mode_and_warning_counts(tmp_path, monkeypatch, capsys):
     (tmp_path / ".aegis" / "rules").mkdir(parents=True)
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+    with patch("shutil.which", side_effect=_only_aegis):
         # 1. Text mode with no served rules -> fails with Fix: remediation and warning/fail summary
         rc_text = run_doctor(argparse.Namespace())
         assert rc_text == 1
@@ -447,6 +493,6 @@ def test_doctor_fails_closed_on_a_rule_that_cannot_be_served(tmp_path, monkeypat
     _governed(tmp_path)
     (tmp_path / ".aegis" / "rules" / "invariants" / "broken.md").write_text("---\nid: [unclosed\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+    with patch("shutil.which", side_effect=_only_aegis):
         assert run_doctor(argparse.Namespace()) == 1
     assert "cannot be served" in capsys.readouterr().out

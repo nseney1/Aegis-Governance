@@ -16,7 +16,8 @@ Each host gets one state, the first of these that applies:
   bootstrap (its CLI failed or timed out, its config cannot be parsed, the registration
   waits on an approval doctor cannot see, a host that sends no workspace depends on an
   unreadable registry, or a CLAUDE.md-family file above the workspace, which doctor does
-  not read, decides whether Claude Code reads AGENTS.md);
+  not read, decides whether Claude Code reads AGENTS.md; the user's own
+  ``~/.claude/CLAUDE.md``, which Claude Code loads as user memory, never does);
 - ``policy_gap``: ``aegis`` loads, but this repository's policy does not fully reach the
   host (no or broken bootstrap, a CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md or
   AGENTS.override.md shadowing AGENTS.md, a file the host truncates, an unregistered
@@ -56,7 +57,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -148,13 +148,24 @@ def _check_state_dir(project_root: Path | None = None) -> bool:
     return False
 
 
-def _check_cli_resolvable() -> bool:
-    """Check that 'aegis' CLI is on PATH."""
-    path = shutil.which("aegis")
+def _check_cli_resolvable(project_root: Optional[Path] = None) -> bool:
+    """Check that the 'aegis' CLI the bootstrap sends agents to is on PATH.
+
+    Only absolute PATH entries count (aegis_core.pathlookup): an empty or relative entry
+    resolves against the directory a shell starts in, where a cloned repository can plant
+    an ``aegis``. Doctor runs nothing here, so an absolute entry inside the workspace (a
+    project virtualenv the user put on PATH) counts, and the line says where it is.
+    """
+    root = Path(project_root or Path.cwd()).resolve()
+    path = which("aegis")
     if path:
-        print(f"  ✅ aegis CLI resolvable ({path})")
+        inside = which("aegis", outside=root) != path
+        print(f"  ✅ aegis CLI resolvable ({path}{', inside the workspace' if inside else ''})")
         return True
     print("  ❌ aegis CLI not found on PATH")
+    for hit in only_skipped("aegis", base=root):
+        print(f"    {hit.path} is reached only through the relative PATH entry {hit.entry!r}, which "
+              "resolves against the current directory: not counted")
     from aegis_cli.pathcheck import build_hint
     hint = build_hint()
     if hint:
@@ -845,8 +856,9 @@ class _Instructions:
     bootstrap: str = "not_read"  # current outdated hand_edited malformed missing not_read
     block_end: Optional[int] = None  # bytes up to the end of the closing marker line
     claude: List[_ClaudeFile] = field(default_factory=list)  # in the workspace, _CLAUDE_FAMILY order
-    # CLAUDE.md-family files in the workspace's parent directories: they count, but doctor
-    # reads no file outside the workspace, so whether one imports this AGENTS.md is unknown.
+    # CLAUDE.md-family files in the workspace's parent directories, except the user memory
+    # file: they count, but doctor reads no file outside the workspace, so whether one
+    # imports this AGENTS.md is unknown.
     claude_outside: List[Path] = field(default_factory=list)
     override: bool = False
 
@@ -907,10 +919,20 @@ def _instructions(ctx: _Ctx) -> _Instructions:
             name=name, path=entry.path, size=len(entry.raw),
             imports_agents=bool(imports.search(_prose(entry.raw.decode("utf-8", errors="replace")))),
             is_agents=same, link_target=os.path.realpath(str(entry.path)) if entry.is_link else None))
-    info.claude_outside = [d.joinpath(*name.split("/")) for d in ctx.root.parents for name in _CLAUDE_FAMILY
-                           if _present(d.joinpath(*name.split("/")))]
+    # Claude Code loads <config dir>/CLAUDE.md (~/.claude/CLAUDE.md) as user memory and
+    # leaves exactly that path out of the walk that decides whether AGENTS.md is read
+    # (claude 2.1.301: the walk's processed paths start as {managed, user} memory).
+    claude_dir = _claude_dir(ctx)
+    user_memory = _path_key(claude_dir / "CLAUDE.md") if claude_dir is not None else None
+    candidates = (d.joinpath(*name.split("/")) for d in ctx.root.parents for name in _CLAUDE_FAMILY)
+    info.claude_outside = [p for p in candidates if _path_key(p) != user_memory and _present(p)]
     info.override = (ctx.root / "AGENTS.override.md").exists()
     return info
+
+
+def _path_key(path: Path) -> str:
+    """``path`` as written, made absolute and case-folded where the OS folds case."""
+    return os.path.normcase(os.path.abspath(str(path)))
 
 
 def _present(path: Path) -> bool:
@@ -1889,7 +1911,7 @@ def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None)
         "zero_dependencies": _check_zero_dependencies,
         "rules": lambda: _check_rules(root),
         "state_dir": lambda: _check_state_dir(root),
-        "cli_on_path": _check_cli_resolvable,
+        "cli_on_path": lambda: _check_cli_resolvable(root),
         "precommit_hook": lambda: _check_precommit_hook(root),
         "ast_drivers": lambda: _check_ast_drivers(root, fix=fix_ast),
         "mcp_launcher": lambda: _check_mcp_launcher(workspace=root),
