@@ -43,6 +43,7 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis team` | Daily Workflow & Verification | Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics) |
 | `aegis rule` | Rule Evolution & Intelligence | Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs |
 | `aegis sync` | Rule Evolution & Intelligence | Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them) |
+| `aegis benchmark` | Plumbing | Measure scan and hook latency, payload size and Layer 1 throughput (not an efficacy measure) |
 | `aegis hook` | Plumbing | Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks |
 
 ### `aegis doctor`
@@ -337,6 +338,18 @@ Category: Rule Evolution & Intelligence.
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--apply` |  |  | Apply the suggested promote/demote/archive transitions (moves rule files) |
+
+### `aegis benchmark`
+
+Measure scan and hook latency, payload size and Layer 1 throughput (not an efficacy measure)
+
+Time the aegis_scan answer (latency p50/p95, payload bytes, approximate tokens), the `aegis hook run pre-tool` hook as a host starts it (a fresh Python process), and Layer 1 throughput (files per second), on a built-in fixture corpus in a temporary directory: nothing in your repository is read or written. It appends one benchmark event to this workspace's events log. This is not an efficacy measure: it says nothing about whether Aegis makes an agent's code better. Compare only runs of the same corpus (its sha256 is in the output) on the same machine.
+
+Category: Plumbing.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--runs` | `N` | `20` | Timed runs of each measurement, 1 to 1000 (default 20); one untimed warm-up of the hook and Layer 1 comes first |
 
 ### `aegis hook`
 

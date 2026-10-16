@@ -77,6 +77,8 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core.inference_provider": 2,
     # Rule packs (rule export/import): the loader, migrate's stripper, the lifecycle's id checks and events.
     "aegis_core.packs": 2,
+    # The benchmark: scan, Layer 1 and events over a fixture corpus it ships as package data.
+    "aegis_core.benchmark": 2,
 }
 # Leaf tables: importable from anywhere because they import no aegis module.
 CORE_LEAVES = ("aegis_core._version", "aegis_core.errors", "aegis_core.taxonomy")

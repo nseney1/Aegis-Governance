@@ -1,5 +1,6 @@
 {
   "command_resolution": {
+    "benchmark": "benchmark",
     "check": "check",
     "doctor": "doctor",
     "hook": "hook",
@@ -91,6 +92,78 @@
       }
     ],
     "commands": {
+      "benchmark": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": 20,
+            "dest": "runs",
+            "flags": [
+              "--runs"
+            ],
+            "help": "Timed runs of each measurement, 1 to 1000 (default 20); one untimed warm-up of the hook and Layer 1 comes first",
+            "kind": "store",
+            "metavar": "N",
+            "nargs": null,
+            "required": false,
+            "type": "_runs"
+          }
+        ],
+        "description": "Time the aegis_scan answer (latency p50/p95, payload bytes, approximate tokens), the `aegis hook run pre-tool` hook as a host starts it (a fresh Python process), and Layer 1 throughput (files per second), on a built-in fixture corpus in a temporary directory: nothing in your repository is read or written. It appends one benchmark event to this workspace's events log. This is not an efficacy measure: it says nothing about whether Aegis makes an agent's code better. Compare only runs of the same corpus (its sha256 is in the output) on the same machine.",
+        "help": "Measure scan and hook latency, payload size and Layer 1 throughput (not an efficacy measure)"
+      },
       "check": {
         "aliases": [],
         "arguments": [
@@ -3209,6 +3282,12 @@
     "description": "Aegis Governance — make AI coding agents trustworthy"
   },
   "registry": [
+    {
+      "aliases": [],
+      "category": "Plumbing",
+      "help": "Measure scan and hook latency, payload size and Layer 1 throughput (not an efficacy measure)",
+      "name": "benchmark"
+    },
     {
       "aliases": [],
       "category": "Daily Workflow & Verification",
