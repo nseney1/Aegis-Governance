@@ -3,10 +3,6 @@ id: governance-auditor
 name: Governance Auditor
 description: Audits session transcripts against governance rules to produce a per-rule PASS/FAIL verdict table.
 kind: skill
-tier: auditor
-consumes: [InspectionReceipt, ArbitrationEvidence]
-produces: [InspectionReceipt]
-handoff_targets: [post-mortem, spec-synthesizer]
 trigger: user_request
 ---
 

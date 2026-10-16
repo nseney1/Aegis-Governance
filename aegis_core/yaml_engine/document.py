@@ -4,8 +4,6 @@ from __future__ import annotations
 import collections.abc
 from typing import Any, Dict, Iterator, List, Optional
 
-from aegis_core.taxonomy import CANONICAL_RULE_TYPES
-
 
 class AegisDocument(collections.abc.Mapping):
     """Unified polymorphic document model representing Rules or Skills.
@@ -31,20 +29,13 @@ class AegisDocument(collections.abc.Mapping):
         return self._metadata
 
     def _resolve_kind(self, explicit_kind: Optional[str]) -> str:
+        """The kind passed in, else the frontmatter's ``kind`` (``kind: skill`` marks a
+        skill), else ``rule``. No other key makes a skill."""
         if explicit_kind:
             return explicit_kind.strip().lower()
-        if str(self._data.get("kind", "")).lower() == "skill":
-            return "skill"
-        if "kind" in self._metadata and self._metadata["kind"]:
-            return str(self._metadata["kind"]).strip().lower()
-
-        m_type = str(self._metadata.get("type", "")).lower()
-        if m_type in CANONICAL_RULE_TYPES:
-            return "rule"
-
-        if any(k in self._metadata for k in ("tier", "consumes", "produces", "handoff_targets")):
-            return "skill"
-
+        kind = self._metadata.get("kind")
+        if kind:
+            return str(kind).strip().lower()
         return "rule"
 
     def _apply_defaults(self) -> None:
@@ -55,15 +46,6 @@ class AegisDocument(collections.abc.Mapping):
                 self._metadata["target_paths"] = []
             if "decay" not in self._metadata:
                 self._metadata["decay"] = True
-        elif self._kind == "skill":
-            if "tier" not in self._metadata:
-                self._metadata["tier"] = "method"
-            if "consumes" not in self._metadata:
-                self._metadata["consumes"] = []
-            if "produces" not in self._metadata:
-                self._metadata["produces"] = []
-            if "handoff_targets" not in self._metadata:
-                self._metadata["handoff_targets"] = []
 
     def __getitem__(self, key: str) -> Any:
         return self._metadata[key]
@@ -124,26 +106,6 @@ class AegisDocument(collections.abc.Mapping):
     def target_paths(self) -> List[str]:
         paths = self._metadata.get("target_paths", [])
         return list(paths) if isinstance(paths, (list, tuple)) else []
-
-    @property
-    def tier(self) -> Optional[str]:
-        val = self._metadata.get("tier")
-        return str(val) if val is not None else None
-
-    @property
-    def consumes(self) -> List[str]:
-        c = self._metadata.get("consumes", [])
-        return list(c) if isinstance(c, (list, tuple)) else []
-
-    @property
-    def produces(self) -> List[str]:
-        p = self._metadata.get("produces", [])
-        return list(p) if isinstance(p, (list, tuple)) else []
-
-    @property
-    def handoff_targets(self) -> List[str]:
-        h = self._metadata.get("handoff_targets", [])
-        return list(h) if isinstance(h, (list, tuple)) else []
 
     @property
     def decay(self) -> bool:

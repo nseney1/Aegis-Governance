@@ -1,7 +1,8 @@
-"""Skill graph discovery and the ${SLOT.*} registry used by aegis_scan.
+"""The shipped skills and the ${SLOT.*} registry used by aegis_scan.
 
-The swarm handoff router and its typed artifacts were removed in v4. The file
-keeps its name because the Layer-1 runner maps aegis_core/skills/* to it.
+The Layer-1 runner maps aegis_core/skills/* to this file. The v4 skill graph and its
+typed handoffs were removed, so a skill is a SKILL.md with ``kind: skill``; nothing
+reads the graph's frontmatter (tier, consumes, produces, handoff_targets).
 """
 from __future__ import annotations
 
@@ -10,6 +11,28 @@ from pathlib import Path
 import pytest
 
 from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
+from aegis_core.yaml_engine.frontmatter import AegisYAML
+
+SKILLS_ROOT = Path(__file__).resolve().parents[3] / "skills"
+REMOVED_GRAPH_KEYS = ("tier", "consumes", "produces", "handoff_targets")
+
+
+def _shipped_skills():
+    return sorted(SKILLS_ROOT.glob("*/SKILL.md"))
+
+
+def test_fifteen_skills_ship():
+    # The CI wheel smoke counts them too (.github/scripts/wheel_smoke.py).
+    assert len(_shipped_skills()) == 15
+
+
+@pytest.mark.parametrize("path", _shipped_skills(), ids=lambda p: p.parent.name)
+def test_each_shipped_skill_is_kind_skill_without_the_removed_graph_keys(path: Path):
+    doc = AegisYAML.parse_text(path.read_text(encoding="utf-8"))
+    assert doc.kind == "skill"
+    assert doc.id == path.parent.name
+    assert doc.get("name") and doc.get("description")
+    assert [k for k in REMOVED_GRAPH_KEYS if k in doc] == []
 
 
 class TestSlotRegistry:

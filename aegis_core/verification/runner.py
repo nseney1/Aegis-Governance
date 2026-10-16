@@ -113,7 +113,7 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
         if found:
             return found
     if "aegis_core/skills" in norm:
-        found = _find_in_tests("test_skills_and_handoff.py")
+        found = _find_in_tests("test_skills.py")
         if found:
             return found
 

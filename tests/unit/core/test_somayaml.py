@@ -188,23 +188,32 @@ enforcement: gate
         assert doc["id"] == "wall-symlink"
         assert "Wall Symlink" in doc.body
 
-    def test_skill_kind_auto_inference(self):
+    def test_a_skill_is_a_document_with_kind_skill_and_gets_no_injected_keys(self):
         text = """---
 id: tdd-cycle
-tier: method
-consumes: [FeatureSpec]
-produces: [VerifiedPatch]
+kind: skill
 ---
 # TDD Cycle
 """
         doc = AegisYAML.parse_text(text)
         assert doc.kind == "skill"
         assert doc.id == "tdd-cycle"
-        assert doc.tier == "method"
-        assert doc.consumes == ["FeatureSpec"]
-        assert doc.produces == ["VerifiedPatch"]
         assert doc.decay is False
-        assert doc.handoff_targets == []
+        # The v4 skill graph is gone: no tier, consumes, produces or handoff_targets default.
+        assert doc.to_dict() == {"id": "tdd-cycle", "kind": "skill"}
+
+    def test_the_removed_handoff_keys_no_longer_make_a_document_a_skill(self):
+        text = """---
+id: legacy-skill
+tier: method
+consumes: [FeatureSpec]
+produces: [VerifiedPatch]
+handoff_targets: [staff-review]
+---
+"""
+        doc = AegisYAML.parse_text(text)
+        assert doc.kind == "rule"
+        assert doc["consumes"] == ["FeatureSpec"]  # kept as data, read by nothing
 
     def test_mapping_interface(self):
         doc = AegisDocument(metadata={"id": "test", "num": 42}, body="# Body", kind="generic")
@@ -334,11 +343,10 @@ class TestSomaYAMLBranchHardening:
         assert doc.id == "s1"
         assert doc.name == "s1"
         assert doc.type == "wall"
-        assert doc.tier == "method"
         assert doc.body == "body text"
         assert doc.source_path == "/tmp/doc.md"
-        assert doc.to_dict() == {"kind": "skill", "id": "s1", "type": "wall", "tier": "method", "consumes": [], "produces": [], "handoff_targets": []}
-        assert list(iter(doc)) == ["kind", "id", "type", "tier", "consumes", "produces", "handoff_targets"]
+        assert doc.to_dict() == {"kind": "skill", "id": "s1", "type": "wall"}
+        assert list(iter(doc)) == ["kind", "id", "type"]
         assert ("AegisDocument" in repr(doc) or "AegisDocument" in repr(doc))
         assert doc["id"] == "s1"
         assert doc.get("nonexistent", "fallback") == "fallback"
@@ -347,9 +355,6 @@ class TestSomaYAMLBranchHardening:
         assert len(doc.items()) >= 3
         assert doc.enforcement is None
         assert doc.target_paths == []
-        assert doc.consumes == []
-        assert doc.produces == []
-        assert doc.handoff_targets == []
         assert doc.decay is False
 
         # rule kind auto inference

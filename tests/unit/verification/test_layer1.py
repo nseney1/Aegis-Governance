@@ -291,8 +291,8 @@ class TestRunnerCoverageEnhancements:
         engine_test = _find_test_file("soma_core/outcomes/engine.py", REPO_ROOT)
         assert engine_test is not None and engine_test.endswith("test_outcome_engine.py")
 
-        skills_test = _find_test_file("soma_core/skills/graph.py", REPO_ROOT)
-        assert skills_test is not None and skills_test.endswith("test_skills_and_handoff.py")
+        skills_test = _find_test_file("soma_core/skills/__init__.py", REPO_ROOT)
+        assert skills_test is not None and skills_test.endswith("test_skills.py")
 
         slots_test = _find_test_file("soma_core/skills/slots.py", REPO_ROOT)
         assert slots_test is not None and slots_test.endswith("test_slots.py")

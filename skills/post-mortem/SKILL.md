@@ -3,10 +3,6 @@ id: post-mortem
 name: post-mortem
 description: Conducts blameless retrospectives of sessions or incidents to extract patterns and process improvements.
 kind: skill
-tier: auditor
-consumes: [ChargeSheet, InspectionReceipt, TestVerdict]
-produces: [InspectionReceipt]
-handoff_targets: [spec-synthesizer, governance-auditor]
 ---
 
 # SRE Post-Mortem Facilitator

@@ -236,8 +236,8 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_mcp_dispatch.py")
     if stem == "tools":
         candidates.append(test_dir / "test_mcp_tools_contract.py")
-    if parent_name == "skills" or stem in ("graph", "handoff", "slots", "skills", "artifacts"):
-        candidates.append(test_dir / "test_skills_and_handoff.py")
+    if parent_name == "skills" or stem in ("slots", "skills"):
+        candidates.append(test_dir / "test_skills.py")
     if parent_name == "handlers" or stem in ("registry", "projection"):
         candidates.append(test_dir / "test_mcp_tools_contract.py")
         candidates.append(test_dir / "test_mcp_dispatch.py")

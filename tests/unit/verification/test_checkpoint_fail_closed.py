@@ -145,3 +145,13 @@ def test_resolve_canonical_test_candidates(tmp_path: Path):
     candidates_cli = [p.as_posix() for p in _resolve_canonical_test_candidates(tmp_path, cli_src)]
     assert any("tests/cli/test_promote.py" in c for c in candidates_cli)
     assert any("tests/test_cli_promote.py" in c for c in candidates_cli)
+
+
+def test_a_skills_module_maps_to_the_skills_suite(tmp_path: Path):
+    """aegis_core/skills/* is covered by tests/unit/mcp/test_skills.py (the handoff suite is gone)."""
+    from aegis_core.verification.checkpoint_checks import _resolve_canonical_test_candidates
+
+    src = tmp_path / "aegis_core" / "skills" / "slots.py"
+    candidates = [p.relative_to(tmp_path).as_posix() for p in _resolve_canonical_test_candidates(tmp_path, src)]
+    assert "tests/unit/mcp/test_skills.py" in candidates
+    assert not [c for c in candidates if "handoff" in c]
