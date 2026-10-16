@@ -33,8 +33,8 @@ TS = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 
 KINDS = (
     "lease_claimed", "lease_denied", "lane_check", "scan_gate", "guard_match",
-    "skills_sync", "partition_check", "pack_import", "init_host", "benchmark", "package",
-    "baseline_written", "baseline_check",
+    "skills_sync", "partition_check", "pack_import", "init_host", "benchmark",
+    "baseline_written", "baseline_check", "package",
 )
 
 
