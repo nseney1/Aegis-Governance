@@ -261,3 +261,79 @@ def test_a_workspace_below_the_git_toplevel_checks_its_own_files(repo, monkeypat
     payload = json.loads(capsys.readouterr().out)
     assert payload["files"] == ["app.py"]
     assert [(e["tool"], e["target"]) for e in payload["layer1"] if not e["verdict"]] == [("forbid_ast:no-eval", "app.py")]
+
+
+# ── The hook reads from git only what a check can read ──────────────────────
+
+def _staged_oid(repo: Path, rel: str) -> str:
+    out = subprocess.run(["git", "rev-parse", f":{rel}"], cwd=str(repo), check=True, capture_output=True, text=True)
+    return out.stdout.strip()
+
+
+@pytest.fixture
+def blob_reads(monkeypatch):
+    """The object ids each `git cat-file --batch` call asked for: the content git hands over."""
+    from aegis_core import gitsafe
+
+    real_run, asked = gitsafe.run, []
+
+    def spy(args, cwd, *rest, **kwargs):
+        if list(args[:2]) == ["cat-file", "--batch"]:
+            asked.extend((kwargs.get("stdin") or b"").decode("ascii").split())
+        return real_run(args, cwd, *rest, **kwargs)
+
+    monkeypatch.setattr(gitsafe, "run", spy)
+    return asked
+
+
+def test_a_staged_file_no_check_can_read_is_never_read_from_git(repo, blob_reads, capsys):
+    (repo / "asset.bin").write_bytes(os.urandom(1 << 20))
+    _git(repo, "add", "asset.bin")
+    _stage(repo, ".env", "API_TOKEN=not-a-real-token\n")
+    _stage(repo, "app.py", SAFE)
+
+    assert main(["check", "--hook"]) == 0, capsys.readouterr().out
+    assert _staged_oid(repo, "app.py") in blob_reads
+    assert _staged_oid(repo, "asset.bin") not in blob_reads
+    assert _staged_oid(repo, ".env") not in blob_reads
+
+
+def _oversized_source(runner_module) -> str:
+    line = "x = 1\n"
+    return line * (runner_module.INDEX_BLOB_LIMIT_BYTES // len(line) + 1)
+
+
+def test_an_oversized_staged_source_file_a_gate_rule_covers_fails_closed(governed, blob_reads, capsys):
+    from aegis_core.verification import runner
+
+    _stage(governed, "big.py", _oversized_source(runner))
+
+    assert main(["check", "--hook"]) == 1
+    out = capsys.readouterr().out
+    assert "forbid_ast:no-eval: big.py" in out
+    assert "over the" in out and "PASSED" not in out
+    assert _staged_oid(governed, "big.py") not in blob_reads
+
+
+def test_an_oversized_staged_source_file_no_rule_covers_is_skipped_and_said(repo, blob_reads, capsys):
+    from aegis_core.verification import runner
+
+    _stage(repo, "big.py", _oversized_source(runner))
+    _stage(repo, "app.py", SAFE)
+
+    assert main(["check", "--hook"]) == 0
+    out = capsys.readouterr().out
+    assert "big.py not checked" in out
+    assert _staged_oid(repo, "big.py") not in blob_reads
+
+
+def test_a_block_on_an_import_of_an_untracked_sibling_says_why(repo, capsys):
+    """The commit would not include the sibling, so the hook does not count it as local."""
+    (repo / ".gitignore").write_text("local_settings.py\n", encoding="utf-8")
+    (repo / "local_settings.py").write_text("SECRET = 1\n", encoding="utf-8")
+    _stage(repo, "settings.py", "from local_settings import SECRET\n")
+
+    assert main(["check", "--hook"]) == 1
+    out = capsys.readouterr().out
+    assert "import_guard: settings.py" in out
+    assert "local_settings.py is not staged or tracked" in out

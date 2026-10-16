@@ -365,6 +365,8 @@ def run_verify(args: argparse.Namespace) -> int:
         for r in results:
             if not r.verdict:
                 print(f"🔴 {r.tool}: {r.target} — {r.detail}")
+            elif r.tool == runner.INDEX_NOTE_TOOL:  # what the hook could not read from git
+                print(f"note: {r.detail}")
         print(summary)
 
     def _record_telemetry(passed: bool, verdict: Any) -> None:

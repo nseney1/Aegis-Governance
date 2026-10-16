@@ -451,6 +451,11 @@ def format_summary(results: list[ToolEvidence]) -> str:
 
 _INDEX_FILE_MODES = frozenset({"100644", "100755"})  # a symlink or submodule has no source to check
 SNAPSHOT_PREFIX = "aegis-index-"
+# The largest staged file the hook reads from git, and the most it reads per git call:
+# memory stays bounded whatever is staged. A larger source file is not read (see
+# _layer1_on_snapshot for what that means for its checks).
+INDEX_BLOB_LIMIT_BYTES = 5 * 1024 * 1024
+INDEX_NOTE_TOOL = "index"  # passing evidence that says what the hook did not check
 
 
 def _git_blob_id(data: bytes, oid_length: int) -> str:
@@ -475,6 +480,27 @@ def _index_entries(repo_root: str) -> dict[str, tuple[str, str]]:
             continue  # an unmerged entry: git refuses the commit before any hook runs
         entries[os.fsdecode(raw_path)] = (parts[0].decode("ascii"), parts[1].decode("ascii"))
     return entries
+
+
+def _blob_sizes(repo_root: str, oids: list[str]) -> dict[str, int]:
+    """The size of each blob, from the object headers only (no content is read)."""
+    from aegis_core import gitsafe
+
+    wanted = list(dict.fromkeys(oids))
+    if not wanted:
+        return {}
+    res = gitsafe.run(["cat-file", "--batch-check"], repo_root, stdin="".join(f"{oid}\n" for oid in wanted).encode("ascii"))
+    if res.returncode != 0:
+        raise gitsafe.GitError(f"git cat-file failed: {res.stderr.decode('utf-8', 'replace').strip()}")
+    sizes: dict[str, int] = {}
+    for oid, line in zip(wanted, res.stdout.splitlines()):
+        header = line.split()
+        if len(header) != 3 or header[0] != oid.encode("ascii") or header[1] != b"blob" or not header[2].isdigit():
+            raise gitsafe.GitError(f"git cannot read the staged object {oid}")
+        sizes[oid] = int(header[2])
+    if len(sizes) != len(wanted):
+        raise gitsafe.GitError("git did not describe every staged object")
+    return sizes
 
 
 def _read_blobs(repo_root: str, oids: list[str]) -> dict[str, bytes]:
@@ -513,9 +539,10 @@ def _snapshot_file(snapshot: str, rel: str) -> str:
     return full
 
 
-def snapshot_index(repo_root: str, paths: list[str], snapshot: str) -> list[str]:
+def snapshot_index(repo_root: str, paths: list[str], snapshot: str) -> tuple[list[str], dict[str, int]]:
     """Write the staged content of ``paths`` (relative to ``repo_root``) under ``snapshot``
-    at the same relative paths; return the paths written (regular files only).
+    at the same relative paths. Return the paths written (regular files only) and the
+    size of each staged file larger than INDEX_BLOB_LIMIT_BYTES, whose content is not read.
 
     The other Python files the index holds next to each one are written empty: Layer 1
     reads only their names (import_guard counts a sibling module as local), so their
@@ -523,19 +550,31 @@ def snapshot_index(repo_root: str, paths: list[str], snapshot: str) -> list[str]
     """
     entries = _index_entries(repo_root)
     staged = [p for p in dict.fromkeys(paths) if entries.get(p, ("", ""))[0] in _INDEX_FILE_MODES]
-    blobs = _read_blobs(repo_root, [entries[p][1] for p in staged])
-    folders = {posixpath.dirname(p) for p in staged if p.endswith(".py")}
+    sizes = _blob_sizes(repo_root, [entries[p][1] for p in staged])
+    too_large = {p: sizes[entries[p][1]] for p in staged if sizes[entries[p][1]] > INDEX_BLOB_LIMIT_BYTES}
+    written = [p for p in staged if p not in too_large]
+    folders = {posixpath.dirname(p) for p in written if p.endswith(".py")}
     for rel, (mode, _oid) in entries.items():
         if rel.endswith(".py") and posixpath.dirname(rel) in folders and mode in _INDEX_FILE_MODES:
             target = _snapshot_file(snapshot, rel)
             os.makedirs(os.path.dirname(target), exist_ok=True)
             open(target, "wb").close()
-    for rel in staged:
-        target = _snapshot_file(snapshot, rel)
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        with open(target, "wb") as fh:
-            fh.write(blobs[entries[rel][1]])
-    return staged
+    batch: list[str] = []
+    batch_bytes = 0
+    for rel in [*written, None]:
+        size = sizes[entries[rel][1]] if rel is not None else 0
+        if batch and (rel is None or batch_bytes + size > INDEX_BLOB_LIMIT_BYTES):
+            blobs = _read_blobs(repo_root, [entries[r][1] for r in batch])
+            for done in batch:
+                target = _snapshot_file(snapshot, done)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(target, "wb") as fh:
+                    fh.write(blobs[entries[done][1]])
+            batch, batch_bytes = [], 0
+        if rel is not None:
+            batch.append(rel)
+            batch_bytes += size
+    return written, too_large
 
 
 def _without_snapshot(results: list[ToolEvidence], snapshot: str) -> list[ToolEvidence]:
@@ -548,14 +587,34 @@ def _without_snapshot(results: list[ToolEvidence], snapshot: str) -> list[ToolEv
     return results
 
 
-def _layer1_on_snapshot(files: list[str], repo_root: str, snapshot: str) -> list[ToolEvidence]:
+def _not_in_the_commit(rel: str, full_path: str, repo_root: str) -> list[str]:
+    """The modules ``rel`` imports that are sibling files in the working tree but neither
+    staged nor tracked: the hook (rightly) does not count them as local, so say why."""
+    folder = posixpath.dirname(rel)
+    try:
+        here = os.listdir(os.path.join(repo_root, *folder.split("/")) if folder else repo_root)
+        imported = {imp.module for imp in import_guard.extract_imports(full_path)}
+    except Exception:
+        return []
+    return sorted(
+        name for name in here
+        if name.endswith(".py") and not name.startswith("_") and name[:-3] in imported
+        and not os.path.exists(os.path.join(os.path.dirname(full_path), name))
+    )
+
+
+def _layer1_on_snapshot(
+    files: list[str], repo_root: str, snapshot: str, ast_runner: Any, too_large: dict[str, int],
+) -> list[ToolEvidence]:
     """run_layer1 in fast mode (call_graph, import_guard, forbid_ast) with each file read
-    from ``snapshot`` and everything else (rules, drivers, local packages) from ``repo_root``."""
+    from ``snapshot`` and everything else (rules, drivers, local packages) from ``repo_root``.
+
+    A file in ``too_large`` was not read: a forbid_ast gate rule that covers it fails
+    closed; otherwise the call_graph and import_guard checks it would get are skipped,
+    and passing INDEX_NOTE_TOOL evidence says so."""
     from aegis_core.ast.policy import ASTExtractionError, evaluate_forbid_ast, extract_normalized_ast
-    from aegis_core.ast.runner import ASTDriverRunner
 
     results: list[ToolEvidence] = []
-    ast_runner = ASTDriverRunner()
     checked = [
         (rel, _snapshot_file(snapshot, rel)) for rel in files
         if not (is_test_path(rel) or posixpath.basename(rel) == "__init__.py")
@@ -575,9 +634,15 @@ def _layer1_on_snapshot(files: list[str], repo_root: str, snapshot: str) -> list
     for rel, full_path in checked:
         if rel.endswith(".py"):
             try:
-                results.append(import_guard.check(full_path, project_root=repo_root))
+                result = import_guard.check(full_path, project_root=repo_root)
             except Exception as exc:
                 results.append(_tool_failure("import_guard", rel, exc))
+                continue
+            missing = _not_in_the_commit(rel, full_path, repo_root) if not result.verdict else []
+            if missing:
+                result.detail += (f"; {', '.join(missing)} {'is' if len(missing) == 1 else 'are'} not staged or "
+                                  "tracked, so the commit would not include it")
+            results.append(result)
 
     try:
         forbid_rules, broken_rules = _discover_forbid_ast_rules(repo_root)
@@ -592,6 +657,16 @@ def _layer1_on_snapshot(files: list[str], repo_root: str, snapshot: str) -> list
             tool="forbid_ast", target=rule_path, verdict=False,
             detail=f"forbid_ast: cannot load rule {rule_path}: {reason}",
         ))
+    limit = f"{INDEX_BLOB_LIMIT_BYTES / (1024 * 1024):g} MiB"
+    for rel, size in too_large.items():
+        why = f"its staged content is {size} bytes, over the {limit} the pre-commit hook reads from git"
+        covering = [rule for rule, _spec in forbid_rules if rule.applies_to(rel)]
+        for rule in covering:  # a gate rule that cannot read the file must not pass it
+            results.append(ToolEvidence(
+                tool=f"forbid_ast:{rule.id}", target=rel, verdict=False, detail=f"forbid_ast: cannot verify {rel}: {why}",
+            ))
+        if not covering and not (is_test_path(rel) or posixpath.basename(rel) == "__init__.py"):
+            results.append(ToolEvidence(tool=INDEX_NOTE_TOOL, target=rel, verdict=True, detail=f"{rel} not checked: {why}"))
     for rel in files:
         # Rule.applies_to: target_paths, and test files only when the patterns name tests.
         applicable = [(rule, spec) for rule, spec in forbid_rules if rule.applies_to(rel)]
@@ -632,16 +707,32 @@ def run_layer1_on_index(changed_files: list[str], repo_root: str) -> list[ToolEv
     """Layer 1 in fast mode on the staged content of ``changed_files`` (paths relative to
     ``repo_root``): exactly what ``git commit`` records, whatever the working tree holds.
 
-    A path the index does not hold as a regular file (a deletion, a symlink, a submodule)
-    has no content to check. Raises GitError when git cannot list or read the index, so
-    the caller fails closed.
+    Only a file some check can read is read from git: Python, or a type an AST driver
+    handles (forbid_ast skips any other type). A path the index does not hold as a regular
+    file (a deletion, a symlink, a submodule) has no content to check. Raises GitError
+    when git cannot list or read the index, so the caller fails closed.
     """
     import tempfile
 
+    from aegis_core.ast.runner import ASTDriverRunner
+
     repo_root_str = str(getattr(repo_root, "root", repo_root))
+    ast_runner = ASTDriverRunner()
+    driven: dict[str, bool] = {".py": True}
+
+    def readable(rel: str) -> bool:
+        ext = os.path.splitext(rel)[1].lower()
+        if ext not in driven:
+            try:
+                driven[ext] = bool(ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str))
+            except Exception:
+                driven[ext] = True  # read it: call_graph meets the same error and fails closed on it
+        return driven[ext]
+
     with tempfile.TemporaryDirectory(prefix=SNAPSHOT_PREFIX) as snapshot:
-        staged = snapshot_index(repo_root_str, changed_files, snapshot)
-        return _without_snapshot(_layer1_on_snapshot(staged, repo_root_str, snapshot), snapshot)
+        staged, too_large = snapshot_index(repo_root_str, [rel for rel in changed_files if readable(rel)], snapshot)
+        results = _layer1_on_snapshot(staged, repo_root_str, snapshot, ast_runner, too_large)
+        return _without_snapshot(results, snapshot)
 
 
 if __name__ == '__main__':
