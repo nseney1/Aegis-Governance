@@ -5,6 +5,7 @@ import os
 import re
 import stat
 from pathlib import Path
+from typing import List
 
 from aegis_core.taxonomy import RULE_TYPES
 from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME
