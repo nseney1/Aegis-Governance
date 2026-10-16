@@ -538,7 +538,7 @@ def test_hook_run_median_latency_is_under_300_ms(ws, home, covered):
         started = time.perf_counter()
         proc = _cli(["pre-tool", "--host", "claude-code"], data, ws, home)
         elapsed = time.perf_counter() - started
-        assert (proc.returncode, proc.stdout, proc.stderr) == expected
+        assert (proc.returncode, proc.stdout, proc.stderr.replace(b"\r\n", b"\n")) == expected  # Windows text stderr
         return elapsed
 
     once()  # warm the OS file cache
