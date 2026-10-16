@@ -135,7 +135,7 @@ def test_without_hooks_each_host_row_says_absent_and_names_the_tier_install_woul
     payload = env.doctor()
     for host_id, (text, evidence) in TIERS.items():
         row = hooks(payload, host_id)
-        assert row["status"] == "absent" and row["entries"] == []
+        assert row["status"] == "absent" and row["entries"] == [] and row["trust"] is None
         assert (row["tier"], row["evidence"]) == (text, evidence)
     best = tier(payload, "best_effort")
     assert best["status"] == "inactive" and best["hosts"] == []
@@ -190,6 +190,7 @@ def test_only_unavailable_hosts_make_the_best_effort_tier_unavailable(env, monke
     monkeypatch.setattr(registrar, "_windows", lambda: True)
     best = tier(env.doctor(), "best_effort")
     assert best["status"] == "unavailable" and best["hosts"] == []
+    assert best["detail"] == registrar.unavailable_reason("antigravity")
 
 
 def test_an_ungoverned_workspace_runs_no_hook_even_where_one_is_registered(env, tmp_path):
@@ -221,6 +222,8 @@ def test_a_second_aegis_entry_is_a_duplicate(env, second):
     (dup,) = findings(payload, "duplicate_hook")
     assert dup["fixable"] is False and "twice" in dup["message"]
     assert str(other) in dup["message"] or "~/" in dup["message"]
+    rc, out = env.run()
+    assert f"hooks        2 Aegis entries (user, {second}): keep one" in out
 
 
 def test_an_entry_whose_aegis_is_gone_is_broken_and_fails_open(env):
@@ -233,11 +236,27 @@ def test_an_entry_whose_aegis_is_gone_is_broken_and_fails_open(env):
     assert row["entries"] == [{"scope": "user", "path": str(env.home / ".codex" / "hooks.json"),
                                "aegis": gone, "executable": False}]
     (missing,) = findings(payload, "hook_aegis_missing")
-    assert gone in missing["message"] and "aegis hook install --host codex-cli" in missing["message"]
+    assert gone in missing["message"]
+    assert missing["message"].endswith("(it fails open): run aegis hook install --host codex-cli")
+    rc, out = env.run()
+    assert f"hooks        registered, but {gone} is missing or not executable (fails open)" in out
     best = tier(payload, "best_effort")
     assert best["status"] == "inactive" and best["hosts"] == []
     assert best["detail"] == ("no Aegis PreToolUse hook registered for claude-code, antigravity; the Aegis "
                               "hook of codex-cli runs a missing aegis: run aegis hook install --host <host>")
+
+
+@pytest.mark.parametrize("scope, fix", [
+    ("project", "run aegis hook install --host claude-code --scope project"),
+    ("local", "remove it from that file, then run aegis hook install --host claude-code"),
+])
+def test_a_broken_entry_outside_the_user_scope_names_its_own_fix(env, scope, fix):
+    name = {"project": "settings.json", "local": "settings.local.json"}[scope]
+    gone = str(env.tmp / "gone" / "aegis")
+    env.write_json(env.ws / ".claude" / name,
+                   {"hooks": {"PreToolUse": [registrar.hook_group("claude-code", gone)]}})
+    (missing,) = findings(env.doctor(), "hook_aegis_missing")
+    assert missing["message"].endswith(f"(it fails open): {fix}")
 
 
 def test_a_non_executable_aegis_is_broken(env):
@@ -320,13 +339,34 @@ def test_v3_hook_entries_are_flagged_in_every_host_file(env):
     assert "hooks.Stop[0]" in flagged[str(claude)]["location"]
 
 
+@pytest.mark.parametrize("command", [
+    "cd /repo; soma hook stop",
+    "exec soma hook stop",
+    "true || aegis hook session-close",
+    r"C:\Tools\soma.exe hook stop",
+    r"C:\Tools\aegis.exe hook stop",
+])
+def test_a_v3_call_anywhere_a_command_starts_is_flagged(env, command):
+    env.write_json(env.home / ".claude" / "settings.json", {"hooks": {"Stop": [{"hooks": [handler(command)]}]}})
+    assert len(findings(env.doctor(), "legacy_hook_entry")) == 1
+
+
+def test_handlers_without_a_command_are_never_v3_entries(env):
+    env.write_json(env.home / ".claude" / "settings.json", {"hooks": {"Stop": [{"hooks": [
+        "not-a-handler", {"type": "mcp_tool", "server": "x", "tool": "y"}, {"type": "command", "command": 7}]}]}})
+    payload = env.doctor()
+    assert findings(payload, "legacy_hook_entry") == []
+    assert hooks(payload, "claude-code")["status"] == "absent"
+
+
 def test_fix_removes_only_the_v3_entries_and_backs_each_file_up(env):
     env.install("claude-code")
     claude = env.home / ".claude" / "settings.json"
     data = json.loads(claude.read_text(encoding="utf-8"))
     data["model"] = "x"
     data["hooks"]["PreToolUse"] = V3_CLAUDE["hooks"]["PreToolUse"] + data["hooks"]["PreToolUse"]
-    data["hooks"]["Stop"] = V3_CLAUDE["hooks"]["Stop"]
+    keep_stop = {"hooks": [handler("/usr/bin/notify")]}
+    data["hooks"]["Stop"] = V3_CLAUDE["hooks"]["Stop"] + [keep_stop] + V3_CLAUDE["hooks"]["Stop"]
     data["hooks"]["SessionEnd"] = V3_CLAUDE["hooks"]["SessionEnd"]
     env.write_json(claude, data)
     original = claude.read_bytes()
@@ -344,7 +384,7 @@ def test_fix_removes_only_the_v3_entries_and_backs_each_file_up(env):
     assert after["hooks"]["PreToolUse"] == [
         {"matcher": "Bash", "hooks": [handler("/usr/bin/lint")]},
         registrar.hook_group("claude-code", env.aegis)]
-    assert after["hooks"]["Stop"] == []
+    assert after["hooks"]["Stop"] == [keep_stop]
     assert after["hooks"]["SessionEnd"] == V3_CLAUDE["hooks"]["SessionEnd"]
     assert json.loads(agy.read_text(encoding="utf-8")) == {
         "governance-monitor": {"PreInvocation": []},
@@ -362,6 +402,7 @@ def test_fix_removes_only_the_v3_entries_and_backs_each_file_up(env):
     "/x/aegis hook run pre-tool --host claude-code",
     "aegis hook safety-gate",
     "aegis hook install",
+    "aegis hook pre-commit",
     "somatic hook stop",
     "echo soma hook stop",
     "/x/soma-hook stop",

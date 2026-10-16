@@ -76,7 +76,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import stat
 import subprocess
 import sys
@@ -1396,11 +1395,10 @@ def _hook_files(host_id: str, ctx: _Ctx) -> List[Tuple[str, Path]]:
     from aegis_cli.hooks import registrar
 
     found: List[Tuple[str, Path]] = []
-    if ctx.home is not None:
-        found.append(("user", registrar.hook_file(host_id, "user", home=ctx.home, root=ctx.root,
-                                                  environ=ctx.environ)))
-    found.append(("project", registrar.hook_file(host_id, "project", home=ctx.home or ctx.root, root=ctx.root,
-                                                 environ=ctx.environ)))
+    for scope in registrar.SCOPES:
+        path = registrar.hook_file(host_id, scope, home=ctx.home, root=ctx.root, environ=ctx.environ)
+        if path is not None:
+            found.append((scope, path))
     found.extend((scope, ctx.root.joinpath(*rel)) for scope, rel in _HOOK_SCOPE_FILES.get(host_id, ()))
     unique: Dict[str, Tuple[str, Path]] = {}
     for scope, path in found:  # in the home directory the project file is the user file
@@ -1497,7 +1495,7 @@ def _removed_host_phases() -> frozenset:
     """The `aegis hook <phase>` commands v3 host configs called and v4 removed (cli.py's table)."""
     from aegis_cli.cli import _HOST_HOOK, REMOVED_COMMANDS
 
-    return frozenset(name.split(" ", 1)[1] for name, pointer in REMOVED_COMMANDS.items()
+    return frozenset(name.partition(" ")[2] for name, pointer in REMOVED_COMMANDS.items()
                      if name.startswith("hook ") and pointer == _HOST_HOOK)
 
 
@@ -1515,10 +1513,9 @@ def _is_legacy_handler(handler: Any, phases: frozenset) -> bool:
     if isinstance(args, list) and args and all(isinstance(a, str) for a in args):
         tokens = [command] + args
     else:
-        try:
-            tokens = shlex.split(command, posix=True)
-        except ValueError:
-            tokens = command.split()
+        from aegis_cli.hooks.registrar import command_tokens
+
+        tokens = command_tokens(command)
     starts = True
     for index, token in enumerate(tokens[:-1]):
         if starts and tokens[index + 1] == "hook":
@@ -1684,6 +1681,11 @@ def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool, unreached: Op
     ]
 
 
+def _hook_tier_text(host_id: str, hooks: Dict[str, Any]) -> str:
+    text = f"{host_id}: {hooks['tier']} [{hooks['evidence']}]"
+    return text + (f", {hooks['trust']}" if hooks["trust"] else "")
+
+
 def _best_effort(rows: List[Dict[str, Any]], governed: bool, setup: str) -> Dict[str, Any]:
     """The per-host hook tier. Doctor reads files only, so a registered hook makes the tier
     ``unknown``, never active: whether a host runs it is out of doctor's sight."""
@@ -1698,13 +1700,10 @@ def _best_effort(rows: List[Dict[str, Any]], governed: bool, setup: str) -> Dict
         return dict(tier, status="inactive",
                     detail=f"no .aegis/ here, so a registered hook passes every call: run {setup}")
     if hooked:
-        def said(host_id: str) -> str:
-            text = f"{host_id}: {hooks[host_id]['tier']} [{hooks[host_id]['evidence']}]"
-            return text + (f", {hooks[host_id]['trust']}" if hooks[host_id]["trust"] else "")
-
+        said = "; ".join(_hook_tier_text(h, hooks[h]) for h in hooked)
         return dict(tier, hosts=hooked, status="unknown",
-                    detail=f"registered for {'; '.join(said(h) for h in hooked)}. Doctor reads the host files only "
-                           "and cannot confirm that a host runs them; each fails open when Aegis errors")
+                    detail=f"registered for {said}. Doctor reads the host files only and cannot confirm that a host "
+                           "runs them; each fails open when Aegis errors")
     unreadable = [h for h in capable if hooks[h]["status"] == "unknown"]
     if unreadable:
         return dict(tier, status="unknown",
@@ -2228,19 +2227,15 @@ def _without_lines(raw: bytes, ranges: Sequence[Tuple[int, int]]) -> Optional[by
 
 
 def _without_list_items(raw: bytes, items: Sequence[Tuple[Tuple[Any, ...], int]]) -> bytes:
-    """The JSON with the listed entries removed from their lists; every list is found
-    before any entry goes, so removing one never shifts another's index."""
+    """The JSON with the listed entries removed from their lists. ``raw`` is byte-identical
+    to what doctor checked (sha256), so every path resolves; every list is found before any
+    entry goes, so removing one never shifts another's index."""
     data = json.loads(raw.decode("utf-8"), object_pairs_hook=_strict_pairs, parse_constant=_reject_constant)
     targets: Dict[int, Tuple[list, set]] = {}
     for path, index in items:
         node: Any = data
         for part in path:
-            if isinstance(part, int):
-                node = node[part] if isinstance(node, list) and 0 <= part < len(node) else None
-            else:
-                node = node.get(part) if isinstance(node, dict) else None
-        if not isinstance(node, list) or not 0 <= index < len(node):
-            raise _Refused(f"{_list_location(path, index)} is no longer there")
+            node = node[part]
         targets.setdefault(id(node), (node, set()))[1].add(index)
     for node, indexes in targets.values():
         for index in sorted(indexes, reverse=True):

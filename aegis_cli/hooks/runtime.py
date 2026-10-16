@@ -72,6 +72,7 @@ def run_hook(args: Any) -> int:
     """Dispatch `aegis hook <action>`; no action shows the hook status."""
     action = getattr(args, "hook_action", None)
     if action in ("install", "uninstall"):
+        # run_hook is public: a caller's own Namespace may predate --host and --scope.
         if getattr(args, "host", None) is None:
             if getattr(args, "scope", None) is not None:
                 print(f"aegis hook {action}: --scope needs --host", file=sys.stderr)

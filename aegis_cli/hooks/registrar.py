@@ -61,6 +61,7 @@ __all__ = [
     "aegis_handlers",
     "codex_rules_file",
     "codex_rules_text",
+    "command_tokens",
     "handler_aegis",
     "hook_file",
     "hook_group",
@@ -176,9 +177,10 @@ def check_host(host: str) -> None:
     raise UsageError(f"--host {host!r} has no Aegis hooks; hook hosts: {', '.join(HOOK_HOSTS)}")
 
 
-def hook_file(host: str, scope: str, *, home: Path, root: Optional[Path],
+def hook_file(host: str, scope: str, *, home: Optional[Path], root: Optional[Path],
               environ: Mapping[str, str]) -> Optional[Path]:
-    """The file that holds ``host``'s hooks at ``scope`` (None: project scope without a root)."""
+    """The file that holds ``host``'s hooks at ``scope`` (None: project scope without a
+    root, user scope without a home)."""
     check_host(host)
     if scope == "project":
         if root is None:
@@ -186,6 +188,8 @@ def hook_file(host: str, scope: str, *, home: Path, root: Optional[Path],
         rel = {"claude-code": (".claude", "settings.json"), "codex-cli": (".codex", "hooks.json"),
                "antigravity": (".agents", "hooks.json")}[host]
         return Path(root).joinpath(*rel)
+    if home is None:
+        return None
     if host == "claude-code":
         return (_env_dir(environ, "CLAUDE_CONFIG_DIR") or Path(home) / ".claude") / "settings.json"
     if host == "codex-cli":
@@ -268,11 +272,21 @@ def hook_group(host: str, aegis: str) -> Dict[str, Any]:
 
 
 def _is_aegis_path(token: Any) -> bool:
-    if not isinstance(token, str) or not token:
-        return False
-    absolute = os.path.isabs(token) or PureWindowsPath(token).is_absolute()
-    name = PureWindowsPath(token).name if "\\" in token else os.path.basename(token)
-    return absolute and name.lower() in _AEGIS_NAMES
+    """An absolute path (POSIX or Windows) whose file is aegis or aegis.exe."""
+    return (isinstance(token, str) and (os.path.isabs(token) or PureWindowsPath(token).is_absolute())
+            and PureWindowsPath(token).name.lower() in _AEGIS_NAMES)
+
+
+def command_tokens(command: str) -> List[str]:
+    """A hook command line split into words: POSIX quoting, except that a line with a
+    backslash (a Windows path, which POSIX rules would eat) keeps its backslashes and only
+    loses the quotes around a word. Unbalanced quotes split on whitespace."""
+    try:
+        if "\\" not in command:
+            return shlex.split(command, posix=True)
+        return [t.strip("\"'") for t in shlex.split(command, posix=False)]
+    except ValueError:
+        return command.split()
 
 
 def handler_aegis(handler: Any) -> Optional[str]:
@@ -285,10 +299,7 @@ def handler_aegis(handler: Any) -> Optional[str]:
         return command if _is_aegis_path(command) and args[:2] == ["hook", "run"] else None
     if not isinstance(command, str):
         return None
-    try:
-        tokens = shlex.split(command, posix=True)
-    except ValueError:
-        return None
+    tokens = command_tokens(command)
     if len(tokens) >= 3 and _is_aegis_path(tokens[0]) and tokens[1:3] == ["hook", "run"]:
         return tokens[0]
     return None
@@ -303,7 +314,8 @@ def is_aegis_handler(handler: Any) -> bool:
 Located = Tuple[Tuple[str, ...], int, int, Dict[str, Any]]
 
 
-def _event_lists(host: str, data: Dict[str, Any], path: Path, strict: bool) -> List[Tuple[Tuple[str, ...], list]]:
+def _event_lists(host: str, data: Dict[str, Any], path: Path,
+                 strict: bool = False) -> List[Tuple[Tuple[str, ...], list]]:
     """Every PreToolUse group list of a hooks file, with its key path. ``strict`` refuses a
     shape the host would not load (what install would write into); otherwise such parts are
     skipped."""
@@ -338,10 +350,10 @@ def _event_lists(host: str, data: Dict[str, Any], path: Path, strict: bool) -> L
     return out
 
 
-def aegis_handlers(host: str, data: Any, path: Path = Path("."), strict: bool = False) -> List[Located]:
-    """Every Aegis handler in a hooks file's PreToolUse lists (any group, any position)."""
-    if not isinstance(data, dict):
-        return []
+def aegis_handlers(host: str, data: Dict[str, Any], path: Path = Path("."), strict: bool = False) -> List[Located]:
+    """Every Aegis handler in a hooks file's PreToolUse lists (any group, any position).
+    ``strict`` refuses (ShapeError) a shape the host would not load; otherwise such parts
+    are skipped."""
     found: List[Located] = []
     for keys, groups in _event_lists(host, data, path, strict):
         for gi, group in enumerate(groups):
@@ -354,16 +366,15 @@ def aegis_handlers(host: str, data: Any, path: Path = Path("."), strict: bool = 
     return found
 
 
-def _remove_aegis(host: str, data: Dict[str, Any], path: Path) -> Tuple[int, Optional[Tuple[Tuple[str, ...], int]]]:
-    """Drop every Aegis handler (and groups left empty); (count, where the first group was)."""
-    count = 0
+def _remove_aegis(host: str, data: Dict[str, Any], path: Path) -> Optional[Tuple[Tuple[str, ...], int]]:
+    """Drop every Aegis handler (and groups left empty) from a file aegis_handlers(strict=True)
+    accepted; where the first group with one was, or None when there was none."""
     first: Optional[Tuple[Tuple[str, ...], int]] = None
-    for keys, groups in _event_lists(host, data, path, strict=True):
+    for keys, groups in _event_lists(host, data, path):
         kept: List[Any] = []
         for group in groups:
             handlers = group.get("hooks")
             if isinstance(handlers, list) and any(is_aegis_handler(h) for h in handlers):
-                count += sum(1 for h in handlers if is_aegis_handler(h))
                 rest = [h for h in handlers if not is_aegis_handler(h)]
                 if rest:
                     kept.append(dict(group, hooks=rest))
@@ -374,7 +385,7 @@ def _remove_aegis(host: str, data: Dict[str, Any], path: Path) -> Tuple[int, Opt
                 continue
             kept.append(group)
         groups[:] = kept
-    return count, first
+    return first
 
 
 def _container_path(host: str) -> Tuple[str, ...]:
@@ -541,8 +552,8 @@ def install(host: str, scope: str = "user", *, home: Union[str, Path], root: Opt
             and current[located[0][1]] == want):
         status = "unchanged"
     else:
-        count, first = _remove_aegis(host, data, path)
-        status = "updated" if count else "added"
+        first = _remove_aegis(host, data, path)
+        status = "updated" if first is not None else "added"
         groups = _ensure_list(data, container, path)
         index = first[1] if first is not None and first[0] == container else len(groups)
         groups.insert(index, want)
@@ -658,10 +669,8 @@ def _context(args: Any) -> Tuple[Path, Optional[Path]]:
     layout = UserLayout.current()
     if layout is None:
         raise InstallError("no home directory: Aegis cannot find the host config files")
-    ws = getattr(args, "ws", None)
-    raw = getattr(ws, "root", None) or getattr(args, "_project_root", None) or getattr(args, "workspace", None)
-    root = Path(raw).resolve() if raw else None
-    return Path(layout.home), root
+    ws = getattr(args, "ws", None)  # `aegis hook` always runs in a workspace (cli._attach_workspace)
+    return Path(layout.home), None if ws is None else Path(ws.root).resolve()
 
 
 def _print_text(command: str, results: List[HookResult]) -> None:
@@ -675,7 +684,7 @@ def _print_text(command: str, results: List[HookResult]) -> None:
             continue
         icon = "ℹ️ " if r.status in ("absent", "unchanged") else "✅"
         print(f"{icon} {prefix}{r.host}: the Aegis PreToolUse hook {verb} {where} ({r.scope} scope)")
-        if r.rules_path is not None and r.rules_status:
+        if r.rules_status:  # set exactly when the result has a Codex rules file
             print(f"   Codex rules {r.rules_path}: {r.rules_status.replace('_', ' ')}")
         if command == "install":
             print(f"   tier: {TIERS[r.host]} [{EVIDENCE[r.host]}]; doctor cannot confirm the host runs it")
@@ -689,10 +698,8 @@ def _print_text(command: str, results: List[HookResult]) -> None:
 
 
 def _run(command: str, args: Any) -> int:
-    host = str(getattr(args, "host", "") or "")
-    scope = getattr(args, "scope", None)
-    use_json = bool(getattr(args, "json", False))
-    dry_run = bool(getattr(args, "dry_run", False))
+    host, scope = str(args.host), getattr(args, "scope", None)
+    use_json, dry_run = bool(getattr(args, "json", False)), bool(getattr(args, "dry_run", False))
     try:
         check_host(host)
         if scope is not None and scope not in SCOPES:

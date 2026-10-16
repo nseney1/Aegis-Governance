@@ -174,6 +174,11 @@ def test_a_relative_aegis_path_is_refused(env):
         install(env, "claude-code")
 
 
+def test_hook_group_refuses_a_host_without_hooks():
+    with pytest.raises(registrar.UsageError, match="has no Aegis hooks"):
+        registrar.hook_group("claude-desktop", "/x/aegis")
+
+
 @pytest.mark.parametrize("host", ["claude-desktop", "gemini-cli", "nope"])
 def test_hosts_without_hooks_are_refused(env, host):
     with pytest.raises(registrar.UsageError) as exc:
@@ -213,6 +218,22 @@ def test_the_old_bytes_are_backed_up_owner_only_before_the_file_changes(env):
     assert result.backup_dir.parent == env.home / ".aegis" / "backups"
     if os.name != "nt":
         assert copy.stat().st_mode & 0o777 == 0o600
+        assert {d.stat().st_mode & 0o777 for d in (copy.parent, copy.parent.parent)} == {0o700}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_dry_run_refuses_when_the_backup_directory_cannot_be_created(env):
+    path = env.home / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'{"model": "x"}')
+    (env.home / ".aegis").mkdir()
+    (env.home / ".aegis").chmod(0o555)
+    try:
+        with pytest.raises(InstallError, match="cannot be created"):
+            install(env, "claude-code", dry_run=True)
+    finally:
+        (env.home / ".aegis").chmod(0o755)
+    assert path.read_bytes() == b'{"model": "x"}'
 
 
 def test_a_new_file_needs_no_backup(env):
@@ -263,6 +284,7 @@ def test_an_aegis_handler_sharing_a_group_is_split_out_and_the_other_handler_kep
     (b'{"hooks": []}', "hooks"),
     (b'{"hooks": {"PreToolUse": {}}}', "PreToolUse"),
     (b'{"hooks": {"PreToolUse": ["x"]}}', "PreToolUse"),
+    (b'{"hooks": {"PreToolUse": [{"hooks": "x"}]}}', "PreToolUse\\[\\]\\.hooks' must be a list"),
 ])
 def test_an_unparseable_or_unexpected_file_is_refused_and_left_byte_identical(env, content, why):
     path = env.home / ".claude" / "settings.json"
@@ -271,6 +293,69 @@ def test_an_unparseable_or_unexpected_file_is_refused_and_left_byte_identical(en
     with pytest.raises(InstallError, match=why):
         install(env, "claude-code")
     assert path.read_bytes() == content and backups(env) == []
+
+
+def test_install_appends_after_every_group_of_the_user_and_keeps_groups_without_handlers(env):
+    path = env.home / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True)
+    first = {"matcher": "Bash", "hooks": [{"type": "command", "command": "/usr/bin/one"}]}
+    bare = {"matcher": "Edit"}
+    path.write_text(json.dumps({"hooks": {"PreToolUse": [first, bare]}}), encoding="utf-8")
+    assert install(env, "claude-code").status == "added"
+    assert load(path)["hooks"]["PreToolUse"] == [first, bare, registrar.hook_group("claude-code", env.aegis)]
+
+
+def test_agy_top_level_values_that_are_not_groups_are_kept(env, monkeypatch):
+    monkeypatch.setattr(registrar, "_windows", lambda: False)
+    path = env.home / ".gemini" / "config" / "hooks.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"description": "mine", "version": 2}), encoding="utf-8")
+    install(env, "antigravity")
+    data = load(path)
+    assert data["description"] == "mine" and data["version"] == 2
+    assert data["aegis"] == {"PreToolUse": [registrar.hook_group("antigravity", env.aegis)]}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_read_only_settings_file_is_refused_before_any_backup(env):
+    path = env.home / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'{"model": "x"}')
+    path.chmod(0o444)
+    with pytest.raises(InstallError, match="read-only"):
+        install(env, "claude-code")
+    assert path.read_bytes() == b'{"model": "x"}' and backups(env) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_rules_file_that_cannot_be_rewritten_stops_install_before_the_hook_is_written(env):
+    rules = env.home / ".codex" / "rules" / "aegis.rules"
+    rules.parent.mkdir(parents=True)
+    rules.write_text(registrar.CODEX_RULES_HEADER + "# an older block set\n", encoding="utf-8")
+    rules.chmod(0o444)
+    with pytest.raises(InstallError, match="read-only"):
+        install(env, "codex-cli")
+    assert not (env.home / ".codex" / "hooks.json").exists() and backups(env) == []
+
+
+def test_codex_on_windows_with_an_aegis_path_cmd_would_split_is_unavailable(env, monkeypatch):
+    monkeypatch.setattr(registrar, "_windows", lambda: True)
+    env.aegis = r"C:\Users\me\Scripts\aegis.exe"
+    result = install(env, "codex-cli")
+    assert result.status == "unavailable"
+    assert "%COMSPEC% /C" in result.detail and env.aegis in result.detail
+    assert not (env.home / ".codex").exists()
+
+
+def test_codex_on_windows_with_a_plain_aegis_path_is_installed(env, monkeypatch):
+    monkeypatch.setattr(registrar, "_windows", lambda: True)
+    assert install(env, "codex-cli").status == "added"
+
+
+def test_reinstall_from_the_home_directory_is_unchanged_not_a_clash(env):
+    env.repo = env.home
+    assert install(env, "claude-code").status == "added"
+    assert install(env, "claude-code").status == "unchanged"
 
 
 def test_an_agy_aegis_group_that_is_not_an_object_is_refused(env, monkeypatch):
@@ -345,6 +430,14 @@ def test_a_user_entry_blocks_a_project_install_too(env):
     assert not (env.repo / ".codex").exists()
 
 
+def test_a_misshapen_file_at_the_other_scope_does_not_block_an_install(env):
+    project = env.repo / ".claude" / "settings.json"
+    project.parent.mkdir(parents=True)
+    project.write_bytes(b'{"hooks": []}')
+    assert install(env, "claude-code", "user").status == "added"
+    assert project.read_bytes() == b'{"hooks": []}'
+
+
 def test_project_scope_at_the_home_directory_is_refused(env):
     env.repo = env.home
     with pytest.raises(InstallError, match="home directory"):
@@ -380,13 +473,77 @@ def test_uninstall_finds_an_entry_by_command_whatever_its_aegis_path(env):
     assert result.status == "removed" and load(path) == {}
 
 
+@pytest.mark.parametrize("entry", [
+    {"type": "command", "command": "/elsewhere/aegis hook run"},
+    {"type": "command", "command": "'/opt/my tools/aegis' hook run pre-tool --host codex-cli"},
+    {"type": "command", "command": "/x/aegis hook run pre-tool --host claude-code", "args": []},
+    {"type": "command", "command": "/x/aegis", "args": ["hook", "run", "pre-tool"]},
+    {"type": "command", "command": r"C:\Users\me\Scripts\aegis.exe hook run pre-tool --host codex-cli"},
+    {"type": "command", "command": r'"C:\Program Files\aegis\aegis.exe" hook run pre-tool --host codex-cli'},
+])
+def test_uninstall_finds_every_form_of_an_aegis_entry(env, entry):
+    path = env.home / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [entry]}]}}),
+                    encoding="utf-8")
+    (result,) = uninstall(env, "claude-code", "user")
+    assert result.status == "removed" and load(path) == {}
+
+
+def test_uninstall_keeps_the_users_other_events(env):
+    path = env.home / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True)
+    stop = [{"hooks": [{"type": "command", "command": "/usr/bin/notify"}]}]
+    path.write_text(json.dumps({"hooks": {"Stop": stop}}), encoding="utf-8")
+    install(env, "claude-code")
+    uninstall(env, "claude-code")
+    assert load(path) == {"hooks": {"Stop": stop}}
+
+
+def test_uninstall_refuses_a_misshapen_file(env):
+    path = env.home / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'{"hooks": []}')
+    with pytest.raises(InstallError, match="'hooks' must be a JSON object"):
+        uninstall(env, "claude-code", "user")
+    assert path.read_bytes() == b'{"hooks": []}'
+
+
+def test_uninstall_from_the_home_directory_has_one_scope(env):
+    env.repo = env.home
+    install(env, "claude-code")
+    assert [(r.scope, r.status) for r in uninstall(env, "claude-code")] == [("user", "removed")]
+
+
+def test_uninstall_keeps_a_rules_file_aegis_did_not_write(env):
+    rules = env.home / ".codex" / "rules" / "aegis.rules"
+    rules.parent.mkdir(parents=True)
+    rules.write_text('prefix_rule(pattern=["ls"], decision="allow")\n', encoding="utf-8")
+    (result,) = uninstall(env, "codex-cli", "user")
+    assert result.rules_status == "not_aegis" and rules.exists() and backups(env) == []
+
+
+def test_uninstall_on_agy_empties_another_group_it_found_aegis_in_but_keeps_it(env, monkeypatch):
+    monkeypatch.setattr(registrar, "_windows", lambda: False)
+    path = env.home / ".gemini" / "config" / "hooks.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"mine": {"PreToolUse": [registrar.hook_group("antigravity", env.aegis)],
+                                         "PostToolUse": []}}), encoding="utf-8")
+    uninstall(env, "antigravity", "user")
+    assert load(path) == {"mine": {"PostToolUse": []}}
+
+
 def test_uninstall_leaves_lookalike_commands_alone(env):
     path = env.home / ".claude" / "settings.json"
     path.parent.mkdir(parents=True)
     keep = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
         {"type": "command", "command": "/x/aegis-lint hook run"},
         {"type": "command", "command": "aegis hook run pre-tool --host claude-code"},
-        {"type": "command", "command": "/x/aegis", "args": ["check"]}]}]}}
+        {"type": "command", "command": "/x/aegis", "args": ["check"]},
+        {"type": "command", "command": "/x/aegis hook 'run"},
+        {"type": "command", "command": "", "args": ["hook", "run", "pre-tool"]},
+        {"type": "command", "args": ["hook", "run", "pre-tool"]},
+        {"type": "command", "command": r"C:\x\aegis-lint.exe hook run"}]}]}}
     path.write_text(json.dumps(keep), encoding="utf-8")
     (result,) = uninstall(env, "claude-code", "user")
     assert result.status == "absent" and load(path) == keep
@@ -519,6 +676,17 @@ def test_aegis_command_is_none_when_nothing_is_found(env):
     assert registrar.aegis_command("", scripts_dirs=[], outside=env.repo) is None
 
 
+def test_aegis_command_falls_back_to_this_interpreters_scripts_directory(env):
+    scripts = str(Path(env.aegis).parent)
+    assert registrar.aegis_command("", scripts_dirs=[scripts], outside=env.repo) == env.aegis
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no execute bit")
+def test_aegis_command_skips_a_scripts_entry_that_is_not_executable(env):
+    Path(env.aegis).chmod(0o644)
+    assert registrar.aegis_command("", scripts_dirs=[str(Path(env.aegis).parent)], outside=env.repo) is None
+
+
 # ── the CLI ─────────────────────────────────────────────────────────────────
 
 def cli(env, *argv, monkeypatch=None):
@@ -541,7 +709,7 @@ def cli_env(env, monkeypatch):
 def test_cli_install_json_carries_the_envelope_and_the_result(cli_env):
     rc, out, err = cli(cli_env, "hook", "install", "--host", "claude-code", "--json")
     doc = json.loads(out)
-    assert rc == 0
+    assert rc == 0 and out.startswith('{\n  "source": ')
     assert doc["source"] == "aegis hook install" and doc["aegis_version"]
     assert doc["checked_at"].endswith("Z")
     assert doc["scope"] == {"host": "claude-code", "scope": "user", "workspace": str(cli_env.repo.resolve())}
@@ -582,6 +750,34 @@ def test_cli_refusal_exits_1_and_names_the_file(cli_env):
     assert rc == 1 and "settings.json" in err and "not valid JSON" in err
 
 
+def test_cli_agy_on_windows_reports_unavailable_and_exits_1(cli_env, monkeypatch):
+    monkeypatch.setattr(registrar, "_windows", lambda: True)
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "antigravity", "--json")
+    assert rc == 1
+    (result,) = json.loads(out)["results"]
+    assert result["status"] == "unavailable" and result["tier"] == "unavailable"
+    assert not (cli_env.home / ".gemini").exists()
+
+
+def test_cli_text_names_the_tier_on_install_only(cli_env):
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "claude-code")
+    assert rc == 0 and "tier: blocking (documented; fails open on error) [DOC]" in out
+    rc, out, err = cli(cli_env, "hook", "uninstall", "--host", "claude-code")
+    assert rc == 0 and "removed from" in out and "tier:" not in out
+
+
+def test_cli_text_says_why_a_host_is_unavailable(cli_env, monkeypatch):
+    monkeypatch.setattr(registrar, "_windows", lambda: True)
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "antigravity")
+    assert rc == 1 and "antigravity: hooks unavailable: Antigravity hooks are unavailable on Windows" in out
+
+
+def test_cli_dry_run_writes_nothing(cli_env):
+    rc, out, err = cli(cli_env, "hook", "install", "--host", "codex-cli", "--dry-run")
+    assert rc == 0 and "(dry run)" in out
+    assert not (cli_env.home / ".codex").exists()
+
+
 def test_cli_without_any_aegis_found_refuses(cli_env, monkeypatch):
     monkeypatch.setenv("PATH", "")
     rc, out, err = cli(cli_env, "hook", "install", "--host", "claude-code")
@@ -595,6 +791,16 @@ def test_cli_uninstall_json(cli_env):
     doc = json.loads(out)
     assert rc == 0 and doc["source"] == "aegis hook uninstall"
     assert {r["scope"]: r["status"] for r in doc["results"]} == {"user": "removed", "project": "absent"}
+
+
+def test_run_hook_takes_a_callers_namespace_without_the_new_options(cli_env, capsys):
+    """run_hook is public (aegis_cli.hooks): a Namespace built without --force, --scope,
+    --json or --dry-run still installs the host hook, at user scope."""
+    from aegis_cli.hooks import run_hook
+
+    rc = run_hook(argparse.Namespace(hook_action="install", host="claude-code"))
+    assert rc == 0 and "added to" in capsys.readouterr().out
+    assert (cli_env.home / ".claude" / "settings.json").is_file()
 
 
 def test_cli_without_host_still_manages_the_git_hook(cli_env, monkeypatch):
