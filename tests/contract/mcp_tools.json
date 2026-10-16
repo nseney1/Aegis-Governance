@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "aegis_scan",
-      "description": "Call before editing files: returns the governance rules that apply to them, ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules (gates, invariants) take at most two slots; the others are listed in omitted_mandatory. stale_rules lists rules edited since the last aegis sync. If any rule file cannot be loaded the scan fails (status FAIL) and names it.",
+      "description": "Call before editing files: returns the governance rules that apply to them, ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules (gates, invariants) take at most two slots; the others are listed in omitted_mandatory. Gates and invariants are served from the reviewed base commit (rules_base); branch-local edits to them never bind and are listed in unreviewed_rules. stale_rules lists rules edited since the last aegis sync. If any rule file cannot be loaded the scan fails (status FAIL) and names it.",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

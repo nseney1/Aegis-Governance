@@ -26,6 +26,7 @@ NON_AEGIS_WRITERS = {
     ("aegis_core/checkrun.py", "run_tests"): "the test run's output in a temporary directory (aegis check --record)",
     ("aegis_core/treeid.py", "bind"): "a copy of the git index in a private temporary directory (tree identity)",
     ("aegis_core/benchmark.py", "materialize"): "the fixture corpus in a temporary directory (aegis benchmark)",
+    ("aegis_core/release_verify.py", "verify_release"): "the attestation subject in a temporary directory (aegis doctor --release)",
 }
 _WRITE_MODE = re.compile(r"[wax+]")
 _COPIES = {"copy", "copy2", "copyfile", "copytree"}

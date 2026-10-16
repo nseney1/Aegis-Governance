@@ -63,6 +63,7 @@ Category: Setup & Environment.
 | `--drivers` |  |  | Run only AST driver and language detection health check |
 | `--github` |  |  | Print what trust tiers A and B need: the ruleset JSON, CODEOWNERS lines and signing setup |
 | `--apply` |  |  | With --github --tier: create the ruleset through gh, only after a y/N at a terminal |
+| `--release` | `SHA` |  | Verify that the CI verdict job attested this commit (gh attestation verify, gh >= 2.93.0; otherwise UNVERIFIED and a non-zero exit) |
 | `--tier` | one of `A`, `B` |  | With --github --apply: which ruleset to create (A: reviews; B: solo, signed approvals) |
 
 ### `aegis init`
@@ -172,14 +173,16 @@ Category: Daily Workflow & Verification.
 | `--dry-run` |  |  | Show what would be checked without running anything |
 | `--record` |  |  | Bind the work tree to a git tree, run Layer 1 on an exported snapshot of it and write one ledger check row (witness: aegis). A label, not proof: only CI on the landing commit confirms it. A tree git cannot see completely (assume-unchanged or skip-worktree files) is unbindable and writes no row; exit 0 only when the run passed |
 | `--tests` |  |  | With --record: also run the test command from the user-scope config (tests.command in ~/.aegis/config.json, default python -m pytest, never the repository's) in the snapshot with a fixed environment; exit 5 or zero passed tests is never evidence |
-| `--format` | one of `text`, `json` | `"text"` | Output format |
+| `--format` | one of `text`, `json`, `github` | `"text"` | Output format (github, with --ci only: workflow-command annotations) |
 | `--lane` | `LANE` |  | Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment (every changed path, deletions and both sides of a move included, inside the lane's globs) and Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong as the protection on .github/** and on the base branch |
 | `--partition` |  |  | Report the cross-lane call, def and import edges between lanes planned with --split (at least two), and the [FROZEN_SIGNATURES] of the functions that cross a lane boundary. Python, and Rust when its driver is enabled. A report: it changes nothing and exits 0 even when it finds edges |
 | `--card` |  |  | Print the day-0 card: languages, AST drivers, rules by type, the Layer 1 pass rate on the files and the 5 files with the most findings (above 2000 files it samples, and says so). Changes nothing and never reads baseline.json; --json for the machine-readable form |
 | `--write-baseline` |  |  | Record every current Layer 1 finding in .aegis/baseline.json, so that aegis check then fails only on new ones. Findings are fingerprinted by rule, path, matched line and its occurrence, not by line number. A failure that is not about a line (a rule that cannot load, a file that cannot be parsed) is listed and is never recorded |
 | `--prune-baseline` |  |  | Drop the entries of .aegis/baseline.json whose findings are fixed (or whose file is gone). It never adds a finding, and it refuses to run while a check cannot run |
+| `--ci` |  |  | The CI weakening check: compare the rules that bind (gates, invariants, enforcement: gate) at merge-base(--base, --head) with those at --head, and flag every way one binds less (a deletion or archive, a rank decrease, lost coverage of existing files, a forbid_ast pattern no longer covered, a new or unknown key, any applies_to change, or a mandatory rule added past the scan's slot cap). A flagged change passes only with a signed Aegis-Approve commit (aegis approve) by a key in the base branch's allowed_signers. Exit 0 pass, 1 fail |
+| `--head` | `REF` |  | With --ci: the commit under review (default: the pull request head in $GITHUB_EVENT_PATH, else HEAD) |
 | `--split` | `NAME=GLOB[,GLOB...]` |  | With --partition: one planned lane and the globs of its files; give at least two. They match as rule target_paths do: a glob without '/' matches at any depth |
-| `--base` | `REF` |  | With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection |
+| `--base` | `REF` |  | With --ci: the pull request's base (default: its base.sha in $GITHUB_EVENT_PATH, else as below). With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection |
 | `--paths` | `GLOB [GLOB ...]` |  | With --lane: the lane's globs instead of its live lease (self-attested). They match as rule target_paths do: a glob without '/' matches at any depth, so CHANGELOG.md also admits docs/CHANGELOG.md. They never allow .aegis/** or .github/workflows/** |
 | `--base-policy` |  |  | With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may .aegis/** and .github/workflows/** change |
 
@@ -494,7 +497,7 @@ The server speaks MCP over stdio. Its tools, as `tools/list` returns them:
 
 **Scan JIT Rules** (read-only, idempotent)
 
-Call before editing files: returns the governance rules that apply to them, ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules (gates, invariants) take at most two slots; the others are listed in omitted_mandatory. stale_rules lists rules edited since the last aegis sync. If any rule file cannot be loaded the scan fails (status FAIL) and names it.
+Call before editing files: returns the governance rules that apply to them, ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules (gates, invariants) take at most two slots; the others are listed in omitted_mandatory. Gates and invariants are served from the reviewed base commit (rules_base); branch-local edits to them never bind and are listed in unreviewed_rules. stale_rules lists rules edited since the last aegis sync. If any rule file cannot be loaded the scan fails (status FAIL) and names it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |

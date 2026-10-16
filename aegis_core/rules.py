@@ -17,15 +17,19 @@ One policy, applied everywhere:
   Otherwise a README is documentation and is skipped; anything else is reported as
   ignored.
 - A file that cannot be decoded or parsed, whose frontmatter ``id`` or ``type``
-  disagrees with its name or directory, whose id another rule also uses, or that spells
+  disagrees with its name or directory, whose id another rule also uses, that spells
   an enforcement key in a way v4 does not read (``paths``, ``globs``, ``target_path``,
-  ``enforce``, ...) becomes a record carrying ``error``. Callers that serve rules (scan,
+  ``enforce``, ...) or that sets ``expired_at`` on a rank 2+ rule (a gate, an invariant, or
+  any rule declaring ``enforcement: gate``: such a rule is retired by a reviewed change, never
+  by expiry) becomes a record carrying ``error``. Callers that serve rules (scan,
   check, the SDK scan) fail closed on error records; listing callers show them, and
   reporting callers count them. Nothing is dropped silently.
 - Derived counters (``fitness``, ``triggers: 12``, ...) and keys v3 tooling wrote that
   v4 never reads (``enforcement_artifact``) are not rule content: they are removed from
   ``meta`` and listed in ``legacy_keys`` (``aegis migrate`` strips them).
 - A rule with ``expired_at`` is loaded but not served (``Rule.expired``).
+- ``applies_to`` is a known key (v4.4 scopes rules with it). Until then a rule carrying it is
+  served as an unscoped rule: only ``target_paths`` decide where it applies.
 - A ``forbid_ast`` rule without ``target_paths`` applies to every file (``**``).
 - Where a rule applies is ``Rule.applies_to``: its target_paths through the one matcher,
   except that a ``forbid_ast`` gate skips test files unless its patterns name tests.
@@ -51,6 +55,7 @@ __all__ = [
     "ENFORCEMENT_KEYS",
     "RETIRED_KEYS",
     "VALID_ENFORCEMENT",
+    "rank_of",
     "Ignored",
     "Rule",
     "RuleCache",
@@ -66,7 +71,7 @@ __all__ = [
 VALID_ENFORCEMENT = ("advisory", "mechanical", "gate")
 
 # Keys that decide what a rule enforces and where.
-ENFORCEMENT_KEYS = frozenset({"type", "enforcement", "target_paths", "forbid_ast", "expired_at"})
+ENFORCEMENT_KEYS = frozenset({"type", "enforcement", "target_paths", "forbid_ast", "expired_at", "applies_to"})
 # Spellings of an enforcement key that v4 does not read, with the key to use instead. A
 # rule using one would apply in the wrong place or nowhere, so it is an error. Compared
 # case-insensitively without "-" and "_" (``targetPaths``, ``Target-Paths``), and any such
@@ -74,7 +79,7 @@ ENFORCEMENT_KEYS = frozenset({"type", "enforcement", "target_paths", "forbid_ast
 # a path or enforcement (``source_path``, ``enforcement_notes``) is descriptive.
 _ENFORCEMENT_ALIASES = {
     "target_paths": (
-        "paths", "path", "glob", "globs", "applyto", "appliesto", "targets", "targetpath",
+        "paths", "path", "glob", "globs", "applyto", "targets", "targetpath",
         "targetglob", "targetglobs", "targetfile", "targetfiles", "targetpattern",
         "targetpatterns", "filepatterns", "pathpatterns", "patterns", "files", "include",
         "includes",
@@ -112,6 +117,17 @@ _TIMESTAMP_KEYS = frozenset({"last_trigger_date", "last_triggered"})
 _RULE_SIGNAL_KEYS = ("type", "target_paths", "forbid_ast")
 _NO_FRONTMATTER = "no frontmatter metadata"
 _UNTERMINATED = "unterminated YAML frontmatter (no closing --- line)"
+
+
+def rank_of(rule_type: Optional[str], enforcement: Any) -> int:
+    """How strongly a rule binds: 3 for a ``gate`` type, 2 for an ``invariant`` type or any
+    rule declaring ``enforcement: gate``, 1 otherwise. Rank 2+ rules are the ones git (the
+    reviewed BASE) witnesses (``aegis_core.rule_integrity``) and that never expire."""
+    if rule_type == "gate":
+        return 3
+    if rule_type == "invariant" or enforcement == "gate":
+        return 2
+    return 1
 
 
 def is_derived(key: str, value: Any) -> bool:
@@ -215,6 +231,11 @@ class Rule:
     def enforcement(self) -> str:
         value = self.meta.get("enforcement")
         return value if isinstance(value, str) and value else "advisory"
+
+    @property
+    def rank(self) -> int:
+        """1, 2 or 3: see ``rank_of``."""
+        return rank_of(self.type, self.meta.get("enforcement"))
 
     @property
     def mandatory(self) -> bool:
@@ -356,6 +377,9 @@ def _parse(entry: RuleInventoryEntry, rule_type: Optional[str], directory: str) 
     unknown = _unknown_enforcement_keys(clean)
     if unknown:
         problems.append(f"unknown enforcement-relevant key(s) {', '.join(unknown)}")
+    if clean.get("expired_at") and rank_of(rule_type, enforcement) >= 2:
+        problems.append("expired_at is not allowed on a rank 2+ rule (a gate, an invariant or enforcement: gate): "
+                        "retire it with a reviewed change, not by expiry")
     return Rule(
         id=stem,
         path=relative,
@@ -495,18 +519,23 @@ class RuleCache:
         self._entries: Dict[str, Tuple[str, RuleSet]] = {}
 
     def get(self, workspace: Any) -> RuleSet:
+        return self.snapshot(workspace)[1]
+
+    def snapshot(self, workspace: Any) -> Tuple[RuleInventory, RuleSet]:
+        """The byte snapshot taken now and the rules parsed from it (reused while the
+        fingerprint is unchanged), for a caller that also compares the bytes."""
         key = workspace_root(workspace)
         snapshot = inventory_rules(key)
         with self._lock:
             cached = self._entries.get(key)
             if cached is not None and cached[0] == snapshot.fingerprint:
-                return cached[1]
+                return snapshot, cached[1]
         ruleset = load_rules(key, inventory=snapshot)
         with self._lock:
             if key not in self._entries and len(self._entries) >= self._MAX_WORKSPACES:
                 self._entries.pop(next(iter(self._entries)))
             self._entries[key] = (snapshot.fingerprint, ruleset)
-        return ruleset
+        return snapshot, ruleset
 
     def invalidate(self) -> None:
         with self._lock:
