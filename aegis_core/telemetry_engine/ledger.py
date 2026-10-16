@@ -572,9 +572,21 @@ def _order(row: Mapping[str, Any]) -> Tuple[str, str, int]:
 def plan_merge(
     existing: Iterable[Dict[str, Any]], sources: Sequence[Sequence[Dict[str, Any]]],
 ) -> Tuple[List[Dict[str, Any]], int]:
+    """``plan_merge_report`` without the conflict count: ``(rows to add, duplicates)``."""
+    added, duplicates, _conflicts = plan_merge_report(existing, sources)
+    return added, duplicates
+
+
+def plan_merge_report(
+    existing: Iterable[Dict[str, Any]], sources: Sequence[Sequence[Dict[str, Any]]],
+) -> Tuple[List[Dict[str, Any]], int, int]:
     """Which rows of ``sources`` (normalized v2 outcome rows, one list per per-worktree
     ledger) the ledger holding ``existing`` lacks, in the order they are to be appended,
-    and how many it already has (``(rows to add, duplicates)``).
+    and how many it already has (``(rows to add, duplicates, conflicts)``). A conflict is a
+    keyed row whose ``(key, rule)`` is already held with a DIFFERENT payload: the live
+    ``append`` raises ``EventConflictError`` for it, so the merge keeps the first row (the
+    earliest, or the one ``existing`` has), does not add the other, and counts it here, not
+    as a duplicate.
 
     - A keyed row is the same row as any other with its ``(key, rule)``: the earliest by
       ``(ts, worktree, seq)`` is kept, and none that ``existing`` has.
@@ -586,12 +598,12 @@ def plan_merge(
     - What is added is sorted by ``(ts, worktree, seq)``, a missing or unusable field
       sorting first; rows equal on all three keep their source order.
     """
-    existing_keys = set()
+    existing_keys: Dict[Tuple[str, Any], str] = {}
     existing_copies: Counter = Counter()
     for row in existing:
         identity = _identity(row)
         if identity is not None:
-            existing_keys.add(identity)
+            existing_keys.setdefault(identity, _payload_digest(row))
         else:
             existing_copies[_canonical(row)] += 1
 
@@ -611,14 +623,18 @@ def plan_merge(
     ordered.sort(key=lambda entry: entry[:3])
     added: List[Dict[str, Any]] = []
     duplicates = 0
-    seen = set(existing_keys)
+    conflicts = 0
+    seen = dict(existing_keys)
     for _sort_key, _source, _position, row in ordered:
         identity = _identity(row)
         if identity is not None:
             if identity in seen:
-                duplicates += 1
+                if seen[identity] == _payload_digest(row):
+                    duplicates += 1
+                else:
+                    conflicts += 1
                 continue
-            seen.add(identity)
+            seen[identity] = _payload_digest(row)
             added.append(row)
             continue
         canonical = _canonical(row)
@@ -627,14 +643,22 @@ def plan_merge(
             added.append(row)
         else:
             duplicates += 1
-    return added, duplicates
+    return added, duplicates, conflicts
 
 
 def merge_rows(
     workspace: Any, sources: Sequence[Sequence[Dict[str, Any]]],
 ) -> Tuple[List[Dict[str, Any]], int]:
+    """``merge_rows_report`` without the conflict count: ``(rows written, duplicates)``."""
+    written, duplicates, _conflicts = merge_rows_report(workspace, sources)
+    return written, duplicates
+
+
+def merge_rows_report(
+    workspace: Any, sources: Sequence[Sequence[Dict[str, Any]]],
+) -> Tuple[List[Dict[str, Any]], int, int]:
     """Append to ``workspace``'s ledger the rows of ``sources`` it lacks (``plan_merge``),
-    renumbering ``seq`` after the rows already there; ``(rows written, duplicates)``.
+    renumbering ``seq`` after the rows already there; ``(rows written, duplicates, conflicts)``.
 
     The ledger is read and written under one hold of the ledger lock, so two merges at
     once, or a merge and a writer, never add a row twice. Each row keeps the ``worktree``
@@ -642,5 +666,5 @@ def merge_rows(
     """
     with ledger_locked(workspace) as site:
         existing, _unusable = normalize_rows(read_jsonl(site.path).rows)
-        added, duplicates = plan_merge(existing, sources)
-        return (append_rows(workspace, added) if added else []), duplicates
+        added, duplicates, conflicts = plan_merge_report(existing, sources)
+        return (append_rows(workspace, added) if added else []), duplicates, conflicts

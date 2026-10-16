@@ -35,7 +35,8 @@ def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
     if ledger:
         print(
             f"  ledger: {ledger['rows']} v2 row(s) from {', '.join(ledger['sources'])} "
-            f"({ledger['duplicates']} duplicate, {ledger['unusable_rows']} unusable, "
+            f"({ledger['duplicates']} duplicate, {ledger.get('conflicts', 0)} conflicting, "
+            f"{ledger['unusable_rows']} unusable, "
             f"{ledger['skipped_lines']} unreadable line(s))"
         )
     if report["config_sources"]:

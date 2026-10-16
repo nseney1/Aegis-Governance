@@ -1795,6 +1795,20 @@ def test_a_legacy_workspace_without_rules_is_told_to_migrate_never_to_init(env, 
 V3_STATE = [".aegis/evidence/signals.jsonl", "aegis.conf"]
 
 
+def test_pending_worktree_ledger_rows_are_a_warning_that_names_aegis_migrate(env, monkeypatch):
+    """After the v4.2 upgrade rows in a worktree's own ledger are not read; doctor says so."""
+    from aegis_core import migrate
+
+    env.all_ok()
+    monkeypatch.setattr(migrate, "pending_worktree_rows", lambda root: 3)
+    payload = env.doctor()
+    (finding,) = [f for f in payload["findings"] if f["code"] == "worktree_ledger_pending"]
+    assert finding["severity"] == "warning" and finding["fixable"] is False
+    assert "3 outcome row(s)" in finding["message"] and "aegis migrate --apply" in finding["message"]
+    monkeypatch.setattr(migrate, "pending_worktree_rows", lambda root: 0)
+    assert "worktree_ledger_pending" not in finding_codes(env.doctor())
+
+
 def test_unmigrated_v3_state_is_a_warning_that_names_the_files_and_aegis_migrate(env, monkeypatch):
     """status, scan and sync refuse a workspace with v3 state v4 never reads; doctor, which
     still runs there, says so instead of reporting a healthy workspace."""

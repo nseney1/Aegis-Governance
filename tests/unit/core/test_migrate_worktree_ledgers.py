@@ -102,7 +102,7 @@ def test_the_plan_lists_the_ledgers_and_the_rows_to_merge_and_writes_nothing(rep
     assert report["status"] == "pending" and report["refusal"] is None
     assert report["worktree_ledgers"] == {
         "sources": sorted([theirs.resolve().as_posix(), mine.resolve().as_posix()]),
-        "rows": 5, "duplicates": 1, "unusable_rows": 0, "skipped_lines": 0,
+        "rows": 5, "duplicates": 1, "conflicts": 0, "unusable_rows": 0, "skipped_lines": 0,
     }
     assert report["ledger"] is None and report["unreadable"] == [] and report["skipped"] == []
     assert not (storage.ledger_site(repo, create=False).path).exists()
