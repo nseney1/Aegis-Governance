@@ -127,7 +127,8 @@ class MigrateCommand(AegisCommand):
         parser.add_argument("--dry-run", action="store_true", help="Only report what would change (the default)")
 
     def execute(self, args: argparse.Namespace) -> int:
-        if getattr(args, "apply", False) and getattr(args, "dry_run", False):
+        # Both flags are store_true options of this parser, so they are always set.
+        if args.apply and args.dry_run:
             print("Error: --apply and --dry-run are mutually exclusive", file=sys.stderr)
             return 2
         return run_migrate(args)
