@@ -168,6 +168,14 @@ def scripts_dir(candidates: Iterable[str] | None = None, cmd_name: str = "aegis"
     return None
 
 
+def _script_path(directory: str, cmd_name: str, os_name: str) -> str:
+    """The console script scripts_dir found, quoted when its path has a space."""
+    names = (cmd_name + ".exe", cmd_name) if os_name == "nt" else (cmd_name, cmd_name + ".exe")
+    path = next((os.path.join(directory, n) for n in names if os.path.isfile(os.path.join(directory, n))),
+                os.path.join(directory, names[0]))
+    return f'"{path}"' if " " in path else path
+
+
 def _active_venv_prefix() -> str | None:
     """sys.prefix when running inside a virtual environment, else None."""
     base = getattr(sys, "base_prefix", sys.prefix)
@@ -204,12 +212,14 @@ def build_hint(env: Mapping[str, str] | None = None,
 
     pkg_name = "aegis-guardrails"
     py = "python" if os_name == "nt" else "python3"
-    fallback = f"    Until then you can run: {py} -m aegis_cli <command>"
     directory = scripts_dir(candidates if candidates is not None else default_candidates(), cmd_name=cmd_name)
     if directory is None:
         return (f"ℹ️  The '{cmd_name}' command is not installed for this Python.\n"
                 f"    Install it with: {py} -m pip install {pkg_name}\n"
                 f"    (or pipx install {pkg_name})")
+    # The stopgap names the installed script by its full path. `python -m aegis_cli` would
+    # put the current directory first on sys.path and import a repository's own aegis_* code.
+    fallback = f"    Until then you can run it by its full path: {_script_path(directory, cmd_name, os_name)} <command>"
 
     shell = shell or detect_shell(env, os_name=os_name)
     sep = ";" if os_name == "nt" else ":"

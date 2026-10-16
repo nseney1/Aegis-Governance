@@ -193,7 +193,9 @@ def test_build_hint_zsh_names_zshrc_and_fallback(tmp_path):
     assert "zsh" in text
     assert "~/.zshrc" in text
     assert 'export PATH="$HOME/.local/bin:$PATH"' in text
-    assert "python3 -m aegis_cli" in text
+    # The stopgap names the script by its full path; `-m aegis_cli` would import from the cwd.
+    assert f"{bindir / 'aegis'} <command>" in text
+    assert "-m aegis_cli" not in text
 
 
 def test_build_hint_on_path_but_shell_not_refreshed(tmp_path):
@@ -377,8 +379,8 @@ def test_build_hint_windows_uses_python_not_python3(tmp_path):
     text = build_hint(env=env, candidates=[str(tmp_path)], which=lambda *_a, **_k: None,
                       home=str(home), platform="win32", os_name="nt")
     assert text is not None
-    assert "python -m aegis_cli" in text
-    assert "python3 -m" not in text
+    assert f"{tmp_path / 'aegis.exe'} <command>" in text
+    assert "-m aegis_cli" not in text
 
 def test_scripts_dir_ignores_a_v3_soma_script(tmp_path):
     # v4 installs only `aegis`; a leftover v3 `soma` script is not where aegis is.

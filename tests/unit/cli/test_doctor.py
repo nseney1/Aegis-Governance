@@ -141,7 +141,8 @@ def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, ca
     out = capsys.readouterr().out
     assert "aegis CLI not found on PATH" in out
     assert "~/.zshrc" in out
-    assert "python3 -m aegis_cli" in out
+    assert f"{bindir / 'aegis'} <command>" in out
+    assert "-m aegis_cli" not in out
 
 
 def test_cli_check_never_says_aegis_is_where_only_a_v3_soma_script_is(tmp_path, monkeypatch, capsys,
