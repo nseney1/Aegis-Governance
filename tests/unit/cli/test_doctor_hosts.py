@@ -777,7 +777,7 @@ def test_the_mcp_launcher_check_runs_no_python3_and_no_aegis_mcp(env, monkeypatc
 
 @pytest.mark.parametrize("command, args", [("{py}", ["-m", "aegis_mcp"]), ("python3", ["-m", "aegis_mcp"])])
 def test_a_dash_m_registration_is_unsafe_on_the_host_row_and_in_the_launcher_check(env, command, args):
-    """The v4.0.0 fallback (`<python> -m aegis_mcp`) and the v3 one (`python3 -m aegis_mcp`)
+    """The v4.0.0 release candidate's fallback (`<python> -m aegis_mcp`) and a bare `python3 -m aegis_mcp`
     import from the project directory the host starts the server in."""
     env.all_ok()
     py = env.stub("python3")
