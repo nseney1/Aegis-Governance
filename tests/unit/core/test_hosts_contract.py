@@ -49,6 +49,35 @@ def test_phase_one_hosts_are_the_three_the_author_runs_plus_desktop_identity():
     assert hosts.get("claude-desktop").registration is None
 
 
+RETIRED_GEMINI_CLI = ("gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
+                      "accounts; use --host antigravity.")
+
+
+def test_gemini_cli_is_retired_and_kept_only_to_name_the_client():
+    # Google no longer serves Gemini CLI to individual Code Assist accounts; Antigravity is
+    # the Gemini-family host. The row stays so identify() can name the client if it connects,
+    # and that client keeps its own ${SLOT.*} profile.
+    row = hosts.get("gemini-cli")
+    assert row.retired == RETIRED_GEMINI_CLI
+    assert row.registration is None
+    assert row.verified is False
+    assert row.slot_profile == "gemini-cli"
+    assert row.phase == 2
+    assert row.notes == (
+        "Retired: Google no longer serves Gemini CLI to individual Code Assist accounts; "
+        "Antigravity is the Gemini-family host. Identity only.",
+    )
+    assert hosts.identify("gemini-cli-mcp-client") == "gemini-cli"
+
+
+def test_only_gemini_cli_is_retired_and_a_retired_row_never_registers():
+    assert [h.id for h in hosts.HOSTS if h.retired] == ["gemini-cli"]
+    assert hosts.get("claude-desktop").retired == ""
+    for h in hosts.HOSTS:
+        if h.retired:
+            assert h.registration is None, h.id
+
+
 def test_bootstrap_fits_every_host_budget_and_carries_no_rule_bodies():
     text = bootstrap.bootstrap_text()
     size = len(text.encode("utf-8"))

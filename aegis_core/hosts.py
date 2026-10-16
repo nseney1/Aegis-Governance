@@ -58,6 +58,9 @@ class HostSpec:
     phase: int = 1
     verified: bool = True
     notes: Tuple[str, ...] = field(default_factory=tuple)
+    #: Why Aegis refuses a host it no longer supports, as ``aegis init --host`` prints it;
+    #: empty for any other host. A retired row stays only so identify() names its client.
+    retired: str = ""
 
 
 HOSTS: Tuple[HostSpec, ...] = (
@@ -126,14 +129,16 @@ HOSTS: Tuple[HostSpec, ...] = (
         binaries=("gemini",),
         user_dirs=("~/.gemini",),
         instructions="gemini_md",
-        registration=Registration(
-            kind="native_cli",
-            argv=("gemini", "mcp", "add", "-s", "user", "aegis", "-e", "AEGIS_CLIENT=gemini-cli", "--", "{command}"),
-        ),
+        registration=None,
         slot_profile="gemini-cli",
         phase=2,
         verified=False,
-        notes=("Reads GEMINI.md only unless context.fileName lists AGENTS.md.",),
+        notes=(
+            "Retired: Google no longer serves Gemini CLI to individual Code Assist accounts; "
+            "Antigravity is the Gemini-family host. Identity only.",
+        ),
+        retired=("gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
+                 "accounts; use --host antigravity."),
     ),
 )
 

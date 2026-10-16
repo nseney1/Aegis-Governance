@@ -147,6 +147,56 @@ class TestSharedHosts:
         assert env.runner.calls[0] == ["codex", "mcp", "remove", "aegis"]
         assert "still lists codex-cli" in capsys.readouterr().err
 
+    @staticmethod
+    def _add_entries(env, *roots: str, hosts=("codex-cli",)) -> None:
+        path = env.home / ".aegis" / "workspaces.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["workspaces"] += [{"root": root, "added_at": "2026-10-16T00:00:00Z", "added_by": "aegis init",
+                                "hosts": list(hosts)} for root in roots]
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def _unbindable_roots(self, env) -> list:
+        """Entries the MCP server's registry reader can never bind (aegis_core.workspace.binding):
+        a relative root, a NUL byte, the home directory, a filesystem root, a directory that is
+        gone and one that is not an Aegis workspace."""
+        plain = env.tmp / "plain"
+        plain.mkdir()
+        return ["relative/ws", str(env.tmp / "nul\x00byte"), str(env.home), env.tmp.anchor,
+                str(env.tmp / "gone"), str(plain)]
+
+    def test_entries_the_server_can_never_bind_do_not_keep_a_host(self, env, capsys):
+        init(env, env.project, "codex-cli")
+        self._add_entries(env, *self._unbindable_roots(env))
+        env.runner.calls.clear()
+
+        assert uninstall(env.project) == 0
+
+        assert env.runner.calls[:1] == [["codex", "mcp", "remove", "aegis"]]
+        assert "kept (still used" not in capsys.readouterr().out
+
+    def test_only_bindable_workspaces_are_counted_as_users(self, env, capsys):
+        other = env.tmp / "other"
+        other.mkdir()
+        init(env, env.project, "codex-cli")
+        init(env, other, "codex-cli")
+        self._add_entries(env, *self._unbindable_roots(env))
+        env.runner.calls.clear()
+
+        assert uninstall(env.project) == 0
+
+        assert env.runner.calls == []
+        assert "codex-cli: kept (still used by 1 other registered workspace(s))" in capsys.readouterr().out
+
+    def test_naming_a_host_warns_only_about_a_bindable_workspace(self, env, capsys):
+        init(env, env.project, "codex-cli")
+        self._add_entries(env, *self._unbindable_roots(env))
+        env.runner.calls.clear()
+
+        assert uninstall(env.project, "--host", "codex-cli") == 0
+
+        assert env.runner.calls[:1] == [["codex", "mcp", "remove", "aegis"]]
+        assert "still lists" not in capsys.readouterr().err
+
     def test_without_a_registry_entry_the_config_hosts_are_used(self, env):
         init(env, env.project, "codex-cli")
         (env.home / ".aegis" / "workspaces.json").write_text('{"v": 1, "workspaces": []}', encoding="utf-8")
@@ -161,6 +211,55 @@ class TestSharedHosts:
         assert uninstall(env.project) == 0
         assert env.runner.calls == []
         assert "claude mcp remove --scope user aegis" in capsys.readouterr().out
+
+
+class TestRecordedHostsAegisNeverRegisters:
+    """A recorded host Aegis has no registration for (retired, identity only, or not in the
+    host table) is skipped with a note; the rest of the uninstall still runs."""
+
+    SKIPPED = {
+        "gemini-cli": "retired: Aegis does not register there",
+        "claude-desktop": "identity only: Aegis does not register there (ADR 0005 H4)",
+        "cursor": "not a host Aegis knows",
+    }
+
+    def _actions(self, env, capsys) -> dict:
+        capsys.readouterr()
+        assert main(["--json", "uninstall", "--workspace", str(env.project)]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "ok"
+        return {a["target"]: (a["result"], a["detail"]) for a in payload["actions"]}
+
+    def test_from_the_registry_entry(self, env, capsys):
+        init(env, env.project, "codex-cli")
+        path = env.home / ".aegis" / "workspaces.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["workspaces"][0]["hosts"] = ["codex-cli", "gemini-cli", "claude-desktop", "cursor"]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        env.runner.calls.clear()
+
+        actions = self._actions(env, capsys)
+
+        assert env.runner.calls == [["codex", "mcp", "remove", "aegis"], ["codex", "mcp", "remove", "soma"]]
+        assert actions["codex-cli"][0] == "removed"
+        assert {h: actions[h] for h in self.SKIPPED} == {h: ("skipped", d) for h, d in self.SKIPPED.items()}
+        assert registry(env) == {"v": 1, "workspaces": []}
+
+    def test_from_config_json_without_a_registry_entry(self, env, capsys):
+        (env.project / ".aegis").mkdir()
+        (env.project / ".aegis" / "config.json").write_text(
+            json.dumps({"v": 1, "hosts": ["gemini-cli", "claude-desktop"]}), encoding="utf-8")
+        gemini = env.bin / ("gemini" + (".exe" if os.name == "nt" else ""))
+        gemini.write_bytes(b"#!/bin/sh\nexit 0\n")
+        gemini.chmod(0o755)
+
+        assert uninstall(env.project) == 0
+
+        out = capsys.readouterr().out
+        assert env.runner.calls == []
+        assert "gemini-cli: skipped (retired: Aegis does not register there)" in out
+        assert "claude-desktop: skipped (identity only: Aegis does not register there (ADR 0005 H4))" in out
+        assert "Nothing was changed" not in out
 
 
 class TestSafety:
@@ -442,6 +541,23 @@ class TestCommandLine:
         assert exc.value.code == 2
         captured = capsys.readouterr()
         assert (captured.out, captured.err) == ("", line + "\n")
+        assert snapshot(env.project, env.home) == before
+
+    @pytest.mark.parametrize("value, message", [
+        ("gemini-cli", "gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
+                       "accounts; use --host antigravity."),
+        ("claude-desktop", "claude-desktop is identity only: Aegis does not register there (ADR 0005 H4)"),
+    ])
+    def test_naming_a_host_aegis_never_registers_exits_2_with_its_reason(self, env, value, message, capsys):
+        init(env, env.project, "codex-cli")
+        capsys.readouterr()
+        before = snapshot(env.project, env.home)
+        with pytest.raises(SystemExit) as exc:
+            uninstall(env.project, "--host", value)
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.splitlines()[-1] == f"aegis uninstall: error: argument --host: {message}"
         assert snapshot(env.project, env.home) == before
 
     @pytest.mark.parametrize("value, message", [("auto", "names hosts"), ("cursor", "unknown host")])

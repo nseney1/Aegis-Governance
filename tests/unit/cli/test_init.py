@@ -649,3 +649,16 @@ class TestCommandLine:
             main(["init", "--host", value, "--workspace", str(project)])
         assert exc.value.code == 2
         assert message in capsys.readouterr().err
+
+    def test_retired_gemini_cli_exits_2_and_points_at_antigravity(self, project, capsys):
+        with pytest.raises(SystemExit) as exc:
+            main(["init", "--host", "gemini-cli", "--yes", "--workspace", str(project)])
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.splitlines()[-1] == (
+            "aegis init: error: argument --host: gemini-cli is not supported: Google retired Gemini CLI "
+            "for individual Code Assist accounts; use --host antigravity.")
+        assert "gemini mcp" not in captured.err
+        assert "v4.1" not in captured.err
+        assert not (project / ".aegis").exists()

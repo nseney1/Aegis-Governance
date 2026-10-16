@@ -23,6 +23,10 @@ from aegis_core import hosts
 # Captured at import, before the autouse fixture swaps it for a refusing stub.
 _REAL_RUN_CLI = ih._run_cli
 
+RETIRED_GEMINI_CLI = ("gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
+                      "accounts; use --host antigravity.")
+DESKTOP_H4 = "claude-desktop is identity only: Aegis does not register there (ADR 0005 H4)"
+
 BEGIN = "<!-- aegis:begin id={id} v=1 sha={sha} -->"
 END = "<!-- aegis:end id={id} -->"
 
@@ -517,13 +521,31 @@ class TestHostSelection:
     @pytest.mark.parametrize("value, message", [
         ("gemini", "unknown host 'gemini'"),
         ("claude-desktop", "identity only"),
-        ("gemini-cli", "v4.1"),
         ("", "no host"),
         ("auto,codex-cli", "auto"),
     ])
     def test_parse_hosts_refuses(self, value, message):
         with pytest.raises(ValueError, match=message):
             ih.parse_hosts(value)
+
+    @pytest.mark.parametrize("value", ["gemini-cli", "codex-cli,gemini-cli"])
+    def test_retired_gemini_cli_is_refused_with_the_way_to_antigravity(self, value):
+        with pytest.raises(ValueError) as exc:
+            ih.parse_hosts(value)
+        assert str(exc.value) == RETIRED_GEMINI_CLI
+
+    def test_a_retired_host_and_an_identity_only_host_are_refused_for_different_reasons(self):
+        with pytest.raises(ValueError) as retired:
+            ih.parse_hosts("gemini-cli")
+        with pytest.raises(ValueError) as identity:
+            ih.parse_hosts("claude-desktop")
+        assert (str(retired.value), str(identity.value)) == (RETIRED_GEMINI_CLI, DESKTOP_H4)
+
+    def test_a_host_this_release_cannot_register_is_refused_without_a_version_promise(self, monkeypatch):
+        monkeypatch.setattr(ih, "registrable_hosts", lambda: (hosts.get("claude-code"),))
+        with pytest.raises(ValueError) as exc:
+            ih.parse_hosts("codex-cli")
+        assert str(exc.value) == "codex-cli: Aegis does not register this host in this release; hosts now: claude-code"
 
 
 class TestRegistrationCommands:
@@ -628,6 +650,27 @@ class TestRegisterHost:
         cfg.write_text(json.dumps({"mcpServers": {"aegis": {}, "soma": {}, "x": {}}}), encoding="utf-8")
         assert ih.unregister_host("antigravity", home=tmp_path).result == "removed"
         assert json.loads(cfg.read_text(encoding="utf-8")) == {"mcpServers": {"x": {}}}
+
+
+class TestHostsAegisNeverRegisters:
+    """A retired or identity-only row is refused before anything runs or is written."""
+
+    @pytest.mark.parametrize("call", ["register", "unregister"])
+    @pytest.mark.parametrize("host_id, message", [("gemini-cli", RETIRED_GEMINI_CLI), ("claude-desktop", DESKTOP_H4)])
+    def test_register_and_unregister_refuse_with_the_row_reason(self, tmp_path, monkeypatch, call, host_id, message):
+        _fake_bin(tmp_path / "bin", "gemini")
+        runner = _Runner()
+        monkeypatch.setattr(ih, "_run_cli", runner)
+        home = tmp_path / "home"
+        home.mkdir()
+        with pytest.raises(ih.InstallError) as exc:
+            if call == "register":
+                ih.register_host(host_id, home=home, command=["/x/aegis-mcp"], path=str(tmp_path / "bin"))
+            else:
+                ih.unregister_host(host_id, home=home, path=str(tmp_path / "bin"))
+        assert str(exc.value) == message
+        assert runner.calls == []
+        assert list(home.iterdir()) == []
 
 
 class TestUserConfigBackups:

@@ -65,7 +65,7 @@ _CLAUDE_PROFILE: dict[str, str] = {
 
 # Codex has no read or search tool: it reads and greps through exec_command (codex-cli
 # 0.162.1). Its model slugs differ per account and plan and none is on record, so the
-# tiers stay generic, as for gemini-cli; ~/.aegis/config.json "slots" can name them.
+# tiers stay generic; ~/.aegis/config.json "slots" can name them.
 _CODEX_PROFILE: dict[str, str] = {
     "TOOL_READ": "exec_command",
     "TOOL_EDIT": "apply_patch",
@@ -92,8 +92,9 @@ _GENERIC_PROFILE: dict[str, str] = {
     "MODEL_HEAVY": "heavy",
 }
 
-# The gemini-cli row is unverified (phase 2): only its documented tool names are bound;
-# the subagent tool and the model tiers stay generic until a real install confirms them.
+# Gemini CLI is retired (aegis_core.hosts), but identify() still names its client when it
+# connects, so it renders its documented tool names; the subagent tool and the model tiers
+# stay generic, as no real install ever confirmed them.
 _GEMINI_CLI_PROFILE: dict[str, str] = {
     **_GENERIC_PROFILE,
     "TOOL_READ": "read_file",

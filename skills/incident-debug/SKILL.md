@@ -3,10 +3,6 @@ id: incident-debug
 name: incident-debug
 description: Systematic incident debugging and root-cause analysis following structured reproduce, isolate, diagnose, fix, verify triage.
 kind: skill
-tier: method
-consumes: [ChargeSheet, InspectionReceipt, TestVerdict]
-produces: [DiffProposal, TestVerdict]
-handoff_targets: [post-mortem, staff-review]
 ---
 
 # SRE Incident Debugger

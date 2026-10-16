@@ -156,6 +156,37 @@ class TestResolveBackend:
         with pytest.raises(LLMCommandError, match="AEGIS_LLM_CMD|--llm-cmd"):
             resolve_backend(r'"C:\Program Files\llm.exe -p', environ={})
 
+    @pytest.mark.parametrize("raw, argv", [
+        # A quoted span groups anywhere in a token, as CommandLineToArgvW reads it.
+        ('llm --flag="a b" -p', ["llm", "--flag=a b", "-p"]),
+        ('llm --title="say \\"hi\\"" x', ["llm", '--title=say "hi"', "x"]),
+        ('llm pre"fix mid"post', ["llm", "prefix midpost"]),
+        # 2n backslashes before a quote are n and the quote is syntax; 2n+1 escape it.
+        (r'llm "C:\dir with space\\" next', ["llm", "C:\\dir with space\\", "next"]),
+        (r'llm a\\\"b', ["llm", 'a\\"b']),
+        # Backslashes anywhere else are literal; an empty quoted span is an empty argument.
+        (r"llm C:\tools\ x", ["llm", "C:\\tools\\", "x"]),
+        ('llm "" x', ["llm", "", "x"]),
+    ])
+    def test_windows_command_splits_as_command_line_to_argv(self, monkeypatch, raw, argv):
+        monkeypatch.setattr("aegis_core.inference_provider.os.name", "nt")
+        assert resolve_backend(raw, environ={}).argv == argv
+
+    @pytest.mark.parametrize("argv", [
+        ["llm", "--flag=a b", "-p"],
+        [r"C:\Program Files\node.exe", r"D:\x y\llm.js", 'say "hi"', "trailing\\", "dir with\\", "", "100%"],
+        ["codex", "exec", "--skip-git-repo-check", r"\\server\share\x", 'a\\"b'],
+    ])
+    def test_windows_command_reads_back_what_list2cmdline_writes(self, monkeypatch, argv):
+        # subprocess.list2cmdline quotes for the C runtime; the split must undo it exactly.
+        monkeypatch.setattr("aegis_core.inference_provider.os.name", "nt")
+        assert resolve_backend(subprocess.list2cmdline(argv), environ={}).argv == argv
+
+    def test_windows_command_with_an_unclosed_mid_token_quote_is_an_error(self, monkeypatch):
+        monkeypatch.setattr("aegis_core.inference_provider.os.name", "nt")
+        with pytest.raises(LLMCommandError, match="AEGIS_LLM_CMD|--llm-cmd"):
+            resolve_backend('llm --flag="a b', environ={})
+
     def test_posix_command_honors_shell_quoting_and_escapes(self, monkeypatch):
         monkeypatch.setattr("aegis_core.inference_provider.os.name", "posix")
         backend = resolve_backend(r"my\ llm -p 'two words'", environ={})

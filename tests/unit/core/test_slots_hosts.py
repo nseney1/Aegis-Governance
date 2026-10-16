@@ -61,6 +61,7 @@ def test_every_profile_binds_every_capability_to_a_value_the_sanitizer_keeps(pro
         ("codex-cli", "exec_command", "apply_patch", "spawn_agent", "fast"),
         ("claude-code", "Read", "Edit", "Task", "haiku"),
         ("antigravity", "view_file", "replace_file_content", "invoke_subagent", "flash"),
+        # Retired, but a connected client is still identified and renders its own tools.
         ("gemini-cli", "read_file", "replace", "subagent", "fast"),
         ("generic", "read_file", "edit_file", "subagent", "fast"),
     ],
@@ -69,6 +70,12 @@ def test_for_platform_renders_each_host_with_its_own_tools(host_id, read, edit, 
     reg = SlotRegistry.for_platform(host_id)
     template = "${SLOT.TOOL_READ}|${SLOT.TOOL_EDIT}|${SLOT.TOOL_SUBAGENT}|${SLOT.MODEL_FAST}"
     assert reg.resolve(template) == f"{read}|{edit}|{subagent}|{fast}"
+
+
+def test_the_retired_gemini_cli_client_keeps_its_documented_search_and_run_tools():
+    assert hosts.get("gemini-cli").slot_profile == "gemini-cli"
+    reg = SlotRegistry.for_platform("gemini-cli")
+    assert reg.resolve("${SLOT.TOOL_SEARCH}|${SLOT.TOOL_RUN}") == "grep_search|run_shell_command"
 
 
 def test_identity_only_desktop_gets_the_generic_profile_from_the_host_table():

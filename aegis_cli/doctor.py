@@ -839,7 +839,7 @@ def _probe(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
         return _PROBES[spec.id](spec, binary, ctx)
     if spec.registration is not None and spec.registration.kind == "json_file":
         return _probe_json_host(spec, binary, ctx)
-    return _registration("unavailable", "-", detail=f"doctor cannot check {spec.display_name} yet")
+    return _registration("unavailable", "-", detail=f"doctor has no check for {spec.display_name}")
 
 
 # ── Host plane: instruction files ───────────────────────────────────────────
@@ -1726,10 +1726,16 @@ def _selection(root: Path, governed: bool) -> Tuple[Tuple[Any, ...], str, List[_
     if not chosen:
         return default, "default", []
     known = {h.id: h for h in hosts.HOSTS if h.registration is not None}
-    unknown = [h for h in chosen if h not in known]
-    notes = [_Finding("unknown_host", config,
-                      f"{config.name} selects {', '.join(repr(h) for h in unknown)}, which doctor "
-                      "cannot check", severity="info")] if unknown else []
+    table = {h.id: h for h in hosts.HOSTS}
+    named = list(dict.fromkeys(chosen))
+    retired = [h for h in named if h in table and table[h].retired]
+    unknown = [h for h in named if h not in known and h not in retired]
+    notes = [_Finding("retired_host", config, f"{config.name} selects {h!r}, a retired host: {table[h].retired}",
+                      severity="info") for h in retired]
+    if unknown:
+        notes.append(_Finding("unknown_host", config,
+                              f"{config.name} selects {', '.join(repr(h) for h in unknown)}, which doctor "
+                              "cannot check", severity="info"))
     picked = tuple(h for h in hosts.HOSTS if h.id in set(chosen) and h.id in known)
     return picked, "config", notes
 

@@ -3,10 +3,6 @@ id: genesis
 name: Genesis — Codebase Onboarding Reconnaissance
 description: Four-stage read-only reconnaissance protocol mapping structure, history, architecture, and governance in unfamiliar codebases.
 kind: skill
-tier: scout
-consumes: []
-produces: [InspectionReceipt]
-handoff_targets: [domain-researcher, adaptive-reviewer, staff-review, spec-synthesizer]
 trigger: user_request
 aliases: ["genesis", "init", "onboard", "explore", "map this repo", "what is this codebase"]
 ---
