@@ -1682,3 +1682,97 @@ def test_from_home_no_source_file_under_it_is_taken_for_a_project(env):
     assert "user layer" in " ".join(checks["ast_drivers"]["detail"])
     assert not (env.home / ".aegis" / "config.json").exists()
     assert not any(f.get("action", "").startswith("enable") for f in payload.get("fixes", []))
+
+
+# ── v4.0.0 release review: the floor must be reachable, a .soma workspace migrates ──
+
+def _install_current_hook(env: Env) -> Path:
+    from aegis_cli.hooks.management import generate_hook_block
+
+    hooks = env.ws / ".git" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    hook.chmod(0o755)
+    return hook
+
+
+def _unreachable(monkeypatch, reason: str) -> None:
+    """hook_status as the git-hook lane reports a block git never reaches."""
+    from aegis_cli.hooks import management
+
+    real = management.hook_status
+
+    def status(root=None):
+        st = real(root)
+        st.update(reachable=False, unreachable_reason=reason)
+        return st
+
+    monkeypatch.setattr(management, "hook_status", status)
+
+
+def test_a_current_hook_git_never_reaches_is_not_the_local_floor(env, monkeypatch):
+    env.all_ok()
+    _install_current_hook(env)
+    assert tier(env.doctor(), "local_floor")["status"] == "active"
+    reason = "line 2 (exec ./other-hook) ends the hook before the aegis block, so the check never runs"
+    _unreachable(monkeypatch, reason)
+    payload = env.doctor()
+    floor = tier(payload, "local_floor")
+    assert floor["status"] == "inactive"
+    assert floor["detail"] == f"the Aegis pre-commit hook is installed but never runs: {reason}; see aegis hook status"
+    assert levels(payload) == dict.fromkeys(PHASE1, "advisory")
+    (check,) = [c for c in payload["checks"] if c["id"] == "precommit_hook"]
+    assert check["status"] == "fail" and payload["_rc"] == 1
+    assert f"never runs: {reason}" in " ".join(check["detail"])
+
+
+def test_a_hook_status_without_reachability_counts_as_reachable(env):
+    """hook_status gains `reachable` in the git-hook lane; until then its absence is no gap."""
+    env.all_ok()
+    _install_current_hook(env)
+    from aegis_cli.hooks.management import hook_status
+
+    st = hook_status(env.ws)
+    if "reachable" in st:
+        assert st["reachable"] is True
+    payload = env.doctor()
+    assert tier(payload, "local_floor")["status"] == "active"
+    (check,) = [c for c in payload["checks"] if c["id"] == "precommit_hook"]
+    assert check["status"] == "pass"
+
+
+def test_the_best_effort_tier_states_the_planned_v41_hooks_as_the_docs_do(env):
+    env.all_ok()
+    best = tier(env.doctor(), "best_effort")
+    assert best["status"] == "unavailable" and best["hosts"] == []
+    assert best["detail"] == (
+        "none in 4.0. Planned for v4.1: Claude Code blocks with exit 2; Codex blocks with exit 2 "
+        "once you trust the hook in /hooks; Antigravity blocks only destructive commands (exit 1) "
+        "and records scan-before-edit. Each fails open when Aegis errors")
+
+
+def test_a_legacy_workspace_without_rules_is_told_to_migrate_never_to_init(env, tmp_path, monkeypatch, capsys):
+    """Release review (upgrade): `aegis init` in a .soma workspace leaves its rules unserved.
+    Run through the CLI, which lets doctor (and only doctor and uninstall) into one."""
+    from aegis_cli.cli import main
+
+    env.all_ok()
+    legacy = tmp_path / "legacy"
+    (legacy / ".soma" / "cells" / "traps").mkdir(parents=True)
+    (legacy / ".soma" / "cells" / "traps" / "trap-x.md").write_text("---\nid: trap-x\n---\n# x\n", encoding="utf-8")
+    (legacy / ".git" / "hooks").mkdir(parents=True)
+    monkeypatch.chdir(legacy)
+    main(["doctor"])
+    out = capsys.readouterr().out
+    assert "Fix: Run 'aegis migrate' to see how this v3 workspace converts, then 'aegis migrate --apply'." in out
+    assert f"{legacy.resolve()} has no .aegis/: run aegis migrate there" in out
+    assert "a pre-commit hook has nothing to enforce: run aegis migrate" in out
+    for setup_advice in ("Run 'aegis init'", "run aegis init there", "nothing to enforce: run aegis init"):
+        assert setup_advice not in out
+    plain = tmp_path / "plain"
+    (plain / ".git" / "hooks").mkdir(parents=True)
+    monkeypatch.chdir(plain)
+    main(["doctor"])
+    out = capsys.readouterr().out
+    assert "Fix: Run 'aegis init' to install starter rules." in out and "aegis migrate" not in out

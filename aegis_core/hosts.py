@@ -80,7 +80,7 @@ HOSTS: Tuple[HostSpec, ...] = (
         slot_profile="codex-cli",
         notes=(
             "AGENTS.md over 32 KiB is truncated silently.",
-            "Hooks fail open and need user approval.",
+            "Hooks need trust in /hooks and fail open on errors.",
         ),
     ),
     HostSpec(
@@ -97,7 +97,7 @@ HOSTS: Tuple[HostSpec, ...] = (
             argv=("claude", "mcp", "add", "--scope", "user", "aegis", "-e", "AEGIS_CLIENT=claude-code", "--", "{command}"),
         ),
         slot_profile="claude-code",
-        notes=("PreToolUse hooks can block (strongest host).",),
+        notes=("PreToolUse hooks can block with exit 2.",),
     ),
     HostSpec(
         id="claude-desktop",

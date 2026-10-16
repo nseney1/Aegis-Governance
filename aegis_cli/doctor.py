@@ -115,6 +115,26 @@ def _is_home(root: Path) -> bool:
     return layout is not None and key is not None and key == _root_key(layout.home)
 
 
+def _setup_command(root: Path) -> str:
+    """What sets governance up here: ``aegis migrate`` while an unmigrated v3 workspace is
+    here (``aegis init`` would leave its rules unserved, and the check would then pass on
+    none of them), else ``aegis init``."""
+    from aegis_core.errors import WorkspaceError
+    from aegis_core.workspace.discovery import refuse_unmigrated_v3
+
+    try:
+        refuse_unmigrated_v3(root)
+    except WorkspaceError:
+        return "aegis migrate"
+    return "aegis init"
+
+
+def _setup_fix(root: Path, purpose: str) -> str:
+    if _setup_command(root) == "aegis migrate":
+        return "Fix: Run 'aegis migrate' to see how this v3 workspace converts, then 'aegis migrate --apply'."
+    return f"Fix: Run 'aegis init' to {purpose}."
+
+
 def _check_rules(project_root: Path) -> bool:
     """The workspace serves at least one rule and every rule file loads."""
     from aegis_core.rules import load_rules
@@ -128,7 +148,7 @@ def _check_rules(project_root: Path) -> bool:
     rules_dir = WorkspaceLayout(Path(project_root)).rules_dir
     if not rules_dir.is_dir():
         print(f"  ❌ No rules directory ({rules_dir})")
-        print("    Fix: Run 'aegis init' to install starter rules.")
+        print("    " + _setup_fix(project_root, "install starter rules"))
         return False
     try:
         ruleset = load_rules(project_root)
@@ -142,7 +162,7 @@ def _check_rules(project_root: Path) -> bool:
         return False
     if not ruleset.served:
         print(f"  ❌ No rules are served from {rules_dir}")
-        print("    Fix: Run 'aegis init' to install starter rules.")
+        print("    " + _setup_fix(project_root, "install starter rules"))
         return False
     print(f"  ✅ Rules: {len(ruleset.served)} served from {rules_dir}")
     return True
@@ -170,7 +190,7 @@ def _check_state_dir(project_root: Path | None = None) -> Optional[bool]:
         print(f"  ✅ State directory can be created ({state})")
         return True
     print(f"  ❌ State directory does not exist ({state})")
-    print("    Fix: Run 'aegis init' to create workspace directories.")
+    print("    " + _setup_fix(root, "create workspace directories"))
     return False
 
 
@@ -442,6 +462,11 @@ def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
             print(f"  ❌ Pre-commit hook ({st['hook_file']}) pins {gone[0]}, which no longer exists,\n"
                   "      so every commit fails closed. Re-run `aegis hook install` to re-pin it.")
             return False
+        if st.get("reachable", True) is False:
+            print(f"  ❌ Pre-commit hook ({st['hook_file']}) is installed but never runs: "
+                  f"{st.get('unreachable_reason') or 'git does not reach the Aegis block'}.\n"
+                  "      Run `aegis hook status` for the fix.")
+            return False
         print(f"  ✅ Pre-commit hook is current ({st['hook_file']})")
         return True
     print(f"  ❌ Pre-commit hook uses an old block (format {st['format_version']}, {st['hook_file']}).\n"
@@ -588,6 +613,8 @@ class _Ctx:
     selected: Tuple[Any, ...]
     selection: str
     is_home: bool = False
+    # What sets this workspace up: aegis migrate while an unmigrated v3 workspace is here.
+    setup: str = "aegis init"
     _cache: Dict[Tuple[str, bool], _File] = field(default_factory=dict)
 
     @property
@@ -1266,7 +1293,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         add("workspace_not_governed", f"{ctx.root} is your home directory: its .aegis/ is your user layer, "
                                       "never a governed workspace. Run aegis doctor inside a repository")
     elif not ctx.governed:
-        add("workspace_not_governed", f"{ctx.root} has no .aegis/: run aegis init there")
+        add("workspace_not_governed", f"{ctx.root} has no .aegis/: run {ctx.setup} there")
     else:
         if info.bootstrap in ("missing", "hand_edited", "malformed"):
             add("bootstrap_" + info.bootstrap, {
@@ -1338,21 +1365,28 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
 
 # ── Enforcement tiers (AD-8) ────────────────────────────────────────────────
 
-def _floor_status(root: Path) -> str:
-    from aegis_cli.hooks.management import hook_status
+def _floor_status(root: Path) -> Tuple[str, Optional[str]]:
+    """The local floor's status, and why an installed, current hook never runs. The floor
+    is active only for a hook that is installed, current and reached by git (hook_status
+    ``reachable``; a status without the key predates it and counts as reachable)."""
+    from aegis_cli.hooks import management
 
     try:
-        st = hook_status(root)
+        st = management.hook_status(root)
     except Exception:
-        return "unknown"
+        return "unknown", None
     if st.get("status") == "no_git_repository":
-        return "unavailable"
+        return "unavailable", None
     if not st.get("managed_by_aegis"):
-        return "inactive"
+        return "inactive", None
     if st.get("status") != "installed":
-        return "outdated"
+        return "outdated", None
     gone = [p for p in (st.get("interpreter"), st.get("aegis_path")) if p and not p.get("exists")]
-    return "outdated" if gone else "active"
+    if gone:
+        return "outdated", None
+    if st.get("reachable", True) is False:
+        return "inactive", _clean(st.get("unreachable_reason") or "git does not reach the Aegis block", 1024)
+    return "active", None
 
 
 _TIER_TEXT = {
@@ -1363,7 +1397,8 @@ _TIER_TEXT = {
 }
 
 
-def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool) -> List[Dict[str, Any]]:
+def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool, unreached: Optional[str] = None,
+           setup: str = "aegis init") -> List[Dict[str, Any]]:
     ids = [r["id"] for r in rows]
     reached = [r["id"] for r in rows if r["advisory"] is True]
     unsure = [r["id"] for r in rows if r["advisory"] is None]
@@ -1381,14 +1416,18 @@ def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool) -> List[Dict[
         "unavailable": "not a git repository",
         "unknown": "the git hooks directory could not be read",
     }[floor]
+    if unreached:
+        floor_detail = f"the Aegis pre-commit hook is installed but never runs: {unreached}; see aegis hook status"
     if not governed and floor != "unavailable":
         # A hook here, installed or not, has no rules to check: the floor is not in force.
-        floor, floor_detail = "inactive", "no .aegis/ here, so a pre-commit hook has nothing to enforce: run aegis init"
+        floor, floor_detail = "inactive", f"no .aegis/ here, so a pre-commit hook has nothing to enforce: run {setup}"
     return [
         {"tier": "advisory", "mechanism": _TIER_TEXT["advisory"][1], "hosts": ids, "status": advisory,
          "detail": reach},
         {"tier": "best_effort", "mechanism": _TIER_TEXT["best_effort"][1], "hosts": [], "status": "unavailable",
-         "detail": "per-host hooks ship in v4.1 (Claude Code can block; Codex fails open)"},
+         "detail": "none in 4.0. Planned for v4.1: Claude Code blocks with exit 2; Codex blocks with exit 2 once "
+                   "you trust the hook in /hooks; Antigravity blocks only destructive commands (exit 1) and "
+                   "records scan-before-edit. Each fails open when Aegis errors"},
         {"tier": "local_floor", "mechanism": _TIER_TEXT["local_floor"][1], "hosts": ids, "status": floor,
          "detail": floor_detail},
         {"tier": "authoritative", "mechanism": _TIER_TEXT["authoritative"][1], "hosts": [], "status": "unavailable",
@@ -1762,10 +1801,11 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     governed = is_aegis_workspace(root) and not is_home
     selected, selection, notes = _selection(root, governed)
     ctx = _Ctx(root=root, governed=governed, home=layout.home if layout else None, environ=environ,
-               selected=selected, selection=selection, is_home=is_home)
+               selected=selected, selection=selection, is_home=is_home,
+               setup="aegis init" if governed or is_home else _setup_command(root))
     info = _instructions(ctx)
     roots, skipped = _registered_roots(ctx)
-    floor = _floor_status(root)
+    floor, unreached = _floor_status(root)
     rows = [_host_row(spec, ctx, info, roots, floor) for spec in selected]
     claude_user = _claude_user_registered(ctx)
     findings = (notes + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
@@ -1780,7 +1820,7 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
                                  f"~/.aegis/workspaces.json: entry {index} has no absolute 'root' that resolves; "
                                  "aegis skips it (run aegis init in that workspace to register it again)",
                                  location=f"workspaces[{index}]"))
-    return _Diagnosis(ctx, rows, _tiers(rows, floor, governed), findings)
+    return _Diagnosis(ctx, rows, _tiers(rows, floor, governed, unreached, ctx.setup), findings)
 
 
 def _claude_user_registered(ctx: _Ctx) -> bool:
