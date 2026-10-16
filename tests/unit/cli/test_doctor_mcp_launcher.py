@@ -130,3 +130,16 @@ def test_an_aegis_mcp_inside_the_workspace_is_named_as_such(tmp_path, capsys):
     exe = stub(ws / ".venv" / "bin", "aegis-mcp", tmp_path / "ran")
     ok, out = check(capsys, path_env=str(ws / ".venv" / "bin"), workspace=ws)
     assert ok is True and f"{exe}, inside the workspace" in out
+
+
+def test_with_path_unset_doctor_reports_the_launcher_init_registers(tmp_path, monkeypatch):
+    """`aegis init` hands mcp_command an unset PATH as None, which searches the OS default
+    path; doctor must report that same command, not search nothing."""
+    from aegis_cli.install_hosts import mcp_command
+
+    exe = stub(tmp_path / "default-bin", "aegis-mcp", tmp_path / "ran")
+    monkeypatch.delenv("PATH", raising=False)
+    monkeypatch.setattr(os, "defpath", str(tmp_path / "default-bin"))
+    command, problems = probe_mcp_launcher(registered=[("codex-cli", [str(exe)])])
+    assert command == mcp_command(os.environ.get("PATH")) == [str(exe)]
+    assert problems == []

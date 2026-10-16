@@ -282,7 +282,7 @@ def probe_mcp_launcher(path_env: Optional[str] = None, registered: Sequence[Regi
     """
     from aegis_cli.install_hosts import mcp_command
 
-    path_env = os.environ.get("PATH", "") if path_env is None else path_env
+    # None reaches mcp_command as it does from init: $PATH, or the OS default path when unset.
     current = mcp_command(path_env, scripts_dirs)
     problems = []
     for host_id, argv in registered:
