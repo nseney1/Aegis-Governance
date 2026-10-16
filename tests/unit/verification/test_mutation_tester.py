@@ -583,3 +583,38 @@ class TestPolyglotMutationTesterCoverage:
             assert "execution error: disk read failure" in ev.detail
 
 
+
+
+class TestModuleSwapStaging:
+    """What a mutant run is handed: the staged source, a fresh load marker and the plugin path."""
+
+    def _swap(self, tmp_path):
+        from aegis_core.verification import mutation_tester
+
+        target = tmp_path / "pkg" / "mod.py"
+        target.parent.mkdir()
+        target.write_text("def f():\n    return 1\n", encoding="utf-8")
+        workdir = tmp_path / "swap"
+        workdir.mkdir()
+        return mutation_tester._ModuleSwap(target, str(workdir))
+
+    def test_staging_writes_the_source_the_plugin_will_serve(self, tmp_path):
+        swap = self._swap(tmp_path)
+        swap.stage("def f():\n    return 2\n")
+        assert Path(swap.source_file).read_text(encoding="utf-8") == "def f():\n    return 2\n"
+
+    def test_staging_clears_the_load_marker_of_the_previous_run(self, tmp_path):
+        # A marker left by an earlier run would let a mutant that was never imported
+        # count as killed when its test run fails for another reason.
+        swap = self._swap(tmp_path)
+        Path(swap.marker).write_text("pkg.mod", encoding="utf-8")
+        assert swap.loaded()
+        swap.stage("def f():\n    return 3\n")
+        assert not swap.loaded()
+
+    def test_the_plugin_dir_comes_first_and_an_inherited_pythonpath_is_kept(self, tmp_path, monkeypatch):
+        swap = self._swap(tmp_path)
+        monkeypatch.setenv("PYTHONPATH", "/opt/inherited")
+        assert swap.stage("x = 1\n") == swap.workdir + os.pathsep + "/opt/inherited"
+        monkeypatch.delenv("PYTHONPATH")
+        assert swap.stage("x = 1\n") == swap.workdir
