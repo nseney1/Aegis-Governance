@@ -145,6 +145,16 @@ def legacy(tmp_path: Path) -> Path:
     return root
 
 
+def _only_the_unmapped_rule_blocks(report: dict) -> bool:
+    """After a full apply of the ``legacy`` fixture only its unmapped .soma rule is left. The
+    upgrade sentinel still refuses the workspace for it, so a rerun names it as the blocker
+    instead of reporting the workspace up to date."""
+    return report["status"] == "refused" and report["refusal"].startswith(
+        "1 rule file(s) in .soma/ cannot be converted: "
+        ".soma/cells/ribosomes/ribosome-mystery.md (unmapped type 'ribosome')."
+    )
+
+
 def _snapshot(root: Path) -> dict:
     return {
         p.relative_to(root).as_posix(): p.read_bytes()
@@ -319,10 +329,10 @@ def test_a_second_apply_changes_nothing(legacy: Path):
     before = _snapshot(legacy)
 
     plan = migrate.plan(legacy)
-    assert plan.to_dict()["status"] == "up_to_date"
-    result = migrate.apply(plan)
+    assert _only_the_unmapped_rule_blocks(plan.to_dict())
+    with pytest.raises(migrate.MigrationRefused):
+        migrate.apply(plan)
 
-    assert result.backup is None
     assert _snapshot(legacy) == before
 
 
@@ -450,7 +460,7 @@ def test_a_rerun_after_an_interrupted_apply_converges(legacy: Path, monkeypatch)
     assert sorted(p.name for p in (legacy / ".soma" / "cells").rglob("*.md")) == ["README.md", "ribosome-mystery.md"]
     rows = ledger.read(legacy).rows
     assert len(rows) == 3  # the rerun re-read the v3 ledger and appended nothing twice
-    assert migrate.plan(legacy).to_dict()["status"] == "up_to_date"
+    assert _only_the_unmapped_rule_blocks(migrate.plan(legacy).to_dict())
 
 
 def test_rule_paths_that_resolve_outside_the_workspace_are_not_written(tmp_path: Path):
@@ -471,7 +481,11 @@ def test_rule_paths_that_resolve_outside_the_workspace_are_not_written(tmp_path:
     # rglob may or may not descend a symlinked dir (it varies by Python version); either way
     # the rule behind it is never rewritten
     assert skipped <= {".soma/cells/vacuoles/trap-new.md", ".aegis/rules/traps/trap-victim.md"}
-    migrate.apply(plan)
+    # Nothing else to apply, and the rule it cannot place is the blocker it names.
+    assert report["status"] == "refused"
+    assert ".soma/cells/vacuoles/trap-new.md (.aegis/rules/traps resolves outside the workspace)" in report["refusal"]
+    with pytest.raises(migrate.MigrationRefused):
+        migrate.apply(plan)
 
     assert victim.read_text(encoding="utf-8") == "---\nid: v\nfitness:\n  triggers: 1\n---\nB\n"
     assert sorted(p.name for p in outside.iterdir()) == ["trap-victim.md"]
@@ -531,7 +545,7 @@ def test_the_v3_manifest_and_its_key_are_backed_up_removed_and_never_exclude_a_r
         "trap-existing", "wall-install-uninstall-parity", "trap-hardcoded-paths",
         "persona-cross-platform-qa", "membrane-genome-mutations", "contract-mcp-cli-parity",
     ])
-    assert migrate.plan(legacy).to_dict()["status"] == "up_to_date"
+    assert _only_the_unmapped_rule_blocks(migrate.plan(legacy).to_dict())
 
 
 def test_the_older_root_manifest_location_is_removed_too(tmp_path: Path):
@@ -567,7 +581,7 @@ def test_a_crash_mid_apply_converges_on_rerun(legacy: Path, monkeypatch):
     assert len(_served(legacy)) == 6
     assert not (legacy / ".aegis" / "rules" / "manifest.json").exists()
     assert "fitness" not in (legacy / ".aegis" / "rules" / "traps" / "trap-existing.md").read_text(encoding="utf-8")
-    assert migrate.plan(legacy).to_dict()["status"] == "up_to_date"
+    assert _only_the_unmapped_rule_blocks(migrate.plan(legacy).to_dict())
 
 
 # ── Config written by someone else between plan and apply (review B2a-6) ─────
@@ -621,7 +635,7 @@ def test_a_ledger_write_torn_at_a_row_boundary_converges_without_duplicates(
     assert ledger.aggregate(legacy, "trap-atomic-write") == {
         "triggers": 2, "tp": pytest.approx(0.6666666666666666 + 1), "fp": 0, "last_ts": TS3,
     }
-    assert migrate.plan(legacy).to_dict()["status"] == "up_to_date"
+    assert _only_the_unmapped_rule_blocks(migrate.plan(legacy).to_dict())
 
 
 # ── Confinement: a symlinked .aegis/state (review B2a-4) ─────────────────────
@@ -666,7 +680,7 @@ def test_user_authored_drivers_are_left_in_place_and_reported(legacy: Path):
     assert (drivers / "NOTES.txt").is_file()
     assert not (drivers / "rust_ast.py").exists()
     assert (result.backup / ".aegis" / "drivers" / "rust_ast.py").is_file()
-    assert migrate.plan(legacy).to_dict()["status"] == "up_to_date"
+    assert _only_the_unmapped_rule_blocks(migrate.plan(legacy).to_dict())
 
 
 def test_a_staged_copy_a_printed_driver_command_names_is_kept(legacy: Path):

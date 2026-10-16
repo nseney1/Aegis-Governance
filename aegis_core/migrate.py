@@ -10,16 +10,20 @@ paths, same permission bits, in a 0o700 directory: the copies include keys and r
 before touching it. A second run finds nothing to do and writes nothing.
 
 What a plan converts:
-- **Ledger**: ``.aegis/evidence/signals.jsonl`` and its ``telemetry/`` compaction copy
-  (decoded as v3 wrote them, with ``surrogatepass``; deduplicated by event id, or by
-  identical row for rows without one) become v2 rows
+- **Ledger**: ``.aegis/evidence/signals.jsonl`` and its ``telemetry/`` compaction copy,
+  the monthly ``archive/*.jsonl.gz`` files v3.3 compaction moved older rows into beside
+  each, and the v1/v2 ``.soma/evidence/signals.jsonl`` (decoded as v3 wrote them, with
+  ``surrogatepass``; deduplicated by event id, or by identical row for rows without one
+  against the first ledger present) become v2 rows
   appended to ``.aegis/state/ledger.jsonl`` with provenance (``from``: v3 file and line),
-  followed by one epoch row. Existing rows are never rewritten (v4.3 §10.4).
+  followed by one epoch row. Existing rows are never rewritten (v4.3 §10.4). What is not
+  converted (compaction rollups, ``steering.conf``, ``~/.aegis/slots.yaml``) is listed.
 - **Config**: ``aegis.conf``/``soma.conf``, ``.aegis/slots.yaml`` and ``.aegis/config.yaml``
   become ``.aegis/config.json``. Command-like values (driver commands, slots) go to a
   printed note for ``~/.aegis/config.json``, never into the repository; keys v4 no longer
   has are reported as dropped.
-- **Rules**: ``.soma/cells/<type>/*.md``, and the rules v3.1-v3.3 kept in a v3 type
+- **Rules**: ``.soma/cells/<type>/*.md`` and ``.soma/rules/<type>/*.md`` (v2.0, v2.1),
+  and the rules v3.1-v3.3 kept in a v3 type
   directory of ``.aegis/rules`` (``walls/``, ``membranes/``…; notes there stay), move
   to ``.aegis/rules/<canonical type>/`` through the legacy type-name table
   (taxonomy.LEGACY_TYPE_NAMES: the v1-v3 aliases and the v2.1 organelle names); a type it does
@@ -37,6 +41,10 @@ What a plan converts:
   byte for byte (a copy that differs from every version aegis shipped may hold the
   user's changes), or that a printed driver command names: those are left in place and
   reported.
+
+A workspace the upgrade sentinel (aegis_core.workspace.discovery) would still refuse
+after the plan, with nothing to apply, gets a refusal naming what blocks it and how to
+clear it: never "nothing to do".
 """
 from __future__ import annotations
 
@@ -44,7 +52,9 @@ from collections import Counter
 import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -55,19 +65,25 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from aegis_core.errors import PathTraversalError, WorkspaceError
 from aegis_core.rules import is_legacy_key
-from aegis_core.storage import atomic_write_bytes, atomic_write_text, locked, read_jsonl, state_dir
+from aegis_core.storage import JsonlRead, atomic_write_bytes, atomic_write_text, locked, read_jsonl, state_dir
 from aegis_core.taxonomy import DIR_RULE_TYPES, RULE_TYPE_DIRS, legacy_rule_type
 from aegis_core.workspace.layout import (
     LEGACY_CONFIG_ENTRIES,
+    LEGACY_LEDGER_ARCHIVE,
+    LEGACY_LEDGER_ARCHIVE_GLOB,
     LEGACY_LEDGER_FILES,
-    LEGACY_REPO_CONF,
+    LEGACY_LEDGER_ROLLUP,
+    LEGACY_REPO_CONFS,
     LEGACY_STATE_ENTRIES,
+    LEGACY_STEERING_CONF,
+    UserLayout,
     WorkspaceLayout,
 )
 
 __all__ = ["MigrationPlan", "MigrationRefused", "MigrationResult", "apply", "plan"]
 
-_REPO_CONF_NAMES = (LEGACY_REPO_CONF, "soma.conf")
+# A compaction archive larger than this decompressed is reported unreadable, not read.
+_ARCHIVE_LIMIT = 256 * 1024 * 1024
 _V4_ENTRIES = frozenset({"config.json", ".gitignore", "rules", "state"})
 _TOP_KEY = re.compile(r"^([A-Za-z_][\w\-]*)[ \t]*:")
 _TYPE_LINE = re.compile(r"^type[ \t]*:[ \t]*(['\"]?)([A-Za-z_][\w\-]*)\1[ \t]*(#.*)?$")
@@ -126,6 +142,8 @@ class MigrationPlan:
     unreadable: List[str] = field(default_factory=list)
     removals: List[str] = field(default_factory=list)
     left_in_place: List[str] = field(default_factory=list)
+    # v3 data with no v4 form: {"path", "reason"}; reported, never a failure.
+    not_converted: List[Dict[str, str]] = field(default_factory=list)
     skipped: List[Dict[str, str]] = field(default_factory=list)
     already_moved: List[Path] = field(default_factory=list)
     refusal: Optional[str] = None
@@ -176,6 +194,7 @@ class MigrationPlan:
             "already_moved": [self._rel(path) for path in self.already_moved],
             "remove": self.removals,
             "left_in_place": self.left_in_place,
+            "not_converted": self.not_converted,
         }
 
 
@@ -305,44 +324,120 @@ def _record(result: "MigrationPlan", path: Path, data: Optional[bytes] = None) -
 
 # ── Planning ─────────────────────────────────────────────────────────────────
 
+def _jsonl_row(raw: bytes, errors: str) -> Optional[Dict[str, Any]]:
+    try:
+        value = json.loads(raw.decode("utf-8-sig", errors))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _jsonl_rows(data: bytes, errors: str) -> JsonlRead:
+    """Parse JSONL ``data`` as storage.read_jsonl parses a file (same lines, numbers, tail)."""
+    rows: List[Dict[str, Any]] = []
+    numbers: List[int] = []
+    skipped: List[int] = []
+    torn = False
+    lines = data.split(b"\n")
+    last = len(lines) - 1
+    for index, raw in enumerate(lines):
+        if index == last and not raw:
+            break
+        raw = raw.rstrip(b"\r")
+        if not raw.strip():
+            continue
+        row = _jsonl_row(raw, errors)
+        if row is not None:
+            rows.append(row)
+            numbers.append(index + 1)
+        elif index == last:
+            torn = True
+        else:
+            skipped.append(index + 1)
+    return JsonlRead(rows, numbers, skipped, torn_tail=torn)
+
+
+def _read_archive(path: Path) -> Tuple[Optional[bytes], JsonlRead]:
+    """A v3.3 compaction archive: (its bytes as read, for the plan's fingerprint; its rows).
+    A link, a damaged or oversized file reads as no rows with ``error`` set."""
+    if path.is_symlink() or not path.is_file():
+        return None, JsonlRead([], [], [], error=f"cannot read {path}: not a regular file")
+    try:
+        raw = path.read_bytes()
+        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as fh:
+            data = fh.read(_ARCHIVE_LIMIT + 1)
+    except (OSError, EOFError, ValueError) as exc:
+        return None, JsonlRead([], [], [], error=f"cannot read {path}: {exc}")
+    if len(data) > _ARCHIVE_LIMIT:
+        return raw, JsonlRead([], [], [], error=f"cannot read {path}: larger than {_ARCHIVE_LIMIT >> 20} MiB")
+    return raw, _jsonl_rows(data, "surrogatepass")
+
+
+def _ledger_families(layout: WorkspaceLayout) -> List[List[Path]]:
+    """The ledger copies with what they hold, first one first: each v3 ledger file followed
+    by the compaction archives beside it, then the v1/v2 ledger. Only files that exist."""
+    families: List[List[Path]] = []
+    for rel in LEGACY_LEDGER_FILES:
+        live = layout.legacy(rel)
+        archive = live.parent / LEGACY_LEDGER_ARCHIVE
+        family = [live] if live.is_file() or live.is_symlink() else []
+        if archive.is_dir() and not archive.is_symlink():
+            family += sorted(archive.glob(LEGACY_LEDGER_ARCHIVE_GLOB))
+        families.append(family)
+    predecessor = layout.legacy_predecessor_ledger
+    families.append([predecessor] if predecessor.is_file() or predecessor.is_symlink() else [])
+    return [family for family in families if family]
+
+
 def _plan_ledger(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     from aegis_core.telemetry_engine import ledger
 
-    sources = [layout.legacy(rel) for rel in LEGACY_LEDGER_FILES if layout.legacy(rel).is_file()]
-    if not sources:
+    families = _ledger_families(layout)
+    if not families:
         return
     rows: List[Dict[str, Any]] = []
     origins: List[Dict[str, Any]] = []
     seen_ids = set()
     primary_rows: Counter = Counter()
     stats = {"rows": 0, "duplicates": 0, "unusable_rows": 0, "skipped_lines": 0, "torn_tail": False}
-    for index, source in enumerate(sources):
-        rel = result._rel(source)
-        result.ledger_sources.append(rel)
-        _record(result, source)  # before reading: a row appended meanwhile is a change
-        # v3 wrote these with errors="surrogatepass" (a lone surrogate from a non-UTF-8
-        # file name); strict decoding would drop such a row as unreadable.
-        read = read_jsonl(source, errors="surrogatepass")
-        if read.error:
-            result.unreadable.append(rel)
-        stats["skipped_lines"] += read.skipped
-        stats["torn_tail"] = stats["torn_tail"] or read.torn_tail
-        for line_no, row in zip(read.line_numbers, read.rows):
-            identity = row.get("event_id")
-            text = json.dumps(row, sort_keys=True)
-            if isinstance(identity, str) and identity:
-                if identity in seen_ids:
+    for index, family in enumerate(families):
+        for source in family:
+            rel = result._rel(source)
+            result.ledger_sources.append(rel)
+            if source.name.endswith(".gz"):
+                raw, read = _read_archive(source)
+                if raw is not None:
+                    _record(result, source, raw)
+                else:
+                    _record(result, source)
+            else:
+                _record(result, source)  # before reading: a row appended meanwhile is a change
+                # v3 wrote these with errors="surrogatepass" (a lone surrogate from a non-UTF-8
+                # file name); strict decoding would drop such a row as unreadable.
+                read = read_jsonl(source, errors="surrogatepass")
+            if read.error:
+                result.unreadable.append(rel)
+            stats["skipped_lines"] += read.skipped
+            stats["torn_tail"] = stats["torn_tail"] or read.torn_tail
+            for line_no, row in zip(read.line_numbers, read.rows):
+                identity = row.get("event_id")
+                text = json.dumps(row, sort_keys=True)
+                if isinstance(identity, str) and identity:
+                    if identity in seen_ids:
+                        stats["duplicates"] += 1
+                        continue
+                    seen_ids.add(identity)
+                elif index > 0 and primary_rows[text] > 0:
+                    primary_rows[text] -= 1  # a copy of a row the first ledger has
                     stats["duplicates"] += 1
                     continue
-                seen_ids.add(identity)
-            elif index > 0 and primary_rows[text] > 0:
-                primary_rows[text] -= 1  # a compaction copy of a row the primary file has
-                stats["duplicates"] += 1
-                continue
-            elif index == 0:
-                primary_rows[text] += 1
-            rows.append(row)
-            origins.append({"v": 1, "file": rel, "line": line_no})
+                elif index == 0:
+                    primary_rows[text] += 1
+                rows.append(row)
+                origins.append({"v": 1, "file": rel, "line": line_no})
+    if layout.legacy_predecessor_ledger in families[-1]:
+        # Under .soma/, which no v3 state entry covers: removed here once converted.
+        result.removals.append(result._rel(layout.legacy_predecessor_ledger))
     converted, unusable = ledger.normalize_rows(rows, origins)
     for row in converted:
         if not row.get("key"):
@@ -353,6 +448,27 @@ def _plan_ledger(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     stats["unusable_rows"] = unusable
     result.ledger_rows = converted
     result.ledger_stats = stats
+
+
+def _plan_not_converted(result: MigrationPlan, layout: WorkspaceLayout) -> None:
+    """List the v3 data that has no v4 form, so dropping it is never silent."""
+    for rel in LEGACY_LEDGER_FILES:
+        rollup = layout.legacy(rel).parent / LEGACY_LEDGER_ROLLUP
+        if os.path.lexists(rollup):
+            result.not_converted.append({
+                "path": result._rel(rollup),
+                "reason": "per-rule totals from v3.3 compaction; v4 keeps no rollup (the archived rows "
+                          "it summed are converted where archive/ still holds them); removed, backed up first",
+            })
+    steering = layout.root / LEGACY_STEERING_CONF
+    if os.path.lexists(steering):
+        result.not_converted.append({"path": result._rel(steering), "reason": "no v4 setting; left in place"})
+    user = UserLayout.current()
+    if user is not None and os.path.lexists(user.legacy_slots_file):
+        result.not_converted.append({
+            "path": "~/" + user.legacy_slots_file.relative_to(user.home).as_posix(),
+            "reason": "no v4 setting (a driver or slot command now goes in ~/.aegis/config.json); left in place",
+        })
 
 
 def _parse_conf(path: Path) -> Dict[str, str]:
@@ -394,7 +510,7 @@ def _plan_config(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             node = child
         node.setdefault(path[-1], value)
 
-    for name in _REPO_CONF_NAMES:
+    for name in LEGACY_REPO_CONFS:
         conf = layout.root / name
         if not conf.is_file():
             continue
@@ -556,8 +672,9 @@ def _retype(text: str, directory: str) -> Optional[Tuple[str, str]]:
 def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
     planned_targets: set = set()
     moving: set = set()
-    if layout.legacy_soma_rules_dir.is_dir():
-        _plan_moves(result, layout, layout.legacy_soma_rules_dir, planned_targets, notes_stay=False)
+    for folder in layout.legacy_rule_dirs:
+        if folder.is_dir() and not folder.is_symlink():
+            _plan_moves(result, layout, folder, planned_targets, notes_stay=False)
     for directory in _v3_type_dirs(layout):
         moving.update(_plan_moves(result, layout, directory, planned_targets, notes_stay=True))
 
@@ -581,6 +698,44 @@ def _plan_rules(result: MigrationPlan, layout: WorkspaceLayout) -> None:
             if keys or retype:
                 result.strips.append(_RuleStrip(path, keys, new_text, raw, retype))
                 _record(result, path, raw)
+
+
+def _plan_blocker(result: MigrationPlan, layout: WorkspaceLayout) -> None:
+    """With nothing to apply, refuse with what keeps the upgrade sentinel refusing the
+    workspace and how to clear it, instead of reporting it as up to date."""
+    from aegis_core.workspace.discovery import refuse_unmigrated_v3, unconverted_rule_files
+
+    if result.refusal or result.pending:
+        return
+    try:
+        refuse_unmigrated_v3(layout.root)
+        return  # the sentinel lets it through: up to date
+    except WorkspaceError:
+        pass
+    old_dir = result._rel(layout.legacy_soma_dir)
+    reasons: Dict[str, str] = {}
+    for entry in result.unmapped:
+        reasons[entry["path"]] = f"unmapped type {entry['type']!r}"
+    for entry in result.conflicts:
+        reasons[entry["path"]] = f"{entry['to']} already exists"
+    for entry in result.skipped:
+        reasons[entry["path"]] = entry["reason"]
+    for rel in result.unreadable:
+        reasons.setdefault(rel, "cannot be read")
+    left = [result._rel(path) for path in unconverted_rule_files(layout.root)]
+    if left:
+        listed = ", ".join(f"{rel} ({reasons.get(rel, 'not converted')})" for rel in left)
+        result.refusal = (
+            f"{len(left)} rule file(s) in {old_dir}/ cannot be converted: {listed}. Aegis refuses this workspace "
+            f"while they remain: give each a v4 type or move it into .aegis/rules/<type>/ yourself and run "
+            f"aegis migrate again, or, if you no longer need them, rename or remove {old_dir}/"
+        )
+        return
+    result.refusal = (
+        f"{old_dir}/ holds nothing aegis migrate converts, and Aegis refuses a directory with {old_dir}/ but no "
+        f".aegis/. Check what it holds, then rename or remove it (for example: mv {old_dir} {old_dir}.old), "
+        "and run aegis init"
+    )
 
 
 def _same_text(path: Path, content: str) -> bool:
@@ -708,7 +863,9 @@ def plan(root: Any) -> MigrationPlan:
     _plan_config(result, layout)
     _plan_rules(result, layout)
     _plan_state(result, layout)
+    _plan_not_converted(result, layout)
     result.removals = sorted(set(result.removals))
+    _plan_blocker(result, layout)
     return result
 
 

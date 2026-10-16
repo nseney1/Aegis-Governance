@@ -290,8 +290,10 @@ def test_migrate_still_finds_a_legacy_workspace_inside_its_repository(home, tmp_
 
     rc = main(["migrate", "--json"])
 
-    assert rc == 0
-    assert json.loads(capsys.readouterr().out)["root"] == str(repo.resolve())
+    assert rc == 1  # a bare .soma/ holds nothing to convert: migrate names the blocker
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["root"] == str(repo.resolve())
+    assert payload["status"] == "refused" and "rename or remove it" in payload["refusal"]
 
 
 def test_migrate_below_home_never_plans_the_user_plane(home, capsys, monkeypatch):
