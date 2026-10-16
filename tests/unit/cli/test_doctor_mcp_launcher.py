@@ -1,145 +1,132 @@
-"""`aegis doctor` MCP launcher check (C1).
+"""`aegis doctor` MCP launcher check (release review: packaging and seams findings).
 
-MCP configs keep `"command": "python3"`. On Windows `python3` on PATH is often
-the Microsoft Store App Installer stub: it exits 49 (or prints a Store message
-with no output) instead of running Python, and the MCP server silently never
-starts. Doctor resolves `python3` from PATH exactly as the host would and says
-which of four states applies. Stubs live in a fake PATH directory.
+Doctor reports the command `aegis init --host` registers from this install (the absolute
+aegis-mcp script, else this interpreter in isolated mode) and compares it with the command
+each host has registered. It runs neither: a registered argv comes from a file the user's
+hosts keep, and one that uses ``-m`` or is not absolute is reported as an unsafe
+registration with the command that replaces it. Stubs write a marker if anything runs them.
 """
+from __future__ import annotations
+
 import os
+import sys
+from pathlib import Path
 
 import pytest
 
+from aegis_cli import pathcheck
 from aegis_cli.doctor import _check_mcp_launcher, probe_mcp_launcher
+from aegis_cli.install_hosts import MCP_RUNNER
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="sh stubs need POSIX exec")
+EXE = ".exe" if os.name == "nt" else ""
 
 
-def make_stub(directory, body):
+def stub(directory: Path, name: str, marker: Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    stub = directory / "python3"
-    stub.write_text("#!/bin/sh\n" + body, encoding="utf-8")
-    stub.chmod(0o755)
-    return stub
+    path = directory / (name + EXE)
+    path.write_text(f'#!/bin/sh\necho ran >> "{marker}"\n', encoding="utf-8")
+    path.chmod(0o755)
+    return path
 
 
-def test_working_python_with_aegis_mcp(tmp_path):
-    d = tmp_path / "bin"
-    make_stub(d, 'case "$*" in *aegis_mcp*) exit 0;; esac\necho 3\n')
-    status, detail = probe_mcp_launcher(str(d))
-    assert status == "ok", detail
+@pytest.fixture(autouse=True)
+def no_interpreter_scripts(monkeypatch):
+    """The sysconfig scripts directories of the interpreter running the tests may hold a
+    real aegis-mcp; each test says which directories exist instead."""
+    monkeypatch.setattr(pathcheck, "default_candidates", lambda: [])
 
 
-def test_python3_missing(tmp_path):
-    (tmp_path / "empty").mkdir()
-    status, _ = probe_mcp_launcher(str(tmp_path / "empty"))
-    assert status == "missing"
+def check(capsys, **kw) -> tuple:
+    ok = _check_mcp_launcher(**kw)
+    return ok, capsys.readouterr().out
 
 
-def test_store_stub_exit_49(tmp_path):
-    d = tmp_path / "bin"
-    make_stub(d, "exit 49\n")
-    status, _ = probe_mcp_launcher(str(d))
-    assert status == "store_stub"
+def test_the_aegis_mcp_on_path_is_what_init_registers_and_it_is_not_run(tmp_path, capsys):
+    marker = tmp_path / "ran"
+    exe = stub(tmp_path / "bin", "aegis-mcp", marker)
+    ok, out = check(capsys, path_env=str(tmp_path / "bin"))
+    assert ok is True
+    assert f"✅ MCP launcher: {exe}" in out and "what aegis init --host registers" in out
+    assert not marker.exists()
 
 
-def test_store_stub_message_without_output(tmp_path):
-    d = tmp_path / "bin"
-    make_stub(d, 'echo "Python was not found; run without arguments to install '
-                 'from the Microsoft Store, or disable this shortcut" >&2\nexit 9009\n')
-    status, _ = probe_mcp_launcher(str(d))
-    assert status == "store_stub"
+def test_the_script_installed_with_this_interpreter_is_next(tmp_path, capsys, monkeypatch):
+    marker = tmp_path / "ran"
+    exe = stub(tmp_path / "scripts", "aegis-mcp", marker)
+    monkeypatch.setattr(pathcheck, "default_candidates", lambda: [str(tmp_path / "scripts")])
+    ok, out = check(capsys, path_env=str(tmp_path / "empty"))
+    assert ok is True and f"MCP launcher: {exe}" in out
+    assert not marker.exists()
 
 
-def test_aegis_mcp_not_importable(tmp_path):
-    d = tmp_path / "bin"
-    make_stub(d, 'case "$*" in *aegis_mcp*) exit 1;; esac\necho 3\n')
-    status, _ = probe_mcp_launcher(str(d))
-    assert status == "no_aegis_mcp"
+def test_without_any_aegis_mcp_this_interpreter_runs_isolated(tmp_path, capsys):
+    command, problems = probe_mcp_launcher(str(tmp_path / "empty"))
+    assert command[:3] == [sys.executable, "-I", "-c"] and "-m" not in command
+    assert problems == []
+    ok, out = check(capsys, path_env=str(tmp_path / "empty"))
+    assert ok is True and "isolated mode" in out
+    # The v3 wording and remedy are gone: nothing is installed for a PATH python3.
+    assert "python3 -m aegis_mcp" not in out and "pip install" not in out
 
 
-def test_broken_interpreter(tmp_path):
-    d = tmp_path / "bin"
-    make_stub(d, "echo boom >&2\nexit 2\n")
-    status, _ = probe_mcp_launcher(str(d))
-    assert status == "broken"
-
-
-def test_hanging_interpreter_times_out(tmp_path):
-    d = tmp_path / "bin"
-    make_stub(d, "sleep 30\n")
-    status, detail = probe_mcp_launcher(str(d), timeout=0.5)
-    assert status == "broken" and "timed out" in detail
-
-
-def test_probe_uses_isolated_flags(tmp_path):
-    d = tmp_path / "bin"
-    log = tmp_path / "args.log"
-    make_stub(d, f'echo "$*" >> "{log}"\ncase "$*" in *aegis_mcp*) exit 0;; esac\necho 3\n')
-    probe_mcp_launcher(str(d))
-    calls = log.read_text(encoding="utf-8").splitlines()
-    assert calls[0].startswith("-I -S -c"), calls
-    assert "aegis_mcp" in calls[1] and "-I" not in calls[1].split(), calls
-
-
-def test_store_stub_report_names_the_fix(tmp_path, capsys):
-    d = tmp_path / "bin"
-    make_stub(d, "exit 49\n")
-    _check_mcp_launcher(path_env=str(d))
-    out = capsys.readouterr().out
-    assert "App execution aliases" in out
-    assert "python.org" in out
-
-
-def test_no_aegis_mcp_report_gives_pip_guidance(tmp_path, capsys):
-    d = tmp_path / "bin"
-    make_stub(d, 'case "$*" in *aegis_mcp*) exit 1;; esac\necho 3\n')
-    _check_mcp_launcher(path_env=str(d))
-    assert "pip install" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("entries, where", [
-    (["", "{outside}"], "{ws}/python3, through the relative PATH entry ''"),
-    ([".", "{outside}"], "{ws}/python3, through the relative PATH entry '.'"),
-    (["{ws}/bin", "{outside}"], "{ws}/bin/python3, inside {ws}"),
+@pytest.mark.parametrize("argv, why", [
+    (["{py}", "-m", "aegis_mcp"], "it runs -m"),
+    (["python3", "-m", "aegis_mcp"], "not an absolute path"),
+    (["{py}", "-c", "from aegis_mcp.server import main; main()"], "-c without -I"),
 ])
-def test_a_python3_the_workspace_supplies_is_never_run(tmp_path, monkeypatch, entries, where):
-    """Only absolute PATH entries outside the workspace count: the probe runs what it
-    finds. One found only elsewhere is reported where it is, never as absent."""
-    ws, outside, marker = tmp_path / "ws", tmp_path / "outside", tmp_path / "ran"
-    outside.mkdir()
-    for directory in (ws, ws / "bin"):
-        make_stub(directory, f'echo ran >> "{marker}"\necho 3\n')
-    monkeypatch.chdir(ws)
-    path = os.pathsep.join(e.format(ws=ws, outside=outside) for e in entries)
-    status, detail = probe_mcp_launcher(path, workspace=ws)
-    assert status == "refused"
-    assert detail == f"python3 is found only at {where.format(ws=ws)}, where doctor runs nothing"
+def test_a_registration_that_imports_from_the_start_directory_is_unsafe_and_never_run(
+        tmp_path, capsys, argv, why):
+    marker = tmp_path / "ran"
+    py = stub(tmp_path / "pybin", "python3", marker)
+    stub(tmp_path / "bin", "aegis-mcp", marker)
+    argv = [a.format(py=py) for a in argv]
+    ok, out = check(capsys, path_env=str(tmp_path / "bin"), registered=[("codex-cli", argv)])
+    assert ok is False
+    assert "codex-cli" in out and "unsafe registration" in out and why in out
+    assert "re-run aegis init --host codex-cli" in out
     assert not marker.exists()
 
 
-def test_a_python3_found_only_where_doctor_runs_nothing_gets_no_install_advice(tmp_path, monkeypatch, capsys):
-    ws, marker = tmp_path / "ws", tmp_path / "ran"
-    make_stub(ws / "bin", f'echo ran >> "{marker}"\necho 3\n')
-    assert _check_mcp_launcher(path_env=str(ws / "bin"), workspace=ws) is False
-    out = capsys.readouterr().out
-    assert f"python3 is found only at {ws}/bin/python3, inside {ws}, where doctor runs nothing" in out
-    assert "cannot tell whether `python3 -m aegis_mcp` starts" in out
-    assert "not found" not in out and "install Python" not in out and "python.org" not in out
+def test_a_registered_command_that_is_gone_is_reported(tmp_path, capsys):
+    marker = tmp_path / "ran"
+    stub(tmp_path / "bin", "aegis-mcp", marker)
+    gone = str(tmp_path / "old-venv" / "bin" / ("aegis-mcp" + EXE))
+    ok, out = check(capsys, path_env=str(tmp_path / "bin"), registered=[("claude-code", [gone])])
+    assert ok is False
+    assert f"claude-code starts {gone}, which does not exist" in out and "re-run aegis init --host claude-code" in out
+
+
+def test_a_registered_runner_whose_install_is_gone_is_reported(tmp_path, capsys):
+    gone = str(tmp_path / "removed-site-packages")
+    ok, out = check(capsys, path_env=str(tmp_path / "empty"),
+                    registered=[("antigravity", [sys.executable, "-I", "-c", MCP_RUNNER, gone])])
+    assert ok is False
+    assert f"no aegis_mcp in {gone}" in out and "re-run aegis init --host antigravity" in out
+
+
+def test_a_registration_from_another_install_is_reported(tmp_path, capsys):
+    marker = tmp_path / "ran"
+    current = stub(tmp_path / "bin", "aegis-mcp", marker)
+    other = stub(tmp_path / "pipx" / "bin", "aegis-mcp", marker)
+    ok, out = check(capsys, path_env=str(tmp_path / "bin"), registered=[("codex-cli", [str(other)])])
+    assert ok is False
+    assert f"codex-cli starts {other}, not this install's {current}" in out
+    assert "re-run aegis init --host codex-cli" in out
     assert not marker.exists()
 
 
-def test_a_python3_on_no_path_entry_is_missing_with_install_advice(tmp_path, capsys):
-    (tmp_path / "empty").mkdir()
-    assert _check_mcp_launcher(path_env=str(tmp_path / "empty"), workspace=tmp_path) is False
-    out = capsys.readouterr().out
-    assert "python3 not found on PATH" in out and "python.org" in out
+def test_registrations_of_this_install_pass_and_are_named(tmp_path, capsys):
+    marker = tmp_path / "ran"
+    exe = stub(tmp_path / "bin", "aegis-mcp", marker)
+    ok, out = check(capsys, path_env=str(tmp_path / "bin"),
+                    registered=[("codex-cli", [str(exe)]), ("claude-code", [str(exe)])])
+    assert ok is True
+    assert "registered for codex-cli, claude-code" in out
+    assert not marker.exists()
 
 
-def test_the_python3_outside_the_workspace_is_the_one_probed(tmp_path, monkeypatch):
-    ws, outside = tmp_path / "ws", tmp_path / "outside"
-    make_stub(ws / "bin", "exit 7\n")
-    real = make_stub(outside, 'case "$*" in *aegis_mcp*) exit 0;; esac\necho 3\n')
-    monkeypatch.chdir(ws)
-    status, detail = probe_mcp_launcher(os.pathsep.join(["", str(ws / "bin"), str(outside)]), workspace=ws)
-    assert (status, detail) == ("ok", str(real))
+def test_an_aegis_mcp_inside_the_workspace_is_named_as_such(tmp_path, capsys):
+    ws = tmp_path / "ws"
+    exe = stub(ws / ".venv" / "bin", "aegis-mcp", tmp_path / "ran")
+    ok, out = check(capsys, path_env=str(ws / ".venv" / "bin"), workspace=ws)
+    assert ok is True and f"{exe}, inside the workspace" in out

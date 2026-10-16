@@ -748,24 +748,53 @@ def test_the_codex_probe_runs_the_absolute_codex_outside_the_workspace(env, monk
 
 
 @pytest.mark.parametrize("layout", LAYOUTS)
-def test_the_mcp_launcher_check_never_runs_a_python3_from_the_workspace(env, monkeypatch, tmp_path, layout):
+def test_the_mcp_launcher_check_runs_no_python3_and_no_aegis_mcp(env, monkeypatch, tmp_path, layout):
+    """The launcher check compares commands; it starts no program, from the workspace or not."""
     env.all_ok()
     marker = tmp_path / "decoy-ran"
     for where in (env.ws, env.ws / "tools"):
         _decoy(where, "python3", marker)
+        _decoy(where, "aegis-mcp", marker)
     monkeypatch.chdir(env.ws)
     monkeypatch.setenv("PATH", _path_with(env, layout))
     payload = env.doctor()
     (check,) = [c for c in payload["checks"] if c["id"] == "mcp_launcher"]
-    assert not marker.exists(), "doctor ran a python3 the repository supplied"
+    assert not marker.exists(), "doctor ran a program the repository supplied"
     detail = " ".join(check["detail"])
-    assert check["status"] == "warn"
-    if layout == "cwd_only":
-        assert "python3 not found on PATH" in detail
+    assert "python3" not in detail and "pip install" not in detail
+    if layout == "entry_inside_workspace":
+        # An absolute PATH entry is the user's choice, so init would register the
+        # workspace's aegis-mcp; doctor says where it is and that the hosts run another.
+        decoy = env.ws / "tools" / _decoy_name("aegis-mcp")
+        assert check["status"] == "warn", detail
+        assert f"MCP launcher: {decoy}, inside the workspace" in detail
+        assert f"codex-cli starts {env.mcp}, not this install's {decoy}" in detail
     else:
-        # Reported where it is, never as absent, and with no advice to install Python.
-        assert "python3 is found only at" in detail and "where doctor runs nothing" in detail
-        assert "not found" not in detail and "python.org" not in detail
+        assert check["status"] == "pass", detail
+        assert f"MCP launcher: {env.mcp}" in detail
+        assert "registered for codex-cli, claude-code, antigravity" in detail
+
+
+@pytest.mark.parametrize("command, args", [("{py}", ["-m", "aegis_mcp"]), ("python3", ["-m", "aegis_mcp"])])
+def test_a_dash_m_registration_is_unsafe_on_the_host_row_and_in_the_launcher_check(env, command, args):
+    """The v4.0.0 fallback (`<python> -m aegis_mcp`) and the v3 one (`python3 -m aegis_mcp`)
+    import from the project directory the host starts the server in."""
+    env.all_ok()
+    py = env.stub("python3")
+    cfg = env.antigravity_registered()
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    data["mcpServers"]["aegis"].update(command=command.format(py=py), args=args)
+    cfg.write_text(json.dumps(data), encoding="utf-8")
+    payload = env.doctor()
+    row = host(payload, "antigravity")
+    assert "unsafe_registration" in codes(row) and row["state"] == "policy_gap"
+    (reason,) = [r for r in row["reasons"] if r["code"] == "unsafe_registration"]
+    assert "run aegis init --host antigravity" in reason["message"]
+    (check,) = [c for c in payload["checks"] if c["id"] == "mcp_launcher"]
+    detail = " ".join(check["detail"])
+    assert check["status"] == "warn" and "unsafe registration" in detail
+    assert "re-run aegis init --host antigravity" in detail
+    assert {h["id"]: h["state"] for h in payload["hosts"]}["codex-cli"] == "ok"
 
 
 # ── honest enforcement levels (review finding 2) ────────────────────────────
@@ -1134,9 +1163,7 @@ def test_on_windows_host_cli_children_do_not_search_the_current_directory(monkey
     monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)  # some launchers set it
     monkeypatch.setattr(doctor.sys, "platform", "win32")
     doctor._run_host_cli(["C:\\bin\\codex.cmd", "mcp", "get", "aegis", "--json"], cwd="C:\\repo", timeout=1.0)
-    monkeypatch.setattr(doctor, "which", lambda name, path=None, outside=None: "C:\\bin\\python3.exe")
-    doctor.probe_mcp_launcher("C:\\bin")
-    assert len(seen) == 3  # codex, then python3's version and import probes
+    assert len(seen) == 1  # the codex probe: the MCP launcher check starts no program
     for kw in seen:
         assert kw["env"]["NoDefaultCurrentDirectoryInExePath"] == "1"
         assert kw["env"]["PATH"] == "C:\\bin"
@@ -1565,12 +1592,15 @@ def test_a_bare_registered_command_on_no_path_entry_is_missing(env):
     assert row["state"] == "unregistered" and "command_missing" in codes(row)
 
 
-def test_a_bare_registered_command_on_an_absolute_path_entry_exists(env):
+def test_a_bare_registered_command_on_an_absolute_path_entry_exists_but_is_unsafe(env):
+    """The host resolves a bare name itself, from the directory it starts in (libuv on
+    Windows searches it before PATH); aegis init registers only absolute commands."""
     env.all_ok()
     env.antigravity_registered(command="aegis-mcp")
     row = host(env.doctor(), "antigravity")
     assert row["registration"]["command_exists"] is True
-    assert row["state"] == "ok" and row["reasons"] == []
+    assert row["state"] == "policy_gap" and codes(row) == ["unsafe_registration"]
+    assert "not an absolute path" in row["reasons"][0]["message"]
 
 
 @pytest.mark.parametrize("layout", ["empty_entry", "relative_entry", "entry_inside_workspace"])

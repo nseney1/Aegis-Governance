@@ -23,7 +23,9 @@ Each host gets one state, the first of these that applies:
   host (no or broken bootstrap, a CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md or
   AGENTS.override.md shadowing AGENTS.md, a file the host truncates, an unregistered
   workspace for a host without roots, a disabled entry or one Claude Code turns off for
-  the project in ``disabledMcpServers``, another host's identity);
+  the project in ``disabledMcpServers``, another host's identity, or an unsafe
+  registration: a command that is not absolute, or that runs ``-m`` or ``-c`` without
+  ``-I`` and so imports from the project directory the host starts it in);
 - ``ok``: none of the above.
 
 ``--json`` prints one ``aegis.doctor/v1`` document: ``schema``, ``source``, ``aegis_version``,
@@ -40,8 +42,10 @@ that decides it cannot be read, such as a host binary found only inside the work
 The home directory is never a governed workspace: its ``.aegis/`` is the user plane, so
 run from there doctor checks no project rules, state or AST drivers.
 Strings taken from files or host output are printed without control sequences, and
-doctor starts only programs found in absolute PATH entries (aegis_core.pathlookup): host
-CLIs and ``python3`` only outside the workspace.
+doctor starts only host CLIs found in absolute PATH entries outside the workspace
+(aegis_core.pathlookup). It never starts the MCP server or a registered command: the MCP
+launcher check compares what each host registered with what ``aegis init --host`` would
+register from this install.
 
 ``--fix`` changes only what a finding reported as fixable, after confirmation (``--yes``
 skips it). Every file is first copied to ``~/.aegis/backups/<UTC stamp>/`` with a manifest;
@@ -219,60 +223,53 @@ def _clean(text: Any, limit: int = 512) -> str:
 
 # ── MCP launcher ─────────────────────────────────────────────────────────────
 
-# MCP configs start the server as `python3 -m aegis_mcp`. The import probe runs
-# without -I so user site-packages count, but drops the implicit CWD entry so
-# doctor never imports (executes) a aegis_mcp that happens to sit in the cwd.
-_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __import__('aegis_mcp')"
+# A registered command, as doctor compares it: (host id, argv as the host config holds it).
+Registered = Tuple[str, Sequence[str]]
 
 
-def probe_mcp_launcher(path_env: str | None = None,
-                       timeout: float = 10.0,
-                       workspace: Optional[Path] = None) -> tuple[str, str]:
-    """Resolve `python3` from PATH like an MCP host and classify it.
+def _same_command(a: Sequence[str], b: Sequence[str]) -> bool:
+    if len(a) != len(b) or not a:
+        return False
+    return os.path.normcase(a[0]) == os.path.normcase(b[0]) and list(a[1:]) == list(b[1:])
 
-    Only absolute PATH entries outside ``workspace`` count (aegis_core.pathlookup): the
-    probe runs what it finds. Returns (status, detail); status is one of ok, missing,
-    refused (python3 is only behind an empty or relative PATH entry or inside
-    ``workspace``, so it is not run), store_stub, broken, no_aegis_mcp.
+
+def _launcher_problem(argv: Sequence[str], current: Sequence[str]) -> Optional[str]:
+    """Why a registered launcher is wrong, or None. Nothing is run."""
+    from aegis_cli.install_hosts import MCP_RUNNER, display_command, launch_risk
+
+    shown = display_command(argv) if argv else "an empty command"
+    risk = launch_risk(argv)
+    if risk:
+        return f"starts `{shown}`, an unsafe registration: {risk}"
+    if not (os.path.isfile(argv[0]) and (os.name == "nt" or os.access(argv[0], os.X_OK))):
+        return f"starts {argv[0]}, which does not exist"
+    if len(argv) == 5 and argv[1:4] == ["-I", "-c", MCP_RUNNER] \
+            and not os.path.isfile(os.path.join(argv[4], "aegis_mcp", "server.py")):
+        return f"starts {argv[0]} with no aegis_mcp in {argv[4]}: that install is gone"
+    if not _same_command(argv, current):
+        return f"starts {shown}, not this install's {display_command(current)}"
+    return None
+
+
+def probe_mcp_launcher(path_env: Optional[str] = None, registered: Sequence[Registered] = (),
+                       scripts_dirs: Optional[Sequence[str]] = None) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """The command `aegis init --host` registers from this install (install_hosts.mcp_command
+    under ``path_env``), and each ``registered`` host whose command is unsafe (launch_risk),
+    gone, or another install's, with the reason.
+
+    Doctor runs neither: the registered argv comes from a host's config file, and
+    starting the server would prove nothing a host does not do at its next session.
     """
+    from aegis_cli.install_hosts import mcp_command
+
     path_env = os.environ.get("PATH", "") if path_env is None else path_env
-    exe = which("python3", path_env, outside=workspace)
-    if not exe:
-        hits = only_skipped("python3", path_env, outside=workspace, base=workspace)
-        if hits:
-            return "refused", f"python3 is found only at {_where(hits[0], workspace)}, where doctor runs nothing"
-        return "missing", "python3 is not on PATH"
-
-    def _run(argv: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run([exe, *argv], stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, errors="replace",
-                              timeout=timeout, env=_child_env())
-
-    try:
-        proc = _run(["-I", "-S", "-c", "import sys; print(sys.version_info[0])"])
-    except subprocess.TimeoutExpired:
-        return "broken", f"{exe} timed out after {timeout:g}s"
-    except OSError as exc:
-        return "broken", f"{exe} could not be started: {exc}"
-    out = proc.stdout.strip()
-    # The App Installer stub exits 49, or prints a Store message and nothing
-    # on stdout, instead of running Python.
-    store_msg = "microsoft store" in (proc.stdout + proc.stderr).lower()
-    if proc.returncode == 49 or (not out and store_msg):
-        return "store_stub", exe
-    if proc.returncode != 0 or out != "3":
-        err = (proc.stderr.strip() or out)[:200]
-        return "broken", f"{exe} exited {proc.returncode}: {err}"
-
-    try:
-        imp = _run(["-c", _IMPORT_PROBE])
-    except subprocess.TimeoutExpired:
-        return "broken", f"{exe} timed out after {timeout:g}s importing aegis_mcp"
-    except OSError as exc:
-        return "broken", f"{exe} could not be started: {exc}"
-    if imp.returncode != 0:
-        return "no_aegis_mcp", exe
-    return "ok", exe
+    current = mcp_command(path_env, scripts_dirs)
+    problems = []
+    for host_id, argv in registered:
+        why = _launcher_problem(list(argv), current)
+        if why:
+            problems.append((host_id, why))
+    return current, problems
 
 
 def _where(hit: Hit, fence: Any) -> str:
@@ -283,29 +280,30 @@ def _where(hit: Hit, fence: Any) -> str:
     return f"{hit.path}, through the relative PATH entry {hit.entry!r}"
 
 
-def _check_mcp_launcher(path_env: str | None = None, workspace: Optional[Path] = None) -> bool:
-    """Advisory: report whether `python3 -m aegis_mcp` would start."""
-    status, detail = probe_mcp_launcher(path_env, workspace=workspace)
-    if status == "ok":
-        print(f"  ✅ MCP launcher: python3 ({detail}) runs and imports aegis_mcp")
-        return True
-    if status == "refused":
-        print(f"  ⚠️  MCP launcher: {detail}, so doctor cannot tell whether `python3 -m aegis_mcp` starts.")
-    elif status == "missing":
-        print("  ⚠️  MCP launcher: python3 not found on PATH. MCP configs start the\n"
-              "      server with `python3 -m aegis_mcp`; install Python 3 from python.org\n"
-              "      or put it on PATH (only needed if you use the MCP server).")
-    elif status == "store_stub":
-        print(f"  ⚠️  MCP launcher: {detail} is the Windows Store App Installer stub, not Python.\n"
-              "      Fix: Settings > Apps > Advanced app settings > App execution aliases:\n"
-              "      turn off python.exe and python3.exe, then install Python from python.org\n"
-              "      (or make sure the real python3 comes first on PATH).")
-    elif status == "no_aegis_mcp":
-        print(f"  ⚠️  MCP launcher: {detail} runs but cannot import aegis_mcp.\n"
-              f"      Install it for that interpreter: {detail} -m pip install --user aegis-guardrails")
+def _check_mcp_launcher(path_env: Optional[str] = None, workspace: Optional[Path] = None,
+                        registered: Sequence[Registered] = (),
+                        scripts_dirs: Optional[Sequence[str]] = None) -> bool:
+    """Advisory: the MCP launcher this install registers, and whether each host's matches."""
+    from aegis_cli.install_hosts import MCP_SCRIPT, display_command
+
+    current, problems = probe_mcp_launcher(path_env, registered, scripts_dirs)
+    where = ""
+    if len(current) == 1 and workspace is not None:
+        # The script's directory, not the script: a version manager's link resolves elsewhere.
+        key, fence = _root_key(Path(current[0]).parent), _root_key(workspace)
+        if key and fence and (key == fence or key.startswith(fence.rstrip(os.sep) + os.sep)):
+            where = ", inside the workspace"
+    if len(current) == 1:
+        print(f"  {'⚠️ ' if problems else '✅'} MCP launcher: {current[0]}{where} (what aegis init --host registers)")
     else:
-        print(f"  ⚠️  MCP launcher: {detail}")
-    return False
+        print(f"  {'⚠️ ' if problems else '✅'} MCP launcher: no {MCP_SCRIPT} script found, so aegis init --host "
+              f"registers this interpreter in isolated mode: {display_command(current)}")
+    for host_id, why in problems:
+        print(f"      {host_id} {why}. Fix: re-run aegis init --host {host_id}")
+    ok_hosts = [h for h, _ in registered if h not in {p for p, _ in problems}]
+    if ok_hosts:
+        print(f"      registered for {', '.join(ok_hosts)}")
+    return not problems
 
 
 def _missing_ast_extensions(ws_root: Path) -> List[str]:
@@ -1189,6 +1187,8 @@ def _level(advisory: Optional[bool], floor: str, governed: bool, installed: Opti
 
 
 def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], floor: str) -> Dict[str, Any]:
+    from aegis_cli.install_hosts import launch_risk
+
     binary = next((found for found in (ctx.which(name) for name in spec.binaries) if found), None)
     passed = [] if binary else [hit for name in spec.binaries for hit in ctx.passed_over(name)]
     ignored = list(dict.fromkeys(hit.path for hit in passed))
@@ -1239,6 +1239,10 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                        "doctor does not look")
                 add("command_unverifiable", f"the registered command {cmd} {why}, so doctor cannot tell whether "
                                             f"it exists: run aegis init --host {spec.id} to register an absolute path")
+        risk = launch_risk(reg["command"]) if reg["command"] else None
+        if risk:
+            add("unsafe_registration", f"the registered command {reg['command'][0]} is an unsafe registration: "
+                                       f"{risk}: run aegis init --host {spec.id}")
         if reg["approval"] == "unknown":
             add("approval_unknown", "aegis is registered only in this project's .mcp.json, which Claude Code "
                                     "runs after an approval doctor cannot see")
@@ -1988,7 +1992,14 @@ _CHECKS: Tuple[Tuple[str, bool], ...] = (
 )
 
 
-def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
+def _registered_launchers(rows: List[Dict[str, Any]]) -> List[Registered]:
+    """The command each host has registered, where doctor could read it."""
+    return [(row["id"], row["registration"]["command"]) for row in rows
+            if row["registration"]["status"] == "registered" and row["registration"]["command"]]
+
+
+def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None,
+                registered: Sequence[Registered] = ()) -> List[Dict[str, Any]]:
     calls: Dict[str, Callable[[], Optional[bool]]] = {
         "python_version": _check_python_version,
         "zero_dependencies": _check_zero_dependencies,
@@ -1997,7 +2008,7 @@ def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None)
         "cli_on_path": lambda: _check_cli_resolvable(root),
         "precommit_hook": lambda: _check_precommit_hook(root),
         "ast_drivers": lambda: _check_ast_drivers(root, fix=fix_ast),
-        "mcp_launcher": lambda: _check_mcp_launcher(workspace=root),
+        "mcp_launcher": lambda: _check_mcp_launcher(workspace=root, registered=registered),
     }
     out = []
     for check_id, blocking in _CHECKS:
@@ -2206,7 +2217,7 @@ def run_doctor(args: argparse.Namespace) -> int:
     with contextlib.redirect_stdout(text) if use_json else contextlib.nullcontext():
         if not use_json:
             print(f"aegis doctor — running health checks ({_clean(root, 4096)}):\n")
-        checks = _run_checks(root, fix_ast=False)
+        checks = _run_checks(root, fix_ast=False, registered=_registered_launchers(diag.rows))
         if not use_json:
             for check in checks:
                 print(check["text"], end="")
