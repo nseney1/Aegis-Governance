@@ -175,18 +175,16 @@ def _check_id(rule_id: str) -> None:
         _require_servable_id(rule_id)  # README and hidden names are never served
     except ValueError as exc:
         raise PackPathError(str(exc)) from None
-    if ".." in rule_id:
-        raise PackPathError(f"the id {rule_id!r} contains '..' (path traversal)")
+    try:
+        validate_rule_id(rule_id)  # the lifecycle's own rule: no separator, no '..'
+    except ValueError:
+        raise PackPathError(f"the id {rule_id!r} contains a path separator or '..' (path traversal)") from None
     if len(rule_id) > MAX_ID_LENGTH or not _ID_CHARS.fullmatch(rule_id):
         raise PackPathError(
             f"the id {rule_id!r} is not a usable rule id: use 1 to {MAX_ID_LENGTH} characters from "
             "A-Z a-z 0-9 . _ - that start with a letter or digit")
     if rule_id.split(".")[0].lower() in _DEVICE_NAMES:
         raise PackPathError(f"the id {rule_id!r} is a reserved device name on Windows")
-    try:
-        validate_rule_id(rule_id)
-    except ValueError as exc:  # unreachable behind the checks above; the lifecycle's own rule stays in force
-        raise PackPathError(str(exc)) from None
 
 
 def parse_pack_path(path: Any) -> PackPath:
@@ -240,35 +238,40 @@ def select_rules(
     return Selection(chosen, tuple((r.id, "expired") for r in candidates if r.expired))
 
 
+def _export_entry(rule: Rule) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """``(entry, None)`` for a rule that can travel, else ``(None, why not)``."""
+    if rule.type not in RULE_TYPE_DIRS:
+        return None, f"{rule.path}: it is not in a rule type directory"
+    relative = f"{RULE_TYPE_DIRS[rule.type]}/{rule.id}.md"
+    try:
+        parse_pack_path(relative)
+    except PackPathError as exc:
+        return None, f"{relative}: {exc}"
+    text = rule.raw.decode("utf-8")
+    _stripped, removed = _strip_derived(text)
+    keys = sorted(set(rule.legacy_keys) | set(removed))
+    if keys:
+        return None, (f"{relative} still has derived or retired keys ({', '.join(keys)}): "
+                      "run aegis migrate --apply, then export again")
+    size = len(text.encode("utf-8"))
+    if size > MAX_RULE_BYTES:
+        return None, f"{relative}: {size} bytes exceeds the {MAX_RULE_BYTES} byte limit"
+    return {"path": relative, "text": text, "sha256": text_digest(text)}, None
+
+
 def build_pack(rules: Iterable[Rule]) -> Dict[str, Any]:
     """The pack for ``rules`` (loaded, unexpired rules): entries in path order, each with the
     digest of its text. PackError lists every rule that cannot travel: an id the importer
     would refuse, derived or retired keys (the text that leaves is the file as it is, so run
     ``aegis migrate`` first) or a rule too large to import."""
-    problems: List[str] = []
     entries: List[Dict[str, Any]] = []
+    problems: List[str] = []
     for rule in rules:
-        if rule.type not in RULE_TYPE_DIRS:
-            problems.append(f"{rule.path}: it is not in a rule type directory")
-            continue
-        relative = f"{RULE_TYPE_DIRS[rule.type]}/{rule.id}.md"
-        try:
-            parse_pack_path(relative)
-        except PackPathError as exc:
-            problems.append(f"{relative}: {exc}")
-            continue
-        text = rule.raw.decode("utf-8")
-        _stripped, removed = _strip_derived(text)
-        keys = sorted(set(rule.legacy_keys) | set(removed))
-        if keys:
-            problems.append(f"{relative} still has derived or retired keys ({', '.join(keys)}): "
-                            "run aegis migrate --apply, then export again")
-            continue
-        size = len(text.encode("utf-8"))
-        if size > MAX_RULE_BYTES:
-            problems.append(f"{relative}: {size} bytes exceeds the {MAX_RULE_BYTES} byte limit")
-            continue
-        entries.append({"path": relative, "text": text, "sha256": text_digest(text)})
+        entry, problem = _export_entry(rule)
+        if entry is not None:
+            entries.append(entry)
+        else:
+            problems.append(str(problem))
     if problems:
         raise PackError(problems)
     entries.sort(key=lambda entry: entry["path"])
@@ -297,6 +300,26 @@ def _no_constant(name: str) -> Any:
 
 def _shape_problem() -> str:
     return 'a pack is a JSON object with exactly the keys "v", "rules" and "sha256"'
+
+
+def _content_problem(label: str, shown: str, text: Any, digest: Any) -> List[str]:
+    """What is wrong with an entry's text and digest, as messages (empty when nothing is).
+    ``label`` names the entry for a wrong type, ``shown`` (the path too, when it parsed) for
+    a wrong content."""
+    if not isinstance(text, str):
+        return [f'{label}: "text" must be a string']
+    if not isinstance(digest, str) or not _HEX64.fullmatch(digest):
+        return [f'{label}: "sha256" must be 64 lowercase hex digits']
+    try:
+        encoded = text.encode("utf-8")
+    except UnicodeEncodeError:
+        return [f"{shown}: the text is not valid UTF-8"]
+    found = []
+    if len(encoded) > MAX_RULE_BYTES:
+        found.append(f"{shown}: {len(encoded)} bytes exceeds the {MAX_RULE_BYTES} byte limit")
+    if hashlib.sha256(encoded).hexdigest() != digest:
+        found.append(f"{shown}: the text does not match its sha256")
+    return found
 
 
 def validate_pack(pack: Any) -> List[PackEntry]:
@@ -330,40 +353,26 @@ def validate_pack(pack: Any) -> List[PackEntry]:
         path, text, digest = entry["path"], entry["text"], entry["sha256"]
         hashable = hashable and all(isinstance(entry[k], str) for k in _ENTRY_KEYS)
         parsed: Optional[PackPath] = None
+        shown = label
         try:
             parsed = parse_pack_path(path)
+            shown = f"{label} ({path})"
         except PackPathError as exc:
             problems.append(f"{label} ({path!r}): {exc}")
-        if not isinstance(text, str):
-            problems.append(f'{label}: "text" must be a string')
-            continue
-        if not isinstance(digest, str) or not _HEX64.fullmatch(digest):
-            problems.append(f'{label}: "sha256" must be 64 lowercase hex digits')
-            continue
-        if parsed is not None:
-            label = f"{label} ({path})"
-        try:
-            encoded = text.encode("utf-8")
-        except UnicodeEncodeError:
-            problems.append(f"{label}: the text is not valid UTF-8")
-            continue
-        if len(encoded) > MAX_RULE_BYTES:
-            problems.append(f"{label}: {len(encoded)} bytes exceeds the {MAX_RULE_BYTES} byte limit")
-        if hashlib.sha256(encoded).hexdigest() != digest:
-            problems.append(f"{label}: the text does not match its sha256")
-        if parsed is None:
-            continue
-        if path in by_path:
-            problems.append(f"{label}: the path appears twice in the pack")
-            continue
-        by_path[path] = index
-        # Casefolded: on a case-insensitive file system Foo.md and foo.md are one file.
-        folded = parsed.id.casefold()
-        if folded in by_id:
-            problems.append(f"{label}: the id {parsed.id!r} is also used by {by_id[folded]}")
-            continue
-        by_id[folded] = path
-        entries.append(PackEntry(index, path, parsed, text))
+        content = _content_problem(label, shown, text, digest)
+        if content:
+            problems.extend(content)
+        elif parsed is not None:
+            # Casefolded: on a case-insensitive file system Foo.md and foo.md are one file.
+            folded = parsed.id.casefold()
+            if path in by_path:
+                problems.append(f"{shown}: the path appears twice in the pack")
+            elif folded in by_id:
+                problems.append(f"{shown}: the id {parsed.id!r} is also used by {by_id[folded]}")
+            else:
+                by_path[path] = index
+                by_id[folded] = path
+                entries.append(PackEntry(index, path, parsed, text))
     if hashable and bundle_digest(rules) != pack["sha256"]:
         problems.append("the pack sha256 does not match its rules: it was altered after export")
     if problems:
@@ -481,9 +490,9 @@ def _free_id(rule_id: str, taken: set) -> Optional[str]:
 
 def _plan(root: str, entries: Sequence[PackEntry], rename: bool) -> List[_Planned]:
     planned = [_Planned(e.index, e.path, e.parsed.directory, e.parsed.type, e.parsed.id, e.text) for e in entries]
-    problems = _staged_problems(root, planned)
-    if problems:
-        raise PackError(problems)
+    invalid = _staged_problems(root, planned)
+    if invalid:
+        raise PackError(invalid)
     try:
         existing = load_rules(root)
     except RuleInventoryError as exc:
@@ -493,14 +502,15 @@ def _plan(root: str, entries: Sequence[PackEntry], rename: bool) -> List[_Planne
         holders.setdefault(rule.id.casefold(), rule.path)
     taken = set(holders) | {item.id.casefold() for item in planned}
     final: List[_Planned] = []
+    refused: List[str] = []
     for item in planned:
         label = f"rules[{item.index}] ({item.source})"
         holder = holders.get(item.id.casefold())
         if holder is None:
             final.append(item)
         elif not rename:
-            problems.append(f"{label}: the id {item.id!r} is already used by {holder}; "
-                            "import with --rename to keep both")
+            refused.append(f"{label}: the id {item.id!r} is already used by {holder}; "
+                           "import with --rename to keep both")
         else:
             fresh = _free_id(item.id, taken)
             if fresh is None:
@@ -508,17 +518,18 @@ def _plan(root: str, entries: Sequence[PackEntry], rename: bool) -> List[_Planne
                     why = f"{item.id + _RENAME_SUFFIX!r} is longer than {MAX_ID_LENGTH} characters"
                 else:
                     why = f"{_RENAME_ATTEMPTS} candidates are taken"
-                problems.append(f"{label}: no usable renamed id: {why}")
-                continue
-            taken.add(fresh.casefold())
-            final.append(_Planned(item.index, item.source, item.directory, item.type, fresh,
-                                  _with_id(item.text, fresh), renamed_from=item.id))
-    if problems:
-        raise PackError(problems)
+                refused.append(f"{label}: no usable renamed id: {why}")
+            else:
+                taken.add(fresh.casefold())
+                final.append(_Planned(item.index, item.source, item.directory, item.type, fresh,
+                                      _with_id(item.text, fresh), renamed_from=item.id))
+    if refused:
+        raise PackError(refused)
     if any(item.renamed_from for item in final):
-        problems = _staged_problems(root, final)
-        if problems:
-            raise PackError(problems)
+        # The rewrite is checked like the pack was: it must not leave a rule the loader refuses.
+        broken = _staged_problems(root, final)
+        if broken:
+            raise PackError(broken)
     final.sort(key=lambda item: item.relative)
     return final
 

@@ -125,7 +125,7 @@ def test_a_path_is_a_type_directory_and_an_id(directory, rule_type):
     ("traps/readme.md", "README"),
     ("traps/x y.md", "is not a usable rule id"),
     ("traps/caf\u00e9.md", "is not a usable rule id"),
-    ("traps/a..b.md", "path traversal"),
+    ("traps/a..b.md", "the id 'a..b' contains a path separator or '..' (path traversal)"),
     ("traps/con.md", "reserved device name"),
     ("traps/NUL.md", "reserved device name"),
     ("traps/com1.md", "reserved device name"),
@@ -753,3 +753,113 @@ def test_a_refused_import_leaves_no_trace_in_a_workspace_without_state(ws):
     before = _tree(ws)
     _refused_import(ws, _good())
     assert _tree(ws) == before  # taking the lock would have created .aegis/state
+
+
+# ── limits, and the branches a mutation run found untested ───────────────────
+
+def test_the_documented_limits():
+    assert (packs.MAX_PACK_BYTES, packs.MAX_PACK_RULES, packs.MAX_RULE_BYTES, packs.MAX_ID_LENGTH) == (
+        8 * 1024 * 1024, 500, 128 * 1024, 128)
+
+
+def test_export_refuses_a_rules_tree_that_cannot_be_read_safely(ws, tmp_path):
+    (ws / ".aegis/rules/traps").mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    try:
+        os.symlink(str(outside), str(ws / ".aegis/rules/personas"), target_is_directory=True)
+    except (OSError, NotImplementedError):
+        if os.name != "nt":
+            raise
+        pytest.skip("symlinks are unavailable")
+    with pytest.raises(PackError) as info:
+        packs.select_rules(ws)
+    assert _problems(info).startswith("the rules directory cannot be read safely: ")
+
+
+def test_a_rule_outside_a_type_directory_cannot_be_exported():
+    from aegis_core.rules import Rule
+
+    stray = Rule(id="stray", path=".aegis/rules/stray.md", type=None, meta={}, body="", digest="0" * 64, raw=b"x")
+    with pytest.raises(PackError) as info:
+        packs.build_pack([stray])
+    assert _problems(info) == ".aegis/rules/stray.md: it is not in a rule type directory"
+
+
+def test_a_rule_of_exactly_the_size_limit_is_exported_and_one_byte_more_is_not(ws):
+    text = _text("edge")
+    padded = text + "x" * (packs.MAX_RULE_BYTES - len(text.encode("utf-8")))
+    _put(ws, "trap", "edge", padded)
+    (entry,) = packs.build_pack(packs.select_rules(ws).rules)["rules"]
+    assert len(entry["text"].encode("utf-8")) == packs.MAX_RULE_BYTES
+    _put(ws, "trap", "edge", padded + "x")
+    with pytest.raises(PackError) as info:
+        packs.build_pack(packs.select_rules(ws).rules)
+    assert f"traps/edge.md: {packs.MAX_RULE_BYTES + 1} bytes exceeds" in _problems(info)
+
+
+def test_every_unexportable_rule_is_reported_not_only_the_first(ws):
+    _put(ws, "trap", "has space", _text("has space"))
+    _put(ws, "trap", "stale", _text("stale", fitness=0.9))
+    with pytest.raises(PackError) as info:
+        packs.build_pack(packs.select_rules(ws).rules)
+    assert len(info.value.problems) == 2
+
+
+def test_an_entry_with_a_path_that_is_not_text_is_reported_alone_without_a_bundle_complaint():
+    entry = {"path": 5, "text": "t", "sha256": _digest("t")}
+    pack = {"v": 1, "rules": [entry], "sha256": packs.bundle_digest([entry])}
+    assert _refusal(_wire(pack)).splitlines() == ["rules[0] (5): the path must be a string, not int"]
+
+
+def test_a_bad_path_with_a_bad_digest_is_reported_twice_under_the_bare_label():
+    pack = _pack({"path": "../x.md", "text": "t", "sha256": "0" * 64})
+    problems = _refusal(_wire(pack)).splitlines()
+    assert problems[0].startswith("rules[0] ('../x.md'): the path must be exactly")
+    assert problems[1:] == ["rules[0]: the text does not match its sha256"]
+
+
+def test_the_same_path_twice_is_reported_once():
+    entry = _entry("traps/one.md", _text("one"))
+    assert _refusal(_wire(_pack(entry, dict(entry)))).splitlines() == [
+        "rules[1] (traps/one.md): the path appears twice in the pack"]
+
+
+def test_a_rename_keeps_a_byte_order_mark_and_rewrites_the_id(ws):
+    _put(ws, "trap", "one")
+    bom = "\ufeff" + _text("one")
+    result = _import(ws, _pack(_entry("traps/one.md", bom)), rename=True)
+    written = (ws / ".aegis/rules/traps/one-imported.md").read_bytes()
+    assert written == bom.replace("id: one\n", "id: one-imported\n").encode("utf-8")
+    assert written.startswith(b"\xef\xbb\xbf---") and result.rules[0].id == "one-imported"
+
+
+def test_a_rename_that_cannot_rewrite_the_id_is_refused_not_written(ws):
+    """A frontmatter opener the loader accepts and the line editor does not ('----'): the
+    id line is left alone, and the staged check after the rename refuses the mismatch."""
+    _put(ws, "trap", "one")
+    odd = _text("one").replace("---\n", "----\n", 1)
+    assert load_rules(ws).get("one") is not None
+    pack = _pack(_entry("traps/one.md", odd))
+    assert _refused_import(ws, pack, rename=True) == (
+        "rules[0] (traps/one.md): id 'one' does not match the file name 'one-imported'")
+    assert not (ws / ".aegis/rules/traps/one-imported.md").exists()
+
+
+def test_a_loader_that_skips_an_entry_fails_closed_instead_of_crashing(ws, monkeypatch):
+    from aegis_core.rules import RuleSet
+
+    monkeypatch.setattr(packs, "load_rules", lambda *args, **kwargs: RuleSet(()))
+    assert _refused_import(ws, _good()).splitlines() == [
+        "rules[0] (traps/one.md): the loader found 0 rules for it, expected exactly one",
+        "rules[1] (invariants/two.md): the loader found 0 rules for it, expected exactly one",
+    ]
+
+
+def test_a_rename_that_runs_out_of_candidates_says_so(ws, monkeypatch):
+    monkeypatch.setattr(packs, "_RENAME_ATTEMPTS", 2)
+    _put(ws, "trap", "one")
+    _put(ws, "trap", "one-imported")
+    _put(ws, "trap", "one-imported-2")
+    assert _refused_import(ws, _pack(_entry("traps/one.md", _text("one"))), rename=True) == (
+        "rules[0] (traps/one.md): no usable renamed id: 2 candidates are taken")
