@@ -333,3 +333,15 @@ def test_text_fix_lists_the_plan_and_where_the_backup_went(env, monkeypatch):
     assert rc == 0
     assert "remove mcpServers.soma" in out
     assert str(env.home / ".aegis" / "backups") in out
+
+
+@pytest.mark.parametrize("before, after", [
+    (b'{\n\t"mcpServers": {\n\t\t"soma": {},\n\t\t"x": 1\n\t}\n}\n', b'{\n\t"mcpServers": {\n\t\t"x": 1\n\t}\n}\n'),
+    (b'{\r\n    "mcpServers": {\r\n        "soma": {}\r\n    }\r\n}', b'{\r\n    "mcpServers": {}\r\n}'),
+    (b'{"mcpServers": {"soma": {}, "x": "\xc3\xa9"}}', b'{"mcpServers": {"x": "\xc3\xa9"}}'),
+])
+def test_fix_keeps_the_files_own_json_formatting(env, before, after):
+    path = env.home / ".mcp.json"
+    path.write_bytes(before)
+    env.fix()
+    assert path.read_bytes() == after

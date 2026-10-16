@@ -610,3 +610,13 @@ def test_a_registration_waiting_for_approval_is_not_counted_as_advisory(env):
     row = host(env.doctor(), "claude-code")
     assert row["state"] == "auth_unknown"
     assert row["enforcement_level"] == "none"  # no bootstrap either: nothing is known to reach it
+
+
+def test_a_host_doctor_cannot_check_yet_is_never_reported_ok(env):
+    env.all_ok()
+    env.stub("gemini")
+    (env.ws / ".aegis" / "config.json").write_text(json.dumps({"v": 1, "hosts": ["gemini-cli"]}))
+    row = host(env.doctor(), "gemini-cli")
+    assert row["registration"]["status"] == "unavailable"
+    assert row["state"] == "auth_unknown" and "registration_unverifiable" in codes(row)
+    assert row["verified_row"] is False

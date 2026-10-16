@@ -843,7 +843,8 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         add("not_registered", f"aegis is not registered with {spec.display_name}: run aegis init --host {spec.id}")
     elif status in ("unknown", "unavailable"):
         unknown.append("registration")
-        if status == "unknown":
+        # An installed host doctor cannot ask is never "ok": unknown is not absent either.
+        if status == "unknown" or binary is not None:
             add("registration_unverifiable", f"cannot tell whether {spec.display_name} loads aegis: {reg['detail']}")
     else:
         if reg["command_exists"] is False:
@@ -1277,20 +1278,22 @@ def _v3_copy_findings(ctx: _Ctx) -> List[_Finding]:
 def _selection(root: Path, governed: bool) -> Tuple[Tuple[Any, ...], str, List[_Finding]]:
     from aegis_core import hosts
     from aegis_core.config import ConfigError, RepoConfig
+    from aegis_core.workspace.layout import WorkspaceLayout
 
+    config = WorkspaceLayout(root).config_file
     default = tuple(h for h in hosts.all_hosts(phase=1) if h.registration is not None)
     if not governed:
         return default, "default", []
     try:
         chosen = RepoConfig.load(root).hosts
     except ConfigError as exc:
-        return default, "default", [_Finding("unreadable_config", root / ".aegis" / "config.json", str(exc))]
+        return default, "default", [_Finding("unreadable_config", config, str(exc))]
     if not chosen:
         return default, "default", []
     known = {h.id: h for h in hosts.HOSTS if h.registration is not None}
     unknown = [h for h in chosen if h not in known]
-    notes = [_Finding("unknown_host", root / ".aegis" / "config.json",
-                      f".aegis/config.json selects {', '.join(repr(h) for h in unknown)}, which doctor "
+    notes = [_Finding("unknown_host", config,
+                      f"{config.name} selects {', '.join(repr(h) for h in unknown)}, which doctor "
                       "cannot check", severity="info")] if unknown else []
     picked = tuple(h for h in hosts.HOSTS if h.id in set(chosen) and h.id in known)
     return picked, "config", notes
@@ -1390,9 +1393,14 @@ def _current_bytes(path: Path, expected: Optional[str]) -> Optional[bytes]:
 
 
 def _dump_like(original: bytes, data: Dict[str, Any]) -> bytes:
+    """``data`` serialized the way ``original`` was: its indent, line endings and final newline."""
     text = original.decode("utf-8")
-    match = re.search(r"\n( +)\"", text)
-    indent = len(match.group(1)) if match else (2 if "\n" in text.strip() else None)
+    match = re.search(r"\n([ \t]+)\"", text)
+    indent: Any
+    if match:
+        indent = match.group(1) if "\t" in match.group(1) else len(match.group(1))
+    else:
+        indent = 2 if "\n" in text.strip() else None
     out = json.dumps(data, indent=indent, ensure_ascii=False)
     if "\r\n" in text:
         out = out.replace("\n", "\r\n")
@@ -1478,10 +1486,7 @@ def _apply(plan: List[_Change], home: Optional[Path], root: Path) -> Tuple[List[
             current = _current_bytes(change.path, change.sha256)
             if current is not None:
                 name = f"{index:02d}-{change.path.name}"
-                with open(backup / name, "xb") as fh:
-                    fh.write(current)
-                    fh.flush()
-                    os.fsync(fh.fileno())
+                atomic_write_bytes(backup / name, current)  # a fresh directory: nothing to replace
                 manifest.append({"path": str(change.path), "backup": name, "sha256": _sha256(current),
                                  "action": action})
                 _write_manifest(backup, manifest)
@@ -1640,7 +1645,9 @@ def _print_findings(findings: List[_Finding]) -> None:
 
 
 def _print_plan(plan: List[_Change], home: Optional[Path]) -> None:
-    where = f"{home / '.aegis' / 'backups'}{os.sep}<UTC stamp>" if home else "~/.aegis/backups"
+    from aegis_core.workspace.layout import UserLayout
+
+    where = f"{UserLayout(home).backups_dir}{os.sep}<UTC stamp>" if home else "the Aegis backups directory"
     print(f"\nPlanned changes (each file is backed up to {where} first):")
     for index, change in enumerate(plan, 1):
         print(f"  {index}. {change.path}: {'; '.join(change.describe)}")
