@@ -18,6 +18,10 @@ concurrency guarantees live in one place:
   ``workspace_id``; the lock is a shared lock (a leaf, taken after the workspace lock when
   a caller holds it). Outside git the ledger is ``.aegis/state/ledger.jsonl`` under the
   workspace lock.
+- Shared state is private: its directories are 0o700 and its files 0o600, set explicitly
+  (``chmod``/``fchmod``, so the umask does not matter). ``shared_state_modes`` counts the
+  entries that are looser (never naming them) and, with ``fix``, tightens them
+  (v4.4 spec §12.7).
 - ``state_dir(workspace)``: ``.aegis/state``, refused when it (or ``.aegis``, or any
   entry directly inside it: the ledger, the lock, a log, a backup) is a symlink or
   resolves outside the workspace, so machine-local state is never written through a
@@ -83,8 +87,10 @@ __all__ = [
     "ledger_site",
     "locked",
     "read_jsonl",
+    "StateModes",
     "shared_locked",
     "shared_state_dir",
+    "shared_state_modes",
     "state_dir",
     "workspace_id",
     "workspace_relative",
@@ -271,6 +277,24 @@ def state_dir(workspace: Any) -> Path:
 
 _SHARED_DIR_NAME = "aegis"
 _SHARED_DIR_MODE = 0o700
+_PRIVATE_FILE_MODE = 0o600
+
+
+def _in_shared_state(path: Path) -> bool:
+    """Whether ``path`` is inside a repository's shared state: below a directory named
+    ``aegis`` that sits directly in a git directory (it holds ``HEAD`` and ``objects``)."""
+    for parent in list(path.parents)[:8]:
+        if parent.name == _SHARED_DIR_NAME and (parent.parent / "HEAD").is_file() \
+                and (parent.parent / "objects").is_dir():
+            return True
+    return False
+
+
+def _make_private(fd: int, mode: int) -> None:
+    """Set ``mode`` exactly on an open file; the umask does not apply. Windows has no
+    POSIX bits to set."""
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, mode)
 
 
 def _shared_link_error(path: Path, base: Path) -> PathTraversalError:
@@ -329,6 +353,63 @@ def shared_state_dir(workspace: Any, create: bool = True) -> Path:
     return _shared_dir(Path(_resolved(common)), create)
 
 
+class StateModes(NamedTuple):
+    """What ``shared_state_modes`` found: ``checked`` entries (directories and files) in the
+    shared state, ``looser`` of them with any group or other permission bit, ``fixed`` of
+    those tightened. Counts only: a name in a report would leak what the state holds."""
+
+    checked: int
+    looser: int
+    fixed: int
+    supported: bool
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"checked": self.checked, "looser": self.looser, "fixed": self.fixed, "supported": self.supported}
+
+
+def shared_state_modes(workspace: Any, fix: bool = False) -> StateModes:
+    """Count the entries of ``<git common dir>/aegis`` looser than 0o700 (directories) and
+    0o600 (files); with ``fix`` set them to exactly that. Nothing is created.
+
+    A symlink is never followed or changed. Raises what ``shared_state_dir`` raises for an
+    unconfined directory. Without POSIX permission bits (Windows) nothing is checked and
+    ``supported`` is False.
+    """
+    if os.name == "nt":
+        return StateModes(0, 0, 0, False)
+    top = shared_state_dir(workspace, create=False)
+    if not os.path.lexists(top):
+        return StateModes(0, 0, 0, True)
+    checked = looser = fixed = 0
+    pending = [(top, True)]
+    while pending:
+        path, is_dir = pending.pop()
+        checked += 1
+        if stat.S_IMODE(os.lstat(path).st_mode) & 0o077:
+            looser += 1
+            if fix and _chmod_exact(path, _SHARED_DIR_MODE if is_dir else _PRIVATE_FILE_MODE, is_dir):
+                fixed += 1
+        if is_dir:
+            with os.scandir(path) as found:
+                pending.extend((Path(e.path), e.is_dir(follow_symlinks=False)) for e in found if not e.is_symlink())
+    return StateModes(checked, looser, fixed, True)
+
+
+def _chmod_exact(path: Path, mode: int, is_dir: bool) -> bool:
+    flags = os.O_RDONLY | _O_NOFOLLOW | _O_CLOEXEC | (getattr(os, "O_DIRECTORY", 0) if is_dir else 0)
+    try:
+        fd = os.open(str(path), flags)
+    except OSError:
+        return False
+    try:
+        _make_private(fd, mode)
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+    return True
+
+
 def _local_state_dir(root: Path, create: bool) -> Path:
     """The workspace's ``.aegis/state`` with ``state_dir``'s refusals; with ``create`` False
     nothing is created."""
@@ -358,6 +439,7 @@ def _confined_shared(directory: Path, base: Path, create: bool) -> None:
     if create and not os.path.lexists(directory):
         try:
             directory.mkdir(mode=_SHARED_DIR_MODE)
+            os.chmod(directory, _SHARED_DIR_MODE)  # mkdir's mode passes through the umask; this is exact
         except FileExistsError:
             pass  # another worktree's process made it first; checked again below
         _confined(directory, base, link_error, outside_error)
@@ -536,6 +618,8 @@ def _open_regular(path: Path, flags: int) -> int:
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise PathTraversalError(f"refusing to use {path}: it is not a regular file", path=str(path))
+        if st is None and _in_shared_state(Path(path)):
+            _make_private(fd, _PRIVATE_FILE_MODE)
     except BaseException:
         os.close(fd)
         raise
@@ -684,7 +768,8 @@ def atomic_write_bytes(
         try:
             keep_mode = stat.S_IMODE(os.stat(target).st_mode)
         except FileNotFoundError:
-            pass
+            if _in_shared_state(target):
+                keep_mode = _PRIVATE_FILE_MODE
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_BINARY | _O_CLOEXEC
     # A file that ends with set bits starts private, so it is never looser in between.

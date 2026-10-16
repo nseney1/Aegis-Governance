@@ -132,6 +132,7 @@ def create_default_registry() -> CommandRegistry:
     """Create a CommandRegistry holding the v4 command set."""
     reg = CommandRegistry()
 
+    from aegis_cli.approve import ApproveCommand
     from aegis_cli.benchmark import BenchmarkCommand
     from aegis_cli.check import CheckCommand
     from aegis_cli.doctor import DoctorCommand
@@ -153,6 +154,7 @@ def create_default_registry() -> CommandRegistry:
         MigrateCommand,
         DoctorCommand,
         CheckCommand,
+        ApproveCommand,
         ScanCommand,
         StatusCommand,
         RuleCommand,

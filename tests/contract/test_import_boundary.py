@@ -66,6 +66,19 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core.hook_events": 1,
     # The post-lane gate (aegis check --lane): team, the matcher, gitsafe and events.
     "aegis_core.lane_gate": 1,
+    # The governance file set (the matcher and the layout) and the trust tier / approvals over it
+    # (gitsafe, storage, pathlookup, governance): v4.3 human_gate.
+    "aegis_core.governance": 1,
+    "aegis_core.human_gate": 1,
+    # v4.3 verified checks: the tree identity (gitsafe, pathlookup), the credit state machine over the ledger
+    # (human_gate's gh runner, storage, gitsafe) and the hermetic run, which also runs Layer 1 (baseline).
+    "aegis_core.treeid": 1,
+    "aegis_core.credit": 1,
+    "aegis_core.checkrun": 2,
+    # v4.3 T3: rank 2+ rules served from the reviewed BASE (the loader, the inventory, gitsafe), under scan.
+    "aegis_core.rule_integrity": 1,
+    # v4.3 T2: `aegis doctor --release` (gitsafe, pathlookup, human_gate's tier).
+    "aegis_core.release_verify": 2,
     "aegis_core.scan": 2,
     "aegis_core.scan_compliance": 2,
     "aegis_core.sync": 2,

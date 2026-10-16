@@ -124,7 +124,9 @@ TOOL_DEFINITIONS = [
             "Call before editing files: returns the governance rules that apply to them, "
             "ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules "
             "(gates, invariants) take at most two slots; the others are listed in "
-            "omitted_mandatory. stale_rules lists rules edited since the last aegis sync. "
+            "omitted_mandatory. Gates and invariants are served from the reviewed base commit "
+            "(rules_base); branch-local edits to them never bind and are listed in unreviewed_rules. "
+            "stale_rules lists rules edited since the last aegis sync. "
             "If any rule file cannot be loaded the scan fails (status FAIL) and names it."
         ),
         "annotations": {
@@ -150,8 +152,11 @@ TOOL_DEFINITIONS = [
     {
         "name": "aegis_report_outcome",
         "description": (
-            "Report whether the rules you were shown helped. Each report is an advisory "
-            "self-report row in the outcome ledger; it never promotes a rule by itself."
+            "Report whether the rules you were shown helped. The server ties the report to the tree "
+            "it computes now: with an `aegis check --record` run of exactly that tree it credits the "
+            "rules it showed you that match the change (your rules_used is not what is credited), and "
+            "even then only CI on the landing commit makes it count; without one it records a single "
+            "unwitnessed claim per session and tree that earns nothing. Reports per session are capped."
         ),
         "annotations": {
             # Only readOnlyHint is declared: hosts treat annotations as untrusted hints and no host

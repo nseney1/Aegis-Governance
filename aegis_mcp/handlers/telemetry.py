@@ -5,23 +5,14 @@ from pathlib import PurePath
 import sys
 from typing import List, Optional, Set, Tuple
 
+from aegis_core import credit, treeid
+from aegis_core.baseline import envelope
 from aegis_core.rule_inventory import RuleInventoryError
 from aegis_core.rules import validate_rule_names
-from aegis_core.telemetry_engine import ledger
 from aegis_mcp.registry import _STATUS_FAIL, _VALID_OUTCOMES, _get_workspace
 
 # (workspace root, session, idempotency key) whose edit event is recorded.
 _RECORDED: Set[Tuple[str, str, str]] = set()
-
-_LEDGER_OUTCOME = {
-    "success": "tp",
-    "tp": "tp",
-    "pass": "tp",
-    "failure": "fp",
-    "fp": "fp",
-    "fail": "fp",
-    "partial": "trigger",
-}
 
 _KEY_REQUIRED = (
     "'idempotency_key' is required: send a unique key per report so a retry is never recorded twice."
@@ -34,6 +25,24 @@ _RULES_REQUIRED = (
 
 def _fail(message: str) -> dict:
     return {"status": _STATUS_FAIL, "error": message}
+
+
+def _credited_rules(workspace, check, host: Optional[str], session: Optional[str]) -> List[str]:
+    """Rules exposed in this server session's scans and matching ``diff(base, check tree)``."""
+    from aegis_core.scan import RULE_CACHE
+
+    exposed = credit.exposed_rules(workspace.root, host, session)
+    if not exposed:
+        return []
+    try:
+        with treeid.bind(workspace.root) as bound:
+            if bound.binding.tree != check.get("tree"):
+                return []
+            changed = [path for status, path in bound.diff_entries(str(check.get("base"))) if status != "D"]
+        ruleset = RULE_CACHE.get(workspace)
+    except Exception:  # an unreadable tree or rule set credits nothing
+        return []
+    return sorted(rule.id for rule in ruleset.served if rule.id in exposed and rule.matching_files(changed))
 
 
 def handle_report_outcome(args: dict) -> dict:
@@ -74,41 +83,26 @@ def handle_report_outcome(args: dict) -> dict:
         except ValueError as exc:
             return _fail(str(exc))
 
-    meta = {
-        "notes": args.get("notes", ""),
-        "tests_passed": args.get("tests_passed"),
-        "rework_count": args.get("rework_count", 0),
-    }
-    # Attribution comes from the server (clientInfo and its session), never the caller.
-    # The key is scoped by host and session (host-matrix §3.8): two sessions that pick
-    # the same key ("report-1") are two reports. The cost: a retry after a reconnect,
-    # which starts a new session, records again.
+    # Attribution comes from the server (clientInfo and its session), never the caller. The
+    # credited rules are the server's: those this session's scans exposed that also match the
+    # change the check covered. 'rules_used' above only had to be well formed.
     host, session = args.get("_host"), args.get("_session")
-    ledger_key = f"{host}/{session}/{idempotency_key}" if session else idempotency_key
-    events = [
-        {
-            "rule": rule,
-            "outcome": _LEDGER_OUTCOME[outcome],
-            "source": "mcp",
-            "host": host,
-            "session": session,
-            "key": ledger_key,
-            "meta": meta,
-        }
-        for rule in rules_used
-    ]
+    binding = treeid.tree_of(workspace.root)
     try:
-        records = ledger.append(workspace.root, events)
-    except ledger.EventConflictError:
+        result = credit.submit_report(
+            workspace.root, tree=binding.tree if binding.bound else None, session=session, host=host,
+            key=idempotency_key, outcome=outcome, rules_for=lambda check: _credited_rules(workspace, check, host, session))
+    except credit.ReportConflict:
         return _fail(
             f"'idempotency_key' {idempotency_key!r} was already used for a different report: "
             "send a new key for each new report."
         )
     except Exception as exc:
         return _fail(f"Failed to record outcome: {exc}")
-    if edited:
+    if edited and result.get("status") != "rate_limited":  # a capped session writes nothing at all
         _record_edit(workspace, args, idempotency_key, edited)
-    return {"status": "recorded", "records": records}
+    tree = binding.tree if binding.bound else None
+    return {**envelope("aegis_report_outcome", {"tree": tree}), **result}
 
 
 def _record_edit(workspace, args: dict, idempotency_key: str, files: List[str]) -> None:

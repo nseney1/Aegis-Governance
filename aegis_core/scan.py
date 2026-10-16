@@ -18,6 +18,11 @@ rule into a system prompt, it returns only the rules for the changed files:
 5. ``stale_rules`` lists rules edited since the last ``aegis sync``; they are served
    like any other rule. Markdown under .aegis/rules that is not a rule costs one bounded
    ``warnings`` line.
+6. Rules that bind (gates, invariants, ``enforcement: gate``) are the reviewed BASE
+   versions (aegis_core.rule_integrity), not the working tree's: ``rules_base`` says which
+   commit and whether it is review-witnessed, and ``unreviewed_rules`` lists (id, title and
+   kind of change only) what this branch added, changed or removed. Those are never served
+   as mandatory. Outside git nothing is anchored and neither key appears.
 """
 from __future__ import annotations
 
@@ -29,6 +34,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aegis_core.fitness import Fitness, compute, for_rules
 from aegis_core.match import normalize_path, workspace_files
+from aegis_core import rule_integrity
+from aegis_core.rule_integrity import MANDATORY_SLOT_CAP
 from aegis_core.rule_inventory import RuleInventoryError
 from aegis_core.rules import Rule, RuleCache, RuleSet, workspace_root
 from aegis_core.taxonomy import (
@@ -54,9 +61,9 @@ __all__ = [
 # Per-process cache of parsed rules; the MCP server keeps it across tool calls.
 RULE_CACHE = RuleCache()
 
-# Mandatory rules may take at most this many of a scan's rule slots, so a few rules
-# that declare themselves mandatory on `**` cannot starve every advisory rule.
-MANDATORY_SLOT_CAP = 2
+# MANDATORY_SLOT_CAP (aegis_core.rule_integrity): mandatory rules may take at most that many
+# of a scan's rule slots, so a few rules that declare themselves mandatory on `**` cannot
+# starve every advisory rule. Adding one past it is a governance change aegis check --ci flags.
 
 # The server sends a scan as json.dumps(result), which is ASCII, so a response the
 # budget admits is at most 4 bytes per budgeted token.
@@ -231,9 +238,11 @@ def _payload(
     stats: Dict[str, Any],
     stale: List[Dict[str, Any]],
     warnings: List[str],
+    extras: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """The response; ``shown`` of the ``omitted_mandatory`` entries are listed by name
-    (all of them unless the token budget cannot hold them), and all are counted."""
+    (all of them unless the token budget cannot hold them), and all are counted.
+    ``extras`` are added as they are: they count against the token budget like the rest."""
     listed = omitted_mandatory[:shown]
     guidance = _render(staged, omitted, len(omitted_mandatory), [o["name"] for o in listed])
     payload: Dict[str, Any] = {
@@ -247,6 +256,8 @@ def _payload(
     }
     if warnings:
         payload["warnings"] = list(warnings)
+    if extras:
+        payload.update(extras)
     return payload
 
 
@@ -304,16 +315,36 @@ def scan(
 
     token_budget = resolve_token_budget(workspace, max_tokens)
     try:
-        ruleset = RULE_CACHE.get(workspace)
+        view = rule_integrity.effective(workspace, RULE_CACHE)
     except RuleInventoryError as exc:
         return _failure(f"the rules directory cannot be read safely: {exc}")
+    except rule_integrity.IntegrityError as exc:
+        return _failure(f"the reviewed (base) version of the rules cannot be read, so none is served: {exc}")
+    ruleset = view.ruleset
     if ruleset.errors:
         return _broken(ruleset)
 
     # Workspace-relative, each file once, as every other surface matches them.
     files = workspace_files(workspace_root(workspace), changed_files if changed_files else _git_changed_files(workspace))
     stale = stale_rules(ruleset, read_derived(workspace))
-    return _select(ruleset, files, budget, token_budget, stale, lambda served: for_rules(workspace, served))
+    return _select(ruleset, files, budget, token_budget, stale, lambda served: for_rules(workspace, served),
+                   _integrity_extras(view))
+
+
+# Titles are branch-local text that reaches an agent: only the first few are listed.
+_UNREVIEWED_LISTED = 10
+
+
+def _integrity_extras(view: "rule_integrity.Effective") -> Dict[str, Any]:
+    """``rules_base`` and ``unreviewed_rules`` (id, title, kind of change; nothing else) for a scan."""
+    if view.anchor is None:
+        return {}
+    extras: Dict[str, Any] = {"rules_base": view.anchor.as_dict()}
+    if view.unreviewed:
+        extras["unreviewed_rules"] = [u.as_dict() for u in view.unreviewed[:_UNREVIEWED_LISTED]]
+        if len(view.unreviewed) > _UNREVIEWED_LISTED:
+            extras["unreviewed_total"] = len(view.unreviewed)
+    return extras
 
 
 def scan_user_layer(
@@ -383,6 +414,7 @@ def _select(
     token_budget: int,
     stale: List[Dict[str, Any]],
     fitness_of: Callable[[List[Rule]], Dict[str, Fitness]],
+    extras: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Match, rank, slot and clamp ``ruleset``'s served rules for ``files``."""
     slots = JIT_DEFAULT_RULE_COUNT_BUDGET if budget is None else max(0, int(budget))
@@ -397,7 +429,7 @@ def _select(
         "max_tokens_budget": token_budget,
     }
     if not files:
-        payload = _payload([], 0, [], 0, stats, stale, warnings)
+        payload = _payload([], 0, [], 0, stats, stale, warnings, extras)
         payload["guidance"] = NO_CHANGES_TEXT
         payload["stats"]["estimated_tokens"] = _tokens(payload)
         return payload
@@ -420,7 +452,7 @@ def _select(
     # serialized response: the per-entry estimate is additive only up to rounding.
     # The count of omitted mandatory rules is always reported; their names are listed
     # as far as the budget allows, after the rules themselves.
-    used = _tokens(_payload([], 1, omitted_mandatory, 0, stats, stale, warnings))
+    used = _tokens(_payload([], 1, omitted_mandatory, 0, stats, stale, warnings, extras))
     staged: List[Dict[str, Any]] = []
     clamped: List[Dict[str, Any]] = []
     for entry in entries:
@@ -442,7 +474,7 @@ def _select(
         note_clamped(entry)
     shown = len(omitted_mandatory)
     while True:
-        payload = _payload(staged, len(clamped), omitted_mandatory, shown, stats, stale, warnings)
+        payload = _payload(staged, len(clamped), omitted_mandatory, shown, stats, stale, warnings, extras)
         # Measure with the widest count that can pass, so writing the real one cannot overflow.
         payload["stats"]["estimated_tokens"] = token_budget
         tokens = _tokens(payload)

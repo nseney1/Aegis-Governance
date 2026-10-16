@@ -31,6 +31,7 @@ MODES = {
     "--card": ["--card"],
     "--write-baseline": ["--write-baseline"],
     "--prune-baseline": ["--prune-baseline"],
+    "--ci": ["--ci"],
 }
 TS = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 

@@ -1,5 +1,6 @@
 {
   "command_resolution": {
+    "approve": "approve",
     "benchmark": "benchmark",
     "check": "check",
     "doctor": "doctor",
@@ -93,6 +94,77 @@
       }
     ],
     "commands": {
+      "approve": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "base",
+            "flags": [
+              "--base"
+            ],
+            "help": "The base branch to measure governance changes against (default: origin/main, main, origin/develop, develop)",
+            "kind": "store",
+            "metavar": "REF",
+            "nargs": null,
+            "required": false
+          }
+        ],
+        "description": "Makes one signed, empty commit 'Aegis-Approve: <governance tree hash>' naming the governance files as committed at HEAD. Refuses when nothing governance-related changed since the base branch, when anything is staged or uncommitted, and without a terminal. The signing key, format and program come from your user-level git config (gpg.format ssh); no key is created.",
+        "help": "Sign a human approval of this branch's governance changes"
+      },
       "benchmark": {
         "aliases": [],
         "arguments": [
@@ -319,16 +391,43 @@
             "required": false
           },
           {
+            "const": true,
+            "default": false,
+            "dest": "record",
+            "flags": [
+              "--record"
+            ],
+            "help": "Bind the work tree to a git tree, run Layer 1 on an exported snapshot of it and write one ledger check row (witness: aegis). A label, not proof: only CI on the landing commit confirms it. A tree git cannot see completely (assume-unchanged or skip-worktree files) or that holds symbolic links is unbindable and writes no row; exit 0 only when the run passed",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "tests",
+            "flags": [
+              "--tests"
+            ],
+            "help": "With --record: also run the test command from the user-scope config (tests.command in ~/.aegis/config.json, default python -m pytest, never the repository's) in the snapshot with a fixed environment; exit 5 or zero passed tests is never evidence",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
             "choices": [
               "text",
-              "json"
+              "json",
+              "github"
             ],
             "default": "text",
             "dest": "format",
             "flags": [
               "--format"
             ],
-            "help": "Output format",
+            "help": "Output format (github, with --ci only: workflow-command annotations)",
             "kind": "store",
             "metavar": null,
             "nargs": null,
@@ -399,6 +498,31 @@
             "required": false
           },
           {
+            "const": true,
+            "default": false,
+            "dest": "ci",
+            "flags": [
+              "--ci"
+            ],
+            "help": "The CI weakening check: compare the rules that bind (gates, invariants, enforcement: gate) at merge-base(--base, --head) with those at --head, and flag every way one binds less (a deletion or archive, a rank decrease, lost coverage of existing files, a forbid_ast pattern no longer covered, a new or unknown key, any applies_to change, or a mandatory rule added past the scan's slot cap). A flagged change passes only with a signed Aegis-Approve commit (aegis approve) by a key in the base branch's allowed_signers. Exit 0 pass, 1 fail",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "head",
+            "flags": [
+              "--head"
+            ],
+            "help": "With --ci: the commit under review (default: the pull request head in $GITHUB_EVENT_PATH, else HEAD)",
+            "kind": "store",
+            "metavar": "REF",
+            "nargs": null,
+            "required": false
+          },
+          {
             "default": null,
             "dest": "split",
             "flags": [
@@ -416,7 +540,7 @@
             "flags": [
               "--base"
             ],
-            "help": "With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection",
+            "help": "With --ci: the pull request's base (default: its base.sha in $GITHUB_EVENT_PATH, else as below). With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection",
             "kind": "store",
             "metavar": "REF",
             "nargs": null,
@@ -543,6 +667,60 @@
             "kind": "store_true",
             "metavar": null,
             "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "github",
+            "flags": [
+              "--github"
+            ],
+            "help": "Print what trust tiers A and B need: the ruleset JSON, CODEOWNERS lines and signing setup",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "apply",
+            "flags": [
+              "--apply"
+            ],
+            "help": "With --github --tier: create the ruleset through gh, only after a y/N at a terminal",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "release",
+            "flags": [
+              "--release"
+            ],
+            "help": "Verify that the CI verdict job attested this commit (gh attestation verify, gh >= 2.93.0; otherwise UNVERIFIED and a non-zero exit)",
+            "kind": "store",
+            "metavar": "SHA",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "choices": [
+              "A",
+              "B"
+            ],
+            "default": null,
+            "dest": "tier",
+            "flags": [
+              "--tier"
+            ],
+            "help": "With --github --apply: which ruleset to create (A: reviews; B: solo, signed approvals)",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
             "required": false
           }
         ],
@@ -3443,6 +3621,12 @@
     "description": "Aegis Governance — make AI coding agents trustworthy"
   },
   "registry": [
+    {
+      "aliases": [],
+      "category": "Daily Workflow & Verification",
+      "help": "Sign a human approval of this branch's governance changes",
+      "name": "approve"
+    },
     {
       "aliases": [],
       "category": "Plumbing",

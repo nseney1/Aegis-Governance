@@ -486,9 +486,10 @@ class TestLayer1FailsClosed:
         assert runner.gate_verdict(results) is False
 
     def test_an_expired_rule_with_a_malformed_forbid_ast_is_not_enforced(self, tmp_path):
-        invariants = tmp_path / ".aegis" / "rules" / "invariants"
-        invariants.mkdir(parents=True)
-        (invariants / "old.md").write_text(
+        # A rank-1 trap: expired_at on an invariant or gate is a load error since v4.3 (T3).
+        traps = tmp_path / ".aegis" / "rules" / "traps"
+        traps.mkdir(parents=True)
+        (traps / "old.md").write_text(
             "---\nid: old\nexpired_at: '2026-01-01'\nforbid_ast: true\n---\n", encoding="utf-8"
         )
         (tmp_path / "mod.py").write_text("def main():\n    return 1\n", encoding="utf-8")
