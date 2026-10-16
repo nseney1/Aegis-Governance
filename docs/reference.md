@@ -39,6 +39,7 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis check` | Daily Workflow & Verification | Verify changes: Layer 1 checks, plus a Layer 2 model review with --full |
 | `aegis scan` | Daily Workflow & Verification | Show which rules apply to the given files (run before editing them) |
 | `aegis status` | Daily Workflow & Verification | Show active rules and stats |
+| `aegis team` | Daily Workflow & Verification | Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics) |
 | `aegis rule` | Rule Evolution & Intelligence | Manage rule lifecycle (list, create, promote, demote, archive) |
 | `aegis sync` | Rule Evolution & Intelligence | Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them) |
 | `aegis hook` | Plumbing | Install, inspect or remove the git pre-commit hook |
@@ -139,6 +140,87 @@ Category: Daily Workflow & Verification.
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--compliance` |  |  | Show the per-host scan-before-edit rate from the MCP activity log (.aegis/state/activity.jsonl), per session and per host. Edits are the files a session named in aegis_report_outcome 'files' plus the files of commits inside exactly one session's window (first to last event, plus 15 minutes). Limits: an edit time is an upper bound (report or commit time), so the rate can overstate compliance; uncommitted edits that were never reported are not seen; commits in overlapping sessions count as ambiguous, not as misses; a session with no observed edit is unknown, never 0. A host rate is an aggregate over sessions, not a per-attempt verdict. Reads only. |
+
+### `aegis team`
+
+Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics)
+
+Leases under refs/aegis/lanes/<lane> declare which paths a lane works on. A lease is cooperative conflict input, not a lock, not an identity and not proof that an agent is alive: claims of different lanes can race, and owner and role are display labels. The backstops are the post-lane gate (aegis check --lane) and aegis team metrics.
+
+Category: Daily Workflow & Verification. Subcommands: `claim`, `gc`, `list`, `metrics`, `release`, `renew`, `transfer`.
+
+### `aegis team claim`
+
+Lease a lane's paths; prints the lease oid
+
+Refuse when a live lease of another lane may overlap the paths; otherwise create the lane's lease, or take over its expired lease. Prints the new lease oid.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `lane` | `LANE` |  | Lane name: [a-z0-9][a-z0-9._-]{0,62} (required) |
+| `--paths` | `GLOB [GLOB ...]` |  | Globs the lane will change (the conflict scope) |
+| `--role` | `ROLE` |  | Display label (default: implementer) |
+| `--owner` | `OWNER` |  | Display label (default: <user>@<hostname>) |
+| `--ttl` | `SECONDS` | `3600` | Seconds until the lease expires, at most 86400 |
+| `--branch` | `BRANCH` |  | The lane's branch, recorded for display |
+
+### `aegis team gc`
+
+Delete expired leases
+
+Delete every expired lease by compare-and-swap; unreadable leases are kept.
+
+### `aegis team list`
+
+Show leases (conflict input, not liveness proof)
+
+A lease is conflict input, not liveness proof: it records which paths a lane declared and until when, not that its agent is still working. The backstops are the post-lane gate (aegis check --lane) and aegis team metrics.
+
+### `aegis team metrics`
+
+Lease events and merge outcomes
+
+Claims and denials from the events log, and for each first-parent merge since --base: whether both sides changed a common path and whether git merge-tree reports a conflict (unavailable before git 2.38). GitHub's synthetic refs/pull/*/merge commits are excluded.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--base` | `REF` |  | Count merges since this commit (default: the branch base, as for aegis check --lane: origin/main, main, origin/develop or develop; with none, the whole first-parent history) |
+
+### `aegis team release`
+
+Delete a lease
+
+Delete a lease by compare-and-swap. Anyone may release; the events log records the caller.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `lane` | `LANE` |  | Lane name: [a-z0-9][a-z0-9._-]{0,62} (required) |
+| `--expect` | `OID` |  | The lease oid the lane must hold now (printed by claim, renew, transfer and list) |
+
+### `aegis team renew`
+
+Extend a lease; prints the new lease oid
+
+Renew by compare-and-swap; an expired lease is re-claimed, overlap check included.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `lane` | `LANE` |  | Lane name: [a-z0-9][a-z0-9._-]{0,62} (required) |
+| `--expect` | `OID` |  | The lease oid the lane must hold now (printed by claim, renew, transfer and list) |
+| `--ttl` | `SECONDS` |  | New lifetime in seconds, at most 86400 (default: keep it) |
+
+### `aegis team transfer`
+
+Give a live lease to another owner
+
+Change a live lease's owner (and role) by compare-and-swap.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `lane` | `LANE` |  | Lane name: [a-z0-9][a-z0-9._-]{0,62} (required) |
+| `--expect` | `OID` |  | The lease oid the lane must hold now (printed by claim, renew, transfer and list) |
+| `--owner` | `OWNER` |  | The new owner label |
+| `--role` | `ROLE` |  | The new role label (default: keep it) |
 
 ### `aegis rule`
 
