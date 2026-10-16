@@ -11,6 +11,7 @@ Every test runs with an empty HOME (tests/unit/cli/conftest.py).
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -32,6 +33,14 @@ CLAUDE_DIR = ".claude/skills"
 SHARED_DIR = ".agents/skills"
 MARKER = re.compile(r"<!-- aegis:skill id=([a-z0-9-]+) v=1 sha=([0-9a-f]{12}) -->")
 ISO_UTC = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+
+
+@pytest.fixture(autouse=True)
+def _no_fsync(monkeypatch):
+    """os.fsync is the OS durability boundary. These tests check bytes, never power-loss
+    survival, and the ~2000 fsyncs of a full run take ~30 s on a spinning or busy disk:
+    past the 30 s the mutation gate gives this module's baseline run."""
+    monkeypatch.setattr(os, "fsync", lambda fd: None)
 
 
 @pytest.fixture
@@ -189,6 +198,8 @@ def test_a_source_ending_at_its_closing_delimiter_projects_an_empty_body(ws, tmp
     ("nodesc", "---\nid: nodesc\n---\nbody\n", "description"),
     ("skill-x", "---\nid: skill-x\ndescription: [a, b]\n---\nbody\n", "description"),
     ("skill-x", "no frontmatter\n", "frontmatter"),
+    ("skill-x", "intro text\n---\nbody\n", "frontmatter"),
+    ("skill-x", "---\n---\nbody\n", "description"),
     ("skill-x", "---\nid: open\ndescription: d\n", "frontmatter"),
     ("skill-x", "---\nid: skill-x\ndescription: \"unterminated\n---\nbody\n", "frontmatter"),
 ])
@@ -219,6 +230,77 @@ def test_a_multi_line_description_is_copied_verbatim(ws, tmp_path):
     assert (ws / CLAUDE_DIR / "folded" / "SKILL.md").read_text(encoding="utf-8") == (
         "---\nname: folded\ndescription: >\n  First line\n  second line.\n---\n"
         f"<!-- aegis:skill id=folded v=1 sha={sha} -->\nBody\n")
+
+
+def test_a_description_on_the_first_frontmatter_line_is_copied(ws, tmp_path):
+    source = tmp_path / "source"
+    path = source / "first" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("---\ndescription: Comes first.\nid: first\n---\nBody\n", encoding="utf-8")
+
+    assert sync_skills(ws, ["claude-code"], source=source).status == "ok"
+
+    sha = _sha("Body\n")
+    assert (ws / CLAUDE_DIR / "first" / "SKILL.md").read_text(encoding="utf-8") == (
+        f"---\nname: first\ndescription: Comes first.\n---\n<!-- aegis:skill id=first v=1 sha={sha} -->\nBody\n")
+
+
+def test_blank_lines_inside_a_block_description_are_kept_and_trailing_ones_dropped(ws, tmp_path):
+    source = tmp_path / "source"
+    path = source / "blocky" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("---\nid: blocky\ndescription: |\n  One.\n\n  Two.\n\n\nkind: skill\n---\nBody\n",
+                    encoding="utf-8")
+
+    assert sync_skills(ws, ["claude-code"], source=source).status == "ok"
+
+    sha = _sha("Body\n")
+    assert (ws / CLAUDE_DIR / "blocky" / "SKILL.md").read_text(encoding="utf-8") == (
+        "---\nname: blocky\ndescription: |\n  One.\n\n  Two.\n---\n"
+        f"<!-- aegis:skill id=blocky v=1 sha={sha} -->\nBody\n")
+
+
+def test_a_last_description_before_blank_lines_and_the_closing_delimiter(ws, tmp_path):
+    source = tmp_path / "source"
+    path = source / "last" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("---\nid: last\ndescription: The end.\n\n---\nBody\n", encoding="utf-8")
+
+    assert sync_skills(ws, ["claude-code"], source=source).status == "ok"
+
+    assert (ws / CLAUDE_DIR / "last" / "SKILL.md").read_text(encoding="utf-8").startswith(
+        "---\nname: last\ndescription: The end.\n---\n<!-- aegis:skill id=last ")
+
+
+def test_an_aegis_copy_with_an_empty_body_is_updated_when_the_skill_gains_one(ws, tmp_path):
+    source = tmp_path / "source"
+    path = source / "bare" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("---\nid: bare\ndescription: Nothing else.\n---\n", encoding="utf-8")
+    sync_skills(ws, ["claude-code"], source=source)
+    path.write_text("---\nid: bare\ndescription: Nothing else.\n---\nNow a body.\n", encoding="utf-8")
+
+    result = sync_skills(ws, ["claude-code"], source=source)
+
+    assert result.targets[0].entries[0].result == "updated"
+    assert (ws / CLAUDE_DIR / "bare" / "SKILL.md").read_text(encoding="utf-8").endswith(" -->\nNow a body.\n")
+
+
+def test_the_api_takes_a_str_root_and_keeps_edited_copies_unless_forced(ws, tmp_path):
+    source = tmp_path / "source"
+    _fixture_skill(source, "demo", "\nversion one\n")
+    assert sync_skills(str(ws), ["claude-code"], source=source).status == "ok"
+    target = ws / CLAUDE_DIR / "demo" / "SKILL.md"
+    target.write_bytes(target.read_bytes() + b"mine\n")
+    edited = target.read_bytes()
+
+    kept = sync_skills(ws, ["claude-code"], source=source)
+
+    assert (kept.targets[0].entries[0].result, kept.force) == ("skipped", False)
+    assert target.read_bytes() == edited
+    forced = sync_skills(ws, ["claude-code"], source=source, force=True)
+    assert forced.targets[0].entries[0].result == "overwritten"
+    assert target.read_bytes().endswith(b"\nversion one\n")
 
 
 def test_no_packaged_skills_is_an_error(ws, tmp_path):
@@ -361,6 +443,34 @@ def test_a_marker_that_is_not_right_after_the_frontmatter_is_not_a_marker(ws, ca
     assert target.read_text(encoding="utf-8") == moved
 
 
+@pytest.mark.parametrize("content", [
+    pytest.param(b"# My notes\nNo frontmatter here.\n", id="no-frontmatter"),
+    pytest.param(b"---\nname: genesis\ndescription: mine\n---\n", id="ends-at-the-delimiter"),
+    pytest.param(b"Intro\n---\n<!-- aegis:skill id=genesis v=1 sha=e3b0c44298fc -->\n", id="late-delimiter"),
+])
+def test_files_without_a_marker_after_their_frontmatter_are_the_user_s_own(ws, capsys, content):
+    target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(content)
+
+    rc, doc = _json(ws, capsys, "--host", "claude-code", "--force")
+
+    assert rc == 0 and target.read_bytes() == content
+    entry = next(e for e in doc["targets"][0]["skills"] if e["id"] == "genesis")
+    assert (entry["result"], entry["reason"]) == ("skipped", "foreign")
+
+
+def test_an_aegis_marker_over_an_empty_frontmatter_counts_as_edited(ws, capsys):
+    target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(f"---\n---\n<!-- aegis:skill id=genesis v=1 sha={_sha('x')} -->\nx".encode("utf-8"))
+
+    _rc, doc = _json(ws, capsys, "--host", "claude-code")
+
+    entry = next(e for e in doc["targets"][0]["skills"] if e["id"] == "genesis")
+    assert (entry["result"], entry["reason"]) == ("skipped", "edited")
+
+
 def test_a_non_utf8_skill_file_is_the_user_s_own(ws, capsys):
     target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
     target.parent.mkdir(parents=True)
@@ -491,7 +601,8 @@ def test_an_unchanged_read_only_copy_is_simply_unchanged(ws, tmp_path):
 @pytest.mark.parametrize("make,where,reason", [
     (lambda ws: (ws / ".claude").write_text("x"), ".claude", "not_directory"),
     (lambda ws: ((ws / ".claude").mkdir(), (ws / CLAUDE_DIR).write_text("x")), CLAUDE_DIR, "not_directory"),
-    (lambda ws: (ws / CLAUDE_DIR / "genesis" / "SKILL.md").mkdir(parents=True), "genesis/SKILL.md", "not_regular"),
+    (lambda ws: (ws / CLAUDE_DIR / "genesis").mkdir(parents=True) or (ws / CLAUDE_DIR / "genesis" / "SKILL.md")
+     .mkdir(), f"{CLAUDE_DIR}/genesis/SKILL.md", "not_regular"),
 ])
 def test_a_component_of_the_wrong_kind_is_refused(ws, capsys, make, where, reason):
     make(ws)
@@ -501,7 +612,63 @@ def test_a_component_of_the_wrong_kind_is_refused(ws, capsys, make, where, reaso
     assert rc == 1
     refused = [e for e in doc["targets"][0]["skills"] if e["result"] == "refused"]
     assert refused and {e["reason"] for e in refused} == {reason}
-    assert all(where in e["detail"] for e in refused)
+    assert all(e["detail"].startswith(f"{where} is not a ") for e in refused)
+
+
+needs_posix_permissions = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits that apply to this user")
+DENIED = os.strerror(errno.EACCES)  # the OS's own wording; the detail carries it, not the errno repr
+
+
+@needs_posix_permissions
+def test_a_directory_that_cannot_be_written_fails_the_copy(ws, capsys):
+    (ws / CLAUDE_DIR).mkdir(parents=True)
+    os.chmod(ws / CLAUDE_DIR, 0o555)
+    try:
+        rc, doc = _json(ws, capsys, "--host", "claude-code")
+    finally:
+        os.chmod(ws / CLAUDE_DIR, 0o755)
+
+    assert rc == 1 and doc["status"] == "failed"
+    entry = doc["targets"][0]["skills"][0]
+    assert (entry["result"], entry["reason"]) == ("failed", "write")
+    assert entry["detail"] == f"{entry['path']} could not be written ({DENIED})"
+    assert doc["counts"]["failed"] == 15 and list((ws / CLAUDE_DIR).iterdir()) == []
+
+
+@needs_posix_permissions
+def test_a_skill_file_that_cannot_be_read_is_refused(ws, capsys):
+    target = ws / CLAUDE_DIR / "genesis" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"secret\n")
+    os.chmod(target, 0o200)
+    try:
+        rc, doc = _json(ws, capsys, "--host", "claude-code", "--force")
+    finally:
+        os.chmod(target, 0o644)
+
+    assert rc == 1 and target.read_bytes() == b"secret\n"
+    entry = next(e for e in doc["targets"][0]["skills"] if e["id"] == "genesis")
+    assert (entry["result"], entry["reason"]) == ("refused", "unreadable")
+    assert entry["detail"] == f"{CLAUDE_DIR}/genesis/SKILL.md cannot be read ({DENIED})"
+
+
+@needs_posix_permissions
+def test_a_skill_directory_that_cannot_be_searched_is_refused(ws, capsys):
+    directory = ws / CLAUDE_DIR / "genesis"
+    directory.mkdir(parents=True)
+    os.chmod(directory, 0o600)
+    try:
+        rc, doc = _json(ws, capsys, "--host", "claude-code")
+    finally:
+        os.chmod(directory, 0o755)
+
+    assert rc == 1
+    entry = next(e for e in doc["targets"][0]["skills"] if e["id"] == "genesis")
+    assert (entry["result"], entry["reason"]) == ("refused", "unreadable")
+    assert entry["detail"] == f"{CLAUDE_DIR}/genesis/SKILL.md cannot be read ({DENIED})"
+    assert list(directory.iterdir()) == []
 
 
 # ── Dry run, output contract, events ─────────────────────────────────────────
@@ -526,9 +693,12 @@ def test_dry_run_text_says_what_would_happen(ws, capsys):
 
 
 def test_json_output_carries_the_envelope_and_posix_paths(ws, capsys):
-    rc, doc = _json(ws, capsys, "--host", "antigravity,claude-code")
+    rc = main(["--json", "skills", "sync", "--workspace", str(ws), "--host", "antigravity,claude-code"])
+    raw = capsys.readouterr().out
+    doc = json.loads(raw)
 
     assert rc == 0
+    assert raw.startswith('{\n  "source": "aegis skills sync",\n  "aegis_version": ')
     assert doc["source"] == "aegis skills sync"
     assert doc["aegis_version"] == __version__
     assert ISO_UTC.fullmatch(doc["checked_at"])
@@ -542,6 +712,48 @@ def test_json_output_carries_the_envelope_and_posix_paths(ws, capsys):
                                    "result": "created", "reason": None, "detail": ""}
     assert [e["id"] for e in shared["skills"]] == SKILLS
     assert doc["errors"] == [] and doc["warnings"] == []
+
+
+def test_text_output_lists_what_changed_and_counts_the_rest(ws, capsys):
+    (ws / ".aegis" / "config.json").write_text('{"v": 1, "hosts": ["claude-desktop", "claude-code"]}',
+                                               encoding="utf-8")
+    assert _sync(ws) == 0
+    _edited(ws)
+    capsys.readouterr()
+
+    assert _sync(ws) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
+        ".claude/skills/ for claude-code (claude-code wording, unverified: the host's documented location, "
+        "not checked on a real install)",
+        "  ⚠️  genesis: skipped (edited since Aegis wrote it; left as it is (aegis skills sync --force replaces it))",
+        "  14 unchanged",
+        "Done: 14 unchanged, 1 skipped.",
+    ]
+    assert captured.err == "⚠️  claude-desktop reads no project skills; nothing to copy for it\n"
+
+
+def test_text_output_reports_a_packaged_skill_that_cannot_be_projected(ws, tmp_path, capsys, monkeypatch):
+    """The packaged data's location is the installation boundary; point it at a broken copy."""
+    from aegis_cli import skills_sync
+
+    source = tmp_path / "source"
+    _fixture_skill(source, "good", "\nfine\n")
+    (source / "broken").mkdir()
+    (source / "broken" / "SKILL.md").write_text("no frontmatter\n", encoding="utf-8")
+    monkeypatch.setattr(skills_sync, "packaged_dir", lambda name: source)
+
+    assert _sync(ws, "--host", "claude-code") == 1
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
+        ".claude/skills/ for claude-code (claude-code wording, unverified: the host's documented location, "
+        "not checked on a real install)",
+        "  ✅ good: created",
+        "Done: 1 created.",
+    ]
+    assert captured.err == "❌ packaged broken/SKILL.md: skill broken: no readable frontmatter\n"
 
 
 def test_unverified_skills_directories_are_labelled(ws, capsys):
@@ -617,6 +829,13 @@ def test_no_host_to_project_for_is_a_usage_error(ws, capsys):
     err = capsys.readouterr().err
     assert "no host" in err and "--host" in err
     assert not (ws / ".claude").exists() and not (ws / ".agents").exists()
+
+
+def test_configured_hosts_that_read_no_skills_are_named_in_the_usage_error(ws, capsys):
+    (ws / ".aegis" / "config.json").write_text('{"v": 1, "hosts": ["claude-desktop", "gemini-cli"]}',
+                                               encoding="utf-8")
+    assert _sync(ws) == 2
+    assert "no host to copy skills for (claude-desktop, gemini-cli); name them with --host" in capsys.readouterr().err
 
 
 def test_an_unreadable_config_without_host_is_a_usage_error(ws, capsys):

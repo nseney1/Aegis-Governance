@@ -276,17 +276,30 @@ def _targets(hosts: Sequence[str]) -> Tuple[List[_Target], List[str]]:
 
 # ── Safety checks and the write ──────────────────────────────────────────────
 
+class _Refusal(Exception):
+    """A path Aegis does not write through; ``--force`` never overrides it."""
+
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+
+
+_WRITE_BITS = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+
+
 def _is_link(path: Path) -> bool:
-    # A Windows junction is no symlink to islink before Python 3.12; the realpath
-    # comparison in _dir_refusal catches it there.
+    # A Windows junction is no link to islink, and isjunction exists only from Python
+    # 3.12; the realpath comparison in _check_dirs refuses one on older versions too.
     isjunction = getattr(os.path, "isjunction", None)
     return os.path.islink(path) or bool(isjunction and isjunction(path))
 
 
-def _dir_refusal(root: Path, parts: Sequence[str]) -> Optional[Tuple[str, str]]:
-    """``(reason, detail)`` when a directory on ``root/parts`` cannot hold a skill: a link,
-    something else than a directory, or a directory that resolves anywhere but exactly
-    there inside the workspace. None when every existing one is fine (the rest is made)."""
+def _check_dirs(root: Path, parts: Sequence[str]) -> None:
+    """Raise _Refusal unless every existing directory on ``root/parts`` is a real directory
+    exactly there inside the workspace: no link or junction, nothing but a directory, and
+    a realpath equal to the workspace's realpath plus these parts (as init._real_key
+    compares paths). Missing directories are fine; the write creates them."""
     expected = _real_key(root)
     current = root
     for depth, part in enumerate(parts, 1):
@@ -294,64 +307,50 @@ def _dir_refusal(root: Path, parts: Sequence[str]) -> Optional[Tuple[str, str]]:
         expected = expected + os.sep + os.path.normcase(part)
         rel = "/".join(parts[:depth])
         if _is_link(current):
-            return "link", f"{rel} is a symlink; Aegis never writes through a link, {_FORCE_NOTE}"
+            raise _Refusal("link", f"{rel} is a link (symlink or junction); Aegis never writes through a link, "
+                                   f"{_FORCE_NOTE}")
         if not os.path.lexists(current):
-            return None
+            return
         if not os.path.isdir(current):
-            return "not_directory", f"{rel} is not a directory; left as it is"
+            raise _Refusal("not_directory", f"{rel} is not a directory; left as it is")
         if _real_key(current) != expected:
-            return "outside", (f"{rel} resolves to {os.path.realpath(current)}, not a real directory inside the "
-                               f"workspace (a junction or link); Aegis never writes through it, {_FORCE_NOTE}")
-    return None
+            raise _Refusal("outside", f"{rel} resolves to {os.path.realpath(current)}, not a real directory inside "
+                                      f"the workspace (a junction or link); Aegis never writes through it, {_FORCE_NOTE}")
 
 
-def _file_state(path: Path, rel: str) -> Tuple[Optional[bytes], bool, Optional[Tuple[str, str]]]:
-    """``(bytes or None when missing, read-only, refusal)`` for the SKILL.md at ``path``."""
+def _file_state(path: Path, rel: str) -> Tuple[Optional[bytes], bool]:
+    """``(bytes, read-only)`` of the SKILL.md at ``path`` (``(None, False)`` when missing);
+    _Refusal unless it is a regular file with one link that can be read."""
     try:
         st = os.lstat(path)
     except FileNotFoundError:
-        return None, False, None
+        return None, False
     except OSError as exc:
-        return None, False, ("unreadable", f"{rel} cannot be read ({exc.strerror or exc})")
+        raise _Refusal("unreadable", f"{rel} cannot be read ({exc.strerror or exc})") from exc
     if stat.S_ISLNK(st.st_mode):
-        return None, False, ("link", f"{rel} is a symlink; Aegis never writes through a link, {_FORCE_NOTE}")
+        raise _Refusal("link", f"{rel} is a symlink; Aegis never writes through a link, {_FORCE_NOTE}")
     if not stat.S_ISREG(st.st_mode):
-        return None, False, ("not_regular", f"{rel} is not a regular file; left as it is")
+        raise _Refusal("not_regular", f"{rel} is not a regular file; left as it is")
     if st.st_nlink > 1:
-        return None, False, ("hard_link", f"{rel} has another hard link; replacing it would split the link, "
-                                          f"{_FORCE_NOTE}")
+        raise _Refusal("hard_link", f"{rel} has another hard link; replacing it would split the link, {_FORCE_NOTE}")
     try:
-        # os.replace swaps a read-only file as readily as any other, so the bit is honored here.
-        return path.read_bytes(), not st.st_mode & 0o222, None
+        data = path.read_bytes()
     except OSError as exc:
-        return None, False, ("unreadable", f"{rel} cannot be read ({exc.strerror or exc})")
-
-
-def _make_dirs(root: Path, parts: Sequence[str]) -> Optional[Tuple[str, str]]:
-    """Create the missing directories one at a time, then check the chain again (a link
-    swapped in meanwhile is refused, not written through)."""
-    current = root
-    for part in parts:
-        current = current / part
-        if not os.path.lexists(current):
-            try:
-                os.mkdir(current)
-            except FileExistsError:
-                pass
-    return _dir_refusal(root, parts)
+        raise _Refusal("unreadable", f"{rel} cannot be read ({exc.strerror or exc})") from exc
+    # os.replace swaps a read-only file as readily as any other, so the bit is honored here.
+    return data, not st.st_mode & _WRITE_BITS
 
 
 def _sync_one(root: Path, target: _Target, skill: _Skill, *, force: bool, dry_run: bool) -> Entry:
     parts = (*target.dir.split("/"), skill.id)
     rel = "/".join(parts) + "/" + SKILL_FILE
+    path = root.joinpath(*parts, SKILL_FILE)
     entry = Entry(skill.id, rel, "refused")
-    refusal = _dir_refusal(root, parts)
-    existing: Optional[bytes] = None
-    read_only = False
-    if refusal is None:
-        existing, read_only, refusal = _file_state(root.joinpath(*parts, SKILL_FILE), rel)
-    if refusal is not None:
-        entry.reason, entry.detail = refusal
+    try:
+        _check_dirs(root, parts)
+        existing, read_only = _file_state(path, rel)
+    except _Refusal as refusal:
+        entry.reason, entry.detail = refusal.reason, refusal.detail
         return entry
     data = _render(skill, target.profile)
     if existing is None:
@@ -378,16 +377,13 @@ def _sync_one(root: Path, target: _Target, skill: _Skill, *, force: bool, dry_ru
         return entry
     from aegis_core.storage import atomic_write_bytes
 
+    # The checks above ran just now; atomic_write_bytes makes the missing directories and
+    # replaces the file whole, so a reader never sees a partial copy.
     try:
-        refusal = _make_dirs(root, parts)
-        if refusal is None:
-            atomic_write_bytes(root.joinpath(*parts, SKILL_FILE), data)
+        atomic_write_bytes(path, data)
     except OSError as exc:
         entry.result, entry.reason = "failed", "write"
         entry.detail = f"{rel} could not be written ({exc.strerror or exc})"
-        return entry
-    if refusal is not None:
-        entry.result, (entry.reason, entry.detail) = "refused", refusal
     return entry
 
 
@@ -428,6 +424,7 @@ def summary(counts: Dict[str, int]) -> str:
 # ── The command ──────────────────────────────────────────────────────────────
 
 _ICONS = {"skipped": "⚠️ ", "refused": "❌", "failed": "❌"}
+_SHOWN = 300  # characters of a detail, warning or error the text output shows
 _DRY = {"created": "would create", "updated": "would update", "overwritten": "would overwrite"}
 
 
@@ -441,14 +438,14 @@ def _print_text(result: SyncResult) -> None:
                 unchanged += 1
                 continue
             verb = _DRY.get(entry.result, entry.result) if result.dry_run else entry.result
-            detail = f" ({sanitize_display(entry.detail, 300)})" if entry.detail else ""
+            detail = f" ({sanitize_display(entry.detail, _SHOWN)})" if entry.detail else ""
             print(f"  {_ICONS.get(entry.result, '✅')} {entry.id}: {verb}{detail}")
         if unchanged:
             print(f"  {unchanged} unchanged")
     for warning in result.warnings:
-        print(f"⚠️  {sanitize_display(warning, 300)}", file=sys.stderr)
+        print(f"⚠️  {sanitize_display(warning, _SHOWN)}", file=sys.stderr)
     for error in result.errors:
-        print(f"❌ {sanitize_display(error, 300)}", file=sys.stderr)
+        print(f"❌ {sanitize_display(error, _SHOWN)}", file=sys.stderr)
     if result.dry_run:
         print(f"Dry run: {summary(result.counts)}; nothing was written.")
     else:

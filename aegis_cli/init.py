@@ -569,7 +569,7 @@ def _skills_steps(ctx: _Context, dry_run: bool) -> List[Step]:
             if entry.result == "skipped":
                 ctx.report.warn(f"{entry.path}: {entry.detail}")
         counts = target.counts
-        written = counts["created"] + counts["updated"] + counts["overwritten"]
+        written = any(counts[name] for name in ("created", "updated", "overwritten"))
         label = "" if target.verified else ", unverified"
         steps.append(Step(target.dir, "synced" if written else "unchanged",
                           f"{', '.join(target.hosts)}{label}: {summary(counts)}"))
