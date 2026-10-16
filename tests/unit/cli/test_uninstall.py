@@ -220,7 +220,7 @@ class TestRecordedHostsAegisNeverRegisters:
     SKIPPED = {
         "gemini-cli": "retired: Aegis does not register there",
         "claude-desktop": "identity only: Aegis does not register there (ADR 0005 H4)",
-        "cursor": "not a host Aegis knows",
+        "zed": "not a host Aegis knows",
     }
 
     def _actions(self, env, capsys) -> dict:
@@ -234,7 +234,7 @@ class TestRecordedHostsAegisNeverRegisters:
         init(env, env.project, "codex-cli")
         path = env.home / ".aegis" / "workspaces.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-        data["workspaces"][0]["hosts"] = ["codex-cli", "gemini-cli", "claude-desktop", "cursor"]
+        data["workspaces"][0]["hosts"] = ["codex-cli", "gemini-cli", "claude-desktop", "zed"]
         path.write_text(json.dumps(data), encoding="utf-8")
         env.runner.calls.clear()
 
@@ -562,7 +562,7 @@ class TestCommandLine:
         assert captured.err.splitlines()[-1] == f"aegis uninstall: error: argument --host: {message}"
         assert snapshot(env.project, env.home) == before
 
-    @pytest.mark.parametrize("value, message", [("auto", "names hosts"), ("cursor", "unknown host")])
+    @pytest.mark.parametrize("value, message", [("auto", "names hosts"), ("zed", "unknown host")])
     def test_bad_host_is_a_usage_error(self, env, value, message, capsys):
         with pytest.raises(SystemExit) as exc:
             uninstall(env.project, "--host", value)

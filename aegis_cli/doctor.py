@@ -37,6 +37,9 @@ determine), ``checks_ok`` (no blocking check failed; it says nothing about the h
 ``findings``, and with ``--fix`` the ``fixes`` it applied and its ``backup_dir``.
 
 Each row lists the ``surfaces`` its config plane covers (CLI, IDE extension, desktop app).
+A row whose host table entry is unverified (``verified_row`` false: Cursor, Copilot, Kiro,
+Windsurf) is also ``experimental``, and the text names it so: its registration file is the
+one the vendor documents, not yet checked on a real install.
 Without ``hosts`` in .aegis/config.json the matrix is every verified host plus each
 experimental one found on this machine (by binary, config path or app). A host found
 here whose agent reads AGENTS.md, while AGENTS.md carries the bootstrap and the host has
@@ -1405,6 +1408,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         "id": spec.id,
         "display_name": spec.display_name,
         "verified_row": spec.verified,
+        "experimental": not spec.verified,
         "surfaces": list(spec.surfaces),
         "state": state,
         "reasons": reasons,
@@ -2526,7 +2530,11 @@ def _print_hosts(diag: _Diagnosis) -> None:
     print(f"\nHosts ({how}):")
     for row in diag.rows:
         reg, boot, budget = row["registration"], row["bootstrap"], row["budget"]
-        print(f"  {_ICON[row['state']]} {row['display_name']} ({row['id']}): {row['state']}")
+        label = " [experimental]" if row["experimental"] else ""
+        print(f"  {_ICON[row['state']]} {row['display_name']} ({row['id']}){label}: {row['state']}")
+        if row["experimental"]:
+            print("      experimental documented by the vendor, not yet checked on a real install "
+                  "(verified after 3 clean runs)")
         if row["surfaces"]:
             print(f"      surfaces     {', '.join(row['surfaces'])}")
         binary = row["binary"]

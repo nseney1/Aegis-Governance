@@ -1,10 +1,18 @@
-"""The outcome ledger, ``.aegis/state/ledger.jsonl`` (build-sheet D13, ADR 0005 AD-1/AD-5).
+"""The outcome ledger (build-sheet D13, ADR 0005 AD-1/AD-5, v4.2 #7).
 
-The ledger is append-only and the only source of rule fitness. Every row is versioned::
+The ledger is append-only and the only source of rule fitness. In a git repository it is
+ONE file for every worktree, ``<git common dir>/aegis/state/<ws-id>/ledger.jsonl``
+(aegis_core.storage.ledger_site: ``<ws-id>`` names the workspace by its path below the git
+toplevel, so each ``.aegis`` workspace has its own); outside git it is
+``.aegis/state/ledger.jsonl``. Every row is versioned::
 
-    {"v": 2, "seq": 7, "ts": "2026-10-15T12:00:00Z", "rule": "trap-x", "outcome": "tp",
-     "source": "mcp", "host": "claude-code", "session": "…", "key": "report-1",
-     "weight": 0.5, "meta": {…}}
+    {"v": 2, "seq": 7, "ts": "2026-10-15T12:00:00Z", "worktree": "/path/to/worktree",
+     "rule": "trap-x", "outcome": "tp", "source": "mcp", "host": "claude-code",
+     "session": "…", "key": "report-1", "weight": 0.5, "meta": {…}}
+
+``worktree`` (the top of the work tree that wrote the row) is present in the shared ledger
+only. It is attribution, like ``host`` and ``session``: it is not part of a row's payload,
+so the same report retried from another worktree is the same row.
 
 - ``outcome`` is ``tp``, ``fp`` or ``trigger``. Every outcome row is also a trigger (#15):
   a rule credited with a tp was, by definition, relevant. ``trigger`` alone says the
@@ -13,14 +21,17 @@ The ledger is append-only and the only source of rule fitness. Every row is vers
 - ``seq`` increases by one per row. ``(key, rule)`` is the idempotency identity: one
   report naming N rules shares one key and writes N rows; a retry writes nothing and
   returns the stored row. Reusing a key for a different payload is an EventConflictError.
-- Rows are appended under the one workspace lock with one fsync (aegis_core.storage);
-  nothing ever rewrites a row. A migration appends an epoch row instead.
+- Rows are appended under the ledger lock with one fsync (aegis_core.storage.ledger_locked:
+  one lock file next to the shared ledger, taken by every writer of every worktree; the
+  workspace lock outside git); nothing ever rewrites a row. A migration appends an epoch
+  row instead. A caller that holds the worktree lock takes it first.
 
 Readers accept v1 rows (the ``cell``/``rule_id`` + ``signal`` shape of the v3
 ``signals.jsonl``) and convert them in memory; see ``normalize_rows``.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -30,10 +41,10 @@ import math
 import os
 from pathlib import Path
 import threading
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from aegis_core.storage import append_jsonl, locked, read_jsonl
-from aegis_core.workspace.layout import WorkspaceLayout
+from aegis_core.errors import PathTraversalError
+from aegis_core.storage import append_jsonl, ledger_locked, ledger_site, read_jsonl
 
 __all__ = [
     "LEDGER_VERSION",
@@ -48,7 +59,9 @@ __all__ = [
     "append_rows",
     "incomplete",
     "ledger_path",
+    "merge_rows",
     "normalize_rows",
+    "plan_merge",
     "read",
 ]
 
@@ -68,7 +81,9 @@ def _utc_now() -> str:
 
 
 def ledger_path(workspace: Any) -> Path:
-    return WorkspaceLayout(Path(os.fspath(workspace)).resolve()).ledger_file
+    """The ledger file of ``workspace`` (aegis_core.storage.ledger_site); nothing is created.
+    Raises PathTraversalError when the shared state directory is not confined."""
+    return ledger_site(workspace, create=False).path
 
 
 def _weight(row: Dict[str, Any]) -> Optional[Decimal]:
@@ -223,8 +238,14 @@ def incomplete(health: Mapping[str, Any]) -> Optional[str]:
 
 
 def read(workspace: Any) -> LedgerView:
-    """Read the ledger. Never raises for its content; a missing ledger is empty."""
-    path = ledger_path(workspace)
+    """Read the ledger. Never raises for its content or for a ledger directory that is not
+    confined (``error`` says why, and the view is incomplete); a missing ledger is empty."""
+    try:
+        path = ledger_path(workspace)
+    except PathTraversalError as exc:
+        return LedgerView([], error=str(exc))
+    except OSError as exc:  # the shared state dir cannot be listed for its confinement check
+        return LedgerView([], error=f"cannot read {exc.filename or 'the ledger directory'}: {exc.strerror or exc}")
     raw = read_jsonl(path)
     rows, unusable = normalize_rows(raw.rows)
     return LedgerView(rows, list(raw.skipped_lines), unusable, raw.torn_tail, raw.error, path)
@@ -449,8 +470,8 @@ def append(workspace: Any, events: Iterable[Dict[str, Any]]) -> List[Dict[str, A
     planned = [_validated(e) for e in events]
     if not planned:
         return []
-    path = ledger_path(workspace)
-    with locked(workspace):
+    with ledger_locked(workspace) as site:
+        path = site.path
         index = _current_index(path)
         seen: Dict[Tuple[str, str], Dict[str, Any]] = {}
         results: List[Dict[str, Any]] = []
@@ -471,6 +492,8 @@ def append(workspace: Any, events: Iterable[Dict[str, Any]]) -> List[Dict[str, A
                 continue
             seq += 1
             written = {"v": LEDGER_VERSION, "seq": seq, "ts": stamp, **{k: v for k, v in row.items() if k != "v"}}
+            if site.worktree is not None:
+                written["worktree"] = site.worktree
             new_rows.append(written)
             results.append(written)
             if identity is not None:
@@ -484,10 +507,12 @@ def append_epoch(workspace: Any, note: Dict[str, Any]) -> Dict[str, Any]:
     """Append an epoch row (no rule, no outcome) recording a migration; return it."""
     if not isinstance(note, dict):
         raise ValueError("note must be a mapping")
-    path = ledger_path(workspace)
-    with locked(workspace):
+    with ledger_locked(workspace) as site:
+        path = site.path
         index = _current_index(path)
         row = {"v": LEDGER_VERSION, "seq": index.last_seq + 1, "ts": _utc_now(), "epoch": note}
+        if site.worktree is not None:
+            row["worktree"] = site.worktree
         _write(path, [row])
         return row
 
@@ -498,8 +523,8 @@ def append_rows(workspace: Any, rows: List[Dict[str, Any]]) -> List[Dict[str, An
     Rows whose ``(key, rule)`` is already in the ledger are skipped, so a re-run adds
     nothing. Returns the rows written.
     """
-    path = ledger_path(workspace)
-    with locked(workspace):
+    with ledger_locked(workspace) as site:
+        path = site.path
         index = _current_index(path)
         seq = index.last_seq
         seen = set(index.keyed)
@@ -510,9 +535,112 @@ def append_rows(workspace: Any, rows: List[Dict[str, Any]]) -> List[Dict[str, An
             if identity is not None and identity in seen:
                 continue
             seq += 1
-            new_rows.append({"v": LEDGER_VERSION, "seq": seq, **{k: v for k, v in row.items() if k not in ("v", "seq")}})
+            written = {"v": LEDGER_VERSION, "seq": seq, **{k: v for k, v in row.items() if k not in ("v", "seq")}}
+            if site.worktree is not None and "worktree" not in written:
+                written["worktree"] = site.worktree
+            new_rows.append(written)
             if identity is not None:
                 seen.add(identity)
         if new_rows:
             _write(path, new_rows)
         return new_rows
+
+
+# ── Merging the ledgers of several worktrees (v4.2 #7) ───────────────────────
+
+def _identity(row: Mapping[str, Any]) -> Optional[Tuple[str, Any]]:
+    key = row.get("key")
+    return (key, row.get("rule")) if isinstance(key, str) and key else None
+
+
+def _canonical(row: Mapping[str, Any]) -> str:
+    """A row as one string, equal for two rows that differ only in ``seq`` (the merge
+    renumbers it) or in a field one has with no value and the other lacks."""
+    fields = {k: v for k, v in row.items() if k != "seq" and v is not None and v != ""}
+    return json.dumps(fields, sort_keys=True, ensure_ascii=True, default=str)
+
+
+def _order(row: Mapping[str, Any]) -> Tuple[str, str, int]:
+    ts, worktree, seq = row.get("ts"), row.get("worktree"), row.get("seq")
+    return (
+        ts if isinstance(ts, str) else "",
+        worktree if isinstance(worktree, str) else "",
+        seq if type(seq) is int else 0,
+    )
+
+
+def plan_merge(
+    existing: Iterable[Dict[str, Any]], sources: Sequence[Sequence[Dict[str, Any]]],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Which rows of ``sources`` (normalized v2 outcome rows, one list per per-worktree
+    ledger) the ledger holding ``existing`` lacks, in the order they are to be appended,
+    and how many it already has (``(rows to add, duplicates)``).
+
+    - A keyed row is the same row as any other with its ``(key, rule)``: the earliest by
+      ``(ts, worktree, seq)`` is kept, and none that ``existing`` has.
+    - A keyless row is the same as any other with the same canonical row, that is every
+      field but ``seq``. Identical rows that ONE source holds several times are separate
+      events (two triggers in one second), so the shared ledger ends with as many copies
+      as the source with most has, not fewer: only a copy in another source, or of what
+      ``existing`` holds, is dropped. A re-run therefore adds nothing.
+    - What is added is sorted by ``(ts, worktree, seq)``, a missing or unusable field
+      sorting first; rows equal on all three keep their source order.
+    """
+    existing_keys = set()
+    existing_copies: Counter = Counter()
+    for row in existing:
+        identity = _identity(row)
+        if identity is not None:
+            existing_keys.add(identity)
+        else:
+            existing_copies[_canonical(row)] += 1
+
+    ordered: List[Tuple[Tuple[str, str, int], int, int, Dict[str, Any]]] = []
+    most_in_a_source: Counter = Counter()
+    for source_index, rows in enumerate(sources):
+        in_this_source: Counter = Counter()
+        for position, row in enumerate(rows):
+            ordered.append((_order(row), source_index, position, row))
+            if _identity(row) is None:
+                in_this_source[_canonical(row)] += 1
+        for canonical, count in in_this_source.items():
+            most_in_a_source[canonical] = max(most_in_a_source[canonical], count)
+    to_add = {canonical: count - existing_copies[canonical]
+              for canonical, count in most_in_a_source.items() if count > existing_copies[canonical]}
+
+    ordered.sort(key=lambda entry: entry[:3])
+    added: List[Dict[str, Any]] = []
+    duplicates = 0
+    seen = set(existing_keys)
+    for _sort_key, _source, _position, row in ordered:
+        identity = _identity(row)
+        if identity is not None:
+            if identity in seen:
+                duplicates += 1
+                continue
+            seen.add(identity)
+            added.append(row)
+            continue
+        canonical = _canonical(row)
+        if to_add.get(canonical, 0) > 0:
+            to_add[canonical] -= 1
+            added.append(row)
+        else:
+            duplicates += 1
+    return added, duplicates
+
+
+def merge_rows(
+    workspace: Any, sources: Sequence[Sequence[Dict[str, Any]]],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Append to ``workspace``'s ledger the rows of ``sources`` it lacks (``plan_merge``),
+    renumbering ``seq`` after the rows already there; ``(rows written, duplicates)``.
+
+    The ledger is read and written under one hold of the ledger lock, so two merges at
+    once, or a merge and a writer, never add a row twice. Each row keeps the ``worktree``
+    it has; one without gets the asking worktree's, as ``append_rows`` stamps it.
+    """
+    with ledger_locked(workspace) as site:
+        existing, _unusable = normalize_rows(read_jsonl(site.path).rows)
+        added, duplicates = plan_merge(existing, sources)
+        return (append_rows(workspace, added) if added else []), duplicates

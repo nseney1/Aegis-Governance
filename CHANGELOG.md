@@ -2,6 +2,24 @@
 
 All notable changes to Aegis Guardrails are documented here. The project uses [Semantic Versioning](https://semver.org/). Releases before 1.0.0 are summarized at the end.
 
+## [4.2.0] - 2026-10-17
+
+v4.2 makes a first run on an existing repository adoptable, lets rules travel, and gives parallel worktrees one shared ledger. Two changes are breaking; they are marked.
+
+### Added
+
+- **Day-0 card and partition report.** `aegis check --card` prints what Aegis found in this repository (rules active, findings per rule); `aegis init` prints the card. `aegis check --partition` splits the findings into what blocks and what is advisory.
+- **Ratchet baseline.** `aegis check --write-baseline` records today's findings (fingerprint is the SHA-256 of rule, path, line and occurrence) so only new ones fail; `--prune-baseline` drops entries that no longer match; `--base REF` reads the baseline from the base ref and never falls back to the candidate's file. Events: `baseline_written`, `baseline_check`.
+- **Rule packs.** `aegis rule export OUT [--min-fitness X] [--type T]` writes the rule files (no ledger rows) with a checksum; `aegis rule import PACK [--rename] [--dry-run]` treats the pack as untrusted: every entry is re-parsed by the one loader, an id the workspace already has refuses the whole pack unless `--rename`, and the write is all or nothing. Packs are unsigned.
+- **`aegis benchmark`** measures scan and hook latency, payload size and Layer-1 throughput over a shipped fixture corpus.
+- **`aegis package --host claude-code`** (experimental) writes a Claude Code plugin directory: `.claude-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json` and the skills. The Claude Code plugin layout was written from the vendor documentation and has not been tried against a live install.
+- **Experimental host rows** for Cursor, Copilot and Windsurf join Kiro. `aegis init --host <experimental>` warns and records an `init_host` event; `aegis doctor` marks them experimental. A row becomes verified by hand after three clean runs.
+
+### Changed
+
+- **Breaking: the ledger is shared across worktrees.** In a git repository every worktree of one repository appends to `<git-common-dir>/aegis/state/<workspace-id>/ledger.jsonl` under one lock. Rows in a worktree's own `.aegis/state/ledger.jsonl` are read again only after `aegis migrate --apply` merges them (read-only on the sources, a second run adds nothing). Outside git the ledger stays where it was.
+- **Breaking: `aegis check` modes are exclusive.** `--lane`, `--partition`, `--card`, `--write-baseline` and `--prune-baseline` refuse `FILES`, `--full` and `--plan*`.
+
 ## [4.1.1] - 2026-10-17
 
 Fixes from the independent 4.1.0 release review.
@@ -20,7 +38,7 @@ Fixes from the independent 4.1.0 release review.
 
 ## [4.1.0] - 2026-10-16
 
-v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel agents, and skills projection, as designed in [ADR 0005](docs/adr/0005-v4-plan-of-record.md) AD-7 and AD-8 (amended 2026-10-16). Nothing from 4.0 is removed. The details are in [How Aegis works](docs/how-it-works.md) section 8.
+v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel agents, and skills projection, as designed in ADR 0005 AD-7 and AD-8 (amended 2026-10-16). Nothing from 4.0 is removed. The details are in [How Aegis works](docs/how-it-works.md) section 8.
 
 ### Added
 
@@ -66,7 +84,7 @@ v4.1 adds per-host agent hooks, lane leases with a post-lane gate for parallel a
 
 ## [4.0.0] - 2026-10-16
 
-v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has fewer commands and MCP tools, one config file, an append-only ledger as the only source of rule fitness, and a host plane that registers Aegis with Codex CLI, Claude Code and Antigravity. The reasons, with the evidence and the mistakes behind them, are in [docs/why-aegis.md](docs/why-aegis.md); the decisions are in [ADR 0005](docs/adr/0005-v4-plan-of-record.md). Every removed command and flag exits with status 2. Removed commands, and the removed `init` and `uninstall` flags, print one line naming the replacement (or saying there is none); the other removed flags get the argument parser's usage error, and the Breaking changes list below names their replacements.
+v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has fewer commands and MCP tools, one config file, an append-only ledger as the only source of rule fitness, and a host plane that registers Aegis with Codex CLI, Claude Code and Antigravity. The reasons, with the evidence and the mistakes behind them, are in [docs/why-aegis.md](docs/why-aegis.md); the decisions are in ADR 0005. Every removed command and flag exits with status 2. Removed commands, and the removed `init` and `uninstall` flags, print one line naming the replacement (or saying there is none); the other removed flags get the argument parser's usage error, and the Breaking changes list below names their replacements.
 
 ### Upgrading from 3.x
 
@@ -157,7 +175,7 @@ v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has
 
 ### Fixed
 
-These are the v3.3 defects found by the v4 review ([evidence review](docs/adr/0005-evidence-review.md)) and the build waves.
+These are the v3.3 defects found by the v4 review (evidence review) and the build waves.
 
 - `forbid_ast` was bypassed by import aliases (`import subprocess as sp`), rebinding, a CR-only encoding cookie and dynamic imports, and silently skipped files it could not read (a byte-order mark, latin-1). It now resolves aliases and fails closed.
 - A repository's `.aegis/slots.yaml` could run commands and inject text into scan output. Repository config can no longer name commands.

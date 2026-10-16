@@ -38,9 +38,6 @@
       "description": "Report whether the rules you were shown helped. Each report is an advisory self-report row in the outcome ledger; it never promotes a rule by itself.",
       "annotations": {
         "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
         "title": "Report Outcome"
       },
       "inputSchema": {

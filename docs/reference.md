@@ -35,14 +35,16 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis doctor` | Setup & Environment | System health and governance audit |
 | `aegis init` | Setup & Environment | Set up governance for this project and register it with your agent hosts |
 | `aegis migrate` | Setup & Environment | Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply) |
+| `aegis package` | Setup & Environment | Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published |
 | `aegis skills` | Setup & Environment | Copy the packaged skills into your hosts' project skills folders (sync) |
 | `aegis uninstall` | Setup & Environment | Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/) |
 | `aegis check` | Daily Workflow & Verification | Verify changes: Layer 1 checks, plus a Layer 2 model review with --full |
 | `aegis scan` | Daily Workflow & Verification | Show which rules apply to the given files (run before editing them) |
 | `aegis status` | Daily Workflow & Verification | Show active rules and stats |
 | `aegis team` | Daily Workflow & Verification | Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics) |
-| `aegis rule` | Rule Evolution & Intelligence | Manage rule lifecycle (list, create, promote, demote, archive) |
+| `aegis rule` | Rule Evolution & Intelligence | Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs |
 | `aegis sync` | Rule Evolution & Intelligence | Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them) |
+| `aegis benchmark` | Plumbing | Measure scan and hook latency, payload size and Layer 1 throughput (not an efficacy measure) |
 | `aegis hook` | Plumbing | Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks |
 
 ### `aegis doctor`
@@ -69,7 +71,7 @@ Category: Setup & Environment.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--host` | `HOST[,HOST]|auto` |  | Register the Aegis MCP server with these hosts, or 'auto' for the ones found on this machine (by CLI on PATH, config directory or desktop app). Without it, found hosts are only listed. A host is the config plane its surfaces share, so a surface name selects its host: codex-cli (Codex CLI, Codex IDE extension, ChatGPT desktop app (Codex mode); also codex, codex-ide, codex-app, chatgpt-desktop); claude-code (Claude Code CLI, Claude Code IDE extensions, Claude desktop app (Code tab); also claude-desktop-code); antigravity (Antigravity app, Antigravity IDE, agy CLI; also antigravity-app, antigravity-ide); kiro, experimental (Kiro IDE, Kiro CLI; also kiro-ide, kiro-cli) |
+| `--host` | `HOST[,HOST]|auto` |  | Register the Aegis MCP server with these hosts, or 'auto' for the ones found on this machine (by CLI on PATH, config directory or desktop app). Without it, found hosts are only listed. A host is the config plane its surfaces share, so a surface name selects its host: codex-cli (Codex CLI, Codex IDE extension, ChatGPT desktop app (Codex mode); also codex, codex-ide, codex-app, chatgpt-desktop); claude-code (Claude Code CLI, Claude Code IDE extensions, Claude desktop app (Code tab); also claude-desktop-code); antigravity (Antigravity app, Antigravity IDE, agy CLI; also antigravity-app, antigravity-ide); kiro, experimental (Kiro IDE, Kiro CLI; also kiro-ide, kiro-cli); cursor, experimental (Cursor IDE, Cursor CLI (cursor-agent); also cursor-ide, cursor-cli); copilot, experimental (GitHub Copilot in VS Code (agent mode), GitHub Copilot CLI; also github-copilot, copilot-cli, vscode-copilot); windsurf, experimental (Windsurf IDE; also windsurf-ide) |
 | `--rules` | one of `minimal`, `standard`, `full`, `none-active` | `"standard"` | Starter rules: guidance seeded into .aegis/rules/personas/ (minimal 2, standard 5, full every shipped one), which applies to no file until you set its target_paths; a new workspace also gets one active rule, the no-eval invariant in .aegis/rules/invariants/ (bans eval and exec in **/*.py). none-active seeds the standard guidance without it (default: standard) |
 | `--dry-run` |  |  | Check and show every step without writing anything or running a host CLI |
 | `--yes`, `-y` |  |  | Skip the confirmation prompt |
@@ -91,6 +93,20 @@ Category: Setup & Environment.
 | --- | --- | --- | --- |
 | `--apply` |  |  | Perform the migration (default: dry run) |
 | `--dry-run` |  |  | Only report what would change (the default) |
+
+### `aegis package`
+
+Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published
+
+Write a Claude Code plugin directory: .claude-plugin/plugin.json, the Aegis MCP server (.mcp.json), the pre-tool hook (hooks/hooks.json) and the packaged skills (skills/). Experimental: nothing is published, and the directory names absolute paths on this machine, so it works only here. Only --host claude-code is supported; the Gemini CLI is retired. In an Aegis workspace a real run appends one package event.
+
+Category: Setup & Environment.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--host` | `claude-code` |  | The host to package for; only claude-code |
+| `--out` | `DIR` |  | Where to write the plugin (default ./aegis-claude-plugin in the workspace); an existing directory must be empty or an earlier Aegis plugin |
+| `--dry-run` |  |  | Report what would be written; write nothing |
 
 ### `aegis skills`
 
@@ -140,7 +156,12 @@ Category: Daily Workflow & Verification.
 | `--dry-run` |  |  | Show what would be checked without running anything |
 | `--format` | one of `text`, `json` | `"text"` | Output format |
 | `--lane` | `LANE` |  | Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment (every changed path, deletions and both sides of a move included, inside the lane's globs) and Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong as the protection on .github/** and on the base branch |
-| `--base` | `REF` |  | With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0 |
+| `--partition` |  |  | Report the cross-lane call, def and import edges between lanes planned with --split (at least two), and the [FROZEN_SIGNATURES] of the functions that cross a lane boundary. Python, and Rust when its driver is enabled. A report: it changes nothing and exits 0 even when it finds edges |
+| `--card` |  |  | Print the day-0 card: languages, AST drivers, rules by type, the Layer 1 pass rate on the files and the 5 files with the most findings (above 2000 files it samples, and says so). Changes nothing and never reads baseline.json; --json for the machine-readable form |
+| `--write-baseline` |  |  | Record every current Layer 1 finding in .aegis/baseline.json, so that aegis check then fails only on new ones. Findings are fingerprinted by rule, path, matched line and its occurrence, not by line number. A failure that is not about a line (a rule that cannot load, a file that cannot be parsed) is listed and is never recorded |
+| `--prune-baseline` |  |  | Drop the entries of .aegis/baseline.json whose findings are fixed (or whose file is gone). It never adds a finding, and it refuses to run while a check cannot run |
+| `--split` | `NAME=GLOB[,GLOB...]` |  | With --partition: one planned lane and the globs of its files; give at least two. They match as rule target_paths do: a glob without '/' matches at any depth |
+| `--base` | `REF` |  | With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection |
 | `--paths` | `GLOB [GLOB ...]` |  | With --lane: the lane's globs instead of its live lease (self-attested). They match as rule target_paths do: a glob without '/' matches at any depth, so CHANGELOG.md also admits docs/CHANGELOG.md. They never allow .aegis/** or .github/workflows/** |
 | `--base-policy` |  |  | With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may .aegis/** and .github/workflows/** change |
 
@@ -247,9 +268,9 @@ Change a live lease's owner (and role) by compare-and-swap.
 
 ### `aegis rule`
 
-Manage rule lifecycle (list, create, promote, demote, archive)
+Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs
 
-Category: Rule Evolution & Intelligence. Subcommands: `archive`, `create`, `demote`, `list`, `promote`.
+Category: Rule Evolution & Intelligence. Subcommands: `archive`, `create`, `demote`, `export`, `import`, `list`, `promote`.
 
 ### `aegis rule archive`
 
@@ -285,6 +306,30 @@ Demote a rule down lifecycle tiers (no RULE_ID: list candidates)
 | `rule_id` | `[RULE_ID]` |  | Rule identifier to demote |
 | `--dry-run` |  |  | Preview demotion without moving files |
 
+### `aegis rule export`
+
+Write the workspace's rules to an unsigned pack file
+
+Write the workspace's rules to OUT as a pack: their text and digests, no ledger rows. The pack is unsigned: its sha256 shows it was not altered after export, not who made it. A rule that cannot be loaded, or that still has derived or retired keys (run aegis migrate --apply), stops the export; an expired rule is skipped and reported. An existing regular file at OUT is replaced; a link is refused.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `out` | `OUT` |  | The pack file to write (required) |
+| `--type` | one of `invariant`, `trap`, `gate`, `boundary`, `persona`, `contract` |  | Export only rules of this type (repeatable): invariant, trap, gate, boundary, persona, contract |
+| `--min-fitness` | `X` |  | Export only rules whose fitness in this repository's ledger is at least X |
+
+### `aegis rule import`
+
+Add the rules of an unsigned pack file to the workspace
+
+Add the rules of PACK to the workspace's .aegis/rules. The pack is unsigned: its digests show it was not altered after export, not who made it, so every entry is checked (its path must be exactly <type dir>/<id>.md, and the rule loader must accept it) and the pack is imported whole or not at all. An id the workspace already has refuses the pack unless --rename gives the incoming rule a free id. With --workspace DIR, DIR itself must hold .aegis (there is no walk-up from it). Review the imported rules before you rely on them.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `pack` | `PACK` |  | The pack file to read (required) |
+| `--rename` |  |  | Give a rule whose id is taken a free id (<id>-imported, -imported-2, ...) instead of refusing |
+| `--dry-run` |  |  | Check the pack and report what would be added; write nothing |
+
 ### `aegis rule list`
 
 List active rules and fitness metrics
@@ -313,6 +358,18 @@ Category: Rule Evolution & Intelligence.
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--apply` |  |  | Apply the suggested promote/demote/archive transitions (moves rule files) |
+
+### `aegis benchmark`
+
+Measure scan and hook latency, payload size and Layer 1 throughput (not an efficacy measure)
+
+Time the aegis_scan answer (latency p50/p95, payload bytes, approximate tokens), the `aegis hook run pre-tool` hook as a host starts it (a fresh Python process), and Layer 1 throughput (files per second), on a built-in fixture corpus in a temporary directory: nothing in your repository is read or written. It appends one benchmark event to this workspace's events log. This is not an efficacy measure: it says nothing about whether Aegis makes an agent's code better. Compare only runs of the same corpus (its sha256 is in the output) on the same machine.
+
+Category: Plumbing.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--runs` | `N` | `20` | Timed runs of each measurement, 1 to 1000 (default 20); one untimed warm-up of the hook and Layer 1 comes first |
 
 ### `aegis hook`
 
@@ -455,7 +512,7 @@ Input schema:
 
 ### `aegis_report_outcome`
 
-**Report Outcome** (idempotent)
+**Report Outcome**
 
 Report whether the rules you were shown helped. Each report is an advisory self-report row in the outcome ledger; it never promotes a rule by itself.
 

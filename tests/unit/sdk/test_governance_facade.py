@@ -20,6 +20,7 @@ import pytest
 import aegis_sdk
 from aegis_core import _version
 from aegis_core.errors import AegisError, RuleNotFoundError, RuleParseError
+from aegis_core.telemetry_engine.ledger import ledger_path
 from aegis_sdk import Governance, parse_rule_file
 
 KEPT_METHODS = {"grade", "coverage_report", "scan", "entropy", "list_rules", "fitness_landscape"}
@@ -72,15 +73,6 @@ def ws(tmp_path: Path) -> Path:
     (root / ".aegis" / "rules" / "invariants").mkdir(parents=True)
     (root / ".aegis" / "rules" / "traps" / "trap-src-drift.md").write_text(TRAP, encoding="utf-8")
     (root / ".aegis" / "rules" / "invariants" / "invariant-app-pure.md").write_text(INVARIANT, encoding="utf-8")
-    (root / ".aegis" / "state").mkdir()
-    rows = [
-        {"cell": "trap-src-drift", "signal": "trigger", "source": "ci"},
-        {"cell": "trap-src-drift", "signal": "tp", "source": "ci"},
-        {"cell": "invariant-app-pure", "signal": "trigger", "source": "mcp"},
-    ]
-    (root / ".aegis" / "state" / "ledger.jsonl").write_text(
-        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
-    )
     (root / "src").mkdir()
     (root / "src" / "app.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
     (root / "docs").mkdir()
@@ -88,6 +80,15 @@ def ws(tmp_path: Path) -> Path:
     _git(root, "init", "-q")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
+    rows = [
+        {"cell": "trap-src-drift", "signal": "trigger", "source": "ci"},
+        {"cell": "trap-src-drift", "signal": "tp", "source": "ci"},
+        {"cell": "invariant-app-pure", "signal": "trigger", "source": "mcp"},
+    ]
+    # In a git repository the ledger is the one every worktree shares (in the common dir).
+    ledger = ledger_path(root)
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     (root / "src" / "app.py").write_text("def add(a, b):\n    return b + a\n", encoding="utf-8")
     return root
 

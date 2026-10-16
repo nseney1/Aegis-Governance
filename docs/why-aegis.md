@@ -2,7 +2,7 @@
 
 This page explains where Aegis's rules came from, what the project measured, what it got wrong, and why v4 looks the way it does. It is written for people deciding whether to trust Aegis, and for contributors deciding what to change next.
 
-**Status.** Written during the v4.0 build (2026-10-15) and checked against the code once waves A, B and C were merged. Where this page describes v4, it describes what that code does; the decisions behind it are in [ADR 0005](adr/0005-v4-plan-of-record.md), and the [CHANGELOG](../CHANGELOG.md) records each release. Section 6 is planned work, not a feature list. What 4.1.0 adds (agent hooks, teams and skills) is described in [How Aegis works](how-it-works.md) section 8; here only the AD-7 row of section 7 changed for it.
+**Status.** Written during the v4.0 build (2026-10-15) and checked against the code once waves A, B and C were merged. Where this page describes v4, it describes what that code does; the decisions behind it are in ADR 0005, and the [CHANGELOG](../CHANGELOG.md) records each release. Section 6 is planned work, not a feature list. What 4.1.0 adds (agent hooks, teams and skills) is described in [How Aegis works](how-it-works.md) section 8; here only the AD-7 row of section 7 changed for it.
 
 **How to read the numbers.** Every number here is one of two kinds:
 
@@ -17,7 +17,7 @@ Coding agents read instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`) 
 - **They forget.** Long sessions compact context, and new sessions start from zero. The project's session analysis found the same environment traps rediscovered independently across sessions.
 - **They fail open.** A check that crashes, a tool that is missing or a rule that is not loaded looks exactly like "no problem found".
 
-Aegis's own history has examples of all three. The v4 review found that `aegis_scan` returned 0 rules in the author's own session, that the AST gate silently skipped files with a byte-order mark, and that the release gate's "SHIP" receipts were written by the agent being gated ([ADR 0005](adr/0005-v4-plan-of-record.md) §1; [review](adr/0005-evidence-review.md) H3, H4, H6).
+Aegis's own history has examples of all three. The v4 review found that `aegis_scan` returned 0 rules in the author's own session, that the AST gate silently skipped files with a byte-order mark, and that the release gate's "SHIP" receipts were written by the agent being gated (ADR 0005 §1; review H3, H4, H6).
 
 The author's post on this framing is [Your AI agent's rules file is a gentleman's agreement](https://dev.to/nseney1/your-ai-agents-rules-file-is-a-gentlemans-agreement-heres-what-happens-when-you-build-2dml).
 
@@ -45,11 +45,11 @@ The itemized rows sum to 473 steps (63% of the waste). The other 276 steps happe
 
 *Source*: the evolution log, `docs/architecture/phylogeny.md` "Phase 2", and `docs/project/METRICS.md` "Aggregate Stats" (both at `v3.3.0`). *Caveat*: one session, one developer, classified by the project's own analysis with no second rater.
 
-**Cross-session patterns.** Comparing sessions across projects showed the failures were systemic. The worst session ran 1,579 steps with 8 architectural pivots, 2 safety incidents and zero subagent delegation, and produced zero working autonomous runs. It added rules on premature abstraction, pivot discipline (the Two-Pivot Halt), delegation floors and real-time loop budgets, which now live in [architectural-tenets](../rules/.oracles/architectural-tenets.md) and [subagent-delegation](../rules/subagent-delegation.md). It also added a desktop-automation safety rule, which v4 no longer ships ([ADR 0005](adr/0005-v4-plan-of-record.md) D16). *Source*: the evolution log, "Phase 3". *Caveat*: the author's own projects only.
+**Cross-session patterns.** Comparing sessions across projects showed the failures were systemic. The worst session ran 1,579 steps with 8 architectural pivots, 2 safety incidents and zero subagent delegation, and produced zero working autonomous runs. It added rules on premature abstraction, pivot discipline (the Two-Pivot Halt), delegation floors and real-time loop budgets, which now live in [architectural-tenets](../rules/.oracles/architectural-tenets.md) and [subagent-delegation](../rules/subagent-delegation.md). It also added a desktop-automation safety rule, which v4 no longer ships (ADR 0005 D16). *Source*: the evolution log, "Phase 3". *Caveat*: the author's own projects only.
 
 ## 3. Design principles
 
-Principles C1–C6 emerged from that work and are listed in the evolution log ("Design Principles"). C7 was learned the hard way: the C7 key is defined in [ADR 0005](adr/0005-v4-plan-of-record.md) Appendix A, which cites all seven by these keys, and rests on [ADR 0005](adr/0005-v4-plan-of-record.md) H6 and AD-1.
+Principles C1–C6 emerged from that work and are listed in the evolution log ("Design Principles"). C7 was learned the hard way: the C7 key is defined in ADR 0005 Appendix A, which cites all seven by these keys, and rests on ADR 0005 H6 and AD-1.
 
 | Key | Principle | In one sentence |
 |---|---|---|
@@ -59,7 +59,7 @@ Principles C1–C6 emerged from that work and are listed in the evolution log ("
 | C4 | Continuous validation | A rule is never "done"; it is re-checked against new sessions. |
 | C5 | Installation completeness | Governance installed at partial fidelity gives false assurance, so every install path deploys rules, skills and hooks with the same completeness. |
 | C6 | Hypothesis-driven governance | Every rule and feature states what it predicts, how to measure it, and when to prune it. |
-| C7 | Ledger, not frontmatter, for fitness | Outcomes go to an append-only ledger; rule files are never rewritten by the tool that scores them ([ADR 0005](adr/0005-v4-plan-of-record.md) H6, AD-1). |
+| C7 | Ledger, not frontmatter, for fitness | Outcomes go to an append-only ledger; rule files are never rewritten by the tool that scores them (ADR 0005 H6, AD-1). |
 
 Three ideas survive from the project's earlier mechanism-design notes (`docs/architecture/mechanism_design.md` at `v3.3.0`):
 
@@ -67,7 +67,7 @@ Three ideas survive from the project's earlier mechanism-design notes (`docs/arc
 - **Graduated enforcement**: a rule earns blocking power (trap, then invariant, then gate) only after evidence.
 - **Budget balance**: governance must cost less context than the rework it prevents.
 
-In v3 the first one was claimed but not delivered: an MCP caller could write true- and false-positive signals for any rule ([review](adr/0005-evidence-review.md) H4), and pass/fail credit went to every rule whose paths matched (section 5.2).
+In v3 the first one was claimed but not delivered: an MCP caller could write true- and false-positive signals for any rule (review H4), and pass/fail credit went to every rule whose paths matched (section 5.2).
 
 ## 4. What we measured, and how to read it
 
@@ -100,7 +100,7 @@ A multi-lens review graded the code at `9e4d976` (v3.3 plus the first v4 wave) 4
 
 Release Gate 4.5 required a "SHIP" receipt before a release. For v2.0, v2.1, v3.0 and v3.3 the receipt was written by hand by the agent being gated. One contained placeholder predictions `p1` to `p6`; the v3.3.0 receipt claims 8 convergences and lists 5. A hand-written evidence file with `verdict: ship` and the current tree hash passed the gate (review H6). *Source*: ADR 0005 §1, fact 1.
 
-**v4**: receipts and the release gate are deleted ([ADR 0005](adr/0005-v4-plan-of-record.md) AD-2, §5). A release needs an independent review, CI green on the exact commit SHA, and `aegis check` passing Layer 1 and a cross-vendor Layer 2 ([CONTRIBUTING](../CONTRIBUTING.md#releases)). Old receipts are treated as unattested, not rewritten. The pre-tag check is `.github/scripts/ci_green.py <sha>`.
+**v4**: receipts and the release gate are deleted (ADR 0005 AD-2, §5). A release needs an independent review, CI green on the exact commit SHA, and `aegis check` passing Layer 1 and a cross-vendor Layer 2 ([CONTRIBUTING](../CONTRIBUTING.md#releases)). Old receipts are treated as unattested, not rewritten. The pre-tag check is `.github/scripts/ci_green.py <sha>`.
 
 ### 5.2 The fitness signal was inverted
 
@@ -132,7 +132,7 @@ On 2026-10-14 the project rebranded, tagged v2.0.0, v2.1.0 and v3.0.0, then star
 
 A repository's `.aegis/slots.yaml` named AST-driver commands that `aegis check` executed, and its slot values were inlined into the scan output the agent reads (review H5).
 
-**v4**: one `.aegis/config.json`, and repository config cannot name commands or tool slots. Driver commands come only from packaged templates or user-scope config ([ADR 0005](adr/0005-v4-plan-of-record.md) §5 "Config" and D10; [ADR 0016](adr/0016-zero-touch-polyglot-genesis.md) status). Every git call goes through `gitsafe`, which switches off what a repository's git config could run. The [repository trust table](../SECURITY.md#repository-trust) lists everything Aegis does run and where it comes from (`tests/unit/core/test_security_policy.py` fails when a module that starts a program has no row there); the one case that runs repository code is `aegis check --full`, which runs the tests that match the change.
+**v4**: one `.aegis/config.json`, and repository config cannot name commands or tool slots. Driver commands come only from packaged templates or user-scope config (ADR 0005 §5 "Config" and D10; ADR 0016 status). Every git call goes through `gitsafe`, which switches off what a repository's git config could run. The [repository trust table](../SECURITY.md#repository-trust) lists everything Aegis does run and where it comes from (`tests/unit/core/test_security_policy.py` fails when a module that starts a program has no row there); the one case that runs repository code is `aegis check --full`, which runs the tests that match the change.
 
 ```mermaid
 flowchart LR
@@ -178,11 +178,11 @@ Each v4 decision carries a falsifiable prediction (principle C6). A failed predi
 | AD-7 git-native team | In 20 multi-lane sessions, no cross-lane write conflict reaches a merge | `aegis team metrics`: lease denials, and the merges where both sides changed a common path or git reports a conflict. If no lease is denied in 30 days of multi-lane use, leases are dropped and `aegis check --lane` and the merge metrics stay | Not on v4.0. From 4.1.0, after real multi-lane sessions: `aegis team` and leases shipped in 4.1.0 |
 | AD-9 bootstrap and JIT | Scan-before-edit rate of at least 80% on each Phase-1 host after 3 sessions | `aegis status --compliance` (it prints the rate per host and per session, and the limits of how edits are observed) | Yes, after real sessions |
 
-New v4.1 and v4.2 features get a prune box before they merge ([ADR 0005](adr/0005-v4-plan-of-record.md) Appendix D). Examples: lane leases are pruned after 0 denials in 30 days of multi-lane use; the test-integrity check after 60 days without a finding that a reviewer did not override; the benchmark after it catches no regression in 3 releases; an experimental host row after it stays unverified for 2 minor releases.
+New v4.1 and v4.2 features get a prune box before they merge (ADR 0005 Appendix D). Examples: lane leases are pruned after 0 denials in 30 days of multi-lane use; the test-integrity check after 60 days without a finding that a reviewer did not override; the benchmark after it catches no regression in 3 releases; an experimental host row after it stays unverified for 2 minor releases.
 
 ## 8. Trade-offs
 
-From [ADR 0005](adr/0005-v4-plan-of-record.md) §7, with what each choice costs you.
+From ADR 0005 §7, with what each choice costs you.
 
 | Decision | Latency | Complexity | Cost | What you give up |
 |---|---|---|---|---|
@@ -200,7 +200,7 @@ The trade Aegis does not make: it does not claim enforcement it lacks. CI on eve
 
 ## Sources
 
-**Decision records**: [ADR 0005](adr/0005-v4-plan-of-record.md) (plan of record), its [evidence review](adr/0005-evidence-review.md), [ADR 0003](adr/0003-v3-clean-slate-and-cli-ux.md), [ADR 0007](adr/0007-host-plane.md) (the host plane), and [ADR 0012](adr/0012-zero-dependency-frontmatter-engine.md)–[0016](adr/0016-zero-touch-polyglot-genesis.md). ADR 0005's appendices hold the delegated decisions D1–D23 and the v4.1/v4.2 scope, which lived in a separate build sheet during the build.
+**Decision records**: ADR 0005 (plan of record), its evidence review, ADR 0003, ADR 0007 (the host plane), and ADR 0012–0016. ADR 0005's appendices hold the delegated decisions D1–D23 and the v4.1/v4.2 scope, which lived in a separate build sheet during the build.
 
 **Deleted documents quoted here**, readable from the v3.3.0 release tag with `git show v3.3.0:<path>` (all four are byte-identical at `895bbf5`; `git diff --stat v3.3.0 895bbf5 -- <the four paths>` prints nothing):
 

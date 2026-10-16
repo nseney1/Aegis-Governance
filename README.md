@@ -119,7 +119,7 @@ The full story, with diagrams, is in [How Aegis works](https://github.com/nseney
 
 ## What's included
 
-- **A CLI** with 12 commands (`init`, `uninstall`, `doctor`, `migrate`, `check`, `scan`, `status`, `rule`, `sync`, `hook`, `team`, `skills`) and **an MCP server** with 4 tools (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`).
+- **A CLI** with 14 commands (`init`, `uninstall`, `doctor`, `migrate`, `check`, `scan`, `status`, `rule`, `sync`, `hook`, `team`, `skills`, `benchmark`, `package`) and **an MCP server** with 4 tools (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`).
 - **Host surfaces.** A host is the config plane its apps share: `codex-cli` covers the Codex CLI, IDE extension and ChatGPT desktop app; `claude-code` covers the CLI, IDE extensions and the desktop app's Code tab; `antigravity` the app, IDE and `agy`; `kiro` (experimental) the Kiro IDE and CLI. `--host` accepts the surface names too (for example `codex-app`, `kiro-ide`), and `--host auto` finds apps by their config directories and app bundles as well as CLIs on PATH. `aegis doctor` warns when a host reads the `AGENTS.md` bootstrap but has no Aegis MCP registration.
 - **12 starter [rules](https://github.com/nseney1/Aegis-Guardrails/tree/main/rules)**: grounding claims in the code before acting, dry runs before destructive commands, behavioral tests, test-first development, git hygiene and more. `aegis init --rules minimal|standard|full` seeds 2, 5 or all 12. They apply to no file until you set their `target_paths`.
 - **15 [skills](https://github.com/nseney1/Aegis-Guardrails/tree/main/skills)**, `SKILL.md` playbooks for reviews, audits, incident debugging, refactoring and more. `aegis skills sync` (or `aegis init --skills`) copies them into `.claude/skills/` for Claude Code and `.agents/skills/` for Codex CLI and Antigravity, and later runs replace only Aegis's own unedited copies.
@@ -172,7 +172,7 @@ Aegis does not claim enforcement it lacks. `aegis doctor` reports these tiers, i
 - [How Aegis works](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/how-it-works.md): the loop, rules, MCP delivery, checks, the ledger, hosts and enforcement.
 - [Why Aegis is built this way](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/why-aegis.md): the evidence, what went wrong in v3, the v4.3 roadmap.
 - [Reference](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/reference.md): every command, flag and MCP tool, generated from the code.
-- [Plan of record (ADR 0005)](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/adr/0005-v4-plan-of-record.md) and the [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md).
+- Plan of record (ADR 0005) and the [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md).
 - [Contributing](https://github.com/nseney1/Aegis-Guardrails/blob/main/CONTRIBUTING.md) and [privacy](https://github.com/nseney1/Aegis-Guardrails/blob/main/PRIVACY.md).
 - Security issues: report them privately as described in [SECURITY.md](SECURITY.md).
 

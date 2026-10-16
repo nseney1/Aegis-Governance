@@ -47,7 +47,7 @@ Docs: relative links must resolve (`tests/unit/test_docs_links.py`), the README 
 
 ## Releases
 
-A release goes to `main` only after all of these hold for the exact commit being tagged ([ADR 0005](docs/adr/0005-v4-plan-of-record.md) AD-10):
+A release goes to `main` only after all of these hold for the exact commit being tagged (ADR 0005 AD-10):
 
 1. An independent review of the release pull request.
 2. CI green on that commit: `python3 .github/scripts/ci_green.py <sha>` exits 0 (it needs the `gh` CLI).

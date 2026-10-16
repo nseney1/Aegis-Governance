@@ -714,7 +714,7 @@ class TestCommandLine:
             assert gone not in out
 
     @pytest.mark.parametrize("value, message", [
-        ("cursor", "unknown host 'cursor'"),
+        ("zed", "unknown host 'zed'"),
         ("claude-desktop", "identity only"),
     ])
     def test_bad_host_is_a_usage_error(self, project, value, message, capsys):

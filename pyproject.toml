@@ -85,7 +85,7 @@ version = {attr = "aegis_core._version.__version__"}
 
 [tool.setuptools.package-data]
 aegis_sdk = ["py.typed"]
-aegis_core = ["ast/drivers/templates/*"]
+aegis_core = ["ast/drivers/templates/*", "benchmark_corpus/corpus.json"]
 "aegis_core._data.rules" = ["*.md", ".oracles/*.md"]
 "aegis_core._data.skills" = ["*/SKILL.md"]
 

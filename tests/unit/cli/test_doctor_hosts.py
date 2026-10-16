@@ -629,7 +629,7 @@ def test_the_retired_gemini_cli_is_described_as_retired_never_promised_nor_check
     env.all_ok()
     env.stub("gemini")
     (env.ws / ".aegis" / "config.json").write_text(
-        json.dumps({"v": 1, "hosts": ["gemini-cli", "cursor", "gemini-cli"]}))
+        json.dumps({"v": 1, "hosts": ["gemini-cli", "zed", "gemini-cli"]}))
     payload = env.doctor()
     assert [h["id"] for h in payload["hosts"]] == []
     by_code = {}
@@ -641,7 +641,7 @@ def test_the_retired_gemini_cli_is_described_as_retired_never_promised_nor_check
         "config.json selects 'gemini-cli', a retired host: gemini-cli is not supported: Google retired "
         "Gemini CLI for individual Code Assist accounts; use --host antigravity.")
     (unknown,) = by_code["unknown_host"]  # an id the table does not know is a different note
-    assert "'cursor'" in unknown["message"] and "gemini-cli" not in unknown["message"]
+    assert "'zed'" in unknown["message"] and "gemini-cli" not in unknown["message"]
     said = list(_strings(payload)) + env.run()[1].splitlines()
     about = [text for text in said if "gemini-cli" in text or "Gemini CLI" in text]
     assert about and all("retired" in text for text in about)
@@ -2004,3 +2004,77 @@ def test_a_host_without_a_documented_instruction_budget_prints_the_size_alone(en
     rc, out = env.run()
     assert f"budget       AGENTS.md {size} bytes (no documented limit)" in out
     assert "of None" not in out
+
+
+# ── experimental rows: cursor, copilot, kiro, windsurf (v4.2 #6) ─────────────────
+
+EXPERIMENTAL_FILES = {
+    "kiro": (".kiro/settings/mcp.json", "kiro-cli"),
+    "cursor": (".cursor/mcp.json", "cursor-agent"),
+    "copilot": (".copilot/mcp-config.json", "copilot"),
+    "windsurf": (".codeium/windsurf/mcp_config.json", "windsurf"),
+}
+
+
+def experimental_registered(env: Env, host_id: str) -> Path:
+    relative, binary = EXPERIMENTAL_FILES[host_id]
+    env.stub(binary)
+    cfg = env.home.joinpath(*relative.split("/"))
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"mcpServers": {"aegis": {
+        "command": str(env.mcp), "args": [], "env": {"AEGIS_CLIENT": host_id}}}}), encoding="utf-8")
+    return cfg
+
+
+@pytest.mark.parametrize("host_id", sorted(EXPERIMENTAL_FILES))
+def test_an_experimental_row_is_checked_from_the_file_its_vendor_documents(env, host_id):
+    env.all_ok()
+    experimental_registered(env, host_id)
+    select(env, host_id)
+    payload = env.doctor()
+    row = host(payload, host_id)
+    assert row["state"] == "ok", row["reasons"]
+    assert row["registration"]["source"] == "~/" + EXPERIMENTAL_FILES[host_id][0]
+    assert row["registration"]["scope"] == "user"
+    assert row["identity"] == {"status": "explicit", "aegis_client": host_id}
+    assert row["hooks"]["status"] == "none"
+    assert row["enforcement_level"] == "advisory"
+    assert {Path(c["argv"][0]).stem for c in env.calls} <= {"codex"}  # never a host CLI of its own
+
+
+@pytest.mark.parametrize("host_id", sorted(EXPERIMENTAL_FILES))
+def test_an_experimental_row_without_a_registration_is_unregistered_with_the_fix(env, host_id):
+    env.all_ok()
+    env.stub(EXPERIMENTAL_FILES[host_id][1])
+    select(env, host_id)
+    row = host(env.doctor(), host_id)
+    assert row["state"] == "unregistered" and "not_registered" in codes(row)
+    assert f"run aegis init --host {host_id}" in next(r["message"] for r in row["reasons"] if r["code"] == "not_registered")
+
+
+@pytest.mark.parametrize("host_id", ["cursor", "copilot", "windsurf"])
+def test_a_new_experimental_row_joins_the_default_matrix_only_where_its_plane_is_found(env, host_id):
+    env.all_ok()
+    assert host_id not in [h["id"] for h in env.doctor()["hosts"]]
+    plane = {"cursor": ".cursor", "copilot": ".copilot", "windsurf": ".codeium/windsurf"}[host_id]
+    env.home.joinpath(*plane.split("/")).mkdir(parents=True)
+    assert [h["id"] for h in env.doctor()["hosts"]][-1] == host_id
+
+
+def test_doctor_labels_an_experimental_row_experimental_and_a_verified_one_not(env):
+    env.all_ok()
+    experimental_registered(env, "cursor")
+    select(env, "cursor", "codex-cli")
+    payload = env.doctor()
+    assert host(payload, "cursor")["experimental"] is True
+    assert host(payload, "cursor")["verified_row"] is False
+    assert host(payload, "codex-cli")["experimental"] is False
+    rc, out = env.run()
+    lines = out.splitlines()
+    (cursor_line,) = [l for l in lines if "(cursor)" in l]
+    assert cursor_line.endswith("Cursor (cursor) [experimental]: ok")
+    (codex_line,) = [l for l in lines if "(codex-cli)" in l]
+    assert codex_line.endswith("Codex CLI (codex-cli): ok") and "experimental" not in codex_line
+    notice = "experimental documented by the vendor, not yet checked on a real install (verified after 3 clean runs)"
+    assert out.count(notice) == 1
+    assert lines[lines.index(cursor_line) + 1].strip() == notice  # inside Cursor's block, not Codex's

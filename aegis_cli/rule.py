@@ -6,14 +6,18 @@ Subcommands:
   aegis rule promote <rule_id>    Promote a rule up lifecycle tiers
   aegis rule demote <rule_id>     Demote a rule down lifecycle tiers
   aegis rule archive [--dry-run]  Archive rules that misfire (applies unless --dry-run)
+  aegis rule export OUT           Write rules to an unsigned pack file (aegis_core.packs)
+  aegis rule import PACK          Add the rules of a pack file (--rename, --dry-run)
 """
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Sequence
 
 from aegis_cli import sanitize_display
 from aegis_cli.base import CommandCategory, AegisCommand
@@ -44,7 +48,7 @@ def run_rule(args: argparse.Namespace) -> int:
     action = getattr(args, "rule_action", None) or "list"
     handlers = {
         "list": _run_list, "create": _run_create, "promote": _run_promote,
-        "demote": _run_demote, "archive": _run_archive,
+        "demote": _run_demote, "archive": _run_archive, "export": _run_export, "import": _run_import,
     }
     if action not in handlers:
         print(f"Unknown rule subcommand: {action}", file=sys.stderr)
@@ -435,13 +439,194 @@ def _run_create(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── Rule packs: export and import (v4.2 #3, aegis_core.packs) ───────────────
+
+_SHOWN_PROBLEMS = 10
+_UNSIGNED = "The pack is unsigned: its sha256 ({short}) shows it was not altered after export, not who made it."
+
+
+def _show(value: object) -> str:
+    """Pack content and rule files are repository or network content: no terminal controls."""
+    text = str(value)
+    return sanitize_display(text, max_len=len(text))
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _pack_envelope(action: str, root: Optional[Path], scope: Dict[str, Any]) -> Dict[str, Any]:
+    from aegis_core._version import __version__
+
+    return {
+        "source": f"aegis rule {action}",
+        "aegis_version": __version__,
+        "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "scope": {"workspace": str(root) if root is not None else None, **scope},
+    }
+
+
+def _pack_fail(args: argparse.Namespace, action: str, root: Optional[Path], scope: Dict[str, Any],
+               message: str, problems: Sequence[str] = (), status: str = "error", header: str = "") -> int:
+    """A refusal or failure that wrote nothing: an enveloped document with --json, else stderr.
+    With problems, the text lists the first ten under ``header``."""
+    if getattr(args, "json", False):
+        doc = _pack_envelope(action, root, scope)
+        doc.update({"status": status, "error": message})
+        if problems:
+            doc["problems"] = list(problems)
+        print(json.dumps(doc, indent=2))
+    elif problems and header:
+        print(f"Error: {header}", file=sys.stderr)
+        for problem in problems[:_SHOWN_PROBLEMS]:
+            print(f"  {_show(problem)}", file=sys.stderr)
+        if len(problems) > _SHOWN_PROBLEMS:
+            print(f"  ... and {len(problems) - _SHOWN_PROBLEMS} more problems", file=sys.stderr)
+    else:
+        print(f"Error: {_show(message)}", file=sys.stderr)
+    return 1
+
+
+def _out_problem(out: str) -> Optional[str]:
+    """Why ``out`` cannot be written as a pack file, or None. A link is refused (the write
+    would land wherever it points); an existing regular file is replaced."""
+    if os.path.islink(out):
+        return f"{out} is a symlink"
+    if os.path.isdir(out):
+        return f"{out} is a directory"
+    if os.path.lexists(out) and not os.path.isfile(out):
+        return f"{out} is not a regular file"
+    parent = os.path.dirname(out)
+    if not os.path.isdir(parent):
+        return f"the directory {parent} does not exist"
+    return None
+
+
+def _run_export(args: argparse.Namespace) -> int:
+    """Write the workspace's rules to a pack file; nothing in the workspace changes."""
+    from aegis_core import packs
+    from aegis_core.storage import atomic_write_bytes
+
+    types = list(getattr(args, "types", None) or [])
+    min_fitness = getattr(args, "min_fitness", None)
+    scope: Dict[str, Any] = {"types": types, "min_fitness": min_fitness}
+    try:
+        root = _resolve_workspace_root(args)
+    except WorkspaceNotFoundError as exc:
+        return _pack_fail(args, "export", None, scope, str(exc))
+    out = os.path.abspath(os.path.expanduser(args.out))
+    problem = _out_problem(out)
+    if problem:
+        return _pack_fail(args, "export", root, scope, f"cannot write the pack: {problem}")
+    try:
+        selection = packs.select_rules(root, types=types or None, min_fitness=min_fitness)
+        pack = packs.build_pack(selection.rules)
+    except packs.PackError as exc:
+        many = len(exc.problems) > 1
+        message = f"the export was refused: {len(exc.problems)} problems" if many else exc.problems[0]
+        return _pack_fail(args, "export", root, scope, message, exc.problems, "refused",
+                          header="the export was refused:" if many else "")
+    try:
+        atomic_write_bytes(out, packs.dump_pack(pack))
+    except OSError as exc:
+        return _pack_fail(args, "export", root, scope, f"cannot write the pack: {exc.strerror or exc}")
+
+    entries = []
+    for entry in pack["rules"]:
+        parsed = packs.parse_pack_path(entry["path"])
+        entries.append({"path": entry["path"], "id": parsed.id, "type": parsed.type, "sha256": entry["sha256"]})
+    skipped = [{"id": rule_id, "reason": reason} for rule_id, reason in selection.skipped]
+    if getattr(args, "json", False):
+        doc = _pack_envelope("export", root, scope)
+        doc.update({"status": "exported", "out": out, "signed": False, "sha256": pack["sha256"],
+                    "rules": entries, "skipped": skipped})
+        print(json.dumps(doc, indent=2))
+        return 0
+    print(f"Exported {_plural(len(entries), 'rule')} to {_show(out)}")
+    for entry in entries:
+        print(f"  {entry['path']}")
+    if skipped:
+        print("Skipped: " + ", ".join(f"{_show(s['id'])} ({s['reason']})" for s in skipped))
+    print(_UNSIGNED.format(short=pack["sha256"][:12]))
+    return 0
+
+
+class _PackFileError(Exception):
+    pass
+
+
+def _read_pack_file(path: str, limit: int) -> bytes:
+    """The pack file's bytes, at most ``limit`` + 1 of them; a file that is not a regular file
+    is never opened (a FIFO would block)."""
+    if not os.path.lexists(path):
+        raise _PackFileError(f"{path} does not exist")
+    if not os.path.isfile(path):
+        raise _PackFileError(f"{path} is not a regular file")
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(limit + 1)
+    except OSError as exc:
+        raise _PackFileError(f"{path}: {exc.strerror or exc}") from None
+
+
+def _run_import(args: argparse.Namespace) -> int:
+    """Add the rules of a pack file to the workspace, all or none."""
+    from aegis_core import packs
+
+    pack_path = os.path.abspath(os.path.expanduser(args.pack))
+    rename = bool(getattr(args, "rename", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    scope: Dict[str, Any] = {"pack": pack_path, "rename": rename, "dry_run": dry_run}
+    try:
+        root = _resolve_workspace_root(args, require_aegis=True)
+    except WorkspaceNotFoundError as exc:
+        return _pack_fail(args, "import", None, scope, str(exc))
+    try:
+        data = _read_pack_file(pack_path, packs.MAX_PACK_BYTES)
+    except _PackFileError as exc:
+        return _pack_fail(args, "import", root, scope, f"cannot read the pack: {exc}")
+    try:
+        pack = packs.load_pack(data)
+        result = packs.import_pack(root, pack, rename=rename, dry_run=dry_run)
+    except packs.PackError as exc:
+        count = _plural(len(exc.problems), "problem")
+        return _pack_fail(args, "import", root, scope, f"the pack was not imported: {count}", exc.problems,
+                          "refused", header="the pack was not imported:")
+    except Exception as exc:  # a lock timeout, an unconfined state dir...: nothing was imported
+        return _pack_fail(args, "import", root, scope, f"the pack was not imported: {exc}")
+
+    rules = [{"path": r.path, "id": r.id, "type": r.type, "renamed_from": r.renamed_from, "sha256": r.sha256}
+             for r in result.rules]
+    if getattr(args, "json", False):
+        doc = _pack_envelope("import", root, scope)
+        doc.update({"status": "dry_run" if result.dry_run else "imported", "signed": False,
+                    "pack_sha256": result.pack_sha256, "rules": rules, "warnings": list(result.warnings)})
+        print(json.dumps(doc, indent=2))
+        return 0
+    short = result.pack_sha256[:12]
+    count = _plural(len(rules), "rule")
+    verb = f"Dry run: would import {count}" if result.dry_run else f"Imported {count}"
+    print(f"{verb} from {_show(pack_path)} (sha256 {short}):")
+    for rule in rules:
+        renamed = f" (renamed from {rule['renamed_from']!r})" if rule["renamed_from"] else ""
+        print(f"  {rule['path']}{renamed}")
+    for warning in result.warnings:
+        print(f"Warning: {_show(warning)}", file=sys.stderr)
+    if result.dry_run:
+        print("Nothing was written.")
+    else:
+        print("The pack is unsigned: review the imported rules (git diff) before you rely on them, "
+              "then run aegis sync.")
+    return 0
+
+
 class RuleCommand(AegisCommand):
     """Unified rule lifecycle management."""
 
     name = "rule"
     aliases = ()
     category = CommandCategory.LIFECYCLE
-    help = "Manage rule lifecycle (list, create, promote, demote, archive)"
+    help = "Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         common = argparse.ArgumentParser(add_help=False)
@@ -478,6 +663,34 @@ class RuleCommand(AegisCommand):
 
         p_arch = sub.add_parser("archive", parents=[common], help="Archive rules whose ledger evidence says they misfire")
         p_arch.add_argument("--dry-run", action="store_true", help="Report the rules that would be archived; move nothing")
+
+        p_exp = sub.add_parser(
+            "export", parents=[common], help="Write the workspace's rules to an unsigned pack file",
+            description=("Write the workspace's rules to OUT as a pack: their text and digests, no ledger rows. "
+                         "The pack is unsigned: its sha256 shows it was not altered after export, not who made "
+                         "it. A rule that cannot be loaded, or that still has derived or retired keys (run "
+                         "aegis migrate --apply), stops the export; an expired rule is skipped and reported. "
+                         "An existing regular file at OUT is replaced; a link is refused."))
+        p_exp.add_argument("out", metavar="OUT", help="The pack file to write")
+        p_exp.add_argument("--type", dest="types", action="append", choices=list(CANONICAL_RULE_TYPES),
+                           metavar="TYPE", help=f"Export only rules of this type (repeatable): {', '.join(CANONICAL_RULE_TYPES)}")
+        p_exp.add_argument("--min-fitness", dest="min_fitness", type=float, default=None, metavar="X",
+                           help="Export only rules whose fitness in this repository's ledger is at least X")
+
+        p_imp = sub.add_parser(
+            "import", parents=[common], help="Add the rules of an unsigned pack file to the workspace",
+            description=("Add the rules of PACK to the workspace's .aegis/rules. The pack is unsigned: its digests "
+                         "show it was not altered after export, not who made it, so every entry is checked "
+                         "(its path must be exactly <type dir>/<id>.md, and the rule loader must accept it) and "
+                         "the pack is imported whole or not at all. An id the workspace already has refuses the "
+                         "pack unless --rename gives the incoming rule a free id. With --workspace DIR, DIR "
+                         "itself must hold .aegis (there is no walk-up from it). Review the imported rules "
+                         "before you rely on them."))
+        p_imp.add_argument("pack", metavar="PACK", help="The pack file to read")
+        p_imp.add_argument("--rename", action="store_true",
+                           help="Give a rule whose id is taken a free id (<id>-imported, -imported-2, ...) instead of refusing")
+        p_imp.add_argument("--dry-run", dest="dry_run", action="store_true",
+                           help="Check the pack and report what would be added; write nothing")
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_rule(args)
