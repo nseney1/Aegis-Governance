@@ -70,6 +70,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from aegis_core import hosts as host_table
 from aegis_core.config import ENV_CLIENT, ENV_WORKSPACE
+from aegis_core.pathlookup import which
 from aegis_core.storage import atomic_write_bytes
 from aegis_core.workspace.layout import AEGIS_DIRNAME, UserLayout
 
@@ -635,52 +636,6 @@ def registrable_hosts() -> Tuple[host_table.HostSpec, ...]:
     return tuple(h for h in host_table.all_hosts(phase=1) if h.registration is not None)
 
 
-def _exe_names(name: str) -> List[str]:
-    if sys.platform != "win32":
-        return [name]
-    exts = [e for e in (os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(os.pathsep) if e]
-    if os.path.splitext(name)[1].upper() in {e.upper() for e in exts}:
-        return [name]
-    return [name + e for e in exts]
-
-
-def _on_disk(directory: str, candidates: List[str]) -> List[str]:
-    """The names in ``directory`` that ``candidates`` match, in candidate order, spelled as
-    the directory holds them. Windows matches names case-insensitively and PATHEXT spells
-    extensions in capitals, so ``codex.EXE`` opens ``codex.exe``; the command Aegis runs and
-    the one it writes into a host config should carry the file's own name."""
-    try:
-        names = {n.lower(): n for n in os.listdir(directory)}
-    except OSError:
-        return candidates
-    return [names[c.lower()] for c in candidates if c.lower() in names]
-
-
-def _which(name: str, path: Optional[str] = None) -> Optional[str]:
-    """``shutil.which`` restricted to the absolute entries of ``path`` (default ``$PATH``).
-
-    init and uninstall run inside a repository the user may just have cloned. A relative
-    or empty PATH entry names the current directory, and on Windows shutil.which searches
-    the current directory first whatever PATH says (``path=`` does not stop it), so either
-    would let the repository supply the host CLI Aegis runs, or the aegis-mcp command it
-    writes into a host's user config (host-matrix §3.7).
-
-    The result is the PATH entry joined with the file's name as found, never resolved:
-    version managers (Volta, mise, asdf) install a tool as a link to one dispatcher that
-    picks the tool from the name it is run under.
-    """
-    search = os.environ.get("PATH", os.defpath) if path is None else path
-    candidates = _exe_names(name)
-    for entry in search.split(os.pathsep):
-        if not entry or not os.path.isabs(entry):
-            continue
-        for candidate in _on_disk(entry, candidates) if sys.platform == "win32" else candidates:
-            full = os.path.join(entry, candidate)
-            if os.path.isfile(full) and os.access(full, os.X_OK):
-                return full
-    return None
-
-
 def _user_dir(home: Path, spec: str) -> Path:
     return home / spec[2:] if spec.startswith("~/") else Path(spec)
 
@@ -690,7 +645,7 @@ def detect_hosts(home: Union[str, Path], path: Optional[str] = None) -> List[str
     home = Path(home)
     found = []
     for host in registrable_hosts():
-        if any(_which(b, path) for b in host.binaries) or any(
+        if any(which(b, path) for b in host.binaries) or any(
                 _user_dir(home, d).is_dir() for d in host.user_dirs):
             found.append(host.id)
     return found
@@ -721,7 +676,7 @@ def parse_hosts(value: str) -> Union[str, List[str]]:
 def mcp_command(path: Optional[str] = None) -> List[str]:
     """The absolute command that starts the Aegis MCP server: the aegis-mcp found on PATH,
     under that name (not a link's target, which may be a dispatcher), else this interpreter."""
-    exe = _which("aegis-mcp", path)
+    exe = which("aegis-mcp", path)
     if exe:
         return [exe]
     return [sys.executable, "-m", "aegis_mcp"]
@@ -801,7 +756,7 @@ def _call(argv: List[str]) -> Tuple[int, str]:
 
 def _native(host: host_table.HostSpec, steps: List[List[str]], path: Optional[str], dry_run: bool,
             done: str) -> HostAction:
-    binary = _which(steps[-1][0], path)
+    binary = which(steps[-1][0], path)
     if binary is None:
         return HostAction(host.id, "manual", steps[-1], f"{steps[-1][0]} is not on PATH")
     if dry_run:
@@ -852,7 +807,7 @@ def unregister_host(host_id: str, *, home: Union[str, Path], path: Optional[str]
         result = "absent" if status == "absent" else ("would_run" if dry_run else "removed")
         return HostAction(host_id, result, None, str(target))
     steps = [unregister_argv(host, SERVER_NAME), unregister_argv(host, LEGACY_SERVER_NAME)]
-    binary = _which(steps[0][0], path)
+    binary = which(steps[0][0], path)
     if binary is None:
         return HostAction(host_id, "manual", steps[0], f"{steps[0][0]} is not on PATH")
     if dry_run:
