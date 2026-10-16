@@ -32,7 +32,7 @@ cd my-app
 aegis init --host claude-code,codex-cli   # or --host auto: every supported host found on this machine
 ```
 
-If pip stops with `externally-managed-environment` (PEP 668, as many Linux distributions and Homebrew Python do), run `pipx install aegis-guardrails` or install into a virtual environment. If your shell then says `aegis: command not found`, run `python3 -m aegis_cli <command>` instead (`python -m aegis_cli` on Windows); `aegis init` and `aegis doctor` print the PATH fix for your shell.
+If pip stops with `externally-managed-environment` (PEP 668, as many Linux distributions and Homebrew Python do), run `pipx install aegis-guardrails` or install into a virtual environment. If your shell then says `aegis: command not found`, run `pipx ensurepath` after a pipx install, activate the virtual environment, or run the script by its full path (on Linux `~/.local/bin/aegis` after `pip install --user`); `aegis init` and `aegis doctor` print the PATH fix for your shell. Do not fall back to `python3 -m aegis_cli` inside a repository: `-m` imports from the current directory first.
 
 `aegis init` prints its plan and asks before it writes anything. After you confirm, it reports (absolute paths shortened to `~`):
 
@@ -154,7 +154,7 @@ Aegis does not claim enforcement it lacks. `aegis doctor` reports these tiers, i
 
 **Does Aegis send my code anywhere?** No. The CLI and the MCP server make no network calls, and the ledger stays in `.aegis/state/` on your machine. The exception is Layer 2: `aegis check --full` pipes the change to the model command you name with `--llm-cmd`, for example `claude -p`. `aegis init --host` also runs your hosts' own CLIs to register the server.
 
-**I used Aegis 3.x. How do I upgrade?** Run `aegis migrate` to see the plan, then `aegis migrate --apply` (it backs up every file it changes). Then run `aegis doctor --fix` to remove stale v3 MCP entries (such as `soma`) and legacy rule blocks in instruction files, again backing up each file first.
+**I used Aegis 3.x. How do I upgrade?** Run `aegis migrate` to see the plan, then `aegis migrate --apply` (it backs up every file it changes). Then run `aegis init --host <your hosts>` (for example `--host claude-code,codex-cli`, or `--host auto`) to register the MCP server and write the `AGENTS.md` bootstrap. Last, run `aegis doctor --fix` to remove stale v3 MCP entries (such as `soma`) and legacy rule blocks in instruction files, again backing up each file first. The [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md#upgrading-from-3x) lists what `aegis migrate` converts.
 
 ## Documentation, contributing, security, license
 

@@ -279,17 +279,29 @@ def test_the_readme_gives_the_install_remedies_aegis_itself_prints(tmp_path):
 
     nowhere = {"env": {"PATH": ""}, "which": lambda *a, **k: None, "os_name": "posix"}
     not_installed = build_hint(candidates=[], **nowhere)
-    scripts = tmp_path / "bin"
-    scripts.mkdir()
+    scripts = tmp_path / ".local" / "bin"
+    scripts.mkdir(parents=True)
     (scripts / "aegis").write_text("", encoding="utf-8")
     off_path = build_hint(candidates=[str(scripts)], home=str(tmp_path), platform="linux",
                           shell="bash", venv_prefix=None, **nowhere)
 
     pipx = re.search(r"pipx install [\w.-]+", not_installed).group(0)
-    module = re.search(r"python3 -m \w+", off_path).group(0)
     quick = _section(README.read_text(encoding="utf-8"), "Quick start")
-    assert pipx in quick and module in quick
+    assert pipx in quick
     assert "externally-managed-environment" in quick
+    # The script pip --user installed, by its full path: what the PATH fix adds.
+    assert f"was installed to {scripts}" in off_path and "~/.local/bin/aegis" in quick
+    assert "pipx ensurepath" in quick and "activate the virtual environment" in quick
+
+
+def test_the_readme_never_advises_running_aegis_with_python_dash_m():
+    """Release review: `python3 -m aegis_cli` (and `-m aegis_mcp`) put the current directory
+    first on sys.path, so in a cloned repository they run its own aegis_* packages."""
+    readme = README.read_text(encoding="utf-8")
+    advice = re.findall(r"python3? -m aegis_\w+", readme)
+    assert all("Do not fall back to `" + a in readme for a in advice), advice
+    how = HOW.read_text(encoding="utf-8")
+    assert "-m aegis_mcp" not in how.replace("never registers `python -m aegis_mcp`", "")
 
 
 def _description() -> str:
