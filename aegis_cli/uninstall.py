@@ -153,6 +153,12 @@ class UninstallCommand(AegisCommand):
     name = "uninstall"
     category = CommandCategory.SETUP
     help = "Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/)"
+    description = (
+        "Remove the git pre-commit hook block, the Aegis blocks in AGENTS.md and CLAUDE.md, this "
+        "workspace's entry in ~/.aegis/workspaces.json and the 'aegis' (and legacy 'soma') MCP "
+        "registration of the hosts it was registered with. A host that another registered workspace "
+        "still lists keeps its registration unless named with --host. Never deletes .aegis/."
+    )
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
