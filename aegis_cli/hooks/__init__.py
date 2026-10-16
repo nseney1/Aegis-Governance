@@ -1,4 +1,5 @@
-"""Git pre-commit hook management and the isolated command safety gate."""
+"""Git pre-commit hook management, the agent-host hook runtime (`aegis hook run`,
+in aegis_cli.hooks.pretool) and the isolated command safety gate."""
 from __future__ import annotations
 
 from aegis_cli.hooks.management import (
