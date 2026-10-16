@@ -11,7 +11,7 @@ import fnmatch
 import os
 import re
 import shlex
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 # ── Canonical Reason Strings (1:1 Parity with aegis_cli/hooks.py) ─────────────
 
@@ -895,6 +895,13 @@ class GuardRule:
     codex_prefixes: Tuple[CodexPrefix, ...] = ()
 
 
+def _prefix(*positions: Union[str, Tuple[str, ...]]) -> CodexPrefix:
+    """A Codex prefix pattern. Built by a call, not a tuple literal: it is data for Codex,
+    and a literal ("git", ...) reads as a git argv to the ratchet that keeps every git
+    subprocess in gitsafe (tests/unit/core/test_gitsafe.py)."""
+    return tuple(positions)
+
+
 _PROTECTED_BRANCHES = frozenset({"main", "master"})
 # dd may write these without destroying anything.
 _HARMLESS_DEVICES = frozenset({"/dev/null", "/dev/zero", "/dev/stdout", "/dev/stderr", "/dev/tty"})
@@ -909,26 +916,26 @@ BLOCK_SET: Tuple[GuardRule, ...] = (
     GuardRule(
         "git-push-force", GUARD_BLOCK,
         "force push (--force, -f, --force-with-lease) overwrites the remote branch",
-        (("git", "push", ("--force", "-f", "--force-with-lease")),),
+        (_prefix("git", "push", ("--force", "-f", "--force-with-lease")),),
     ),
     GuardRule("git-push-refspec", GUARD_BLOCK, "a +refspec push force-updates the remote branch"),
     GuardRule(
         "git-reset-hard", GUARD_BLOCK, "git reset --hard discards uncommitted changes",
-        (("git", "reset", "--hard"),),
+        (_prefix("git", "reset", "--hard"),),
     ),
     GuardRule(
         "git-clean-force", GUARD_BLOCK, "git clean -f permanently deletes untracked files",
-        (("git", "clean", ("-f", "--force", "-fd", "-df", "-fx", "-xf", "-fdx", "-xdf", "-dfx")),),
+        (_prefix("git", "clean", ("-f", "--force", "-fd", "-df", "-fx", "-xf", "-fdx", "-xdf", "-dfx")),),
     ),
     GuardRule(
         "rm-recursive-dangerous", GUARD_BLOCK, "recursive rm of /, ~, $HOME, *, . or ..",
-        (("rm", ("-r", "-R", "-rf", "-fr", "-Rf", "-fR", "--recursive"),
-          ("/", "/*", "~", "~/", "~/*", "*", ".", "./", "..", "../", "$HOME", "/home", "/root")),),
+        (_prefix("rm", ("-r", "-R", "-rf", "-fr", "-Rf", "-fR", "--recursive"),
+                 ("/", "/*", "~", "~/", "~/*", "*", ".", "./", "..", "../", "$HOME", "/home", "/root")),),
     ),
     GuardRule(
         "mkfs", GUARD_BLOCK, "mkfs formats a filesystem",
-        ((("mkfs", "mkfs.ext2", "mkfs.ext3", "mkfs.ext4", "mkfs.xfs", "mkfs.btrfs", "mkfs.vfat",
-           "mkfs.fat", "mkfs.exfat", "mkfs.ntfs"),),),
+        (_prefix(("mkfs", "mkfs.ext2", "mkfs.ext3", "mkfs.ext4", "mkfs.xfs", "mkfs.btrfs", "mkfs.vfat",
+                  "mkfs.fat", "mkfs.exfat", "mkfs.ntfs")),),
     ),
     GuardRule("dd-device", GUARD_BLOCK, "dd of=/dev/... overwrites a device"),
 )
