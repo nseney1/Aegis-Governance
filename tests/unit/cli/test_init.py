@@ -6,6 +6,7 @@ covered in test_init_hosts.py. Every test runs with an empty HOME (tests/unit/cl
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -711,3 +712,207 @@ class TestCommandLine:
         assert "gemini mcp" not in captured.err
         assert "v4.1" not in captured.err
         assert not (project / ".aegis").exists()
+
+
+# ── --skills: project the packaged skills for the hosts (v4.1 spec §3) ──────
+
+PACKAGED_SKILLS = sorted(p.parent.name for p in packaged_dir("skills").glob("*/SKILL.md"))
+
+
+def _projected(root: Path, directory: str) -> list:
+    return sorted(p.parent.name for p in (root / directory).glob("*/SKILL.md"))
+
+
+def _init_json(project: Path, capsys, *flags: str):
+    rc = main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks", "--rules", "minimal", *flags])
+    return rc, json.loads(capsys.readouterr().out)
+
+
+class TestInitSkills:
+    @pytest.fixture(autouse=True)
+    def _no_fsync(self, monkeypatch):
+        """os.fsync is the OS durability boundary; these tests check bytes, and the fsyncs
+        of 15 or 30 copies per test would double this module's run time on a slow disk
+        (the mutation gate's baseline has a fixed budget)."""
+        monkeypatch.setattr(os, "fsync", lambda fd: None)
+
+    def test_skills_projects_every_packaged_skill_for_the_selected_hosts(self, project, capsys):
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code,codex-cli")
+
+        assert rc == 0
+        assert len(PACKAGED_SKILLS) == 15
+        assert _projected(project, ".claude/skills") == PACKAGED_SKILLS
+        assert _projected(project, ".agents/skills") == PACKAGED_SKILLS
+        steps = {a["target"]: a for a in payload["actions"]}
+        assert steps[".agents/skills"]["result"] == "synced"
+        assert steps[".agents/skills"]["detail"] == "codex-cli, unverified: 15 created"
+        assert steps[".claude/skills"]["detail"] == "claude-code, unverified: 15 created"
+        genesis = (project / ".claude/skills/genesis/SKILL.md").read_text(encoding="utf-8")
+        assert genesis.startswith("---\nname: genesis\ndescription: ")
+
+    def test_text_output_names_each_skills_directory(self, project, capsys):
+        assert run_init(_args(project, "--skills", "--host", "antigravity")) == 0
+        out = capsys.readouterr().out
+        assert ".agents/skills: synced (antigravity, unverified: 15 created)" in out
+
+    def test_a_second_init_leaves_the_projected_skills_unchanged(self, project, capsys):
+        assert run_init(_args(project, "--skills", "--host", "claude-code")) == 0
+        before = {p: p.read_bytes() for p in (project / ".claude").rglob("SKILL.md")}
+        capsys.readouterr()
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 0
+        step = next(a for a in payload["actions"] if a["target"] == ".claude/skills")
+        assert (step["result"], step["detail"]) == ("unchanged", "claude-code, unverified: 15 unchanged")
+        assert {p: p.read_bytes() for p in (project / ".claude").rglob("SKILL.md")} == before
+
+    def test_without_skills_nothing_is_projected(self, project, capsys):
+        rc, payload = _init_json(project, capsys, "--host", "claude-code")
+        assert rc == 0
+        assert not (project / ".claude").exists()
+        assert not any("skills" in a["target"] for a in payload["actions"])
+
+    def test_skills_uses_the_hosts_already_in_the_config(self, project):
+        assert run_init(_args(project, "--host", "antigravity")) == 0
+        assert not (project / ".agents").exists()
+
+        assert run_init(_args(project, "--skills")) == 0
+
+        assert _projected(project, ".agents/skills") == PACKAGED_SKILLS
+        assert not (project / ".claude").exists()
+
+    def test_skills_without_any_host_is_skipped_with_a_pointer(self, project, capsys):
+        rc, payload = _init_json(project, capsys, "--skills")
+
+        assert rc == 0
+        step = next(a for a in payload["actions"] if a["target"] == "skills")
+        assert step["result"] == "skipped" and "--host" in step["detail"]
+        assert not (project / ".claude").exists() and not (project / ".agents").exists()
+
+    def test_a_refused_skills_directory_stops_init_before_anything_is_written(self, project, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        symlink_or_skip(outside, project / ".claude", target_is_directory=True)
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 1 and payload["status"] == "refused"
+        assert not (project / ".aegis").exists() and not (project / "AGENTS.md").exists()
+        assert list(outside.iterdir()) == []
+        assert any(".claude" in e and "symlink" in e and "--skills" in e for e in payload["errors"])
+
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX permission bits that apply to this user")
+    def test_a_skills_directory_that_cannot_be_written_stops_init_before_anything_is_written(self, project, capsys):
+        (project / ".claude").mkdir()
+        os.chmod(project / ".claude", 0o555)
+        try:
+            rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+        finally:
+            os.chmod(project / ".claude", 0o755)
+
+        assert rc == 1 and payload["status"] == "refused"
+        assert not (project / ".aegis").exists() and not (project / "AGENTS.md").exists()
+        assert list((project / ".claude").iterdir()) == []
+        assert payload["errors"][0] == (
+            f"skills: .claude/skills/{PACKAGED_SKILLS[0]}/SKILL.md cannot be written "
+            f"({project.resolve() / '.claude'} is not a writable directory). Fix it, or re-run without --skills.")
+
+    def test_a_user_s_own_skill_file_is_kept_with_a_warning(self, project, capsys):
+        mine = project / ".claude" / "skills" / "genesis" / "SKILL.md"
+        mine.parent.mkdir(parents=True)
+        mine.write_bytes(b"my genesis\n")
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 0
+        assert mine.read_bytes() == b"my genesis\n"
+        assert any(w.startswith(".claude/skills/genesis/SKILL.md: ") and "marker" in w for w in payload["warnings"])
+        step = next(a for a in payload["actions"] if a["target"] == ".claude/skills")
+        assert step["detail"] == "claude-code, unverified: 14 created, 1 skipped"
+
+    def test_dry_run_projects_nothing_and_records_no_event(self, project, capsys):
+        from aegis_core import events
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code", "--dry-run")
+
+        assert rc == 0 and payload["dry_run"] is True
+        step = next(a for a in payload["actions"] if a["target"] == ".claude/skills")
+        assert step["detail"] == "claude-code, unverified: 15 created"
+        assert not (project / ".claude").exists() and not (project / ".aegis").exists()
+        assert events.read(project, "skills_sync").rows == []
+
+    def test_an_aegis_copy_updated_alone_is_reported_synced(self, project, capsys):
+        assert run_init(_args(project, "--skills", "--host", "claude-code")) == 0
+        target = project / ".claude/skills/genesis/SKILL.md"
+        lines = target.read_text(encoding="utf-8").splitlines(True)
+        # An older Aegis copy: unedited (its marker matches its text), but not today's text.
+        head, old_body = "".join(lines[:4]), "\nAn older genesis.\n"
+        sha = hashlib.sha256((head + old_body).encode("utf-8")).hexdigest()[:12]
+        target.write_text(head + f"<!-- aegis:skill id=genesis v=1 sha={sha} -->\n" + old_body, encoding="utf-8")
+        capsys.readouterr()
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 0
+        step = next(a for a in payload["actions"] if a["target"] == ".claude/skills")
+        assert (step["result"], step["detail"]) == ("synced", "claude-code, unverified: 1 updated, 14 unchanged")
+        assert "An older genesis." not in target.read_text(encoding="utf-8")
+
+    def test_skills_with_an_unreadable_config_uses_the_hosts_named_now(self, project, capsys):
+        (project / ".aegis").mkdir()
+        (project / ".aegis" / "config.json").write_text("{not json", encoding="utf-8")
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "codex-cli")
+
+        assert rc == 0
+        assert _projected(project, ".agents/skills") == PACKAGED_SKILLS
+        assert any("config.json" in w for w in payload["warnings"])
+
+    def test_configured_hosts_without_skills_are_named_in_warnings(self, project, capsys):
+        (project / ".aegis").mkdir()
+        (project / ".aegis" / "config.json").write_text('{"v": 1, "hosts": ["claude-desktop"]}', encoding="utf-8")
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 0
+        assert "claude-desktop reads no project skills; nothing to copy for it" in payload["warnings"]
+
+    def test_a_packaged_skill_that_cannot_be_projected_stops_init(self, project, tmp_path, capsys, monkeypatch):
+        """The packaged data's location is the installation boundary; point it at a broken copy."""
+        from aegis_cli import skills_sync
+
+        source = tmp_path / "source"
+        (source / "broken").mkdir(parents=True)
+        (source / "broken" / "SKILL.md").write_text("no frontmatter\n", encoding="utf-8")
+        monkeypatch.setattr(skills_sync, "packaged_dir", lambda name: source)
+
+        rc, payload = _init_json(project, capsys, "--skills", "--host", "claude-code")
+
+        assert rc == 1 and payload["status"] == "refused"
+        assert payload["errors"][0] == ("skills: packaged broken/SKILL.md: skill broken: no readable frontmatter. "
+                                        "Fix it, or re-run without --skills.")
+        assert not (project / ".aegis").exists() and not (project / ".claude").exists()
+
+    def test_a_caller_s_own_namespace_without_the_option_projects_nothing(self, project, capsys):
+        """run_init called with a Namespace built before --skills existed keeps the old behaviour."""
+        args = argparse.Namespace(workspace=str(project), yes=True, no_hooks=True, rules="minimal",
+                                  host=["claude-code"], json=True)
+
+        assert run_init(args) == 0
+
+        payload = json.loads(capsys.readouterr().out)
+        assert not (project / ".claude").exists()
+        assert not any("skills" in a["target"] for a in payload["actions"])
+
+    def test_a_real_run_records_an_init_triggered_skills_sync_event(self, project):
+        from aegis_core import events
+
+        assert run_init(_args(project, "--skills", "--host", "claude-code")) == 0
+
+        rows = events.read(project, "skills_sync").rows
+        assert [(r["result"], r["detail"]["trigger"], r["detail"]["hosts"]) for r in rows] == [
+            ("ok", "init", ["claude-code"])]
