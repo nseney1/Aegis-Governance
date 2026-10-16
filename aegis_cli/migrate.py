@@ -2,7 +2,8 @@
 
 The work is aegis_core.migrate; this module parses flags and prints the plan.
 Exit codes: 0 done (or nothing to do), 1 refused (nothing written: an unconfined path,
-the lock held by another process, or files that changed between planning and applying)
+the lock held by another process, files that changed between planning and applying, or
+a workspace Aegis would still refuse with nothing to convert, whose blocker is named)
 or something was left unmigrated (an unmapped type, a destination conflict, an
 unreadable file, a customized driver), 2 usage error.
 """
@@ -54,13 +55,22 @@ def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
     for entry in report["conflicts"]:
         print(f"  ! {entry['to']} already exists: {entry['path']} left in place")
     for path in report["unreadable"]:
-        print(f"  ! cannot read {path}: left in place")
+        removed_with = next((r for r in report["remove"] if path == r or path.startswith(r.rstrip("/") + "/")), None)
+        if removed_with is None:
+            print(f"  ! cannot read {path}: left in place")
+        else:  # its directory goes, so the backup is the only copy left
+            where = f"the backup {backup}" if backup else "the backup"
+            print(f"  ! cannot read {path}: not converted; removed with {removed_with}, kept only in {where}")
     for entry in report["skipped"]:
         print(f"  ! {entry['path']}: {entry['reason']}")
     for path in report["already_moved"]:
         print(f"  remove (already converted, backed up first): {path}")
     for path in report["left_in_place"]:
         print(f"  note: {path} is not part of the v4 layout; left in place")
+    if report.get("not_converted"):
+        print("  ! not converted:")
+        for entry in report["not_converted"]:
+            print(f"    {entry['path']}: {entry['reason']}")
     if report["user_config"]:
         print("  For ~/.aegis/config.json (not written: a repository cannot name commands or set slots):")
         print("    " + json.dumps(report["user_config"], indent=2).replace("\n", "\n    "))

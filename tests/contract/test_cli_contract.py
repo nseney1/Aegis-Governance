@@ -170,12 +170,13 @@ def test_installed_git_hook_command_parses_as_check_hook():
     from aegis_cli.hooks.management import _HOOK_RUNNER, generate_hook_block
 
     block = generate_hook_block("/opt/py/bin/python3", import_root="/opt/site")
-    exec_lines = [ln.strip() for ln in block.splitlines() if ln.strip().startswith("exec ")]
-    assert len(exec_lines) == 1, block
-    tokens = shlex.split(exec_lines[0])
-    assert tokens[:5] == ["exec", "$AEGIS_PYTHON", "-I", "-c", _HOOK_RUNNER]
+    run_lines = [ln.strip() for ln in block.splitlines() if ln.strip().startswith('"$AEGIS_PYTHON" ')]
+    assert len(run_lines) == 1, block
+    tokens = shlex.split(run_lines[0])
+    assert tokens[:4] == ["$AEGIS_PYTHON", "-I", "-c", _HOOK_RUNNER]
+    assert tokens[-3:] == ["||", "exit", "$?"]  # a failed check ends the hook with its exit code
     assert "main(sys.argv[2:])" in _HOOK_RUNNER
-    argv = tokens[tokens.index("$AEGIS_PATH") + 1:]
+    argv = tokens[tokens.index("$AEGIS_PATH") + 1:-3]
     ns = _build_parser(prog="aegis").parse_args(argv)
     assert ns.command == "check"
     assert ns.hook is True

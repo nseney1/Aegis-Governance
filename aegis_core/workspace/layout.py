@@ -35,10 +35,15 @@ RULES_RELDIR = f"{AEGIS_DIRNAME}/rules"
 # lives under state/, so one entry covers it.
 GITIGNORE_ENTRIES: tuple[str, ...] = ("state/",)
 
-# ── v3 layout, read only by `aegis migrate` ──────────────────────────────────
+# ── v3 layout, read only by `aegis migrate` and the upgrade checks ───────────
 # Ledger copies, newest-wins order: evidence/ was the live ledger, telemetry/ held
 # compaction snapshots of it (a row can be in both).
 LEGACY_LEDGER_FILES: tuple[str, ...] = ("evidence/signals.jsonl", "telemetry/signals.jsonl")
+# v3.3 `aegis system compact` moved expired rows of each copy into monthly gzip files
+# beside it (archive/signals-YYYY-MM.jsonl.gz) and summed them in checkpoint_rollup.json.
+LEGACY_LEDGER_ARCHIVE = "archive"
+LEGACY_LEDGER_ARCHIVE_GLOB = "*.jsonl.gz"
+LEGACY_LEDGER_ROLLUP = "checkpoint_rollup.json"
 # Runtime state v4 no longer reads. `aegis migrate --apply` backs these up and removes
 # them; entries are relative to .aegis/ (a trailing "/" marks a directory).
 LEGACY_STATE_ENTRIES: tuple[str, ...] = (
@@ -65,8 +70,26 @@ LEGACY_STATE_ENTRIES: tuple[str, ...] = (
 # v3 config files that `aegis migrate` converts into config.json (relative to .aegis/,
 # except aegis.conf, which lived at the repository root).
 LEGACY_REPO_CONF = "aegis.conf"
+LEGACY_REPO_CONFS: tuple[str, ...] = (LEGACY_REPO_CONF, "soma.conf")
 LEGACY_CONFIG_ENTRIES: tuple[str, ...] = ("slots.yaml", "config.yaml")
-LEGACY_SOMA_RULES_DIR = "cells"
+# A v3 setting file with no v4 equivalent, at the repository root; migrate reports it.
+LEGACY_STEERING_CONF = "steering.conf"
+# Where the v1/v2 layout kept rules, relative to its .soma/ directory: cells/<type>/
+# (v1, v2.2+) and rules/<type>/ (v2.0, v2.1). Both move to .aegis/rules/<type>/.
+LEGACY_RULE_DIRS: tuple[str, ...] = ("cells", "rules")
+# The v1/v2 ledger, relative to .soma/.
+LEGACY_PREDECESSOR_LEDGER = "evidence/signals.jsonl"
+# What only an unmigrated v3 workspace holds, relative to .aegis/: status, scan and sync
+# refuse while one exists, check warns (discovery.unmigrated_state).
+LEGACY_UPGRADE_MARKERS: tuple[str, ...] = (
+    *LEGACY_LEDGER_FILES,
+    f"evidence/{LEGACY_LEDGER_ARCHIVE}",
+    f"telemetry/{LEGACY_LEDGER_ARCHIVE}",
+    *LEGACY_CONFIG_ENTRIES,
+    "keys",
+    "receipts.jsonl",
+    "rules/manifest.json",
+)
 
 
 @dataclass(frozen=True)
@@ -138,8 +161,14 @@ class WorkspaceLayout:
         return self.root / LEGACY_SOMA_DIRNAME
 
     @property
-    def legacy_soma_rules_dir(self) -> Path:
-        return self.legacy_soma_dir / LEGACY_SOMA_RULES_DIR
+    def legacy_rule_dirs(self) -> tuple[Path, ...]:
+        """The v1/v2 rule directories (``.soma/cells``, ``.soma/rules``)."""
+        base = self.legacy_soma_dir
+        return tuple(base / name for name in LEGACY_RULE_DIRS)
+
+    @property
+    def legacy_predecessor_ledger(self) -> Path:
+        return self.legacy_soma_dir / LEGACY_PREDECESSOR_LEDGER
 
 
 @dataclass(frozen=True)
@@ -176,6 +205,11 @@ class UserLayout:
     def backups_dir(self) -> Path:
         return self.aegis_dir / "backups"
 
+    @property
+    def legacy_slots_file(self) -> Path:
+        """v3's user slot bindings; v4 reads ``config.json`` instead (aegis migrate reports it)."""
+        return self.aegis_dir / "slots.yaml"
+
 
 def is_aegis_workspace(directory: Path | str) -> bool:
     """True if ``directory`` holds an ``.aegis/`` directory."""
@@ -191,11 +225,18 @@ __all__ = [
     "AEGIS_DIRNAME",
     "GITIGNORE_ENTRIES",
     "LEGACY_CONFIG_ENTRIES",
+    "LEGACY_LEDGER_ARCHIVE",
+    "LEGACY_LEDGER_ARCHIVE_GLOB",
     "LEGACY_LEDGER_FILES",
+    "LEGACY_LEDGER_ROLLUP",
+    "LEGACY_PREDECESSOR_LEDGER",
     "LEGACY_REPO_CONF",
+    "LEGACY_REPO_CONFS",
+    "LEGACY_RULE_DIRS",
     "LEGACY_SOMA_DIRNAME",
-    "LEGACY_SOMA_RULES_DIR",
     "LEGACY_STATE_ENTRIES",
+    "LEGACY_STEERING_CONF",
+    "LEGACY_UPGRADE_MARKERS",
     "RULES_RELDIR",
     "UserLayout",
     "WorkspaceLayout",

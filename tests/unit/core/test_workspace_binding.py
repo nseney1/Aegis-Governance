@@ -373,10 +373,70 @@ def test_cli_home_is_never_a_workspace(home, explicit):
     )
 
 
-def test_cli_pin_wins_over_the_cwd(home, tmp_path):
+def test_cli_pin_wins_when_the_cwd_is_in_no_workspace_or_repository(home, tmp_path):
     pin = _governed(tmp_path / "pinned")
-    cwd = _governed(tmp_path / "cwd")
+    cwd = tmp_path / "scratch"
+    cwd.mkdir()
     assert resolve_cli_root(cwd=cwd, pin=str(pin)) == pin
+
+
+def test_cli_pin_agrees_with_a_cwd_inside_the_pinned_workspace(home, tmp_path):
+    pin = _governed(_git_marker(tmp_path / "pinned"))
+    (pin / "src" / "deep").mkdir(parents=True)
+    assert resolve_cli_root(cwd=pin / "src" / "deep", pin=str(pin)) == pin
+
+
+def test_cli_pin_agrees_with_the_repository_that_holds_it(home, tmp_path):
+    """A monorepo: the pinned workspace lies in the cwd's repository, which has no .aegis/."""
+    repo = _git_marker(tmp_path / "mono")
+    pin = _governed(repo / "packages" / "app")
+    (repo / "tools").mkdir()
+    assert resolve_cli_root(cwd=repo / "tools", pin=str(pin)) == pin
+
+
+def test_cli_pin_and_a_cwd_in_another_workspace_hold(home, tmp_path):
+    """The git hook runs in the repository being committed: a pin elsewhere must not
+    make it check another repository."""
+    pin = _governed(_git_marker(tmp_path / "pinned"))
+    other = _governed(_git_marker(tmp_path / "other"))
+    (other / "src").mkdir()
+    with pytest.raises(WorkspaceHold) as exc:
+        resolve_cli_root(cwd=other / "src", pin=str(pin))
+    binding = exc.value.binding.as_dict()
+    assert (binding["status"], binding["reason"]) == ("hold", "pin_conflicts_with_cwd")
+    assert binding["details"] == {"pin": str(pin), "cwd": str(other / "src"), "cwd_root": str(other)}
+    assert "AEGIS_WORKSPACE" in binding["message"]
+
+
+def test_cli_pin_and_a_cwd_in_another_ungoverned_repository_hold(home, tmp_path):
+    pin = _governed(_git_marker(tmp_path / "pinned"))
+    other = _git_marker(tmp_path / "plain-repo")
+    with pytest.raises(WorkspaceHold) as exc:
+        resolve_cli_root(cwd=other, pin=str(pin))
+    assert exc.value.binding.reason == "pin_conflicts_with_cwd"
+    assert exc.value.binding.as_dict()["details"]["cwd_root"] == str(other)
+
+
+def test_cli_pin_wins_from_home_even_when_home_is_a_repository(home, tmp_path):
+    _git_marker(home)  # a dotfiles repository: home is never a workspace, so never a conflict
+    pin = _governed(tmp_path / "pinned")
+    assert resolve_cli_root(cwd=home, pin=str(pin)) == pin
+
+
+def test_cli_a_pin_that_is_not_a_workspace_is_an_error(home, tmp_path):
+    pin = tmp_path / "plain"
+    pin.mkdir()
+    with pytest.raises(WorkspaceNotFoundError) as exc:
+        resolve_cli_root(cwd=pin, pin=str(pin))
+    assert str(exc.value) == f"AEGIS_WORKSPACE is set to {pin}, which has no .aegis/ (run aegis init there)"
+
+
+def test_cli_a_pin_the_command_accepts_need_not_hold_aegis(home, tmp_path):
+    """aegis migrate accepts a legacy workspace (accept), at the pin too."""
+    pin = tmp_path / "legacy"
+    (pin / ".old").mkdir(parents=True)
+    accept = lambda d: (d / ".old").is_dir() or (d / ".aegis").is_dir()  # noqa: E731
+    assert resolve_cli_root(cwd=pin, pin=str(pin), accept=accept) == pin.resolve()
 
 
 def test_cli_pin_and_explicit_target_that_agree_bind(home, tmp_path):

@@ -154,16 +154,19 @@ def _attach_workspace(args: argparse.Namespace) -> None:
     The raw ``--workspace`` value stays on ``args._workspace_arg`` (``args.workspace``
     is replaced by the resolved root). Every command resolves through
     ``resolve_cli_root``: never above the target's git toplevel, never ``$HOME``, and a
-    WorkspaceHold when an ``AEGIS_WORKSPACE`` pin disagrees with ``--workspace``.
+    WorkspaceHold when an ``AEGIS_WORKSPACE`` pin disagrees with ``--workspace`` or,
+    without it, with the cwd's workspace or repository.
     ``aegis init`` keeps its target as given but takes the same hold. An unmigrated
     ``.soma/`` on the walk (or at the pin) raises the upgrade message, except for the
-    ``_LEGACY_TOLERANT_COMMANDS``; ``aegis migrate`` stops at it to convert it.
+    ``_LEGACY_TOLERANT_COMMANDS``; ``aegis migrate`` stops at it to convert it, and
+    ``aegis init`` refuses while ``.soma/`` still holds rule files. Unmigrated v3 state
+    makes status, scan and sync refuse and check warn (``_check_upgrade_state``).
     """
     from aegis_core.config import env_workspace
     from aegis_core.errors import WorkspaceNotFoundError
     from aegis_core.workspace.base import Workspace
     from aegis_core.workspace.binding import check_pin_agrees, resolve_cli_root
-    from aegis_core.workspace.discovery import refuse_unmigrated_v3
+    from aegis_core.workspace.discovery import refuse_unmigrated_v3, unconverted_rule_files
 
     raw_ws = getattr(args, "workspace", None)
     args._workspace_arg = raw_ws
@@ -175,6 +178,10 @@ def _attach_workspace(args: argparse.Namespace) -> None:
     if args.command == "init":
         if raw_ws and pin:
             check_pin_agrees(raw_ws, pin, Path.cwd())
+        target = Path(os.path.expanduser(raw_ws)) if raw_ws else Path.cwd()
+        if unconverted_rule_files(target):
+            # .aegis/ beside them would leave their gates unserved: migrate converts them.
+            refuse_unmigrated_v3(target)
         args._allow_home_fallback = True
         args.ws = Workspace.for_init(raw_ws or Path.cwd())
     elif args.command == "migrate":
@@ -191,6 +198,7 @@ def _attach_workspace(args: argparse.Namespace) -> None:
             else:
                 root = resolve_cli_root(raw_ws, Path.cwd(), pin, accept=_refuse_legacy)
                 refuse_unmigrated_v3(root)  # a pin is not walked
+                _check_upgrade_state(args.command, root)
             args.ws = Workspace(root=root)
         except WorkspaceNotFoundError:
             if args.command not in _HOST_LEVEL_COMMANDS:
@@ -208,6 +216,23 @@ def _attach_workspace(args: argparse.Namespace) -> None:
             return
     args._project_root = args.ws.root
     args.workspace = str(args.ws.root)
+
+
+def _check_upgrade_state(command: str, root: Path) -> None:
+    """Unmigrated v3 state (a v3 ledger, aegis.conf, keys...) that v4 never reads: the
+    commands that would report or derive from an empty ledger refuse, check warns."""
+    from aegis_core.errors import WorkspaceError
+    from aegis_core.workspace.discovery import UPGRADE_STATE_MSG, unmigrated_state
+
+    if command not in _UPGRADE_REFUSED and command not in _UPGRADE_WARNED:
+        return
+    found = unmigrated_state(root)
+    if not found:
+        return
+    message = UPGRADE_STATE_MSG.format(path=root, found=", ".join(found))
+    if command in _UPGRADE_REFUSED:
+        raise WorkspaceError(message)
+    print(f"Warning: {message}", file=sys.stderr)
 
 
 def _migratable(directory: Path) -> bool:
@@ -228,6 +253,11 @@ def _refuse_legacy(directory: Path) -> bool:
 
 # Commands that inspect the machine (hosts, registrations) as well as a workspace.
 _HOST_LEVEL_COMMANDS = frozenset({"doctor"})
+
+# With unmigrated v3 state these refuse (sync must not derive from an empty ledger while
+# a v3 one is pending) or, the gate, warn and still run.
+_UPGRADE_REFUSED = frozenset({"status", "scan", "sync"})
+_UPGRADE_WARNED = frozenset({"check"})
 
 # Commands that must still work in an unmigrated v3 repository (migrate has its own
 # branch): doctor diagnoses it, uninstall removes what an older version installed.

@@ -124,6 +124,45 @@ def test_a_pin_hold_without_json_is_one_line_on_stderr(home, tmp_path, capsys, m
     assert err.startswith("Hold (pin_conflicts_with_target): --workspace ")
 
 
+@pytest.mark.parametrize("argv", [["check", "--hook"], ["status"], ["sync"]], ids=lambda argv: " ".join(argv))
+def test_a_pin_to_another_repository_holds_instead_of_acting_on_it(home, tmp_path, capsys, monkeypatch, argv):
+    """In the git hook the cwd is the repository being committed: a pin elsewhere must
+    not make `check --hook` check (and pass) another repository's changes."""
+    from aegis_cli.registry import get_default_registry
+
+    ran = []
+    monkeypatch.setattr(type(get_default_registry().get(argv[0])), "execute", lambda self, args: ran.append(args) or 0)
+    pinned = _governed(tmp_path / "pinned")
+    (pinned / ".git").mkdir()
+    here = _governed(tmp_path / "here")
+    (here / ".git").mkdir()
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(pinned))
+    monkeypatch.chdir(here)
+
+    rc = main(argv)
+
+    assert rc == 1
+    assert ran == []
+    assert capsys.readouterr().err.startswith(f"Hold (pin_conflicts_with_cwd): AEGIS_WORKSPACE pins {pinned}")
+
+
+def test_a_pin_that_is_not_a_workspace_is_an_error(home, tmp_path, capsys, monkeypatch):
+    from aegis_cli.registry import get_default_registry
+
+    ran = []
+    monkeypatch.setattr(type(get_default_registry().get("status")), "execute", lambda self, args: ran.append(args) or 0)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(plain))
+    monkeypatch.chdir(plain)
+
+    assert main(["status"]) == 1
+    assert ran == []
+    assert capsys.readouterr().err == (
+        f"Error: AEGIS_WORKSPACE is set to {plain}, which has no .aegis/ (run aegis init there)\n"
+    )
+
+
 def test_doctor_still_runs_from_home(home, monkeypatch):
     """Host checks are machine-level: doctor resolves no workspace at $HOME but is not refused."""
     import argparse
@@ -251,8 +290,10 @@ def test_migrate_still_finds_a_legacy_workspace_inside_its_repository(home, tmp_
 
     rc = main(["migrate", "--json"])
 
-    assert rc == 0
-    assert json.loads(capsys.readouterr().out)["root"] == str(repo.resolve())
+    assert rc == 1  # a bare .soma/ holds nothing to convert: migrate names the blocker
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["root"] == str(repo.resolve())
+    assert payload["status"] == "refused" and "rename or remove it" in payload["refusal"]
 
 
 def test_migrate_below_home_never_plans_the_user_plane(home, capsys, monkeypatch):

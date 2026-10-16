@@ -20,6 +20,7 @@ PACKAGES = ("aegis_core", "aegis_cli", "aegis_mcp", "aegis_sdk")
 NON_AEGIS_WRITERS = {
     ("aegis_cli/hooks/management.py", "install_hook"): "the git pre-commit hook (.git/hooks)",
     ("aegis_cli/hooks/management.py", "uninstall_hook"): "the git pre-commit hook (.git/hooks)",
+    ("aegis_core/verification/runner.py", "snapshot_index"): "staged blobs in a temporary directory (aegis check --hook)",
 }
 _WRITE_MODE = re.compile(r"[wax+]")
 _COPIES = {"copy", "copy2", "copyfile", "copytree"}

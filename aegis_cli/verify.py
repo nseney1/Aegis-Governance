@@ -1,7 +1,9 @@
 """The engine behind `aegis check`: target files, Layer 1 and the opt-in Layer 2.
 
 Layer 1 is the workspace checkpoint (aegis_cli.checkpoint) plus call_graph,
-import_guard and forbid_ast on the target files. Layer 2 (--full, or a plan)
+import_guard and forbid_ast on the target files. With --hook (the git pre-commit
+hook) and no FILES, the targets are the staged files and Layer 1 reads their
+staged content: what the commit records, whatever the working tree holds. Layer 2 (--full, or a plan)
 adds the adversarial Spec/Code agent pair and the deterministic Arbiter, run
 by one model command (--llm-cmd or AEGIS_LLM_CMD).
 
@@ -63,10 +65,30 @@ def _files_under(directory: str, git_cwd: str) -> list[str] | None:
     return [f for f in listed if os.path.isfile(os.path.join(git_cwd, f))]
 
 
+def _workspace_relative(paths: list[str], git_cwd: str) -> list[str]:
+    """``paths`` as git diff names them (from the top of the work tree) made relative to
+    the workspace at ``git_cwd``; a path outside the workspace is not its to check."""
+    from aegis_core import gitsafe
+
+    top = gitsafe.toplevel(git_cwd)
+    if top is None:
+        return paths
+    try:
+        prefix = Path(os.path.relpath(os.path.realpath(git_cwd), os.path.realpath(str(top)))).as_posix()
+    except ValueError:  # another drive on Windows
+        return paths
+    if prefix == "." or prefix.startswith(".."):
+        return paths
+    lead = prefix + "/"
+    return [p[len(lead):] for p in paths if p.startswith(lead)]
+
+
 def resolve_target_files(args: argparse.Namespace) -> list[str]:
     """Resolve target files from FILES (a directory means the files under it) or git changes.
 
-    Without FILES, sets ``args._diff_base`` to the base ref the changes came from, or
+    With ``--hook`` and no FILES the targets are the staged files, what the commit records;
+    ``args._staged_unreadable`` is set when git cannot list them. Otherwise, without FILES,
+    sets ``args._diff_base`` to the base ref the changes came from, or
     ``args._no_diff_base`` when nothing changed and no base ref could be diffed against
     (a shallow clone, a repository with no main branch), so a clean tree is not assumed.
     """
@@ -109,8 +131,15 @@ def resolve_target_files(args: argparse.Namespace) -> list[str]:
 
     from aegis_core import gitsafe
 
+    if getattr(args, "hook", False):
+        staged = gitsafe.changed_files(git_cwd, "staged")
+        if staged is None:
+            setattr(args, "_staged_unreadable", True)
+            return []
+        return _workspace_relative(staged, git_cwd)
+
     # `git diff HEAD` plus `git diff --cached`: what a commit of the working tree would add.
-    files = gitsafe.changed_files(git_cwd, "working") or []
+    files = _workspace_relative(gitsafe.changed_files(git_cwd, "working") or [], git_cwd)
     if not files:
         # Nothing uncommitted: check what this branch adds to its base, else the last commit.
         diffed = False
@@ -124,7 +153,7 @@ def resolve_target_files(args: argparse.Namespace) -> list[str]:
                 continue
             diffed = True
             if found:
-                files = found
+                files = _workspace_relative(found, git_cwd)
                 setattr(args, "_diff_base", f"{ref}...HEAD" if mode == "range" else ref)
                 break
         if not diffed:
@@ -255,6 +284,12 @@ def run_verify(args: argparse.Namespace) -> int:
     target_files = resolve_target_files(args)
     if getattr(args, "files", None) and not target_files:
         return 1
+    staged = hook and not getattr(args, "files", None)
+    if staged and getattr(args, "_staged_unreadable", False):
+        # Fail closed: a commit whose content cannot be listed is not checked.
+        print("Error: cannot read the staged changes (not a git work tree, or git failed); nothing was checked",
+              file=sys.stderr)
+        return 1
     no_diff_base = not target_files and bool(getattr(args, "_no_diff_base", False))
     if layer2 and no_diff_base:
         return _usage_error(
@@ -283,7 +318,9 @@ def run_verify(args: argparse.Namespace) -> int:
         _print_checkpoint(issues, strict)
 
     if not target_files:
-        if no_diff_base:
+        if staged:
+            summary = "Layer 1: 0 files staged (nothing to check)"
+        elif no_diff_base:
             summary = "Layer 1: 0 files changed (no base commit found to diff against; pass the files to check)"
         else:
             summary = "Layer 1: 0 files changed (clean repository)"
@@ -302,13 +339,17 @@ def run_verify(args: argparse.Namespace) -> int:
         return 1 if blocking else 0
 
     try:
-        # Mutation testing is slow; it runs only behind --full (fast_mode otherwise).
-        results = runner.run_layer1(
-            changed_files=target_files,
-            repo_root=repo_root,
-            fast_mode=not layer2,
-            diff_base=getattr(args, "_diff_base", None),
-        )
+        if staged:
+            # What `git commit` records is the index, not the working tree.
+            results = runner.run_layer1_on_index(target_files, repo_root)
+        else:
+            # Mutation testing is slow; it runs only behind --full (fast_mode otherwise).
+            results = runner.run_layer1(
+                changed_files=target_files,
+                repo_root=repo_root,
+                fast_mode=not layer2,
+                diff_base=getattr(args, "_diff_base", None),
+            )
     except Exception as exc:
         print(f"Error: Layer 1 could not run: {exc}", file=sys.stderr)
         return 1
@@ -324,6 +365,8 @@ def run_verify(args: argparse.Namespace) -> int:
         for r in results:
             if not r.verdict:
                 print(f"🔴 {r.tool}: {r.target} — {r.detail}")
+            elif r.tool == runner.INDEX_NOTE_TOOL:  # what the hook could not read from git
+                print(f"note: {r.detail}")
         print(summary)
 
     def _record_telemetry(passed: bool, verdict: Any) -> None:
