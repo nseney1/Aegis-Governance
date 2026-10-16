@@ -110,3 +110,71 @@ def test_an_expired_rule_covers_no_file(tmp_path: Path) -> None:
     report = calculate_coverage(str(tmp_path))
 
     assert report["covered"] == 0 and report["uncovered_files"] == ["src/app.py"]
+
+
+def _rule_file(ws: Path, rule_dir: str, rule_id: str, targets: list, enforcement: str = "") -> None:
+    path = ws / ".aegis" / "rules" / rule_dir / f"{rule_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    extra = f"enforcement: {enforcement}\n" if enforcement else ""
+    path.write_text(f"---\nid: {rule_id}\nhypothesis: h\ntarget_paths: {targets!r}\n{extra}---\nB\n", encoding="utf-8")
+
+
+def _files(ws: Path, *rels: str) -> None:
+    for rel in rels:
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_text("x\n", encoding="utf-8")
+
+
+def test_a_directory_reports_the_strongest_enforcement_that_covers_it(tmp_path: Path) -> None:
+    _files(tmp_path, "src/app.py", "src/lib.py", "docs/guide.md", "tools/run.py", "misc/notes.txt")
+    _rule_file(tmp_path, "traps", "gate-app", ["src/app.py"], "gate")
+    _rule_file(tmp_path, "traps", "advise", ["src/*.py", "docs/*.md"])
+    _rule_file(tmp_path, "traps", "mech-tools", ["tools/*.py"], "mechanical")
+
+    by_dir = calculate_coverage(str(tmp_path))["by_directory"]
+
+    assert by_dir == {
+        "src": {"covered": 2, "total": 2, "tier": "gate"},
+        "docs": {"covered": 1, "total": 1, "tier": "advisory"},
+        "tools": {"covered": 1, "total": 1, "tier": "mechanical"},
+        "misc": {"covered": 0, "total": 1, "tier": "none"},
+    }
+
+
+def test_an_unexercised_rule_set_that_covers_everything_grades_45(tmp_path: Path) -> None:
+    """Coverage carries 30% of the overall grade and a rule set without invariants keeps the
+    15% invariant share; with no verdict yet, fitness, diversity (one type) and freshness add nothing."""
+    _files(tmp_path, "src/app.py")
+    _rule_file(tmp_path, "traps", "watch", ["src/*.py"])
+
+    grade = calculate_governance_grade(str(tmp_path))
+
+    assert grade["coverage"] == {"pct": 100.0, "grade": "A+"}
+    assert grade["staleness"] == {"pct": 0.0, "grade": "F"}
+    assert grade["invariant_integrity"] == {"pct": 100.0, "grade": "A+"}
+    assert grade["overall"] == {"pct": 45.0, "grade": "F"}
+
+
+def test_staleness_is_the_share_of_rules_that_have_fired(tmp_path: Path) -> None:
+    from aegis_core.telemetry_engine import ledger
+
+    _files(tmp_path, "src/app.py")
+    _rule_file(tmp_path, "traps", "fired", ["src/*.py"])
+    _rule_file(tmp_path, "traps", "silent", ["src/*.py"])
+    ledger.append(tmp_path, [{"rule": "fired", "outcome": "tp", "source": "ci", "key": "k1"}])
+
+    grade = calculate_governance_grade(str(tmp_path))
+
+    assert grade["staleness"] == {"pct": 50.0, "grade": "F"}
+    assert grade["details"]["stale_rules"] == 1
+
+
+def test_rule_types_in_equal_numbers_give_full_diversity(tmp_path: Path) -> None:
+    _files(tmp_path, "src/app.py")
+    _rule_file(tmp_path, "traps", "a-trap", ["src/*.py"])
+    _rule_file(tmp_path, "invariants", "an-invariant", ["src/*.py"])
+
+    assert calculate_governance_grade(str(tmp_path))["diversity"] == {"pct": 100.0, "grade": "A+"}
+
+    (tmp_path / ".aegis" / "rules" / "invariants" / "an-invariant.md").unlink()
+    assert calculate_governance_grade(str(tmp_path))["diversity"] == {"pct": 0.0, "grade": "F"}

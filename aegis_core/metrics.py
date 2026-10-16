@@ -49,7 +49,9 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
     covered_files = set()
     uncovered_files = set()
     coverage_map = {}
-    tier_rank = {'advisory': 0, 'mechanical': 1, 'gate': 2}
+    # Weakest first. A served rule's enforcement is one of the three (rules.VALID_ENFORCEMENT),
+    # so the order is all a rank needs: no numeric ranks or defaults to drift apart.
+    tiers = ('none', 'advisory', 'mechanical', 'gate')
     dir_tiers = {}
 
     for f in all_files:
@@ -69,8 +71,7 @@ def calculate_coverage(workspace: str, exclude: Optional[Union[List[str], str]] 
             coverage_map[d]['covered'] += 1
 
         for rule in applying:
-            current = dir_tiers.get(d, 'none')
-            if tier_rank.get(rule.enforcement, 0) > tier_rank.get(current, -1):
+            if tiers.index(rule.enforcement) > tiers.index(dir_tiers.get(d, 'none')):
                 dir_tiers[d] = rule.enforcement
 
         coverage_map[d]['tier'] = dir_tiers.get(d, 'none')
