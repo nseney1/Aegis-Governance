@@ -16,12 +16,14 @@ throughout; the pure AST and config readers are tested on their own below.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 from typing import Dict, List, Optional
 
@@ -203,10 +205,19 @@ def test_outside_git_is_a_usage_error(tmp_path: Path):
         lane_gate.check_lane(tmp_path, "docs", base="main", paths=["docs/**"])
 
 
-def test_a_head_already_in_base_has_nothing_to_check(repo: Repo):
+@pytest.mark.parametrize("base_moved_on", [False, True])
+def test_a_head_already_in_base_has_nothing_to_check_and_says_so(repo: Repo, base_moved_on: bool):
+    if base_moved_on:
+        repo.on_main(lambda r: r.write("src/late.py", "late = 1\n"))
     result = _gate(repo, paths=["docs/**"])
-    assert result.changes == ()
+    assert result.changes == () and result.merge_base == result.head
     assert result.passed
+    warning = "HEAD is already contained in main: nothing was checked"
+    assert result.warnings == (warning,)
+    assert result.as_dict()["warnings"] == [warning]
+    lines = result.text_lines()
+    assert f"warning: {warning}" in lines
+    assert lines[-2:] == [lane_gate.NOTE_SELF_ATTESTED, lane_gate.NOTE_EXEMPTION]
 
 
 # ── Allowed set and provenance ───────────────────────────────────────────────
@@ -356,6 +367,31 @@ def test_paths_are_normalized(repo: Repo):
     assert result.passed
 
 
+BASE_SHA = "a" * 40
+
+
+@pytest.mark.parametrize("paths_source, shared_source, label", [
+    (f"base@{BASE_SHA}", f"base@{BASE_SHA}", lane_gate.WITNESSED),
+    (f"base@{BASE_SHA}", "worktree", lane_gate.SELF_ATTESTED),
+    ("lease", f"base@{BASE_SHA}", lane_gate.SELF_ATTESTED),
+    ("cli", f"base@{BASE_SHA}", lane_gate.SELF_ATTESTED),
+    ("cli", "worktree", lane_gate.SELF_ATTESTED),
+])
+def test_the_label_is_witnessed_only_when_every_input_came_from_base(paths_source: str, shared_source: str,
+                                                                     label: str):
+    # check_lane never mixes sources today; v4.2 adds modes, so the property is pinned here.
+    check = lane_gate.LaneCheck(
+        lane="docs", workspace="/w", repository="/w", base="main", base_commit=BASE_SHA, merge_base="b" * 40,
+        head="c" * 40, paths=("docs/**",), paths_source=paths_source, shared=(), shared_source=shared_source,
+        changes=(), findings=(), checked=(), not_checked=(), checked_at="2026-10-16T00:00:00Z",
+    )
+    assert check.label == label
+    assert check.as_dict()["label"] == check.event_detail()["label"] == label
+    note = lane_gate.NOTE_WITNESSED if label == lane_gate.WITNESSED else lane_gate.NOTE_SELF_ATTESTED
+    assert check.as_dict()["notes"][0] == note
+    assert check.text_lines()[0] == f"aegis check --lane docs: PASSED ({label})"
+
+
 # ── Containment ──────────────────────────────────────────────────────────────
 
 def test_a_path_outside_the_allowed_set_fails_containment(repo: Repo):
@@ -464,6 +500,14 @@ def test_finding_id_is_sha256_of_kind_path_name():
     assert len(lane_gate.finding_id("removed", "p", "n")) == 12
 
 
+def test_finding_id_hashes_a_path_that_is_not_utf8_by_its_bytes():
+    # gitsafe.diff_entries decodes a non-UTF-8 path with os.fsdecode, so byte 0xff
+    # arrives as the surrogate U+DCFF; the id is the hash of the original bytes.
+    path = "tests/test_\udcff.py"
+    assert lane_gate.finding_id("removed", path, "test_a") == (
+        hashlib.sha256(b"removed|tests/test_\xff.py|test_a").hexdigest()[:12])
+
+
 def test_a_deleted_test_file_removes_every_test_id(repo: Repo):
     repo.remove("tests/test_app.py")
     repo.commit()
@@ -515,6 +559,16 @@ def test_a_test_class_given_a_constructor_is_no_longer_collected(repo: Repo):
     repo.write("tests/test_app.py", TESTS.replace("class TestApp:\n", "class TestApp:\n    def __init__(self):\n        pass\n\n"))
     repo.commit()
     assert _found(_gate(repo, paths=["tests/**"])) == [("removed", "tests/test_app.py", "TestApp::test_run")]
+
+
+def test_a_test_turned_into_a_fixture_is_no_longer_collected(repo: Repo):
+    repo.write("tests/test_app.py", TESTS.replace("def test_add", "@pytest.fixture\ndef test_add").replace(
+        "    def test_run", "    @pytest.fixture(scope='class')\n    def test_run"))
+    repo.commit()
+    assert _found(_gate(repo, paths=["tests/**"])) == [
+        ("removed", "tests/test_app.py", "TestApp::test_run"),
+        ("removed", "tests/test_app.py", "test_add"),
+    ]
 
 
 def test_a_test_moved_under_a_condition_is_a_finding(repo: Repo):
@@ -593,6 +647,52 @@ def test_a_weakened_skip_condition_is_an_introduced_skip(repo: Repo):
     assert finding.name == "pytest.mark.skipif: pytest.mark.skipif(True, reason='posix') in test_sub"
 
 
+GUARDED = TESTS.replace("import pytest\n", "import sys\n\nimport pytest\n").replace(
+    "def test_add():\n", "def test_add():\n    if sys.platform == 'win32':\n        pytest.skip('win')\n")
+
+
+@pytest.mark.parametrize("head, name", [
+    (GUARDED.replace("    if sys.platform == 'win32':\n        pytest.skip('win')\n", "    pytest.skip('win')\n"),
+     "pytest.skip: pytest.skip('win') in test_add"),
+    (GUARDED.replace("if sys.platform == 'win32':", "if True:"),
+     "pytest.skip: pytest.skip('win') under if True in test_add"),
+    (GUARDED.replace("if sys.platform == 'win32':", "if sys.platform != 'win32':"),
+     "pytest.skip: pytest.skip('win') under if sys.platform != 'win32' in test_add"),
+    (GUARDED.replace("    if sys.platform == 'win32':\n        pytest.skip('win')\n",
+                     "    sys.platform == 'win32' or pytest.skip('win')\n"),
+     "pytest.skip: pytest.skip('win') under sys.platform == 'win32' or in test_add"),
+])
+def test_a_removed_or_changed_guard_around_a_skip_is_an_introduced_skip(repo: Repo, head: str, name: str):
+    repo.on_main(lambda r: r.write("tests/test_app.py", GUARDED))
+    _git(repo.root, "rebase", "-q", "main")
+    repo.write("tests/test_app.py", GUARDED.replace("return 1", "return 2"))
+    repo.commit()
+    assert _gate(repo, paths=["tests/**"]).passed  # the guarded skip itself is not new
+    repo.write("tests/test_app.py", head)
+    repo.commit()
+    (finding,) = _gate(repo, paths=["tests/**"]).findings
+    assert (finding.kind, finding.name) == ("skip", name)
+
+
+@pytest.mark.parametrize("line, name", [
+    ("test_add.__test__ = False", "test_add.__test__ = False in <module>"),
+    ("TestApp.__test__ = False", "TestApp.__test__ = False in <module>"),
+    ("test_sub.pytestmark = [pytest.mark.slow]", "test_sub.pytestmark = [pytest.mark.slow] in <module>"),
+])
+def test_a_test_switched_off_through_an_attribute_is_a_finding(repo: Repo, line: str, name: str):
+    repo.write("tests/test_app.py", TESTS + f"\n{line}\n")
+    repo.commit()
+    (finding,) = _gate(repo, paths=["tests/**"]).findings
+    assert (finding.kind, finding.name) == ("skip", name)
+
+
+def test_ending_the_run_from_a_test_is_a_finding(repo: Repo):
+    repo.write("tests/test_app.py", TESTS.replace("    assert 1 + 1 == 2\n", "    pytest.exit('done', returncode=0)\n"))
+    repo.commit()
+    (finding,) = _gate(repo, paths=["tests/**"]).findings
+    assert (finding.kind, finding.name) == ("skip", "pytest.exit: pytest.exit('done', returncode=0) in test_add")
+
+
 def test_a_new_test_file_with_a_skip_is_a_finding(repo: Repo):
     repo.write("tests/test_new.py", "import pytest\n\npytestmark = pytest.mark.skip\n\n\ndef test_x():\n    assert 1\n")
     repo.commit()
@@ -610,6 +710,31 @@ def test_a_conftest_collect_ignore_is_a_finding_and_a_fixture_is_not(repo: Repo)
     repo.commit()
     (finding,) = _gate(repo, paths=["tests/**"]).findings
     assert (finding.kind, finding.path, finding.name) == ("collection", "tests/conftest.py", "collect_ignore")
+
+
+CONFTEST = (
+    "import pytest\n\ncollect_ignore = ['test_old.py']\n\n\n"
+    "def pytest_collection_modifyitems(items):\n    items.sort(key=lambda item: item.name)\n\n\n"
+    "@pytest.fixture\ndef app():\n    return 1\n"
+)
+
+
+@pytest.mark.parametrize("old, new, name", [
+    ("collect_ignore = ['test_old.py']", "collect_ignore = ['test_old.py', 'test_app.py']", "collect_ignore"),
+    ("items.sort(key=lambda item: item.name)", "items[:] = items[:1]", "pytest_collection_modifyitems"),
+])
+def test_an_edit_to_an_existing_conftest_hook_or_collect_ignore_is_a_finding(repo: Repo, old: str, new: str,
+                                                                             name: str):
+    repo.on_main(lambda r: r.write("tests/conftest.py", CONFTEST))
+    _git(repo.root, "rebase", "-q", "main")
+    repo.write("tests/conftest.py", CONFTEST.replace("return 1", "return 2"))
+    repo.commit()
+    assert _gate(repo, paths=["tests/**"]).passed
+    repo.write("tests/conftest.py", CONFTEST.replace(old, new))
+    repo.commit()
+    (finding,) = _gate(repo, paths=["tests/**"]).findings
+    assert (finding.kind, finding.path, finding.name, finding.detail) == (
+        "collection", "tests/conftest.py", name, "changed at HEAD")
 
 
 def test_a_hook_added_to_a_plugin_module_under_tests_is_a_finding(repo: Repo):
@@ -643,6 +768,31 @@ def test_a_new_pytest_ini_changes_which_config_pytest_reads(repo: Repo):
     repo.write("pytest.ini", "")
     repo.commit()
     assert _found(_gate(repo, paths=["*.ini"])) == [("collection", "pytest.ini", "pytest configuration")]
+
+
+@pytest.mark.parametrize("name", ["pytest.toml", ".pytest.toml"])
+def test_a_new_pytest_toml_is_a_finding(repo: Repo, name: str):
+    # pytest 9 reads [pytest] from these before pytest.ini and pyproject.toml.
+    assert name in lane_gate.PYTEST_CONFIG_FILES
+    repo.write(name, '[pytest]\naddopts = ["--ignore=tests"]\n')
+    repo.commit()
+    result = _gate(repo, paths=["*.toml"])
+    assert [(f.kind, f.path, f.name, f.detail) for f in result.findings] == [
+        ("collection", name, "[pytest] addopts", "added at HEAD"),
+        ("collection", name, "pytest configuration", "added at HEAD"),
+    ]
+    assert result.checked == (name,)
+
+
+def test_a_pytest_toml_testpaths_change_is_a_finding(repo: Repo):
+    repo.on_main(lambda r: r.write("pytest.toml", '[pytest]\ntestpaths = ["tests"]\nmarkers = ["slow"]\n'))
+    _git(repo.root, "rebase", "-q", "main")
+    repo.write("pytest.toml", '[pytest]\ntestpaths = ["tests"]\nmarkers = ["slow", "fast"]\n')
+    repo.commit()
+    assert _gate(repo, paths=["pytest.toml"]).passed
+    repo.write("pytest.toml", '[pytest]\ntestpaths = ["tests/unit"]\nmarkers = ["slow", "fast"]\n')
+    repo.commit()
+    assert _found(_gate(repo, paths=["pytest.toml"])) == [("collection", "pytest.toml", "[pytest] testpaths")]
 
 
 def test_a_pyproject_testpaths_change_is_a_finding(repo: Repo):
@@ -693,6 +843,7 @@ def test_an_event_that_cannot_be_written_is_a_warning(repo: Repo, monkeypatch):
     result = _gate(repo, paths=["docs/**"])
     assert result.passed
     assert result.warnings == ("event not recorded: disk full",)
+    assert "warning: event not recorded: disk full" in result.text_lines()
 
 
 def test_the_report_carries_the_envelope_and_every_record(repo: Repo):
@@ -726,7 +877,8 @@ def test_the_report_carries_the_envelope_and_every_record(repo: Repo):
     assert integrity["not_checked"] == [{"path": "tests/app.test.ts", "reason": "not a Python file"}]
     assert integrity["limits"][0].startswith("Assert weakening is not detected")
     limits = " ".join(integrity["limits"])
-    for gap in ("parametrize", "generated", "test command"):
+    for gap in ("parametrize", "generated", "test command", "module constant", "environment variable",
+                "if ...: return", "decorator", "setattr", "vars()", "os.kill"):
         assert gap in limits
     assert doc["protected_changed"] is True
     assert doc["notes"] == [lane_gate.NOTE_SELF_ATTESTED, lane_gate.NOTE_EXEMPTION]
@@ -848,6 +1000,34 @@ def test_collected_ids_track_conditions_and_rebinding():
     }
 
 
+def test_collected_ids_leave_out_fixtures_named_test():
+    source = (
+        b"import pytest\n"
+        b"import pytest as pt\n"
+        b"from pytest import fixture as fx\n"
+        b"module_scoped = pytest.fixture(scope='module')\n"
+        b"@pytest.fixture\ndef test_a(): pass\n"
+        b"@pytest.fixture(autouse=True)\ndef test_b(): pass\n"
+        b"@pt.yield_fixture\ndef test_c(): pass\n"
+        b"@fx\ndef test_d(): pass\n"
+        b"@module_scoped\ndef test_e(): pass\n"
+        b"class TestK:\n"
+        b"    @pytest.fixture\n    def test_k(self): pass\n"
+        b"    @pytest.mark.slow\n    def test_m(self): pass\n"
+        b"def test_f(): pass\n"
+        b"@pytest.fixture\ndef test_f(): pass\n"
+        b"@pytest.mark.parametrize('x', [1])\ndef test_g(x): pass\n"
+    )
+    assert lane_gate.collected_ids(source) == {"TestK::test_m": True, "test_g": True}
+
+
+def test_collected_ids_follow_a_star_import_of_pytest():
+    assert lane_gate.collected_ids(b"from pytest import *\n@fixture\ndef test_a(): pass\ndef test_b(): pass\n") == {
+        "test_b": True}
+    # Another module's fixture is not pytest's.
+    assert lane_gate.collected_ids(b"from helpers import *\n@fixture\ndef test_a(): pass\n") == {"test_a": True}
+
+
 def test_collected_ids_raise_for_unparseable_source():
     with pytest.raises(SyntaxError):
         lane_gate.collected_ids(b"def broken(:\n")
@@ -911,9 +1091,124 @@ def test_skip_forms_cover_the_plan_s_list(source: str, key: tuple):
     ("import unittest as ut\n@ut.expectedFailure\ndef test_a(): pass\n", ("test_a", "unittest.expectedFailure")),
     ("from unittest import case\n@case.skipIf(True, 'x')\ndef test_a(): pass\n", ("test_a", "unittest.skipIf")),
     ("import pytest\nmk = pytest.mark\n@mk.skip\ndef test_a(): pass\n", ("test_a", "pytest.mark.skip")),
+    ("from pytest import *\n@mark.skip\ndef test_a(): pass\n", ("test_a", "pytest.mark.skip")),
+    ("from pytest import *\ndef test_a():\n    skip('x')\n", ("test_a", "pytest.skip")),
+    ("from pytest import *\ndef test_a():\n    exit('done')\n", ("test_a", "pytest.exit")),
+    ("from unittest import *\n@skipIf(True, 'x')\ndef test_a(): pass\n", ("test_a", "unittest.skipIf")),
+    ("from unittest import *\ndef test_a():\n    raise SkipTest('x')\n", ("test_a", "unittest.SkipTest")),
+    ("from unittest.case import *\n@expectedFailure\ndef test_a(): pass\n", ("test_a", "unittest.expectedFailure")),
 ])
 def test_skip_forms_resolve_import_aliases(source: str, key: tuple):
     assert _canonical_forms(source).get(key) == 1, _forms(source)
+
+
+@pytest.mark.parametrize("source", [
+    "import pytest\ndef _never():\n    import unittest as pytest\n@pytest.mark.skip\ndef test_a(): pass\n",
+    "import pytest, unittest\nif False:\n    pytest = unittest\n@pytest.mark.skip\ndef test_a(): pass\n",
+    "import pytest\n@pytest.mark.skip\ndef test_a(): pass\nimport os as pytest\n",
+    "import pytest\nfrom unittest import skip as pytest\n@pytest.mark.skip\ndef test_a(): pass\n",
+])
+def test_a_name_rebound_elsewhere_still_reads_as_pytest(source: str):
+    # Aliases are collected from the whole module whatever the order or branch, so
+    # rebinding pytest where it never runs must not hide the forms that use it.
+    assert _canonical_forms(source) == {("test_a", "pytest.mark.skip"): 1}
+    fixture = source.replace("@pytest.mark.skip", "@pytest.fixture")
+    assert lane_gate.collected_ids(fixture.encode("utf-8")) == {}
+
+
+def test_an_alias_of_an_alias_is_followed_whatever_the_order():
+    forms = _forms("import pytest\nskip_win = marks.skipif(True, reason='x')\nmarks = pytest.mark\n"
+                   "@skip_win\ndef test_a(): pass\n")
+    assert forms == {("<module>", "pytest.mark.skipif: marks.skipif(True, reason='x')"): 1,
+                     ("test_a", "pytest.mark.skipif: skip_win"): 1}
+
+
+def test_a_star_import_from_another_module_binds_no_skip_form():
+    assert _forms("from helpers import *\n@mark.skip\ndef test_a():\n    skip('x')\n    exit(1)\n") == {}
+
+
+@pytest.mark.parametrize("source, key", [
+    ("import pytest\ndef test_a():\n    pytest.exit('done', returncode=0)\n", ("test_a", "pytest.exit")),
+    ("import os\ndef test_a():\n    os._exit(0)\n", ("test_a", "os._exit")),
+    ("import os as o\ndef test_a():\n    o._exit(0)\n", ("test_a", "os._exit")),
+    ("from os import _exit\ndef test_a():\n    _exit(0)\n", ("test_a", "os._exit")),
+    ("def test_a(): pass\ntest_a.__test__ = False\n", ("<module>", "test_a.__test__ = False")),
+    ("class TestA: pass\nTestA.__test__ = False\n", ("<module>", "TestA.__test__ = False")),
+    ("import pytest\ndef test_a(): pass\ntest_a.pytestmark = [pytest.mark.skip]\n",
+     ("<module>", "test_a.pytestmark = [pytest.mark.skip]")),
+    ("def off(f):\n    f.__test__ = False\n    return f\n", ("off", "f.__test__ = False")),
+])
+def test_skip_forms_cover_early_exits_and_attribute_markers(source: str, key: tuple):
+    assert _canonical_forms(source).get(key) == 1, _forms(source)
+
+
+@pytest.mark.parametrize("statement", [
+    "test_a.__test__, x = False, 1",
+    "x, *test_a.pytestmark = 1, []",
+    "[test_a.__test__] = [False]",
+])
+def test_a_marker_attribute_inside_an_unpacking_target_counts(statement: str):
+    forms = _forms(f"def test_a(): pass\n{statement}\n")
+    assert forms == {("<module>", ast.unparse(ast.parse(statement).body[0])): 1}
+
+
+@pytest.mark.parametrize("source, form", [
+    ("for x in pytest.importorskip('np').arange(3):\n    pass\n", "pytest.importorskip: pytest.importorskip('np')"),
+    ("for d[pytest.skip('x')] in xs:\n    pass\n", "pytest.skip: pytest.skip('x')"),
+    ("while pytest.importorskip('np'):\n    pass\n", "pytest.importorskip: pytest.importorskip('np')"),
+    ("try:\n    pass\nexcept pytest.skip.Exception:\n    pass\n", "pytest.skip: pytest.skip.Exception"),
+    ("with ctx(pytest.importorskip('np')):\n    pass\n", "pytest.importorskip: pytest.importorskip('np')"),
+    ("None if pytest.importorskip('np') else None\n", "pytest.importorskip: pytest.importorskip('np')"),
+])
+def test_a_form_in_the_head_of_a_block_is_counted_outside_the_block(source: str, form: str):
+    assert _forms("import pytest\n" + source) == {("<module>", form): 1}
+
+
+@pytest.mark.parametrize("source, scope, form", [
+    ("if X:\n    pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under if X"),
+    ("if X:\n    pass\nelse:\n    pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under else of if X"),
+    ("if X:\n    pass\nelif Y:\n    pytest.skip('x')\n", "<module>",
+     "pytest.skip: pytest.skip('x') under else of if X > if Y"),
+    ("while X:\n    pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under while X"),
+    ("while X:\n    pass\nelse:\n    pytest.skip('x')\n", "<module>",
+     "pytest.skip: pytest.skip('x') under else of while X"),
+    ("for x in xs:\n    pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under for x in xs"),
+    ("for x in xs:\n    pass\nelse:\n    pytest.skip('x')\n", "<module>",
+     "pytest.skip: pytest.skip('x') under else of for x in xs"),
+    ("async def f():\n    async for x in xs:\n        pytest.skip('x')\n", "f",
+     "pytest.skip: pytest.skip('x') under for x in xs"),
+    ("try:\n    pytest.skip('x')\nexcept ImportError:\n    pass\n", "<module>", "pytest.skip: pytest.skip('x') under try"),
+    ("try:\n    pass\nexcept ImportError:\n    pytest.skip('x')\n", "<module>",
+     "pytest.skip: pytest.skip('x') under except ImportError"),
+    ("try:\n    pass\nexcept:\n    pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under except"),
+    ("try:\n    pass\nexcept E:\n    pass\nelse:\n    pytest.skip('x')\n", "<module>",
+     "pytest.skip: pytest.skip('x') under else of try"),
+    ("try:\n    pass\nfinally:\n    pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under finally"),
+    ("with ctx() as c, other():\n    pytest.skip('x')\n", "<module>",
+     "pytest.skip: pytest.skip('x') under with ctx() as c, other()"),
+    ("async def f():\n    async with ctx():\n        pytest.skip('x')\n", "f",
+     "pytest.skip: pytest.skip('x') under with ctx()"),
+    ("pytest.skip('x') if X else None\n", "<module>", "pytest.skip: pytest.skip('x') under if X"),
+    ("None if X else pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under else of if X"),
+    ("X and pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under X and"),
+    ("X or Y or pytest.skip('x')\n", "<module>", "pytest.skip: pytest.skip('x') under X or > Y or"),
+    ("if pytest.importorskip('np'):\n    pass\n", "<module>", "pytest.importorskip: pytest.importorskip('np')"),
+    ("if X:\n    @pytest.mark.skip\n    def test_a(): pass\n", "test_a", "pytest.mark.skip under if X"),
+    ("if X:\n    def test_a():\n        if Y:\n            pytest.skip('x')\n", "test_a",
+     "pytest.skip: pytest.skip('x') under if X > if Y"),
+    ("if X:\n    pytestmark = pytest.mark.skip\n", "<module>", "pytestmark = pytest.mark.skip under if X"),
+])
+def test_a_skip_is_keyed_by_the_blocks_around_it(source: str, scope: str, form: str):
+    assert _forms("import pytest\n" + source) == {(scope, form): 1}
+
+
+@pytest.mark.skipif(sys.version_info < (3, 10), reason="match statements need Python 3.10")
+def test_a_skip_under_a_match_case_is_keyed_by_the_case():
+    source = "import pytest\nmatch X:\n    case 1 if Y:\n        pytest.skip('x')\n    case _:\n        pass\n"
+    assert _forms(source) == {("<module>", "pytest.skip: pytest.skip('x') under match X case 1 if Y"): 1}
+    heads = ("import pytest\nmatch pytest.importorskip('np'):\n    case _ if pytest.xfail('y'):\n        pass\n")
+    assert _forms(heads) == {("<module>", "pytest.importorskip: pytest.importorskip('np')"): 1,
+                             ("<module>", "pytest.xfail: pytest.xfail('y')"): 1}
 
 
 def test_a_reused_skip_marker_alias_counts_at_each_use():
@@ -1053,6 +1348,13 @@ def test_collection_hooks_ignore_formatting_and_comments():
      {"tool (inline table)": '{pytest={ini_options={addopts="-x"}}}'}),
     ("pyproject.toml", '[tool."pytest".ini_options]\naddopts = """\n-x\n"""\n',
      {"[tool.pytest.ini_options] addopts": '"""\n-x\n"""'}),
+    ("pytest.toml", "", {}),
+    (".pytest.toml", "# nothing yet\n", {}),
+    ("pytest.toml", '[pytest]\naddopts = ["--ignore=tests"]\nmarkers = ["slow"]\n',
+     {"[pytest] addopts": '["--ignore=tests"]'}),
+    (".pytest.toml", 'pytest.testpaths = ["t"]\n', {"[pytest] testpaths": '["t"]'}),
+    ("pytest.toml", 'pytest = {addopts = "-x"}\n', {"pytest (inline table)": '{addopts="-x"}'}),
+    ("pytest.toml", '[tool.pytest]\naddopts = "-x"\n[pytest.ini_options]\naddopts = "-q"\n', {}),
 ])
 def test_pytest_settings_read_the_collection_keys(name: str, text: str, expected):
     assert lane_gate.pytest_settings(name, text.encode("utf-8")) == expected
@@ -1065,6 +1367,8 @@ def test_pytest_settings_read_the_collection_keys(name: str, text: str, expected
     ("pytest.ini", "[pytest]\naddopts = -q\naddopts = -x\n"),
     ("tox.ini", "[pytest]\naddopts = -q\n[pytest]\ntestpaths = t\n"),
     ("setup.cfg", "\xff"),
+    ("pytest.toml", '[pytest]\naddopts = "unterminated\n'),
+    (".pytest.toml", '[pytest\naddopts = "-x"\n'),
 ])
 def test_unreadable_pytest_settings_raise(name: str, text: str):
     data = text.encode("latin-1") if text == "\xff" else text.encode("utf-8")

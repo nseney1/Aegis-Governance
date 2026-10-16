@@ -95,6 +95,16 @@ def test_a_contained_lane_passes_with_exit_0(repo: Path, capsys):
     assert out.splitlines()[0] == "aegis check --lane docs: PASSED (self-attested)"
 
 
+def test_a_head_already_in_base_passes_and_says_nothing_was_checked(repo: Path, capsys):
+    warning = "HEAD is already contained in main: nothing was checked"
+    rc, out, err = _run(capsys, "--lane", "docs", "--base", "main", "--paths", "docs/**")
+    assert rc == 0, err
+    assert f"warning: {warning}" in out.splitlines()
+    assert warning not in err  # printed once, in the report
+    rc, payload, _ = _json(capsys, "--lane", "docs", "--base", "main", "--paths", "docs/**")
+    assert (rc, payload["status"], payload["warnings"]) == (0, "pass", [warning])
+
+
 def test_a_stray_path_or_a_removed_test_fails_with_exit_1(repo: Path, capsys):
     _write(repo, "src/app.py", "def app():\n    return 2\n")
     _write(repo, "tests/test_app.py", "def test_a():\n    assert 1\n")

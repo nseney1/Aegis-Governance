@@ -266,9 +266,7 @@ def _run_lane_gate(args: argparse.Namespace) -> int:
     if use_json:
         print(json.dumps(result.as_dict(), indent=2))
     else:
-        for warning in result.warnings:
-            print(f"Warning: {sanitize_display(warning, max_len=len(warning))}", file=sys.stderr)
-        for line in result.text_lines():
+        for line in result.text_lines():  # warnings included, as "warning: ..." lines
             print(sanitize_display(line, max_len=len(line)))
     return 0 if result.passed else 1
 

@@ -30,22 +30,30 @@ a stable id, the first 12 hex characters of sha256(``kind|path|name``):
 - ``removed``: a test id (``name``, ``Class::name``, ``Outer::Inner::name``: functions
   and methods named ``test*``, as pytest's default discovery collects them) present
   at the merge base and not collected at HEAD. A deleted, moved or symlinked file
-  loses all of its ids; so does a class that gains ``__init__`` or ``__new__``, and a
-  test name rebound or deleted after its ``def``.
+  loses all of its ids; so does a class that gains ``__init__`` or ``__new__``, a
+  test name rebound or deleted after its ``def``, and a test made a fixture
+  (``@pytest.fixture``), which pytest does not collect.
 - ``skip``: an occurrence introduced at HEAD, per scope, of ``pytest.mark.skip``,
   ``skipif`` or ``xfail``; ``unittest.skip``, ``skipIf``, ``skipUnless`` or
-  ``expectedFailure``; a module- or class-level ``pytestmark`` or ``__test__``;
-  ``pytest.skip``, ``pytest.xfail`` or ``pytest.importorskip``; ``.skipTest``; or
-  ``unittest.SkipTest``. Import aliases and simple assignments are followed
-  (``needs_git = pytest.mark.skipif(...)`` makes each ``@needs_git`` count). An
-  occurrence is its whole expression, so a weakened condition is a new skip. A test
-  that moves under a condition (``if``, ``try``, a loop) is a ``skip`` finding too.
+  ``expectedFailure``; a module- or class-level ``pytestmark`` or ``__test__``, or
+  either set as an attribute (``test_x.__test__ = False``); ``pytest.skip``,
+  ``pytest.xfail`` or ``pytest.importorskip``; ``.skipTest``; ``unittest.SkipTest``;
+  or ``pytest.exit`` and ``os._exit``, which end the run early. Import aliases (star
+  imports from pytest, unittest and os too) and simple assignments are followed
+  (``needs_git = pytest.mark.skipif(...)`` makes each ``@needs_git`` count), every
+  binding anywhere in the module, so rebinding ``pytest`` where it never runs adds a
+  reading and hides none. An
+  occurrence is its whole expression and the blocks around it (``if``, ``while``,
+  ``for``, ``try``, ``with``, ``match``, a conditional expression, ``and``/``or``), so
+  a weakened condition or a removed or changed guard is a new skip. A test that
+  moves under a condition (``if``, ``try``, a loop) is a ``skip`` finding too.
 - ``collection``: in a ``conftest.py``, any change to ``collect_ignore``,
   ``collect_ignore_glob`` or a ``pytest_*`` name (the hooks, such as
   ``pytest_collection_modifyitems``, and ``pytest_plugins``); in any other Python
-  test file, a change to a ``pytest_*`` hook it defines (a plugin module); in ``pytest.ini``,
-  ``.pytest.ini``, ``pyproject.toml`` (``[tool.pytest.ini_options]``, ``[tool.pytest]``),
-  ``setup.cfg`` (``[tool:pytest]``) or ``tox.ini`` (``[pytest]``), a change to
+  test file, a change to a ``pytest_*`` hook it defines (a plugin module); in
+  ``pytest.toml`` or ``.pytest.toml`` (``[pytest]``), ``pytest.ini``, ``.pytest.ini``,
+  ``pyproject.toml`` (``[tool.pytest.ini_options]``, ``[tool.pytest]``), ``setup.cfg``
+  (``[tool:pytest]``) or ``tox.ini`` (``[pytest]``), a change to
   ``addopts``, ``testpaths``, ``python_files``, ``python_classes``,
   ``python_functions`` or ``norecursedirs``, or a pytest configuration appearing or
   disappearing (which changes the file pytest reads).
@@ -56,7 +64,8 @@ the reviewer or the person merging decides with the findings in view. LIMITS lis
 what is not detected, assert weakening first.
 
 Every check appends a ``lane_check`` event with the label, both results and the
-provenance record; an event that cannot be written is a warning, never a failure.
+provenance record; an event that cannot be written is a warning, never a failure. A
+HEAD already contained in the base leaves nothing to check: it passes with a warning.
 """
 from __future__ import annotations
 
@@ -72,7 +81,7 @@ from pathlib import Path
 import posixpath
 import re
 import time
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
 from aegis_core import events, gitsafe, team
 from aegis_core._version import __version__
@@ -114,7 +123,9 @@ PROTECTED = (f"{AEGIS_DIRNAME}/**", ".github/workflows/**")
 KINDS = ("removed", "skip", "collection", "unparseable")
 COVERED = ("python",)
 COLLECTION_KEYS = ("addopts", "testpaths", "python_files", "python_classes", "python_functions", "norecursedirs")
-PYTEST_CONFIG_FILES = ("pytest.ini", ".pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg")
+# pytest's own search order; it reads the first that holds a configuration.
+PYTEST_CONFIG_FILES = ("pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini", "pyproject.toml", "tox.ini",
+                       "setup.cfg")
 MAX_FILE_BYTES = 8 * 1024 * 1024
 LIMITS = (
     "Assert weakening is not detected: a test that still exists but checks less passes.",
@@ -122,9 +133,17 @@ LIMITS = (
     "Test ids follow pytest's default discovery (functions and methods named test*), whatever "
     "python_functions or python_classes the repository configures.",
     "Skips reached indirectly are not detected: through a fixture or helper function, a marker imported "
-    "from another module, or getattr with a string.",
+    "from another module, or getattr or setattr with a string.",
+    "A skip is compared by its own text and the blocks around it (if, while, for, try, with, match, a "
+    "conditional expression, and/or), not by what its condition evaluates to: a condition set elsewhere "
+    "(a module constant such as SLOW = True, an environment variable, a helper) or an earlier "
+    "'if ...: return' can change without a finding.",
+    "A decorator that replaces a test with something pytest does not collect (one that returns None, say) "
+    "is not detected; pytest.fixture is.",
     "Trimming @pytest.mark.parametrize cases is not detected, nor are tests generated at import time "
-    "(exec, globals(), loops), which have no def to compare.",
+    "(exec, globals(), loops), which have no def to compare, or removed through globals() or vars().",
+    "Of the ways to end the run early only pytest.exit and os._exit are detected, not os.kill, a signal or "
+    "a plugin outside the test files.",
     "The test command itself (a CI workflow, a Makefile, tox commands) is not read; containment and the "
     "protection on .github/** cover the workflow.",
     "Only committed changes are checked: the range is merge-base(base, HEAD)..HEAD.",
@@ -335,6 +354,7 @@ class LaneCheck:
                          "protected_changed: false")
         for path, reason in self.not_checked:
             lines.append(f"  not checked: {path} ({reason})")
+        lines.extend(f"warning: {warning}" for warning in self.warnings)
         lines.append(NOTE_WITNESSED if self.label == WITNESSED else NOTE_SELF_ATTESTED)
         lines.append(NOTE_EXEMPTION)
         return lines
@@ -582,14 +602,16 @@ def check_lane(root: Any, lane: str, base: Optional[str] = None, paths: Optional
     allowed = [(glob, paths_source) for glob in lane_paths] + [(glob, shared_source) for glob in shared]
     entries = gitsafe.diff_entries(top, merge_base, head)
     findings, checked, not_checked = _integrity(top, merge_base, head, entries)
+    # Passing is right (the lane changed nothing), but a reader of "PASSED" should know why.
+    empty = (f"HEAD is already contained in {ref}: nothing was checked",) if merge_base == head else ()
     result = LaneCheck(
         lane=lane, workspace=str(workspace), repository=str(top), base=ref, base_commit=base_commit,
         merge_base=merge_base, head=head, paths=tuple(lane_paths), paths_source=paths_source,
         shared=tuple(shared), shared_source=shared_source,
         changes=tuple(_contain(entry, allowed) for entry in entries),
-        findings=findings, checked=checked, not_checked=not_checked, checked_at=_stamp(moment),
+        findings=findings, checked=checked, not_checked=not_checked, checked_at=_stamp(moment), warnings=empty,
     )
-    return dataclasses.replace(result, warnings=_record(top, result))
+    return dataclasses.replace(result, warnings=empty + _record(top, result))
 
 
 # ── Python test files ────────────────────────────────────────────────────────
@@ -656,11 +678,20 @@ def _constructs(cls: ast.ClassDef) -> bool:
     return False
 
 
-def _scan_ids(body: Sequence[ast.stmt], prefix: str, conditional: bool, state: Dict[str, bool]) -> None:
+def _fixture(func: Any, aliases: _Aliases) -> bool:
+    """A function decorated with ``pytest.fixture`` (called or not, through any alias):
+    pytest collects it as a fixture, never as a test, whatever its name."""
+    return any(chain in _FIXTURES
+               for decorator in func.decorator_list
+               for chain in _resolve(decorator.func if isinstance(decorator, ast.Call) else decorator, aliases))
+
+
+def _scan_ids(body: Sequence[ast.stmt], prefix: str, conditional: bool, state: Dict[str, bool],
+              aliases: _Aliases) -> None:
     for stmt in body:
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             key = prefix + stmt.name
-            test = stmt.name.startswith("test")
+            test = stmt.name.startswith("test") and not _fixture(stmt, aliases)
             _unbind(state, key, conditional, keep=test)
             if test:
                 # A conditional redefinition of a test keeps a test there either way.
@@ -669,14 +700,14 @@ def _scan_ids(body: Sequence[ast.stmt], prefix: str, conditional: bool, state: D
             key = prefix + stmt.name
             _unbind(state, key, conditional)
             if not _constructs(stmt):
-                _scan_ids(stmt.body, key + "::", conditional, state)
+                _scan_ids(stmt.body, key + "::", conditional, state, aliases)
         else:
             for name in _bound_names(stmt):
                 _unbind(state, prefix + name, conditional)
             for name in _compound_names(stmt):
                 _unbind(state, prefix + name, True)
             for block in _blocks(stmt):
-                _scan_ids(block, prefix, True, state)
+                _scan_ids(block, prefix, True, state, aliases)
 
 
 def collected_ids(source: bytes) -> Dict[str, bool]:
@@ -684,10 +715,11 @@ def collected_ids(source: bytes) -> Dict[str, bool]:
     whether it is defined unconditionally (directly in the module or class body, not
     under an ``if``, ``try``, ``with`` or loop). Functions and methods named ``test*``,
     in classes of any name at any nesting; a class with ``__init__`` or ``__new__``
-    contributes none; the last binding of a name wins. Raises SyntaxError, ValueError
-    or RecursionError for source that does not parse."""
+    contributes none, nor does a ``pytest.fixture``; the last binding of a name wins.
+    Raises SyntaxError, ValueError or RecursionError for source that does not parse."""
+    tree = ast.parse(source)
     state: Dict[str, bool] = {}
-    _scan_ids(ast.parse(source).body, "", False, state)
+    _scan_ids(tree.body, "", False, state, _aliases(tree))
     return state
 
 
@@ -703,11 +735,24 @@ _FORMS = (
     ("unittest", "skipUnless"),
     ("unittest", "expectedFailure"),
     ("unittest", "SkipTest"),
+    # They end the whole run, so the tests after them never run; pytest.exit with
+    # returncode=0 and os._exit(0) even report success.
+    ("pytest", "exit"),
+    ("os", "_exit"),
 )
 # Calls that return a skip or xfail decorator: a name bound to one is the form itself.
-_DECORATOR_FACTORIES = frozenset(_FORMS[:3] + _FORMS[6:9])
-_PREFIXES = frozenset(form[:i] for form in _FORMS for i in range(1, len(form)))
+_DECORATOR_FACTORIES = frozenset({
+    ("pytest", "mark", "skip"), ("pytest", "mark", "skipif"), ("pytest", "mark", "xfail"),
+    ("unittest", "skip"), ("unittest", "skipIf"), ("unittest", "skipUnless"),
+})
+# pytest.fixture(...) returns a decorator too; neither is a skip form.
+_FIXTURES = frozenset({("pytest", "fixture"), ("pytest", "yield_fixture")})
+_PREFIXES = frozenset(form[:i] for form in _FORMS + tuple(_FIXTURES) for i in range(1, len(form)))
 _MARKERS = ("pytestmark", "__test__")
+_Chain = Tuple[str, ...]
+# Every chain each name is bound to anywhere in the module; stored chains are forms,
+# prefixes or fixture decorators only, so the sets stay small and the fixed point ends.
+_Aliases = Dict[str, Set[_Chain]]
 
 
 def _canonical(chain: Tuple[str, ...]) -> Tuple[str, ...]:
@@ -722,54 +767,90 @@ def _form_of(chain: Optional[Tuple[str, ...]]) -> Optional[Tuple[str, ...]]:
     return None
 
 
-def _resolve(node: ast.AST, aliases: Dict[str, Tuple[str, ...]]) -> Optional[Tuple[str, ...]]:
-    """A ``Name`` or ``a.b.c`` chain as dotted parts, its head replaced by its alias."""
+def _resolve(node: ast.AST, aliases: _Aliases) -> List[_Chain]:
+    """Every chain a ``Name`` or ``a.b.c`` chain may stand for, as dotted parts: as
+    written, then with its head replaced by each alias bound to it anywhere in the
+    module. A name rebound elsewhere (``import unittest as pytest`` in a function that
+    never runs) so adds a reading and never hides one."""
     parts: List[str] = []
     while isinstance(node, ast.Attribute):
         parts.append(node.attr)
         node = node.value
     if not isinstance(node, ast.Name):
-        return None
-    return _canonical(aliases.get(node.id, (node.id,)) + tuple(reversed(parts)))
+        return []
+    tail = tuple(reversed(parts))
+    return [_canonical(head + tail) for head in [(node.id,)] + sorted(aliases.get(node.id, ()))]
 
 
-def _alias_value(value: ast.AST, aliases: Dict[str, Tuple[str, ...]]) -> Optional[Tuple[str, ...]]:
+def _first_form(chains: Sequence[_Chain]) -> Optional[_Chain]:
+    return next((form for form in map(_form_of, chains) if form is not None), None)
+
+
+def _aliasable(chain: _Chain) -> Optional[_Chain]:
+    """What a name bound to ``chain`` is recorded as: the skip form it starts with (so
+    ``pytest.skip.Exception`` is ``pytest.skip``), or itself when it is a part of a form
+    or a fixture decorator; None for anything else."""
+    form = _form_of(chain)
+    if form is not None:
+        return form
+    return chain if chain in _PREFIXES or chain in _FIXTURES else None
+
+
+def _alias_values(value: ast.AST, aliases: _Aliases) -> Set[_Chain]:
     if isinstance(value, ast.Call):
-        form = _form_of(_resolve(value.func, aliases))
-        return form if form in _DECORATOR_FACTORIES else None
-    chain = _resolve(value, aliases)
-    return chain if chain is not None and (chain in _PREFIXES or _form_of(chain) is not None) else None
+        chains = _resolve(value.func, aliases)
+        return ({chain for chain in chains if chain in _FIXTURES}
+                | {form for form in map(_form_of, chains) if form in _DECORATOR_FACTORIES})
+    return {alias for alias in map(_aliasable, _resolve(value, aliases)) if alias is not None}
 
 
-def _aliases(tree: ast.AST) -> Dict[str, Tuple[str, ...]]:
-    """Names bound, anywhere in the module, to pytest, unittest, a part of a skip form or
-    a skip decorator: by import, or by assignment followed to a fixed point."""
-    aliases: Dict[str, Tuple[str, ...]] = {}
+def _bind(aliases: _Aliases, name: str, chain: _Chain) -> None:
+    alias = _aliasable(chain)
+    if alias is not None:
+        aliases.setdefault(name, set()).add(alias)
+
+
+def _star_names(module: Tuple[str, ...]) -> Dict[str, Tuple[str, ...]]:
+    """What ``from <module> import *`` binds among the known names: each one that
+    starts a skip form or fixture decorator under ``module``."""
+    depth = len(module)
+    return {chain[depth]: chain[:depth + 1] for chain in _FORMS + tuple(_FIXTURES)
+            if len(chain) > depth and chain[:depth] == module}
+
+
+def _aliases(tree: ast.AST) -> _Aliases:
+    """Names bound, anywhere in the module, to pytest, unittest, os, a part of a skip
+    form, a skip decorator or pytest.fixture: by import (a star import of those
+    modules binds each such name), or by assignment followed to a fixed point. Every
+    binding is kept, whatever the order or the branch it is in."""
+    aliases: _Aliases = {}
     assigned: List[Tuple[str, ast.AST]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                chain = _canonical(tuple(alias.name.split(".")))
-                if alias.asname and (chain in _PREFIXES or _form_of(chain) is not None):
-                    aliases[alias.asname] = chain
+                if alias.asname:  # without one, the name bound is the module itself
+                    _bind(aliases, alias.asname, _canonical(tuple(alias.name.split("."))))
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            module = _canonical(tuple(node.module.split(".")))
             for alias in node.names:
-                chain = _canonical(tuple(node.module.split(".")) + (alias.name,))
-                if chain in _PREFIXES or _form_of(chain) is not None:
-                    aliases[alias.asname or alias.name] = chain
+                if alias.name == "*":
+                    for name, chain in _star_names(module).items():
+                        _bind(aliases, name, chain)
+                else:
+                    _bind(aliases, alias.asname or alias.name, _canonical(module + (alias.name,)))
         elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             assigned.extend((target.id, node.value) for target in targets if isinstance(target, ast.Name))
-    for _ in range(len(assigned) + 1):
-        changed = False
+    # Each round adds a chain to some name or ends; the chains come from a finite set.
+    while True:
+        grown = False
         for name, value in assigned:
-            chain = _alias_value(value, aliases)
-            if chain is not None and aliases.get(name) != chain:
-                aliases[name] = chain
-                changed = True
-        if not changed:
-            break
-    return aliases
+            new = _alias_values(value, aliases) - aliases.get(name, set())
+            if new:
+                aliases.setdefault(name, set()).update(new)
+                grown = True
+        if not grown:
+            return aliases
 
 
 def _shown(node: ast.AST) -> str:
@@ -784,17 +865,104 @@ def _shown(node: ast.AST) -> str:
     return text
 
 
+def _flat_targets(node: ast.AST) -> Iterator[ast.AST]:
+    if isinstance(node, (ast.Tuple, ast.List)):
+        for element in node.elts:
+            yield from _flat_targets(element)
+    elif isinstance(node, ast.Starred):
+        yield from _flat_targets(node.value)
+    else:
+        yield node
+
+
 class _FormCounter(ast.NodeVisitor):
     """Counts skip and xfail forms per scope (``Class::method``, ``<module>``)."""
 
-    def __init__(self, aliases: Dict[str, Tuple[str, ...]]) -> None:
+    def __init__(self, aliases: _Aliases) -> None:
         self.aliases = aliases
         self.scope: List[Tuple[str, bool]] = []  # (name, is a class)
+        # The blocks around the node being visited, outermost first, across scopes: a
+        # decorator under a module-level ``if`` is guarded by it, and so is the body.
+        self.guards: List[str] = []
         self.counts: Dict[Tuple[str, str], int] = {}
 
     def _add(self, form: str) -> None:
+        # The guards are part of the occurrence, so removing or changing the condition
+        # around an existing skip (``if win: pytest.skip()`` -> ``pytest.skip()``) is new.
+        if self.guards:
+            form = f"{form} under {' > '.join(self.guards)}"
         key = ("::".join(name for name, _ in self.scope) or "<module>", form)
         self.counts[key] = self.counts.get(key, 0) + 1
+
+    def _under(self, guard: str, nodes: Sequence[ast.AST]) -> None:
+        self.guards.append(guard)
+        for node in nodes:
+            self.visit(node)
+        self.guards.pop()
+
+    def _branches(self, word: str, test: ast.AST, body: Sequence[ast.AST], orelse: Sequence[ast.AST]) -> None:
+        self.visit(test)
+        shown = _shown(test)
+        self._under(f"{word} {shown}", body)
+        if orelse:
+            self._under(f"else of {word} {shown}", orelse)
+
+    def visit_If(self, node: ast.If) -> None:
+        self._branches("if", node.test, node.body, node.orelse)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self._branches("if", node.test, [node.body], [node.orelse])
+
+    def visit_While(self, node: ast.While) -> None:
+        self._branches("while", node.test, node.body, node.orelse)
+
+    def visit_For(self, node: Any) -> None:
+        self.visit(node.target)
+        self.visit(node.iter)
+        loop = f"for {_shown(node.target)} in {_shown(node.iter)}"
+        self._under(loop, node.body)
+        if node.orelse:
+            self._under(f"else of {loop}", node.orelse)
+
+    visit_AsyncFor = visit_For
+
+    def visit_Try(self, node: Any) -> None:
+        self._under("try", node.body)
+        for handler in node.handlers:
+            if handler.type is not None:
+                self.visit(handler.type)
+            self._under("except" if handler.type is None else f"except {_shown(handler.type)}", handler.body)
+        if node.orelse:
+            self._under("else of try", node.orelse)
+        if node.finalbody:
+            self._under("finally", node.finalbody)
+
+    visit_TryStar = visit_Try  # Python 3.11+
+
+    def visit_With(self, node: Any) -> None:
+        for item in node.items:
+            self.visit(item)
+        self._under("with " + ", ".join(_shown(item) for item in node.items), node.body)
+
+    visit_AsyncWith = visit_With
+
+    def visit_Match(self, node: Any) -> None:  # Python 3.10+
+        self.visit(node.subject)
+        subject = _shown(node.subject)
+        for case in node.cases:
+            if case.guard is not None:
+                self.visit(case.guard)
+            guard = "" if case.guard is None else f" if {_shown(case.guard)}"
+            self._under(f"match {subject} case {_shown(case.pattern)}{guard}", case.body)
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:
+        # Each operand runs only after the ones before it: ``win or pytest.skip()``.
+        word = "and" if isinstance(node.op, ast.And) else "or"
+        depth = len(self.guards)
+        for value in node.values:
+            self.visit(value)
+            self.guards.append(f"{_shown(value)} {word}")
+        del self.guards[depth:]
 
     def _enter(self, node: Any, is_class: bool) -> None:
         self.scope.append((node.name, is_class))
@@ -811,12 +979,15 @@ class _FormCounter(ast.NodeVisitor):
         self._enter(node, True)
 
     def _marker(self, node: Any, targets: Sequence[ast.AST]) -> None:
-        # pytestmark and __test__ act in a module or class body; the whole statement is
-        # the form, so any change to what it holds is a new occurrence.
+        # pytestmark and __test__ act as names in a module or class body, and as
+        # attributes of a test or class anywhere (test_x.__test__ = False); the whole
+        # statement is the form, so any change to what it holds is a new occurrence.
         marker_level = not self.scope or self.scope[-1][1]
-        if marker_level and any(isinstance(t, ast.Name) and t.id in _MARKERS for t in targets):
-            self._add(_shown(node))
-            return
+        for target in (t for whole in targets for t in _flat_targets(whole)):
+            if (isinstance(target, ast.Attribute) and target.attr in _MARKERS) or (
+                    marker_level and isinstance(target, ast.Name) and target.id in _MARKERS):
+                self._add(_shown(node))
+                return
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -830,7 +1001,7 @@ class _FormCounter(ast.NodeVisitor):
 
     def _reference(self, node: ast.AST) -> Optional[str]:
         """The canonical form a name, attribute chain or callee refers to, or None."""
-        form = _form_of(_resolve(node, self.aliases))
+        form = _first_form(_resolve(node, self.aliases))
         if form is not None:
             return ".".join(form)
         return "skipTest" if isinstance(node, ast.Attribute) and node.attr == "skipTest" else None
@@ -920,12 +1091,15 @@ def pytest_settings(filename: str, data: bytes) -> Optional[Dict[str, str]]:
     """The pytest collection settings in a config file named ``filename``: None when the
     file holds no pytest configuration, else ``{"[section] key": value}`` for the
     COLLECTION_KEYS it sets (``{}`` for a configuration without them; a
-    ``pytest.ini`` or ``.pytest.ini`` is one even when empty). Values are compared as
-    text: whitespace around ini lines and, in TOML, whitespace and comments outside
-    strings do not count. Raises ValueError for a file that cannot be read."""
+    ``pytest.toml``, ``.pytest.toml``, ``pytest.ini`` or ``.pytest.ini`` is one even
+    when empty, as pytest reads it). Values are compared as text: whitespace around ini
+    lines and, in TOML, whitespace and comments outside strings do not count. Raises
+    ValueError for a file that cannot be read."""
     text = bytes(data).decode("utf-8-sig")
     if filename == "pyproject.toml":
-        return _toml_settings(text)
+        return _toml_settings(text, _PYPROJECT_TABLES, always=False)
+    if filename in ("pytest.toml", ".pytest.toml"):
+        return _toml_settings(text, _PYTEST_TOML_TABLES, always=True)
     section = _INI_SECTIONS.get(filename)
     if section is None:
         raise ValueError(f"{filename} is not a pytest configuration file")
@@ -946,26 +1120,31 @@ def pytest_settings(filename: str, data: bytes) -> Optional[Dict[str, str]]:
     }
 
 
-_TOML_TABLES = (("tool", "pytest", "ini_options"), ("tool", "pytest"))
+# The tables pytest reads settings from, the last being the root of its configuration.
+_PYPROJECT_TABLES = (("tool", "pytest", "ini_options"), ("tool", "pytest"))
+_PYTEST_TOML_TABLES = (("pytest",),)
 _TOML_BARE = re.compile(r"[A-Za-z0-9_-]+")
 
 
-def _toml_settings(text: str) -> Optional[Dict[str, str]]:
+def _toml_settings(text: str, tables: Tuple[Tuple[str, ...], ...], always: bool) -> Optional[Dict[str, str]]:
+    root = tables[-1]
+    holders = {watched[:i] for watched in tables for i in range(1, len(watched) + 1)}
     found: Dict[str, str] = {}
-    present = False
+    present = always
     table: Tuple[str, ...] = ()
     for is_table, key, value in _toml_statements(text):
         if is_table:
             table = key
-            present = present or key[:2] == ("tool", "pytest")
+            present = present or key[:len(root)] == root
             continue
         full = table + key
-        present = present or full[:2] == ("tool", "pytest")
-        for watched in _TOML_TABLES:
+        present = present or full[:len(root)] == root
+        for watched in tables:
             if full[:-1] == watched and full[-1] in COLLECTION_KEYS:
                 found[f"[{'.'.join(watched)}] {full[-1]}"] = value
         # An inline table that holds the pytest tables: kept whole, so any change counts.
-        if full in _TOML_TABLES + (("tool",),) and value.startswith("{") and (full != ("tool",) or "pytest" in value):
+        # Above the root (``tool = {...}``) it counts only when it mentions pytest.
+        if full in holders and value.startswith("{") and (len(full) >= len(root) or "pytest" in value):
             present = True
             found[f"{'.'.join(full)} (inline table)"] = value
     return found if present else None
