@@ -39,9 +39,25 @@ def _plan(existing, *sources):
 
 def test_a_keyed_row_is_the_same_row_whatever_else_differs():
     existing = [_row(key="k", seq=7, worktree="/wt/a", host="claude-code", ts="2026-10-01T00:00:00Z")]
-    incoming = [_row(key="k", seq=1, worktree="/wt/b", host="codex-cli", ts="2026-10-02T00:00:00Z", outcome="fp")]
+    incoming = [_row(key="k", seq=1, worktree="/wt/b", host="codex-cli", ts="2026-10-02T00:00:00Z")]
     added, duplicates = _plan(existing, incoming)
     assert (added, duplicates) == ([], 1)
+
+
+def test_a_keyed_row_with_another_payload_is_a_conflict_not_a_duplicate():
+    """Live append raises EventConflictError for this; the merge keeps the first row, adds
+    nothing and reports it apart, so a differing outcome never vanishes as a 'duplicate'."""
+    existing = [_row(key="k", outcome="tp")]
+    incoming = [_row(key="k", seq=1, worktree="/wt/b", outcome="fp")]
+    added, duplicates, conflicts = ledger.plan_merge_report(existing, [incoming])
+    assert (added, duplicates, conflicts) == ([], 0, 1)
+
+
+def test_two_sources_disagreeing_on_a_key_keep_the_earliest_and_count_one_conflict():
+    a = [_row(key="k", outcome="tp", ts="2026-10-02T00:00:00Z", worktree="/wt/a")]
+    b = [_row(key="k", outcome="fp", ts="2026-10-03T00:00:00Z", worktree="/wt/b")]
+    added, duplicates, conflicts = ledger.plan_merge_report([], [a, b])
+    assert [r["outcome"] for r in added] == ["tp"] and (duplicates, conflicts) == (0, 1)
 
 
 def test_the_key_and_the_rule_together_are_the_identity():
@@ -135,7 +151,7 @@ def test_equal_rows_of_the_sort_key_keep_their_source_order():
 # ── merge_rows writes under the one lock, after what is there ────────────────
 
 def test_merge_rows_appends_after_the_existing_rows_and_renumbers(tmp_path: Path):
-    ledger.append(tmp_path, [{"rule": "trap-x", "outcome": "tp", "source": "mcp", "key": "have"}])
+    ledger.append(tmp_path, [{"rule": "trap-x", "outcome": "tp", "source": "ci", "key": "have"}])
     sources = [[_row(key="have", seq=40), _row(key="new1", ts="2026-10-02T00:00:00Z", seq=41),
                 _row(key="new0", ts="2026-10-01T00:00:00Z", seq=42)]]
     written, duplicates = ledger.merge_rows(tmp_path, sources)
@@ -161,7 +177,7 @@ def test_the_existing_rows_are_read_with_the_lock_held(tmp_path: Path, monkeypat
     """A row appended after the caller last looked is still seen: the shared ledger is
     read inside merge_rows, under the lock, not passed in."""
     sources = [[_row(key="k", seq=1)]]
-    ledger.append(tmp_path, [{"rule": "trap-x", "outcome": "tp", "source": "mcp", "key": "k"}])
+    ledger.append(tmp_path, [{"rule": "trap-x", "outcome": "tp", "source": "ci", "key": "k"}])
     assert ledger.merge_rows(tmp_path, sources) == ([], 1)
 
 

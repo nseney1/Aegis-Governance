@@ -73,7 +73,7 @@ def test_write_baseline_records_every_current_finding(repo: Path, capsys):
     held = _held(repo)
     assert sorted((e["rule"], e["path"]) for e in held) == [
         ("forbid_ast:no-eval", "legacy.py"), ("import_guard", "legacy.py")]
-    assert all(re.fullmatch(r"[0-9a-f]{16}", e["fp"]) for e in held)
+    assert all(re.fullmatch(r"[0-9a-f]{64}", e["fp"]) for e in held)
     assert "wrote .aegis/baseline.json: 2 finding(s)" in out
 
 

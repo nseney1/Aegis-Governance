@@ -593,13 +593,14 @@ def _plan_worktree_ledgers(result: MigrationPlan, layout: WorkspaceLayout) -> No
     if shared.error:
         result.refusal = f"cannot merge into the shared ledger: {shared.error}"
         return
-    added, duplicates = ledger.plan_merge(shared.rows, [source.rows for source in sources])
+    added, duplicates, conflicts = ledger.plan_merge_report(shared.rows, [source.rows for source in sources])
     result.worktree_sources = [(source.label, source.workspace) for source in sources]
     result.worktree_pending = len(added)
     result.worktree_stats = {
         "sources": [source.path.as_posix() for source in sources],
         "rows": len(added),
         "duplicates": duplicates,
+        "conflicts": conflicts,
         "unusable_rows": sum(source.unusable_rows for source in sources),
         "skipped_lines": sum(source.skipped_lines for source in sources),
     }
@@ -1080,13 +1081,14 @@ def _merge_worktree_ledgers(root: Path, sources: List[Tuple[str, Path]]) -> int:
         found = _read_worktree_ledger(label, workspace)
         if found is not None and found.problem is None:
             read.append(found)
-    written, duplicates = ledger.merge_rows(root, [found.rows for found in read])
+    written, duplicates, conflicts = ledger.merge_rows_report(root, [found.rows for found in read])
     if written:
         ledger.append_epoch(root, {
             "migration": "worktree-ledgers",
             "sources": sorted(found.label for found in read),
             "rows": len(written),
             "duplicates": duplicates,
+            **({"conflicts": conflicts} if conflicts else {}),
         })
     return len(written)
 
@@ -1171,3 +1173,15 @@ def apply(migration: MigrationPlan) -> MigrationResult:
         for rel in migration.removals:
             _remove(root / rel)
     return result
+
+
+def pending_worktree_rows(root: Any) -> int:
+    """How many rows in per-worktree ledgers the shared ledger lacks (0 outside git or when
+    nothing is pending); ``aegis migrate --apply`` merges them. Read only."""
+    layout = WorkspaceLayout(Path(os.fspath(root)).resolve())
+    result = MigrationPlan(root=layout.root)
+    try:
+        _plan_worktree_ledgers(result, layout)
+    except OSError:
+        return 0
+    return result.worktree_pending

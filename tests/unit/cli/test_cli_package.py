@@ -77,7 +77,10 @@ def test_the_mcp_entry_is_the_absolute_server_and_never_dash_m(ws, fake_aegis, c
     out = tmp_path / "plugin"
     _run(capsys, ws, "--host", "claude-code", "--out", str(out))
     server = json.loads((out / ".mcp.json").read_text())["mcpServers"]["aegis"]
-    assert server["command"] == str(Path(fake_aegis).parent / "aegis-mcp")
+    if os.name == "nt":  # the stub dir holds only aegis.exe; the real aegis-mcp.exe is found elsewhere
+        assert Path(server["command"]).is_absolute() and Path(server["command"]).stem == "aegis-mcp"
+    else:
+        assert server["command"] == str(Path(fake_aegis).parent / "aegis-mcp")
     assert server["args"] == [] and server["env"]["AEGIS_CLIENT"] == "claude-code"
 
 

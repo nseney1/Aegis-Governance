@@ -9,7 +9,7 @@ v4.2 makes a first run on an existing repository adoptable, lets rules travel, a
 ### Added
 
 - **Day-0 card and partition report.** `aegis check --card` prints what Aegis found in this repository (rules active, findings per rule); `aegis init` prints the card. `aegis check --partition` splits the findings into what blocks and what is advisory.
-- **Ratchet baseline.** `aegis check --write-baseline` records today's findings (fingerprint is the SHA-256 of rule, path, line and occurrence) so only new ones fail; `--prune-baseline` drops entries that no longer match; `--base REF` reads the baseline from the base ref and never falls back to the candidate's file. Events: `baseline_written`, `baseline_check`.
+- **Ratchet baseline.** `aegis check --write-baseline` records today's findings (the fingerprint is the full SHA-256 of the rule, the path, the matched line's normalized text and its occurrence index among identical lines; it does not include the line number) so only new ones fail; `--prune-baseline` drops entries that no longer match; `--base REF` reads the baseline from the base ref and never falls back to the candidate's file. Events: `baseline_written`, `baseline_check`.
 - **Rule packs.** `aegis rule export OUT [--min-fitness X] [--type T]` writes the rule files (no ledger rows) with a checksum; `aegis rule import PACK [--rename] [--dry-run]` treats the pack as untrusted: every entry is re-parsed by the one loader, an id the workspace already has refuses the whole pack unless `--rename`, and the write is all or nothing. Packs are unsigned.
 - **`aegis benchmark`** measures scan and hook latency, payload size and Layer-1 throughput over a shipped fixture corpus.
 - **`aegis package --host claude-code`** (experimental) writes a Claude Code plugin directory: `.claude-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json` and the skills. The Claude Code plugin layout was written from the vendor documentation and has not been tried against a live install.
@@ -17,7 +17,7 @@ v4.2 makes a first run on an existing repository adoptable, lets rules travel, a
 
 ### Changed
 
-- **Breaking: the ledger is shared across worktrees.** In a git repository every worktree of one repository appends to `<git-common-dir>/aegis/state/<workspace-id>/ledger.jsonl` under one lock. Rows in a worktree's own `.aegis/state/ledger.jsonl` are read again only after `aegis migrate --apply` merges them (read-only on the sources, a second run adds nothing). Outside git the ledger stays where it was.
+- **Breaking: the ledger is shared across worktrees.** In a git repository every worktree of one repository appends to `<git-common-dir>/aegis/state/<workspace-id>/ledger.jsonl` under one lock. Rows in a worktree's own `.aegis/state/ledger.jsonl` are read again only after `aegis migrate --apply` merges them (read-only on the sources, a second run adds nothing). Outside git the ledger stays where it was. After upgrading, run `aegis migrate --apply` once in each repository, or its old per-worktree rows are not read and rules show no evidence until you do. The shared directory needs a writable git directory; if `.git` is read-only (some sandboxes), outcome reports fail until it is writable.
 - **Breaking: `aegis check` modes are exclusive.** `--lane`, `--partition`, `--card`, `--write-baseline` and `--prune-baseline` refuse `FILES`, `--full` and `--plan*`.
 
 ## [4.1.1] - 2026-10-17

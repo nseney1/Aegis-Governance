@@ -2054,6 +2054,22 @@ def _bootstrap_tool_findings(ctx: _Ctx, info: _Instructions, rows: List[Dict[str
     return found
 
 
+def _worktree_ledger_findings(ctx: _Ctx) -> List[_Finding]:
+    """Rows in a worktree's own ledger that the shared ledger (v4.2) does not hold: Aegis
+    no longer reads them, so rules show less evidence until aegis migrate --apply merges them."""
+    if ctx.is_home:
+        return []
+    from aegis_core import migrate
+    from aegis_core.workspace.layout import WorkspaceLayout
+
+    pending = migrate.pending_worktree_rows(ctx.root)
+    if not pending:
+        return []
+    return [_Finding("worktree_ledger_pending", WorkspaceLayout(ctx.root).ledger_file,
+                     f"{pending} outcome row(s) in per-worktree ledgers are not in the shared ledger, so rule "
+                     "evidence is understated: run aegis migrate to see the merge, then aegis migrate --apply")]
+
+
 def _upgrade_findings(ctx: _Ctx) -> List[_Finding]:
     """v3 state here that v4 never reads (discovery.unmigrated_state): status, scan and sync
     refuse such a workspace, and doctor, which still runs in it, must not call it healthy.
@@ -2207,7 +2223,7 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     floor, unreached = _floor_status(root)
     rows = [_host_row(spec, ctx, info, roots, floor) for spec in selected]
     claude_user = _claude_user_registered(ctx)
-    findings = (notes + _upgrade_findings(ctx) + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
+    findings = (notes + _upgrade_findings(ctx) + _worktree_ledger_findings(ctx) + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
                 + _legacy_block_findings(ctx) + _budget_findings(ctx, info) + _home_rules_finding(ctx)
                 + _v3_copy_findings(ctx) + _hook_findings(ctx, rows) + _bootstrap_tool_findings(ctx, info, rows))
     if roots is None and ctx.home is not None:

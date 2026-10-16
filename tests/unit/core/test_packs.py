@@ -70,7 +70,7 @@ def ws(tmp_path: Path) -> Path:
 def _put(ws: Path, rule_type: str, rule_id: str, text: str = "") -> Path:
     path = ws / ".aegis" / "rules" / RULE_TYPE_DIRS[rule_type] / f"{rule_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text or _text(rule_id, rule_type), encoding="utf-8")
+    path.write_bytes((text or _text(rule_id, rule_type)).encode("utf-8"))  # bytes: Windows text mode would write CRLF
     return path
 
 
@@ -162,7 +162,7 @@ def test_the_text_of_an_exported_rule_is_the_file_and_its_digest_covers_that_tex
     path = _put(ws, "trap", "keep-me")
     pack = packs.build_pack(packs.select_rules(ws).rules)
     (entry,) = pack["rules"]
-    assert entry["text"] == path.read_text(encoding="utf-8")
+    assert entry["text"] == path.read_bytes().decode("utf-8")
     assert entry["sha256"] == _digest(entry["text"])
 
 
