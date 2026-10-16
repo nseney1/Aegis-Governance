@@ -43,7 +43,8 @@ def test_a_mandatory_type_refuses_any_enforcement_but_gate_and_writes_nothing(tm
     assert list((ws / ".aegis" / "rules").rglob("*.md")) == []
 
 
-@pytest.mark.parametrize("body", ["Body.\n", "\u00e9" * (MAX_RULE_BODY_BYTES // 2)])
+# Short ids: a 64 KiB id overflows PYTEST_CURRENT_TEST on Windows (32767 characters).
+@pytest.mark.parametrize("body", ["Body.\n", "\u00e9" * (MAX_RULE_BODY_BYTES // 2)], ids=["short", "64KiB"])
 def test_a_body_of_at_most_64_kib_is_returned_unchanged(body):
     assert validate_rule_body(body) == body
 
@@ -51,7 +52,7 @@ def test_a_body_of_at_most_64_kib_is_returned_unchanged(body):
 @pytest.mark.parametrize("body, message", [
     (" \n\t", "rule body is empty"),
     ("\u00e9" * (MAX_RULE_BODY_BYTES // 2) + "x", "rule body exceeds 64 KiB (65536 bytes)"),  # bytes, not characters
-])
+], ids=["blank", "64KiB-plus-one-byte"])
 def test_a_blank_or_oversized_body_is_refused_before_anything_is_written(tmp_path: Path, body, message):
     ws = _ws(tmp_path)
     with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):

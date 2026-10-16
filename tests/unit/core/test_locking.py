@@ -172,12 +172,14 @@ def test_a_waiter_backs_off_from_10_ms_by_half_again_each_try_up_to_50_ms(tmp_pa
     22.5 and 33.75 ms, then 50 ms (LOCK_RETRY_INTERVAL_SECONDS, LOCK_MAX_BACKOFF_SECONDS)."""
     from aegis_core import storage
 
+    # A fake clock that only the waiter's sleeps advance, so the sequence does not depend
+    # on how fast the runner is (a slow macOS runner used up the 0.5 s deadline early).
     waits = []
-    real_sleep = time.sleep
+    clock = [0.0]
 
     def sleep(seconds):
         waits.append(seconds)
-        real_sleep(seconds)
+        clock[0] += seconds
 
     holder = subprocess.Popen(
         [sys.executable, "-c", _HOLD_UNTIL_EOF, str(tmp_path)],
@@ -187,6 +189,7 @@ def test_a_waiter_backs_off_from_10_ms_by_half_again_each_try_up_to_50_ms(tmp_pa
     try:
         assert holder.stdout.readline().strip() == "held", holder.stderr.read()
         monkeypatch.setattr(storage.time, "sleep", sleep)
+        monkeypatch.setattr(storage.time, "monotonic", lambda: clock[0])
         with pytest.raises(LockTimeoutError):
             with locked(tmp_path, timeout=0.5):
                 pytest.fail("acquired a lock another process holds")
