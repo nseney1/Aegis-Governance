@@ -421,33 +421,131 @@ def _pinned_value(text: str, var: str) -> str | None:
         return match.group(1)
 
 
-_REDIRECTION = re.compile(r"^[0-9]*(?:[<>]|&>)")
-_OPENERS = frozenset({"if", "case", "for", "while", "until", "select", "{"})
-_CLOSERS = frozenset({"fi", "esac", "done", "}"})
+# A redirection word (`&` in `>&` and `&>` is first rewritten to `_`); when it is only
+# the operator, the next word is its target.
+_REDIRECTION = re.compile(r"[0-9_]*[<>]+_?")
+_SEPARATOR = re.compile(r"(\$\(|&&|\|\||;;|[;&|()])")
+_RUNS_ALWAYS_AFTER = frozenset({";", ";;", "&", "\n"})  # not `&&`, `||` or `|`
+_BLOCKS = frozenset({"case", "for", "while", "until", "select", "{"})
+_BLOCK_ENDS = frozenset({"esac", "done", "}"})
+_HEREDOC = re.compile(r"(?<!<)<<-?(?!<)\s*\\?(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _shell_lines(lines: list[str]) -> list[tuple[int, str, str]]:
+    """(first line number, text, text without quoted strings or comments) per shell line:
+    backslash continuations joined, here-document bodies left out."""
+    found: list[tuple[int, str, str]] = []
+    first, raw, clean = 0, [], []
+    heredoc = None
+    for number, line in enumerate(lines, start=1):
+        if heredoc is not None:
+            heredoc = None if line.strip() == heredoc else heredoc
+            continue
+        text = re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", "''", line)
+        text = re.sub(r"(^|\s)#.*$", "", text).rstrip()
+        match = _HEREDOC.search(line) if "<<" in text else None
+        heredoc = match.group(2) if match else None
+        if not clean:
+            first = number
+        continued = text.endswith("\\")
+        raw.append(line.strip()[:-1].rstrip() if continued and line.strip().endswith("\\") else line.strip())
+        clean.append(text[:-1] if continued else text)
+        if not continued:
+            found.append((first, " ".join(raw), " ".join(clean)))
+            raw, clean = [], []
+    if clean:
+        found.append((first, " ".join(raw), " ".join(clean)))
+    return found
+
+
+def _execs_a_command(words: list[str]) -> bool:
+    """Whether ``exec <words>`` replaces the shell (``exec >log 2>&1`` only redirects)."""
+    target = False
+    for word in words:
+        if target:
+            target = False
+            continue
+        match = _REDIRECTION.match(word)
+        if match is None:
+            return True
+        target = match.end() == len(word)
+    return False
+
+
+class _Frame:
+    """An open if/loop/group/subshell, and for an if, whether each branch so far ends the hook."""
+
+    def __init__(self, kind: str, where: tuple[int, str], runs_always: bool = False) -> None:
+        self.kind, self.where, self.runs_always = kind, where, runs_always
+        self.condition = kind == "if"
+        self.branch_ends = False
+        self.every_branch_ends = True
+        self.has_else = False
 
 
 def _ends_hook_at(lines: list[str]) -> tuple[int, str] | None:
     """The first line (1-based, and its text) that ends the hook unconditionally: an
-    ``exec`` of a command or an ``exit`` at the top level, outside any if/case/loop/
-    function body and not behind ``&&``/``||``. A shell parse would be exact; this reads
-    lines, which is what hook files are, and ignores quoted text and comments."""
-    depth = 0
-    for number, line in enumerate(lines, start=1):
-        text = re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", "''", line)
-        text = re.sub(r"(^|\s)#.*$", "", text).strip()
-        if not text:
+    ``exec`` of a command or an ``exit`` at the top level that nothing makes conditional
+    (``&&``/``||``), runs elsewhere (a pipeline, ``&``, a subshell, ``$(...)``) or skips
+    (a loop, case or function body), even after ``;`` on a line; or an if/elif/else
+    every branch of which ends that way. A shell parse would be exact; this reads the
+    lines hooks are made of, ignoring quoted text, comments and here-documents."""
+    frames: list[_Frame] = []
+
+    def ends(where: tuple[int, str]) -> tuple[int, str] | None:
+        if not frames:
+            return where
+        if frames[-1].kind == "if" and not frames[-1].condition:
+            frames[-1].branch_ends = True
+        return None
+
+    carried = "\n"  # a line ending in `&&`, `||` or `|` continues on the next one
+    for number, raw, clean in _shell_lines(lines):
+        if not clean.strip():
             continue
-        words = text.split()
-        if depth == 0 and words[0] in ("exec", "exit"):
-            command = [w for w in words[1:] if not _REDIRECTION.match(w)]
-            if words[0] == "exit" or command:  # `exec >log 2>&1` only redirects
-                return number, line.strip()
-        for segment in re.split(r"&&|\|\||[;&|()]", text):
-            first = segment.split()[:1]
-            if first and first[0] in _OPENERS:
-                depth += 1
-            if first and first[0] in _CLOSERS:
-                depth = max(depth - 1, 0)
+        where = (number, raw)
+        parts = _SEPARATOR.split(re.sub(r"([<>])&", r"\1_", clean).replace("&>", "_>"))
+        texts, ops = parts[0::2], [carried, *parts[1::2], "\n"]
+        for index, text in enumerate(texts):
+            before, after = ops[index], ops[index + 1]
+            always = before in _RUNS_ALWAYS_AFTER and after not in ("|", "&")
+            words = text.split()
+            while words:
+                word, top = words[0], (frames[-1] if frames else None)
+                in_if = top is not None and top.kind == "if"
+                if word == "if":
+                    frames.append(_Frame("if", where, runs_always=before in _RUNS_ALWAYS_AFTER))
+                elif word == "then" and in_if:
+                    top.condition = False
+                elif word in ("elif", "else") and in_if:
+                    top.every_branch_ends = top.every_branch_ends and top.branch_ends
+                    top.branch_ends, top.condition = False, word == "elif"
+                    top.has_else = top.has_else or word == "else"
+                elif word == "fi" and in_if:
+                    frames.pop()
+                    if top.has_else and top.every_branch_ends and top.branch_ends and top.runs_always and always:
+                        found = ends(top.where)
+                        if found:
+                            return found
+                elif word == "function":
+                    words = words[2:]  # `function name`: the body that follows is a group
+                    continue
+                elif word in _BLOCKS:
+                    frames.append(_Frame("block", where))
+                elif word in _BLOCK_ENDS and top is not None and top.kind == "block":
+                    frames.pop()
+                elif word not in ("do", "!"):
+                    break
+                words = words[1:]
+            if always and words and (words[0] == "exit" or (words[0] == "exec" and _execs_a_command(words[1:]))):
+                found = ends(where)
+                if found:
+                    return found
+            if after in ("$(", "("):
+                frames.append(_Frame("sub", where))
+            elif after == ")" and frames and frames[-1].kind == "sub":
+                frames.pop()
+        carried = ops[-2] if not texts[-1].strip() and ops[-2] in ("&&", "||", "|") else "\n"
     return None
 
 

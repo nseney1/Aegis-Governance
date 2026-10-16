@@ -319,6 +319,55 @@ def test_an_exit_that_does_not_end_the_hook_keeps_it_reachable(tmp_path, before)
     assert (st["reachable"], st["unreachable_reason"]) == (True, None)
 
 
+PRE_COMMIT_FRAMEWORK_BODY = (
+    "INSTALL_PYTHON=/usr/bin/python3\n"
+    "ARGS=(hook-impl --config=.pre-commit-config.yaml --hook-type=pre-commit)\n"
+    'HERE="$(cd "$(dirname "$0")" && pwd)"\n'
+    'ARGS+=(--hook-dir "$HERE" -- "$@")\n'
+    'if [ -x "$INSTALL_PYTHON" ]; then\n'
+    '    exec "$INSTALL_PYTHON" -mpre_commit "${ARGS[@]}"\n'
+    "elif command -v pre-commit > /dev/null; then\n"
+    '    exec pre-commit "${ARGS[@]}"\n'
+    "else\n"
+    "    echo 'pre-commit not found' 1>&2\n"
+    "    exit 1\n"
+    "fi\n"
+)
+
+
+@pytest.mark.parametrize("before,line", [
+    ("echo hi; exit 0\n", 2),
+    ('cd "$(git rev-parse --show-toplevel)"; exec ./run.sh\n', 2),
+    ("x=$(date); exec ./run.sh 2>&1\n", 2),
+    ("run-linters \\\n  --all; exit $?\n", 2),
+    ("if [ -f a ]; then exit 0; else exit 1; fi\n", 2),
+    (PRE_COMMIT_FRAMEWORK_BODY, 6),
+    ("if a; then\n  if b; then exit 0; else exec c; fi\nelse\n  exit 2\nfi\n", 2),
+], ids=["chained-exit", "chained-exec", "substitution-then-exec", "continued-line", "if-else-all-exit",
+        "pre-commit-framework", "nested-if"])
+def test_an_unconditional_end_on_a_chained_line_or_in_every_branch_is_found(tmp_path, before, line):
+    st = _status_of(tmp_path, "#!/usr/bin/env bash\n" + before + generate_hook_block(sys.executable))
+    assert st["reachable"] is False
+    assert f"line {line} (" in st["unreachable_reason"]
+
+
+@pytest.mark.parametrize("before", [
+    "if [ -f a ]; then exit 0; elif [ -f b ]; then exit 1; fi\n",
+    "if [ -f a ]; then\n  exit 0\nelse\n  echo keep going\nfi\n",
+    "lint | exit 0\n",
+    "exit 0 &\n",
+    "(\n  exit 0\n)\n",
+    "( cd sub; exit 0 )\n",
+    "cat <<EOF\nexit 0\nEOF\n",
+    "while read -r f; do exit 1; done < files\n",
+    "out=$(\n  exit 3\n)\n",
+], ids=["if-elif-no-else", "one-branch-continues", "pipeline", "background", "multi-line-subshell",
+        "one-line-subshell", "heredoc", "loop", "multi-line-substitution"])
+def test_an_end_some_path_avoids_keeps_the_hook_reachable(tmp_path, before):
+    st = _status_of(tmp_path, "#!/usr/bin/env bash\n" + before + generate_hook_block(sys.executable))
+    assert (st["reachable"], st["unreachable_reason"]) == (True, None)
+
+
 def test_hook_status_text_names_an_unreachable_block(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path / "r")
     _write_hook(repo, FRAMEWORK_HOOK + generate_hook_block(sys.executable))
