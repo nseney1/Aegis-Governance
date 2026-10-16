@@ -275,6 +275,61 @@ def test_global_workspace_flag_never_resolves_above_its_git_toplevel(home, elsew
     assert _tree(home) == before
 
 
+# ── never $HOME, never a workspace that encloses it (C-fix T6, AD-4) ───
+
+_ACTIONS = [["list", "--json"], ["promote", "outer-rule"], ["demote", "outer-rule"], ["archive", "--dry-run"],
+            ["create", "--hypothesis", "Never land here", "--id", "never"]]
+
+
+@pytest.mark.parametrize("explicit", [True, False], ids=["explicit", "cwd"])
+@pytest.mark.parametrize("action", _ACTIONS, ids=lambda a: a[0])
+def test_the_user_rule_layer_never_makes_home_the_rule_workspace(home, monkeypatch, capsys, action, explicit):
+    repo = _git_repo(home / "code" / "repo", initialized=False)
+    (repo / "src").mkdir()
+    monkeypatch.chdir(repo / "src")
+    before = _tree(home)
+
+    rc = main(["rule", *action, *(["--workspace", str(repo / "src")] if explicit else [])])
+
+    captured = capsys.readouterr()
+    assert "user-plane" not in captured.out + captured.err
+    assert str(home / ".aegis") not in captured.out
+    assert _tree(home) == before
+    if explicit or action[0] == "create":
+        assert rc == 1 and _not_a_workspace((repo / "src").resolve()) in captured.out + captured.err
+    elif action[0] == "list":
+        assert rc == 0 and json.loads(captured.out) == []
+
+
+@pytest.fixture
+def enclosed_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """$HOME inside a directory that is itself an Aegis workspace."""
+    outer = tmp_path / "outer"
+    _trap(outer, "outer-rule")
+    home = outer / "home"
+    (home / ".aegis").mkdir(parents=True)  # the user plane, with no rule layer
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
+    return home
+
+
+@pytest.mark.parametrize("action", _ACTIONS[:4], ids=lambda a: a[0])
+def test_an_explicit_workspace_never_walks_past_home(enclosed_home, elsewhere, capsys, action):
+    notes = enclosed_home / "notes"  # no .git: only $HOME bounds the walk
+    notes.mkdir()
+    outer = enclosed_home.parent
+    before = _tree(outer)
+
+    rc = main(["rule", *action, "--workspace", str(notes)])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert _not_a_workspace(notes.resolve()) in captured.out + captured.err
+    assert "outer-rule" not in captured.out
+    assert _tree(outer) == before
+
+
 # ── Lifecycle outcomes the CLI must not report as success ─────────────
 
 def test_promote_into_a_protected_namespace_fails(repo, capsys) -> None:

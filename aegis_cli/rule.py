@@ -17,12 +17,11 @@ from typing import Any
 
 from aegis_cli import sanitize_display
 from aegis_cli.base import CommandCategory, AegisCommand
-from aegis_core.config import env_workspace
 from aegis_core.errors import WorkspaceNotFoundError
 from aegis_core.lifecycle.creation import MAX_RULE_BODY_BYTES, validate_rule_body
 from aegis_core.taxonomy import CANONICAL_RULE_TYPES
 from aegis_core.workspace.base import Workspace
-from aegis_core.workspace.discovery import _is_workspace_dir
+from aegis_core.workspace.binding import bounded_walk_up, home_message
 from aegis_core.workspace.layout import WorkspaceLayout
 from aegis_core.lifecycle.promotion import (
     promote_rule,
@@ -76,13 +75,6 @@ class _WorkspaceArg(argparse.Action):
         setattr(namespace, "_rule_workspace_arg", values)
 
 
-def _git_toplevel(start: Path) -> Path | None:
-    for d in (start, *start.parents):
-        if (d / ".git").exists():
-            return d
-    return None
-
-
 def _home() -> Path | None:
     try:
         return Path.home().resolve()
@@ -95,27 +87,31 @@ def _not_a_workspace(directory: Path) -> WorkspaceNotFoundError:
 
 
 def _walk_up_to_workspace(start: Path) -> Path:
-    """Discovery's start-path walk without its AEGIS_WORKSPACE override:
-    an explicit --workspace beats the environment, as it already does for create."""
-    for d in (start, *start.parents):
-        if _is_workspace_dir(str(d)):
-            return d
-    return start
+    """The workspace an explicit --workspace names: AD-4's bounded walk-up from ``start``
+    (never above its git toplevel, never ``$HOME`` or the filesystem root), else ``start``.
+
+    It ignores AEGIS_WORKSPACE: an explicit --workspace beats the environment, as it
+    already does for create.
+    """
+    return bounded_walk_up(start) or start
 
 
 def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = False) -> Path:
-    """Resolve the rule workspace. Never ``$HOME``, never above the git toplevel (H8).
+    """Resolve the rule workspace. Never ``$HOME``, never above the git toplevel (H8, AD-4).
 
     An explicit ``--workspace DIR`` is the start point, whichever position it
     was given in (``_workspace_arg`` is the raw global flag, when ``cli.main``
     keeps it). ``rule create`` (``require_aegis``) uses exactly DIR; the other
-    actions walk up from DIR like cwd discovery does. Without DIR the root comes
-    from ``cli.main``'s cwd discovery. Either way the root is then bounded by
-    the start point's git toplevel, since discovery itself walks up without bounds.
+    actions take the bounded walk-up from DIR, and DIR must then resolve to a
+    workspace. Without DIR the root comes from ``cli.main``'s discovery, which is
+    bounded the same way.
     """
     explicit = getattr(args, "_rule_workspace_arg", None) or getattr(args, "_workspace_arg", None)
     if explicit:
-        start = Path(explicit).expanduser().resolve()
+        try:
+            start = Path(explicit).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:  # a NUL byte, a link loop before 3.13
+            raise WorkspaceNotFoundError(f"--workspace {explicit} cannot be resolved: {exc}") from exc
         root = start if require_aegis else _walk_up_to_workspace(start)
     else:
         ws_obj = getattr(args, "ws", None)
@@ -129,20 +125,10 @@ def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = Fals
     home = _home()
     if home is not None and root == home:
         if start == home:
-            raise WorkspaceNotFoundError(
-                f"not an Aegis workspace ({home} is the home directory; ~/.aegis is the user rule layer); "
-                "run aegis init in a project"
-            )
+            raise WorkspaceNotFoundError(home_message(home))
         raise _not_a_workspace(start)
 
-    pin = env_workspace()
-    pinned = bool(pin) and Path(pin).resolve() == root
-    if not pinned and root != start and root in start.parents:
-        top = _git_toplevel(start)
-        if top is not None and root in top.parents:
-            raise _not_a_workspace(start)
-
-    if require_aegis and not is_aegis_workspace(root):
+    if (explicit or require_aegis) and not is_aegis_workspace(root):
         raise _not_a_workspace(root)
     return root
 
