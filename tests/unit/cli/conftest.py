@@ -47,3 +47,13 @@ def _no_real_host_cli(monkeypatch):
         raise AssertionError(f"a test tried to run a real host CLI: {argv!r}")
 
     monkeypatch.setattr(install_hosts, "_run_cli", refuse)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_desktop_apps(monkeypatch):
+    """Host detection also looks for desktop apps in machine-wide folders (/Applications,
+    %LOCALAPPDATA%\\Programs). Those hold the developer's real apps, so no test sees them;
+    a test that exercises app detection points ``hosts.APP_DIRS`` at its own tmp_path."""
+    from aegis_core import hosts
+
+    monkeypatch.setattr(hosts, "APP_DIRS", {})

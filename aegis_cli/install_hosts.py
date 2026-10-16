@@ -21,8 +21,9 @@ are (BOM included).
 
 **MCP registration** uses each host's row in :mod:`aegis_core.hosts`: a native CLI
 (``codex mcp add``, ``claude mcp add --scope user``) run as an argv with no shell, or a
-JSON merge into the host's config file (Antigravity's ``~/.gemini/config/mcp_config.json``),
-whose previous bytes are first copied, owner-only, to ``~/.aegis/backups/<UTC stamp>/``.
+JSON merge into the host's config file (Antigravity's ``~/.gemini/config/mcp_config.json``,
+Kiro's ``~/.kiro/settings/mcp.json``), whose previous bytes are first copied, owner-only,
+to ``~/.aegis/backups/<UTC stamp>/``.
 Host CLIs and ``aegis-mcp`` are looked up only in absolute ``PATH`` entries, never in
 the current directory (the repository being set up). A host CLI is run by the path found
 there, not the file a link there points to: version managers (Volta, mise, asdf) install
@@ -66,7 +67,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from aegis_core import hosts as host_table
 from aegis_core.config import ENV_CLIENT, ENV_WORKSPACE
@@ -84,6 +85,7 @@ __all__ = [
     "backup_dir",
     "SERVER_NAME",
     "detect_hosts",
+    "detection_evidence",
     "find_workspace",
     "display_command",
     "has_block_marker",
@@ -94,6 +96,7 @@ __all__ = [
     "ordered_hosts",
     "merge_mcp_json",
     "parse_hosts",
+    "plane_evidence",
     "read_registry",
     "register_argv",
     "register_host",
@@ -650,7 +653,8 @@ def _never_registered(host: host_table.HostSpec) -> str:
     if host.retired:
         return host.retired
     if host.registration is None:
-        return f"{host.id} is identity only: Aegis does not register there (ADR 0005 H4)"
+        why = f"{host.id} is identity only: Aegis does not register there (ADR 0005 H4)"
+        return f"{why}; {host.redirect}" if host.redirect else why
     return ""
 
 
@@ -663,19 +667,48 @@ def _user_dir(home: Path, spec: str) -> Path:
     return home / spec[2:] if spec.startswith("~/") else Path(spec)
 
 
-def detect_hosts(home: Union[str, Path], path: Optional[str] = None) -> List[str]:
-    """Hosts that look installed (a binary on PATH or a user config dir); a proposal only."""
+def plane_evidence(host: host_table.HostSpec, home: Union[str, Path], path: Optional[str] = None,
+                   environ: Optional[Mapping[str, str]] = None, platform: Optional[str] = None) -> Optional[str]:
+    """What shows ``host``'s config plane is on this machine, or None: its binary on PATH,
+    one of its config paths (as the table writes it), or its desktop app (an IDE or a
+    desktop app puts nothing on PATH). App bundles are directories; anything else there
+    is not an app."""
     home = Path(home)
-    found = []
+    for name in host.binaries:
+        found = which(name, path)
+        if found:
+            return found
+    for spec in host.config_paths:
+        if os.path.exists(_user_dir(home, spec)):
+            return spec
+    environ = os.environ if environ is None else environ
+    for app in host_table.app_paths(host, home, environ, sys.platform if platform is None else platform):
+        if os.path.isdir(app):
+            return app
+    return None
+
+
+def detection_evidence(home: Union[str, Path], path: Optional[str] = None,
+                       environ: Optional[Mapping[str, str]] = None,
+                       platform: Optional[str] = None) -> Dict[str, str]:
+    """{host id: what found it} for every host `aegis init` can register, in table order."""
+    found = {}
     for host in registrable_hosts():
-        if any(which(b, path) for b in host.binaries) or any(
-                _user_dir(home, d).is_dir() for d in host.user_dirs):
-            found.append(host.id)
+        evidence = plane_evidence(host, home, path, environ, platform)
+        if evidence is not None:
+            found[host.id] = evidence
     return found
 
 
+def detect_hosts(home: Union[str, Path], path: Optional[str] = None,
+                 environ: Optional[Mapping[str, str]] = None, platform: Optional[str] = None) -> List[str]:
+    """Hosts that look installed (a binary on PATH, a config path or a desktop app); a proposal only."""
+    return list(detection_evidence(home, path, environ, platform))
+
+
 def parse_hosts(value: str) -> Union[str, List[str]]:
-    """``auto``, or the comma-separated host ids in host-table order; ValueError otherwise."""
+    """``auto``, or the plane ids of the comma-separated host ids and surface aliases
+    (``codex-app`` is ``codex-cli``), once each in host-table order; ValueError otherwise."""
     names = [v.strip() for v in value.split(",") if v.strip()]
     if not names:
         raise ValueError("no host given; use --host auto or a comma-separated list of host ids")
@@ -684,18 +717,22 @@ def parse_hosts(value: str) -> Union[str, List[str]]:
             raise ValueError("'auto' cannot be combined with host ids")
         return "auto"
     registrable = {h.id for h in registrable_hosts()}
+    planes = []
     for name in names:
         try:
-            spec = host_table.get(name)
+            spec = host_table.get(host_table.resolve(name))
         except KeyError as exc:
-            raise ValueError(f"unknown host {name!r}; hosts: {', '.join(sorted(registrable))}") from exc
+            aliases = sorted(a for h in registrable_hosts() for a in h.aliases)
+            raise ValueError(f"unknown host {name!r}; hosts: {', '.join(sorted(registrable))} "
+                             f"(or a surface: {', '.join(aliases)})") from exc
         refusal = _never_registered(spec)
         if refusal:
             raise ValueError(refusal)
-        if name not in registrable:
+        if spec.id not in registrable:
             raise ValueError(f"{name}: Aegis does not register this host in this release; "
                              f"hosts now: {', '.join(sorted(registrable))}")
-    return ordered_hosts(names)
+        planes.append(spec.id)
+    return ordered_hosts(planes)
 
 
 MCP_SCRIPT = "aegis-mcp"

@@ -453,7 +453,7 @@ def test_enforcement_tiers_report_what_is_in_force_here_and_nothing_more(env):
     tiers = {t["tier"]: t for t in payload["enforcement_tiers"]}
     assert list(tiers) == ["advisory", "best_effort", "local_floor", "authoritative"]
     assert tiers["advisory"]["status"] == "active"
-    assert tiers["best_effort"]["status"] == "unavailable"
+    assert tiers["best_effort"]["status"] == "inactive"  # no host hook registered (v4.1)
     assert tiers["local_floor"]["status"] == "inactive"
     # doctor makes no network call, so CI is a capability it does not have: unavailable.
     assert tiers["authoritative"]["status"] == "unavailable"
@@ -1754,14 +1754,12 @@ def test_a_hook_status_without_reachability_counts_as_reachable(env):
     assert check["status"] == "pass"
 
 
-def test_the_best_effort_tier_states_the_planned_v41_hooks_as_the_docs_do(env):
+def test_the_best_effort_tier_without_host_hooks_is_inactive_and_names_the_install_command(env):
     env.all_ok()
     best = tier(env.doctor(), "best_effort")
-    assert best["status"] == "unavailable" and best["hosts"] == []
-    assert best["detail"] == (
-        "none in 4.0. Planned for v4.1: Claude Code blocks with exit 2; Codex blocks with exit 2 "
-        "once you trust the hook in /hooks; Antigravity blocks only destructive commands (exit 1) "
-        "and records scan-before-edit. Each fails open when Aegis errors")
+    assert best["status"] == "inactive" and best["hosts"] == []
+    assert best["detail"] == ("no Aegis PreToolUse hook registered for codex-cli, claude-code, antigravity: "
+                              "run aegis hook install --host <host>")
 
 
 def test_a_legacy_workspace_without_rules_is_told_to_migrate_never_to_init(env, tmp_path, monkeypatch, capsys):
@@ -1845,3 +1843,162 @@ def test_the_home_directory_is_never_checked_for_unmigrated_state(env, monkeypat
                         raising=False)
     payload = env.doctor(workspace=str(env.home))
     assert seen == [] and "unmigrated_v3_state" not in finding_codes(payload)
+
+
+# ── surfaces, IDE and desktop planes, bootstrap without tools (v4.1 rev 3.1) ─────
+
+def kiro_registered(env: Env, command: Optional[str] = None) -> Path:
+    cfg = env.home / ".kiro" / "settings" / "mcp.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"mcpServers": {"aegis": {
+        "command": command or str(env.mcp), "args": [], "env": {"AEGIS_CLIENT": "kiro"}}}}), encoding="utf-8")
+    return cfg
+
+
+def select(env: Env, *host_ids: str) -> None:
+    (env.ws / ".aegis" / "config.json").write_text(json.dumps({"v": 1, "hosts": list(host_ids)}), encoding="utf-8")
+
+
+def test_every_row_lists_the_surfaces_its_config_plane_covers(env):
+    env.all_ok()
+    payload = env.doctor()
+    from aegis_core import hosts as table
+    for row in payload["hosts"]:
+        assert row["surfaces"] == list(table.get(row["id"]).surfaces)
+    rc, out = env.run()
+    assert "surfaces     Codex CLI, Codex IDE extension, ChatGPT desktop app (Codex mode)" in out
+    assert "surfaces     Claude Code CLI, Claude Code IDE extensions, Claude desktop app (Code tab)" in out
+
+
+def test_kiro_is_checked_from_its_user_mcp_json_without_running_kiro_cli(env):
+    env.all_ok()
+    env.stub("kiro-cli")
+    kiro_registered(env)
+    select(env, "kiro")
+    payload = env.doctor()
+    row = host(payload, "kiro")
+    assert row["state"] == "ok", row["reasons"]
+    assert row["verified_row"] is False
+    assert row["registration"]["source"] == "~/.kiro/settings/mcp.json"
+    assert row["registration"]["scope"] == "user"
+    assert row["identity"] == {"status": "explicit", "aegis_client": "kiro"}
+    assert row["hooks"]["status"] == "none"  # no Aegis hooks for Kiro in v4.1
+    assert row["enforcement_level"] == "advisory"
+    # The only host CLI doctor starts is codex (for the bootstrap check of a host found here).
+    assert {Path(c["argv"][0]).stem for c in env.calls} <= {"codex"}
+
+
+def test_an_unverified_row_joins_the_default_matrix_only_where_its_plane_is_found(env):
+    env.all_ok()
+    assert [h["id"] for h in env.doctor()["hosts"]] == PHASE1
+    (env.home / ".kiro").mkdir()
+    payload = env.doctor()
+    assert [h["id"] for h in payload["hosts"]] == PHASE1 + ["kiro"]
+    assert payload["scope"]["hosts"] == PHASE1 + ["kiro"]
+
+
+def test_an_installed_app_counts_as_installed_without_a_cli(env, monkeypatch, tmp_path):
+    """The Kiro IDE puts no kiro-cli on PATH: its app bundle shows the host is installed,
+    so the row is judged on its registration instead of reported missing."""
+    from aegis_core import hosts as table
+    apps = tmp_path / "Applications"
+    (apps / "Kiro.app").mkdir(parents=True)
+    monkeypatch.setattr(table, "APP_DIRS", {"darwin": (str(apps),)})
+    monkeypatch.setattr(doctor, "_platform", lambda: "darwin")
+    env.all_ok()
+    select(env, "kiro")
+    row = host(env.doctor(), "kiro")
+    assert row["state"] == "unregistered" and "missing_binary" not in codes(row)
+    assert row["binary"]["found"] is False
+    assert row["app"] == str(apps / "Kiro.app")
+    kiro_registered(env)
+    row = host(env.doctor(), "kiro")
+    assert row["state"] == "ok" and row["enforcement_level"] == "advisory"
+
+
+def test_an_app_that_doctor_cannot_ask_is_auth_unknown_never_ok(env, monkeypatch, tmp_path):
+    """The ChatGPT desktop app keeps Codex registrations in TOML that only the codex CLI
+    reads: with the app and no CLI, doctor cannot tell, and says so."""
+    from aegis_core import hosts as table
+    apps = tmp_path / "Applications"
+    (apps / "Codex.app").mkdir(parents=True)
+    monkeypatch.setattr(table, "APP_DIRS", {"darwin": (str(apps),)})
+    monkeypatch.setattr(doctor, "_platform", lambda: "darwin")
+    env.bootstrap()
+    env.register_workspace()
+    row = host(env.doctor(), "codex-cli")
+    assert row["state"] == "auth_unknown"
+    assert "registration_unverifiable" in codes(row)
+    assert env.calls == []
+
+
+def bootstrap_warnings(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [f for f in payload["findings"] if f["code"] == "bootstrap_without_tools"]
+
+
+def test_a_found_host_that_reads_the_bootstrap_without_aegis_tools_is_warned_about(env):
+    """The field case: Kiro read AGENTS.md, whose bootstrap tells the agent to call
+    aegis_scan, but Kiro had no Aegis MCP registration. The workspace selected another host."""
+    env.all_ok()
+    select(env, "codex-cli")
+    (env.home / ".kiro").mkdir()
+    payload = env.doctor()
+    (warning,) = bootstrap_warnings(payload)
+    assert warning["severity"] == "warning"
+    assert warning["path"] == str(env.ws / "AGENTS.md")
+    assert "Kiro" in warning["message"] and "aegis init --host kiro" in warning["message"]
+    assert "~/.kiro" in warning["message"]
+    assert [h["id"] for h in payload["hosts"]] == ["codex-cli"]
+    rc, out = env.run()
+    assert "aegis init --host kiro" in out
+
+
+def test_no_bootstrap_warning_once_the_host_has_aegis(env):
+    env.all_ok()
+    select(env, "codex-cli")
+    (env.home / ".kiro").mkdir()
+    kiro_registered(env)
+    assert bootstrap_warnings(env.doctor()) == []
+
+
+def test_no_bootstrap_warning_without_the_bootstrap_or_without_the_host(env):
+    env.all_ok()
+    select(env, "codex-cli")
+    assert bootstrap_warnings(env.doctor()) == []  # no Kiro on this machine
+    (env.home / ".kiro").mkdir()
+    (env.ws / "AGENTS.md").write_text("# Notes\n", encoding="utf-8")
+    assert bootstrap_warnings(env.doctor()) == []  # no bootstrap to mislead its agent
+
+
+def test_a_selected_host_left_unregistered_is_warned_about_too(env):
+    env.all_ok()
+    env.replies["codex"] = (1, "", "Error: No MCP server named 'aegis' found.\n")
+    (warning,) = bootstrap_warnings(env.doctor())
+    assert "Codex CLI" in warning["message"] and "aegis init --host codex-cli" in warning["message"]
+
+
+def test_no_bootstrap_warning_where_doctor_cannot_tell_or_the_host_skips_agents_md(env):
+    env.all_ok()
+    env.replies["codex"] = subprocess.TimeoutExpired(["codex"], 10)  # unknown is not absent
+    env.claude_json({})  # claude-code unregistered...
+    (env.ws / "CLAUDE.md").write_text("# Notes\n", encoding="utf-8")  # ...but it reads CLAUDE.md, not AGENTS.md
+    (env.home / ".codex").mkdir()
+    assert bootstrap_warnings(env.doctor()) == []
+
+
+def test_a_host_found_only_by_its_config_dir_whose_registration_cannot_be_read_is_not_warned_about(env):
+    env.bootstrap()
+    (env.home / ".codex").mkdir()  # the ChatGPT desktop app, say: no codex CLI to ask
+    assert bootstrap_warnings(env.doctor()) == []
+
+
+def test_a_host_without_a_documented_instruction_budget_prints_the_size_alone(env):
+    env.all_ok()
+    kiro_registered(env)
+    select(env, "kiro")
+    size = (env.ws / "AGENTS.md").stat().st_size
+    row = host(env.doctor(), "kiro")
+    assert row["budget"] == {"file": "AGENTS.md", "bytes": size, "budget_bytes": None, "within": None}
+    rc, out = env.run()
+    assert f"budget       AGENTS.md {size} bytes (no documented limit)" in out
+    assert "of None" not in out

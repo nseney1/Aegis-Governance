@@ -10,7 +10,8 @@ Each host gets one state, the first of these that applies:
 - ``missing_binary``: none of its binaries is in an absolute PATH entry outside the
   workspace (one found only inside it, or only through an empty or relative entry, is
   listed in ``binary.ignored`` with the reason ``binary_in_workspace`` or
-  ``binary_on_relative_path``, and makes the host's installation unknown);
+  ``binary_on_relative_path``, and makes the host's installation unknown), and none of
+  its desktop apps is installed (``app``: an IDE or desktop app puts nothing on PATH);
 - ``unregistered``: its config has no ``aegis`` server, or the registered command is gone;
 - ``auth_unknown``: doctor cannot confirm the host will load ``aegis`` or read its
   bootstrap (its CLI failed or timed out, its config cannot be parsed, the registration
@@ -35,12 +36,33 @@ determine), ``checks_ok`` (no blocking check failed; it says nothing about the h
 ``enforcement_level`` and ``trust_tier``, reserved as null until v4.3), ``enforcement_tiers``,
 ``findings``, and with ``--fix`` the ``fixes`` it applied and its ``backup_dir``.
 
+Each row lists the ``surfaces`` its config plane covers (CLI, IDE extension, desktop app).
+Without ``hosts`` in .aegis/config.json the matrix is every verified host plus each
+experimental one found on this machine (by binary, config path or app). A host found
+here whose agent reads AGENTS.md, while AGENTS.md carries the bootstrap and the host has
+no ``aegis`` registration, is the ``bootstrap_without_tools`` warning: the bootstrap
+tells that agent to call tools it does not have (fix: ``aegis init --host <id>``).
+
 ``enforcement_level`` is the strongest tier known to be in force for the host here:
 ``local_floor``, ``advisory``, ``none`` (an ungoverned workspace, a host not installed,
 or no route by which aegis or its bootstrap reaches the agent) or ``unknown`` (a fact
 that decides it cannot be read, such as a host binary found only inside the workspace).
 The home directory is never a governed workspace: its ``.aegis/`` is the user plane, so
 run from there doctor checks no project rules, state or AST drivers.
+
+Each host row also has ``hooks`` (v4.1 §2): the Aegis PreToolUse entries in the files the
+host reads hooks from (user, project and, for Claude Code, local settings), whether each
+runs an executable ``aegis``, and the tier such an entry gives with its evidence label
+(Claude Code and Codex blocking are documented, DOC; Antigravity's exit-1 block is LIVE).
+Presence never claims enforcement: no entry changes ``state`` or ``enforcement_level``, and
+the best-effort tier is ``unknown`` while any is registered, since doctor cannot see a host
+run it (nor Codex's /hooks approval). An entry that is not the one ``aegis hook install``
+writes (matcher, type, command form with its host, or timeout) is ``modified`` and claims no
+tier. Duplicates, modified entries, host files that do not parse, entries
+whose ``aegis`` is gone and v3 leftovers (``soma hook ...`` or a removed ``aegis hook``
+phase, in any hook file or the stale v3 Antigravity plugin) are findings; ``--fix`` removes
+the leftovers with the ``remove_list_items`` action (or deletes a plugin file that holds
+nothing else).
 Strings taken from files or host output are printed without control sequences, and
 doctor starts only host CLIs found in absolute PATH entries outside the workspace
 (aegis_core.pathlookup). It never starts the MCP server or a registered command: the MCP
@@ -684,6 +706,37 @@ def _desktop_configs(ctx: _Ctx) -> List[Path]:
     return list(unique.values())
 
 
+def _platform() -> str:
+    """``sys.platform``, read in one place so a test can emulate another OS's app folders."""
+    return sys.platform
+
+
+def _app(spec: Any, ctx: _Ctx) -> Optional[str]:
+    """The installed desktop app of ``spec`` (an app bundle is a directory), or None."""
+    from aegis_core import hosts
+
+    if ctx.home is None:
+        return None
+    return next((app for app in hosts.app_paths(spec, ctx.home, ctx.environ, _platform()) if os.path.isdir(app)),
+                None)
+
+
+def _plane_found(spec: Any, ctx: _Ctx) -> Optional[str]:
+    """What shows ``spec``'s config plane is on this machine, for people: a binary doctor
+    would run, a config path in the home directory or a desktop app; None when nothing does."""
+    for name in spec.binaries:
+        found = ctx.which(name)
+        if found:
+            return ctx.label(Path(found))
+    if ctx.home is not None:
+        for spec_path in spec.config_paths:
+            rel = spec_path[2:] if spec_path.startswith("~/") else spec_path
+            if os.path.exists(ctx.home.joinpath(*rel.split("/"))):
+                return spec_path
+    app = _app(spec, ctx)
+    return ctx.label(Path(app)) if app else None
+
+
 def _host_json_path(spec: Any, ctx: _Ctx) -> Optional[Path]:
     reg = spec.registration
     if reg is None or reg.kind != "json_file" or ctx.home is None:
@@ -1219,8 +1272,10 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     binary = next((found for found in (ctx.which(name) for name in spec.binaries) if found), None)
     passed = [] if binary else [hit for name in spec.binaries for hit in ctx.passed_over(name)]
     ignored = list(dict.fromkeys(hit.path for hit in passed))
+    # An IDE or desktop app of the plane puts no binary on PATH; its bundle is the evidence.
+    app = None if binary else _app(spec, ctx)
     # Installed: True, False, or None when the only binary is one doctor will not run.
-    installed: Optional[bool] = True if binary else (None if passed else False)
+    installed: Optional[bool] = True if binary or app else (None if passed else False)
     reg = _probe(spec, binary, ctx)
     identity = _identity(spec, reg)
     reasons: List[Dict[str, str]] = []
@@ -1230,10 +1285,10 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         reasons.append({"code": code, "message": _clean(message, 1024)})
 
     names = " or ".join(f"`{b}`" for b in spec.binaries) or "a binary"
-    if passed:
+    if passed and not app:
         unknown.append("binary")
-    fenced = next((hit for hit in passed if hit.reason == INSIDE_FENCE), None)
-    relative = next((hit for hit in passed if hit.reason != INSIDE_FENCE), None)
+    fenced = next((hit for hit in passed if hit.reason == INSIDE_FENCE), None) if not app else None
+    relative = next((hit for hit in passed if hit.reason != INSIDE_FENCE), None) if not app else None
     if fenced is not None:
         add("binary_in_workspace", f"{names} found only at {fenced.path}, inside the workspace: doctor does not "
                                    "run programs from the repository, so it cannot tell whether the host is installed")
@@ -1242,7 +1297,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                                        f"{relative.entry!r}, which resolves against the directory a program starts in "
                                        "(here the workspace): doctor does not run it, so it cannot tell whether the "
                                        "host is installed")
-    if binary is None and not passed:
+    if binary is None and not passed and not app:
         add("missing_binary", f"no {names} on PATH")
     status = reg["status"]
     if status == "absent":
@@ -1250,7 +1305,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     elif status in ("unknown", "unavailable"):
         unknown.append("registration")
         # An installed host doctor cannot ask is never "ok": unknown is not absent either.
-        if status == "unknown" or binary is not None:
+        if status == "unknown" or installed:
             add("registration_unverifiable", f"cannot tell whether {spec.display_name} loads aegis: {reg['detail']}")
     else:
         if reg["command_exists"] is False:
@@ -1340,14 +1395,21 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
 
     advisory = _advisory(spec, ctx, installed, reg, False if cut else reaches, workspace_registered)
     level = _level(advisory, floor, ctx.governed, installed)
+    # The PreToolUse hooks never change ``state`` or ``level``: their presence in a file is
+    # not proof that the host runs them (presence never claims enforcement).
+    hooks = _hook_row(spec, ctx)
+    if hooks["status"] == "unknown":
+        unknown.append("hooks")
     shown = {k: v for k, v in reg.items() if k != "aegis_client"}
     return {
         "id": spec.id,
         "display_name": spec.display_name,
         "verified_row": spec.verified,
+        "surfaces": list(spec.surfaces),
         "state": state,
         "reasons": reasons,
         "binary": {"found": binary is not None, "path": binary, "names": list(spec.binaries), "ignored": ignored},
+        "app": app,
         "registration": shown,
         "identity": identity,
         "workspace_registered": workspace_registered,
@@ -1356,11 +1418,252 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         "budget": budget,
         "enforcement_level": level,
         "advisory": advisory,
+        "hooks": hooks,
         "trust_tier": None,
         "trust_tier_status": "unavailable",
         "stale": False,
         "unknown": unknown,
     }
+
+
+# ── Host plane: PreToolUse hooks (v4.1 §2 Doctor) ──────────────────────────
+
+_HOOK_SCOPE_FILES = {"claude-code": (("local", (".claude", "settings.local.json")),)}
+# A token after which the shell starts a new command (a v3 entry may be `cd x && soma hook ...`).
+_COMMAND_STARTERS = frozenset({"&&", "||", "|", ";", "&", "!", "(", "{", "then", "do", "else", "exec"})
+_V3_PLUGIN = (".gemini", "config", "plugins", "governance", "hooks.json")
+
+
+def _hook_files(host_id: str, ctx: _Ctx) -> List[Tuple[str, Path]]:
+    """(scope, path) of each file ``host_id`` reads hooks from here: the user and project
+    files ``aegis hook install`` writes, plus Claude Code's local settings."""
+    from aegis_cli.hooks import registrar
+
+    found: List[Tuple[str, Path]] = []
+    for scope in registrar.SCOPES:
+        path = registrar.hook_file(host_id, scope, home=ctx.home, root=ctx.root, environ=ctx.environ)
+        if path is not None:
+            found.append((scope, path))
+    found.extend((scope, ctx.root.joinpath(*rel)) for scope, rel in _HOOK_SCOPE_FILES.get(host_id, ()))
+    unique: Dict[str, Tuple[str, Path]] = {}
+    for scope, path in found:  # in the home directory the project file is the user file
+        unique.setdefault(os.path.normcase(os.path.abspath(str(path))), (scope, path))
+    return list(unique.values())
+
+
+def _runnable(path: Optional[str]) -> bool:
+    return bool(path) and os.path.isfile(path) and (os.name == "nt" or os.access(path, os.X_OK))
+
+
+def _hook_row(spec: Any, ctx: _Ctx) -> Dict[str, Any]:
+    """Whether an Aegis PreToolUse entry for ``spec`` is in a file the host reads, and the
+    tier it would give. ``status``: registered, absent, duplicate (more than one entry),
+    broken (its aegis is missing), modified (not the entry install writes, so no tier is
+    claimed), unknown (a host file cannot be read), unavailable (the host cannot run the
+    hook here) or none (a host without Aegis hooks)."""
+    from aegis_cli.hooks import registrar
+
+    row: Dict[str, Any] = {"status": "none", "tier": None, "evidence": None, "trust": None, "detail": None,
+                           "entries": [], "files": []}
+    if spec.id not in registrar.HOOK_HOSTS:
+        return row
+    for scope, path in _hook_files(spec.id, ctx):
+        entry = ctx.file(path, as_json=True)
+        item = {"scope": scope, "path": str(path), "status": "absent", "error": None}
+        row["files"].append(item)
+        if not entry.exists:
+            continue
+        if entry.error:
+            item.update(status="invalid", error=entry.error)
+            continue
+        try:
+            located = registrar.aegis_handlers(spec.id, entry.data, path, strict=True)
+        except registrar.ShapeError as exc:
+            item.update(status="invalid", error=f"is not in the shape {spec.display_name} reads "
+                                                f"('{exc.where}' must be {exc.what})")
+            continue
+        item["status"] = "ok"
+        for keys, group_index, _handler_index, handler in located:
+            groups: Any = entry.data
+            for key in keys:
+                groups = groups[key]
+            aegis = registrar.handler_aegis(handler)
+            row["entries"].append({"scope": scope, "path": str(path), "aegis": aegis, "executable": _runnable(aegis),
+                                   "modified": not registrar.matches_install(spec.id, groups[group_index], handler)})
+    entries = row["entries"]
+    invalid = [f for f in row["files"] if f["status"] == "invalid"]
+    why = registrar.unavailable_reason(spec.id, ctx.which("aegis"))
+    if why:
+        row.update(status=registrar.UNAVAILABLE, tier=registrar.UNAVAILABLE, detail=why)
+        return row
+    if len(entries) > 1:
+        status = "duplicate"
+    elif entries:
+        status = "broken" if not entries[0]["executable"] else "modified" if entries[0]["modified"] else "registered"
+    else:
+        status = "unknown" if invalid else "absent"
+    row.update(status=status, tier=registrar.TIERS[spec.id], evidence=registrar.EVIDENCE[spec.id])
+    if status == "unknown":
+        row["detail"] = f"{ctx.label(Path(invalid[0]['path']))} {invalid[0]['error']}"
+    if entries and spec.id == "codex-cli":
+        row["trust"] = registrar.TRUST_UNCHECKED
+    return row
+
+
+def _hook_findings(ctx: _Ctx, rows: List[Dict[str, Any]]) -> List[_Finding]:
+    found: List[_Finding] = []
+    for row in rows:
+        hooks, name, host_id = row["hooks"], row["display_name"], row["id"]
+        for item in hooks["files"]:
+            if item["status"] == "invalid":
+                path = Path(item["path"])
+                found.append(_Finding("hook_file_invalid", path,
+                                      f"{ctx.label(path)} {item['error']}, so {name} may skip every hook in it, and "
+                                      f"aegis hook install --host {host_id} will not edit it: fix the file"))
+        entries = hooks["entries"]
+        if len(entries) > 1:
+            where = ", ".join(f"{ctx.label(Path(e['path']))} ({e['scope']})" for e in entries)
+            times = "twice" if len(entries) == 2 else f"{len(entries)} times"
+            found.append(_Finding("duplicate_hook", Path(entries[1]["path"]),
+                                  f"{name} has {len(entries)} Aegis PreToolUse hook entries ({where}), so it runs "
+                                  f"the handler {times} per tool call: keep one (aegis hook uninstall --host "
+                                  f"{host_id} --scope user|project removes one scope's)"))
+        for e in entries:
+            path = Path(e["path"])
+            fix = (f"remove it from that file, then run aegis hook install --host {host_id}" if e["scope"] == "local"
+                   else f"run aegis hook install --host {host_id}" + (" --scope project" if e["scope"] == "project"
+                                                                        else ""))
+            if not e["executable"]:
+                found.append(_Finding("hook_aegis_missing", path,
+                                      f"{ctx.label(path)}: the Aegis hook runs {e['aegis']}, which is missing or not "
+                                      f"executable, so {name} gets no Aegis check from it (it fails open): {fix}"))
+            elif e["modified"]:
+                found.append(_Finding("hook_entry_modified", path,
+                                      f"{ctx.label(path)}: the Aegis hook entry is not the entry aegis hook install "
+                                      "writes (its matcher, type, command, arguments or timeout differ), so "
+                                      f"{name} may not run it as its tier says: {fix}"))
+    return found + _legacy_hook_findings(ctx)
+
+
+def _removed_host_phases() -> frozenset:
+    """The `aegis hook <phase>` commands v3 host configs called and v4 removed (cli.py's table)."""
+    from aegis_cli.cli import _HOST_HOOK, REMOVED_COMMANDS
+
+    return frozenset(name.partition(" ")[2] for name, pointer in REMOVED_COMMANDS.items()
+                     if name.startswith("hook ") and pointer == _HOST_HOOK)
+
+
+def _program_name(token: str) -> str:
+    name = re.split(r"[\\/]", token)[-1].lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def _is_legacy_handler(handler: Any, phases: frozenset) -> bool:
+    """Whether a hook handler calls the v3 CLI's hooks or a removed `aegis hook` phase,
+    as the program of any command in its (shell) command line."""
+    if not isinstance(handler, dict) or not isinstance(handler.get("command"), str):
+        return False
+    command, args = handler["command"], handler.get("args")
+    if isinstance(args, list) and args and all(isinstance(a, str) for a in args):
+        tokens = [command] + args
+    else:
+        from aegis_cli.hooks.registrar import command_tokens
+
+        tokens = command_tokens(command)
+    starts = True
+    for index, token in enumerate(tokens[:-1]):
+        if starts and tokens[index + 1] == "hook":
+            program = _program_name(token)
+            if program == LEGACY_SERVER:
+                return True
+            if program == "aegis" and index + 2 < len(tokens) and tokens[index + 2].rstrip(";&|") in phases:
+                return True
+        starts = token in _COMMAND_STARTERS or token.endswith((";", "&", "|"))
+    return False
+
+
+ListItem = Tuple[Tuple[Any, ...], int]
+
+
+def _legacy_items(host_id: str, data: Dict[str, Any], phases: frozenset) -> Tuple[List[ListItem], int, int]:
+    """(where the v3 entries are, handlers in the file, v3 handlers). A group whose handlers
+    are all v3 goes whole; otherwise only its v3 handlers go. Every event counts, not only
+    PreToolUse: v3 hooked PreInvocation and Stop too."""
+    if host_id == "antigravity":
+        containers = [name for name, value in data.items() if isinstance(value, dict)]
+    else:
+        containers = ["hooks"] if isinstance(data.get("hooks"), dict) else []
+    items: List[ListItem] = []
+    total = legacy = 0
+    for name in containers:
+        for event, listed in data[name].items():
+            if not isinstance(listed, list):
+                continue
+            for index, item in enumerate(listed):
+                inner = item.get("hooks") if isinstance(item, dict) else None
+                if isinstance(inner, list):
+                    old = [j for j, h in enumerate(inner) if _is_legacy_handler(h, phases)]
+                    total += len(inner)
+                    legacy += len(old)
+                    if old and len(old) == len(inner):
+                        items.append(((name, event), index))
+                    else:
+                        items.extend(((name, event, index, "hooks"), j) for j in old)
+                elif isinstance(item, dict):
+                    total += 1
+                    if _is_legacy_handler(item, phases):
+                        legacy += 1
+                        items.append(((name, event), index))
+    return items, total, legacy
+
+
+def _list_location(path: Tuple[Any, ...], index: int) -> str:
+    out = ""
+    for part in path:
+        out += f"[{part}]" if isinstance(part, int) else ("." if out else "") + _clean(part)
+    return f"{out}[{index}]"
+
+
+def _legacy_hook_findings(ctx: _Ctx) -> List[_Finding]:
+    """v3 hook entries in every hook file of every hook host (selected or not), and the
+    stale v3 Antigravity plugin."""
+    from aegis_cli.hooks import registrar
+
+    files: Dict[str, Tuple[str, Path, bool]] = {}
+    for host_id in registrar.HOOK_HOSTS:
+        for _scope, path in _hook_files(host_id, ctx):
+            files.setdefault(os.path.normcase(os.path.abspath(str(path))), (host_id, path, False))
+    if ctx.home is not None:
+        plugin = ctx.home.joinpath(*_V3_PLUGIN)
+        files.setdefault(os.path.normcase(os.path.abspath(str(plugin))), ("antigravity", plugin, True))
+    phases = _removed_host_phases()
+    found: List[_Finding] = []
+    for host_id, path, is_plugin in files.values():
+        entry = ctx.file(path, as_json=True)
+        if entry.raw is None or entry.error or not isinstance(entry.data, dict):
+            continue
+        items, total, legacy = _legacy_items(host_id, entry.data, phases)
+        if not items:
+            continue
+        where = ", ".join(_list_location(p, i) for p, i in items)
+        calls = f"call {LEGACY_SERVER} hook or a removed aegis hook phase"
+        if is_plugin:
+            code, message = "legacy_hook_plugin", f"{ctx.label(path)}: the stale v3 Antigravity plugin's hooks {calls}"
+        else:
+            code, message = "legacy_hook_entry", f"{ctx.label(path)}: v3 hook entries {calls}"
+        message += f" ({where})"
+        action = None
+        if entry.refusal:
+            message += f"; --fix will not change it: {entry.refusal}"
+        elif is_plugin and legacy == total:
+            action = _Action(path, "delete_file", _sha256(entry.raw), f"delete the file (it holds only v3 hooks, {where})")
+            message += f"; nothing else is in it, so --fix deletes the file. Fix: {_FIX_HINT}"
+        else:
+            action = _Action(path, "remove_list_items", _sha256(entry.raw), f"remove the v3 hook entries ({where})",
+                             items=tuple(items))
+            message += f". Fix: {_FIX_HINT}"
+        found.append(_Finding(code, path, message, location=where, action=action))
+    return found
 
 
 # ── Enforcement tiers (AD-8) ────────────────────────────────────────────────
@@ -1424,15 +1727,52 @@ def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool, unreached: Op
     return [
         {"tier": "advisory", "mechanism": _TIER_TEXT["advisory"][1], "hosts": ids, "status": advisory,
          "detail": reach},
-        {"tier": "best_effort", "mechanism": _TIER_TEXT["best_effort"][1], "hosts": [], "status": "unavailable",
-         "detail": "none in 4.0. Planned for v4.1: Claude Code blocks with exit 2; Codex blocks with exit 2 once "
-                   "you trust the hook in /hooks; Antigravity blocks only destructive commands (exit 1) and "
-                   "records scan-before-edit. Each fails open when Aegis errors"},
+        _best_effort(rows, governed, setup),
         {"tier": "local_floor", "mechanism": _TIER_TEXT["local_floor"][1], "hosts": ids, "status": floor,
          "detail": floor_detail},
         {"tier": "authoritative", "mechanism": _TIER_TEXT["authoritative"][1], "hosts": [], "status": "unavailable",
          "detail": "not checked: aegis doctor makes no network or GitHub calls"},
     ]
+
+
+def _hook_tier_text(host_id: str, hooks: Dict[str, Any]) -> str:
+    text = f"{host_id}: {hooks['tier']} [{hooks['evidence']}]"
+    return text + (f", {hooks['trust']}" if hooks["trust"] else "")
+
+
+def _best_effort(rows: List[Dict[str, Any]], governed: bool, setup: str) -> Dict[str, Any]:
+    """The per-host hook tier. Doctor reads files only, so a registered hook makes the tier
+    ``unknown``, never active: whether a host runs it is out of doctor's sight."""
+    tier = {"tier": "best_effort", "mechanism": _TIER_TEXT["best_effort"][1], "hosts": []}
+    hooks = {row["id"]: row["hooks"] for row in rows}
+    capable = [h for h, v in hooks.items() if v["status"] not in ("unavailable", "none")]
+    hooked = [h for h in capable if hooks[h]["status"] in ("registered", "duplicate")]
+    if not capable:
+        reasons = "; ".join(v["detail"] for v in hooks.values() if v["detail"]) or "no selected host has Aegis hooks"
+        return dict(tier, status="unavailable", detail=reasons)
+    if not governed:
+        return dict(tier, status="inactive",
+                    detail=f"no .aegis/ here, so a registered hook passes every call: run {setup}")
+    if hooked:
+        said = "; ".join(_hook_tier_text(h, hooks[h]) for h in hooked)
+        return dict(tier, hosts=hooked, status="unknown",
+                    detail=f"registered for {said}. Doctor reads the host files only and cannot confirm that a host "
+                           "runs them; each fails open when Aegis errors")
+    unreadable = [h for h in capable if hooks[h]["status"] == "unknown"]
+    if unreadable:
+        return dict(tier, status="unknown",
+                    detail=f"cannot tell for {', '.join(unreadable)}: a hook file cannot be read (see the warnings)")
+    modified = [h for h in capable if hooks[h]["status"] == "modified"]
+    if modified:
+        return dict(tier, status="unknown",
+                    detail=f"cannot tell for {', '.join(modified)}: its Aegis hook entry is not the one aegis hook "
+                           "install writes (see the warnings)")
+    absent = [h for h in capable if hooks[h]["status"] == "absent"]
+    broken = [h for h in capable if hooks[h]["status"] == "broken"]
+    parts = [f"no Aegis PreToolUse hook registered for {', '.join(absent)}"] if absent else []
+    if broken:
+        parts.append(f"the Aegis hook of {', '.join(broken)} runs a missing aegis")
+    return dict(tier, status="inactive", detail="; ".join(parts) + ": run aegis hook install --host <host>")
 
 
 # ── Findings ────────────────────────────────────────────────────────────────
@@ -1442,11 +1782,14 @@ class _Action:
     """One reported change --fix may make to one file."""
 
     path: Path
-    kind: str  # remove_keys | remove_lines | delete_file | enable_packaged_ast_drivers
+    kind: str  # remove_keys | remove_lines | remove_list_items | delete_file | enable_packaged_ast_drivers
     sha256: Optional[str]
     describe: str
     keys: Tuple[Tuple[str, ...], ...] = ()
     lines: Tuple[Tuple[int, int], ...] = ()
+    # remove_list_items: (key path to a JSON list, index in it); the file is unchanged since
+    # the check (sha256), so the indexes still name the entries doctor reported.
+    items: Tuple[Tuple[Tuple[Any, ...], int], ...] = ()
 
 
 @dataclass
@@ -1674,6 +2017,39 @@ def _workspace_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
     return found
 
 
+def _bootstrap_tool_findings(ctx: _Ctx, info: _Instructions, rows: List[Dict[str, Any]]) -> List[_Finding]:
+    """Hosts found on this machine whose agent reads the bootstrap in AGENTS.md, which
+    tells it to call aegis_scan, while the host has no ``aegis`` server: the field case of
+    an IDE that read AGENTS.md but had no tools. Any registrable host counts, selected or
+    not; a registration doctor cannot read is unknown, never absent, so it is not one."""
+    from aegis_core import hosts
+
+    if not ctx.governed or info.bootstrap not in ("current", "outdated"):
+        return []
+    by_id = {row["id"]: row for row in rows}
+    found = []
+    for spec in hosts.all_hosts(phase=1):
+        if spec.registration is None or spec.retired or _bootstrap_reaches(spec, info) is not True:
+            continue
+        evidence = _plane_found(spec, ctx)
+        if evidence is None:
+            continue
+        row = by_id.get(spec.id)
+        if row is not None:
+            status = row["registration"]["status"]
+        else:
+            binary = next((b for b in (ctx.which(name) for name in spec.binaries) if b), None)
+            status = _probe(spec, binary, ctx)["status"]
+        if status != "absent":
+            continue
+        found.append(_Finding(
+            "bootstrap_without_tools", ctx.root / "AGENTS.md",
+            f"AGENTS.md carries the Aegis bootstrap, which tells {spec.display_name}'s agent to call the aegis "
+            f"tools, but {spec.display_name} (found: {evidence}) has no Aegis MCP server: "
+            f"run aegis init --host {spec.id}"))
+    return found
+
+
 def _upgrade_findings(ctx: _Ctx) -> List[_Finding]:
     """v3 state here that v4 never reads (discovery.unmigrated_state): status, scan and sync
     refuse such a workspace, and doctor, which still runs in it, must not call it healthy.
@@ -1769,13 +2145,15 @@ def _v3_copy_findings(ctx: _Ctx) -> List[_Finding]:
 
 # ── The diagnosis ───────────────────────────────────────────────────────────
 
-def _selection(root: Path, governed: bool) -> Tuple[Tuple[Any, ...], str, List[_Finding]]:
+def _selection(root: Path, governed: bool, ctx: _Ctx) -> Tuple[Tuple[Any, ...], str, List[_Finding]]:
     from aegis_core import hosts
     from aegis_core.config import ConfigError, RepoConfig
     from aegis_core.workspace.layout import WorkspaceLayout
 
     config = WorkspaceLayout(root).config_file
-    default = tuple(h for h in hosts.all_hosts(phase=1) if h.registration is not None)
+    # An experimental row joins the default matrix only where its plane is on this machine.
+    default = tuple(h for h in hosts.all_hosts(phase=1) if h.registration is not None
+                    and (h.verified or _plane_found(h, ctx) is not None))
     if not governed:
         return default, "default", []
     try:
@@ -1815,10 +2193,11 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     # The home directory's .aegis/ is the user plane (~/.aegis), never a workspace.
     is_home = _is_home(root)
     governed = is_aegis_workspace(root) and not is_home
-    selected, selection, notes = _selection(root, governed)
     ctx = _Ctx(root=root, governed=governed, home=layout.home if layout else None, environ=environ,
-               selected=selected, selection=selection, is_home=is_home,
+               selected=(), selection="default", is_home=is_home,
                setup="aegis init" if governed or is_home else _setup_command(root))
+    ctx.selected, ctx.selection, notes = _selection(root, governed, ctx)
+    selected = ctx.selected
     info = _instructions(ctx)
     roots, skipped = _registered_roots(ctx)
     floor, unreached = _floor_status(root)
@@ -1826,7 +2205,7 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     claude_user = _claude_user_registered(ctx)
     findings = (notes + _upgrade_findings(ctx) + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
                 + _legacy_block_findings(ctx) + _budget_findings(ctx, info) + _home_rules_finding(ctx)
-                + _v3_copy_findings(ctx))
+                + _v3_copy_findings(ctx) + _hook_findings(ctx, rows) + _bootstrap_tool_findings(ctx, info, rows))
     if roots is None and ctx.home is not None:
         findings.append(_Finding("unreadable_config", UserLayout(ctx.home).workspaces_file,
                                  "~/.aegis/workspaces.json cannot be read as a v1 registry; doctor "
@@ -1942,6 +2321,23 @@ def _without_lines(raw: bytes, ranges: Sequence[Tuple[int, int]]) -> Optional[by
     return (bom + kept).encode("utf-8") if kept.strip(" \t\r\n") else None
 
 
+def _without_list_items(raw: bytes, items: Sequence[Tuple[Tuple[Any, ...], int]]) -> bytes:
+    """The JSON with the listed entries removed from their lists. ``raw`` is byte-identical
+    to what doctor checked (sha256), so every path resolves; every list is found before any
+    entry goes, so removing one never shifts another's index."""
+    data = json.loads(raw.decode("utf-8"), object_pairs_hook=_strict_pairs, parse_constant=_reject_constant)
+    targets: Dict[int, Tuple[list, set]] = {}
+    for path, index in items:
+        node: Any = data
+        for part in path:
+            node = node[part]
+        targets.setdefault(id(node), (node, set()))[1].add(index)
+    for node, indexes in targets.values():
+        for index in sorted(indexes, reverse=True):
+            del node[index]
+    return _dump_like(raw, data)
+
+
 @dataclass
 class _Change:
     path: Path
@@ -1950,6 +2346,7 @@ class _Change:
     describe: List[str] = field(default_factory=list)
     keys: List[Tuple[str, ...]] = field(default_factory=list)
     lines: List[Tuple[int, int]] = field(default_factory=list)
+    items: List[Tuple[Tuple[Any, ...], int]] = field(default_factory=list)
 
 
 def _plan(findings: List[_Finding], ast_missing: List[str], root: Path) -> List[_Change]:
@@ -1963,6 +2360,7 @@ def _plan(findings: List[_Finding], ast_missing: List[str], root: Path) -> List[
         change.describe.append(action.describe)
         change.keys.extend(action.keys)
         change.lines.extend(action.lines)
+        change.items.extend(action.items)
     plan = list(changes.values())
     if ast_missing:
         from aegis_core.workspace.layout import WorkspaceLayout
@@ -2008,6 +2406,10 @@ def _apply(plan: List[_Change], home: Optional[Path], root: Path) -> Tuple[List[
                 atomic_bytes = _without_keys(current, change.keys)
                 _current_bytes(change.path, change.sha256)  # compare before replace
                 atomic_write_bytes(change.path, atomic_bytes)
+            elif change.kind == "remove_list_items":
+                edited = _without_list_items(current, change.items)
+                _current_bytes(change.path, change.sha256)
+                atomic_write_bytes(change.path, edited)
             elif change.kind == "remove_lines":
                 kept = _without_lines(current, change.lines)
                 if kept is None:  # the plan said "edit"; deleting would be a change nobody confirmed
@@ -2120,15 +2522,19 @@ _ICON = {"ok": "✅", "missing_binary": "➖", "unregistered": "❌", "auth_unkn
 
 def _print_hosts(diag: _Diagnosis) -> None:
     ctx = diag.ctx
-    how = "from .aegis/config.json" if ctx.selection == "config" else "all v4.0 hosts; aegis init --host picks yours"
+    how = "from .aegis/config.json" if ctx.selection == "config" else "every supported host; aegis init --host picks yours"
     print(f"\nHosts ({how}):")
     for row in diag.rows:
         reg, boot, budget = row["registration"], row["bootstrap"], row["budget"]
         print(f"  {_ICON[row['state']]} {row['display_name']} ({row['id']}): {row['state']}")
+        if row["surfaces"]:
+            print(f"      surfaces     {', '.join(row['surfaces'])}")
         binary = row["binary"]
         where = binary["path"] or ("found only where doctor runs nothing (see below)" if binary["ignored"]
                                    else "not on PATH")
         print(f"      binary       {where}")
+        if row["app"]:
+            print(f"      app          {_clean(ctx.label(Path(row['app'])), 4096)}")
         registered = {"registered": f"yes, {reg['scope']} scope", "absent": "no", "unknown": "unknown",
                       "unavailable": "not checked"}[reg["status"]]
         print(f"      registered   {registered} ({_clean(reg['source'], 4096)})")
@@ -2143,20 +2549,52 @@ def _print_hosts(diag: _Diagnosis) -> None:
         print(f"      workspace    {ws} in ~/.aegis/workspaces.json")
         print(f"      bootstrap    {boot['file']}: {boot['status']}")
         if budget["bytes"] is not None:
-            print(f"      budget       {budget['file']} {budget['bytes']} of {budget['budget_bytes']} bytes")
+            limit = (f"of {budget['budget_bytes']} bytes" if budget["budget_bytes"] is not None
+                     else "bytes (no documented limit)")
+            print(f"      budget       {budget['file']} {budget['bytes']} {limit}")
+        print(f"      hooks        {_clean(_hooks_line(row, ctx), 4096)}")
         print(f"      enforcement  {row['enforcement_level'].replace('_', ' ')}")
         for reason in row["reasons"]:
             if reason["code"] != "missing_binary":
                 print(f"      → {reason['message']}")
 
 
+def _hooks_line(row: Dict[str, Any], ctx: _Ctx) -> str:
+    hooks, status = row["hooks"], row["hooks"]["status"]
+    entries = hooks["entries"]
+    if status == "registered":
+        e = entries[0]
+        text = (f"registered ({e['scope']} scope, {ctx.label(Path(e['path']))}); if {row['display_name']} runs it: "
+                f"{hooks['tier']} [{hooks['evidence']}]")
+        return text + (f"; {hooks['trust']}" if hooks["trust"] else "")
+    if status == "absent":
+        return f"not registered: aegis hook install --host {row['id']}"
+    if status == "duplicate":
+        return f"{len(entries)} Aegis entries ({', '.join(e['scope'] for e in entries)}): keep one"
+    if status == "broken":
+        return f"registered, but {entries[0]['aegis']} is missing or not executable (fails open)"
+    if status == "modified":
+        e = entries[0]
+        return (f"registered but modified ({e['scope']} scope, {ctx.label(Path(e['path']))}): not the entry aegis "
+                "hook install writes, so no tier is claimed")
+    if status in ("unknown", "unavailable"):
+        return f"{status}: {hooks['detail']}"
+    return "none"
+
+
 def _print_tiers(diag: _Diagnosis) -> None:
+    from aegis_cli.hooks import registrar
+
     print("\nEnforcement tiers (AD-8):")
     for tier in diag.tiers:
         name, mechanism = _TIER_TEXT[tier["tier"]]
         hosts = ", ".join(tier["hosts"]) or "-"
         print(f"  {name:<14} {tier['status']:<12} {mechanism}")
         print(f"  {'':<14} {'':<12} hosts: {hosts}; {tier['detail']}")
+        if tier["tier"] == "best_effort":
+            print(f"  {'':<14} {'':<12} known gaps (guardrails, not a security boundary):")
+            for gap in registrar.KNOWN_GAPS:
+                print(f"  {'':<14} {'':<12}   - {gap}")
 
 
 def _print_findings(findings: List[_Finding]) -> None:
@@ -2317,8 +2755,8 @@ class DoctorCommand(AegisCommand):
     description = (
         "Read-only health checks, the host matrix (binary, registration, identity, workspace, "
         "bootstrap, budget per host) and the enforcement tiers in force here. --fix changes only "
-        "what doctor reported (stale v3 and misplaced MCP entries, legacy rule blocks, unedited "
-        "v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up "
+        "what doctor reported (stale v3 and misplaced MCP entries, v3 hook entries, legacy rule "
+        "blocks, unedited v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up "
         "to ~/.aegis/backups/<UTC stamp>/ first."
     )
 

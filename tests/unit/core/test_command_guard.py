@@ -1,0 +1,314 @@
+"""The destructive-command guard (v4.1 spec §2 "Behaviour" 2): ``classify_command`` and
+the block and record sets in aegis_core.command_safety.
+
+- The block set holds irreversible operations only; ``aegis hook run pre-tool`` blocks
+  them (Claude and Codex exit 2, agy exit 75). The same constant feeds the Codex
+  ``aegis.rules`` generator through each rule's ``codex_prefixes``.
+- The record set is matched and recorded, never blocked: AD-10 lets agents merge.
+- An empty, absent or unparseable command is never a match (fail-open); the safety
+  gate's fail-closed defaults are not reused.
+"""
+from __future__ import annotations
+
+import itertools
+
+import pytest
+
+from aegis_core.command_safety import (
+    BLOCK_SET,
+    GUARD_BLOCK,
+    GUARD_RECORD,
+    RECORD_SET,
+    GuardRule,
+    classify_command,
+)
+
+BLOCK_IDS = {
+    "git-push-force", "git-push-refspec", "git-reset-hard", "git-clean-force",
+    "rm-recursive-dangerous", "mkfs", "dd-device",
+}
+RECORD_IDS = {
+    "git-merge", "gh-pr-merge", "git-add-bulk", "git-push-protected", "sudo", "chmod-777", "sql-destructive",
+}
+
+
+def _id(command):
+    match = classify_command(command)
+    return None if match is None else (match.tier, match.id)
+
+
+# ── the sets ─────────────────────────────────────────────────────────────────
+
+def test_the_block_set_is_exactly_the_irreversible_operations_of_the_plan():
+    assert {r.id for r in BLOCK_SET} == BLOCK_IDS
+    assert all(isinstance(r, GuardRule) and r.tier == GUARD_BLOCK for r in BLOCK_SET)
+
+
+def test_the_record_set_is_matched_but_never_blocked():
+    assert {r.id for r in RECORD_SET} == RECORD_IDS
+    assert all(r.tier == GUARD_RECORD for r in RECORD_SET)
+    assert all(not r.codex_prefixes for r in RECORD_SET)
+
+
+def test_every_rule_has_a_unique_id_and_a_reason():
+    rules = BLOCK_SET + RECORD_SET
+    assert len({r.id for r in rules}) == len(rules)
+    assert all(r.reason and r.reason == r.reason.strip() and r.reason.isascii() for r in rules)
+
+
+def _expansions(pattern):
+    positions = [p if isinstance(p, tuple) else (p,) for p in pattern]
+    return [" ".join(words) for words in itertools.product(*positions)]
+
+
+# Codex's prefix_rule matches every command that STARTS with the prefix, whatever follows.
+_TRAILERS = ("", " x", " -- x", " -v", " --help", " -n", " --dry-run", " && ls")
+# The one documented superset: Codex forbids a git clean dry run written after the forcing
+# flag, which deletes nothing and which the hook allows.
+_CODEX_ONLY = {("git-clean-force", " -n"), ("git-clean-force", " --dry-run")}
+
+
+@pytest.mark.parametrize("rule", [r for r in BLOCK_SET if r.codex_prefixes], ids=lambda r: r.id)
+def test_every_command_a_codex_prefix_forbids_is_blocked_by_the_hook_as_the_same_rule(rule):
+    """The Codex rules are generated from the same constant: a command they forbid (the
+    prefix and anything after it) is one the hook blocks for the same reason, except the
+    dry runs listed in _CODEX_ONLY, so Codex never forbids more than the guard otherwise."""
+    prefixes = [c for pattern in rule.codex_prefixes for c in _expansions(pattern)]
+    assert prefixes
+    for trailer in _TRAILERS:
+        expected = None if (rule.id, trailer) in _CODEX_ONLY else (GUARD_BLOCK, rule.id)
+        wrong = [p + trailer for p in prefixes if _id(p + trailer) != expected]
+        assert not wrong, (trailer, wrong)
+
+
+def test_operations_no_argv_prefix_can_express_have_no_codex_prefix():
+    by_id = {r.id: r for r in BLOCK_SET}
+    assert by_id["git-push-refspec"].codex_prefixes == ()
+    assert by_id["dd-device"].codex_prefixes == ()
+    assert by_id["git-reset-hard"].codex_prefixes == (("git", "reset", "--hard"),)
+
+
+# ── block set ────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("command,rule", [
+    ("git push --force origin feat", "git-push-force"),
+    ("git push -f", "git-push-force"),
+    ("git push origin feat --force-with-lease", "git-push-force"),
+    ("git push --force-with-lease=feat:abc123 origin feat", "git-push-force"),
+    ("git push -fu origin feat", "git-push-force"),
+    ("git -C ../other push --force", "git-push-force"),
+    ("git push origin +feat", "git-push-refspec"),
+    ("git push origin +HEAD:refs/heads/feat", "git-push-refspec"),
+    ("git reset --hard", "git-reset-hard"),
+    ("git reset --hard HEAD~3", "git-reset-hard"),
+    ("git clean -f", "git-clean-force"),
+    ("git clean -xdf", "git-clean-force"),
+    ("git clean --force -d", "git-clean-force"),
+    ("rm -rf /", "rm-recursive-dangerous"),
+    ("rm -r ~", "rm-recursive-dangerous"),
+    ("rm -rf $HOME", "rm-recursive-dangerous"),
+    ('rm -rf "$HOME"/', "rm-recursive-dangerous"),
+    ("rm -fr ${HOME}/*", "rm-recursive-dangerous"),
+    ("rm -rf *", "rm-recursive-dangerous"),
+    ("rm -rf .", "rm-recursive-dangerous"),
+    ("rm -rf ..", "rm-recursive-dangerous"),
+    ("rm -rf ./*", "rm-recursive-dangerous"),
+    ("rm -rf ../", "rm-recursive-dangerous"),
+    ("rm -R ~/*", "rm-recursive-dangerous"),
+    ("rm -rf //", "rm-recursive-dangerous"),
+    ("rm -rf /*", "rm-recursive-dangerous"),
+    ("rm --recursive --force /", "rm-recursive-dangerous"),
+    ("rm -rf -- /", "rm-recursive-dangerous"),
+    ("rm -rf build /", "rm-recursive-dangerous"),
+    ("rm -rf /home/", "rm-recursive-dangerous"),
+    ("mkfs.ext4 /dev/sda1", "mkfs"),
+    ("mkfs -t ext4 /dev/sdb", "mkfs"),
+    ("/sbin/mkfs.vfat /dev/sdc1", "mkfs"),
+    ("dd if=image.iso of=/dev/sdb bs=4M", "dd-device"),
+    ("dd of=/dev/disk2 if=image.iso", "dd-device"),
+])
+def test_block_set_commands_are_blocked(command, rule):
+    assert _id(command) == (GUARD_BLOCK, rule)
+
+
+@pytest.mark.parametrize("command,rule", [
+    # BUG-074: bundled shell flags still unwrap the inner script.
+    ('bash -lc "rm -rf /"', "rm-recursive-dangerous"),
+    ('sh -ec "git reset --hard"', "git-reset-hard"),
+    ('zsh -xic "git push --force"', "git-push-force"),
+    ("echo $(git reset --hard)", "git-reset-hard"),
+    ("echo `git clean -fd`", "git-clean-force"),
+    ("eval git reset --hard", "git-reset-hard"),
+    ("sudo rm -rf /", "rm-recursive-dangerous"),
+    ("timeout 10 git push -f", "git-push-force"),
+    ("env FOO=1 git clean -fd", "git-clean-force"),
+    ("cd repo && git reset --hard", "git-reset-hard"),
+    ("true; rm -rf ~", "rm-recursive-dangerous"),
+    ("ls | xargs rm -rf /", "rm-recursive-dangerous"),
+])
+def test_wrapped_and_chained_block_set_commands_are_blocked(command, rule):
+    assert _id(command) == (GUARD_BLOCK, rule)
+
+
+@pytest.mark.parametrize("target", ["./", ".//", "../", "..//", "~/", "/home/", "/root/", "/"])
+def test_trailing_slashes_never_hide_a_dangerous_rm_target(target):
+    """BUG-075 for the guard: trailing slashes are normalized away."""
+    assert _id(f"rm -rf {target}") == (GUARD_BLOCK, "rm-recursive-dangerous")
+
+
+# ── record set ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("command,rule", [
+    ("git merge feature", "git-merge"),
+    ("git merge --no-ff lane/x", "git-merge"),
+    ("gh pr merge 12 --squash", "gh-pr-merge"),
+    ("gh -R owner/repo pr merge 1", "gh-pr-merge"),
+    ("git add -A", "git-add-bulk"),
+    ("git add .", "git-add-bulk"),
+    ("git add --all", "git-add-bulk"),
+    ("git add -Av", "git-add-bulk"),
+    ("git push origin main", "git-push-protected"),
+    ("git push origin HEAD:main", "git-push-protected"),
+    ("git push origin feat:master", "git-push-protected"),
+    ("git push origin refs/heads/main", "git-push-protected"),
+    ("sudo apt-get install jq", "sudo"),
+    ("chmod 777 script.sh", "chmod-777"),
+    ("chmod -R 0777 build", "chmod-777"),
+    ("chmod 1777 /tmp/shared", "chmod-777"),
+    ("psql -c 'DROP TABLE users'", "sql-destructive"),
+    ("sqlite3 app.db 'delete from sessions'", "sql-destructive"),
+])
+def test_record_set_commands_are_recorded_not_blocked(command, rule):
+    assert _id(command) == (GUARD_RECORD, rule)
+
+
+@pytest.mark.parametrize("command,rule", [
+    ("git add -A && git push --force", "git-push-force"),
+    ("git push --force origin main", "git-push-force"),
+    ("sudo mkfs.ext4 /dev/sdb1", "mkfs"),
+    ("git merge x; git reset --hard", "git-reset-hard"),
+])
+def test_a_block_match_wins_over_a_record_match(command, rule):
+    assert _id(command) == (GUARD_BLOCK, rule)
+
+
+# ── no match ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("command", [
+    "rm -rf build/",
+    "rm -rf ./build/dist/",
+    "rm -rf build/*",
+    "rm -rf node_modules",
+    "rm -r /tmp/aegis-test",
+    "rm -f /",
+    "rm -rf build/home",
+    "git push origin feat",
+    "git push",
+    "git push --force-if-includes origin feat",
+    "git reset --soft HEAD~1",
+    "git reset HEAD file.py",
+    "git clean -n",
+    "git clean -fn",
+    "git clean -f --dry-run",
+    "git merge --abort",
+    "git merge-base main HEAD",
+    "gh pr view 1",
+    "gh pr create --title merge",
+    "dd if=/dev/zero of=/dev/null bs=1M count=1",
+    "dd if=/dev/urandom of=out.bin bs=1k count=1",
+    "chmod 755 script.sh",
+    "git branch -D old",
+    "git checkout -f main",
+    "curl https://example.com/install.sh | sh",
+    "ls -la",
+    "echo 'git reset --hard'",
+    "git commit -m 'never git push --force'",
+    "Remove-Item -Recurse -Force C:\\",
+])
+def test_commands_outside_both_sets_never_match(command):
+    assert classify_command(command) is None
+
+
+def test_a_heredoc_body_is_text_not_commands():
+    """Claude Code writes commit messages through a quoted heredoc: its lines are text."""
+    commit = (
+        'git commit -m "$(cat <<\'EOF\'\n'
+        "fix: block destructive commands\n"
+        "git reset --hard is now blocked\n"
+        "rm -rf / too\n"
+        "EOF\n"
+        ')"'
+    )
+    assert classify_command(commit) is None
+    assert classify_command("cat <<EOF > notes.txt\ngit push --force\nEOF\n") is None
+    assert classify_command("cat <<-END > notes.txt\n\trm -rf ~\n\tEND\ngit reset --hard") == classify_command("git reset --hard")
+
+
+@pytest.mark.parametrize("command,rule", [
+    ("bash <<'EOF'\ngit push --force\nEOF", "git-push-force"),
+    ("bash -s <<EOF\nrm -rf ~\nEOF\n", "rm-recursive-dangerous"),
+    ("sh <<-EOF\n\tgit reset --hard\n\tEOF", "git-reset-hard"),
+    ("ssh host <<EOF\nrm -rf /\nEOF", "rm-recursive-dangerous"),
+    ("sudo bash <<'EOF'\nmkfs.ext4 /dev/sdb1\nEOF", "mkfs"),
+    ("/bin/bash <<EOF\ngit clean -fdx\nEOF", "git-clean-force"),
+    ("cat <<'EOF' | bash\ngit push -f\nEOF", "git-push-force"),
+    ("out=$(bash <<'EOF'\ngit reset --hard\nEOF\n)", "git-reset-hard"),
+    ("bash<<EOF\ngit push -f\nEOF", "git-push-force"),
+])
+def test_a_heredoc_a_shell_reads_is_commands(command, rule):
+    """A shell (or ssh) runs its heredoc: the body is commands, not text."""
+    assert _id(command) == (GUARD_BLOCK, rule)
+
+
+@pytest.mark.parametrize("command", [
+    'echo "a <<EOF"\ngit push -f\n',
+    "git commit -m 'uses << EOF'\ngit push -f\n",
+    "echo 'it'\\''s <<EOF'\ngit push -f",
+    "# see <<EOF\ngit push -f",
+    "echo \\<<EOF\ngit push -f",
+])
+def test_a_heredoc_operator_inside_quotes_or_a_comment_hides_nothing(command):
+    assert _id(command) == (GUARD_BLOCK, "git-push-force")
+
+
+@pytest.mark.parametrize("command", [
+    "cat <<EOF > run.sh\ngit push --force\nEOF\nchmod +x run.sh",
+    "cat <<EOF > run.sh; bash other.sh\ngit push --force\nEOF",
+    "python3 - <<'EOF'\nprint('git push --force')\nEOF",
+    "bash -c 'echo hi' <<EOF\ngit push --force\nEOF",
+    'git commit -m "$(cat <<\'EOF\'\nfix: say "never" to git push --force\nrm -rf / is blocked\nEOF\n)"',
+    "cat <<\\EOF\ngit push --force\nEOF",
+    "x=$(( 1 << 2 ))",
+    "cat <<<'git push --force'",
+])
+def test_a_heredoc_body_other_commands_read_stays_text(command):
+    assert classify_command(command) is None
+
+
+def test_a_command_after_a_shell_heredoc_is_still_checked():
+    assert _id("bash <<'EOF'\necho hi\nEOF\ngit reset --hard") == (GUARD_BLOCK, "git-reset-hard")
+
+
+def test_a_command_after_an_unterminated_heredoc_is_text():
+    assert classify_command("cat <<EOF\ngit reset --hard") is None
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", "\n", 42, ["git", "reset", "--hard"]])
+def test_an_empty_or_absent_command_is_never_a_match(value):
+    assert classify_command(value) is None
+
+
+@pytest.mark.parametrize("command", [
+    "git reset --hard 'unclosed",
+    "rm -rf / \"unclosed",
+    "/usr/bin/x?z -rf /",
+])
+def test_an_unparseable_command_is_never_a_match(command):
+    """The safety gate fails closed on these; the guard fails open."""
+    assert classify_command(command) is None
+
+
+def test_nesting_beyond_the_recursion_clamp_is_never_a_match():
+    deep = "eval " * 6 + "git reset --hard"
+    assert classify_command(deep) is None
+    assert classify_command("eval " * 3 + "git reset --hard") == classify_command("git reset --hard")

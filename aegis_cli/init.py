@@ -3,13 +3,18 @@
 The repository plane (committed): ``.aegis/config.json`` (``hosts``), ``.aegis/.gitignore``,
 the starter rules under ``.aegis/rules/personas/``, the Aegis bootstrap block in
 ``AGENTS.md`` and, only when a ``CLAUDE.md`` already exists, an ``@AGENTS.md`` block in it
-(host-matrix spec §3.2, §3.4). The user plane (this machine): the ``aegis`` MCP
+(host-matrix spec §3.2, §3.4). A new workspace also gets one active rule, the
+``no-eval`` invariant in ``.aegis/rules/invariants/`` (``--rules none-active`` leaves it
+out), and ``--ci`` writes ``.github/workflows/aegis.yml``; without it init only prints that
+workflow. The user plane (this machine): the ``aegis`` MCP
 registration of each selected host and the workspace entry in ``~/.aegis/workspaces.json``
 (see :mod:`aegis_cli.install_hosts` for its schema). Plus the git pre-commit hook.
 
 Host detection only proposes: hosts are registered only when named with ``--host``
-(``--host auto`` takes the detected ones). Every step is checked before anything is
-written, so a file Aegis cannot change safely stops init with nothing written. A
+(``--host auto`` takes the detected ones). A host is found by its CLI on PATH, its config
+directory or its desktop app, since an IDE or desktop app puts nothing on PATH; ``--host``
+also takes a surface alias (``codex-app``, ``kiro-ide``) and stores the plane id. Every
+step is checked before anything is written, so a file Aegis cannot change safely stops init with nothing written. A
 ``CLAUDE.md`` that is a link is never written through: a link to ``AGENTS.md`` already
 gives Claude Code the bootstrap, and a link elsewhere is left alone with a warning.
 """
@@ -31,13 +36,14 @@ from aegis_cli.install_hosts import (
     REGISTRY_LABEL,
     InstallError,
     ordered_hosts,
-    detect_hosts,
+    detection_evidence,
     display_command,
     is_denied_root,
     mcp_command,
     parse_hosts,
     register_host,
     register_workspace,
+    registrable_hosts,
     write_managed_block,
 )
 from aegis_core.storage import atomic_write_bytes
@@ -55,7 +61,9 @@ from aegis_cli.hooks import (  # noqa: F401
 from aegis_cli.hooks.management import hook_status, work_tree_warning
 
 __all__ = [
+    "ACTIVE_STARTERS",
     "AGENTS_FILE",
+    "CI_WORKFLOW_LABEL",
     "CLAUDE_FILE",
     "CLAUDE_SHIM_ID",
     "CLAUDE_SHIM_TEXT",
@@ -64,13 +72,16 @@ __all__ = [
     "RemovedOption",
     "Report",
     "Step",
+    "ci_workflow",
     "hook_refusal",
     "install_rules",
+    "packaged_active_rules",
     "packaged_dir",
     "packaged_rules",
     "preset_rules",
     "report_partial",
     "run_init",
+    "seed_active_rules",
     "seed_workspace_rules",
 ]
 
@@ -84,11 +95,21 @@ CLAUDE_SHIM_TEXT = "@AGENTS.md\n"
 
 # ── Starter rules: one locator over the packaged rules/ (defense #20, D16) ───
 
+_STANDARD = ("providence", "destructive-ops", "testing", "cost-optimization", "git-workflow")
 RULE_PRESETS: Dict[str, Optional[Tuple[str, ...]]] = {
     "minimal": ("providence", "destructive-ops"),
-    "standard": ("providence", "destructive-ops", "testing", "cost-optimization", "git-workflow"),
-    "full": None,  # every shipped rule
+    "standard": _STANDARD,
+    "full": None,  # every shipped guidance rule
+    "none-active": _STANDARD,  # the standard personas, and no active starter
 }
+# Shipped rules seeded as they are, active, into their own type directory of a new
+# workspace: the personas apply to no file until someone sets their target_paths, so
+# without one `aegis check` enforced nothing on day one (v4.1 field report). They are in
+# no persona preset; ``--rules none-active`` leaves them out.
+ACTIVE_STARTERS: Dict[str, str] = {"no-eval": "bans eval() and exec() in **/*.py"}
+NO_ACTIVE_PRESETS = ("none-active",)
+ACTIVE_TYPE_DIR = RULE_TYPES[RuleType.INVARIANT].directory
+_ACTIVE_LABEL = f"{RULES_RELDIR}/{ACTIVE_TYPE_DIR}"
 # The shipped rules are process guidance (what to do, not where), so they are seeded as
 # persona rules whose frontmatter says so: ``type: persona`` (the repository's own lint,
 # `aegis check`, requires a declared type) and ``target_paths: []`` (they apply to no file
@@ -118,8 +139,7 @@ def packaged_dir(name: str, base: Optional[Path] = None) -> Path:
     return installed
 
 
-def packaged_rules() -> Dict[str, Path]:
-    """Every shipped rule (``rules/*.md``, ``rules/.oracles/*.md``, through ``packaged_dir``) by id."""
+def _shipped_rules() -> Dict[str, Path]:
     base = packaged_dir("rules")
     found: Dict[str, Path] = {}
     for directory in (base, base / ".oracles"):
@@ -128,6 +148,22 @@ def packaged_rules() -> Dict[str, Path]:
                 if path.is_file() and path.name not in _NOT_RULES:
                     found.setdefault(path.stem, path)
     return found
+
+
+def packaged_rules() -> Dict[str, Path]:
+    """Every shipped guidance rule (``rules/*.md``, ``rules/.oracles/*.md``, through
+    ``packaged_dir``) by id: what the persona presets seed. The active starters are not
+    among them (see packaged_active_rules)."""
+    return {k: v for k, v in _shipped_rules().items() if k not in ACTIVE_STARTERS}
+
+
+def packaged_active_rules() -> Dict[str, Path]:
+    """The shipped active starters (ACTIVE_STARTERS) by id; ValueError when one is missing."""
+    shipped = _shipped_rules()
+    missing = [n for n in ACTIVE_STARTERS if n not in shipped]
+    if missing:
+        raise ValueError(f"packaged rule(s) {', '.join(missing)} not found; reinstall aegis-guardrails")
+    return {n: shipped[n] for n in ACTIVE_STARTERS}
 
 
 def preset_rules(preset: str) -> List[Path]:
@@ -221,6 +257,43 @@ def seed_workspace_rules(root: Path, preset: str, dry_run: bool = False) -> Tupl
     return seeded, present
 
 
+def _has_rules(root: Path) -> bool:
+    from aegis_core.workspace.layout import WorkspaceLayout
+
+    rules_dir = WorkspaceLayout(root).rules_dir
+    return rules_dir.is_dir() and any(p.is_file() for p in rules_dir.glob("*/*.md"))
+
+
+def seed_active_rules(root: Path, preset: str, new_workspace: bool, dry_run: bool = False) -> "Step":
+    """Seed the active starters, as shipped, into their type directory of a new workspace.
+
+    Only a workspace with no rule file yet gets them: a re-run (to add a host) must never
+    put back a gate someone deleted, nor add one to a repository that already governs
+    itself. A file already at the destination is kept.
+    """
+    from aegis_core.workspace.layout import WorkspaceLayout
+
+    if preset in NO_ACTIVE_PRESETS:
+        return Step(_ACTIVE_LABEL, "skipped", f"--rules {preset}: no active rule")
+    if not new_workspace:
+        return Step(_ACTIVE_LABEL, "unchanged",
+                    "the workspace already has rules; active starters go only into a new one")
+    directory = WorkspaceLayout(root).rules_dir / ACTIVE_TYPE_DIR
+    seeded: List[str] = []
+    kept: List[str] = []
+    for name, source in packaged_active_rules().items():
+        dest = directory / source.name
+        if os.path.lexists(dest):
+            kept.append(name)
+            continue
+        if not dry_run:
+            atomic_write_bytes(dest, source.read_bytes())
+        seeded.append(name)
+    return Step(_ACTIVE_LABEL, "seeded" if seeded else "unchanged",
+                ", ".join(f"{n} ({ACTIVE_STARTERS[n]})" for n in seeded) or "nothing new",
+                names=seeded, kept=kept)
+
+
 # ── Removed flags (H1 hard cut: one pointer line, exit 2) ────────────────────
 
 class RemovedOption(argparse.Action):
@@ -241,6 +314,148 @@ def _host_option(value: str):
         return parse_hosts(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def _host_help() -> str:
+    """--host's help, from the host table: each plane with its surfaces and aliases."""
+    planes = []
+    for host in registrable_hosts():
+        tag = ", experimental" if not host.verified else ""
+        also = f"; also {', '.join(host.aliases)}" if host.aliases else ""
+        planes.append(f"{host.id}{tag} ({', '.join(host.surfaces)}{also})")
+    return ("Register the Aegis MCP server with these hosts, or 'auto' for the ones found on this machine "
+            "(by CLI on PATH, config directory or desktop app). Without it, found hosts are only listed. A host "
+            "is the config plane its surfaces share, so a surface name selects its host: " + "; ".join(planes))
+
+
+def _with_surfaces(host_ids: Sequence[str]) -> str:
+    from aegis_core import hosts as host_table
+
+    return ", ".join(f"{h} ({', '.join(host_table.get(h).surfaces)})" for h in host_ids)
+
+
+# ── The CI floor ─────────────────────────────────────────────────────────────
+
+CI_WORKFLOW_LABEL = ".github/workflows/aegis.yml"
+_RUNS_AEGIS_CHECK = re.compile(r"\baegis\s+check\b")
+_WORKFLOW_READ_LIMIT = 1 << 20
+
+
+def ci_workflow() -> str:
+    """The GitHub Actions workflow init prints, and writes with ``--ci``: ``aegis check`` on
+    every pull request, with the aegis version that wrote it (a newer release may check more)."""
+    from aegis_cli import __version__
+
+    return f"""\
+# aegis check on every pull request. CI is the floor: git commit --no-verify skips the
+# local pre-commit hook, so the same check runs here.
+name: Aegis
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  aegis-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # aegis check diffs the pull request against its base branch
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install aegis-guardrails=={__version__}
+      - run: aegis check
+"""
+
+
+def _workflow_files(root: Path) -> List[Path]:
+    """The GitHub Actions workflow files (``.github/workflows/*.yml|yaml``; GitHub reads no
+    subdirectory there)."""
+    directory = root / ".github" / "workflows"
+    try:
+        entries = sorted(directory.iterdir()) if directory.is_dir() else []
+    except OSError:
+        return []
+    return [e for e in entries if e.suffix in (".yml", ".yaml") and e.is_file()]
+
+
+def _runs_aegis_check(path: Path) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            text = handle.read(_WORKFLOW_READ_LIMIT).decode("utf-8", "replace")
+    except OSError:
+        return False
+    return bool(_RUNS_AEGIS_CHECK.search(text))
+
+
+def _ci_step(root: Path, write: bool, dry_run: bool) -> "Step":
+    """The CI workflow: with ``write`` (--ci) ``.github/workflows/aegis.yml`` is created
+    unless a file is there; without it nothing is written, and the step says whether a
+    workflow already runs aegis check (``present``) or init should print one (``suggested``,
+    with the workflow files it saw as ``names``). Raises InstallError for a directory it
+    cannot write through: a link, a file, or one resolving out of the repository."""
+    workflows = root / ".github" / "workflows"
+    if not write:
+        files = _workflow_files(root)
+        running = [f.relative_to(root).as_posix() for f in files if _runs_aegis_check(f)]
+        if running:
+            return Step(CI_WORKFLOW_LABEL, "present", f"{', '.join(running)} run{'s' if len(running) == 1 else ''} "
+                                                      "aegis check")
+        return Step(CI_WORKFLOW_LABEL, "suggested", "no GitHub Actions workflow runs aegis check; "
+                                                    "aegis init --ci writes one",
+                    names=[f.relative_to(root).as_posix() for f in files])
+    inside = _real_key(root) + os.sep
+    for directory in (root / ".github", workflows):
+        label = directory.relative_to(root).as_posix()
+        if directory.is_symlink():
+            raise InstallError(f"{label}: is a symlink; aegis init --ci writes the workflow only into a real "
+                               "directory inside the repository. Replace the link, or re-run without --ci.")
+        if os.path.lexists(directory) and not directory.is_dir():
+            raise InstallError(f"{label}: is not a directory; left unchanged. Move it aside, or re-run without --ci.")
+        if directory.is_dir() and not _real_key(directory).startswith(inside):
+            raise InstallError(f"{label}: resolves outside the repository; aegis init --ci writes the workflow only "
+                               "inside it. Re-run without --ci.")
+    dest = workflows / "aegis.yml"
+    data = ci_workflow().encode("utf-8")
+    if os.path.lexists(dest):
+        try:
+            same = not dest.is_symlink() and dest.is_file() and dest.read_bytes() == data
+        except OSError:
+            same = False
+        return Step(CI_WORKFLOW_LABEL, "unchanged") if same else Step(
+            CI_WORKFLOW_LABEL, "kept", "it exists; left as it is")
+    if dry_run:
+        _need_writable(workflows)
+    else:
+        atomic_write_bytes(dest, data)
+    return Step(CI_WORKFLOW_LABEL, "created", "runs aegis check on every pull request")
+
+
+def _report_ci(report: Report, actions: Sequence["Step"]) -> None:
+    """After a real run: CI is the floor. The workflow written, or the one to add."""
+    step = next((a for a in actions if a.target == CI_WORKFLOW_LABEL), None)
+    floor = "CI is the floor: git commit --no-verify skips the pre-commit hook, so CI must run aegis check too."
+    if step is None or step.result not in ("created", "suggested"):
+        return
+    if step.result == "created":
+        report.say(f"  {floor} Review and commit {CI_WORKFLOW_LABEL}.")
+        report.say()
+        return
+    lead = ("No GitHub Actions workflow here runs aegis check yet." if step.names
+            else "This repository has no GitHub Actions workflow yet.")
+    report.say(f"  {floor}")
+    report.say(f"  {lead} Save this as {CI_WORKFLOW_LABEL}, or re-run aegis init with --ci to write it:")
+    report.say()
+    for line in ci_workflow().splitlines():
+        report.say(f"      {line}".rstrip())
+    report.say()
 
 
 # ── The pre-commit hook ──────────────────────────────────────────────────────
@@ -412,6 +627,7 @@ class Report:
             return
         self.warnings.append(line)
         if not self.json_mode:
+            sys.stdout.flush()  # keep the order of stdout and stderr lines in a pipe
             print(f"  ⚠️  {line}", file=sys.stderr)
 
     def error(self, line: str) -> None:
@@ -496,6 +712,8 @@ class _Context:
     pin: Optional[str]
     path_env: Optional[str]
     report: Report
+    skills: bool = False
+    ci: bool = False
 
 
 def _real_key(path: Path) -> str:
@@ -541,6 +759,40 @@ def _claude_shim(ctx: _Context, dry_run: bool) -> Step:
     return Step(CLAUDE_FILE, "skipped", "a symlink, never written through")
 
 
+def _skills_steps(ctx: _Context, dry_run: bool) -> List[Step]:
+    """``--skills``: the packaged skills copied for the configured and selected hosts, as
+    ``aegis skills sync`` copies them. A refusal (a link, a file of the wrong kind) stops
+    init like any other step; a file the user owns or edited is kept, with a warning."""
+    from aegis_cli.skills_sync import summary, sync_skills
+    from aegis_core.config import ConfigError, RepoConfig
+
+    try:
+        configured = list(RepoConfig.load(ctx.root).hosts)
+    except ConfigError:
+        configured = []  # _config_hosts has already warned about the file
+    result = sync_skills(ctx.root, ordered_hosts(configured + ctx.selected), dry_run=dry_run, trigger="init")
+    if not result.targets:
+        return [Step("skills", "skipped", "no selected host reads project skills; "
+                                          "add --host claude-code, codex-cli or antigravity")]
+    problems = [e.detail for t in result.targets for e in t.entries if e.result in ("refused", "failed")]
+    problems += result.errors
+    if problems:
+        raise InstallError(f"skills: {problems[0]}. Fix it, or re-run without --skills.")
+    for warning in result.warnings:
+        ctx.report.warn(warning)
+    steps = []
+    for target in result.targets:
+        for entry in target.entries:
+            if entry.result == "skipped":
+                ctx.report.warn(f"{entry.path}: {entry.detail}")
+        counts = target.counts
+        written = any(counts[name] for name in ("created", "updated", "overwritten"))
+        label = "" if target.verified else ", unverified"
+        steps.append(Step(target.dir, "synced" if written else "unchanged",
+                          f"{', '.join(target.hosts)}{label}: {summary(counts)}"))
+    return steps
+
+
 def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -> List[Step]:
     """Run every init step; with ``dry_run`` only check and plan. Raises InstallError.
 
@@ -558,6 +810,7 @@ def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -
     actions = [] if actions is None else actions
     layout = WorkspaceLayout(root)
     personas = layout.rules_dir / SEED_TYPE_DIR
+    new_workspace = not _has_rules(root)  # before anything is seeded
     try:
         planned = ctx.ws.scaffold(minimal=(ctx.preset == "minimal"), dry_run=True)
         missing = [d for d in planned if not os.path.lexists(d)]
@@ -591,6 +844,13 @@ def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -
     actions.append(Step(f"{RULES_RELDIR}/{SEED_TYPE_DIR}", "seeded" if seeded else "unchanged",
                            f"preset {ctx.preset}: {', '.join(seeded) or 'nothing new'}",
                            names=seeded, kept=present))
+    try:
+        active = seed_active_rules(root, ctx.preset, new_workspace, dry_run=dry_run)
+    except ValueError as exc:
+        raise InstallError(str(exc)) from exc
+    if dry_run and active.result == "seeded":
+        _need_writable(layout.rules_dir / ACTIVE_TYPE_DIR)
+    actions.append(active)
 
     languages = detect_project_languages(root)
     try:
@@ -610,6 +870,9 @@ def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -
     actions.append(Step(AGENTS_FILE, write_managed_block(
         agents, BOOTSTRAP_ID, bootstrap_text(), force=ctx.force, dry_run=dry_run)))
     actions.append(_claude_shim(ctx, dry_run))
+    if ctx.skills:
+        actions.extend(_skills_steps(ctx, dry_run))
+    actions.append(_ci_step(root, ctx.ci, dry_run))
 
     if not ctx.no_hooks:
         in_place = shared_hook_in_place(root)
@@ -636,11 +899,47 @@ def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -
 _ICONS = {"failed": "❌", "manual": "👉", "kept": "⚠️ ", "skipped": "⚠️ "}
 # Results that changed nothing on disk (what a failed run reports as already written).
 _NO_CHANGE = {"unchanged", "absent", "none", "kept", "skipped", "linked", "would_run", "manual", "failed",
-              "dry-run", "skipped (not a git repository)"}
+              "dry-run", "skipped (not a git repository)", "present", "suggested"}
+_NEXT_RULE = "    Next: add a rule for your own code with aegis rule create (aegis rule create --help)"
+
+
+def _print_active(report: Report, action: Step, dry_run: bool, preset: str) -> None:
+    """The active starter: what it enforces, or that there is none; then the next step."""
+    if action.result == "skipped":
+        report.say(f"  No active rule (--rules {preset}): aegis check enforces no rule until one names files.")
+    elif action.names or action.kept:
+        report.say(f"  Active rule in {action.target}/:")
+        for name in action.names:
+            report.say(f"    {'[DRY-RUN]' if dry_run else '✅'} {name}: {ACTIVE_STARTERS[name]}; "
+                       "aegis check and the pre-commit hook enforce it")
+        for name in action.kept:
+            report.say(f"    [SKIP] {name} (a file with this name exists)")
+    else:
+        return  # a workspace that already had rules: nothing was seeded, nothing to say
+    if not dry_run:
+        report.say(_NEXT_RULE)
+
+
+def _print_ci(report: Report, action: Step, dry_run: bool) -> None:
+    if action.result == "present":
+        report.say(f"  ✅ CI: {action.detail}")
+    elif action.result == "created":
+        report.say(f"  ✅ {action.target}: {'would create' if dry_run else 'created'} ({action.detail})")
+    elif action.result == "kept":
+        report.say(f"  {_ICONS['kept']} {action.target}: kept ({action.detail})")
+    elif action.result == "unchanged":
+        report.say(f"  ✅ {action.target}: unchanged")
+    # "suggested": the workflow is printed after a real run (_report_ci)
 
 
 def _print_actions(report: Report, actions: Sequence[Step], dry_run: bool, preset: str) -> None:
     for action in actions:
+        if action.target == _ACTIVE_LABEL:
+            _print_active(report, action, dry_run, preset)
+            continue
+        if action.target == CI_WORKFLOW_LABEL:
+            _print_ci(report, action, dry_run)
+            continue
         if action.target.startswith(RULES_RELDIR + "/"):
             report.say(f"  Starter rules (preset={preset}) in {action.target}/:")
             for name in action.names:
@@ -704,7 +1003,8 @@ def run_init(args: argparse.Namespace) -> int:
     home = Path.home()
     path_env = os.environ.get("PATH")
 
-    detected = detect_hosts(home, path_env)
+    found = detection_evidence(home, path_env)
+    detected = list(found)
     host_arg = getattr(args, "host", None)
     if isinstance(host_arg, str):
         host_arg = parse_hosts(host_arg)
@@ -730,18 +1030,27 @@ def run_init(args: argparse.Namespace) -> int:
     else:
         report.say("  Project type: unknown (rules are language-agnostic)")
     if selected:
-        report.say(f"  Hosts: {', '.join(selected)}")
+        report.say(f"  Hosts: {_with_surfaces(selected)}")
     else:
         report.say("  Hosts: none selected (only the repository is set up)")
         if detected and host_arg is None:
-            report.say(f"  Detected on this machine: {', '.join(detected)}. To register Aegis with them:")
+            report.say("  Found on this machine: "
+                       f"{', '.join(f'{h} ({_home_label(v, home)})' for h, v in found.items())}. "
+                       "To register Aegis with them:")
             report.say(f"       aegis init --host {','.join(detected)}")
     report.say()
+    from aegis_core import hosts as host_table
+
+    for host_id in selected:
+        spec = host_table.get(host_id)
+        if not spec.verified:
+            report.warn(f"{host_id} is an experimental host. {' '.join(spec.notes)}")
 
     ctx = _Context(ws=ws, root=root, home=home, selected=selected, preset=preset,
                    force=bool(getattr(args, "force", False)), no_hooks=_no_hooks(args),
                    command=mcp_command(path_env), pin=str(root) if getattr(args, "pin", False) else None,
-                   path_env=path_env, report=report)
+                   path_env=path_env, report=report, skills=bool(getattr(args, "skills", False)),
+                   ci=bool(getattr(args, "ci", False)))
 
     # Every step is checked first; a refusal stops init before anything is written.
     report.muted = not dry_run
@@ -818,6 +1127,7 @@ def run_init(args: argparse.Namespace) -> int:
     report.say()
     report.say("  After a session, run: aegis status")
     report.say()
+    _report_ci(report, actions)
     if not json_mode:
         try:
             from aegis_cli.pathcheck import build_hint
@@ -830,6 +1140,16 @@ def run_init(args: argparse.Namespace) -> int:
             pass
     report.finish("failed" if failed else "ok", scope, False, actions)
     return 1 if failed else 0
+
+
+def _home_label(evidence: str, home: Path) -> str:
+    """``evidence`` (a path that found a host) as ``~/...`` when it is under ``home``."""
+    if evidence.startswith("~/"):
+        return evidence
+    try:
+        return "~/" + Path(evidence).relative_to(home).as_posix()
+    except ValueError:
+        return evidence
 
 
 def _no_hooks(args: argparse.Namespace) -> bool:
@@ -857,7 +1177,9 @@ class InitCommand(AegisCommand):
         "workspace's entry in ~/.aegis/workspaces.json {\"v\": 1, \"workspaces\": [{root, added_at, "
         "added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with "
         "--host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add "
-        "--scope user; antigravity: ~/.gemini/config/mcp_config.json)."
+        "--scope user; antigravity: ~/.gemini/config/mcp_config.json; kiro: ~/.kiro/settings/mcp.json). "
+        "A new workspace also gets one active rule, the no-eval invariant; --ci writes the CI workflow "
+        ".github/workflows/aegis.yml, which init otherwise only prints."
     )
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -866,14 +1188,16 @@ class InitCommand(AegisCommand):
             type=_host_option,
             default=None,
             metavar="HOST[,HOST]|auto",
-            help="Register the Aegis MCP server with these hosts (codex-cli, claude-code, antigravity), "
-                 "or 'auto' for the ones detected on this machine. Without it, detected hosts are only listed.",
+            help=_host_help(),
         )
         parser.add_argument(
             "--rules",
             choices=list(RULE_PRESETS),
             default="standard",
-            help="Starter rules to seed into .aegis/rules/personas/ (default: standard)",
+            help="Starter rules: guidance seeded into .aegis/rules/personas/ (minimal 2, standard 5, full every "
+                 "shipped one), which applies to no file until you set its target_paths; a new workspace also gets "
+                 "one active rule, the no-eval invariant in .aegis/rules/invariants/ (bans eval and exec in "
+                 "**/*.py). none-active seeds the standard guidance without it (default: standard)",
         )
         parser.add_argument(
             "--dry-run",
@@ -900,6 +1224,19 @@ class InitCommand(AegisCommand):
             "--no-hooks",
             action="store_true",
             help="Skip installing the git pre-commit hook",
+        )
+        parser.add_argument(
+            "--skills",
+            action="store_true",
+            help="Also copy the packaged skills into the hosts' project skills folders (.claude/skills, "
+                 ".agents/skills), as aegis skills sync does",
+        )
+        parser.add_argument(
+            "--ci",
+            action="store_true",
+            help="Also write .github/workflows/aegis.yml, a GitHub Actions workflow that runs aegis check on every "
+                 "pull request (CI is the floor: git commit --no-verify skips the pre-commit hook). Without it, "
+                 "init prints that workflow when no workflow runs aegis check",
         )
         parser.add_argument("--platform", action=RemovedOption, nargs="?", pointer="use aegis init --host")
         parser.add_argument("--mcp", action=RemovedOption,

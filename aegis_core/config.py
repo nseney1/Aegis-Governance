@@ -4,7 +4,7 @@
 
     {"v": 1,
      "hosts": ["codex-cli", "claude-code"],
-     "jit": {"max_tokens": 2000},
+     "jit": {"max_tokens": 2000, "scan_window_s": 3600},
      "expiry": {"days": 30, "per_type": {"trap": 60, "invariant": null}},
      "ast": {"packaged_drivers": ["rs", "ts"]}}
 
@@ -35,6 +35,7 @@ from aegis_core.workspace.layout import AEGIS_DIRNAME, UserLayout, WorkspaceLayo
 __all__ = [
     "CONFIG_VERSION",
     "ConfigError",
+    "DEFAULT_SCAN_WINDOW_S",
     "ENV_CLIENT",
     "ENV_LLM_CMD",
     "ENV_MAX_JIT_TOKENS",
@@ -48,12 +49,17 @@ __all__ = [
     "env_max_jit_tokens",
     "env_workspace",
     "jit_max_tokens",
+    "scan_window_s",
     "update_repo_config",
 ]
 
 CONFIG_VERSION = 1
 MAX_CONFIG_BYTES = 64 * 1024
 DEFAULT_EXPIRY_DAYS = 30
+# How long an aegis_scan row lets the scan-before-edit hook pass an edit of its files.
+# Bounded: the file is committed, so a huge value must not switch the gate off.
+DEFAULT_SCAN_WINDOW_S = 3600
+SCAN_WINDOW_RANGE = (60, 86400)
 REPO_LABEL = f"{AEGIS_DIRNAME}/config.json"
 USER_LABEL = f"~/{AEGIS_DIRNAME}/config.json"
 
@@ -194,6 +200,7 @@ class RepoConfig:
 
     hosts: Tuple[str, ...] = ()
     jit_max_tokens: Optional[int] = None
+    scan_window_s: int = DEFAULT_SCAN_WINDOW_S
     expiry_days: Optional[int] = DEFAULT_EXPIRY_DAYS
     expiry_per_type: Mapping[str, Optional[int]] = field(default_factory=dict)
     packaged_drivers: Tuple[str, ...] = ()
@@ -240,13 +247,24 @@ class RepoConfig:
 
         jit = raw.get("jit", {})
         max_tokens = None
+        window = DEFAULT_SCAN_WINDOW_S
         if isinstance(jit, dict):
             if "max_tokens" in jit:
                 max_tokens = _positive_int(jit["max_tokens"])
                 if max_tokens is None:
                     warnings.append(f"ignored 'jit.max_tokens' in {REPO_LABEL}: it must be a positive integer")
-            if set(jit) - {"max_tokens"}:
-                warnings.append(f"ignored {len(set(jit) - {'max_tokens'})} unknown key(s) under 'jit' in {REPO_LABEL}")
+            if "scan_window_s" in jit:
+                low, high = SCAN_WINDOW_RANGE
+                configured = _positive_int(jit["scan_window_s"])
+                if configured is not None and low <= configured <= high:
+                    window = configured
+                else:
+                    warnings.append(
+                        f"ignored 'jit.scan_window_s' in {REPO_LABEL}: it must be an integer from {low} to {high}"
+                    )
+            extra = set(jit) - {"max_tokens", "scan_window_s"}
+            if extra:
+                warnings.append(f"ignored {len(extra)} unknown key(s) under 'jit' in {REPO_LABEL}")
         else:
             warnings.append(f"ignored 'jit' in {REPO_LABEL}: it must be an object")
 
@@ -310,6 +328,7 @@ class RepoConfig:
         return cls(
             hosts=tuple(h.strip() for h in hosts),
             jit_max_tokens=max_tokens,
+            scan_window_s=window,
             expiry_days=expiry_days,
             expiry_per_type=per_type,
             packaged_drivers=tuple(packaged),
@@ -417,3 +436,12 @@ def jit_max_tokens(workspace_root: Any, default: int) -> int:
         if configured is not None:
             return configured
     return default
+
+
+def scan_window_s(workspace_root: Any) -> int:
+    """The repo's ``jit.scan_window_s``, or DEFAULT_SCAN_WINDOW_S when the config is
+    missing, unusable or has no valid value (never raises for the file)."""
+    try:
+        return RepoConfig.load(workspace_root).scan_window_s
+    except (ConfigError, OSError):
+        return DEFAULT_SCAN_WINDOW_S

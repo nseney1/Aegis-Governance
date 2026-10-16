@@ -1,7 +1,9 @@
 """aegis scan — which governance rules apply to these files.
 
 The CLI twin of the MCP tool aegis_scan, and the command the AGENTS.md
-bootstrap tells agents to run before editing (`aegis scan FILE`). Exit codes
+bootstrap tells agents to run before editing (`aegis scan FILE`). A scan that ran
+records one ``scan`` activity row with host ``cli`` naming the files inside the
+workspace, so it satisfies the scan-before-edit hook as aegis_scan does. Exit codes
 are a contract: 0 when the scan ran (matches or not), 1 when the rules cannot all
 be served (a rule file cannot be loaded or the rules tree cannot be read safely: the
 scan fails closed and names them), 2 for a usage or workspace error. With --json,
@@ -20,6 +22,8 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import List
+import uuid
 
 from aegis_cli import sanitize_display
 from aegis_cli.base import AegisCommand, CommandCategory
@@ -70,6 +74,7 @@ def run_scan(args: argparse.Namespace) -> int:
     failed = result.get("status") == "FAIL"
     if not failed:
         result = render_scan_result(result, GENERIC, root)
+        _record_scan(root, args.files)
     if args.json:  # AegisParser.parse_args always sets it
         print(json.dumps(result, indent=2, default=str))
     elif failed:
@@ -79,6 +84,29 @@ def run_scan(args: argparse.Namespace) -> int:
         for warning in result.get("warnings") or []:
             print(f"Warning: {sanitize_display(str(warning), max_len=1024)}", file=sys.stderr)
     return EXIT_UNSERVED if failed else EXIT_SCANNED
+
+
+def _record_scan(root: Path, raw_files: List[str]) -> None:
+    """One ``scan`` row (host ``cli``, a session per run) naming the files that lie inside
+    the workspace, resolved as aegis_scan resolves them (``confine_path``: symlinks
+    followed, workspace-relative). Telemetry never fails the scan: a failed append is a
+    warning on stderr."""
+    from aegis_core import scan_compliance
+    from aegis_core.workspace.confinement import confine_path_internal
+
+    inside = []
+    for raw in raw_files:
+        try:
+            inside.append(confine_path_internal(root, os.path.join(os.getcwd(), raw))[1])
+        except ValueError:  # PathTraversalError: outside the workspace or unresolvable
+            continue
+    if not inside:
+        return
+    try:
+        scan_compliance.record(root, "scan", host=scan_compliance.CLI_HOST, session=uuid.uuid4().hex,
+                               files=inside, basis="files")
+    except Exception as exc:  # telemetry only: never fail the scan
+        print("Warning: scan event not recorded: " + _terminal_text(str(exc)), file=sys.stderr)
 
 
 def _error(message: str) -> None:

@@ -26,7 +26,8 @@ _REAL_RUN_CLI = ih._run_cli
 
 RETIRED_GEMINI_CLI = ("gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
                       "accounts; use --host antigravity.")
-DESKTOP_H4 = "claude-desktop is identity only: Aegis does not register there (ADR 0005 H4)"
+DESKTOP_H4 = ("claude-desktop is identity only: Aegis does not register there (ADR 0005 H4); "
+              "the Claude desktop app's Code tab shares Claude Code's configuration: use --host claude-code")
 
 BEGIN = "<!-- aegis:begin id={id} v=1 sha={sha} -->"
 END = "<!-- aegis:end id={id} -->"
@@ -554,7 +555,7 @@ def _paths(*paths) -> list:
 
 class TestHostSelection:
     def test_registrable_hosts_are_the_phase_1_rows_with_a_registration(self):
-        assert [h.id for h in ih.registrable_hosts()] == ["codex-cli", "claude-code", "antigravity"]
+        assert [h.id for h in ih.registrable_hosts()] == ["codex-cli", "claude-code", "antigravity", "kiro"]
 
     def test_detection_reads_binaries_on_path_and_user_dirs(self, tmp_path):
         home, bindir = tmp_path / "home", tmp_path / "bin"
@@ -566,10 +567,52 @@ class TestHostSelection:
         (tmp_path / "home").mkdir()
         assert ih.detect_hosts(tmp_path / "home", path=str(tmp_path / "nobin")) == []
 
+    def test_detection_finds_ide_and_desktop_planes_by_config_path(self, tmp_path):
+        """A desktop app or IDE puts no CLI on PATH; its config plane gives it away."""
+        home = tmp_path / "home"
+        (home / ".kiro").mkdir(parents=True)
+        (home / ".claude.json").write_text("{}", encoding="utf-8")
+        assert ih.detect_hosts(home, path=str(tmp_path / "nobin")) == ["claude-code", "kiro"]
+
+    def test_detection_finds_an_app_bundle(self, tmp_path, monkeypatch):
+        apps = tmp_path / "Applications"
+        (apps / "Kiro.app").mkdir(parents=True)
+        (apps / "Codex.app").mkdir()
+        monkeypatch.setattr(hosts, "APP_DIRS", {"darwin": (str(apps),)})
+        (tmp_path / "home").mkdir()
+        found = ih.detect_hosts(tmp_path / "home", path=str(tmp_path / "nobin"), platform="darwin")
+        assert found == ["codex-cli", "kiro"]
+        assert ih.detect_hosts(tmp_path / "home", path=str(tmp_path / "nobin"), platform="linux") == []
+
+    def test_detection_says_what_it_found(self, tmp_path, monkeypatch):
+        apps = tmp_path / "Programs"
+        (apps / "Kiro").mkdir(parents=True)
+        monkeypatch.setattr(hosts, "APP_DIRS", {"win32": ("%LOCALAPPDATA%/Programs",)})
+        home = tmp_path / "home"
+        (home / ".codex").mkdir(parents=True)
+        claude = _fake_bin(tmp_path / "bin", "claude")
+        evidence = ih.detection_evidence(home, path=str(tmp_path / "bin"), environ={"LOCALAPPDATA": str(tmp_path)},
+                                         platform="win32")
+        assert evidence == {"codex-cli": "~/.codex", "claude-code": str(claude),
+                            "kiro": os.path.join(str(tmp_path), "Programs", "Kiro")}
+
+    def test_a_file_where_an_app_bundle_belongs_is_no_app(self, tmp_path, monkeypatch):
+        apps = tmp_path / "Applications"
+        apps.mkdir()
+        (apps / "Kiro.app").write_text("", encoding="utf-8")
+        monkeypatch.setattr(hosts, "APP_DIRS", {"darwin": (str(apps),)})
+        (tmp_path / "home").mkdir()
+        assert ih.detect_hosts(tmp_path / "home", path=str(tmp_path / "nobin"), platform="darwin") == []
+
     @pytest.mark.parametrize("value, expected", [
         ("auto", "auto"),
         ("codex-cli", ["codex-cli"]),
         ("antigravity, codex-cli,codex-cli", ["codex-cli", "antigravity"]),
+        ("codex-app", ["codex-cli"]),
+        ("kiro-ide,chatgpt-desktop,kiro-cli,codex", ["codex-cli", "kiro"]),
+        ("claude-desktop-code", ["claude-code"]),
+        ("antigravity-ide,antigravity-app", ["antigravity"]),
+        ("kiro", ["kiro"]),
     ])
     def test_parse_hosts(self, value, expected):
         assert ih.parse_hosts(value) == expected
@@ -798,6 +841,36 @@ class TestRegisterHost:
         action = ih.register_host("codex-cli", home=tmp_path, command=["/x"], path=str(tmp_path / "bin"), dry_run=True)
         assert action.result == "would_run"
         assert runner.calls == []
+
+    def test_kiro_merges_its_user_mcp_json_and_keeps_other_servers(self, tmp_path):
+        cfg = tmp_path / ".kiro" / "settings" / "mcp.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(json.dumps({"mcpServers": {"fetch": {"command": "uvx", "args": ["mcp-fetch"]}},
+                                   "other": 1}), encoding="utf-8")
+        action = ih.register_host("kiro", home=tmp_path, command=["/x/aegis-mcp"])
+        assert (action.result, action.detail) == ("registered", str(cfg))
+        assert json.loads(cfg.read_text(encoding="utf-8")) == {
+            "mcpServers": {"fetch": {"command": "uvx", "args": ["mcp-fetch"]},
+                           "aegis": {"command": "/x/aegis-mcp", "args": [], "env": {"AEGIS_CLIENT": "kiro"}}},
+            "other": 1}
+        assert ih.register_host("kiro", home=tmp_path, command=["/x/aegis-mcp"]).result == "unchanged"
+        assert ih.unregister_host("kiro", home=tmp_path).result == "removed"
+        assert json.loads(cfg.read_text(encoding="utf-8")) == {
+            "mcpServers": {"fetch": {"command": "uvx", "args": ["mcp-fetch"]}}, "other": 1}
+
+    def test_kiro_creates_its_settings_file_when_kiro_has_none(self, tmp_path):
+        assert ih.register_host("kiro", home=tmp_path, command=["/x/aegis-mcp"]).result == "registered"
+        data = json.loads((tmp_path / ".kiro" / "settings" / "mcp.json").read_text(encoding="utf-8"))
+        assert data == {"mcpServers": {"aegis": {"command": "/x/aegis-mcp", "args": [],
+                                                 "env": {"AEGIS_CLIENT": "kiro"}}}}
+
+    def test_kiro_refuses_a_settings_file_it_cannot_round_trip(self, tmp_path):
+        cfg = tmp_path / ".kiro" / "settings" / "mcp.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('{"mcpServers": {}, // comment\n}', encoding="utf-8")
+        with pytest.raises(ih.InstallError, match="is not valid JSON"):
+            ih.register_host("kiro", home=tmp_path, command=["/x/aegis-mcp"])
+        assert cfg.read_text(encoding="utf-8") == '{"mcpServers": {}, // comment\n}'
 
     def test_antigravity_merges_its_json_file_under_home(self, tmp_path):
         action = ih.register_host("antigravity", home=tmp_path, command=["/x/aegis-mcp"])

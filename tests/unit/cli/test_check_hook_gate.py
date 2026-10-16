@@ -337,3 +337,51 @@ def test_a_block_on_an_import_of_an_untracked_sibling_says_why(repo, capsys):
     out = capsys.readouterr().out
     assert "import_guard: settings.py" in out
     assert "local_settings.py is not staged or tracked" in out
+
+
+# ── Files an AST driver parses (Rust here) are read from the index snapshot too ──
+# Regression (v4.0.0): the snapshot lives outside the repository, and the driver path
+# confined it to the repository, so every staged .rs file failed with "escapes workspace".
+
+RUST_CLEAN = "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\nfn main() {\n    println!(\"{}\", add(1, 2));\n}\n"
+RUST_DANGER = "fn main() {\n    danger();\n}\n"
+NO_DANGER = (
+    "---\n"
+    "id: no-danger\n"
+    "type: invariant\n"
+    "enforcement: gate\n"
+    "hypothesis: Rust code never calls danger.\n"
+    "target_paths:\n"
+    "  - \"src/*.rs\"\n"
+    "forbid_ast:\n"
+    "  calls:\n"
+    "    - danger\n"
+    "---\n"
+    "# No danger\n"
+)
+
+
+@pytest.fixture
+def rust_repo(repo):
+    """The repo with the packaged Rust driver turned on, as `aegis init` does for Rust projects."""
+    (repo / ".aegis").mkdir()
+    (repo / ".aegis" / "config.json").write_text('{"v": 1, "ast": {"packaged_drivers": ["rs"]}}', encoding="utf-8")
+    return repo
+
+
+def test_a_staged_rust_file_is_parsed_from_the_snapshot_not_refused_as_escaping(rust_repo, capsys):
+    _stage(rust_repo, "src/main.rs", RUST_CLEAN)
+    rc = main(["check", "--hook"])
+    out = capsys.readouterr().out
+    assert "escapes" not in out
+    assert rc == 0, out
+
+
+def test_a_gate_rule_catches_a_forbidden_call_in_a_staged_rust_file(rust_repo, capsys):
+    _stage(rust_repo, ".aegis/rules/invariants/no-danger.md", NO_DANGER)
+    _stage(rust_repo, "src/main.rs", RUST_DANGER)
+    rc = main(["check", "--hook"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "forbid_ast:no-danger" in out and "danger" in out
+    assert "escapes" not in out

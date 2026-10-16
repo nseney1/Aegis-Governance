@@ -487,6 +487,7 @@ def check(
     *,
     fast_mode: bool = False,
     ast_runner: Any = None,
+    confine_root: Optional[str] = None,
 ) -> ToolEvidence:
     """Run AST-based call graph completeness check.
 
@@ -507,7 +508,8 @@ def check(
         from aegis_core.ast.runner import ASTDriverRunner
         runner = ast_runner or ASTDriverRunner()
         try:
-            norm_ast = runner.parse_file(filepath, workspace_root=repo_root)
+            extra = {"confine_root": confine_root} if confine_root is not None else {}
+            norm_ast = runner.parse_file(filepath, workspace_root=repo_root, **extra)
             return check_normalized(norm_ast, repo_root, exclude_names, fast_mode=fast_mode, ast_runner=runner)
         except Exception as e:
             return ToolEvidence(

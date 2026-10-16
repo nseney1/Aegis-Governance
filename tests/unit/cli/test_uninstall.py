@@ -546,7 +546,9 @@ class TestCommandLine:
     @pytest.mark.parametrize("value, message", [
         ("gemini-cli", "gemini-cli is not supported: Google retired Gemini CLI for individual Code Assist "
                        "accounts; use --host antigravity."),
-        ("claude-desktop", "claude-desktop is identity only: Aegis does not register there (ADR 0005 H4)"),
+        ("claude-desktop", "claude-desktop is identity only: Aegis does not register there (ADR 0005 H4); "
+                           "the Claude desktop app's Code tab shares Claude Code's configuration: "
+                           "use --host claude-code"),
     ])
     def test_naming_a_host_aegis_never_registers_exits_2_with_its_reason(self, env, value, message, capsys):
         init(env, env.project, "codex-cli")
