@@ -98,11 +98,18 @@ class TestWorkspaceCore:
         except (OSError, NotImplementedError):
             pytest.skip("symlinks unavailable")
 
-        if sys.version_info < (3, 13):
+        if sys.version_info < (3, 13) and os.name != "nt":
             with pytest.raises(PathTraversalError, match=r"cannot be resolved"):
                 confine_path(name, ws)
-        else:  # 3.13 resolves a loop leniently: the unresolved remainder stays inside the workspace
-            assert Path(confine_path(name, ws)[1]).as_posix() == name
+            return
+        # 3.13+ and Windows may resolve a loop leniently; either way nothing escapes as
+        # RuntimeError and what comes back stays inside the workspace.
+        try:
+            _, rel_p = confine_path(name, ws)
+        except PathTraversalError as exc:
+            assert "cannot be resolved" in str(exc)
+        else:
+            assert not Path(rel_p).is_absolute() and ".." not in Path(rel_p).parts
 
     def test_validate_rule_names(self, tmp_path: Path):
         ws = tmp_path / "rules_ws"

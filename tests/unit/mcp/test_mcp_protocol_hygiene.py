@@ -163,7 +163,7 @@ def test_unsupported_methods_codex_probes_are_method_not_found(method):
 @pytest.mark.parametrize("line", [
     "[" * 100000 + "]" * 100000,
     '{"a": ' * 100000 + "1" + "}" * 100000,
-])
+], ids=["nested-arrays", "nested-objects"])  # the payload as an id overflows Windows' 32767-char env var
 def test_a_deeply_nested_line_is_a_parse_error_and_the_server_keeps_serving(home, monkeypatch, capsys, line):
     rc, frames = _serve(monkeypatch, capsys, [line, _frame(2, "ping")])
     assert rc == 0
