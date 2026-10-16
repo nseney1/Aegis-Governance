@@ -42,7 +42,9 @@ __all__ = [
     "is_test_path",
     "matches",
     "matching_files",
+    "may_overlap",
     "normalize_path",
+    "sets_overlap",
     "workspace_files",
 ]
 
@@ -224,6 +226,46 @@ def matches(pattern: str, path: str) -> bool:
     if _glob_match(glob, rel):
         return True
     return "/" not in pat and _glob_match(glob, rel.rsplit("/", 1)[-1])
+
+
+_WILDCARD = re.compile(r"[*?\[]")
+
+
+def _literal_prefix(glob: object) -> Optional[str]:
+    """The text every path ``glob`` matches starts with, casefolded; None when ``glob``
+    matches nothing (not a string, or empty after normalizing)."""
+    if not isinstance(glob, str):
+        return None
+    pattern = normalize_path(glob)
+    if not pattern:
+        return None
+    if "/" not in pattern:
+        return ""  # the basename rule lets it match at any depth
+    found = _WILDCARD.search(pattern)
+    return (pattern if found is None else pattern[:found.start()]).casefold()
+
+
+def may_overlap(a: str, b: str) -> bool:
+    """Whether some path could match both globs (the lease overlap test, v4.1 §1).
+
+    Conservative: a path ``matches`` both only if it starts with both literal prefixes
+    (the text before the first ``*``, ``?`` or ``[``; ``""`` for a slashless glob, which
+    also matches basenames), so one prefix must be a string prefix of the other. The
+    prefixes compare casefolded, because on a case-insensitive file system ``Docs/`` and
+    ``docs/`` are one directory. "True" therefore means "unsure", never "proven"; "False"
+    is proof that no path matches both. A glob that matches nothing never overlaps.
+    """
+    first, second = _literal_prefix(a), _literal_prefix(b)
+    if first is None or second is None:
+        return False
+    return first.startswith(second) or second.startswith(first)
+
+
+def sets_overlap(first: Patterns, second: Patterns) -> bool:
+    """Whether any glob of ``first`` may overlap any glob of ``second`` (lists, or one
+    glob as a string)."""
+    others = _as_list(second)
+    return any(may_overlap(a, b) for a in _as_list(first) for b in others)
 
 
 def _as_list(patterns: Patterns) -> List[object]:

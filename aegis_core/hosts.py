@@ -61,6 +61,12 @@ class HostSpec:
     #: Why Aegis refuses a host it no longer supports, as ``aegis init --host`` prints it;
     #: empty for any other host. A retired row stays only so identify() names its client.
     retired: str = ""
+    #: Workspace-relative POSIX directory the host reads project skills from
+    #: (``<skills_dir>/<id>/SKILL.md``, v4.1 §3), or None when it has none.
+    skills_dir: Optional[str] = None
+    #: Whether ``skills_dir`` was checked on a real install. Separate from ``verified``,
+    #: which covers the rest of the row.
+    skills_verified: bool = False
 
 
 HOSTS: Tuple[HostSpec, ...] = (
@@ -78,6 +84,7 @@ HOSTS: Tuple[HostSpec, ...] = (
             argv=("codex", "mcp", "add", "aegis", "--env", "AEGIS_CLIENT=codex-cli", "--", "{command}"),
         ),
         slot_profile="codex-cli",
+        skills_dir=".agents/skills",  # UNVERIFIED: neither documented nor probed
         notes=(
             "AGENTS.md over 32 KiB is truncated silently.",
             "Hooks need trust in /hooks and fail open on errors.",
@@ -97,6 +104,7 @@ HOSTS: Tuple[HostSpec, ...] = (
             argv=("claude", "mcp", "add", "--scope", "user", "aegis", "-e", "AEGIS_CLIENT=claude-code", "--", "{command}"),
         ),
         slot_profile="claude-code",
+        skills_dir=".claude/skills",  # DOC: official docs, not probed
         notes=("PreToolUse hooks can block with exit 2.",),
     ),
     HostSpec(
@@ -119,6 +127,7 @@ HOSTS: Tuple[HostSpec, ...] = (
         budget_bytes=24000,
         registration=Registration(kind="json_file", path="~/.gemini/config/mcp_config.json", key="mcpServers"),
         slot_profile="antigravity",
+        skills_dir=".agents/skills",  # DOC: official docs, not probed
         notes=("Sends no MCP roots; the workspace registry is its only binding route.",),
     ),
     HostSpec(
