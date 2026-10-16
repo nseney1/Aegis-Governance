@@ -121,3 +121,10 @@ def test_format_budget_bar_renders_proportion_and_respects_plain_mode():
     tty_ctx = OutputContext.from_env_and_args(_make_ns(), environ={}, isatty=True)
     over_bar = tty_ctx.format_budget_bar(used=2900, budget=3000, width=10)
     assert "\x1b[31m" in over_bar  # >90% triggers red warning color
+
+
+def test_without_args_an_interactive_tty_gets_color_and_emoji_not_json():
+    """Callers that have no parsed flags (args=None, or a namespace without them) are text mode."""
+    for args in (None, argparse.Namespace()):
+        ctx = OutputContext.from_env_and_args(args, environ={}, isatty=True)
+        assert (ctx.json_mode, ctx.plain, ctx.color_enabled, ctx.emoji_enabled) == (False, False, True, True)
