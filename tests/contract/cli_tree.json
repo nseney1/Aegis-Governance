@@ -513,6 +513,87 @@
             "description": null,
             "help": "Install the pre-commit hook into the git repository"
           },
+          "run": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "event",
+                "flags": [],
+                "help": "The hook event: pre-tool",
+                "kind": "store",
+                "metavar": "EVENT",
+                "nargs": "?",
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "host",
+                "flags": [
+                  "--host"
+                ],
+                "help": "The host whose payload is on stdin: claude-code, codex-cli or antigravity",
+                "kind": "store",
+                "metavar": "HOST",
+                "nargs": null,
+                "required": false
+              }
+            ],
+            "description": "Reads the host's PreToolUse JSON on stdin and never prints on stdout. Exit 0 allows, and also follows any error, a timeout, an unknown host or event and an ungoverned workspace: the hooks fail open. Exit 2 blocks on claude-code and codex-cli (reason on stderr); exit 75 blocks on antigravity, whose registration maps it to 1.",
+            "help": "Run the agent-host hook on the payload on stdin (what host hook registrations call)"
+          },
           "safety-gate": {
             "aliases": [],
             "arguments": [

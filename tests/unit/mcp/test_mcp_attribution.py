@@ -2,8 +2,9 @@
 
 - Ledger rows carry the server-owned host id and session; the idempotency key is
   scoped by both, so two sessions that pick the same key never collide.
-- aegis_scan appends one ``scan`` event per (session, files) to the activity log
-  ``.aegis/state/activity.jsonl``; aegis_report_outcome's optional ``files`` append an
+- aegis_scan appends one ``scan`` event per (session, files), again after half the scan
+  window, to the activity log ``.aegis/state/activity.jsonl`` (test_scan_rows_window.py
+  covers the window); aegis_report_outcome's optional ``files`` append an
   ``edit`` event. ``aegis status --compliance`` reads them. Fitness never does.
 """
 from __future__ import annotations

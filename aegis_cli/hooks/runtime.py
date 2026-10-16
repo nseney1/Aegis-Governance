@@ -1,9 +1,13 @@
-"""`aegis hook`: manage the git pre-commit hook, plus the isolated safety gate.
+"""`aegis hook`: manage the git pre-commit hook, run the agent-host PreToolUse hook,
+and the isolated safety gate.
 
 The commit gate itself is `aegis check --hook`, which the installed hook runs.
-Agent-side lifecycle phases (pre-invocation, session-close, post-session, ...)
-were cut in v4 (ADR 0005 D15). `safety-gate` stays, unwired, so v4.1 per-host
-hooks can call it.
+`aegis hook run pre-tool --host <h>` is what the per-host hook registrations call
+(aegis_cli/hooks/pretool.py); ``cli.main`` dispatches that form before it parses or
+attaches a workspace, so the parser below serves its help and a form with global
+options first (``aegis --plain hook run ...``). Agent-side lifecycle phases (pre-invocation,
+session-close, post-session, ...) were cut in v4 (ADR 0005 D15). `safety-gate`
+stays as a manual check of one command (it fails closed: it asks).
 """
 from __future__ import annotations
 
@@ -48,6 +52,12 @@ def run_hook(args: Any) -> int:
         return run_hook_uninstall(args)
     if action == "safety-gate":
         return _run_safety_gate(args)
+    if action == "run":
+        # Imported here: every aegis command loads this module, and only hooks need the
+        # guard, the payload normalization and the events log.
+        from aegis_cli.hooks.pretool import run_hook_run
+
+        return run_hook_run(args)
     return run_hook_status(args)
 
 
@@ -71,6 +81,20 @@ class HookCommand(AegisCommand):
         p_hook_uninstall = p_hook_sub.add_parser("uninstall", parents=p_parents, help="Remove the aegis block from the pre-commit hook")
         p_hook_uninstall.add_argument("--force", action="store_true", help="Force removal")
         p_hook_uninstall.add_argument("--dry-run", action="store_true", help="Preview without modifying disk")
+
+        p_h_run = p_hook_sub.add_parser(
+            "run", parents=p_parents,
+            help="Run the agent-host hook on the payload on stdin (what host hook registrations call)",
+            description=(
+                "Reads the host's PreToolUse JSON on stdin and never prints on stdout. Exit 0 allows, "
+                "and also follows any error, a timeout, an unknown host or event and an ungoverned "
+                "workspace: the hooks fail open. Exit 2 blocks on claude-code and codex-cli (reason on "
+                "stderr); exit 75 blocks on antigravity, whose registration maps it to 1."
+            ),
+        )
+        p_h_run.add_argument("event", nargs="?", default=None, metavar="EVENT", help="The hook event: pre-tool")
+        p_h_run.add_argument("--host", default=None, metavar="HOST",
+                             help="The host whose payload is on stdin: claude-code, codex-cli or antigravity")
 
         p_h_safety = p_hook_sub.add_parser("safety-gate", parents=p_parents, help="Check a shell command against the safety gate (prints a JSON decision)")
         p_h_safety.add_argument("--cmd", type=str, default=None, help="Command line to check (default: JSON payload on stdin)")

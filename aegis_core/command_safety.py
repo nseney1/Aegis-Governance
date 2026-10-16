@@ -11,7 +11,7 @@ import fnmatch
 import os
 import re
 import shlex
-from typing import Sequence
+from typing import Dict, List, Optional, Tuple, Union
 
 # ── Canonical Reason Strings (1:1 Parity with aegis_cli/hooks.py) ─────────────
 
@@ -862,7 +862,347 @@ class CommandAnalyzer:
         return SafetyEvaluation(False)
 
 
+# ── Destructive-command guard (v4.1 per-host hooks) ──────────────────────────
+#
+# CommandAnalyzer above serves `aegis hook safety-gate`, which fails closed (asks) on
+# anything it cannot parse. The guard below decides what `aegis hook run pre-tool`
+# BLOCKS, so it fails open: an empty, absent or unparseable command is never a match,
+# and only the irreversible operations of BLOCK_SET block. It reuses the lexer and the
+# wrapper unwrapping, not the evaluators.
+
+GUARD_BLOCK = "block"
+GUARD_RECORD = "record"
+
+#: An argv prefix for a Codex ``prefix_rule(pattern=...)``; a tuple at a position lists
+#: alternatives (Codex's nested list).
+CodexPrefix = Tuple[Union[str, Tuple[str, ...]], ...]
+
+
+@dataclass(frozen=True)
+class GuardRule:
+    """One operation the guard recognizes.
+
+    ``tier`` is GUARD_BLOCK (the hook blocks it) or GUARD_RECORD (recorded, never
+    blocked). ``codex_prefixes`` feed the Codex ``aegis.rules`` generator. Codex's
+    ``prefix_rule`` forbids every command that starts with a prefix, whatever follows
+    it, and the hook blocks each of those for the same rule with one exception: a git
+    clean dry run written after the forcing flag (``git clean -f -n``, ``git clean
+    --force --dry-run``) deletes nothing, so the hook allows it while Codex forbids it
+    (``git clean -n`` runs on both). Tests pin both. An operation no argv prefix can
+    express (a ``+refspec`` push, ``dd of=/dev/...``) has no prefix and is left to the
+    hook.
+    """
+
+    id: str
+    tier: str
+    reason: str
+    codex_prefixes: Tuple[CodexPrefix, ...] = ()
+
+
+def _prefix(*positions: Union[str, Tuple[str, ...]]) -> CodexPrefix:
+    """A Codex prefix pattern. Built by a call, not a tuple literal: it is data for Codex,
+    and a literal ("git", ...) reads as a git argv to the ratchet that keeps every git
+    subprocess in gitsafe (tests/unit/core/test_gitsafe.py)."""
+    return tuple(positions)
+
+
+_PROTECTED_BRANCHES = frozenset({"main", "master"})
+# dd may write these without destroying anything.
+_HARMLESS_DEVICES = frozenset({"/dev/null", "/dev/zero", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+_HARMLESS_DEVICE_DIRS = ("/dev/fd/", "/dev/shm/")
+_CHMOD_777 = re.compile(r"0*[0-7]?777")
+_SQL_DESTRUCTIVE = ("DROP TABLE", "DROP DATABASE", "DELETE FROM", "TRUNCATE TABLE")
+# A heredoc operator and its delimiter word (``<<EOF``, ``<<-'EOF'``, ``<< "END"``,
+# ``<<\EOF``), matched where _split_heredocs finds an unquoted ``<<`` that is not a
+# ``<<<`` here-string.
+_HEREDOC = re.compile(r"<<(-?)[ \t]*\\?(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
+# A heredoc these read is a script they run, so its body is checked as commands.
+_HEREDOC_SHELLS = SHELL_INTERPRETERS | {"ssh", "ash", "mksh"}
+
+BLOCK_SET: Tuple[GuardRule, ...] = (
+    GuardRule(
+        "git-push-force", GUARD_BLOCK,
+        "force push (--force, -f, --force-with-lease) overwrites the remote branch",
+        (_prefix("git", "push", ("--force", "-f", "--force-with-lease")),),
+    ),
+    GuardRule("git-push-refspec", GUARD_BLOCK, "a +refspec push force-updates the remote branch"),
+    GuardRule(
+        "git-reset-hard", GUARD_BLOCK, "git reset --hard discards uncommitted changes",
+        (_prefix("git", "reset", "--hard"),),
+    ),
+    GuardRule(
+        "git-clean-force", GUARD_BLOCK, "git clean -f permanently deletes untracked files",
+        (_prefix("git", "clean", ("-f", "--force", "-fd", "-df", "-fx", "-xf", "-fdx", "-xdf", "-dfx")),),
+    ),
+    GuardRule(
+        "rm-recursive-dangerous", GUARD_BLOCK, "recursive rm of /, ~, $HOME, *, . or ..",
+        (_prefix("rm", ("-r", "-R", "-rf", "-fr", "-Rf", "-fR", "--recursive"),
+                 ("/", "/*", "~", "~/", "~/*", "*", ".", "./", "..", "../", "$HOME", "/home", "/root")),),
+    ),
+    GuardRule(
+        "mkfs", GUARD_BLOCK, "mkfs formats a filesystem",
+        (_prefix(("mkfs", "mkfs.ext2", "mkfs.ext3", "mkfs.ext4", "mkfs.xfs", "mkfs.btrfs", "mkfs.vfat",
+                  "mkfs.fat", "mkfs.exfat", "mkfs.ntfs")),),
+    ),
+    GuardRule("dd-device", GUARD_BLOCK, "dd of=/dev/... overwrites a device"),
+)
+
+RECORD_SET: Tuple[GuardRule, ...] = (
+    GuardRule("git-merge", GUARD_RECORD, "git merge"),
+    GuardRule("gh-pr-merge", GUARD_RECORD, "gh pr merge"),
+    GuardRule("git-add-bulk", GUARD_RECORD, "bulk staging (git add -A, --all or .)"),
+    GuardRule("git-push-protected", GUARD_RECORD, "push to a protected branch (main, master)"),
+    GuardRule("sudo", GUARD_RECORD, "sudo"),
+    GuardRule("chmod-777", GUARD_RECORD, "chmod 777"),
+    GuardRule("sql-destructive", GUARD_RECORD, "destructive SQL (DROP TABLE/DATABASE, DELETE FROM, TRUNCATE TABLE)"),
+)
+
+_GUARD: Dict[str, GuardRule] = {rule.id: rule for rule in BLOCK_SET + RECORD_SET}
+
+
+def _short_letters(flag: str) -> str:
+    """The letters of a bundled short option (``-fu`` -> ``fu``); "" for anything else."""
+    return flag[1:] if flag.startswith("-") and not flag.startswith("--") else ""
+
+
+def _pushes_to_protected(refspec: str) -> bool:
+    destination = refspec.rsplit(":", 1)[-1]
+    return destination.rsplit("/", 1)[-1] in _PROTECTED_BRANCHES
+
+
+def _guard_git(cmd: UnwrappedCommand) -> List[GuardRule]:
+    flags = [f.lstrip("\\") for f in cmd.flags]
+    letters = "".join(_short_letters(f) for f in flags)
+    sub = cmd.subcommand
+    found: List[GuardRule] = []
+    if sub == "push":
+        if "f" in letters or any(f == "--force" or f.split("=", 1)[0] == "--force-with-lease" for f in flags):
+            found.append(_GUARD["git-push-force"])
+        if any(arg.startswith("+") for arg in cmd.positional_args):
+            found.append(_GUARD["git-push-refspec"])
+        if any(_pushes_to_protected(arg) for arg in cmd.positional_args):
+            found.append(_GUARD["git-push-protected"])
+    elif sub == "reset" and "--hard" in flags:
+        found.append(_GUARD["git-reset-hard"])
+    elif sub == "clean":
+        forced = "f" in letters or "--force" in flags
+        dry_run = "n" in letters or "--dry-run" in flags
+        if forced and not dry_run:
+            found.append(_GUARD["git-clean-force"])
+    elif sub == "merge" and not any(f in ("--abort", "--quit", "--continue") for f in flags):
+        found.append(_GUARD["git-merge"])
+    elif sub == "add" and (
+        "A" in letters or "--all" in flags or any(arg in (".", "./", "*") for arg in cmd.positional_args)
+    ):
+        found.append(_GUARD["git-add-bulk"])
+    return found
+
+
+def _dangerous_rm_target(arg: str) -> bool:
+    """``/``, ``~``, ``$HOME``, ``*``, ``.``, ``..`` (and RM_DANGEROUS_TARGETS' /home, /root),
+    with trailing slashes (BUG-075) or one trailing ``/*`` or ``/.``; never a subpath."""
+    target = arg.strip("'\"").lower().replace("${home}", "$home")
+    trimmed = target.rstrip("/\\")
+    if not trimmed and target[:1] in ("/", "\\"):
+        trimmed = "/"
+    for suffix in ("/*", "/."):
+        if trimmed.endswith(suffix):
+            trimmed = trimmed[: -len(suffix)].rstrip("/\\") or "/"
+            break
+    return trimmed in RM_DANGEROUS_TARGETS
+
+
+def _writes_a_device(arg: str) -> bool:
+    if not arg.startswith("of=/dev/"):
+        return False
+    device = arg[len("of="):]
+    return device not in _HARMLESS_DEVICES and not device.startswith(_HARMLESS_DEVICE_DIRS)
+
+
+def _guard_stage(cmd: UnwrappedCommand) -> List[GuardRule]:
+    found: List[GuardRule] = []
+    binary = cmd.binary
+    if binary == "git":
+        found.extend(_guard_git(cmd))
+    elif binary == "gh":
+        if cmd.subcommand == "pr" and cmd.positional_args[:1] == ["merge"]:
+            found.append(_GUARD["gh-pr-merge"])
+    elif binary == "rm":
+        flags = [f.lstrip("\\") for f in cmd.flags]
+        recursive = "--recursive" in flags or any(c in "rR" for f in flags for c in _short_letters(f))
+        if recursive and any(_dangerous_rm_target(arg) for arg in cmd.positional_args):
+            found.append(_GUARD["rm-recursive-dangerous"])
+    elif binary.startswith("mkfs"):
+        found.append(_GUARD["mkfs"])
+    elif binary == "dd":
+        if any(_writes_a_device(arg) for arg in cmd.positional_args + cmd.flags):
+            found.append(_GUARD["dd-device"])
+    elif binary == "chmod":
+        if any(_CHMOD_777.fullmatch(arg) for arg in cmd.flags + cmd.positional_args):
+            found.append(_GUARD["chmod-777"])
+    if cmd.has_sudo:
+        found.append(_GUARD["sudo"])
+    return found
+
+
+def _feeds_a_shell(line: str, command_start: int, operator: int) -> bool:
+    """Whether the heredoc whose operator is at ``line[operator]`` goes to a shell (or
+    ssh): the command it belongs to, or a later stage of that command's pipeline on the
+    same line (``cat <<EOF | bash``)."""
+    for text in (line[command_start:], line[command_start:operator]):
+        try:
+            pipelines = decompose_command(tokenize_command(text))
+        except ValueError:  # an unbalanced quote that closes on a later line
+            continue
+        for stage in pipelines[0].stages if pipelines else []:
+            unwrapped, _ = unwrap_command_stage(stage.raw_tokens)
+            if unwrapped is not None and unwrapped.binary.split("<<", 1)[0] in _HEREDOC_SHELLS:
+                return True
+        return False
+    return False
+
+
+def _heredoc_operators(line: str, open_quotes: List[str]) -> List[Tuple[bool, str, bool]]:
+    """``(strip_tabs, delimiter, feeds_a_shell)`` for each heredoc operator on ``line``
+    outside quotes and comments, in order. ``open_quotes`` is the stack of quotes and
+    ``$(``/``(`` substitutions still open from earlier lines (a ``<<`` inside a
+    substitution counts, even within double quotes); it is updated in place."""
+    found: List[Tuple[bool, str, bool]] = []
+    command_start = 0
+    index = 0
+    while index < len(line):
+        char = line[index]
+        context = open_quotes[-1] if open_quotes else ""
+        if context == "'":
+            if char == "'":
+                open_quotes.pop()
+            index += 1
+            continue
+        if char == "\\":
+            index += 2
+            continue
+        if line.startswith("$(", index):
+            open_quotes.append("(")
+            index += 2
+            command_start = index
+            continue
+        if context == '"':
+            if char == '"':
+                open_quotes.pop()
+            index += 1
+            continue
+        if char in "'\"":
+            open_quotes.append(char)
+        elif char == "(":
+            open_quotes.append("(")
+            command_start = index + 1
+        elif char == ")":
+            if open_quotes:
+                open_quotes.pop()
+            command_start = index + 1
+        elif char in ";&" or line.startswith("||", index):
+            command_start = index + (2 if line.startswith("||", index) else 1)
+        elif char == "#" and (index == 0 or line[index - 1] in " \t;&|()"):
+            break  # a comment runs to the end of the line
+        elif line.startswith("<<<", index):
+            index += 3
+            continue
+        elif line.startswith("<<", index):
+            heredoc = _HEREDOC.match(line, index)
+            if heredoc is None:
+                index += 2
+                continue
+            found.append((heredoc.group(1) == "-", heredoc.group(3), _feeds_a_shell(line, command_start, index)))
+            index = heredoc.end()
+            continue
+        index += 1
+    return found
+
+
+def _split_heredocs(text: str) -> Tuple[str, List[str]]:
+    """``text`` without the body lines of its heredocs, and the bodies a shell reads.
+
+    A body is data for the command that reads it (Claude Code passes commit messages
+    this way), unless that command is a shell or ssh (``bash <<'EOF'``, ``bash -s``,
+    ``ssh host <<EOF``, ``cat <<EOF | sh``): then it is a script, returned to be checked
+    as commands. A ``<<`` inside quotes or a comment is not an operator. An unterminated
+    heredoc swallows the rest, as the shell would.
+    """
+    if "<<" not in text:
+        return text, []
+    lines = text.split("\n")
+    kept: List[str] = []
+    scripts: List[str] = []
+    open_quotes: List[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        kept.append(line)
+        index += 1
+        for strip_tabs, delimiter, feeds_a_shell in _heredoc_operators(line, open_quotes):
+            body: List[str] = []  # several heredocs on one line are read in order
+            while index < len(lines):
+                raw = lines[index].rstrip("\r")
+                index += 1
+                if (raw.lstrip("\t") if strip_tabs else raw) == delimiter:
+                    break
+                body.append(raw)
+            if feeds_a_shell:
+                scripts.append("\n".join(body))
+    return "\n".join(kept), scripts
+
+
+def _guard_scan(cmd: str, depth: int, found: List[GuardRule]) -> bool:
+    """Add the guard rules ``cmd`` matches to ``found``; False when it cannot be parsed
+    (or nests deeper than MAX_DEPTH), which contributes nothing."""
+    if depth >= MAX_DEPTH:
+        return False
+    text, scripts = _split_heredocs(cmd)
+    try:
+        tokens = tokenize_command(text)
+    except ValueError:
+        return False
+    for script in scripts:
+        _guard_scan(script, depth + 1, found)
+    if any(c in text for c in ("$", "`", "(", "<", ">")):
+        for sub in extract_subshell_commands(text):
+            _guard_scan(sub, depth + 1, found)
+    for pipeline in decompose_command(tokens):
+        for stage in pipeline.stages:
+            unwrapped, inner = unwrap_command_stage(stage.raw_tokens)
+            if inner:
+                _guard_scan(inner, depth + 1, found)
+            elif unwrapped is not None:
+                found.extend(_guard_stage(unwrapped))
+    return True
+
+
+def classify_command(command: object) -> Optional[GuardRule]:
+    """The guard rule ``command`` matches: a BLOCK_SET rule when any matches, else the
+    first RECORD_SET rule, else None.
+
+    Fail-open: an empty or non-string command, one the lexer cannot parse, an
+    unresolvable globbed binary and nesting beyond MAX_DEPTH are never a match.
+    """
+    if not isinstance(command, str) or not command.strip():
+        return None
+    found: List[GuardRule] = []
+    if not _guard_scan(command, 0, found):
+        return None
+    if any(pattern in command.upper() for pattern in _SQL_DESTRUCTIVE):
+        found.append(_GUARD["sql-destructive"])
+    blocked = next((rule for rule in found if rule.tier == GUARD_BLOCK), None)
+    return blocked or (found[0] if found else None)
+
+
 __all__ = [
+    "BLOCK_SET",
+    "GUARD_BLOCK",
+    "GUARD_RECORD",
+    "RECORD_SET",
+    "CodexPrefix",
+    "GuardRule",
+    "classify_command",
     "CommandAnalyzer",
     "SafetyEvaluation",
     "REASON_CHMOD_777",

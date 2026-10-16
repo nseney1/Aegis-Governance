@@ -7,9 +7,19 @@ activity log; the outcome ledger and fitness never read it)::
      "session": "<server instance id>", "files": ["src/a.py"], "client": {"name", "version"},
      "binding": "pin", "basis": "files" | "git_diff" | "report"}
 
-``scan``: an aegis_scan, once per (session, files). ``edit``: the ``files`` an
-aegis_report_outcome named. ``report()`` reads the log (and, when the workspace is a git
-repository, the commits on HEAD) and computes, per session and per host:
+``scan``: an aegis_scan, once per (session, files) and again when that row is older than
+half of ``jit.scan_window_s``; also every ``aegis scan FILE...`` CLI run, with host
+``cli`` (CLI_HOST) and a session per run. ``edit``: the ``files`` an aegis_report_outcome
+named.
+
+``scan_covers()`` is what the scan-before-edit hook (``aegis hook run pre-tool``) asks:
+does one ``scan`` row, of any host or session, name every edited path within the window?
+It keys on workspace and exact path, never on a session id, and reads only the tail of
+the log.
+
+``report()`` reads the log (and, when the workspace is a git repository, the commits on
+HEAD) and computes, per session and per host (CLI rows are left out: they carry no host
+session, and their windows would make commits ambiguous):
 
     rate = edited files the same session scanned no later than its first recorded edit
            / edited files observed
@@ -31,8 +41,10 @@ Reading never writes, syncs or touches the network: git is asked through gitsafe
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 import os
 from pathlib import Path, PurePath
+import stat
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from aegis_core.storage import append_jsonl, locked, read_jsonl
@@ -40,6 +52,7 @@ from aegis_core.workspace.layout import WorkspaceLayout
 
 __all__ = [
     "ACTIVITY_VERSION",
+    "CLI_HOST",
     "EVENTS",
     "GRACE_SECONDS",
     "HEURISTIC",
@@ -48,12 +61,21 @@ __all__ = [
     "activity_path",
     "record",
     "report",
+    "scan_covers",
+    "utc_now",
 ]
 
 ACTIVITY_VERSION = 1
 EVENTS = ("scan", "edit")
 SCHEMA = "aegis.compliance/v1"
 GRACE_SECONDS = 15 * 60
+#: The host of a scan row written by the ``aegis scan`` CLI.
+CLI_HOST = "cli"
+#: How much of the log's end ``scan_covers`` reads: the hook runs on every edit and the
+#: log only grows, and a window's rows sit at the end (rows are appended in time order).
+GATE_TAIL_BYTES = 4 * 1024 * 1024
+#: How far ahead of the reader's clock a row may be and still count.
+FUTURE_SKEW_SECONDS = 300
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 HEURISTIC = (
@@ -70,10 +92,14 @@ LIMITS = (
     "only commits reachable from HEAD are read",
     "a session with no observed edit has rate unknown, never 0",
     "a host rate is an aggregate over sessions, not a per-attempt verdict",
+    "scans by the aegis scan CLI (host cli) carry no host session and are not counted here; "
+    "the scan-before-edit hook still counts them",
 )
 
 
-def _utc_now() -> datetime:
+def utc_now() -> datetime:
+    """The clock activity rows are stamped with. aegis-mcp's re-record decision reads it
+    too, so that decision and the gate's window share one (wall-clock) timeline."""
     return datetime.now(timezone.utc)
 
 
@@ -120,7 +146,7 @@ def record(
         raise ValueError("host and session must be non-empty strings")
     row: Dict[str, Any] = {
         "v": ACTIVITY_VERSION,
-        "ts": _stamp(_utc_now()),
+        "ts": _stamp(utc_now()),
         "event": event,
         "host": host,
         "session": session,
@@ -134,6 +160,105 @@ def record(
     with locked(workspace):
         append_jsonl(activity_path(workspace), [row])
     return row
+
+
+# ── the scan-before-edit gate ────────────────────────────────────────────────
+
+def _tail(path: Path, limit: int) -> bytes:
+    """The whole lines in the last ``limit`` bytes of ``path`` (a partial first line
+    dropped); b"" when it is missing, unreadable, a symlink or not a regular file (the
+    checks ``storage.read_jsonl`` makes)."""
+    try:
+        if os.path.islink(path):
+            return b""
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
+    except OSError:
+        return b""
+    try:
+        found = os.fstat(fd)
+        if not stat.S_ISREG(found.st_mode):
+            return b""
+        size = found.st_size
+        start = max(0, size - limit)
+        os.lseek(fd, start, os.SEEK_SET)
+        chunks = []
+        remaining = size - start
+        while remaining > 0:
+            chunk = os.read(fd, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    except OSError:
+        return b""
+    finally:
+        os.close(fd)
+    data = b"".join(chunks)
+    return data[data.find(b"\n") + 1:] if start else data
+
+
+def _spellings(path: str) -> Tuple[bytes, ...]:
+    """The bytes a JSON row holds for ``path``: the writer escapes non-ASCII
+    (``ensure_ascii``), another writer may not."""
+    return tuple(sorted({json.dumps(path).encode("ascii"), json.dumps(path, ensure_ascii=False).encode("utf-8")}))
+
+
+def _lines_naming(data: bytes, spellings: Tuple[bytes, ...]) -> Iterable[bytes]:
+    """The lines of ``data`` that hold one of ``spellings``, last line first."""
+    end = len(data)
+    while True:
+        at = max(data.rfind(spelling, 0, end) for spelling in spellings)
+        if at < 0:
+            return
+        start = data.rfind(b"\n", 0, at) + 1
+        stop = data.find(b"\n", at)
+        yield data[start:] if stop < 0 else data[start:stop]
+        end = start
+
+
+def scan_covers(workspace: Any, paths: Iterable[str], window_s: float, now: Optional[datetime] = None) -> bool:
+    """True when one usable ``scan`` row names every path in ``paths`` (workspace-relative,
+    compared exactly in POSIX spelling) and was written no more than ``window_s`` seconds
+    before ``now`` (and at most FUTURE_SKEW_SECONDS after it). Any host and any session
+    count. Nothing to cover is covered. Reads only.
+
+    The hook runs this on every edit and the log is never rotated, so it reads only the
+    last GATE_TAIL_BYTES and parses only the scan lines holding every path's JSON
+    spelling, found from the end through the rarest path. The first such row older than
+    the window less FUTURE_SKEW_SECONDS ends the search: rows are appended in time order,
+    so the ones before it are older still (a clock stepped back by more than the slack
+    can hide one; the agent's rescan then appends a new row).
+    """
+    wanted = {PurePath(p).as_posix() for p in paths}
+    if not wanted:
+        return True
+    data = _tail(activity_path(workspace), GATE_TAIL_BYTES)
+    spellings = {path: _spellings(path) for path in wanted}
+    counts = {path: sum(data.count(s) for s in spellings[path]) for path in sorted(wanted)}
+    rarest = min(counts, key=counts.__getitem__)
+    if not counts[rarest]:
+        return False
+    moment = now or utc_now()
+    oldest = moment - timedelta(seconds=window_s)
+    newest = moment + timedelta(seconds=FUTURE_SKEW_SECONDS)
+    floor = oldest - timedelta(seconds=FUTURE_SKEW_SECONDS)
+    for line in _lines_naming(data, spellings[rarest]):
+        if b'"scan"' not in line or not all(any(s in line for s in spellings[p]) for p in wanted):
+            continue
+        try:
+            row = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            continue
+        if not isinstance(row, dict) or not _usable(row) or row["event"] != "scan":
+            continue
+        written = _parse_ts(row["ts"])
+        assert written is not None  # _usable checked it
+        if written < floor:
+            break
+        if oldest <= written <= newest and wanted <= set(row["files"]):
+            return True
+    return False
 
 
 # ── reading ──────────────────────────────────────────────────────────────────
@@ -257,7 +382,7 @@ def report(workspace: Any, now: Optional[datetime] = None) -> Dict[str, Any]:
     read = read_jsonl(activity_path(root))
     usable = [row for row in read.rows if _usable(row)]
     skipped = len(read.skipped_lines) + (len(read.rows) - len(usable))
-    sessions = _sessions(usable)
+    sessions = _sessions(row for row in usable if row["host"] != CLI_HOST)
 
     git: Dict[str, Any] = {"status": "unavailable", "ambiguous_edits": None, "grace_seconds": GRACE_SECONDS}
     if sessions:
@@ -323,7 +448,7 @@ def report(workspace: Any, now: Optional[datetime] = None) -> Dict[str, Any]:
     return {
         "schema": SCHEMA,
         "source": "aegis status --compliance",
-        "checked_at": _stamp(now or _utc_now()),
+        "checked_at": _stamp(now or utc_now()),
         "scope": {
             "workspace": str(root),
             "hosts": sorted(per_host),

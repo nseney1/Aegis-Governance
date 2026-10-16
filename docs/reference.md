@@ -295,7 +295,7 @@ Category: Rule Evolution & Intelligence.
 
 Install, inspect or remove the git pre-commit hook
 
-Category: Plumbing. Subcommands: `install`, `safety-gate`, `status`, `uninstall`.
+Category: Plumbing. Subcommands: `install`, `run`, `safety-gate`, `status`, `uninstall`.
 
 ### `aegis hook install`
 
@@ -305,6 +305,17 @@ Install the pre-commit hook into the git repository
 | --- | --- | --- | --- |
 | `--force` |  |  | Overwrite symlinks pointing outside repository |
 | `--dry-run` |  |  | Preview without creating or modifying hook |
+
+### `aegis hook run`
+
+Run the agent-host hook on the payload on stdin (what host hook registrations call)
+
+Reads the host's PreToolUse JSON on stdin and never prints on stdout. Exit 0 allows, and also follows any error, a timeout, an unknown host or event and an ungoverned workspace: the hooks fail open. Exit 2 blocks on claude-code and codex-cli (reason on stderr); exit 75 blocks on antigravity, whose registration maps it to 1.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `event` | `[EVENT]` |  | The hook event: pre-tool |
+| `--host` | `HOST` |  | The host whose payload is on stdin: claude-code, codex-cli or antigravity |
 
 ### `aegis hook safety-gate`
 
