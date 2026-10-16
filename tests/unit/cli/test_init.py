@@ -332,6 +332,53 @@ class TestSharedHooksDirectory:
         assert run_init(_args(project, hooks=True)) == 0
         assert "aegis pre-commit" in (project / ".githooks" / "pre-commit").read_text(encoding="utf-8")
 
+    def test_after_aegis_hook_install_there_init_leaves_it_and_succeeds(self, project, shared, capsys):
+        """Following the refusal's advice must not leave init refusing forever: the shared
+        hook already runs Aegis, so init has nothing to add and does not rewrite it."""
+        from aegis_cli.hooks import install_hook
+
+        assert install_hook(project)
+        hook = shared / "pre-commit"
+        hook_bytes, hook_inode = hook.read_bytes(), os.stat(hook).st_ino
+        capsys.readouterr()
+        for flags in (("--dry-run",), ()):
+            assert run_init(_args(project, *flags, hooks=True)) == 0
+            assert (hook.read_bytes(), os.stat(hook).st_ino) == (hook_bytes, hook_inode)
+            out = capsys.readouterr().out
+            assert f"Pre-commit hook: {hook}" in out and "already runs the Aegis hook" in out
+        assert (project / "AGENTS.md").is_file()
+
+    def test_an_older_aegis_block_there_is_still_refused(self, project, shared, capsys):
+        from aegis_cli.hooks.management import generate_hook_block
+
+        hook = shared / "pre-commit"
+        hook.write_text("#!/bin/sh\n" + generate_hook_block(str(shared / "old" / "python3"), import_root=str(shared)),
+                        encoding="utf-8")
+        before = _tree(project, shared)
+        assert run_init(_args(project, hooks=True)) == 1
+        assert _tree(project, shared) == before
+        assert "aegis hook install" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(GIT is None, reason="needs git")
+def test_a_hooks_directory_linked_out_of_the_repository_is_named_as_a_link(project, tmp_path, monkeypatch, capsys):
+    """Without core.hooksPath, a .git/hooks that is a link to a dotfiles directory is
+    refused like a shared hooks path, and the message says what the user actually has."""
+    from conftest import symlink_or_skip
+
+    monkeypatch.setenv("PATH", os.pathsep.join([str(tmp_path / "empty-bin"), os.path.dirname(GIT)]))
+    _git("init", "-q", str(project))
+    dotfiles = tmp_path / "dotfiles-hooks"
+    dotfiles.mkdir()
+    shutil.rmtree(project / ".git" / "hooks")
+    symlink_or_skip(dotfiles, project / ".git" / "hooks", target_is_directory=True)
+    assert run_init(_args(project, hooks=True)) == 1
+    err = capsys.readouterr().err
+    assert "core.hooksPath" not in err
+    assert f"{project / '.git' / 'hooks'} is a link to {dotfiles.resolve()}" in err
+    assert "outside this repository" in err and "--no-hooks" in err
+    assert list(dotfiles.iterdir()) == []
+
 
 class TestRepositoryPlaneChecks:
     """What the writes under .aegis/ need is checked before anything is written: a dry run

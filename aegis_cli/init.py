@@ -243,6 +243,56 @@ def _unwritable(directory: Path) -> Optional[str]:
     return f"{existing} is not a writable directory"
 
 
+@dataclass(frozen=True)
+class _HookPlace:
+    hooks_dir: Path
+    hook: Path
+    shared: bool  # outside the repository and its git directories
+    where: str    # how a refusal names the hooks directory
+
+
+def _hook_place(root: Path) -> Optional[_HookPlace]:
+    """Where the pre-commit hook lives; None when there is no git repository."""
+    from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
+
+    hooks_dir = resolve_git_hooks_dir(root)
+    if not hooks_dir:
+        return None
+    hooks_dir = Path(hooks_dir)
+    git_dir, common_dir = _find_git_dirs(root)
+    repository = (root, *(d for d in (git_dir, common_dir) if d is not None))
+    shared = not any(_within(hooks_dir.resolve(), b) for b in repository)
+    default = common_dir / "hooks" if common_dir is not None else None
+    if default is not None and _real_key(default) == _real_key(hooks_dir):
+        # No core.hooksPath: the repository's own hooks directory is a link out of it.
+        where = f"{default} is a link to {hooks_dir.resolve()}"
+    else:
+        where = f"the hooks directory {hooks_dir} (core.hooksPath)"
+    return _HookPlace(hooks_dir, hooks_dir / "pre-commit", shared, where)
+
+
+def shared_hook_in_place(root: Path) -> Optional[Path]:
+    """The pre-commit hook of a shared hooks directory (see hook_refusal) that already holds
+    exactly the block install_hook would write, so installing it changes nothing: someone
+    ran ``aegis hook install`` there on purpose. init leaves it as it is instead of refusing
+    again (which left --no-hooks as the only way through) or rewriting a file other
+    repositories run. None otherwise.
+    """
+    from aegis_cli.hooks.management import _replace_hook_block, generate_hook_block
+
+    place = _hook_place(Path(root).resolve())
+    if place is None or not place.shared:
+        return None
+    try:
+        content = place.hook.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    # install_hook rewrites CRLF as LF, so a CRLF file is not one it would leave alone.
+    if "\r" in content or _replace_hook_block(content, generate_hook_block()) != content:
+        return None
+    return place.hook
+
+
 def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
     """Why the pre-commit hook cannot be installed (or, ``removing``, uninstalled) safely.
 
@@ -253,25 +303,21 @@ def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
     can be changed, or when there is no git repository.
 
     A hooks directory outside the repository and its git directories (``core.hooksPath``
-    set to a team or dotfiles directory, often globally) holds a hook every repository
-    using it runs; install_hook would append the Aegis block there, pinned to this
-    machine's aegis, so it is refused here and left to an explicit ``aegis hook install``.
+    set to a team or dotfiles directory, often globally, or a ``.git/hooks`` linked to one)
+    holds a hook every repository using it runs; install_hook would append the Aegis block
+    there, pinned to this machine's aegis, so it is refused here and left to an explicit
+    ``aegis hook install`` (after which shared_hook_in_place lets init through).
     """
-    from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
     from aegis_cli.hooks.management import _replace_hook_block
 
     root = Path(root).resolve()
-    hooks_dir = resolve_git_hooks_dir(root)
-    if not hooks_dir:
+    place = _hook_place(root)
+    if place is None:
         return None
-    hooks_dir = Path(hooks_dir)
-    hook = hooks_dir / "pre-commit"
-    repository = (root, *(d for d in _find_git_dirs(root) if d is not None))
-    shared = not any(_within(hooks_dir.resolve(), b) for b in repository)
+    hooks_dir, hook, shared = place.hooks_dir, place.hook, place.shared
     if shared and not removing:
-        return (f"the hooks directory {hooks_dir} (core.hooksPath) is outside this repository, so its pre-commit "
-                "hook may run in other repositories too; Aegis does not add its block there. To add it anyway, "
-                "run: aegis hook install")
+        return (f"{place.where}, outside this repository, so its pre-commit hook may run in other "
+                "repositories too; Aegis does not add its block there. To add it anyway, run: aegis hook install")
     verb = "removed" if removing else "installed"
     target, outside = hook, shared
     if hook.is_symlink():
@@ -295,9 +341,8 @@ def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
         reason = None if removing else _unwritable(target.parent)
         return f"{reason}, so the hook cannot be {verb}" if reason else None
     if shared:
-        return (f"{hook} holds the Aegis hook, but its hooks directory {hooks_dir} (core.hooksPath) is outside this "
-                "repository and may serve other repositories; Aegis leaves it as it is. To remove the block anyway, "
-                "run: aegis hook uninstall")
+        return (f"{hook} holds the Aegis hook, but {place.where}, outside this repository, and may serve other "
+                "repositories; Aegis leaves it as it is. To remove the block anyway, run: aegis hook uninstall")
     if outside:
         return (f"{hook} is a symlink to {target}, outside the repository, and that file holds the Aegis hook; "
                 "Aegis does not write through it. Remove the block from that file yourself, or run: "
@@ -533,18 +578,30 @@ def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -
     drivers = sorted(k[len("ast_driver_"):] for k in slots if k.startswith("ast_driver_"))
     actions.append(Step("ast drivers", "configured" if drivers else "none", ", ".join(drivers)))
 
+    agents = root / AGENTS_FILE
+    if agents.is_symlink():
+        raise InstallError(
+            f"{agents}: is a symlink to {os.path.realpath(agents)}; Aegis never writes through a link. Make "
+            f"{AGENTS_FILE} a regular file, then re-run. If it links to {CLAUDE_FILE}, swap them: move "
+            f"{CLAUDE_FILE} to {AGENTS_FILE} and make {CLAUDE_FILE} the link to {AGENTS_FILE}, which Aegis "
+            "supports.")
     actions.append(Step(AGENTS_FILE, write_managed_block(
-        root / AGENTS_FILE, BOOTSTRAP_ID, bootstrap_text(), force=ctx.force, dry_run=dry_run)))
+        agents, BOOTSTRAP_ID, bootstrap_text(), force=ctx.force, dry_run=dry_run)))
     actions.append(_claude_shim(ctx, dry_run))
 
     if not ctx.no_hooks:
-        refusal = hook_refusal(root)
-        if refusal:
-            raise InstallError(f"pre-commit hook: {refusal}. Or re-run with --no-hooks to set up everything else.")
-        hooked = install_hook(root, dry_run=dry_run)
-        if not hooked and resolve_git_hooks_dir(root):
-            raise InstallError("the pre-commit hook could not be installed (see above); left unchanged")
-        actions.append(Step("pre-commit hook", "installed" if hooked else "skipped (not a git repository)"))
+        in_place = shared_hook_in_place(root)
+        if in_place is not None:
+            actions.append(Step("pre-commit hook", "unchanged",
+                                f"{in_place} already runs the Aegis hook (a shared hooks directory); left as it is"))
+        else:
+            refusal = hook_refusal(root)
+            if refusal:
+                raise InstallError(f"pre-commit hook: {refusal}. Or re-run with --no-hooks to set up everything else.")
+            hooked = install_hook(root, dry_run=dry_run)
+            if not hooked and resolve_git_hooks_dir(root):
+                raise InstallError("the pre-commit hook could not be installed (see above); left unchanged")
+            actions.append(Step("pre-commit hook", "installed" if hooked else "skipped (not a git repository)"))
 
     actions.append(Step(REGISTRY_LABEL, register_workspace(ctx.home, root, ctx.selected, dry_run=dry_run)))
     for host in ctx.selected:
@@ -577,6 +634,9 @@ def _print_actions(report: Report, actions: Sequence[Step], dry_run: bool, prese
             verb = "Would configure" if dry_run else "Configured"
             for ext in action.detail.split(", ") if action.detail else []:
                 report.say(f"    ✨ {verb} AST driver (.{ext}): packaged {ext} driver")
+            continue
+        if action.target == "pre-commit hook" and action.result == "unchanged":
+            report.say(f"    🪝 Pre-commit hook: {action.detail}")
             continue
         if action.target in ("pre-commit hook", SCAFFOLD_LABEL):
             continue  # the hook is printed by _report_hook; the directories are in JSON only
@@ -721,9 +781,14 @@ def run_init(args: argparse.Namespace) -> int:
     for action in failed:
         report.error(f"{action.target}: registration failed ({action.detail}). Run it yourself: "
                      f"{display_command(action.command or [])}")
+    manual = sum(1 for a in actions if a.result == "manual")
     report.say()
     if failed:
         report.say("  Done, with errors (see above).")
+    elif manual:
+        # The host CLI is not installed here; nothing is governed until the user runs it.
+        report.say(f"  Done, but {manual} host{'s are' if manual > 1 else ' is'} not registered until you run the "
+                   f"command{'s' if manual > 1 else ''} above.")
     elif ctx.selected:
         report.say("  Done! Your next agent session will be governed.")
     else:

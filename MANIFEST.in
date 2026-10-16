@@ -6,7 +6,6 @@ prune .soma
 prune .aegis
 recursive-include rules *
 recursive-include skills *
-recursive-include aegis_cli/starter_rules *.md
 recursive-include aegis_core *
 global-exclude __pycache__
 global-exclude *.py[cod]

@@ -29,7 +29,8 @@ class Runner:
         self.returncode = returncode
 
     def __call__(self, argv):
-        self.calls.append([Path(argv[0]).name.replace(".exe", ""), *argv[1:]])
+        # The binary's name without its extension: Windows spells it as the file on disk does.
+        self.calls.append([Path(argv[0]).stem, *argv[1:]])
         return subprocess.CompletedProcess(argv, self.returncode, "", "" if self.returncode == 0 else "denied")
 
 
@@ -48,7 +49,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(bindir))
     runner = Runner()
     monkeypatch.setattr(ih, "_run_cli", runner)
-    mcp = os.path.realpath(bindir / ("aegis-mcp" + (".exe" if os.name == "nt" else "")))
+    # The aegis-mcp found on PATH, as found: never the target of a link (a version
+    # manager's dispatcher picks the tool from the name it is run under).
+    mcp = str(bindir / ("aegis-mcp" + (".exe" if os.name == "nt" else "")))
     return type("Env", (), {"project": project, "home": home, "bin": bindir, "runner": runner, "mcp": mcp})
 
 
@@ -153,6 +156,20 @@ class TestExactFilesPerHostSelection:
         import sys
         assert init(env, "--host", "codex-cli") == 0
         assert env.runner.calls[-1][-4:] == ["--", sys.executable, "-m", "aegis_mcp"]
+
+    def test_a_linked_aegis_mcp_is_written_as_the_path_entry(self, env, tmp_path):
+        """mise or asdf put aegis-mcp on PATH as a link to one dispatcher; the config must
+        start aegis-mcp, not the dispatcher (which would see its own name)."""
+        dispatcher = tmp_path / "toolchain" / "mise"
+        dispatcher.parent.mkdir()
+        dispatcher.write_bytes(b"#!/bin/sh\nexit 0\n")
+        dispatcher.chmod(0o755)
+        link = Path(env.mcp)
+        link.unlink()
+        symlink_or_skip(dispatcher, link)
+        assert init(env, "--host", "antigravity") == 0
+        data = json.loads((env.home / ".gemini" / "config" / "mcp_config.json").read_text(encoding="utf-8"))
+        assert data["mcpServers"]["aegis"]["command"] == env.mcp
 
     def test_existing_antigravity_servers_are_kept(self, env):
         cfg = env.home / ".gemini" / "config" / "mcp_config.json"
@@ -285,6 +302,18 @@ class TestRefusalsWriteNothing:
         self._refused(env, capsys, "--host", "codex-cli", message="symlink")
         assert outside.read_bytes() == b"not yours\n"
 
+    def test_agents_md_linked_to_claude_md_names_the_layout_aegis_supports(self, env, capsys):
+        """`ln -s CLAUDE.md AGENTS.md` is common; the refusal names the target and the way
+        out (the reverse link, which init handles), not only "replace the link"."""
+        (env.project / "CLAUDE.md").write_bytes(b"# Claude\n")
+        symlink_or_skip("CLAUDE.md", env.project / "AGENTS.md")
+        before = snapshot(env.project, env.home)
+        assert init(env, "--host", "codex-cli") == 1
+        assert snapshot(env.project, env.home) == before
+        err = capsys.readouterr().err
+        assert str((env.project / "CLAUDE.md").resolve()) in err
+        assert "make CLAUDE.md the link to AGENTS.md" in err and "Nothing was written." in err
+
     def test_hand_edited_bootstrap_block(self, env, capsys):
         (env.project / "AGENTS.md").write_text(
             "<!-- aegis:begin id=bootstrap v=1 sha=000000000000 -->\nmine\n<!-- aegis:end id=bootstrap -->\n",
@@ -371,6 +400,23 @@ class TestDryRunAndFailures:
         assert env.runner.calls == []
         out = capsys.readouterr().out
         assert ih.display_command(_claude_add(env.mcp)) in out
+
+    def test_a_host_left_to_the_user_is_not_reported_as_governed(self, env, capsys):
+        for name in ("codex", "claude"):
+            (env.bin / (name + (".exe" if os.name == "nt" else ""))).unlink()
+        assert init(env, "--host", "codex-cli,claude-code,antigravity") == 0
+        out = capsys.readouterr().out
+        assert "will be governed" not in out
+        assert "Done, but 2 hosts are not registered until you run the commands above." in out
+
+    def test_one_host_left_to_the_user_is_named_in_the_singular(self, env, capsys):
+        (env.bin / ("codex" + (".exe" if os.name == "nt" else ""))).unlink()
+        assert init(env, "--host", "codex-cli,antigravity") == 0
+        assert "Done, but 1 host is not registered until you run the command above." in capsys.readouterr().out
+
+    def test_every_host_registered_is_reported_as_governed(self, env, capsys):
+        assert init(env, "--host", "codex-cli,antigravity") == 0
+        assert "Done! Your next agent session will be governed." in capsys.readouterr().out
 
     def test_failed_registration_exits_1_after_the_other_steps(self, env, capsys, monkeypatch):
         monkeypatch.setattr(ih, "_run_cli", Runner(returncode=1))

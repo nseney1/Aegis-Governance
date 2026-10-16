@@ -8,9 +8,10 @@ repository's. Hosts default to the ones this workspace was registered with; a ho
 another registered workspace still lists keeps its registration unless named with
 ``--host``. Every step is checked first: a refusal changes nothing.
 
-A CLAUDE.md that is a link is never written through: it has nothing of Aegis to remove
-unless the file it points to holds the ``@AGENTS.md`` block, which is then refused. An
-AGENTS.md that CLAUDE.md links to is emptied, not deleted, so the link does not dangle.
+A CLAUDE.md or AGENTS.md that is a link is never written through: it has nothing of
+Aegis to remove unless the file it points to holds that file's Aegis block, which is
+then refused. An AGENTS.md that CLAUDE.md links to is emptied, not deleted, so the link
+does not dangle.
 """
 from __future__ import annotations
 
@@ -76,15 +77,31 @@ def _links_to(link: Path, target: Path) -> bool:
                                   == os.path.normcase(os.path.realpath(target)))
 
 
+def _through_link(link: Path, block_id: str) -> Step:
+    """A linked AGENTS.md or CLAUDE.md: init never wrote through it, so there is nothing
+    to remove unless its target holds the block anyway, which is refused (not skipped)."""
+    if has_block_marker(link, block_id):
+        target = os.path.realpath(link)
+        raise InstallError(f"{link}: is a symlink to {target}, which holds the Aegis {block_id!r} block; "
+                           f"Aegis never writes through a link. Remove the block from {target} yourself, then re-run.")
+    return Step(link.name, "absent", "a symlink with nothing of Aegis in it")
+
+
+def _bootstrap(root: Path, force: bool, dry_run: bool) -> Step:
+    from aegis_core.bootstrap import BOOTSTRAP_ID
+
+    agents = root / AGENTS_FILE
+    if agents.is_symlink():
+        return _through_link(agents, BOOTSTRAP_ID)
+    return Step(AGENTS_FILE, remove_managed_block(agents, BOOTSTRAP_ID, force=force, dry_run=dry_run,
+                                                  delete_if_empty=not _links_to(root / CLAUDE_FILE, agents)))
+
+
 def _claude_shim(root: Path, force: bool, dry_run: bool) -> Step:
     claude = root / CLAUDE_FILE
-    if not claude.is_symlink():
-        return Step(CLAUDE_FILE, remove_managed_block(claude, CLAUDE_SHIM_ID, force=force, dry_run=dry_run))
-    if has_block_marker(claude, CLAUDE_SHIM_ID):
-        target = os.path.realpath(claude)
-        raise InstallError(f"{claude}: is a symlink to {target}, which holds the Aegis {CLAUDE_SHIM_ID!r} block; "
-                           f"Aegis never writes through a link. Remove the block from {target} yourself, then re-run.")
-    return Step(CLAUDE_FILE, "absent", "a symlink with nothing of Aegis in it")
+    if claude.is_symlink():
+        return _through_link(claude, CLAUDE_SHIM_ID)
+    return Step(CLAUDE_FILE, remove_managed_block(claude, CLAUDE_SHIM_ID, force=force, dry_run=dry_run))
 
 
 def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, dry_run: bool,
@@ -95,7 +112,6 @@ def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, d
     part way still says what it had already removed.
     """
     from aegis_cli.hooks import uninstall_hook
-    from aegis_core.bootstrap import BOOTSTRAP_ID
 
     actions = [] if actions is None else actions
     hosts = explicit if explicit is not None else _recorded_hosts(root, home, report)
@@ -105,10 +121,7 @@ def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, d
         raise InstallError(f"pre-commit hook: {refusal}.")
     removed = uninstall_hook(project_root=root, dry_run=dry_run)
     actions.append(Step("pre-commit hook", "removed" if removed else "absent"))
-    agents = root / AGENTS_FILE
-    actions.append(Step(AGENTS_FILE, remove_managed_block(
-        agents, BOOTSTRAP_ID, force=force, dry_run=dry_run,
-        delete_if_empty=not _links_to(root / CLAUDE_FILE, agents))))
+    actions.append(_bootstrap(root, force, dry_run))
     actions.append(_claude_shim(root, force, dry_run))
 
     status, remaining = unregister_workspace(home, root, dry_run=dry_run)

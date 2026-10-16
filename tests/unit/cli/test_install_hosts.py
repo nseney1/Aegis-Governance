@@ -446,12 +446,20 @@ class TestWorkspaceRegistry:
 # ── Host selection, detection and registration commands ──────────────────────
 
 
+EXE = ".exe" if os.name == "nt" else ""
+
+
 def _fake_bin(directory: Path, name: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / (name + (".exe" if os.name == "nt" else ""))
+    path = directory / (name + EXE)
     path.write_bytes(b"#!/bin/sh\nexit 0\n")
     path.chmod(0o755)
     return path
+
+
+def _paths(*paths) -> list:
+    """Paths as Windows compares them (case-insensitively); unchanged on POSIX."""
+    return [os.path.normcase(str(p)) for p in paths]
 
 
 class TestHostSelection:
@@ -491,7 +499,7 @@ class TestHostSelection:
 class TestRegistrationCommands:
     def test_mcp_command_prefers_an_absolute_aegis_mcp_on_path(self, tmp_path):
         exe = _fake_bin(tmp_path / "bin", "aegis-mcp")
-        assert ih.mcp_command(path=str(tmp_path / "bin")) == [str(exe.resolve())]
+        assert _paths(*ih.mcp_command(path=str(tmp_path / "bin"))) == _paths(exe)
 
     def test_mcp_command_falls_back_to_this_interpreter(self, tmp_path):
         assert ih.mcp_command(path=str(tmp_path / "nobin")) == [sys.executable, "-m", "aegis_mcp"]
@@ -538,10 +546,10 @@ class TestRegisterHost:
         monkeypatch.setattr(ih, "_run_cli", runner)
         action = ih.register_host("claude-code", home=tmp_path, command=["/x/aegis-mcp"], path=str(tmp_path / "bin"))
         assert action.result == "registered"
-        assert runner.calls == [
-            [str(exe), "mcp", "remove", "--scope", "user", "aegis"],
-            [str(exe), "mcp", "add", "--scope", "user", "aegis", "-e", "AEGIS_CLIENT=claude-code",
-             "--", "/x/aegis-mcp"],
+        assert _paths(*{c[0] for c in runner.calls}) == _paths(exe)
+        assert [c[1:] for c in runner.calls] == [
+            ["mcp", "remove", "--scope", "user", "aegis"],
+            ["mcp", "add", "--scope", "user", "aegis", "-e", "AEGIS_CLIENT=claude-code", "--", "/x/aegis-mcp"],
         ]
 
     def test_missing_cli_prints_the_exact_command_and_runs_nothing(self, tmp_path, monkeypatch):
@@ -581,7 +589,8 @@ class TestRegisterHost:
         monkeypatch.setattr(ih, "_run_cli", runner)
         action = ih.unregister_host("codex-cli", home=tmp_path, path=str(tmp_path / "bin"))
         assert action.result == "removed"
-        assert runner.calls == [[str(exe), "mcp", "remove", "aegis"], [str(exe), "mcp", "remove", "soma"]]
+        assert _paths(*{c[0] for c in runner.calls}) == _paths(exe)
+        assert [c[1:] for c in runner.calls] == [["mcp", "remove", "aegis"], ["mcp", "remove", "soma"]]
 
     def test_unregister_antigravity_edits_only_its_entries(self, tmp_path):
         cfg = tmp_path / ".gemini" / "config" / "mcp_config.json"
@@ -835,7 +844,7 @@ class TestRepositoryExecutablesAreNeverRun:
         monkeypatch.setattr(ih, "_run_cli", runner)
         path = os.pathsep.join([".", str(tmp_path / "real-bin")])
         assert ih.register_host("codex-cli", home=repo.home, command=["/x"], path=path).result == "registered"
-        assert {c[0] for c in runner.calls} == {str(exe)}
+        assert _paths(*{c[0] for c in runner.calls}) == _paths(exe)
 
     @pytest.mark.skipif(sys.platform != "win32", reason="PATHEXT applies on Windows")
     def test_windows_runs_a_cmd_shim_from_an_absolute_entry(self, tmp_path, monkeypatch):
@@ -848,16 +857,18 @@ class TestRepositoryExecutablesAreNeverRun:
 class TestMultiCallShims:
     """Version managers (Volta, mise, asdf) install a host CLI as a link to one dispatcher
     that picks the tool from the name it was run under (argv[0]). The CLI must be run by
-    the path found on PATH, not by the link's target, or the dispatcher sees its own name."""
+    the path found on PATH, not by the link's target, or the dispatcher sees its own name.
+    The same holds for the aegis-mcp command init writes into a host's config."""
 
-    def _shim(self, tmp_path, script: bytes = b"#!/bin/sh\nexit 0\n") -> Path:
+    def _shim(self, tmp_path, script: bytes = b"#!/bin/sh\nexit 0\n", name: str = "codex") -> Path:
         real = tmp_path / "toolchain" / "dispatcher"
         real.parent.mkdir()
         real.write_bytes(script)
         real.chmod(0o755)
         bindir = tmp_path / "bin"
         bindir.mkdir()
-        symlink_or_skip(real, bindir / "codex")
+        # Windows runs only names carrying a PATHEXT extension, so the link carries one.
+        symlink_or_skip(real, bindir / (name + EXE))
         return bindir
 
     def test_a_linked_host_cli_is_run_under_its_own_name(self, tmp_path, monkeypatch):
@@ -866,7 +877,11 @@ class TestMultiCallShims:
         monkeypatch.setattr(ih, "_run_cli", runner)
         assert ih.register_host("codex-cli", home=tmp_path, command=["/x"], path=str(bindir)).result == "registered"
         assert ih.unregister_host("codex-cli", home=tmp_path, path=str(bindir)).result == "removed"
-        assert {c[0] for c in runner.calls} == {str(bindir / "codex")}
+        assert _paths(*{c[0] for c in runner.calls}) == _paths(bindir / ("codex" + EXE))
+
+    def test_a_linked_aegis_mcp_is_the_command_under_its_own_name(self, tmp_path):
+        bindir = self._shim(tmp_path, name="aegis-mcp")
+        assert _paths(*ih.mcp_command(path=str(bindir))) == _paths(bindir / ("aegis-mcp" + EXE))
 
     @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell dispatcher")
     def test_a_dispatcher_that_reads_argv0_registers(self, tmp_path, monkeypatch):
@@ -883,3 +898,50 @@ class TestMultiCallShims:
             "codex mcp remove aegis",
             "codex mcp add aegis --env AEGIS_CLIENT=codex-cli -- /x/aegis-mcp",
         ]
+
+    @pytest.mark.skipif(os.name == "nt", reason="a POSIX shell dispatcher")
+    def test_the_written_aegis_mcp_command_starts_aegis_mcp(self, tmp_path):
+        import subprocess
+
+        bindir = self._shim(tmp_path, b'#!/bin/sh\necho "dispatch $(basename "$0")"\n', name="aegis-mcp")
+        command = ih.mcp_command(path=str(bindir))
+        out = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL, check=True).stdout
+        assert out == "dispatch aegis-mcp\n"
+
+
+class TestWindowsLookup:
+    """Windows matches file names case-insensitively and PATHEXT spells extensions in
+    capitals: ``codex`` + ``.EXE`` names the file ``codex.exe``. The command Aegis runs and
+    the one it writes into a host's config carry the file's own spelling, so a config does
+    not say ``aegis-mcp.EXE`` for ``aegis-mcp.exe`` and comparisons need not fold case.
+    Emulated off Windows by the platform name; on Windows it is the real lookup."""
+
+    @pytest.fixture
+    def windows(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setenv("PATHEXT", os.pathsep.join([".COM", ".EXE", ".BAT", ".CMD"]))
+
+    @pytest.mark.parametrize("on_disk", ["aegis-mcp.exe", "aegis-mcp.Exe"])
+    def test_the_mcp_command_is_the_on_disk_spelling(self, tmp_path, windows, on_disk):
+        exe = tmp_path / "bin" / on_disk
+        exe.parent.mkdir()
+        exe.write_bytes(b"MZ")
+        exe.chmod(0o755)
+        assert ih.mcp_command(path=str(exe.parent)) == [str(exe)]
+
+    def test_a_host_cli_is_run_by_its_on_disk_spelling(self, tmp_path, windows, monkeypatch):
+        exe = tmp_path / "bin" / "codex.exe"
+        exe.parent.mkdir()
+        exe.write_bytes(b"MZ")
+        exe.chmod(0o755)
+        runner = _Runner()
+        monkeypatch.setattr(ih, "_run_cli", runner)
+        assert ih.register_host("codex-cli", home=tmp_path, command=["/x"], path=str(exe.parent)).result == "registered"
+        assert {c[0] for c in runner.calls} == {str(exe)}
+
+    def test_a_cmd_shim_is_found_after_the_exe_extensions(self, tmp_path, windows):
+        shim = tmp_path / "npm" / "codex.cmd"
+        shim.parent.mkdir()
+        shim.write_bytes(b"@echo off\r\n")
+        shim.chmod(0o755)
+        assert ih.detect_hosts(tmp_path, path=str(shim.parent)) == ["codex-cli"]

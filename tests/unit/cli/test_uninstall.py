@@ -26,7 +26,8 @@ class Runner:
         self.calls: list = []
 
     def __call__(self, argv):
-        self.calls.append([Path(argv[0]).name.replace(".exe", ""), *argv[1:]])
+        # The binary's name without its extension: Windows spells it as the file on disk does.
+        self.calls.append([Path(argv[0]).stem, *argv[1:]])
         return subprocess.CompletedProcess(argv, 0, "", "")
 
 
@@ -201,6 +202,8 @@ class TestSafety:
         symlink_or_skip(outside, env.project / "AGENTS.md")
         assert uninstall(env.project) == 1
         assert "aegis:begin" in outside.read_text(encoding="utf-8")
+        err = capsys.readouterr().err
+        assert str(outside) in err and "never writes through a link" in err and "Nothing was changed." in err
 
     def test_force_never_deletes_aegis_dir(self, env):
         init(env, env.project, "codex-cli")
@@ -354,6 +357,33 @@ class TestLinkedClaudeMd:
         assert env.runner.calls == []
         err = capsys.readouterr().err
         assert str(outside) in err and "never writes through a link" in err and "Nothing was changed." in err
+
+
+class TestLinkedAgentsMd:
+    """An AGENTS.md that is a link (often to CLAUDE.md) must not block uninstall either:
+    init never wrote through it, so unless its target holds the bootstrap block there is
+    nothing of Aegis in it, and the hosts and registry entry are still removed."""
+
+    def test_a_link_to_a_file_without_the_block_is_nothing_to_remove(self, env):
+        init(env, env.project, "codex-cli")
+        agents, claude = env.project / "AGENTS.md", env.project / "CLAUDE.md"
+        agents.unlink()
+        claude.write_bytes(b"# Claude\n")
+        symlink_or_skip("CLAUDE.md", agents)
+        env.runner.calls.clear()
+        assert uninstall(env.project) == 0
+        assert os.readlink(agents) == "CLAUDE.md" and claude.read_bytes() == b"# Claude\n"
+        assert registry(env) == {"v": 1, "workspaces": []}
+        assert env.runner.calls[0] == ["codex", "mcp", "remove", "aegis"]
+
+    def test_json_names_it_absent(self, env, tmp_path, capsys):
+        outside = tmp_path / "guide.md"
+        outside.write_bytes(b"# Guide\n")
+        symlink_or_skip(outside, env.project / "AGENTS.md")
+        assert main(["--json", "uninstall", "--workspace", str(env.project)]) == 0
+        actions = {a["target"]: a for a in json.loads(capsys.readouterr().out)["actions"]}
+        assert actions["AGENTS.md"]["result"] == "absent"
+        assert outside.read_bytes() == b"# Guide\n"
 
 
 GIT = shutil.which("git")

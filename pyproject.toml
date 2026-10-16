@@ -57,7 +57,6 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 aegis_sdk = ["py.typed"]
-aegis_cli = ["starter_rules/*.md"]
 aegis_core = ["ast/drivers/templates/*"]
 rules = ["*.md", ".oracles/*.md"]
 skills = ["*/SKILL.md"]

@@ -644,6 +644,18 @@ def _exe_names(name: str) -> List[str]:
     return [name + e for e in exts]
 
 
+def _on_disk(directory: str, candidates: List[str]) -> List[str]:
+    """The names in ``directory`` that ``candidates`` match, in candidate order, spelled as
+    the directory holds them. Windows matches names case-insensitively and PATHEXT spells
+    extensions in capitals, so ``codex.EXE`` opens ``codex.exe``; the command Aegis runs and
+    the one it writes into a host config should carry the file's own name."""
+    try:
+        names = {n.lower(): n for n in os.listdir(directory)}
+    except OSError:
+        return candidates
+    return [names[c.lower()] for c in candidates if c.lower() in names]
+
+
 def _which(name: str, path: Optional[str] = None) -> Optional[str]:
     """``shutil.which`` restricted to the absolute entries of ``path`` (default ``$PATH``).
 
@@ -652,12 +664,17 @@ def _which(name: str, path: Optional[str] = None) -> Optional[str]:
     the current directory first whatever PATH says (``path=`` does not stop it), so either
     would let the repository supply the host CLI Aegis runs, or the aegis-mcp command it
     writes into a host's user config (host-matrix §3.7).
+
+    The result is the PATH entry joined with the file's name as found, never resolved:
+    version managers (Volta, mise, asdf) install a tool as a link to one dispatcher that
+    picks the tool from the name it is run under.
     """
     search = os.environ.get("PATH", os.defpath) if path is None else path
+    candidates = _exe_names(name)
     for entry in search.split(os.pathsep):
         if not entry or not os.path.isabs(entry):
             continue
-        for candidate in _exe_names(name):
+        for candidate in _on_disk(entry, candidates) if sys.platform == "win32" else candidates:
             full = os.path.join(entry, candidate)
             if os.path.isfile(full) and os.access(full, os.X_OK):
                 return full
@@ -702,10 +719,11 @@ def parse_hosts(value: str) -> Union[str, List[str]]:
 
 
 def mcp_command(path: Optional[str] = None) -> List[str]:
-    """The absolute command that starts the Aegis MCP server."""
+    """The absolute command that starts the Aegis MCP server: the aegis-mcp found on PATH,
+    under that name (not a link's target, which may be a dispatcher), else this interpreter."""
     exe = _which("aegis-mcp", path)
     if exe:
-        return [os.path.realpath(exe)]
+        return [exe]
     return [sys.executable, "-m", "aegis_mcp"]
 
 
