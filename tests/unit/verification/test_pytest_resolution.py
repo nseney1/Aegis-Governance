@@ -13,6 +13,19 @@ from aegis_core.verification.test_runner import resolve_pytest_cmd
 from aegis_core.workspace.base import Workspace
 
 
+def _pytest_program(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    program = directory / ("pytest.exe" if os.name == "nt" else "pytest")
+    program.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    program.chmod(0o755)
+    return program
+
+
+def _empty(tmp_path: Path) -> str:
+    (tmp_path / "empty-bin").mkdir(exist_ok=True)
+    return str(tmp_path / "empty-bin")
+
+
 class TestPytestResolution:
     """Test resolution of pytest runner across environments."""
 
@@ -50,32 +63,41 @@ class TestPytestResolution:
             assert cmd_ws == [str(fake_pytest)]
 
     def test_falls_back_to_system_which(self, tmp_path: Path):
-        with patch.dict(os.environ, {"VIRTUAL_ENV": ""}):
-            with patch("aegis_core.verification.test_runner.shutil.which", return_value="/usr/local/bin/pytest"):
-                cmd = resolve_pytest_cmd(workspace=tmp_path)
-                assert cmd == ["/usr/local/bin/pytest"]
+        program = _pytest_program(tmp_path / "bin")
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": str(program.parent)}):
+            cmd = resolve_pytest_cmd(workspace=tmp_path)
+            assert cmd == [str(program)]
+
+    @pytest.mark.parametrize("entry", ["", ".", "bin"])
+    def test_a_pytest_behind_a_relative_path_entry_is_never_chosen(self, tmp_path: Path, monkeypatch, entry):
+        # Absolute PATH entries only (aegis_core.pathlookup): an empty or relative entry
+        # names the cwd, where the repository under verification can plant a program.
+        cwd = tmp_path / "cwd"
+        _pytest_program(cwd)
+        _pytest_program(cwd / "bin")
+        real = _pytest_program(tmp_path / "real-bin")
+        monkeypatch.chdir(cwd)
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": os.pathsep.join([entry, str(real.parent)])}):
+            assert resolve_pytest_cmd(workspace=tmp_path / "ws") == [str(real)]
 
     def test_falls_back_to_sys_executable(self, tmp_path: Path):
-        with patch.dict(os.environ, {"VIRTUAL_ENV": ""}):
-            with patch("aegis_core.verification.test_runner.shutil.which", return_value=None):
-                with patch("importlib.util.find_spec", return_value=object()):
-                    cmd = resolve_pytest_cmd(workspace=tmp_path)
-                    assert cmd == [sys.executable, "-m", "pytest"]
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": _empty(tmp_path)}):
+            with patch("importlib.util.find_spec", return_value=object()):
+                cmd = resolve_pytest_cmd(workspace=tmp_path)
+                assert cmd == [sys.executable, "-m", "pytest"]
 
     def test_returns_empty_when_no_runner_and_not_required(self, tmp_path: Path):
-        with patch.dict(os.environ, {"VIRTUAL_ENV": ""}):
-            with patch("aegis_core.verification.test_runner.shutil.which", return_value=None):
-                with patch("importlib.util.find_spec", return_value=None):
-                    cmd = resolve_pytest_cmd(workspace=tmp_path, required=False)
-                    assert cmd == []
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": _empty(tmp_path)}):
+            with patch("importlib.util.find_spec", return_value=None):
+                cmd = resolve_pytest_cmd(workspace=tmp_path, required=False)
+                assert cmd == []
 
     def test_raises_when_no_runner_and_required(self, tmp_path: Path):
-        with patch.dict(os.environ, {"VIRTUAL_ENV": ""}):
-            with patch("aegis_core.verification.test_runner.shutil.which", return_value=None):
-                with patch("importlib.util.find_spec", return_value=None):
-                    with pytest.raises(NoTestRunnerFoundError) as exc:
-                        resolve_pytest_cmd(workspace=tmp_path, required=True)
-                    assert "No pytest runner found" in str(exc.value)
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": _empty(tmp_path)}):
+            with patch("importlib.util.find_spec", return_value=None):
+                with pytest.raises(NoTestRunnerFoundError) as exc:
+                    resolve_pytest_cmd(workspace=tmp_path, required=True)
+                assert "No pytest runner found" in str(exc.value)
 
 
 class TestDiscoverTestEvidence:

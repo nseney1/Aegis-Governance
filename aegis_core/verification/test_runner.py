@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
+from aegis_core import pathlookup
 from aegis_core.errors import NoTestRunnerFoundError
 
 
@@ -20,7 +20,7 @@ def resolve_pytest_cmd(
     Probing order:
     1. Active virtual environment ($VIRTUAL_ENV/bin/pytest or Scripts/pytest.exe)
     2. Local workspace virtual environment (.venv/bin/pytest or Scripts/pytest.exe)
-    3. System pytest executable on PATH (shutil.which("pytest"))
+    3. System pytest executable in an absolute PATH entry (aegis_core.pathlookup)
     4. Current Python interpreter if pytest package is installed
 
     Args:
@@ -58,8 +58,9 @@ def resolve_pytest_cmd(
                 if os.name == "nt" or os.access(cand, os.X_OK):
                     return [str(cand)]
 
-    # 3. System pytest executable on PATH
-    which_pytest = shutil.which("pytest")
+    # 3. System pytest executable on PATH. Absolute entries only: an empty or relative
+    # entry (and on Windows the current directory) names the cwd, not an install.
+    which_pytest = pathlookup.which("pytest")
     if which_pytest:
         return [which_pytest]
 
