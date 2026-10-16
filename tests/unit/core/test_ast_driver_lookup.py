@@ -377,3 +377,25 @@ def test_windows_splitting_joins_an_unquoted_absolute_path_with_spaces(tmp_path,
     with monkeypatch.context() as m:
         m.setattr("aegis_core.ast.runner.os.name", "nt")
         assert _split_command(command) == [str(program), "--json"]
+
+
+def test_parse_file_confines_to_confine_root_while_drivers_come_from_the_workspace(tmp_path):
+    """The pre-commit hook parses staged blobs from a snapshot outside the repository."""
+    from aegis_core.ast.runner import ASTDriverRunner
+    from aegis_core.errors import PathTraversalError
+
+    ws = tmp_path / "ws"
+    (ws / ".aegis").mkdir(parents=True)
+    (ws / ".aegis" / "config.json").write_text('{"v": 1, "ast": {"packaged_drivers": ["rs"]}}', encoding="utf-8")
+    snapshot = tmp_path / "snapshot"
+    (snapshot / "src").mkdir(parents=True)
+    staged = snapshot / "src" / "main.rs"
+    staged.write_text("fn main() {\n    helper();\n}\n", encoding="utf-8")
+
+    norm = ASTDriverRunner().parse_file(staged, workspace_root=ws, confine_root=snapshot)
+    assert any(d.name == "main" for d in norm.definitions)
+
+    outside = tmp_path / "elsewhere.rs"
+    outside.write_text("fn x() {}\n", encoding="utf-8")
+    with pytest.raises(PathTraversalError):
+        ASTDriverRunner().parse_file(outside, workspace_root=ws, confine_root=snapshot)
