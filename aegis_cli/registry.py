@@ -141,6 +141,7 @@ def create_default_registry() -> CommandRegistry:
     from aegis_cli.scan import ScanCommand
     from aegis_cli.status import StatusCommand
     from aegis_cli.sync import SyncCommand
+    from aegis_cli.team import TeamCommand
     from aegis_cli.uninstall import UninstallCommand
 
     for cmd_cls in (
@@ -154,6 +155,7 @@ def create_default_registry() -> CommandRegistry:
         RuleCommand,
         SyncCommand,
         HookCommand,
+        TeamCommand,
     ):
         reg.register(cmd_cls)
 
