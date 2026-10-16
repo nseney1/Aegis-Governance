@@ -209,7 +209,7 @@ def test_a_directory_inside_resolving_outside_is_refused(repo: Path, tmp_path: P
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     _resolve_elsewhere(monkeypatch, "junction", outside)
-    with pytest.raises(PathTraversalError, match=f"it resolves outside .*; aegis keeps shared state only inside it"):
+    with pytest.raises(PathTraversalError, match="it resolves outside .*; aegis keeps shared state only inside it"):
         shared_state_dir(repo)
 
 
