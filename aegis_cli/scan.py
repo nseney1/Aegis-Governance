@@ -6,6 +6,11 @@ are a contract: 0 when the scan ran (matches or not), 1 when the rules cannot al
 be served (a rule file cannot be loaded or the rules tree cannot be read safely: the
 scan fails closed and names them), 2 for a usage or workspace error. With --json,
 stdout carries only the JSON document.
+
+${SLOT.*} placeholders in rule text are rendered as aegis_scan renders them, by the one
+renderer in aegis_core.skills.slots. The CLI has no host, so it uses the generic
+profile (with the user's ~/.aegis/config.json overrides); warnings go to stderr in
+text mode. Text from rule files reaches the terminal without control sequences.
 """
 from __future__ import annotations
 
@@ -15,8 +20,10 @@ import os
 import sys
 from pathlib import Path
 
+from aegis_cli import sanitize_display
 from aegis_cli.base import AegisCommand, CommandCategory
 from aegis_core.errors import WorkspaceError
+from aegis_core.hosts import GENERIC
 from aegis_core.workspace.layout import is_aegis_workspace
 
 __all__ = ["ScanCommand", "run_scan"]
@@ -55,16 +62,28 @@ def run_scan(args: argparse.Namespace) -> int:
 
     from aegis_core.scan import scan
 
+    from aegis_core.skills.slots import render_scan_result
+
     files = [_workspace_relative(f, root) for f in args.files]
     result = scan(str(root), changed_files=files)
     failed = result.get("status") == "FAIL"
+    if not failed:
+        result = render_scan_result(result, GENERIC, root)
     if getattr(args, "json", False):
         print(json.dumps(result, indent=2, default=str))
     elif failed:
         print(f"Error: {result.get('error')}", file=sys.stderr)
     else:
-        print(result.get("guidance", ""))
+        print(_terminal_text(result.get("guidance", "")))
+        for warning in result.get("warnings") or []:
+            print(f"Warning: {sanitize_display(str(warning), max_len=1024)}", file=sys.stderr)
     return EXIT_UNSERVED if failed else EXIT_SCANNED
+
+
+def _terminal_text(text: str) -> str:
+    """``text`` line by line without escape or control sequences: rule files are
+    repository content, and a terminal would act on them."""
+    return "\n".join(sanitize_display(line, max_len=len(line) + 1) for line in str(text).split("\n"))
 
 
 class ScanCommand(AegisCommand):
