@@ -158,7 +158,7 @@ class TestSeeding:
         assert run_init(_args(project, rules="standard")) == 0
         ruleset = load_rules(project)
         assert not ruleset.errors
-        assert {r.id for r in ruleset.rules} == STANDARD
+        assert {r.id for r in ruleset.rules} == STANDARD | {"no-eval"}  # the one active starter
 
     def test_an_existing_rule_with_the_same_id_is_never_overwritten_or_duplicated(self, project):
         mine = project / ".aegis" / "rules" / "invariants" / "providence.md"
@@ -204,7 +204,9 @@ class TestSeededRulesAreLintClean:
         from aegis_core.yaml_engine.frontmatter import split_frontmatter
 
         assert run_init(_args(project, rules="standard")) == 0
-        for rule in load_rules(project).rules:
+        personas = [r for r in load_rules(project).rules if r.path.startswith(".aegis/rules/personas/")]
+        assert {r.id for r in personas} == STANDARD
+        for rule in personas:
             assert rule.ok and rule.type == "persona"
             assert rule.meta["type"] == "persona" and rule.meta["target_paths"] == []
             assert rule.target_paths == ()
@@ -937,3 +939,264 @@ class TestInitSkills:
         rows = events.read(project, "skills_sync").rows
         assert [(r["result"], r["detail"]["trigger"], r["detail"]["hosts"]) for r in rows] == [
             ("ok", "init", ["claude-code"])]
+
+
+# ── One active rule out of the box (v4.1 d5) ─────────────────────────────────
+
+ACTIVE = REPO_ROOT / "rules" / "no-eval.md"
+
+
+def _invariants(root: Path) -> set:
+    return {p.stem for p in (root / ".aegis" / "rules" / "invariants").glob("*.md")}
+
+
+def _check(root: Path, *files: str) -> int:
+    try:
+        return main(["check", "--workspace", str(root), *files])
+    except SystemExit as exc:
+        return exc.code
+
+
+class TestActiveStarterRule:
+    """Starter personas apply to no file, so a fresh init used to enforce nothing (field
+    report). A new workspace now gets one active, deterministic invariant."""
+
+    def test_the_active_starter_ships_beside_the_guidance_rules_but_in_no_persona_preset(self):
+        from aegis_cli.init import packaged_active_rules
+
+        assert packaged_active_rules() == {"no-eval": ACTIVE}
+        assert "no-eval" not in packaged_rules()
+        assert all("no-eval" not in {p.stem for p in preset_rules(p)} for p in ("minimal", "standard", "full"))
+
+    def test_a_new_workspace_gets_the_no_eval_invariant_as_shipped(self, project):
+        from aegis_core.rules import load_rules
+
+        assert run_init(_args(project)) == 0
+        seeded = project / ".aegis" / "rules" / "invariants" / "no-eval.md"
+        assert seeded.read_bytes() == ACTIVE.read_bytes()
+        rule = next(r for r in load_rules(project).rules if r.id == "no-eval")
+        assert (rule.ok, rule.type, rule.enforcement) == (True, "invariant", "gate")
+        assert rule.target_paths == ("**/*.py",)
+        assert rule.meta["forbid_ast"] == {"calls": ["eval", "exec"]}
+        # The personas still apply to no file: no-eval is the one active rule.
+        assert [r.id for r in load_rules(project).rules if r.target_paths] == ["no-eval"]
+
+    @pytest.mark.parametrize("preset", ["minimal", "standard", "full"])
+    def test_every_persona_preset_also_seeds_it(self, project, preset):
+        assert run_init(_args(project, rules=preset)) == 0
+        assert _invariants(project) == {"no-eval"}
+
+    def test_aegis_check_enforces_it_on_day_one(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        (project / "app.py").write_text("def load(text):\n    return eval(text)\n", encoding="utf-8")
+        (project / "ok.py").write_text("import json\n\n\ndef load(text):\n    return json.loads(text)\n",
+                                       encoding="utf-8")
+        capsys.readouterr()
+        assert _check(project, "app.py") == 1
+        assert "Forbidden call 'eval'" in capsys.readouterr().out
+        assert _check(project, "ok.py") == 0
+
+    def test_the_output_names_the_active_rule_and_the_next_step(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert "Active rule in .aegis/rules/invariants/:" in out
+        assert "✅ no-eval: bans eval() and exec() in **/*.py; aegis check and the pre-commit hook enforce it" in out
+        assert "Next: add a rule for your own code with aegis rule create (aegis rule create --help)" in out
+
+    def test_none_active_opts_out_and_keeps_the_standard_personas(self, project, capsys):
+        assert run_init(_args(project, rules="none-active")) == 0
+        assert _seeded(project) == STANDARD
+        assert _invariants(project) == set()
+        out = capsys.readouterr().out
+        assert "No active rule (--rules none-active): aegis check enforces no rule until one names files." in out
+        assert "Next: add a rule for your own code with aegis rule create (aegis rule create --help)" in out
+
+    def test_a_deleted_active_rule_is_never_seeded_again(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        (project / ".aegis" / "rules" / "invariants" / "no-eval.md").unlink()
+        capsys.readouterr()
+        assert run_init(_args(project, "--host", "codex-cli", "--dry-run")) == 0
+        assert run_init(_args(project)) == 0
+        assert _invariants(project) == set()
+        assert "no-eval" not in capsys.readouterr().out
+
+    def test_a_workspace_that_already_has_rules_gets_no_new_gate(self, project):
+        traps = project / ".aegis" / "rules" / "traps"
+        traps.mkdir(parents=True)
+        (traps / "mine.md").write_text("---\nid: mine\ntype: trap\ndomain: correctness\nenforcement: advisory\n"
+                                       "hypothesis: mine\n---\n# Mine\n", encoding="utf-8")
+        assert run_init(_args(project)) == 0
+        assert _invariants(project) == set()
+
+    def test_a_rerun_leaves_it_unchanged(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        before = (project / ".aegis" / "rules" / "invariants" / "no-eval.md").read_bytes()
+        capsys.readouterr()
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks"]) == 0
+        step = next(a for a in json.loads(capsys.readouterr().out)["actions"]
+                    if a["target"] == ".aegis/rules/invariants")
+        assert step["result"] == "unchanged"
+        assert (project / ".aegis" / "rules" / "invariants" / "no-eval.md").read_bytes() == before
+
+    def test_json_names_the_seeded_and_the_skipped_rule(self, project, tmp_path, capsys):
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks"]) == 0
+        steps = {a["target"]: a for a in json.loads(capsys.readouterr().out)["actions"]}
+        assert steps[".aegis/rules/invariants"]["result"] == "seeded"
+        assert "no-eval" in steps[".aegis/rules/invariants"]["detail"]
+        other = tmp_path / "other"
+        other.mkdir()
+        assert main(["--json", "init", "--workspace", str(other), "--yes", "--no-hooks",
+                     "--rules", "none-active"]) == 0
+        steps = {a["target"]: a for a in json.loads(capsys.readouterr().out)["actions"]}
+        assert steps[".aegis/rules/invariants"]["result"] == "skipped"
+
+    def test_dry_run_plans_it_and_writes_nothing(self, project, capsys):
+        assert run_init(_args(project, "--dry-run")) == 0
+        assert "[DRY-RUN] no-eval" in capsys.readouterr().out
+        assert not (project / ".aegis").exists()
+
+    def test_a_symlinked_invariants_dir_is_refused_and_nothing_is_written(self, project, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (project / ".aegis" / "rules").mkdir(parents=True)
+        symlink_or_skip(elsewhere, project / ".aegis" / "rules" / "invariants", target_is_directory=True)
+        assert run_init(_args(project)) == 1
+        assert "symlink" in capsys.readouterr().err
+        assert list(elsewhere.iterdir()) == []
+        assert not (project / "AGENTS.md").exists()
+
+
+# ── The CI floor (v4.1 d5) ───────────────────────────────────────────────────
+
+WORKFLOW = REPO_ROOT / ".github" / "workflows"  # this repository's own CI, for the action pins
+
+
+def _workflow_text() -> str:
+    from aegis_cli.init import ci_workflow
+
+    return ci_workflow()
+
+
+class TestCiWorkflow:
+    """`git commit --no-verify` skips the pre-commit hook, so CI is the floor. init prints
+    the workflow by default and writes .github/workflows/aegis.yml only with --ci."""
+
+    def test_by_default_the_workflow_is_printed_and_nothing_is_written(self, project, capsys):
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert ("  CI is the floor: git commit --no-verify skips the pre-commit hook, so CI must run "
+                "aegis check too.") in out
+        assert ("  This repository has no GitHub Actions workflow yet. Save this as .github/workflows/aegis.yml, "
+                "or re-run aegis init with --ci to write it:") in out
+        for line in _workflow_text().splitlines():
+            assert ("      " + line).rstrip() in out.splitlines()
+        assert not (project / ".github").exists()
+
+    def test_ci_writes_exactly_the_printed_workflow(self, project, capsys):
+        assert run_init(_args(project, "--ci")) == 0
+        written = (project / ".github" / "workflows" / "aegis.yml").read_text(encoding="utf-8")
+        assert written == _workflow_text()
+        out = capsys.readouterr().out
+        assert "✅ .github/workflows/aegis.yml: created" in out
+        assert "CI is the floor" in out and "commit .github/workflows/aegis.yml" in out
+        assert "Save this as" not in out
+
+    def test_the_workflow_runs_aegis_check_with_the_aegis_that_wrote_it(self):
+        from aegis_cli import __version__
+
+        text = _workflow_text()
+        assert "  pull_request:\n" in text
+        assert "fetch-depth: 0" in text  # aegis check diffs the pull request against its base
+        assert f"pip install aegis-guardrails=={__version__}" in text
+        assert "      - run: aegis check\n" in text
+        assert "permissions:\n  contents: read\n" in text
+        assert "\t" not in text and text.endswith("\n")
+
+    def test_the_actions_it_uses_are_the_majors_this_repository_runs(self):
+        own = "\n".join(p.read_text(encoding="utf-8") for p in WORKFLOW.glob("*.yml"))
+        for action in re.findall(r"uses: (actions/[\w-]+)@(v\d+)", _workflow_text()):
+            assert re.search(rf"uses: {action[0]}@\w+ # {action[1]}\.", own), action
+
+    def test_an_existing_aegis_yml_is_never_overwritten(self, project, capsys):
+        mine = project / ".github" / "workflows" / "aegis.yml"
+        mine.parent.mkdir(parents=True)
+        mine.write_text("name: mine\n", encoding="utf-8")
+        assert run_init(_args(project, "--ci")) == 0
+        assert mine.read_text(encoding="utf-8") == "name: mine\n"
+        assert ".github/workflows/aegis.yml: kept" in capsys.readouterr().out
+
+    def test_a_workflow_that_runs_aegis_check_is_named_and_no_snippet_printed(self, project, capsys):
+        ci = project / ".github" / "workflows" / "ci.yaml"
+        ci.parent.mkdir(parents=True)
+        ci.write_text("jobs:\n  t:\n    steps:\n      - run: pip install aegis-guardrails && aegis check\n",
+                      encoding="utf-8")
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert "✅ CI: .github/workflows/ci.yaml runs aegis check" in out
+        assert "Save this as" not in out and "name: Aegis" not in out
+
+    def test_other_workflows_that_never_run_aegis_still_get_the_snippet(self, project, capsys):
+        ci = project / ".github" / "workflows" / "ci.yml"
+        ci.parent.mkdir(parents=True)
+        ci.write_text("jobs:\n  t:\n    steps:\n      - run: pytest\n", encoding="utf-8")
+        assert run_init(_args(project)) == 0
+        out = capsys.readouterr().out
+        assert "  No GitHub Actions workflow here runs aegis check yet. Save this as .github/workflows/aegis.yml" in out
+        assert "      name: Aegis" in out.splitlines()
+
+    def test_ci_dry_run_writes_nothing(self, project, capsys):
+        assert run_init(_args(project, "--ci", "--dry-run")) == 0
+        assert ".github/workflows/aegis.yml: would create" in capsys.readouterr().out
+        assert not (project / ".github").exists()
+
+    def test_a_symlinked_workflows_dir_is_refused_with_ci_and_nothing_is_written(self, project, tmp_path, capsys):
+        from conftest import symlink_or_skip
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (project / ".github").mkdir()
+        symlink_or_skip(elsewhere, project / ".github" / "workflows", target_is_directory=True)
+        assert run_init(_args(project, "--ci")) == 1
+        err = capsys.readouterr().err
+        assert ".github/workflows" in err and "symlink" in err and "Nothing was written." in err
+        assert list(elsewhere.iterdir()) == []
+        assert not (project / ".aegis").exists()
+
+    def test_a_file_where_the_workflows_dir_belongs_is_refused_with_ci(self, project, capsys):
+        (project / ".github").write_text("not a directory\n", encoding="utf-8")
+        assert run_init(_args(project, "--ci")) == 1
+        assert "not a directory" in capsys.readouterr().err
+        assert not (project / ".aegis").exists()
+
+    def test_json_mode_prints_no_snippet_and_reports_the_step(self, project, tmp_path, capsys):
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--no-hooks"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        step = next(a for a in payload["actions"] if a["target"] == ".github/workflows/aegis.yml")
+        assert step["result"] == "suggested" and "--ci" in step["detail"]
+        other = tmp_path / "other"
+        other.mkdir()
+        assert main(["--json", "init", "--workspace", str(other), "--yes", "--no-hooks", "--ci"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        step = next(a for a in payload["actions"] if a["target"] == ".github/workflows/aegis.yml")
+        assert step["result"] == "created"
+
+    def test_ci_is_in_the_parser_and_off_by_default(self):
+        parser = argparse.ArgumentParser()
+        InitCommand().configure_parser(parser)
+        assert parser.parse_args([]).ci is False
+        assert parser.parse_args(["--ci"]).ci is True
+        assert parser.parse_args(["--rules", "none-active"]).rules == "none-active"
+
+
+def test_the_wheel_smoke_expects_the_active_starters_init_seeds():
+    """wheel_smoke.py runs only in CI against the built wheel; its list must not drift."""
+    import ast as pyast
+
+    from aegis_cli.init import ACTIVE_STARTERS
+
+    tree = pyast.parse((REPO_ROOT / ".github" / "scripts" / "wheel_smoke.py").read_text(encoding="utf-8"))
+    node = next(n for n in tree.body if isinstance(n, pyast.Assign)
+                and any(getattr(t, "id", None) == "ACTIVE_STARTERS" for t in n.targets))
+    assert tuple(pyast.literal_eval(node.value)) == tuple(ACTIVE_STARTERS)

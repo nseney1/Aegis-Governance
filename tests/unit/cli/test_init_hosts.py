@@ -82,7 +82,8 @@ def snapshot(*roots: Path) -> dict:
     return out
 
 
-REPO_FILES = {".aegis/config.json", ".aegis/.gitignore", "AGENTS.md"} | {
+# A new workspace also gets the one active starter rule (v4.1 d5).
+REPO_FILES = {".aegis/config.json", ".aegis/.gitignore", "AGENTS.md", ".aegis/rules/invariants/no-eval.md"} | {
     f".aegis/rules/personas/{n}.md" for n in STANDARD}
 
 
