@@ -112,6 +112,10 @@ SPAWN_SITES = {
     # one POST after a typed y/N at a terminal; git signs and verifies approvals through ssh-keygen, which only
     # gitsafe-run git starts.
     "aegis_core/human_gate.py": ("`gh`",),
+    # `aegis check --record` computes the tree git would commit with `git` under a scrubbed environment and a
+    # private index, and runs the test command from the user-scope config (never the repository's) in a snapshot.
+    "aegis_core/treeid.py": ("`git`",),
+    "aegis_core/checkrun.py": ("your test command",),
 }
 _SPAWN_MODULES = {"subprocess", "pty", "multiprocessing"}
 _OS_SPAWN = re.compile(r"^(system|popen|startfile|exec\w*|spawn\w*|posix_spawn\w*)$")

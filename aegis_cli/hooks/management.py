@@ -649,6 +649,21 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
     }
 
 
+def _trailer_hook(status: dict[str, Any], action: str) -> str | None:
+    """Install or remove the prepare-commit-msg hook that adds the Aegis-Check trailer, beside the pre-commit hook."""
+    from aegis_cli.hooks import commitmsg
+
+    hook_file = status.get("hook_file")
+    if not hook_file:
+        return None
+    hooks_dir = Path(hook_file).parent
+    try:
+        return commitmsg.install(hooks_dir) if action == "install" else commitmsg.uninstall(hooks_dir)
+    except (OSError, ValueError) as exc:
+        print(f"aegis: prepare-commit-msg hook not {action}ed: {exc}", file=sys.stderr)
+        return None
+
+
 def run_hook_install(args: Any) -> int:
     ws = getattr(args, "ws", None) or getattr(args, "workspace", None)
     force = getattr(args, "force", False)
@@ -657,11 +672,15 @@ def run_hook_install(args: Any) -> int:
 
     ok = install_hook(ws, force=force, dry_run=dry_run)
     st = hook_status(ws) if ok else {}
+    trailer = _trailer_hook(st, "install") if ok and not dry_run else None
     if use_json:
         print(json.dumps({"status": "installed" if ok else "failed", "success": ok}))
     else:
         if ok:
             print(f"✅ aegis pre-commit hook installed ({st.get('hook_file')})")
+            if trailer == "foreign":
+                print("ℹ️ A prepare-commit-msg hook that is not aegis's exists: left alone, so commits get no "
+                      "Aegis-Check trailer", file=sys.stderr)
         else:
             print("❌ Failed to install the aegis pre-commit hook (see above, or no .git directory)", file=sys.stderr)
     if st.get("hooks_dir_in_work_tree"):
@@ -675,7 +694,10 @@ def run_hook_uninstall(args: Any) -> int:
     dry_run = getattr(args, "dry_run", False)
     use_json = getattr(args, "json", False)
 
+    st = hook_status(ws)
     ok = uninstall_hook(ws, force=force, dry_run=dry_run)
+    if ok and not dry_run:
+        _trailer_hook(st, "uninstall")
     if use_json:
         print(json.dumps({"status": "uninstalled" if ok else "not_found", "success": ok}))
     else:

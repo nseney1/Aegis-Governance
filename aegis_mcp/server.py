@@ -405,7 +405,25 @@ def _start(environ: Optional[Dict[str, str]] = None) -> None:
             _canonical_workspace = pin
 
 
+def harden_process() -> bool:
+    """Mark this process non-dumpable (``prctl(PR_SET_DUMPABLE, 0)``) on Linux.
+
+    A non-dumpable process cannot be ptraced or have its memory read by a sibling of the same
+    uid, and ``/proc/<pid>/fd`` stops being openable by them, independent of Yama. Best effort:
+    False off Linux or when libc will not do it, and the server serves either way.
+    """
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        import ctypes
+
+        return ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0) == 0  # PR_SET_DUMPABLE == 4
+    except Exception:
+        return False
+
+
 def run_stdio_server():
+    harden_process()
     _start()
     try:
         for line in sys.stdin:

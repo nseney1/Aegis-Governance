@@ -121,8 +121,12 @@ def run_status(args: argparse.Namespace) -> int:
         ruleset = RuleSet(())
     from aegis_core.telemetry_engine import ledger
 
-    # One ledger read for every number below; what it could not use is shown.
+    # One ledger read for every per-rule number below; what it could not use is shown.
     view = ledger.read(proj)
+    from aegis_core.credit import claimed_summary
+
+    # aegis_report_outcome calls with no check row for their tree: counted apart, never per rule.
+    claimed = claimed_summary(proj)
     loaded = [r for r in ruleset.rules if r.ok]
     fits = for_rules(proj, loaded, view=view)
     derived = read_derived(proj)
@@ -210,6 +214,7 @@ def run_status(args: argparse.Namespace) -> int:
             "last_sync": derived.get("synced_at") if derived else None,
             "inventory_error": inventory_error,
             "ledger": ledger_health,
+            "claimed": claimed,
             **problems,
         }
         print(json.dumps(payload, indent=2))
@@ -231,6 +236,9 @@ def run_status(args: argparse.Namespace) -> int:
     print(f"  {'Context load:':<16}~{estimated_tokens:,} tokens (pre-JIT max)")
     print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}")
     print(f"  {'Last sync:':<16}{derived.get('synced_at') if derived else 'never (run aegis sync)'}\n")
+    if claimed["claimed"]:
+        print(f"  {claimed['label']}: {claimed['claimed']} report(s) from {claimed['sessions']} session(s), "
+              "no rule's evidence\n")
     _print_problems(inventory_error, problems, view.incomplete)
 
     if not all_rules:
