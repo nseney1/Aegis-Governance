@@ -355,6 +355,15 @@ def test_derived_counters_are_ignored_and_reported_for_migrate(tmp_path: Path) -
     assert {r.id for r in rs.needs_migrate} == {"x", "y"}
 
 
+def test_an_emptied_or_quoted_counter_is_still_a_derived_counter(tmp_path: Path) -> None:
+    _write(tmp_path, "traps/z.md", _rule("z", extra="triggers:\ntp: 3\nfp_rate: '0.25'\nscore: high\n"))
+
+    z = load_rules(tmp_path).get("z")
+
+    assert z.legacy_keys == ("fp_rate", "tp", "triggers")
+    assert z.meta["score"] == "high"  # not counter-shaped: rule content
+
+
 def test_an_expired_rule_is_loaded_but_not_served(tmp_path: Path) -> None:
     _write(tmp_path, "traps/old.md", _rule("old", extra="expired_at: 2026-01-01\n"))
 

@@ -166,6 +166,29 @@ def test_an_unreadable_derived_file_counts_as_never_synced(tmp_path: Path) -> No
         assert sync.stale_rules(load_rules(tmp_path), sync.read_derived(tmp_path)) == []
 
 
+def test_a_derived_file_reached_through_a_symlink_is_not_read(tmp_path: Path) -> None:
+    from tests.conftest import symlink_or_skip
+
+    _rule(tmp_path, "trap", "t")
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text(json.dumps(sync.build(tmp_path)), encoding="utf-8")
+    (tmp_path / ".aegis" / "state").mkdir(parents=True)
+    symlink_or_skip(elsewhere, tmp_path / ".aegis" / "state" / "derived.json")
+
+    assert sync.read_derived(tmp_path) is None
+
+
+def test_an_expired_rule_is_recorded_as_expired(tmp_path: Path) -> None:
+    _rule(tmp_path, "trap", "current")
+    retired = _rule(tmp_path, "trap", "retired")
+    retired.write_text(retired.read_text(encoding="utf-8").replace("hypothesis: h\n", "hypothesis: h\nexpired_at: '2026-01-01'\n"), encoding="utf-8")
+
+    rules = sync.build(tmp_path)["rules"]
+
+    assert rules["retired"]["expired"] is True
+    assert "expired" not in rules["current"]
+
+
 def test_a_crlf_rule_is_recorded_by_its_lf_digest(tmp_path: Path) -> None:
     """Recorded from a CRLF checkout, the rule is not stale once the line endings flip back."""
     path = _rule(tmp_path, "trap", "eol", eol="\r\n")
