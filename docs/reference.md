@@ -41,7 +41,7 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis scan` | Daily Workflow & Verification | Show which rules apply to the given files (run before editing them) |
 | `aegis status` | Daily Workflow & Verification | Show active rules and stats |
 | `aegis team` | Daily Workflow & Verification | Lease lane paths for parallel agents (claim, renew, transfer, release, gc, list, metrics) |
-| `aegis rule` | Rule Evolution & Intelligence | Manage rule lifecycle (list, create, promote, demote, archive) |
+| `aegis rule` | Rule Evolution & Intelligence | Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs |
 | `aegis sync` | Rule Evolution & Intelligence | Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them) |
 | `aegis hook` | Plumbing | Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks |
 
@@ -247,9 +247,9 @@ Change a live lease's owner (and role) by compare-and-swap.
 
 ### `aegis rule`
 
-Manage rule lifecycle (list, create, promote, demote, archive)
+Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs
 
-Category: Rule Evolution & Intelligence. Subcommands: `archive`, `create`, `demote`, `list`, `promote`.
+Category: Rule Evolution & Intelligence. Subcommands: `archive`, `create`, `demote`, `export`, `import`, `list`, `promote`.
 
 ### `aegis rule archive`
 
@@ -284,6 +284,30 @@ Demote a rule down lifecycle tiers (no RULE_ID: list candidates)
 | --- | --- | --- | --- |
 | `rule_id` | `[RULE_ID]` |  | Rule identifier to demote |
 | `--dry-run` |  |  | Preview demotion without moving files |
+
+### `aegis rule export`
+
+Write the workspace's rules to an unsigned pack file
+
+Write the workspace's rules to OUT as a pack: their text and digests, no ledger rows. The pack is unsigned: its sha256 shows it was not altered after export, not who made it. A rule that cannot be loaded, or that still has derived or retired keys (run aegis migrate --apply), stops the export; an expired rule is skipped and reported. An existing regular file at OUT is replaced; a link is refused.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `out` | `OUT` |  | The pack file to write (required) |
+| `--type` | one of `invariant`, `trap`, `gate`, `boundary`, `persona`, `contract` |  | Export only rules of this type (repeatable): invariant, trap, gate, boundary, persona, contract |
+| `--min-fitness` | `X` |  | Export only rules whose fitness in this repository's ledger is at least X |
+
+### `aegis rule import`
+
+Add the rules of an unsigned pack file to the workspace
+
+Add the rules of PACK to the workspace's .aegis/rules. The pack is unsigned: its digests show it was not altered after export, not who made it, so every entry is checked (its path must be exactly <type dir>/<id>.md, and the rule loader must accept it) and the pack is imported whole or not at all. An id the workspace already has refuses the pack unless --rename gives the incoming rule a free id. With --workspace DIR, DIR itself must hold .aegis (there is no walk-up from it). Review the imported rules before you rely on them.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `pack` | `PACK` |  | The pack file to read (required) |
+| `--rename` |  |  | Give a rule whose id is taken a free id (<id>-imported, -imported-2, ...) instead of refusing |
+| `--dry-run` |  |  | Check the pack and report what would be added; write nothing |
 
 ### `aegis rule list`
 

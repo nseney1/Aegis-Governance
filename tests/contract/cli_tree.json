@@ -1630,6 +1630,203 @@
             "description": null,
             "help": "Demote a rule down lifecycle tiers (no RULE_ID: list candidates)"
           },
+          "export": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "out",
+                "flags": [],
+                "help": "The pack file to write",
+                "kind": "store",
+                "metavar": "OUT",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "choices": [
+                  "invariant",
+                  "trap",
+                  "gate",
+                  "boundary",
+                  "persona",
+                  "contract"
+                ],
+                "default": null,
+                "dest": "types",
+                "flags": [
+                  "--type"
+                ],
+                "help": "Export only rules of this type (repeatable): invariant, trap, gate, boundary, persona, contract",
+                "kind": "append",
+                "metavar": "TYPE",
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "min_fitness",
+                "flags": [
+                  "--min-fitness"
+                ],
+                "help": "Export only rules whose fitness in this repository's ledger is at least X",
+                "kind": "store",
+                "metavar": "X",
+                "nargs": null,
+                "required": false,
+                "type": "float"
+              }
+            ],
+            "description": "Write the workspace's rules to OUT as a pack: their text and digests, no ledger rows. The pack is unsigned: its sha256 shows it was not altered after export, not who made it. A rule that cannot be loaded, or that still has derived or retired keys (run aegis migrate --apply), stops the export; an expired rule is skipped and reported. An existing regular file at OUT is replaced; a link is refused.",
+            "help": "Write the workspace's rules to an unsigned pack file"
+          },
+          "import": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "pack",
+                "flags": [],
+                "help": "The pack file to read",
+                "kind": "store",
+                "metavar": "PACK",
+                "nargs": null,
+                "required": true
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "rename",
+                "flags": [
+                  "--rename"
+                ],
+                "help": "Give a rule whose id is taken a free id (<id>-imported, -imported-2, ...) instead of refusing",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Check the pack and report what would be added; write nothing",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "description": "Add the rules of PACK to the workspace's .aegis/rules. The pack is unsigned: its digests show it was not altered after export, not who made it, so every entry is checked (its path must be exactly <type dir>/<id>.md, and the rule loader must accept it) and the pack is imported whole or not at all. An id the workspace already has refuses the pack unless --rename gives the incoming rule a free id. With --workspace DIR, DIR itself must hold .aegis (there is no walk-up from it). Review the imported rules before you rely on them.",
+            "help": "Add the rules of an unsigned pack file to the workspace"
+          },
           "list": {
             "aliases": [],
             "arguments": [
@@ -1819,7 +2016,7 @@
           }
         },
         "description": null,
-        "help": "Manage rule lifecycle (list, create, promote, demote, archive)"
+        "help": "Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs"
       },
       "scan": {
         "aliases": [],
@@ -3045,7 +3242,7 @@
     {
       "aliases": [],
       "category": "Rule Evolution & Intelligence",
-      "help": "Manage rule lifecycle (list, create, promote, demote, archive)",
+      "help": "Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs",
       "name": "rule"
     },
     {
