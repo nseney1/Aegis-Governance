@@ -56,7 +56,8 @@ def test_every_profile_binds_every_capability_to_a_value_the_sanitizer_keeps(pro
 @pytest.mark.parametrize(
     "host_id, read, edit, subagent, fast",
     [
-        ("codex-cli", "exec_command", "apply_patch", "spawn_agent", "gpt-6-luna"),
+        # Codex model slugs vary by account and have no recorded evidence: generic tiers.
+        ("codex-cli", "exec_command", "apply_patch", "spawn_agent", "fast-tier"),
         ("claude-code", "Read", "Edit", "Task", "haiku"),
         ("antigravity", "view_file", "replace_file_content", "invoke_subagent", "flash"),
         ("gemini-cli", "read_file", "replace", "subagent", "fast-tier"),

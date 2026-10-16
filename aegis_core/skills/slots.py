@@ -62,9 +62,9 @@ _CLAUDE_PROFILE: dict[str, str] = {
     "MODEL_HEAVY": "opus",
 }
 
-# Codex has no read or search tool: it reads and greps through exec_command. The model
-# slugs are the account catalog seen on codex-cli 0.162.1 (2026-10-15); catalogs differ
-# per plan, so ~/.aegis/config.json "slots" can override them.
+# Codex has no read or search tool: it reads and greps through exec_command (codex-cli
+# 0.162.1). Its model slugs differ per account and plan and none is on record, so the
+# tiers stay generic, as for gemini-cli; ~/.aegis/config.json "slots" can name them.
 _CODEX_PROFILE: dict[str, str] = {
     "TOOL_READ": "exec_command",
     "TOOL_EDIT": "apply_patch",
@@ -72,9 +72,9 @@ _CODEX_PROFILE: dict[str, str] = {
     "TOOL_SEARCH": "exec_command",
     "TOOL_RUN": "exec_command",
     "TOOL_SUBAGENT": "spawn_agent",
-    "MODEL_FAST": "gpt-6-luna",
-    "MODEL_STANDARD": "gpt-6.1-sol",
-    "MODEL_HEAVY": "gpt-6-astra",
+    "MODEL_FAST": "fast-tier",
+    "MODEL_STANDARD": "standard-tier",
+    "MODEL_HEAVY": "heavy-tier",
 }
 
 # Neutral names for a host Aegis does not know: a tool kind, never one vendor's name.

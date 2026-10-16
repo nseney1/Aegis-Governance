@@ -7,7 +7,8 @@ from ``~/.claude.json`` instead of ``claude mcp list``, which starts every confi
 
 Each host gets one state, the first of these that applies:
 
-- ``missing_binary``: none of its binaries is on PATH;
+- ``missing_binary``: none of its binaries is on PATH outside the workspace (one found only
+  inside it is listed in ``binary.ignored`` with the reason ``binary_in_workspace``);
 - ``unregistered``: its config has no ``aegis`` server, or the registered command is gone;
 - ``auth_unknown``: doctor cannot confirm the host will load ``aegis`` (its CLI failed or
   timed out, its config cannot be parsed, the registration waits on an approval doctor
@@ -28,9 +29,10 @@ determine), ``checks_ok`` (no blocking check failed; it says nothing about the h
 ``enforcement_level`` is the strongest tier known to be in force for the host here:
 ``local_floor``, ``advisory``, ``none`` (an ungoverned workspace, a host not installed,
 or no route by which aegis or its bootstrap reaches the agent) or ``unknown`` (a fact
-that decides it cannot be read). Strings taken from files or host output are reported
-without control sequences, and doctor starts only programs found in absolute PATH
-entries outside the workspace.
+that decides it cannot be read, such as a host binary found only inside the workspace).
+The home directory is never a governed workspace: its ``.aegis/`` is the user plane.
+Strings taken from files or host output are printed without control sequences, and
+doctor starts only programs found in absolute PATH entries outside the workspace.
 
 ``--fix`` changes only what a finding reported as fixable, after confirmation (``--yes``
 skips it). Every file is first copied to ``~/.aegis/backups/<UTC stamp>/`` with a manifest;
@@ -189,8 +191,34 @@ def _which(name: str, path: Optional[str] = None, outside: Optional[Path] = None
     return None
 
 
+def _ignored_hits(name: str, path: Optional[str], outside: Path) -> List[str]:
+    """The programs ``_which`` passed over because their absolute PATH entry is inside
+    ``outside``: reported, so a host installed there is never called absent."""
+    search = os.environ.get("PATH", os.defpath) if path is None else path
+    fence = _root_key(outside)
+    hits = []
+    for entry in search.split(os.pathsep):
+        if entry and os.path.isabs(entry) and _inside(_root_key(entry), fence):
+            hits.extend(full for full in (os.path.join(entry, c) for c in _exe_names(name))
+                        if os.path.isfile(full) and os.access(full, os.X_OK))
+    return list(dict.fromkeys(hits))
+
+
 def _inside(path_key: str, root_key: str) -> bool:
     return path_key == root_key or path_key.startswith(root_key.rstrip(os.sep) + os.sep)
+
+
+def _child_env() -> Dict[str, str]:
+    """The environment of a program doctor starts.
+
+    On Windows a ``.cmd`` or ``.bat`` shim (npm's ``codex.cmd``) runs under cmd.exe,
+    which looks for the programs it calls (``node``) in the current directory first:
+    the repository, for the codex probe. This variable turns that search off.
+    """
+    env = dict(os.environ)
+    if sys.platform == "win32":
+        env["NoDefaultCurrentDirectoryInExePath"] = "1"
+    return env
 
 
 def _clean(text: Any, limit: int = 512) -> str:
@@ -225,7 +253,7 @@ def probe_mcp_launcher(path_env: str | None = None,
     def _run(argv: list[str]) -> subprocess.CompletedProcess:
         return subprocess.run([exe, *argv], stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, errors="replace",
-                              timeout=timeout)
+                              timeout=timeout, env=_child_env())
 
     try:
         proc = _run(["-I", "-S", "-c", "import sys; print(sys.version_info[0])"])
@@ -413,11 +441,11 @@ def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
 # registration unknown: a CLI that crashed has not said "absent".
 _CODEX_ABSENT = re.compile(r"no mcp server named\s+['\"]?aegis['\"]?\s+found", re.IGNORECASE)
 _PROBE_TIMEOUT = 10.0
-# Hosts that keep the start of an over-budget instruction file (Codex cuts at its
-# project_doc_max_bytes) and hosts that may drop the whole file (Antigravity's
-# per-file limit); for the others the budget is advice.
-_TRUNCATES_TAIL = frozenset({"codex-cli"})
-_DROPS_OVER_BUDGET = frozenset({"antigravity"})
+# Hosts that silently keep only the start of an over-budget instruction file: Codex at
+# its 32 KiB project_doc_max_bytes, Antigravity at 24,000 bytes per file (host-matrix
+# §1-§2, verified 2026-10-15). A block that ends within the budget still arrives; for
+# the other hosts the budget is advice.
+_TRUNCATES_TAIL = frozenset({"codex-cli", "antigravity"})
 # Hosts that send no MCP roots and attest no workspace: the registry is how the server
 # finds the repository (host-matrix §2, §3.6).
 _REGISTRY_BOUND = frozenset({"antigravity"})
@@ -430,7 +458,7 @@ _LEGACY_ENTRY = f"stale v3 '{LEGACY_SERVER}' MCP server"
 def _run_host_cli(argv: Sequence[str], cwd: str, timeout: float) -> "subprocess.CompletedProcess[str]":
     """The one place doctor starts a host CLI: an argv (no shell), no stdin, bounded in time."""
     return subprocess.run(list(argv), cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True,
-                          text=True, errors="replace", timeout=timeout)
+                          text=True, errors="replace", timeout=timeout, env=_child_env())
 
 
 def _utc_now() -> str:
@@ -539,6 +567,7 @@ class _Ctx:
     environ: Mapping[str, str]
     selected: Tuple[Any, ...]
     selection: str
+    is_home: bool = False
     _cache: Dict[Tuple[str, bool], _File] = field(default_factory=dict)
 
     @property
@@ -547,6 +576,9 @@ class _Ctx:
 
     def which(self, name: str) -> Optional[str]:
         return _which(name, self.path_env, outside=self.root)
+
+    def ignored(self, name: str) -> List[str]:
+        return _ignored_hits(name, self.path_env, self.root)
 
     def file(self, path: Path, as_json: bool = False) -> _File:
         key = (os.path.abspath(str(path)), as_json)
@@ -654,7 +686,9 @@ def _command_exists(command: str, ctx: _Ctx) -> bool:
 def _probe_codex(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
     source = "codex mcp get aegis --json"
     if binary is None:
-        return _registration("unavailable", source, detail="codex is not on PATH")
+        detail = ("the only codex on PATH is inside the workspace, and doctor does not run it"
+                  if ctx.ignored("codex") else "codex is not on PATH")
+        return _registration("unavailable", source, detail=detail)
     try:
         # From the workspace: Codex answers with the config it would use here (user
         # config plus a trusted project's own).
@@ -765,9 +799,11 @@ def _probe(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
 _BLOCK_BEGIN = re.compile(r"^<!-- aegis:begin id=(\S+) v=(\S+) sha=(\S+) -->[ \t]*$")
 _BLOCK_END = re.compile(r"^<!-- aegis:end id=(\S+) -->[ \t]*$")
 _HEX12 = re.compile(r"^[0-9a-f]{12}$")
-_IMPORTS_AGENTS = re.compile(r"(?<![\w@/.\-])@(?:\./)?AGENTS\.md\b")
+# An import path runs to the next whitespace, so @AGENTS.md.bak names another file.
+_IMPORTS_AGENTS = re.compile(r"(?<![\w@/.\-])@(?:\./)?AGENTS\.md(?=\s|$)")
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(`+).+?\1")
+_INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
 _BOM = "\ufeff"
 
 
@@ -782,14 +818,28 @@ def _fence_step(fence: Optional[Tuple[str, int]], line: str) -> Optional[Tuple[s
 
 
 def _prose(text: str) -> str:
-    """``text`` without fenced code blocks and inline code spans, where Claude Code
-    evaluates no ``@`` import."""
-    out, fence = [], None
+    """``text`` without fenced or indented code blocks and inline code spans, where
+    Claude Code evaluates no ``@`` import.
+
+    An indented block starts after a blank line (or at the top) and cannot interrupt a
+    paragraph. List context is not tracked, so an import indented inside a list item
+    after a blank line counts as code: doctor may then under-report it, never over-report.
+    """
+    out, fence, blank_before, indented = [], None, True, False
     for line in text.splitlines():
         inside = fence is not None
         fence = _fence_step(fence, line)
-        if not inside and fence is None:
-            out.append(_CODE_SPAN.sub(" ", line))
+        if inside or fence is not None:
+            blank_before, indented = False, False
+            continue
+        if not line.strip():
+            blank_before = True
+            continue
+        if _INDENTED_CODE.match(line) and (blank_before or indented):
+            indented, blank_before = True, False
+            continue
+        indented, blank_before = False, False
+        out.append(_CODE_SPAN.sub(" ", line))
     return "\n".join(out)
 
 
@@ -801,6 +851,9 @@ class _Instructions:
     claude_md: Optional[Path] = None
     claude_bytes: int = 0
     claude_imports_agents: bool = False
+    # CLAUDE.md and AGENTS.md are one file (a link either way): Claude Code reads AGENTS.md.
+    claude_is_agents: bool = False
+    claude_link_target: Optional[str] = None  # where a CLAUDE.md symlink points
     override: bool = False
 
 
@@ -850,13 +903,34 @@ def _instructions(ctx: _Ctx) -> _Instructions:
         info.claude_md = claude.path
         info.claude_bytes = len(claude.raw)
         info.claude_imports_agents = bool(_IMPORTS_AGENTS.search(_prose(claude.raw.decode("utf-8", errors="replace"))))
+        if claude.is_link:
+            info.claude_link_target = os.path.realpath(str(claude.path))
+        if agents.raw is not None:
+            try:
+                info.claude_is_agents = os.path.samefile(str(claude.path), str(agents.path))
+            except OSError:
+                info.claude_is_agents = False
     info.override = (ctx.root / "AGENTS.override.md").exists()
     return info
 
 
+def _claude_reads_agents(info: _Instructions) -> bool:
+    return info.claude_is_agents or info.claude_imports_agents
+
+
+def _claude_import_advice(info: _Instructions) -> str:
+    """How to make Claude Code read AGENTS.md; aegis init never writes through a link."""
+    if info.claude_link_target is not None:
+        return (f"CLAUDE.md is a link to {info.claude_link_target}, which aegis init never writes through: "
+                "add an @AGENTS.md line to that file, or make CLAUDE.md a link to AGENTS.md")
+    return "run aegis init to add the import"
+
+
 def _budget(spec: Any, info: _Instructions) -> Dict[str, Any]:
     budget = spec.budget_bytes
-    if spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None:
+    if spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None and info.claude_is_agents:
+        size, name = info.claude_bytes, "CLAUDE.md (= AGENTS.md)"
+    elif spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None:
         size = info.claude_bytes + ((info.agents_bytes or 0) if info.claude_imports_agents else 0)
         name = "CLAUDE.md" + (" + AGENTS.md" if info.claude_imports_agents else "")
     elif spec.instructions in ("agents_md", "agents_md_unless_claude_md"):
@@ -875,7 +949,7 @@ def _bootstrap_reaches(spec: Any, info: _Instructions) -> Optional[bool]:
     if spec.id in _READS_AGENTS_OVERRIDE and info.override:
         return False
     if spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None:
-        return info.claude_imports_agents
+        return _claude_reads_agents(info)
     return True
 
 
@@ -937,32 +1011,36 @@ def _mcp_loads(reg: Dict[str, Any]) -> Optional[bool]:
     return True
 
 
-def _advisory(spec: Any, ctx: _Ctx, binary: Optional[str], reg: Dict[str, Any], bootstrap: Optional[bool],
+def _advisory(spec: Any, ctx: _Ctx, installed: Optional[bool], reg: Dict[str, Any], bootstrap: Optional[bool],
               workspace_registered: Optional[bool]) -> Optional[bool]:
     """Whether the advisory tier reaches this host here; None when a deciding fact is unknown.
 
-    It needs rules to serve (a governed workspace), the host on this machine and a route
+    It needs rules to serve (a governed workspace), the host on this machine
+    (``installed`` is None when its only binary sits inside the workspace) and a route
     to its agent: the server loading in the host, or the bootstrap arriving whole
     (``bootstrap`` is False when the host cuts it). A host that sends no workspace finds
     the repository only through the registry, and its bootstrap sends the agent to that
     server, so it needs this workspace registered as well.
     """
-    if not ctx.governed or binary is None:
+    if not ctx.governed or installed is False:
         return False
     route = _any(_mcp_loads(reg), False if spec.instructions == "none" else bootstrap)
     if spec.id in _REGISTRY_BOUND:
-        return _all(workspace_registered, route)
-    return route
+        route = _all(workspace_registered, route)
+    return _all(installed, route)
 
 
-def _level(advisory: Optional[bool], floor: str, present: bool) -> str:
+def _level(advisory: Optional[bool], floor: str, governed: bool, installed: Optional[bool]) -> str:
     """The strongest tier known to be in force for one host (AD-8), never a guess.
 
-    ``present``: the workspace is governed and the host is installed; otherwise nothing
-    is enforced on it here. The local floor holds for every commit made through git.
+    Nothing is enforced on a host in an ungoverned workspace or on a host that is not
+    installed; whether one whose only binary is inside the workspace is installed is
+    unknown. The local floor holds for every commit made through git.
     """
-    if not present:
+    if not governed or installed is False:
         return "none"
+    if installed is None:
+        return "unknown"
     if floor == "active":
         return "local_floor"
     if advisory is True:
@@ -974,6 +1052,9 @@ def _level(advisory: Optional[bool], floor: str, present: bool) -> str:
 
 def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], floor: str) -> Dict[str, Any]:
     binary = next((found for found in (ctx.which(name) for name in spec.binaries) if found), None)
+    ignored = [] if binary else [hit for name in spec.binaries for hit in ctx.ignored(name)]
+    # Installed: True, False, or None when the only binary is one doctor will not run.
+    installed: Optional[bool] = True if binary else (None if ignored else False)
     reg = _probe(spec, binary, ctx)
     identity = _identity(spec, reg)
     reasons: List[Dict[str, str]] = []
@@ -983,7 +1064,11 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         reasons.append({"code": code, "message": _clean(message, 1024)})
 
     names = " or ".join(f"`{b}`" for b in spec.binaries) or "a binary"
-    if binary is None:
+    if ignored:
+        unknown.append("binary")
+        add("binary_in_workspace", f"{names} found only at {ignored[0]}, inside the workspace: doctor does not "
+                                   "run programs from the repository, so it cannot tell whether the host is installed")
+    elif binary is None:
         add("missing_binary", f"no {names} on PATH")
     status = reg["status"]
     if status == "absent":
@@ -1013,13 +1098,15 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     budget = _budget(spec, info)
     reaches = _bootstrap_reaches(spec, info)
     # The host keeps too little of its instruction file for the bootstrap to arrive whole.
-    cut = budget["within"] is False and info.bootstrap != "missing" and (
-        spec.id in _DROPS_OVER_BUDGET
-        or (spec.id in _TRUNCATES_TAIL and (info.block_end or 0) > budget["budget_bytes"]))
+    cut = (budget["within"] is False and info.bootstrap != "missing" and spec.id in _TRUNCATES_TAIL
+           and (info.block_end or 0) > budget["budget_bytes"])
     workspace_registered = None if roots is None else _root_key(ctx.root) in roots
     if roots is None:
         unknown.append("workspace_registered")
-    if not ctx.governed:
+    if not ctx.governed and ctx.is_home:
+        add("workspace_not_governed", f"{ctx.root} is your home directory: its .aegis/ is your user layer, "
+                                      "never a governed workspace. Run aegis doctor inside a repository")
+    elif not ctx.governed:
         add("workspace_not_governed", f"{ctx.root} has no .aegis/: run aegis init there")
     else:
         if info.bootstrap in ("missing", "hand_edited", "malformed"):
@@ -1029,9 +1116,9 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                 "malformed": "the Aegis block markers in AGENTS.md are broken: fix them, then run aegis init",
             }[info.bootstrap])
         if spec.instructions == "agents_md_unless_claude_md" and info.claude_md is not None \
-                and not info.claude_imports_agents:
+                and not _claude_reads_agents(info):
             add("claude_md_shadows_agents_md", "CLAUDE.md exists without @AGENTS.md, so Claude Code does "
-                                               "not read AGENTS.md: run aegis init to add the import")
+                                               f"not read AGENTS.md: {_claude_import_advice(info)}")
         if spec.id in _READS_AGENTS_OVERRIDE and info.override:
             add("agents_override_shadows_agents_md", "AGENTS.override.md replaces AGENTS.md for Codex")
         if cut:
@@ -1046,7 +1133,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                                               "whether aegis finds this repository")
 
     codes = {r["code"] for r in reasons}
-    if "missing_binary" in codes:
+    if codes & {"missing_binary", "binary_in_workspace"}:
         state = "missing_binary"
     elif codes & {"not_registered", "command_missing"}:
         state = "unregistered"
@@ -1057,8 +1144,8 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     else:
         state = "ok"
 
-    advisory = _advisory(spec, ctx, binary, reg, False if cut else reaches, workspace_registered)
-    level = _level(advisory, floor, ctx.governed and binary is not None)
+    advisory = _advisory(spec, ctx, installed, reg, False if cut else reaches, workspace_registered)
+    level = _level(advisory, floor, ctx.governed, installed)
     shown = {k: v for k, v in reg.items() if k != "aegis_client"}
     return {
         "id": spec.id,
@@ -1066,7 +1153,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         "verified_row": spec.verified,
         "state": state,
         "reasons": reasons,
-        "binary": {"found": binary is not None, "path": binary, "names": list(spec.binaries)},
+        "binary": {"found": binary is not None, "path": binary, "names": list(spec.binaries), "ignored": ignored},
         "registration": shown,
         "identity": identity,
         "workspace_registered": workspace_registered,
@@ -1109,7 +1196,7 @@ _TIER_TEXT = {
 }
 
 
-def _tiers(rows: List[Dict[str, Any]], floor: str) -> List[Dict[str, Any]]:
+def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool) -> List[Dict[str, Any]]:
     ids = [r["id"] for r in rows]
     reached = [r["id"] for r in rows if r["advisory"] is True]
     unsure = [r["id"] for r in rows if r["advisory"] is None]
@@ -1127,6 +1214,9 @@ def _tiers(rows: List[Dict[str, Any]], floor: str) -> List[Dict[str, Any]]:
         "unavailable": "not a git repository",
         "unknown": "the git hooks directory could not be read",
     }[floor]
+    if not governed and floor != "unavailable":
+        # A hook here, installed or not, has no rules to check: the floor is not in force.
+        floor, floor_detail = "inactive", "no .aegis/ here, so a pre-commit hook has nothing to enforce: run aegis init"
     return [
         {"tier": "advisory", "mechanism": _TIER_TEXT["advisory"][1], "hosts": ids, "status": advisory,
          "detail": reach},
@@ -1134,7 +1224,7 @@ def _tiers(rows: List[Dict[str, Any]], floor: str) -> List[Dict[str, Any]]:
          "detail": "per-host hooks ship in v4.1 (Claude Code can block; Codex fails open)"},
         {"tier": "local_floor", "mechanism": _TIER_TEXT["local_floor"][1], "hosts": ids, "status": floor,
          "detail": floor_detail},
-        {"tier": "authoritative", "mechanism": _TIER_TEXT["authoritative"][1], "hosts": [], "status": "unknown",
+        {"tier": "authoritative", "mechanism": _TIER_TEXT["authoritative"][1], "hosts": [], "status": "unavailable",
          "detail": "not checked: aegis doctor makes no network or GitHub calls"},
     ]
 
@@ -1365,10 +1455,10 @@ def _budget_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
 
 def _workspace_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
     found = []
-    if info.claude_md is not None and not info.claude_imports_agents:
+    if info.claude_md is not None and not _claude_reads_agents(info):
         found.append(_Finding("claude_md_without_agents_import", info.claude_md,
                               "CLAUDE.md does not import @AGENTS.md, so Claude Code skips AGENTS.md; "
-                              "run aegis init to add the import block"))
+                              f"{_claude_import_advice(info)}"))
     if info.override:
         found.append(_Finding("agents_override", ctx.root / "AGENTS.override.md",
                               "AGENTS.override.md replaces AGENTS.md for Codex; move its text into AGENTS.md"))
@@ -1492,13 +1582,15 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
 
     environ = os.environ if environ is None else environ
     layout = UserLayout.current()
-    governed = is_aegis_workspace(root)
+    # The home directory's .aegis/ is the user plane (~/.aegis), never a workspace.
+    is_home = layout is not None and _root_key(root) == _root_key(layout.home)
+    governed = is_aegis_workspace(root) and not is_home
     selected, selection, notes = _selection(root, governed)
     ctx = _Ctx(root=root, governed=governed, home=layout.home if layout else None, environ=environ,
-               selected=selected, selection=selection)
+               selected=selected, selection=selection, is_home=is_home)
     info = _instructions(ctx)
     roots = _registered_roots(ctx)
-    floor = _floor_status(root) if governed else "unavailable"
+    floor = _floor_status(root)
     rows = [_host_row(spec, ctx, info, roots, floor) for spec in selected]
     claude_user = _claude_user_registered(ctx)
     findings = (notes + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
@@ -1508,7 +1600,7 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
         findings.append(_Finding("unreadable_config", UserLayout(ctx.home).workspaces_file,
                                  "~/.aegis/workspaces.json cannot be read as a v1 registry; doctor "
                                  "reports workspace registration as unknown"))
-    return _Diagnosis(ctx, rows, _tiers(rows, floor), findings)
+    return _Diagnosis(ctx, rows, _tiers(rows, floor, governed), findings)
 
 
 def _claude_user_registered(ctx: _Ctx) -> bool:
@@ -1721,8 +1813,6 @@ _CHECKS: Tuple[Tuple[str, bool], ...] = (
 
 
 def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
-    from aegis_cli.ui.theme import strip_ansi
-
     calls: Dict[str, Callable[[], Optional[bool]]] = {
         "python_version": _check_python_version,
         "zero_dependencies": _check_zero_dependencies,
@@ -1741,8 +1831,11 @@ def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None)
         with contextlib.redirect_stdout(buf):
             ok = calls[check_id]()
         status = "skip" if ok is None else ("pass" if ok else ("fail" if blocking else "warn"))
-        out.append({"id": check_id, "status": status, "text": buf.getvalue(),
-                    "detail": [strip_ansi(line.strip()) for line in buf.getvalue().splitlines() if line.strip()]})
+        # The lines quote rule file names, loader errors and paths a repository chooses:
+        # cleaned here, at the one place every check's output passes.
+        text = "".join(_clean(line, 4096) + "\n" for line in buf.getvalue().splitlines())
+        out.append({"id": check_id, "status": status, "text": text,
+                    "detail": [line.strip() for line in text.splitlines() if line.strip()]})
     return out
 
 
@@ -1789,10 +1882,12 @@ def _print_hosts(diag: _Diagnosis) -> None:
     for row in diag.rows:
         reg, boot, budget = row["registration"], row["bootstrap"], row["budget"]
         print(f"  {_ICON[row['state']]} {row['display_name']} ({row['id']}): {row['state']}")
-        print(f"      binary       {row['binary']['path'] or 'not on PATH'}")
+        binary = row["binary"]
+        where = binary["path"] or ("only inside the workspace (not run)" if binary["ignored"] else "not on PATH")
+        print(f"      binary       {where}")
         registered = {"registered": f"yes, {reg['scope']} scope", "absent": "no", "unknown": "unknown",
                       "unavailable": "not checked"}[reg["status"]]
-        print(f"      registered   {registered} ({reg['source']})")
+        print(f"      registered   {registered} ({_clean(reg['source'], 4096)})")
         if reg["command"]:
             exists = {True: "exists", False: "MISSING", None: "not checked"}[reg["command_exists"]]
             print(f"      command      {reg['command'][0]} ({exists})")
@@ -1833,21 +1928,21 @@ def _print_plan(plan: List[_Change], home: Optional[Path]) -> None:
     from aegis_core.workspace.layout import UserLayout
 
     where = f"{UserLayout(home).backups_dir}{os.sep}<UTC stamp>" if home else "the Aegis backups directory"
-    print(f"\nPlanned changes (each file is backed up to {where} first):")
+    print(f"\nPlanned changes (each file is backed up to {_clean(where, 4096)} first):")
     for index, change in enumerate(plan, 1):
-        print(f"  {index}. {change.path}: {'; '.join(change.describe)}")
+        print(f"  {index}. {_clean(change.path, 4096)}: {_clean('; '.join(change.describe), 4096)}")
 
 
 def _print_results(results: List[Dict[str, Any]], backup: Optional[Path]) -> None:
     print("")
     for item in results:
         icon = {"applied": "✅", "skipped": "⚠️ ", "failed": "❌"}[item["status"]]
-        line = f"  {icon} {item['path']}: {'; '.join(item['changes'])}"
+        line = f"  {icon} {_clean(item['path'], 4096)}: {_clean('; '.join(item['changes']), 4096)}"
         if item["reason"]:
             line += f" ({item['status']}: {item['reason']})"
         print(line)
     if backup is not None:
-        print(f"\nBackups: {backup}")
+        print(f"\nBackups: {_clean(backup, 4096)}")
 
 
 # ── Entry point ─────────────────────────────────────────────────────────────
@@ -1874,7 +1969,7 @@ def _run_drivers_only(root: Path, use_json: bool, fix: bool, yes: bool) -> int:
     text = io.StringIO()
     with contextlib.redirect_stdout(text) if use_json else contextlib.nullcontext():
         if not use_json:
-            print(f"aegis doctor — AST driver health check ({root}):\n")
+            print(f"aegis doctor — AST driver health check ({_clean(root, 4096)}):\n")
         plan = _plan([], _missing_ast_extensions(root), root) if fix else []
         if plan:
             _print_plan(plan, _home())
@@ -1933,7 +2028,7 @@ def run_doctor(args: argparse.Namespace) -> int:
     text = io.StringIO()
     with contextlib.redirect_stdout(text) if use_json else contextlib.nullcontext():
         if not use_json:
-            print(f"aegis doctor — running health checks ({root}):\n")
+            print(f"aegis doctor — running health checks ({_clean(root, 4096)}):\n")
         checks = _run_checks(root, fix_ast=False)
         if not use_json:
             for check in checks:

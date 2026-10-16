@@ -388,14 +388,21 @@ def test_agents_override_shadows_agents_md_for_codex(env):
     assert "agents_override" in finding_codes(payload)
 
 
-def test_budget_gap_only_where_the_host_would_drop_the_bootstrap(env):
+def test_budget_gap_only_where_the_host_would_cut_the_bootstrap(env):
     env.all_ok()
     filler = ("x" * 99 + "\n") * 300  # 30,000 bytes of user text
-    env.bootstrap(after=filler)  # the block comes first: Codex's 32 KiB cut keeps it
+    env.bootstrap(after=filler)  # the block comes first: both hosts keep the start of the file
     payload = env.doctor()
     codex, agy = host(payload, "codex-cli"), host(payload, "antigravity")
     assert codex["budget"]["within"] is True and codex["state"] == "ok"
+    # Antigravity truncates at 24,000 bytes per file (host-matrix §1-2): the block arrives whole.
     assert agy["budget"]["within"] is False and agy["budget"]["bytes"] > 24000
+    assert agy["state"] == "ok" and agy["bootstrap"]["reaches_host"] is True
+
+    env.bootstrap(before=filler)  # the block starts after byte 24,000: Antigravity cuts it
+    payload = env.doctor()
+    codex, agy = host(payload, "codex-cli"), host(payload, "antigravity")
+    assert codex["budget"]["within"] is True and codex["state"] == "ok"
     assert agy["state"] == "policy_gap" and "over_budget" in codes(agy)
 
     env.bootstrap(after=filler + filler)  # over 32 KiB, but the cut falls after the block
@@ -448,7 +455,8 @@ def test_enforcement_tiers_report_what_is_in_force_here_and_nothing_more(env):
     assert tiers["advisory"]["status"] == "active"
     assert tiers["best_effort"]["status"] == "unavailable"
     assert tiers["local_floor"]["status"] == "inactive"
-    assert tiers["authoritative"]["status"] == "unknown"
+    # doctor makes no network call, so CI is a capability it does not have: unavailable.
+    assert tiers["authoritative"]["status"] == "unavailable"
     assert all(h["enforcement_level"] == "advisory" for h in payload["hosts"])
 
     from aegis_cli.hooks.management import generate_hook_block
@@ -648,10 +656,14 @@ def _strings(value: Any):
 
 # ── programs the repository supplies (review finding 1) ─────────────────────
 
+def _decoy_name(name: str) -> str:
+    return name + (".exe" if os.name == "nt" else "")
+
+
 def _decoy(directory: Path, name: str, marker: Path) -> Path:
     """An executable that records that it ran; doctor must never start it."""
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / (name + (".exe" if os.name == "nt" else ""))
+    path = directory / _decoy_name(name)
     path.write_text(f"#!/bin/sh\necho ran >> '{marker}'\necho 3\nexit 0\n", encoding="utf-8")
     path.chmod(0o755)
     return path
@@ -681,7 +693,8 @@ def test_a_codex_in_the_workspace_is_never_found_or_run(env, monkeypatch, tmp_pa
     monkeypatch.setenv("PATH", _path_with(env, layout))
     row = host(env.doctor(), "codex-cli")
     assert env.calls == [], "doctor started a codex the repository supplied"
-    assert row["binary"] == {"found": False, "path": None, "names": ["codex"]}
+    inside = [str(env.ws / "tools" / Path(_decoy_name("codex")))] if layout == "entry_inside_workspace" else []
+    assert row["binary"] == {"found": False, "path": None, "names": ["codex"], "ignored": inside}
     assert row["state"] == "missing_binary"
 
 
@@ -752,10 +765,10 @@ def test_a_host_that_is_not_installed_has_no_enforcement(env):
     assert advisory["status"] == "partial" and "antigravity" not in advisory["detail"]
 
 
-def test_a_bootstrap_the_host_drops_for_size_is_not_advisory(env):
+def test_a_bootstrap_the_host_cuts_for_size_is_not_advisory(env):
     env.all_ok()
     (env.home / ".gemini" / "config" / "mcp_config.json").write_text(json.dumps({"mcpServers": {}}))
-    env.bootstrap(after=("x" * 99 + "\n") * 300)  # ~30 KB: over Antigravity's per-file budget
+    env.bootstrap(before=("x" * 99 + "\n") * 300)  # the block starts past Antigravity's 24,000 bytes
     payload = env.doctor()
     agy = host(payload, "antigravity")
     assert agy["state"] == "unregistered" and "over_budget" in codes(agy)
@@ -855,8 +868,11 @@ def test_a_workspace_path_with_control_sequences_is_reported_without_them(env, t
     "Use the `@AGENTS.md` syntax to import it.\n",
     "Example:\n\n```\n@AGENTS.md\n```\n",
     "~~~md\n@AGENTS.md\n~~~\n",
+    "Example:\n\n    @AGENTS.md\n",  # an indented code block
+    "\t@AGENTS.md\n",
+    "See @AGENTS.md.bak and @AGENTS.md-old\n",  # other files, not AGENTS.md
 ])
-def test_an_import_inside_code_is_not_an_import(env, claude_md):
+def test_an_import_inside_code_or_of_another_file_is_not_an_import(env, claude_md):
     env.all_ok()
     (env.ws / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
     payload = env.doctor()
@@ -897,3 +913,210 @@ def test_a_byte_order_mark_before_a_legacy_block_is_still_a_fixable_block(env):
     path.write_bytes(b"\xef\xbb\xbf<!-- SOMA:START -->\nrules\n<!-- SOMA:END -->\nmine\n")
     (finding,) = [f for f in env.doctor()["findings"] if f["code"] == "legacy_block"]
     assert finding["fixable"] is True and finding["location"] == "lines 1-3"
+
+
+@pytest.mark.parametrize("claude_md", [
+    "@AGENTS.md\n",
+    "Read @AGENTS.md first.\n",
+    "Notes\n  @AGENTS.md\n",  # two spaces: still a paragraph line, not code
+])
+def test_an_import_of_agents_md_in_prose_is_an_import(env, claude_md):
+    env.all_ok()
+    (env.ws / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
+    claude = host(env.doctor(), "claude-code")
+    assert claude["state"] == "ok" and claude["bootstrap"]["reaches_host"] is True
+
+
+# ── check lines quote repository strings (re-review finding 1) ──────────────
+
+def _control(text: str) -> List[str]:
+    return [c for c in text if (ord(c) < 0x20 and c != "\n") or 0x7f <= ord(c) <= 0x9f]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows file names cannot hold control characters")
+def test_a_rule_file_name_with_control_sequences_reaches_the_terminal_without_them(env):
+    env.all_ok()
+    bad = env.ws / ".aegis" / "rules" / "invariants" / "bad\x1b[2J\x1b]0;PWN\x07.md"
+    bad.write_text("---\nid: [unclosed\n---\nbody\n", encoding="utf-8")
+    rc, out = env.run()
+    assert "cannot be served" in out, out
+    assert _control(out) == []
+    payload = env.doctor()
+    (rules,) = [c for c in payload["checks"] if c["id"] == "rules"]
+    assert rules["status"] == "fail"
+    assert [s for s in _strings(payload) if _control(s)] == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows file names cannot hold control characters")
+def test_a_hostile_workspace_path_is_never_printed_raw_even_by_fix(env, tmp_path):
+    import shutil
+    env.claude_registered()
+    hostile = tmp_path / "repo\x1b[2J\x1b]0;pwn\x07"
+    shutil.copytree(str(env.ws), str(hostile))
+    (hostile / "GEMINI.md").write_text("<!-- SOMA:START -->\nold\n<!-- SOMA:END -->\nmine\n", encoding="utf-8")
+    rc, out = env.run(workspace=str(hostile))
+    assert "aegis doctor" in out and _control(out) == []
+    rc, out = env.run(workspace=str(hostile), fix=True, yes=True)
+    assert "Planned changes" in out and "remove the legacy block" in out
+    assert _control(out) == []
+    assert (hostile / "GEMINI.md").read_text(encoding="utf-8") == "mine\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows file names cannot hold control characters")
+def test_a_reason_quoting_a_hostile_path_has_no_control_sequences(env, tmp_path):
+    env.all_ok()
+    bare = tmp_path / "bare\x1b[2J\x1b]0;pwn\x07"
+    bare.mkdir()
+    payload = json.loads(env.run(json=True, workspace=str(bare))[1])
+    messages = [r["message"] for h in payload["hosts"] for r in h["reasons"]
+                if r["code"] == "workspace_not_governed"]
+    assert len(messages) == len(PHASE1)
+    assert all("bare" in m and _control(m) == [] for m in messages)
+
+
+# ── a host binary only inside the workspace (re-review finding 2) ───────────
+
+def test_a_host_binary_found_only_inside_the_workspace_is_reported_never_run(env, monkeypatch, tmp_path):
+    env.claude_registered()
+    env.antigravity_registered()
+    env.register_workspace()
+    env.bootstrap()
+    inside = env.ws / ".local" / "bin"
+    real = _decoy(inside, "codex", tmp_path / "decoy-ran")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(inside), str(env.bin)]))
+    payload = env.doctor()
+    row = host(payload, "codex-cli")
+    assert env.calls == [] and not (tmp_path / "decoy-ran").exists()
+    assert row["binary"] == {"found": False, "path": None, "names": ["codex"], "ignored": [str(real)]}
+    assert row["state"] == "missing_binary"
+    assert "missing_binary" not in codes(row) and "binary_in_workspace" in codes(row)
+    (reason,) = [r for r in row["reasons"] if r["code"] == "binary_in_workspace"]
+    assert str(real) in reason["message"] and "inside the workspace" in reason["message"]
+    # Installed or not is undecided, so nothing is claimed either way.
+    assert row["enforcement_level"] == "unknown"
+    assert "codex-cli.binary" in payload["unknown"]
+    rc, out = env.run()
+    assert "not on PATH" not in out.split("Codex CLI (codex-cli)")[1].split("Claude Code")[0]
+    assert "inside the workspace" in out
+
+    from aegis_cli.hooks.management import generate_hook_block
+    hooks = env.ws / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    payload = env.doctor()
+    assert tier(payload, "local_floor")["status"] == "active"
+    # The floor holds for commits, but not for a host that may not be installed at all.
+    assert levels(payload) == {"codex-cli": "unknown", "claude-code": "local_floor", "antigravity": "local_floor"}
+
+
+def test_the_home_directory_is_never_a_governed_workspace(env, monkeypatch):
+    env.all_ok()
+    rules = env.home / ".aegis" / "rules" / "invariants"
+    rules.mkdir(parents=True)
+    (rules / "mine.md").write_text((env.ws / ".aegis" / "rules" / "invariants" / "invariant-sample.md")
+                                   .read_text(encoding="utf-8"), encoding="utf-8")
+    local_bin = env.home / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    os.replace(str(env.bin / _decoy_name("codex")), str(local_bin / _decoy_name("codex")))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(local_bin), str(env.bin)]))
+    payload = json.loads(env.run(json=True, workspace=str(env.home))[1])
+    assert payload["scope"]["workspace_governed"] is False
+    assert levels(payload) == dict.fromkeys(PHASE1, "none")
+    for row in payload["hosts"]:
+        (reason,) = [r for r in row["reasons"] if r["code"] == "workspace_not_governed"]
+        assert "home directory" in reason["message"]
+    codex = host(payload, "codex-cli")
+    assert codex["binary"]["ignored"] == [str(local_bin / _decoy_name("codex"))]
+    assert env.calls == []
+
+
+# ── a CLAUDE.md that is AGENTS.md (re-review finding 3) ─────────────────────
+
+def test_a_claude_md_linked_to_agents_md_reads_the_bootstrap(env):
+    from conftest import symlink_or_skip
+    env.all_ok()
+    symlink_or_skip("AGENTS.md", env.ws / "CLAUDE.md")
+    payload = env.doctor()
+    claude = host(payload, "claude-code")
+    assert claude["state"] == "ok", claude["reasons"]
+    assert claude["bootstrap"]["reaches_host"] is True
+    assert claude["enforcement_level"] == "advisory"
+    assert claude["budget"]["bytes"] == (env.ws / "AGENTS.md").stat().st_size  # one file, counted once
+    assert "claude_md_without_agents_import" not in finding_codes(payload)
+
+
+def test_a_claude_md_linked_elsewhere_without_the_import_is_still_a_gap(env):
+    from conftest import symlink_or_skip
+    env.all_ok()
+    (env.ws / "docs").mkdir()
+    (env.ws / "docs" / "notes.md").write_text("# Notes\n", encoding="utf-8")
+    symlink_or_skip(os.path.join("docs", "notes.md"), env.ws / "CLAUDE.md")
+    payload = env.doctor()
+    claude = host(payload, "claude-code")
+    assert claude["state"] == "policy_gap" and "claude_md_shadows_agents_md" in codes(claude)
+    (finding,) = [f for f in payload["findings"] if f["code"] == "claude_md_without_agents_import"]
+    # aegis init never writes through a link, so the advice cannot be "run aegis init".
+    assert "link" in finding["message"] and "notes.md" in finding["message"]
+    assert "aegis init to add" not in finding["message"]
+
+
+# ── the local floor outside a governed workspace (re-review low findings) ───
+
+def test_an_ungoverned_git_repository_is_not_called_a_non_repository(env, tmp_path):
+    from aegis_cli.hooks.management import generate_hook_block
+    env.all_ok()
+    bare = tmp_path / "bare"
+    hooks = bare / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    floor = tier(json.loads(env.run(json=True, workspace=str(bare))[1]), "local_floor")
+    assert floor["status"] == "inactive"
+    assert "not a git repository" not in floor["detail"] and ".aegis" in floor["detail"]
+
+    (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    payload = json.loads(env.run(json=True, workspace=str(bare))[1])
+    assert tier(payload, "local_floor")["status"] == "inactive"
+    assert levels(payload) == dict.fromkeys(PHASE1, "none")
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    floor = tier(json.loads(env.run(json=True, workspace=str(plain))[1]), "local_floor")
+    assert (floor["status"], floor["detail"]) == ("unavailable", "not a git repository")
+
+
+def test_an_active_local_floor_is_never_claimed_for_a_host_that_is_not_installed(env):
+    from aegis_cli.hooks.management import generate_hook_block
+    env.all_ok()
+    (env.bin / _decoy_name("agy")).unlink()
+    hooks = env.ws / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    payload = env.doctor()
+    assert tier(payload, "local_floor")["status"] == "active"
+    assert levels(payload) == {"codex-cli": "local_floor", "claude-code": "local_floor", "antigravity": "none"}
+
+
+# ── host CLIs on Windows never resolve programs from the cwd (low finding) ──
+
+def test_on_windows_host_cli_children_do_not_search_the_current_directory(monkeypatch):
+    seen: List[Dict[str, Any]] = []
+
+    def fake_run(argv, **kw):
+        seen.append(kw)
+        return subprocess.CompletedProcess(argv, 0, "3\n", "")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+    monkeypatch.setenv("PATH", "C:\\bin")
+    monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)  # some launchers set it
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    doctor._run_host_cli(["C:\\bin\\codex.cmd", "mcp", "get", "aegis", "--json"], cwd="C:\\repo", timeout=1.0)
+    monkeypatch.setattr(doctor, "_which", lambda name, path=None, outside=None: "C:\\bin\\python3.exe")
+    doctor.probe_mcp_launcher("C:\\bin")
+    assert len(seen) == 3  # codex, then python3's version and import probes
+    for kw in seen:
+        assert kw["env"]["NoDefaultCurrentDirectoryInExePath"] == "1"
+        assert kw["env"]["PATH"] == "C:\\bin"
+
+    seen.clear()
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    doctor._run_host_cli(["/usr/bin/codex"], cwd="/repo", timeout=1.0)
+    assert "NoDefaultCurrentDirectoryInExePath" not in (seen[0].get("env") or {})
