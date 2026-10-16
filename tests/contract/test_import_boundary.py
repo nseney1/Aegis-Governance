@@ -70,6 +70,8 @@ CORE_LAYERS: Dict[str, int] = {
     # (gitsafe, storage, pathlookup, governance): v4.3 human_gate.
     "aegis_core.governance": 1,
     "aegis_core.human_gate": 1,
+    # v4.3 T3: rank 2+ rules served from the reviewed BASE (the loader, the inventory, gitsafe), under scan.
+    "aegis_core.rule_integrity": 1,
     # v4.3 T2: `aegis doctor --release` (gitsafe, pathlookup, human_gate's tier).
     "aegis_core.release_verify": 2,
     "aegis_core.scan": 2,

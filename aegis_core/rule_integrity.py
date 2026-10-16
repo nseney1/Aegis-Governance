@@ -551,11 +551,17 @@ class CiReport:
         return not self.weakenings or (self.approval is not None and self.approval.valid)
 
     def as_dict(self, workspace: Any = None) -> Dict[str, Any]:
-        from aegis_core import baseline
+        from datetime import datetime, timezone
+
+        from aegis_core._version import __version__
 
         scope = {"machine": "local", "workspace": None if workspace is None else str(workspace), "mode": "ci",
                  "base": self.base, "head": self.head, "merge_base": self.merge_base}
-        document = baseline.envelope(SOURCE, scope)
+        # The envelope every machine-readable output carries (the same head as aegis_core.baseline.envelope,
+        # built here because this layer-1 module cannot import the layer-2 baseline).
+        document: Dict[str, Any] = {"source": SOURCE, "aegis_version": __version__,
+                                    "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                    "scope": scope}
         document.update(
             schema=SCHEMA,
             status="pass" if self.passed else "fail",
