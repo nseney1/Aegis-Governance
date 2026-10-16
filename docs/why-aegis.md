@@ -45,11 +45,11 @@ The itemized rows sum to 473 steps (63% of the waste). The other 276 steps happe
 
 *Source*: the evolution log, `docs/architecture/phylogeny.md` "Phase 2", and `docs/project/METRICS.md` "Aggregate Stats" (both at `v3.3.0`). *Caveat*: one session, one developer, classified by the project's own analysis with no second rater.
 
-**Cross-session patterns.** Comparing sessions across projects showed the failures were systemic. The worst session ran 1,579 steps with 8 architectural pivots, 2 safety incidents and zero subagent delegation, and produced zero working autonomous runs. It added rules on premature abstraction, pivot discipline (the Two-Pivot Halt), delegation floors and real-time loop budgets, which now live in [architectural-tenets](../rules/.oracles/architectural-tenets.md) and [subagent-delegation](../rules/subagent-delegation.md). It also added a desktop-automation safety rule, which v4 no longer ships ([build sheet](specs/v4-build-sheet.md) D16). *Source*: the evolution log, "Phase 3". *Caveat*: the author's own projects only.
+**Cross-session patterns.** Comparing sessions across projects showed the failures were systemic. The worst session ran 1,579 steps with 8 architectural pivots, 2 safety incidents and zero subagent delegation, and produced zero working autonomous runs. It added rules on premature abstraction, pivot discipline (the Two-Pivot Halt), delegation floors and real-time loop budgets, which now live in [architectural-tenets](../rules/.oracles/architectural-tenets.md) and [subagent-delegation](../rules/subagent-delegation.md). It also added a desktop-automation safety rule, which v4 no longer ships ([ADR 0005](adr/0005-v4-plan-of-record.md) D16). *Source*: the evolution log, "Phase 3". *Caveat*: the author's own projects only.
 
 ## 3. Design principles
 
-Principles C1–C6 emerged from that work and are listed in the evolution log ("Design Principles"). C7 was learned the hard way: the C7 key is defined in the [v4 build sheet](specs/v4-build-sheet.md), which cites all seven by these keys, and rests on [ADR 0005](adr/0005-v4-plan-of-record.md) H6 and AD-1.
+Principles C1–C6 emerged from that work and are listed in the evolution log ("Design Principles"). C7 was learned the hard way: the C7 key is defined in [ADR 0005](adr/0005-v4-plan-of-record.md) Appendix A, which cites all seven by these keys, and rests on [ADR 0005](adr/0005-v4-plan-of-record.md) H6 and AD-1.
 
 | Key | Principle | In one sentence |
 |---|---|---|
@@ -130,7 +130,7 @@ On 2026-10-14 the project rebranded, tagged v2.0.0, v2.1.0 and v3.0.0, then star
 
 A repository's `.aegis/slots.yaml` named AST-driver commands that `aegis check` executed, and its slot values were inlined into the scan output the agent reads (review H5).
 
-**v4**: one `.aegis/config.json`, and repository config cannot name commands or tool slots. Driver commands come only from packaged templates or user-scope config ([ADR 0005](adr/0005-v4-plan-of-record.md) §5 "Config"; [build sheet](specs/v4-build-sheet.md) D10; [ADR 0016](adr/0016-zero-touch-polyglot-genesis.md) status).
+**v4**: one `.aegis/config.json`, and repository config cannot name commands or tool slots. Driver commands come only from packaged templates or user-scope config ([ADR 0005](adr/0005-v4-plan-of-record.md) §5 "Config" and D10; [ADR 0016](adr/0016-zero-touch-polyglot-genesis.md) status).
 
 ```mermaid
 flowchart LR
@@ -176,7 +176,7 @@ Each v4 decision carries a falsifiable prediction (principle C6). A failed predi
 | AD-7 git-native team | In 20 multi-lane sessions, no cross-lane write conflict reaches a merge | Merge history; prune leases if none is denied in 30 days | No. `aegis team` and leases are v4.1 (wave D) |
 | AD-9 bootstrap and JIT | Scan-before-edit rate of at least 80% on each Phase-1 host after 3 sessions | The per-host scan-before-edit rate the server records | No. The metric lands with v4.0-c (wave C) and is not in the tree yet |
 
-New v4.1 and v4.2 features get a prune box before they merge ([build sheet](specs/v4-build-sheet.md) §3). Examples: lane leases are pruned after 0 denials in 30 days of multi-lane use; the test-integrity gate after 0 human-confirmed catches in 60 days; the benchmark after it catches no regression in 3 releases; an experimental host row after it stays unverified for 2 minor releases.
+New v4.1 and v4.2 features get a prune box before they merge ([ADR 0005](adr/0005-v4-plan-of-record.md) Appendix D). Examples: lane leases are pruned after 0 denials in 30 days of multi-lane use; the test-integrity gate after 0 human-confirmed catches in 60 days; the benchmark after it catches no regression in 3 releases; an experimental host row after it stays unverified for 2 minor releases.
 
 ## 8. Trade-offs
 
@@ -198,7 +198,7 @@ The trade Aegis does not make: it does not claim enforcement it lacks. CI on eve
 
 ## Sources
 
-**Decision records**: [ADR 0005](adr/0005-v4-plan-of-record.md) (plan of record), its [evidence review](adr/0005-evidence-review.md), [ADR 0003](adr/0003-v3-clean-slate-and-cli-ux.md), [ADR 0012](adr/0012-zero-dependency-frontmatter-engine.md)–[0016](adr/0016-zero-touch-polyglot-genesis.md), and the [v4 build sheet](specs/v4-build-sheet.md).
+**Decision records**: [ADR 0005](adr/0005-v4-plan-of-record.md) (plan of record), its [evidence review](adr/0005-evidence-review.md), [ADR 0003](adr/0003-v3-clean-slate-and-cli-ux.md), [ADR 0007](adr/0007-host-plane.md) (the host plane), and [ADR 0012](adr/0012-zero-dependency-frontmatter-engine.md)–[0016](adr/0016-zero-touch-polyglot-genesis.md). ADR 0005's appendices hold the delegated decisions D1–D23 and the v4.1/v4.2 scope, which lived in a separate build sheet during the build.
 
 **Deleted documents quoted here**, readable from the v3.3.0 release tag with `git show v3.3.0:<path>` (all four are byte-identical at `895bbf5`; `git diff --stat v3.3.0 895bbf5 -- <the four paths>` prints nothing):
 
