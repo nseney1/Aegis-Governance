@@ -603,13 +603,17 @@ def test_claude_budget_counts_agents_md_only_when_claude_md_imports_it(env):
     assert budget["file"] == "CLAUDE.md + AGENTS.md" and budget["within"] is False
 
 
-def test_a_registration_waiting_for_approval_is_not_counted_as_advisory(env):
+def test_a_registration_waiting_for_an_approval_doctor_cannot_see_has_an_unknown_level(env):
     env.claude_registered()
     env.claude_json({})
     (env.ws / ".mcp.json").write_text(json.dumps({"mcpServers": {"aegis": {"command": str(env.mcp)}}}))
-    row = host(env.doctor(), "claude-code")
+    payload = env.doctor()
+    row = host(payload, "claude-code")
     assert row["state"] == "auth_unknown"
-    assert row["enforcement_level"] == "none"  # no bootstrap either: nothing is known to reach it
+    # No bootstrap, and whether the server loads waits on an approval doctor cannot read:
+    # never counted as advisory, and not claimed absent either.
+    assert row["enforcement_level"] == "unknown"
+    assert tier(payload, "advisory")["status"] != "active"
 
 
 def test_a_host_doctor_cannot_check_yet_is_never_reported_ok(env):
@@ -620,3 +624,276 @@ def test_a_host_doctor_cannot_check_yet_is_never_reported_ok(env):
     assert row["registration"]["status"] == "unavailable"
     assert row["state"] == "auth_unknown" and "registration_unverifiable" in codes(row)
     assert row["verified_row"] is False
+
+
+def tier(payload: Dict[str, Any], name: str) -> Dict[str, Any]:
+    return next(t for t in payload["enforcement_tiers"] if t["tier"] == name)
+
+
+def levels(payload: Dict[str, Any]) -> Dict[str, str]:
+    return {h["id"]: h["enforcement_level"] for h in payload["hosts"]}
+
+
+def _strings(value: Any):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _strings(key)
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+# ── programs the repository supplies (review finding 1) ─────────────────────
+
+def _decoy(directory: Path, name: str, marker: Path) -> Path:
+    """An executable that records that it ran; doctor must never start it."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / (name + (".exe" if os.name == "nt" else ""))
+    path.write_text(f"#!/bin/sh\necho ran >> '{marker}'\necho 3\nexit 0\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def _path_with(env: Env, layout: str) -> str:
+    """PATH variants that name the workspace: the current directory (Windows searches it
+    whatever PATH says), an empty or relative entry, or an absolute entry inside it."""
+    entries = {"cwd_only": [], "empty_entry": [""], "relative_entry": ["."],
+               "entry_inside_workspace": [str(env.ws / "tools")]}[layout]
+    return os.pathsep.join(entries + [str(env.bin)])
+
+
+LAYOUTS = ["cwd_only", "empty_entry", "relative_entry", "entry_inside_workspace"]
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_a_codex_in_the_workspace_is_never_found_or_run(env, monkeypatch, tmp_path, layout):
+    env.claude_registered()
+    env.antigravity_registered()
+    env.register_workspace()
+    env.bootstrap()
+    marker = tmp_path / "decoy-ran"
+    for where in (env.ws, env.ws / "tools"):
+        _decoy(where, "codex", marker)
+    monkeypatch.chdir(env.ws)
+    monkeypatch.setenv("PATH", _path_with(env, layout))
+    row = host(env.doctor(), "codex-cli")
+    assert env.calls == [], "doctor started a codex the repository supplied"
+    assert row["binary"] == {"found": False, "path": None, "names": ["codex"]}
+    assert row["state"] == "missing_binary"
+
+
+@pytest.mark.parametrize("entry", ["", "."])
+def test_a_relative_path_entry_never_names_a_codex_even_outside_the_workspace(env, monkeypatch, tmp_path, entry):
+    # doctor --workspace REPO run from another untrusted directory: the current directory
+    # is not the workspace, and an empty or relative PATH entry still names it.
+    env.claude_registered()
+    env.antigravity_registered()
+    env.register_workspace()
+    env.bootstrap()
+    elsewhere = tmp_path / "downloads"
+    _decoy(elsewhere, "codex", tmp_path / "decoy-ran")
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("PATH", os.pathsep.join([entry, str(env.bin)]))
+    row = host(env.doctor(), "codex-cli")
+    assert env.calls == []
+    assert row["binary"]["found"] is False and row["state"] == "missing_binary"
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_the_codex_probe_runs_the_absolute_codex_outside_the_workspace(env, monkeypatch, tmp_path, layout):
+    env.all_ok()
+    marker = tmp_path / "decoy-ran"
+    for where in (env.ws, env.ws / "tools"):
+        _decoy(where, "codex", marker)
+    monkeypatch.chdir(env.ws)
+    monkeypatch.setenv("PATH", _path_with(env, layout))
+    assert host(env.doctor(), "codex-cli")["state"] == "ok"
+    (call,) = env.calls
+    assert os.path.isabs(call["argv"][0])
+    assert Path(call["argv"][0]).parent == env.bin
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_the_mcp_launcher_check_never_runs_a_python3_from_the_workspace(env, monkeypatch, tmp_path, layout):
+    env.all_ok()
+    marker = tmp_path / "decoy-ran"
+    for where in (env.ws, env.ws / "tools"):
+        _decoy(where, "python3", marker)
+    monkeypatch.chdir(env.ws)
+    monkeypatch.setenv("PATH", _path_with(env, layout))
+    payload = env.doctor()
+    (check,) = [c for c in payload["checks"] if c["id"] == "mcp_launcher"]
+    assert not marker.exists(), "doctor ran a python3 the repository supplied"
+    assert check["status"] == "warn" and "python3 not found on PATH" in " ".join(check["detail"])
+
+
+# ── honest enforcement levels (review finding 2) ────────────────────────────
+
+def test_an_ungoverned_workspace_has_no_enforcement_even_where_aegis_is_registered(env, tmp_path):
+    env.all_ok()
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    payload = json.loads(env.run(json=True, workspace=str(bare))[1])
+    assert {h["state"] for h in payload["hosts"]} == {"policy_gap"}
+    assert levels(payload) == dict.fromkeys(PHASE1, "none")
+    assert tier(payload, "advisory")["status"] == "inactive"
+
+
+def test_a_host_that_is_not_installed_has_no_enforcement(env):
+    env.all_ok()
+    (env.bin / ("agy" + (".exe" if os.name == "nt" else ""))).unlink()
+    payload = env.doctor()
+    assert host(payload, "antigravity")["state"] == "missing_binary"
+    assert levels(payload) == {"codex-cli": "advisory", "claude-code": "advisory", "antigravity": "none"}
+    advisory = tier(payload, "advisory")
+    assert advisory["status"] == "partial" and "antigravity" not in advisory["detail"]
+
+
+def test_a_bootstrap_the_host_drops_for_size_is_not_advisory(env):
+    env.all_ok()
+    (env.home / ".gemini" / "config" / "mcp_config.json").write_text(json.dumps({"mcpServers": {}}))
+    env.bootstrap(after=("x" * 99 + "\n") * 300)  # ~30 KB: over Antigravity's per-file budget
+    payload = env.doctor()
+    agy = host(payload, "antigravity")
+    assert agy["state"] == "unregistered" and "over_budget" in codes(agy)
+    assert agy["enforcement_level"] == "none"
+    assert tier(payload, "advisory")["status"] == "partial"
+
+
+def test_antigravity_without_a_registered_workspace_has_no_enforcement(env):
+    env.all_ok()
+    (env.home / ".aegis" / "workspaces.json").unlink()
+    payload = env.doctor()
+    assert host(payload, "antigravity")["registration"]["status"] == "registered"
+    # The server cannot find this repository, and the bootstrap sends the agent to it.
+    assert levels(payload) == {"codex-cli": "advisory", "claude-code": "advisory", "antigravity": "none"}
+    assert tier(payload, "advisory")["status"] == "partial"
+
+
+def test_the_advisory_tier_is_active_only_when_every_selected_host_is_advisory(env):
+    env.all_ok()
+    payload = env.doctor()
+    assert levels(payload) == dict.fromkeys(PHASE1, "advisory")
+    advisory = tier(payload, "advisory")
+    assert advisory["status"] == "active"
+    assert advisory["detail"] == "reaches codex-cli, claude-code, antigravity"
+
+
+# ── an unreadable registry; the checks-only verdict (review finding 5) ──────
+
+def test_an_unreadable_registry_leaves_antigravity_auth_unknown_never_ok(env):
+    env.all_ok()
+    (env.home / ".aegis" / "workspaces.json").write_text("{not json", encoding="utf-8")
+    payload = env.doctor()
+    agy = host(payload, "antigravity")
+    assert agy["state"] == "auth_unknown" and "workspace_registry_unknown" in codes(agy)
+    assert agy["workspace_registered"] is None
+    assert agy["enforcement_level"] == "unknown"
+    # Codex and Claude Code attest their workspace: the registry is not how they find it.
+    assert host(payload, "codex-cli")["state"] == "ok"
+    advisory = tier(payload, "advisory")
+    assert advisory["status"] == "partial" and "antigravity" in advisory["detail"]
+    assert "unreadable_config" in finding_codes(payload)
+
+
+def test_the_json_verdict_is_named_for_the_checks_it_covers(env):
+    # Every host unregistered, yet no blocking check fails: the verdict must not read as
+    # "the hosts are fine".
+    env.bootstrap()
+    payload = env.doctor()
+    assert {h["state"] for h in payload["hosts"]} == {"missing_binary"}
+    assert "ok" not in payload
+    assert payload["checks_ok"] is True and payload["_rc"] == 0
+
+
+# ── control sequences from files and host output (review finding 3) ─────────
+
+def test_repository_and_host_strings_reach_the_terminal_without_control_sequences(env):
+    env.all_ok()
+    env.claude_json({"mcpServers": {}})
+    (env.ws / ".mcp.json").write_text(json.dumps({"mcpServers": {"aegis": {
+        "command": "\x1b[2J\x1b[31mFAKE-OK", "args": ["\x1b]0;pwn\x07"],
+        "env": {"AEGIS_CLIENT": "\x1b]0;pwn\x07claude-code\x1b[0m"}}}}), encoding="utf-8")
+    env.replies["codex"] = (1, "", "\x1b[2J\x1b]0;title\x07thread 'main' panicked\n")
+    rc, out = env.run()
+    assert "\x1b" not in out and "\x07" not in out
+    assert "FAKE-OK" in out and "panicked" in out  # the text is shown; its control sequences are not
+
+    payload = env.doctor()
+    bad = [s for s in _strings(payload) if any(ord(c) < 0x20 and c not in "\n" or 0x7f <= ord(c) <= 0x9f
+                                              for c in s)]
+    assert bad == []
+    claude = host(payload, "claude-code")
+    assert claude["registration"]["command"][0] == "FAKE-OK"
+    # The server sees the raw value, which is not "claude-code": cleaning it for display
+    # must not turn it into a match.
+    assert claude["identity"] == {"status": "mismatch", "aegis_client": "claude-code"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows file names cannot hold control characters")
+def test_a_workspace_path_with_control_sequences_is_reported_without_them(env, tmp_path):
+    import shutil
+    hostile = tmp_path / "repo\x1b[2J\x1b]0;pwn\x07"
+    shutil.copytree(str(env.ws), str(hostile))
+    (hostile / "CLAUDE.md").write_text("@AGENTS.md\n<!-- SOMA:START -->\nold\n<!-- SOMA:END -->\nmine\n",
+                                       encoding="utf-8")
+    payload = json.loads(env.run(json=True, workspace=str(hostile))[1])
+    (finding,) = [f for f in payload["findings"] if f["code"] == "legacy_block"]
+    assert "\x1b" not in finding["message"] and "\x07" not in finding["message"]
+    assert "legacy Aegis/Soma rules block" in finding["message"]
+    rc, out = env.run(workspace=str(hostile))
+    warnings = out[out.index("Warnings:"):]
+    assert "\x1b" not in warnings and "\x07" not in warnings
+
+
+# ── what the file says, not what a regex sees (review finding 6) ────────────
+
+@pytest.mark.parametrize("claude_md", [
+    "Use the `@AGENTS.md` syntax to import it.\n",
+    "Example:\n\n```\n@AGENTS.md\n```\n",
+    "~~~md\n@AGENTS.md\n~~~\n",
+])
+def test_an_import_inside_code_is_not_an_import(env, claude_md):
+    env.all_ok()
+    (env.ws / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
+    payload = env.doctor()
+    claude = host(payload, "claude-code")
+    assert claude["state"] == "policy_gap" and "claude_md_shadows_agents_md" in codes(claude)
+    assert "claude_md_without_agents_import" in finding_codes(payload)
+
+
+def test_a_byte_order_mark_before_the_bootstrap_block_is_not_a_broken_block(env):
+    env.all_ok()
+    agents = env.ws / "AGENTS.md"
+    agents.write_bytes(b"\xef\xbb\xbf" + agents.read_bytes())
+    payload = env.doctor()
+    assert {h["bootstrap"]["status"] for h in payload["hosts"]} == {"current"}
+    assert {h["state"] for h in payload["hosts"]} == {"ok"}
+
+
+def test_legacy_markers_shown_inside_a_code_fence_are_not_a_block(env):
+    env.all_ok()
+    (env.ws / "CLAUDE.md").write_text(
+        "@AGENTS.md\n\nThe v3 block looked like this:\n\n```md\n<!-- SOMA:START -->\nrules\n"
+        "<!-- SOMA:END -->\n```\n", encoding="utf-8")
+    assert "legacy_block" not in finding_codes(env.doctor())
+
+
+def test_a_legacy_block_with_an_unclosed_fence_inside_is_still_one_block(env):
+    env.all_ok()
+    path = env.ws / "CLAUDE.md"
+    path.write_text("@AGENTS.md\n<!-- SOMA:START -->\n```python\nunclosed\n<!-- SOMA:END -->\nmine\n",
+                    encoding="utf-8")
+    (finding,) = [f for f in env.doctor()["findings"] if f["code"] == "legacy_block"]
+    assert finding["fixable"] is True and finding["location"] == "lines 2-5"
+
+
+def test_a_byte_order_mark_before_a_legacy_block_is_still_a_fixable_block(env):
+    env.all_ok()
+    path = env.ws / "GEMINI.md"
+    path.write_bytes(b"\xef\xbb\xbf<!-- SOMA:START -->\nrules\n<!-- SOMA:END -->\nmine\n")
+    (finding,) = [f for f in env.doctor()["findings"] if f["code"] == "legacy_block"]
+    assert finding["fixable"] is True and finding["location"] == "lines 1-3"

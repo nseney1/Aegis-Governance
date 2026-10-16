@@ -21,6 +21,13 @@ def isolated_hosts(tmp_path, monkeypatch):
         raise OSError("host CLIs are not run in these tests")
 
     monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
+    # Host CLIs and python3 are looked up in an empty private directory, never on this
+    # machine's PATH (doctor's own lookup; shutil.which patches do not reach it).
+    no_programs = tmp_path / "no-programs"
+    no_programs.mkdir()
+    real_which = doctor._which
+    monkeypatch.setattr(doctor, "_which", lambda name, path=None, outside=None:
+                        real_which(name, str(no_programs), outside))
     return home
 
 

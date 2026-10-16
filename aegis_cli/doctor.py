@@ -10,8 +10,8 @@ Each host gets one state, the first of these that applies:
 - ``missing_binary``: none of its binaries is on PATH;
 - ``unregistered``: its config has no ``aegis`` server, or the registered command is gone;
 - ``auth_unknown``: doctor cannot confirm the host will load ``aegis`` (its CLI failed or
-  timed out, its config cannot be parsed, or the registration waits on an approval doctor
-  cannot see);
+  timed out, its config cannot be parsed, the registration waits on an approval doctor
+  cannot see, or a host that sends no workspace depends on an unreadable registry);
 - ``policy_gap``: ``aegis`` loads, but this repository's policy does not fully reach the
   host (no or broken bootstrap, a CLAUDE.md or AGENTS.override.md shadowing AGENTS.md, a
   file the host truncates, an unregistered workspace for a host without roots, a disabled
@@ -20,9 +20,17 @@ Each host gets one state, the first of these that applies:
 
 ``--json`` prints one ``aegis.doctor/v1`` document: ``schema``, ``source``, ``aegis_version``,
 ``checked_at`` (UTC), ``scope``, ``stale`` and ``unknown`` (fields doctor could not
-determine), ``checks``, ``hosts`` (each with ``state``, ``reasons``, the matrix facts,
+determine), ``checks_ok`` (no blocking check failed; it says nothing about the hosts),
+``checks``, ``hosts`` (each with ``state``, ``reasons``, the matrix facts,
 ``enforcement_level`` and ``trust_tier``, reserved as null until v4.3), ``enforcement_tiers``,
 ``findings``, and with ``--fix`` the ``fixes`` it applied and its ``backup_dir``.
+
+``enforcement_level`` is the strongest tier known to be in force for the host here:
+``local_floor``, ``advisory``, ``none`` (an ungoverned workspace, a host not installed,
+or no route by which aegis or its bootstrap reaches the agent) or ``unknown`` (a fact
+that decides it cannot be read). Strings taken from files or host output are reported
+without control sequences, and doctor starts only programs found in absolute PATH
+entries outside the workspace.
 
 ``--fix`` changes only what a finding reported as fixable, after confirmation (``--yes``
 skips it). Every file is first copied to ``~/.aegis/backups/<UTC stamp>/`` with a manifest;
@@ -146,6 +154,52 @@ def _check_cli_resolvable() -> bool:
     return False
 
 
+# ── Programs doctor starts ───────────────────────────────────────────────────
+
+def _exe_names(name: str) -> List[str]:
+    if sys.platform != "win32":
+        return [name]
+    exts = [e for e in (os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(os.pathsep) if e]
+    if os.path.splitext(name)[1].upper() in {e.upper() for e in exts}:
+        return [name]
+    return [name + e for e in exts]
+
+
+def _which(name: str, path: Optional[str] = None, outside: Optional[Path] = None) -> Optional[str]:
+    """``shutil.which`` restricted to absolute PATH entries that are not inside ``outside``.
+
+    Doctor runs in a repository the user may just have cloned, and it starts what this
+    finds (``codex mcp get``, ``python3 -c``). An empty or relative PATH entry names the
+    current directory, shutil.which on Windows searches the current directory first
+    whatever ``path=`` says, and an absolute entry inside the workspace is the
+    repository's own: each would let the repository choose the program a read-only
+    command runs.
+    """
+    search = os.environ.get("PATH", os.defpath) if path is None else path
+    fence = _root_key(outside) if outside is not None else None
+    for entry in search.split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        if fence is not None and _inside(_root_key(entry), fence):
+            continue
+        for candidate in _exe_names(name):
+            full = os.path.join(entry, candidate)
+            if os.path.isfile(full) and os.access(full, os.X_OK):
+                return full
+    return None
+
+
+def _inside(path_key: str, root_key: str) -> bool:
+    return path_key == root_key or path_key.startswith(root_key.rstrip(os.sep) + os.sep)
+
+
+def _clean(text: Any, limit: int = 512) -> str:
+    """A string from a file or a host's output, safe to print: no escape or control sequences."""
+    from aegis_cli import sanitize_display
+
+    return sanitize_display(str(text), max_len=limit)
+
+
 # ── MCP launcher ─────────────────────────────────────────────────────────────
 
 # MCP configs start the server as `python3 -m aegis_mcp`. The import probe runs
@@ -155,14 +209,16 @@ _IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __im
 
 
 def probe_mcp_launcher(path_env: str | None = None,
-                       timeout: float = 10.0) -> tuple[str, str]:
+                       timeout: float = 10.0,
+                       workspace: Optional[Path] = None) -> tuple[str, str]:
     """Resolve `python3` from PATH like an MCP host and classify it.
 
-    Returns (status, detail); status is one of ok, missing, store_stub,
-    broken, no_aegis_mcp.
+    Only absolute PATH entries outside ``workspace`` count (see ``_which``): the probe
+    runs what it finds. Returns (status, detail); status is one of ok, missing,
+    store_stub, broken, no_aegis_mcp.
     """
     path_env = os.environ.get("PATH", "") if path_env is None else path_env
-    exe = shutil.which("python3", path=path_env)
+    exe = _which("python3", path_env, outside=workspace)
     if not exe:
         return "missing", "python3 is not on PATH"
 
@@ -198,9 +254,9 @@ def probe_mcp_launcher(path_env: str | None = None,
     return "ok", exe
 
 
-def _check_mcp_launcher(path_env: str | None = None) -> bool:
+def _check_mcp_launcher(path_env: str | None = None, workspace: Optional[Path] = None) -> bool:
     """Advisory: report whether `python3 -m aegis_mcp` would start."""
-    status, detail = probe_mcp_launcher(path_env)
+    status, detail = probe_mcp_launcher(path_env, workspace=workspace)
     if status == "ok":
         print(f"  ✅ MCP launcher: python3 ({detail}) runs and imports aegis_mcp")
         return True
@@ -461,7 +517,7 @@ def _parse_json(entry: _File) -> _File:
         return entry
     try:
         text = entry.raw.decode("utf-8")
-        if text.startswith("﻿"):
+        if text.startswith("\ufeff"):
             raise ValueError("starts with a byte-order mark")
         entry.data = json.loads(text, object_pairs_hook=_strict_pairs, parse_constant=_reject_constant)
     except (UnicodeDecodeError, ValueError) as exc:
@@ -490,7 +546,7 @@ class _Ctx:
         return self.environ.get("PATH", "")
 
     def which(self, name: str) -> Optional[str]:
-        return shutil.which(name, path=self.path_env)
+        return _which(name, self.path_env, outside=self.root)
 
     def file(self, path: Path, as_json: bool = False) -> _File:
         key = (os.path.abspath(str(path)), as_json)
@@ -564,14 +620,20 @@ def _registration(status: str, source: str, **facts: Any) -> Dict[str, Any]:
 
 
 def _entry_facts(entry: Any, ctx: _Ctx) -> Dict[str, Any]:
-    """Command, AEGIS_CLIENT and enabled flag of one MCP server entry."""
+    """Command, AEGIS_CLIENT and enabled flag of one MCP server entry.
+
+    The strings come from files a repository can write (a project .mcp.json), so the
+    command is reported without control sequences; the existence check uses it as
+    written, and AEGIS_CLIENT stays raw for the identity decision (``_identity`` cleans
+    what it reports), since the server sees the raw value.
+    """
     facts: Dict[str, Any] = {}
     if not isinstance(entry, dict):
         return facts
     command = entry.get("command")
     if isinstance(command, str) and command:
         args = entry.get("args") if isinstance(entry.get("args"), list) else []
-        facts["command"] = [command] + [str(a) for a in args]
+        facts["command"] = [_clean(command)] + [_clean(a) for a in args]
         facts["command_exists"] = _command_exists(command, ctx)
     env = entry.get("env")
     if isinstance(env, dict) and isinstance(env.get("AEGIS_CLIENT"), str):
@@ -605,7 +667,7 @@ def _probe_codex(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
         said = ((proc.stderr or "") + (proc.stdout or "")).strip()
         if _CODEX_ABSENT.search(said):
             return _registration("absent", source)
-        first = said.splitlines()[0][:200] if said else "no output"
+        first = _clean(said.splitlines()[0], 200) if said else "no output"
         return _registration("unknown", source, detail=f"codex exited {proc.returncode}: {first}")
     try:
         data = json.loads(proc.stdout)
@@ -704,6 +766,31 @@ _BLOCK_BEGIN = re.compile(r"^<!-- aegis:begin id=(\S+) v=(\S+) sha=(\S+) -->[ \t
 _BLOCK_END = re.compile(r"^<!-- aegis:end id=(\S+) -->[ \t]*$")
 _HEX12 = re.compile(r"^[0-9a-f]{12}$")
 _IMPORTS_AGENTS = re.compile(r"(?<![\w@/.\-])@(?:\./)?AGENTS\.md\b")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_CODE_SPAN = re.compile(r"(`+).+?\1")
+_BOM = "\ufeff"
+
+
+def _fence_step(fence: Optional[Tuple[str, int]], line: str) -> Optional[Tuple[str, int]]:
+    """The fenced-code state after ``line``: None outside a fence, else (fence char, length)."""
+    match = _FENCE.match(line)
+    if fence is None:
+        return (match.group(1)[0], len(match.group(1))) if match else None
+    closes = (match is not None and match.group(1)[0] == fence[0] and len(match.group(1)) >= fence[1]
+              and not line[match.end():].strip())
+    return None if closes else fence
+
+
+def _prose(text: str) -> str:
+    """``text`` without fenced code blocks and inline code spans, where Claude Code
+    evaluates no ``@`` import."""
+    out, fence = [], None
+    for line in text.splitlines():
+        inside = fence is not None
+        fence = _fence_step(fence, line)
+        if not inside and fence is None:
+            out.append(_CODE_SPAN.sub(" ", line))
+    return "\n".join(out)
 
 
 @dataclass
@@ -720,8 +807,10 @@ class _Instructions:
 def _bootstrap_state(text: str) -> Tuple[str, Optional[int]]:
     from aegis_core.bootstrap import BOOTSTRAP_ID, bootstrap_text
 
-    lines = text.splitlines(True)
-    begins, ends, offset, end_at = [], [], 0, None
+    # aegis init keeps a byte-order mark it finds, so the block can start right after one.
+    bom = text.startswith(_BOM)
+    lines = text[1:].splitlines(True) if bom else text.splitlines(True)
+    begins, ends, offset, end_at = [], [], len(_BOM.encode("utf-8")) if bom else 0, None
     for index, line in enumerate(lines):
         offset += len(line.encode("utf-8"))
         bare = line.rstrip("\r\n")
@@ -760,7 +849,7 @@ def _instructions(ctx: _Ctx) -> _Instructions:
     if claude.raw is not None:
         info.claude_md = claude.path
         info.claude_bytes = len(claude.raw)
-        info.claude_imports_agents = bool(_IMPORTS_AGENTS.search(claude.raw.decode("utf-8", errors="replace")))
+        info.claude_imports_agents = bool(_IMPORTS_AGENTS.search(_prose(claude.raw.decode("utf-8", errors="replace"))))
     info.override = (ctx.root / "AGENTS.override.md").exists()
     return info
 
@@ -822,7 +911,65 @@ def _identity(spec: Any, reg: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "client_info" if known else "unknown", "aegis_client": None}
     if set(client) == {"*"}:
         return {"status": "unknown", "aegis_client": None}
-    return {"status": "mismatch", "aegis_client": client}
+    return {"status": "mismatch", "aegis_client": _clean(client, 128)}
+
+
+def _any(*facts: Optional[bool]) -> Optional[bool]:
+    """Three-valued or: True if one fact holds, None if none holds but one is unknown."""
+    return True if True in facts else (None if None in facts else False)
+
+
+def _all(*facts: Optional[bool]) -> Optional[bool]:
+    """Three-valued and: False if one fact fails, None if none fails but one is unknown."""
+    return False if False in facts else (None if None in facts else True)
+
+
+def _mcp_loads(reg: Dict[str, Any]) -> Optional[bool]:
+    """Whether the host starts the aegis server: None when doctor cannot tell."""
+    if reg["status"] == "absent":
+        return False
+    if reg["status"] != "registered":
+        return None
+    if reg["command_exists"] is False or reg["enabled"] is False or reg["approval"] == "denied":
+        return False
+    if reg["command_exists"] is None or reg["approval"] == "unknown":
+        return None
+    return True
+
+
+def _advisory(spec: Any, ctx: _Ctx, binary: Optional[str], reg: Dict[str, Any], bootstrap: Optional[bool],
+              workspace_registered: Optional[bool]) -> Optional[bool]:
+    """Whether the advisory tier reaches this host here; None when a deciding fact is unknown.
+
+    It needs rules to serve (a governed workspace), the host on this machine and a route
+    to its agent: the server loading in the host, or the bootstrap arriving whole
+    (``bootstrap`` is False when the host cuts it). A host that sends no workspace finds
+    the repository only through the registry, and its bootstrap sends the agent to that
+    server, so it needs this workspace registered as well.
+    """
+    if not ctx.governed or binary is None:
+        return False
+    route = _any(_mcp_loads(reg), False if spec.instructions == "none" else bootstrap)
+    if spec.id in _REGISTRY_BOUND:
+        return _all(workspace_registered, route)
+    return route
+
+
+def _level(advisory: Optional[bool], floor: str, present: bool) -> str:
+    """The strongest tier known to be in force for one host (AD-8), never a guess.
+
+    ``present``: the workspace is governed and the host is installed; otherwise nothing
+    is enforced on it here. The local floor holds for every commit made through git.
+    """
+    if not present:
+        return "none"
+    if floor == "active":
+        return "local_floor"
+    if advisory is True:
+        return "advisory"
+    if advisory is None or floor == "unknown":
+        return "unknown"
+    return "none"
 
 
 def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], floor: str) -> Dict[str, Any]:
@@ -833,7 +980,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     unknown: List[str] = []
 
     def add(code: str, message: str) -> None:
-        reasons.append({"code": code, "message": message})
+        reasons.append({"code": code, "message": _clean(message, 1024)})
 
     names = " or ".join(f"`{b}`" for b in spec.binaries) or "a binary"
     if binary is None:
@@ -865,6 +1012,10 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
 
     budget = _budget(spec, info)
     reaches = _bootstrap_reaches(spec, info)
+    # The host keeps too little of its instruction file for the bootstrap to arrive whole.
+    cut = budget["within"] is False and info.bootstrap != "missing" and (
+        spec.id in _DROPS_OVER_BUDGET
+        or (spec.id in _TRUNCATES_TAIL and (info.block_end or 0) > budget["budget_bytes"]))
     workspace_registered = None if roots is None else _root_key(ctx.root) in roots
     if roots is None:
         unknown.append("workspace_registered")
@@ -883,32 +1034,31 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
                                                "not read AGENTS.md: run aegis init to add the import")
         if spec.id in _READS_AGENTS_OVERRIDE and info.override:
             add("agents_override_shadows_agents_md", "AGENTS.override.md replaces AGENTS.md for Codex")
-        if budget["within"] is False and info.bootstrap != "missing":
-            cut = (spec.id in _DROPS_OVER_BUDGET
-                   or (spec.id in _TRUNCATES_TAIL and (info.block_end or 0) > budget["budget_bytes"]))
-            if cut:
-                add("over_budget", f"{budget['file']} is {budget['bytes']} bytes; {spec.display_name} reads "
-                                   f"{budget['budget_bytes']} and the Aegis block may not reach it")
+        if cut:
+            add("over_budget", f"{budget['file']} is {budget['bytes']} bytes; {spec.display_name} reads "
+                               f"{budget['budget_bytes']} and the Aegis block may not reach it")
         if spec.id in _REGISTRY_BOUND and workspace_registered is False:
             add("workspace_unregistered", f"{spec.display_name} sends no workspace, so aegis finds this "
                                           f"repository only through ~/.aegis/workspaces.json: run aegis init")
+        elif spec.id in _REGISTRY_BOUND and workspace_registered is None:
+            add("workspace_registry_unknown", f"{spec.display_name} sends no workspace and "
+                                              "~/.aegis/workspaces.json cannot be read, so doctor cannot tell "
+                                              "whether aegis finds this repository")
 
     codes = {r["code"] for r in reasons}
     if "missing_binary" in codes:
         state = "missing_binary"
     elif codes & {"not_registered", "command_missing"}:
         state = "unregistered"
-    elif codes & {"registration_unverifiable", "approval_unknown"}:
+    elif codes & {"registration_unverifiable", "approval_unknown", "workspace_registry_unknown"}:
         state = "auth_unknown"
     elif codes:
         state = "policy_gap"
     else:
         state = "ok"
 
-    loads = (status == "registered" and reg["command_exists"] is not False and reg["enabled"] is not False
-             and reg["approval"] in (None, "approved"))
-    advisory = bool(loads or reaches)
-    level = "local_floor" if floor == "active" else ("advisory" if advisory else "none")
+    advisory = _advisory(spec, ctx, binary, reg, False if cut else reaches, workspace_registered)
+    level = _level(advisory, floor, ctx.governed and binary is not None)
     shown = {k: v for k, v in reg.items() if k != "aegis_client"}
     return {
         "id": spec.id,
@@ -961,8 +1111,15 @@ _TIER_TEXT = {
 
 def _tiers(rows: List[Dict[str, Any]], floor: str) -> List[Dict[str, Any]]:
     ids = [r["id"] for r in rows]
-    reached = [r["id"] for r in rows if r["advisory"]]
-    advisory = "active" if ids and len(reached) == len(ids) else ("partial" if reached else "inactive")
+    reached = [r["id"] for r in rows if r["advisory"] is True]
+    unsure = [r["id"] for r in rows if r["advisory"] is None]
+    if ids and len(reached) == len(ids):
+        advisory = "active"
+    else:
+        advisory = "partial" if reached else ("unknown" if unsure else "inactive")
+    reach = f"reaches {', '.join(reached) or 'no selected host'}"
+    if unsure:
+        reach += f"; unknown for {', '.join(unsure)}"
     floor_detail = {
         "active": "the Aegis pre-commit hook is installed and current",
         "inactive": "no Aegis pre-commit hook: run aegis hook install",
@@ -972,7 +1129,7 @@ def _tiers(rows: List[Dict[str, Any]], floor: str) -> List[Dict[str, Any]]:
     }[floor]
     return [
         {"tier": "advisory", "mechanism": _TIER_TEXT["advisory"][1], "hosts": ids, "status": advisory,
-         "detail": f"reaches {', '.join(reached) or 'no selected host'}"},
+         "detail": reach},
         {"tier": "best_effort", "mechanism": _TIER_TEXT["best_effort"][1], "hosts": [], "status": "unavailable",
          "detail": "per-host hooks ship in v4.1 (Claude Code can block; Codex fails open)"},
         {"tier": "local_floor", "mechanism": _TIER_TEXT["local_floor"][1], "hosts": ids, "status": floor,
@@ -1005,6 +1162,10 @@ class _Finding:
     severity: str = "warning"
     action: Optional[_Action] = None
 
+    def __post_init__(self) -> None:
+        # Messages quote paths, keys and parser errors from files a repository can write.
+        self.message = _clean(self.message, 4096)
+
     @property
     def fixable(self) -> bool:
         return self.action is not None
@@ -1015,12 +1176,13 @@ class _Finding:
 
 
 def _location(keys: Tuple[str, ...]) -> str:
+    """Where a key is, for people: the keys (project paths among them) without control sequences."""
     out = []
     for key in keys:
         if out and out[-1] == "projects":
-            out[-1] = f"projects[{key}]"
+            out[-1] = f"projects[{_clean(key)}]"
         else:
-            out.append(key)
+            out.append(_clean(key))
     return ".".join(out)
 
 
@@ -1099,10 +1261,22 @@ _LEGACY_MARKER = re.compile(r"^<!-- (SOMA|AEGIS):(START|END) -->[ \t]*$")
 
 
 def _legacy_ranges(text: str) -> Tuple[List[Tuple[int, int]], bool]:
-    """(line ranges of well-formed SOMA/AEGIS START..END blocks, markers are balanced)."""
-    ranges, open_at = [], None
+    """(line ranges of well-formed SOMA/AEGIS START..END blocks, markers are balanced).
+
+    Markers shown inside a fenced code block are text, not a block. Inside an open block
+    the content is v3's own (rule text with its fences), so only its END marker counts.
+    """
+    ranges, open_at, fence = [], None, None
     for index, line in enumerate(text.splitlines(True)):
-        match = _LEGACY_MARKER.match(line.rstrip("\r\n"))
+        bare = line.rstrip("\r\n")
+        if index == 0 and bare.startswith(_BOM):
+            bare = bare[1:]
+        if open_at is None:
+            inside = fence is not None
+            fence = _fence_step(fence, bare)
+            if inside or fence is not None:
+                continue
+        match = _LEGACY_MARKER.match(bare)
         if not match:
             continue
         kind, edge = match.groups()
@@ -1153,6 +1327,12 @@ def _legacy_block_findings(ctx: _Ctx) -> List[_Finding]:
         action = None
         if entry.refusal:
             message += f"; --fix will not change it: {entry.refusal}"
+        elif _without_lines(entry.raw, ranges) is None:
+            # An emptied CLAUDE.md would still keep Claude Code from reading AGENTS.md, so
+            # the file goes; the plan the user confirms says so.
+            action = _Action(path, "delete_file", _sha256(entry.raw),
+                             f"delete the file (it holds only the legacy block, {where})")
+            message += f"; nothing else is in the file, so --fix deletes the file. Fix: {_FIX_HINT}"
         else:
             action = _Action(path, "remove_lines", _sha256(entry.raw), f"remove the legacy block ({where})",
                              lines=tuple(ranges))
@@ -1422,11 +1602,16 @@ def _without_keys(raw: bytes, keys: Sequence[Tuple[str, ...]]) -> bytes:
 
 
 def _without_lines(raw: bytes, ranges: Sequence[Tuple[int, int]]) -> Optional[bytes]:
-    """The bytes with the line ranges removed, or None when nothing but whitespace is left."""
-    lines = raw.decode("utf-8").splitlines(True)
+    """The bytes with the line ranges removed, or None when nothing but whitespace is left.
+
+    A byte-order mark stays at the start of the file even when its first line goes.
+    """
+    text = raw.decode("utf-8")
+    bom = _BOM if text.startswith(_BOM) else ""
+    lines = text[len(bom):].splitlines(True)
     drop = {i for a, b in ranges for i in range(a, b + 1)}
     kept = "".join(line for i, line in enumerate(lines) if i not in drop)
-    return kept.encode("utf-8") if kept.strip(" \t\r\n﻿") else None
+    return (bom + kept).encode("utf-8") if kept.strip(" \t\r\n") else None
 
 
 @dataclass
@@ -1466,7 +1651,7 @@ def _apply(plan: List[_Change], home: Optional[Path], root: Path) -> Tuple[List[
 
     def result(change: _Change, status: str, action: str, reason: Optional[str] = None) -> None:
         results.append({"action": action, "path": str(change.path), "status": status,
-                        "changes": list(change.describe), "reason": reason})
+                        "changes": list(change.describe), "reason": None if reason is None else _clean(reason, 1024)})
 
     if home is None:
         for change in plan:
@@ -1486,7 +1671,8 @@ def _apply(plan: List[_Change], home: Optional[Path], root: Path) -> Tuple[List[
             current = _current_bytes(change.path, change.sha256)
             if current is not None:
                 name = f"{index:02d}-{change.path.name}"
-                atomic_write_bytes(backup / name, current)  # a fresh directory: nothing to replace
+                # Owner-only whatever the original's bits: a backup of ~/.claude.json holds tokens.
+                atomic_write_bytes(backup / name, current, mode=0o600)
                 manifest.append({"path": str(change.path), "backup": name, "sha256": _sha256(current),
                                  "action": action})
                 _write_manifest(backup, manifest)
@@ -1496,13 +1682,10 @@ def _apply(plan: List[_Change], home: Optional[Path], root: Path) -> Tuple[List[
                 atomic_write_bytes(change.path, atomic_bytes)
             elif change.kind == "remove_lines":
                 kept = _without_lines(current, change.lines)
+                if kept is None:  # the plan said "edit"; deleting would be a change nobody confirmed
+                    raise _Refused("only the legacy block would be left; re-run aegis doctor")
                 _current_bytes(change.path, change.sha256)
-                if kept is None:
-                    os.unlink(change.path)
-                    action = "delete_file"
-                    change.describe.append("delete the file: nothing but the legacy block was in it")
-                else:
-                    atomic_write_bytes(change.path, kept)
+                atomic_write_bytes(change.path, kept)
             elif change.kind == "delete_file":
                 _current_bytes(change.path, change.sha256)
                 os.unlink(change.path)
@@ -1525,7 +1708,7 @@ def _write_manifest(backup: Path, files: List[Dict[str, Any]]) -> None:
 
     doc = {"schema": "aegis.doctor.backup/v1", "created_at": _utc_now(), "aegis_version": _aegis_version(),
            "files": files}
-    atomic_write_bytes(backup / "manifest.json", (json.dumps(doc, indent=2) + "\n").encode("utf-8"))
+    atomic_write_bytes(backup / "manifest.json", (json.dumps(doc, indent=2) + "\n").encode("utf-8"), mode=0o600)
 
 
 # ── Output ──────────────────────────────────────────────────────────────────
@@ -1548,7 +1731,7 @@ def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None)
         "cli_on_path": _check_cli_resolvable,
         "precommit_hook": lambda: _check_precommit_hook(root),
         "ast_drivers": lambda: _check_ast_drivers(root, fix=fix_ast),
-        "mcp_launcher": _check_mcp_launcher,
+        "mcp_launcher": lambda: _check_mcp_launcher(workspace=root),
     }
     out = []
     for check_id, blocking in _CHECKS:
@@ -1585,7 +1768,9 @@ def _payload(diag: _Diagnosis, checks: List[Dict[str, Any]]) -> Dict[str, Any]:
                   "hosts": [s.id for s in ctx.selected], "host_selection": ctx.selection},
         "stale": False,
         "unknown": unknown,
-        "ok": summary["failed"] == 0,
+        # Only the checks: a run whose hosts are all unregistered can pass them. The hosts'
+        # verdicts are their own ``state`` and ``enforcement_level``.
+        "checks_ok": summary["failed"] == 0,
         "summary": summary,
         "checks": [{k: v for k, v in c.items() if k != "text"} for c in checks],
         "hosts": hosts,
@@ -1706,7 +1891,7 @@ def _run_drivers_only(root: Path, use_json: bool, fix: bool, yes: bool) -> int:
     if use_json:
         payload = {"schema": SCHEMA, "source": SOURCE, "aegis_version": _aegis_version(), "checked_at": _utc_now(),
                    "scope": {"machine": "local", "workspace": str(root), "checks": ["ast_drivers"]},
-                   "stale": False, "unknown": [], "ok": not failed,
+                   "stale": False, "unknown": [], "checks_ok": check["status"] == "pass",
                    "checks": [{k: v for k, v in check.items() if k != "text"}]}
         if fix:
             payload["fixes"] = results

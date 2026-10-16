@@ -183,7 +183,13 @@ def test_hook_status_and_safety_gate_never_rewrite_rules(repo, capsys):
 
 
 @pytest.mark.parametrize("argv", [["status"], ["status", "--json"], ["doctor"], ["doctor", "--json"]])
-def test_status_and_doctor_never_rewrite_rules(repo, argv, capsys):
+def test_status_and_doctor_never_rewrite_rules(repo, argv, capsys, monkeypatch):
+    from aegis_cli import doctor
+
+    def no_host_cli(cli_argv, cwd, timeout):  # doctor may ask codex; never a real host here
+        raise OSError("host CLIs are not run in tests")
+
+    monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
     before = _rule_bytes(repo)
 
     rc = main(argv)

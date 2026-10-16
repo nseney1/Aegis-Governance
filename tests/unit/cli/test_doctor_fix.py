@@ -345,3 +345,62 @@ def test_fix_keeps_the_files_own_json_formatting(env, before, after):
     path.write_bytes(before)
     env.fix()
     assert path.read_bytes() == after
+
+
+# ── review findings 4 and 7, and a byte-order mark kept ─────────────────────
+
+def test_the_plan_names_the_deletion_before_anything_is_confirmed(env, monkeypatch):
+    claude_md = env.ws / "CLAUDE.md"
+    claude_md.write_bytes(b"<!-- SOMA:START -->\n# Soma Governance Rules\nrule\n<!-- SOMA:END -->\n")
+    prompts = []
+    monkeypatch.setattr(doctor, "_confirm", lambda prompt: prompts.append(prompt) or False)
+    rc, out = env.run(fix=True)
+    assert prompts, "the plan is confirmed first"
+    (line,) = [ln for ln in out.splitlines() if ln.strip().startswith("1. ") and str(claude_md) in ln]
+    assert f"{claude_md}: delete the file (it holds only the legacy block, lines 1-4)" in line
+    assert "remove the legacy block" not in line
+    assert claude_md.exists()
+
+    rc, out = env.run(json=True)
+    (finding,) = [f for f in json.loads(out)["findings"] if f["code"] == "legacy_block"]
+    assert "--fix deletes the file" in finding["message"]
+
+    payload = env.fix()
+    assert not claude_md.exists()
+    (fix,) = payload["fixes"]
+    assert (fix["action"], fix["status"]) == ("delete_file", "applied")
+    assert fix["changes"] == ["delete the file (it holds only the legacy block, lines 1-4)"]
+
+
+def test_a_file_with_text_besides_the_legacy_block_is_edited_never_deleted(env, monkeypatch):
+    path = env.ws / "GEMINI.md"
+    path.write_bytes(b"# mine\n\n<!-- SOMA:START -->\nrules\n<!-- SOMA:END -->\n")
+    monkeypatch.setattr(doctor, "_confirm", lambda prompt: False)
+    rc, out = env.run(fix=True)
+    assert f"{path}: remove the legacy block (lines 3-5)" in out
+    assert "delete the file" not in out
+
+
+def test_a_byte_order_mark_survives_the_removal_of_a_legacy_block_on_line_one(env):
+    path = env.ws / "GEMINI.md"
+    path.write_bytes(b"\xef\xbb\xbf<!-- SOMA:START -->\nrules\n<!-- SOMA:END -->\nmine\n")
+    payload = env.fix()
+    assert [f["status"] for f in payload["fixes"]] == ["applied"]
+    assert path.read_bytes() == b"\xef\xbb\xbfmine\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_backups_and_their_manifest_are_owner_only(env):
+    claude = env.claude_user_registration(
+        mcpServers={"aegis": {"command": str(env.mcp), "env": {"AEGIS_CLIENT": "claude-code"}},
+                    "soma": {"command": "soma-mcp"}})
+    claude.chmod(0o600)
+    env.write_json(env.home / ".mcp.json", {"mcpServers": {"soma": {}}})
+    payload = env.fix()
+    assert {f["status"] for f in payload["fixes"]} == {"applied"}
+    (backup,) = env.backups()
+    files = sorted(backup.iterdir())
+    assert len(files) == 3  # two backups and the manifest
+    for path in files:
+        assert path.stat().st_mode & 0o077 == 0, f"{path.name} is {oct(path.stat().st_mode & 0o777)}"
+    assert backup.stat().st_mode & 0o077 == 0

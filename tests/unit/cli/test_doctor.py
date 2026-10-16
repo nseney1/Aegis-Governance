@@ -31,6 +31,13 @@ def isolated_hosts(tmp_path, monkeypatch):
         raise OSError("host CLIs are not run in these tests")
 
     monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
+    # Host CLIs and python3 are looked up in an empty private directory, never on this
+    # machine's PATH (doctor's own lookup; shutil.which patches do not reach it).
+    no_programs = tmp_path / "no-programs"
+    no_programs.mkdir()
+    real_which = doctor._which
+    monkeypatch.setattr(doctor, "_which", lambda name, path=None, outside=None:
+                        real_which(name, str(no_programs), outside))
     return home
 
 
@@ -399,7 +406,7 @@ def test_doctor_json_mode_and_warning_counts(tmp_path, monkeypatch, capsys):
         raw_json = capsys.readouterr().out
         assert "\x1b[" not in raw_json
         payload = json.loads(raw_json)
-        assert payload["ok"] is True
+        assert payload["checks_ok"] is True
         assert payload["summary"]["passed"] >= 5
         assert "warnings" in payload["summary"]
         assert payload["summary"]["failed"] == 0
@@ -431,7 +438,7 @@ def test_drivers_json_is_one_json_document(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema"] == "aegis.doctor/v1"
     assert [c["id"] for c in payload["checks"]] == ["ast_drivers"]
-    assert rc == 0 and payload["ok"] is True
+    assert rc == 0 and payload["checks_ok"] is True
 
 
 def test_doctor_fails_closed_on_a_rule_that_cannot_be_served(tmp_path, monkeypatch, capsys):
