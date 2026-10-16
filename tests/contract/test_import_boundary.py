@@ -66,6 +66,10 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core.hook_events": 1,
     # The post-lane gate (aegis check --lane): team, the matcher, gitsafe and events.
     "aegis_core.lane_gate": 1,
+    # The governance file set (the matcher and the layout) and the trust tier / approvals over it
+    # (gitsafe, storage, pathlookup, governance): v4.3 human_gate.
+    "aegis_core.governance": 1,
+    "aegis_core.human_gate": 1,
     "aegis_core.scan": 2,
     "aegis_core.scan_compliance": 2,
     "aegis_core.sync": 2,
