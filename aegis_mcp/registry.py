@@ -245,6 +245,36 @@ TOOL_DEFINITIONS = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "aegis_capture_insight",
+        "description": (
+            "Record a user correction as an unconfirmed suggestion in user scope. "
+            "Agent suggestions never count toward proposals or debits and never appear in "
+            "aegis_scan; a suggestion upgrades to W2 only when its quote matches a "
+            "hook-captured prompt in the same session."
+        ),
+        "annotations": {
+            "readOnlyHint": False,
+            "title": "Capture Insight",
+        },
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "quote": {
+                    "type": "string",
+                    "maxLength": 1024,
+                    "description": "Quote of the user's correction (redacted and capped at 300 chars).",
+                },
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional workspace-relative file paths this correction applies to.",
+                },
+            },
+            "required": ["quote"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 TOOL_ARGUMENTS = {

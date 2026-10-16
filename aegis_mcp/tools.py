@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from aegis_mcp.handlers.core import handle_scan
 from aegis_mcp.handlers.governance import handle_create_rule, handle_list_rules
-from aegis_mcp.handlers.telemetry import handle_report_outcome
+from aegis_mcp.handlers.telemetry import handle_capture_insight, handle_report_outcome
 from aegis_mcp.projection import project_response
 from aegis_mcp.registry import TOOL_ARGUMENTS, TOOL_DEFINITIONS
 
@@ -14,6 +14,7 @@ _TOOL_HANDLERS = {
     "aegis_report_outcome": handle_report_outcome,
     "aegis_create_rule": handle_create_rule,
     "aegis_list_rules": handle_list_rules,
+    "aegis_capture_insight": handle_capture_insight,
 }
 
 # Set by the server (or passed by an in-process caller), never part of a tool schema.
