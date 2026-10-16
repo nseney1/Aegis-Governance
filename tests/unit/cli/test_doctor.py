@@ -1,4 +1,4 @@
-"""Tests for soma doctor health checks."""
+"""Tests for aegis doctor health checks."""
 from __future__ import annotations
 
 import argparse
@@ -8,12 +8,45 @@ from unittest.mock import patch
 
 import pytest
 
+from aegis_cli import doctor
 from aegis_cli.doctor import (
     _check_cli_resolvable,
     _check_python_version,
     _check_zero_dependencies,
     run_doctor,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_hosts(tmp_path, monkeypatch):
+    """Doctor reads host configs under HOME and may start a host CLI: keep both fake."""
+    home = tmp_path / "fake-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+
+    def no_host_cli(argv, cwd, timeout):
+        raise OSError("host CLIs are not run in these tests")
+
+    monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
+    return home
+
+
+def _governed(root):
+    """A workspace that serves one rule (what `aegis init` leaves behind)."""
+    rules = root / ".aegis" / "rules" / "invariants"
+    rules.mkdir(parents=True, exist_ok=True)
+    (rules / "invariant-sample.md").write_text(
+        "---\nid: invariant-sample\ntype: invariant\nenforcement: gate\n"
+        "hypothesis: Sample rule for doctor tests.\ntarget_paths:\n  - src/*.py\n---\n"
+        "# Sample\n\nKeep the sample rule body long enough to be a real rule body.\n", encoding="utf-8")
+    return root
+
+
+def _only_aegis(cmd, **_kw):
+    return "/usr/local/bin/aegis" if cmd == "aegis" else None
 
 
 # ── Individual check tests ──────────────────────────────────────────────────
@@ -34,42 +67,27 @@ def test_doctor_zero_dependencies_check():
 
 
 def test_doctor_returns_zero_in_valid_env(tmp_path, monkeypatch):
-    """run_doctor returns 0 when every check is mocked to pass."""
-    # Set up a fake project with a recognized platform and evidence dir
-    (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-
-    # Fake rules directory with at least one .md file
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
-    (rules_dir / "example.md").write_text("# rule")
-
+    """run_doctor returns 0 when the workspace serves rules and aegis is on PATH."""
+    _governed(tmp_path)
     monkeypatch.chdir(tmp_path)
-
-    # Mock get_rules_dir to return our fake rules dir
-    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"):
-        with patch(
-            "aegis_cli.init.get_rules_dir",
-            return_value=rules_dir,
-        ):
-            args = argparse.Namespace()
-            result = run_doctor(args)
-
+    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+        result = run_doctor(argparse.Namespace())
     assert result == 0
+
+
+def test_doctor_fails_when_no_rule_is_served(tmp_path, monkeypatch, capsys):
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+        assert run_doctor(argparse.Namespace()) == 1
+    out = capsys.readouterr().out
+    assert "No rules are served" in out and "aegis init" in out
 
 
 def test_doctor_returns_one_on_failure(tmp_path, monkeypatch):
     """Monkeypatch sys.version_info to (3, 8) and verify exit code 1."""
     # Even with a valid environment, a failing Python version check → exit 1
-    (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
-    (rules_dir / "example.md").write_text("# rule")
-
+    _governed(tmp_path)
     monkeypatch.chdir(tmp_path)
 
     from collections import namedtuple
@@ -77,8 +95,7 @@ def test_doctor_returns_one_on_failure(tmp_path, monkeypatch):
     fake_version = _VersionInfo(3, 8, 0, "final", 0)
 
     monkeypatch.setattr("aegis_cli.doctor.sys.version_info", fake_version)
-    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/soma"), \
-         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
+    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
         args = argparse.Namespace()
         result = run_doctor(args)
 
@@ -92,7 +109,7 @@ def test_doctor_returns_one_on_failure(tmp_path, monkeypatch):
 def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, capsys):
     bindir = tmp_path / ".local" / "bin"
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     monkeypatch.setenv("SHELL", "/usr/bin/zsh")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
@@ -105,7 +122,22 @@ def test_cli_check_prints_zsh_remedy_when_unresolvable(tmp_path, monkeypatch, ca
     out = capsys.readouterr().out
     assert "aegis CLI not found on PATH" in out
     assert "~/.zshrc" in out
-    assert "python3 -m soma_cli" in out
+    assert "python3 -m aegis_cli" in out
+
+
+def test_cli_check_never_says_aegis_is_where_only_a_v3_soma_script_is(tmp_path, monkeypatch, capsys):
+    bindir = tmp_path / ".local" / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "soma").write_text("#!/bin/sh\n")
+    monkeypatch.setenv("PATH", str(bindir))
+    monkeypatch.setattr("aegis_cli.pathcheck.default_candidates", lambda: [str(bindir)])
+    with patch("aegis_cli.doctor.shutil.which", return_value=None), \
+         patch("aegis_cli.pathcheck.shutil.which", side_effect=lambda cmd, **kw: str(bindir / cmd) if cmd == "soma" else None):
+        assert _check_cli_resolvable() is False
+    out = capsys.readouterr().out
+    assert "The 'aegis' command is not installed" in out
+    assert "pip install aegis-guardrails" in out
+    assert str(bindir) not in out and "soma" not in out
 
 
 def test_cli_check_silent_remedy_when_resolvable(capsys):
@@ -161,12 +193,7 @@ def test_check_ast_drivers_with_valid_and_invalid_slots(tmp_path, capsys, monkey
 
 
 def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsys):
-    (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
-    (rules_dir / "example.md").write_text("# rule")
+    _governed(tmp_path)
 
     # H5: a repo config can only opt in to a packaged driver (here ts_ast.js, which
     # needs node); an arbitrary repo-defined driver command is dropped before doctor sees it.
@@ -174,8 +201,7 @@ def test_doctor_warns_when_ast_drivers_unresolvable(tmp_path, monkeypatch, capsy
     config.write_text('{"v": 1, "ast": {"packaged_drivers": ["ts"]}, "drivers": {"ts": "evil"}}')
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/aegis" if cmd in ("aegis", "soma") else None), \
-         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
+    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
         args = argparse.Namespace()
         result = run_doctor(args)
     assert result == 0
@@ -224,41 +250,27 @@ def test_check_ast_drivers_missing_extension_slot_warns_and_fixes(tmp_path, caps
 
 
 def test_run_doctor_with_fix_flag(tmp_path, monkeypatch, capsys):
-    (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
-    (rules_dir / "example.md").write_text("# rule")
+    _governed(tmp_path)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "index.ts").write_text("console.log(1);")
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/node"), \
-         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
-        args = argparse.Namespace(fix=True)
-        res = run_doctor(args)
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/node"):
+        res = run_doctor(argparse.Namespace(fix=True, yes=True))
     assert res == 0
     captured = capsys.readouterr().out
-    assert "Fixed: enabled the packaged AST drivers" in captured
+    assert "enable the packaged AST drivers for .ts" in captured
     assert (tmp_path / ".aegis" / "config.json").is_file()
 
 
 def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, capsys):
-    (tmp_path / ".gemini").mkdir()
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
-    (rules_dir / "example.md").write_text("# rule")
+    _governed(tmp_path)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "index.ts").write_text("console.log(1);")
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/node"), \
-         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
-        args = argparse.Namespace()
-        run_doctor(args)
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/node"):
+        run_doctor(argparse.Namespace())
     assert not (tmp_path / ".aegis" / "config.json").exists()
     out = capsys.readouterr().out
     assert "Run 'aegis doctor --fix' to provision" in out
@@ -266,6 +278,7 @@ def test_run_doctor_without_fix_flag_does_not_provision(tmp_path, monkeypatch, c
 
 
 def test_run_doctor_drivers_flag(tmp_path):
+    # The check only reports; provisioning goes through the backed-up --fix plan.
     with patch("aegis_cli.doctor._check_ast_drivers") as mock_check:
         mock_check.return_value = True
         args = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=False)
@@ -273,12 +286,22 @@ def test_run_doctor_drivers_flag(tmp_path):
         mock_check.assert_called_with(tmp_path, fix=False)
 
         mock_check.return_value = False
-        args_fail = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=True)
+        args_fail = argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=True, yes=True)
         assert run_doctor(args_fail) == 1
-        mock_check.assert_called_with(tmp_path, fix=True)
+        mock_check.assert_called_with(tmp_path, fix=False)
 
 
-@pytest.mark.parametrize("flag", ["--fix-path", "--yes", "-y"])
+def test_drivers_fix_provisions_after_a_backup(tmp_path, isolated_hosts, capsys):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.rs").write_text("fn main() {}\n")
+    rc = run_doctor(argparse.Namespace(drivers=True, workspace=str(tmp_path), fix=True, yes=True))
+    assert '"rs"' in (tmp_path / ".aegis" / "config.json").read_text()
+    assert "enable the packaged AST drivers for .rs" in capsys.readouterr().out
+    assert (isolated_hosts / ".aegis" / "backups").is_dir()
+    assert rc == 0
+
+
+@pytest.mark.parametrize("flag", ["--fix-path", "-y"])
 def test_doctor_rejects_cut_fix_path_flags(flag, capsys):
     """D17: doctor never edits shell rc files; the PATH hint stays advisory."""
     from aegis_cli.cli import main
@@ -354,18 +377,14 @@ def test_check_precommit_hook_all_branches(tmp_path, capsys):
 
 
 def test_doctor_json_mode_and_warning_counts(tmp_path, monkeypatch, capsys):
-    """v3.0.0: doctor supports --json, prints 'aegis doctor', tallies warnings, and includes Fix: lines."""
+    """doctor supports --json, prints 'aegis doctor', tallies warnings, and includes Fix: lines."""
     import json
 
-    (tmp_path / ".gemini").mkdir()
-    (tmp_path / ".aegis" / "evidence").mkdir(parents=True)
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
+    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", return_value="/usr/local/bin/aegis"), \
-         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
-        # 1. Text mode with missing rules -> fails with Fix: remediation and warning/fail summary
+    with patch("aegis_cli.doctor.shutil.which", side_effect=_only_aegis):
+        # 1. Text mode with no served rules -> fails with Fix: remediation and warning/fail summary
         rc_text = run_doctor(argparse.Namespace())
         assert rc_text == 1
         out_text = capsys.readouterr().out
@@ -374,16 +393,17 @@ def test_doctor_json_mode_and_warning_counts(tmp_path, monkeypatch, capsys):
         assert "warning" in out_text and "failed" in out_text
 
         # 2. JSON mode -> valid JSON with zero ANSI codes
-        (rules_dir / "example.md").write_text("# rule", encoding="utf-8")
+        _governed(tmp_path)
         rc_json = run_doctor(argparse.Namespace(json=True))
         assert rc_json == 0
         raw_json = capsys.readouterr().out
         assert "\x1b[" not in raw_json
         payload = json.loads(raw_json)
         assert payload["ok"] is True
-        assert payload["passed"] >= 6
-        assert "warnings" in payload
-        assert payload["failed"] == 0
+        assert payload["summary"]["passed"] >= 5
+        assert "warnings" in payload["summary"]
+        assert payload["summary"]["failed"] == 0
+        assert {c["id"] for c in payload["checks"]} >= {"python_version", "rules", "cli_on_path"}
 
 
 
@@ -401,3 +421,14 @@ def test_doctor_fix_refuses_a_symlinked_config_without_crashing(tmp_path, capsys
     assert _check_ast_drivers(proj, fix=True) is False
     assert "is a symlink" in capsys.readouterr().out
     assert not outside.exists()
+
+
+def test_drivers_json_is_one_json_document(tmp_path, capsys):
+    import json
+
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+    rc = run_doctor(argparse.Namespace(drivers=True, json=True, workspace=str(tmp_path)))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema"] == "aegis.doctor/v1"
+    assert [c["id"] for c in payload["checks"]] == ["ast_drivers"]
+    assert rc == 0 and payload["ok"] is True

@@ -56,7 +56,7 @@ def test_soma_mcp_not_importable(tmp_path):
     d = tmp_path / "bin"
     make_stub(d, 'case "$*" in *aegis_mcp*) exit 1;; esac\necho 3\n')
     status, _ = probe_mcp_launcher(str(d))
-    assert status == "no_soma_mcp"
+    assert status == "no_aegis_mcp"
 
 
 def test_broken_interpreter(tmp_path):

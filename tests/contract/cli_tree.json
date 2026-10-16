@@ -283,6 +283,17 @@
           {
             "const": true,
             "default": false,
+            "dest": "yes",
+            "flags": [
+              "--yes"
+            ],
+            "kind": "store_true",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
             "dest": "drivers",
             "flags": [
               "--drivers"

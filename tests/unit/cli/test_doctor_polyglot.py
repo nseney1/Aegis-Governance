@@ -1,11 +1,27 @@
-"""Tests for soma doctor AST driver diagnostics and --fix auto-repair."""
+"""Tests for aegis doctor AST driver diagnostics and --fix auto-repair."""
 import argparse
 from pathlib import Path
 import pytest
 
+from aegis_cli import doctor
 from aegis_cli.cli import main
 from aegis_cli.doctor import run_doctor, _check_ast_drivers
 from aegis_core.skills.slots import SlotRegistry
+
+
+@pytest.fixture(autouse=True)
+def isolated_hosts(tmp_path, monkeypatch):
+    """Doctor reads host configs under HOME and may start a host CLI: keep both fake."""
+    home = tmp_path / "fake-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    def no_host_cli(argv, cwd, timeout):
+        raise OSError("host CLIs are not run in these tests")
+
+    monkeypatch.setattr(doctor, "_run_host_cli", no_host_cli)
+    return home
 
 
 def test_doctor_detects_unconfigured_polyglot_language(tmp_path: Path):
@@ -42,23 +58,13 @@ from unittest.mock import patch
 def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch):
     (tmp_path / "go.mod").write_text("module example.com/app\n", encoding="utf-8")
     (tmp_path / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
-    (tmp_path / ".aegis" / "evidence").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".gemini").mkdir(exist_ok=True)
-    rules_dir = tmp_path / "rules"
-    rules_dir.mkdir()
-    (rules_dir / "rule.md").write_text("# rule")
+    (tmp_path / ".aegis").mkdir()
 
-    args = argparse.Namespace(
-        project_root=tmp_path,
-        _project_root=tmp_path,
-        fix=True,
-    )
+    args = argparse.Namespace(_project_root=tmp_path, fix=True, yes=True)
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: "/usr/local/bin/soma" if cmd == "soma" else "/bin/go"), \
-         patch("aegis_cli.init.get_rules_dir", return_value=rules_dir):
-        exit_code = run_doctor(args)
-    # Doctor exits 0 when health checks pass or are repaired
+    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/go"):
+        run_doctor(args)
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".go") is not None
 
