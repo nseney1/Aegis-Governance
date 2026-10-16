@@ -1,5 +1,6 @@
 {
   "command_resolution": {
+    "approve": "approve",
     "benchmark": "benchmark",
     "check": "check",
     "doctor": "doctor",
@@ -93,6 +94,77 @@
       }
     ],
     "commands": {
+      "approve": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "base",
+            "flags": [
+              "--base"
+            ],
+            "help": "The base branch to measure governance changes against (default: origin/main, main, origin/develop, develop)",
+            "kind": "store",
+            "metavar": "REF",
+            "nargs": null,
+            "required": false
+          }
+        ],
+        "description": "Makes one signed, empty commit 'Aegis-Approve: <governance tree hash>' naming the governance files as committed at HEAD. Refuses when nothing governance-related changed since the base branch, when anything is staged or uncommitted, and without a terminal. The signing key, format and program come from your user-level git config (gpg.format ssh); no key is created.",
+        "help": "Sign a human approval of this branch's governance changes"
+      },
       "benchmark": {
         "aliases": [],
         "arguments": [
@@ -543,6 +615,48 @@
             "kind": "store_true",
             "metavar": null,
             "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "github",
+            "flags": [
+              "--github"
+            ],
+            "help": "Print what trust tiers A and B need: the ruleset JSON, CODEOWNERS lines and signing setup",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "apply",
+            "flags": [
+              "--apply"
+            ],
+            "help": "With --github --tier: create the ruleset through gh, only after a y/N at a terminal",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "A",
+              "B"
+            ],
+            "default": null,
+            "dest": "tier",
+            "flags": [
+              "--tier"
+            ],
+            "help": "With --github --apply: which ruleset to create (A: reviews; B: solo, signed approvals)",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
             "required": false
           }
         ],
@@ -3443,6 +3557,12 @@
     "description": "Aegis Governance — make AI coding agents trustworthy"
   },
   "registry": [
+    {
+      "aliases": [],
+      "category": "Daily Workflow & Verification",
+      "help": "Sign a human approval of this branch's governance changes",
+      "name": "approve"
+    },
     {
       "aliases": [],
       "category": "Plumbing",

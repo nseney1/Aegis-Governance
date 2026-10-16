@@ -2,8 +2,10 @@
 
 A read run changes nothing: it reads files, runs ``codex mcp get aegis --json`` (the only
 host CLI it starts: Codex keeps its registrations in TOML, which stdlib-only Aegis does not
-parse), and never syncs, checks, initializes or touches the network. Claude Code is read
-from ``~/.claude.json`` instead of ``claude mcp list``, which starts every configured server.
+parse), and never syncs, checks or initializes. The one network access is the trust tier's
+read-only ``gh api`` GETs through the user's own ``gh`` (no ``gh`` means tier C). Claude Code
+is read from ``~/.claude.json`` instead of ``claude mcp list``, which starts every configured
+server.
 
 Each host gets one state, the first of these that applies:
 
@@ -33,8 +35,17 @@ Each host gets one state, the first of these that applies:
 ``checked_at`` (UTC), ``scope``, ``stale`` and ``unknown`` (fields doctor could not
 determine), ``checks_ok`` (no blocking check failed; it says nothing about the hosts),
 ``checks``, ``hosts`` (each with ``state``, ``reasons``, the matrix facts,
-``enforcement_level`` and ``trust_tier``, reserved as null until v4.3), ``enforcement_tiers``,
+``enforcement_level`` and ``trust_tier``, the repository's human_gate tier), ``enforcement_tiers``,
+``human_gate`` (the tier, the evidence it rests on and why it is not higher), ``state_modes``
+(how many entries of the shared state are looser than 0700/0600; a count, never names),
 ``findings``, and with ``--fix`` the ``fixes`` it applied and its ``backup_dir``.
+
+The trust tier (``aegis_core.human_gate``, v4.3 §2.2) is printed on every report: A, separation
+of duties; B, solo with signed approvals; C, self-attested. ``--github`` prints what A and B
+need: the exact ruleset JSON, the CODEOWNERS lines and the signing setup. ``--github --apply
+--tier A|B`` creates that ruleset through ``gh api``, and only after an interactive y/N at a
+terminal: ``--yes`` and ``--json`` never apply, and a ruleset of the same name is never
+touched.
 
 Each row lists the ``surfaces`` its config plane covers (CLI, IDE extension, desktop app).
 A row whose host table entry is unverified (``verified_row`` false: Cursor, Copilot, Kiro,
@@ -95,6 +106,7 @@ import sys
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from aegis_cli.base import CommandCategory, AegisCommand
+from aegis_core import human_gate
 from aegis_core.pathlookup import INSIDE_FENCE, Hit, only_skipped, which
 
 __all__ = ["run_doctor", "DoctorCommand", "probe_mcp_launcher", "SCHEMA", "V3_SHIPPED_RULE_SHA256"]
@@ -1424,7 +1436,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         "advisory": advisory,
         "hooks": hooks,
         "trust_tier": None,
-        "trust_tier_status": "unavailable",
+        "trust_tier_status": "unavailable",  # _diagnose fills both from the repository's human_gate tier
         "stale": False,
         "unknown": unknown,
     }
@@ -1735,7 +1747,7 @@ def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool, unreached: Op
         {"tier": "local_floor", "mechanism": _TIER_TEXT["local_floor"][1], "hosts": ids, "status": floor,
          "detail": floor_detail},
         {"tier": "authoritative", "mechanism": _TIER_TEXT["authoritative"][1], "hosts": [], "status": "unavailable",
-         "detail": "not checked: aegis doctor makes no network or GitHub calls"},
+         "detail": "not checked: aegis doctor does not read CI runs; the trust tier says what GitHub enforces"},
     ]
 
 
@@ -2187,6 +2199,8 @@ class _Diagnosis:
     rows: List[Dict[str, Any]]
     tiers: List[Dict[str, Any]]
     findings: List[_Finding]
+    trust: Any = None  # the human_gate TierReport
+    modes: Any = None  # the shared state's StateModes, or None when it cannot be read
 
 
 def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagnosis:
@@ -2219,7 +2233,21 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
                                  f"~/.aegis/workspaces.json: entry {index} has no absolute 'root' that resolves; "
                                  "aegis skips it (run aegis init in that workspace to register it again)",
                                  location=f"workspaces[{index}]"))
-    return _Diagnosis(ctx, rows, _tiers(rows, floor, governed, unreached, ctx.setup), findings)
+    trust = human_gate.detect_tier(root)
+    for row in rows:
+        row["trust_tier"], row["trust_tier_status"] = trust.tier, "detected"
+    return _Diagnosis(ctx, rows, _tiers(rows, floor, governed, unreached, ctx.setup), findings, trust,
+                      _state_modes(root))
+
+
+def _state_modes(root: Path) -> Any:
+    from aegis_core import storage
+    from aegis_core.errors import AegisError
+
+    try:
+        return storage.shared_state_modes(root)
+    except (AegisError, OSError):
+        return None
 
 
 def _claude_user_registered(ctx: _Ctx) -> bool:
@@ -2236,13 +2264,16 @@ class _Refused(Exception):
     """A fix that must not be applied; the message says why."""
 
 
+def _stdin_is_tty() -> bool:
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 def _confirm(prompt: str) -> bool:
     """Ask on the terminal; anything but y/yes is no. Without a terminal the answer is no."""
-    try:
-        interactive = sys.stdin.isatty()
-    except (AttributeError, ValueError, OSError):
-        interactive = False
-    if not interactive:
+    if not _stdin_is_tty():
         print("stdin is not a terminal, so nothing was applied: re-run with --yes to apply these changes.")
         return False
     try:
@@ -2517,6 +2548,8 @@ def _payload(diag: _Diagnosis, checks: List[Dict[str, Any]]) -> Dict[str, Any]:
         "checks": [{k: v for k, v in c.items() if k != "text"} for c in checks],
         "hosts": hosts,
         "enforcement_tiers": diag.tiers,
+        "human_gate": diag.trust.as_dict() if diag.trust is not None else None,
+        "state_modes": diag.modes.as_dict() if diag.modes is not None else None,
         "findings": [f.as_dict() for f in diag.findings],
     }
 
@@ -2605,6 +2638,16 @@ def _print_tiers(diag: _Diagnosis) -> None:
                 print(f"  {'':<14} {'':<12}   - {gap}")
 
 
+def _print_trust(diag: _Diagnosis) -> None:
+    print("")
+    for line in diag.trust.text_lines():
+        print(_clean(line, 4096))
+    modes = diag.modes
+    if modes is not None and modes.supported and modes.looser:
+        print(f"  Shared state: {modes.looser} of {modes.checked} entries are looser than 0700/0600 "
+              "(aegis migrate --apply tightens them).")
+
+
 def _print_findings(findings: List[_Finding]) -> None:
     if not findings:
         return
@@ -2633,6 +2676,96 @@ def _print_results(results: List[Dict[str, Any]], backup: Optional[Path]) -> Non
         print(line)
     if backup is not None:
         print(f"\nBackups: {_clean(backup, 4096)}")
+
+
+# ── --github: what the trust tiers need, and --apply ────────────────────────
+
+_PLACEHOLDER_CHECK = "aegis"
+
+
+def _github_plan(root: Path, report: Any) -> Dict[str, Any]:
+    found = human_gate.workflow_contexts(root)
+    contexts = found or [_PLACEHOLDER_CHECK]
+    owner = (report.evidence.get("repo") or {}).get("full_name") or ""
+    handle = "@" + owner.split("/")[0] if "/" in owner else "@OWNER"
+    return {
+        "required_checks": contexts,
+        "required_checks_from_workflows": bool(found),
+        "ruleset": {"A": human_gate.build_ruleset("A", contexts), "B": human_gate.build_ruleset("B", contexts)},
+        "codeowners": human_gate.codeowners_lines(handle),
+        "signing_setup": human_gate.signers_setup(),
+    }
+
+
+def _print_github(plan: Dict[str, Any], report: Any) -> None:
+    print("aegis doctor --github: what the trust tiers need (read-only; nothing below has been applied)\n")
+    for line in report.text_lines():
+        print(_clean(line, 4096))
+    checks = ", ".join(plan["required_checks"])
+    if plan["required_checks_from_workflows"]:
+        print(f"\nRequired status checks (the jobs in .github/workflows; keep the ones that must pass): {checks}")
+    else:
+        print(f"\nNo workflow jobs found: the rulesets below name a placeholder check {checks!r}; replace it with "
+              "your Aegis job, and --apply refuses until a workflow exists.")
+    for tier, title in (("B", "solo, signed: pull request + required checks, approvals are `aegis approve` signatures"),
+                        ("A", "separation of duties: one approving review + code-owner review + required checks")):
+        print(f"\nRuleset, tier {tier} ({title}):")
+        print(json.dumps(plan["ruleset"][tier], indent=2))
+    print("\nCODEOWNERS lines (commit to the default branch; replace the owner with your reviewer):")
+    for line in plan["codeowners"]:
+        print(f"  {line}")
+    print("\nSigning setup for tier B (nothing here is run for you):")
+    for line in plan["signing_setup"]:
+        print(f"  {line}")
+    print("\nCreate the ruleset: aegis doctor --github --apply --tier A|B (asks at a terminal first).")
+
+
+def _run_github(root: Path, use_json: bool, apply: bool, tier: Optional[str]) -> int:
+    report = human_gate.detect_tier(root)
+    plan = _github_plan(root, report)
+    status = "printed"
+    result: Optional[Dict[str, Any]] = None
+    if apply:
+        if not _stdin_is_tty():
+            print("aegis doctor: --apply changes repository settings, so it only runs at a terminal with an "
+                  "interactive y/N answer (--yes does not apply); nothing was changed.", file=sys.stderr)
+            return 1
+        if not plan["required_checks_from_workflows"]:
+            print("aegis doctor: no workflow jobs found in .github/workflows to require; add the Aegis workflow "
+                  "first. Nothing was changed.", file=sys.stderr)
+            return 1
+        try:
+            exists = human_gate.ruleset_exists(root)
+        except human_gate.HumanGateError as exc:
+            print(f"aegis doctor: cannot read the repository's rulesets: {_clean(exc, 1000)}. Nothing was changed.",
+                  file=sys.stderr)
+            return 1
+        if exists:
+            print(f"aegis doctor: a ruleset named {human_gate.RULESET_NAME!r} already exists; edit it on GitHub "
+                  "(--apply only ever creates). Nothing was changed.", file=sys.stderr)
+            return 1
+        body = plan["ruleset"][tier or "B"]
+        print(json.dumps(body, indent=2))
+        if not _confirm(f"Create this ruleset on the default branch (tier {tier})? [y/N] "):
+            print("No changes made.")
+            return 1
+        try:
+            result = human_gate.create_ruleset(root, body)
+        except human_gate.HumanGateError as exc:
+            print(f"aegis doctor: {_clean(exc, 1000)}", file=sys.stderr)
+            return 1
+        status = "applied"
+        print(f"Created ruleset {human_gate.RULESET_NAME!r}. Re-run aegis doctor to see the tier.")
+    if use_json:
+        print(json.dumps({
+            "schema": SCHEMA, "source": SOURCE, "aegis_version": _aegis_version(), "checked_at": _utc_now(),
+            "scope": {"machine": "local", "workspace": str(root), "mode": "github"},
+            "stale": False, "unknown": [], "status": status, "human_gate": report.as_dict(), "github": plan,
+            "created": result,
+        }, indent=2))
+    elif not apply:
+        _print_github(plan, report)
+    return 0
 
 
 # ── Entry point ─────────────────────────────────────────────────────────────
@@ -2701,11 +2834,30 @@ def run_doctor(args: argparse.Namespace) -> int:
     use_json = bool(getattr(args, "json", False))
     fix = bool(getattr(args, "fix", False))
     yes = bool(getattr(args, "yes", False))
+    if yes and bool(getattr(args, "apply", False)):
+        return _usage_error("--yes does not apply to --github --apply: changing repository settings always asks "
+                            "at a terminal")
     if yes and not fix:
         return _usage_error("--yes only applies to --fix")
     if use_json and fix and not yes:
         return _usage_error("--json --fix needs --yes (there is no prompt in JSON mode)")
+    github = bool(getattr(args, "github", False))
+    apply = bool(getattr(args, "apply", False))
+    tier = getattr(args, "tier", None)
+    if apply and not github:
+        return _usage_error("--apply only applies to --github")
+    if tier and not apply:
+        return _usage_error("--tier only applies to --github --apply")
+    if github and (fix or getattr(args, "drivers", False)):
+        return _usage_error("--github cannot be combined with --fix or --drivers")
+    if apply and use_json:
+        return _usage_error("--github --apply asks at a terminal, so it cannot run with --json")
+    if apply and tier not in ("A", "B"):
+        return _usage_error("--github --apply needs --tier A or --tier B")
     root = _resolve_root(args)
+
+    if github:
+        return _run_github(root, use_json, apply, tier)
 
     if getattr(args, "drivers", False):
         return _run_drivers_only(root, use_json, fix, yes)
@@ -2725,6 +2877,7 @@ def run_doctor(args: argparse.Namespace) -> int:
                 print(check["text"], end="")
             _print_hosts(diag)
             _print_tiers(diag)
+            _print_trust(diag)
             _print_findings(diag.findings)
         if fix:
             if not plan:
@@ -2783,6 +2936,21 @@ class DoctorCommand(AegisCommand):
             "--drivers",
             action="store_true",
             help="Run only AST driver and language detection health check",
+        )
+        parser.add_argument(
+            "--github",
+            action="store_true",
+            help="Print what trust tiers A and B need: the ruleset JSON, CODEOWNERS lines and signing setup",
+        )
+        parser.add_argument(
+            "--apply",
+            action="store_true",
+            help="With --github --tier: create the ruleset through gh, only after a y/N at a terminal",
+        )
+        parser.add_argument(
+            "--tier",
+            choices=("A", "B"),
+            help="With --github --apply: which ruleset to create (A: reviews; B: solo, signed approvals)",
         )
 
     def execute(self, args: argparse.Namespace) -> int:
