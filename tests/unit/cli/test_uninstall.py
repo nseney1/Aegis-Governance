@@ -147,6 +147,56 @@ class TestSharedHosts:
         assert env.runner.calls[0] == ["codex", "mcp", "remove", "aegis"]
         assert "still lists codex-cli" in capsys.readouterr().err
 
+    @staticmethod
+    def _add_entries(env, *roots: str, hosts=("codex-cli",)) -> None:
+        path = env.home / ".aegis" / "workspaces.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["workspaces"] += [{"root": root, "added_at": "2026-10-16T00:00:00Z", "added_by": "aegis init",
+                                "hosts": list(hosts)} for root in roots]
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def _unbindable_roots(self, env) -> list:
+        """Entries the MCP server's registry reader can never bind (aegis_core.workspace.binding):
+        a relative root, a NUL byte, the home directory, a filesystem root, a directory that is
+        gone and one that is not an Aegis workspace."""
+        plain = env.tmp / "plain"
+        plain.mkdir()
+        return ["relative/ws", str(env.tmp / "nul\x00byte"), str(env.home), env.tmp.anchor,
+                str(env.tmp / "gone"), str(plain)]
+
+    def test_entries_the_server_can_never_bind_do_not_keep_a_host(self, env, capsys):
+        init(env, env.project, "codex-cli")
+        self._add_entries(env, *self._unbindable_roots(env))
+        env.runner.calls.clear()
+
+        assert uninstall(env.project) == 0
+
+        assert env.runner.calls[:1] == [["codex", "mcp", "remove", "aegis"]]
+        assert "kept (still used" not in capsys.readouterr().out
+
+    def test_only_bindable_workspaces_are_counted_as_users(self, env, capsys):
+        other = env.tmp / "other"
+        other.mkdir()
+        init(env, env.project, "codex-cli")
+        init(env, other, "codex-cli")
+        self._add_entries(env, *self._unbindable_roots(env))
+        env.runner.calls.clear()
+
+        assert uninstall(env.project) == 0
+
+        assert env.runner.calls == []
+        assert "codex-cli: kept (still used by 1 other registered workspace(s))" in capsys.readouterr().out
+
+    def test_naming_a_host_warns_only_about_a_bindable_workspace(self, env, capsys):
+        init(env, env.project, "codex-cli")
+        self._add_entries(env, *self._unbindable_roots(env))
+        env.runner.calls.clear()
+
+        assert uninstall(env.project, "--host", "codex-cli") == 0
+
+        assert env.runner.calls[:1] == [["codex", "mcp", "remove", "aegis"]]
+        assert "still lists" not in capsys.readouterr().err
+
     def test_without_a_registry_entry_the_config_hosts_are_used(self, env):
         init(env, env.project, "codex-cli")
         (env.home / ".aegis" / "workspaces.json").write_text('{"v": 1, "workspaces": []}', encoding="utf-8")

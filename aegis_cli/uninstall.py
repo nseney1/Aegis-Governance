@@ -6,7 +6,9 @@ bootstrap, the CLAUDE.md ``@AGENTS.md`` import), this workspace's entry in
 registrations. It never deletes ``.aegis/`` (rules, config, ledger): those are the
 repository's. Hosts default to the ones this workspace was registered with; a host
 another registered workspace still lists keeps its registration unless named with
-``--host``. Every step is checked first: a refusal changes nothing.
+``--host``, if the MCP server could bind that workspace (an entry it never can, such as
+a relative root or the home directory, does not count). Every step is checked first: a
+refusal changes nothing.
 
 A CLAUDE.md or AGENTS.md that is a link is never written through: it has nothing of
 Aegis to remove unless the file it points to holds that file's Aegis block, which is
@@ -104,6 +106,24 @@ def _claude_shim(root: Path, force: bool, dry_run: bool) -> Step:
     return Step(CLAUDE_FILE, remove_managed_block(claude, CLAUDE_SHIM_ID, force=force, dry_run=dry_run))
 
 
+def _bindable(root: str) -> bool:
+    """Whether the MCP server could ever bind this registry root, by its own test.
+
+    Its registry reader (aegis_core.workspace.binding.read_registry) keeps only an
+    absolute root that resolves, and binding uses one only while ``_usable`` holds: an
+    Aegis workspace that is neither the home directory nor a filesystem root. An entry it
+    can never bind (relative, a NUL byte, $HOME, /, gone) must not keep a host registered.
+    """
+    from aegis_core.workspace.binding import _resolve, _usable
+
+    if not os.path.isabs(root):
+        return False
+    try:
+        return _usable(_resolve(Path(root)))
+    except OSError:
+        return False
+
+
 def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, dry_run: bool,
            report: Report, actions: Optional[List[Step]] = None) -> List[Step]:
     """Every uninstall step; with ``dry_run`` only check and plan. Raises InstallError.
@@ -128,7 +148,7 @@ def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, d
     actions.append(Step(REGISTRY_LABEL, status))
     path_env = os.environ.get("PATH")
     for host in hosts:
-        users = [e["root"] for e in remaining if host in workspace_hosts(e)]
+        users = [e["root"] for e in remaining if host in workspace_hosts(e) and _bindable(e["root"])]
         if users and explicit is None:
             actions.append(Step(host, "kept", f"still used by {len(users)} other registered workspace(s)"))
             continue
