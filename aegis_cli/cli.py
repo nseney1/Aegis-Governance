@@ -154,7 +154,8 @@ def _attach_workspace(args: argparse.Namespace) -> None:
     The raw ``--workspace`` value stays on ``args._workspace_arg`` (``args.workspace``
     is replaced by the resolved root). Every command resolves through
     ``resolve_cli_root``: never above the target's git toplevel, never ``$HOME``, and a
-    WorkspaceHold when an ``AEGIS_WORKSPACE`` pin disagrees with ``--workspace``.
+    WorkspaceHold when an ``AEGIS_WORKSPACE`` pin disagrees with ``--workspace`` or,
+    without it, with the cwd's workspace or repository.
     ``aegis init`` keeps its target as given but takes the same hold. An unmigrated
     ``.soma/`` on the walk (or at the pin) raises the upgrade message, except for the
     ``_LEGACY_TOLERANT_COMMANDS``; ``aegis migrate`` stops at it to convert it.

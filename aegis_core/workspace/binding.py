@@ -508,6 +508,27 @@ def _pin_hold(explicit: PathLike, start: Path, pin_root: Path, accept: Optional[
         ))
 
 
+def _pin_cwd_hold(cwd: Path, pin_root: Path, accept: Optional[Callable[[Path], bool]]) -> None:
+    """Raise WorkspaceHold when the cwd lies in another workspace, or in a repository that
+    does not hold the pinned one: run there (the git hook runs in the repository being
+    committed), a command must not act on the pinned workspace instead."""
+    found = bounded_walk_up(cwd, accept)
+    if found is not None:
+        conflict = found if found != pin_root else None
+    else:
+        boundary = git_boundary(cwd)
+        if boundary is not None and denial(boundary):
+            boundary = None  # $HOME (a dotfiles repository) is never a workspace to conflict with
+        conflict = boundary if boundary is not None and boundary != pin_root and boundary not in pin_root.parents else None
+    if conflict is not None:
+        raise WorkspaceHold(_not_bound(
+            HOLD, "pin_conflicts_with_cwd",
+            f"AEGIS_WORKSPACE pins {pin_root}, but the current directory {cwd} is in {conflict}; "
+            "unset the pin, or run aegis from the pinned project",
+            pin=str(pin_root), cwd=str(cwd), cwd_root=str(conflict),
+        ))
+
+
 def check_pin_agrees(
     explicit: PathLike,
     pin: PathLike,
@@ -538,21 +559,27 @@ def resolve_cli_root(
     to ``$HOME`` or the filesystem root; an uninitialized directory resolves to itself
     so a command can say so. ``accept`` widens what the walk stops at (as in
     ``bounded_walk_up``; ``aegis migrate`` also stops at a legacy ``.soma/``). An
-    ``AEGIS_WORKSPACE`` pin wins over the cwd, must be a directory and must agree with
-    an explicit target, or this raises WorkspaceHold. Raises WorkspaceNotFoundError for
-    a denied root, an unusable pin or a path that cannot be resolved.
+    ``AEGIS_WORKSPACE`` pin must be a workspace (``.aegis/``, or what ``accept`` takes,
+    as the server's resolver requires) and must agree with an explicit target, or
+    without one with the cwd: the cwd's walk-up result, else its repository, must be the
+    pin (or hold it); otherwise this raises WorkspaceHold. From outside any workspace
+    and repository the pin wins. Raises WorkspaceNotFoundError for a denied root, an
+    unusable pin or a path that cannot be resolved.
     """
     base = _cli_path(cwd) if cwd is not None else Path.cwd().resolve()
     start = _cli_path(explicit, base, "--workspace ") if explicit else base
     if pin:
         raw_pin = os.fspath(pin)
         pin_root = _cli_path(raw_pin, base, "AEGIS_WORKSPACE ")
-        denied = denial(pin_root)
-        if denied or not pin_root.is_dir():
-            what = f"the {denied.replace('_', ' ')}" if denied else "not a directory"
-            raise WorkspaceNotFoundError(f"AEGIS_WORKSPACE is set to {raw_pin}, which is {what}")
+        problem = _pin_problem(pin_root)
+        if problem and problem[0] == "pin_not_a_workspace" and accept is not None and accept(pin_root):
+            problem = None  # accept may also raise, e.g. the upgrade message at a legacy .soma/
+        if problem:
+            raise WorkspaceNotFoundError(problem[1].replace(str(pin_root), raw_pin))
         if explicit:
             _pin_hold(explicit, start, pin_root, accept)
+        else:
+            _pin_cwd_hold(base, pin_root, accept)
         return pin_root
     found = bounded_walk_up(start, accept)
     if found is not None:
