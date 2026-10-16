@@ -482,3 +482,78 @@ class TestDryRunAndFailures:
         assert (env.project / "AGENTS.md").is_file()
         assert (env.home / ".gemini" / "config" / "mcp_config.json").is_file()
         assert "codex-cli" in capsys.readouterr().err
+
+
+# ── experimental hosts: the documented file, a warning and an init_host event (v4.2 #6) ──
+
+EXPERIMENTAL_FILES = {
+    "kiro": ".kiro/settings/mcp.json",
+    "cursor": ".cursor/mcp.json",
+    "copilot": ".copilot/mcp-config.json",
+    "windsurf": ".codeium/windsurf/mcp_config.json",
+}
+
+
+def init_host_events(env):
+    from aegis_core import events
+
+    found = events.read(env.project, "init_host")
+    assert found.error is None and found.malformed == 0
+    return found.rows
+
+
+class TestExperimentalHosts:
+    @pytest.mark.parametrize("host_id", sorted(EXPERIMENTAL_FILES))
+    def test_each_registers_in_its_documented_file_and_warns(self, env, capsys, host_id):
+        assert init(env, "--host", host_id) == 0
+        assert files(env.home) == {".aegis/workspaces.json", EXPERIMENTAL_FILES[host_id]}
+        assert env.runner.calls == []
+        data = json.loads(env.home.joinpath(*EXPERIMENTAL_FILES[host_id].split("/")).read_text(encoding="utf-8"))
+        assert data == {"mcpServers": {"aegis": {"command": env.mcp, "args": [], "env": {"AEGIS_CLIENT": host_id}}}}
+        config = json.loads((env.project / ".aegis" / "config.json").read_text(encoding="utf-8"))
+        assert config == {"v": 1, "hosts": [host_id]}
+        err = capsys.readouterr().err
+        (warning,) = [line for line in err.splitlines() if "is an experimental host" in line]
+        assert f"{host_id} is an experimental host." in warning
+        assert "not yet checked on a real install" in warning and "3 clean runs" in warning
+
+    def test_an_alias_selects_the_plane_and_the_config_stores_the_plane_id(self, env):
+        assert init(env, "--host", "cursor-ide,github-copilot,windsurf-ide") == 0
+        config = json.loads((env.project / ".aegis" / "config.json").read_text(encoding="utf-8"))
+        assert config["hosts"] == ["cursor", "copilot", "windsurf"]
+
+    def test_init_writes_one_init_host_event_for_each_experimental_host_and_none_for_the_others(self, env):
+        assert init(env, "--host", "codex-cli,kiro,cursor") == 0
+        rows = init_host_events(env)
+        assert [(r["host"], r["result"], r["detail"]["host"], r["detail"]["verified"]) for r in rows] == [
+            ("kiro", "experimental", "kiro", False), ("cursor", "experimental", "cursor", False)]
+        assert all(r["worktree"] == Path(env.project).resolve().as_posix() for r in rows)
+        assert init(env, "--host", "cursor") == 0  # every run is an event: the prune metric counts runs
+        assert [r["host"] for r in init_host_events(env)] == ["kiro", "cursor", "cursor"]
+
+    def test_a_verified_host_and_a_dry_run_write_no_event(self, env):
+        assert init(env, "--host", "codex-cli,claude-code,antigravity") == 0
+        assert init_host_events(env) == []
+        assert init(env, "--host", "kiro,windsurf", "--dry-run") == 0
+        assert init_host_events(env) == []
+        assert not (env.home / ".kiro").exists()
+
+    def test_auto_takes_an_ide_found_by_its_config_dir_and_records_it(self, env):
+        for name in ("codex", "claude", "agy"):
+            (env.bin / (name + (".exe" if os.name == "nt" else ""))).unlink()
+        (env.home / ".cursor").mkdir()
+        assert init(env, "--host", "auto") == 0
+        assert (env.home / ".cursor" / "mcp.json").is_file()
+        assert [r["host"] for r in init_host_events(env)] == ["cursor"]
+
+    def test_an_event_that_cannot_be_recorded_never_fails_init(self, env, capsys, monkeypatch):
+        from aegis_core import events
+
+        def refuse(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(events, "append", refuse)
+        assert init(env, "--host", "kiro") == 0
+        err = capsys.readouterr().err
+        assert "the init_host event for kiro could not be recorded (OSError: disk full)" in err
+        assert (env.home / ".kiro" / "settings" / "mcp.json").is_file()

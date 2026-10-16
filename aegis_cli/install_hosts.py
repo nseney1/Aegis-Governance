@@ -22,8 +22,13 @@ are (BOM included).
 **MCP registration** uses each host's row in :mod:`aegis_core.hosts`: a native CLI
 (``codex mcp add``, ``claude mcp add --scope user``) run as an argv with no shell, or a
 JSON merge into the host's config file (Antigravity's ``~/.gemini/config/mcp_config.json``,
-Kiro's ``~/.kiro/settings/mcp.json``), whose previous bytes are first copied, owner-only,
+Kiro's ``~/.kiro/settings/mcp.json``, and the other experimental rows' files: Cursor's
+``~/.cursor/mcp.json``, Copilot's ``~/.copilot/mcp-config.json``, Windsurf's
+``~/.codeium/windsurf/mcp_config.json``), whose previous bytes are first copied, owner-only,
 to ``~/.aegis/backups/<UTC stamp>/``.
+A host whose row is unverified (aegis_core.hosts: experimental) is warned about by
+`aegis init`, and each real run that selects it appends an ``init_host`` event to the events
+log (:func:`record_init_host`); a metric never fails the run.
 Host CLIs and ``aegis-mcp`` are looked up only in absolute ``PATH`` entries, never in
 the current directory (the repository being set up). A host CLI is run by the path found
 there, not the file a link there points to: version managers (Volta, mise, asdf) install
@@ -98,6 +103,7 @@ __all__ = [
     "parse_hosts",
     "plane_evidence",
     "read_registry",
+    "record_init_host",
     "register_argv",
     "register_host",
     "register_workspace",
@@ -599,9 +605,43 @@ def ordered_hosts(names: Sequence[str]) -> List[str]:
     return [h for h in known if h in unique] + sorted(unique - set(known))
 
 
+def record_init_host(root: Union[str, Path], hosts: Sequence[str]) -> None:
+    """Append an ``init_host`` event for each of ``hosts`` whose row is unverified
+    (experimental; aegis_core.hosts), in host-table order. A host the table does not know,
+    a verified one and a host without a registration are skipped. A metric never fails
+    `aegis init`: an event that cannot be written is reported on stderr and init goes on."""
+    from aegis_core import events
+
+    for name in ordered_hosts(hosts):
+        try:
+            spec = host_table.get(name)
+        except KeyError:
+            continue
+        if spec.verified or spec.registration is None:
+            continue
+        detail = {"host": spec.id, "verified": False, "surfaces": list(spec.surfaces)}
+        try:
+            events.append(root, "init_host", "experimental", detail, host=spec.id)
+        except Exception as exc:  # events.append documents what it raises; none of it may stop init
+            print(f"aegis: the init_host event for {spec.id} could not be recorded ({type(exc).__name__}: {exc})",
+                  file=sys.stderr)
+
+
 def register_workspace(home: Union[str, Path], root: Union[str, Path], hosts: Sequence[str], *,
                        dry_run: bool = False, now: Optional[str] = None) -> str:
-    """Add ``root`` (with ``hosts``) to the registry; ``added``, ``updated`` or ``unchanged``."""
+    """Add ``root`` (with ``hosts``) to the registry; ``added``, ``updated`` or ``unchanged``.
+
+    This is `aegis init` recording the hosts it set up for ``root``, so a real run (not a
+    dry run) also notes each experimental host among ``hosts`` in the events log
+    (:func:`record_init_host`), whether or not the registry entry changed."""
+    status = _update_registry(home, root, hosts, dry_run=dry_run, now=now)
+    if not dry_run:
+        record_init_host(root, hosts)
+    return status
+
+
+def _update_registry(home: Union[str, Path], root: Union[str, Path], hosts: Sequence[str], *,
+                     dry_run: bool, now: Optional[str]) -> str:
     path = _registry_file(home)
     raw, data = _load_registry(path)
     key = _root_key(root)
