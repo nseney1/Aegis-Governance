@@ -516,12 +516,14 @@ class TestPolyglotMutationTesterCoverage:
             ev = mutation_tester.check(str(ts_file), "test", str(test_file), ast_runner=mock_runner)
             assert ev.verdict is False
             assert "Baseline tests fail" in ev.detail
+            assert ev.lines == [-1]
 
         # 2. Mutant survives (test passes against mutant)
         with patch("aegis_core.verification.mutation_tester._check_tests", return_value=passed):
             ev = mutation_tester.check(str(ts_file), "test", str(test_file), max_mutations=2, ast_runner=mock_runner)
             assert ev.verdict is False
             assert "1/2 survived" in ev.detail
+            assert not list(tmp_path.glob("_mutant_*")), "a mutant was left beside the source"
 
         # 3. Mutant killed (baseline passes, mutant fails)
         run_results = [passed, failed]  # first baseline passes, then mutant fails

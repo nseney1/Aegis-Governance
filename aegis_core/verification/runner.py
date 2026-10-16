@@ -78,6 +78,16 @@ def _discover_forbid_ast_rules(
     return discovered, broken
 
 
+# The tests/ directory that holds each package's tests, most specific first.
+_TEST_HOMES = (
+    ("aegis_core/verification/", "unit/verification"),
+    ("aegis_core/", "unit/core"),
+    ("aegis_cli/", "unit/cli"),
+    ("aegis_mcp/", "unit/mcp"),
+    ("aegis_sdk/", "unit/sdk"),
+)
+
+
 def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
     """Find the test file for a source file by convention.
 
@@ -88,6 +98,8 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
       4. tests/<clean_parent>/test_<stem>.py
       5. tests/test_<clean_parent>/test_<stem>.py
       6. Domain mappings (e.g. runner.py -> test_verification/test_layer1.py)
+    Each name is tried in the source package's own test directory (_TEST_HOMES)
+    before anywhere else.
     """
     norm = filepath.replace("\\", "/").replace("soma_", "aegis_")
     def _find_in_tests(*names: str) -> Optional[str]:
@@ -138,6 +150,15 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
         found = _find_in_tests("test_layer1.py", "test_verification/test_layer1.py")
         if found:
             return found
+
+    # A same-named test of another package (tests/unit/core/test_scan.py for
+    # aegis_cli/scan.py) must not win over the source package's own tests.
+    home = next((d for pkg, d in _TEST_HOMES if f"/{pkg}" in f"/{norm}"), None)
+    if home:
+        for cand_name in candidates:
+            p = os.path.join(repo_root, "tests", home, cand_name)
+            if os.path.isfile(p):
+                return p
 
     for cand_name in candidates:
         found = _find_in_tests(cand_name)
@@ -222,15 +243,14 @@ def _find_mutation_test_files(filepath: str, repo_root: str, func_name: str, tes
     tails = {name.rpartition(".")[2] for name in names}
     mentions = re.compile(rf"\b{re.escape(func_name)}\b")
     ordered = [convention] if convention else []
-    seen = {os.path.normcase(os.path.abspath(path)) for path in ordered}
+    convention_key = os.path.normcase(os.path.abspath(convention)) if convention else None
     for path in tests.paths:
         text = tests.text(path)
         if not mentions.search(text) or not any(tail in text for tail in tails):
             continue
         tree = tests.tree(path)
-        key = os.path.normcase(os.path.abspath(path))
-        if tree is not None and key not in seen and _imports_module(tree, names):
-            seen.add(key)
+        if (tree is not None and os.path.normcase(os.path.abspath(path)) != convention_key
+                and _imports_module(tree, names)):
             ordered.append(path)
     return ordered
 

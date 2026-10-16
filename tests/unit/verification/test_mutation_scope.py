@@ -7,6 +7,7 @@ module, "survived" every mutation.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import textwrap
@@ -152,6 +153,62 @@ class TestTestFileResolution:
         assert ev.verdict is False
         assert ev.detail == "1/1 survived (15 test files ran; the 15-file cap left out 1)"
 
+    def test_convention_file_comes_from_the_source_package(self, tmp_path):
+        """aegis_cli/scan.py is tested by tests/unit/cli/test_cli_scan.py, not by the
+        test of aegis_core/scan.py that happens to share its stem."""
+        for rel in ("tests/unit/core/test_scan.py", "tests/unit/cli/test_cli_scan.py"):
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text("", encoding="utf-8")
+
+        cli = runner._find_test_file("aegis_cli/scan.py", str(tmp_path))
+        core = runner._find_test_file("aegis_core/scan.py", str(tmp_path))
+
+        assert Path(cli).relative_to(tmp_path).as_posix() == "tests/unit/cli/test_cli_scan.py"
+        assert Path(core).relative_to(tmp_path).as_posix() == "tests/unit/core/test_scan.py"
+
+    def test_modules_of_a_namespace_package_are_found_by_path(self, tmp_path):
+        root = _repo(tmp_path, {"tests/test_ns.py": _STRONG.replace("pkg.mod", "nspkg.mod")},
+                     sources={"nspkg/mod.py": "def double(x):\n    return x + x\n"})
+
+        ev = _mutation_evidence(runner.run_layer1(["nspkg/mod.py"], str(root), max_mutations=1), "double")
+
+        assert ev.verdict is True, ev.detail
+        assert ev.detail == "0/1 survived (1 test file ran)"
+
+    def test_modules_under_a_source_root_are_found_by_package(self, tmp_path):
+        root = _repo(tmp_path, {"tests/test_src.py": _STRONG.replace("pkg.mod", "srcpkg.mod")}, sources={
+            "pyproject.toml": '[tool.pytest.ini_options]\npythonpath = ["src"]\n',
+            "src/srcpkg/__init__.py": "",
+            "src/srcpkg/mod.py": "def double(x):\n    return x + x\n",
+        })
+
+        ev = _mutation_evidence(runner.run_layer1(["src/srcpkg/mod.py"], str(root), max_mutations=1), "double")
+
+        assert ev.verdict is True, ev.detail
+        assert ev.detail == "0/1 survived (1 test file ran)"
+
+    def test_unparseable_test_modules_are_skipped(self, tmp_path):
+        root = _repo(tmp_path, {
+            "tests/test_mod.py": _STRONG,
+            "tests/test_broken.py": "from pkg.mod import double\n\ndef test_broken(:\n    double(1)\n",
+        })
+
+        ev = _mutation_evidence(runner.run_layer1(["pkg/mod.py"], str(root), max_mutations=1), "double")
+
+        assert ev.detail == "0/1 survived (1 test file ran)"
+
+    def test_unreadable_test_modules_are_skipped(self, tmp_path):
+        """A test module whose text cannot be read is not selected and stops nothing."""
+        root = _repo(tmp_path, {"tests/test_mod.py": _STRONG})
+        try:
+            os.symlink(str(root / "tests" / "missing.py"), str(root / "tests" / "test_dangling.py"))
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"cannot create a symlink here: {exc}")
+
+        ev = _mutation_evidence(runner.run_layer1(["pkg/mod.py"], str(root), max_mutations=1), "double")
+
+        assert ev.detail == "0/1 survived (1 test file ran)"
+
     def test_baseline_runs_the_same_set(self, tmp_path):
         root = _repo(tmp_path, {
             "tests/test_mod.py": _STRONG,
@@ -167,6 +224,7 @@ class TestTestFileResolution:
 
         assert ev.verdict is False
         assert ev.detail.startswith("Baseline tests fail against the unmutated code")
+        assert "test_wrong.py::test_double_wrong" in ev.detail
         assert "2 test files ran" in ev.detail
         assert ev.lines == [-1]
 
@@ -198,7 +256,8 @@ class TestMutantReachesEveryImporter:
         assert ev.detail == "2/2 survived: no test that ran imported mod.py (1 test file ran)"
         assert ev.lines == [2]
 
-    def test_check_leaves_the_tree_as_it_found_it(self, tmp_path):
+    def test_check_leaves_the_tree_as_it_found_it(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
         root = _repo(tmp_path, {"tests/test_mod.py": _WEAK})
         before = _snapshot(root)
 
@@ -235,6 +294,7 @@ class TestMutantReachesEveryImporter:
 
         assert ev.verdict is False
         assert ev.detail == "could not assess: cannot regenerate mod.py: RecursionError: too deep"
+        assert ev.lines == [-1]
 
 
 class TestRunTimeouts:
