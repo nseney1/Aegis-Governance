@@ -62,11 +62,12 @@ class Env:
             monkeypatch.delenv(name, raising=False)
         monkeypatch.setattr(doctor, "_run_host_cli", self._no_cli)
         monkeypatch.setattr(registrar, "_windows", lambda: False)
+        suffix = ".exe" if os.name == "nt" else ""  # Windows finds a program on PATH only under a PATHEXT name
         for name in ("aegis", "aegis-mcp"):
-            stub = self.bin / name
+            stub = self.bin / (name + suffix)
             stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             stub.chmod(0o755)
-        self.aegis = str(self.bin / "aegis")
+        self.aegis = str(self.bin / ("aegis" + suffix))
         if not registrar.AEGIS_PATH_CHARSET.fullmatch(self.aegis):
             # A native Windows path ('\\' and ':') is outside the shell-form charset, so
             # install would refuse the Codex and Antigravity entries these tests read back.
@@ -459,7 +460,8 @@ def test_fix_removes_only_the_v3_entries_and_backs_each_file_up(env):
     agy_original = agy.read_bytes()
 
     payload = env.fix()
-    assert payload["_rc"] == 0
+    assert payload["_rc"] == 0, ([(f.get("code"), f.get("severity")) for f in payload.get("findings", [])],
+                                 [c["id"] for c in payload.get("checks", []) if c.get("status") not in ("pass", "skip")])
     assert {(f["action"], f["status"]) for f in payload["fixes"]} == {("remove_list_items", "applied")}
     after = json.loads(claude.read_text(encoding="utf-8"))
     assert after["model"] == "x"

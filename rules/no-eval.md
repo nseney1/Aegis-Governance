@@ -21,6 +21,9 @@ Never call `eval` or `exec` on data: they run whatever the string holds. Parse d
 code as text.
 
 `aegis init` seeds this rule into a new workspace so that `aegis check` and the pre-commit
-hook enforce something on day one. Test files are not checked unless `target_paths` names
+hook enforce something on day one.
+The match is by call name: a method named `eval` or `exec` (pandas `df.eval()`, PyTorch
+`model.eval()`, SQLModel `session.exec()`) fails the check too. Delete this file if that is wrong
+for your code. Test files are not checked unless `target_paths` names
 them. If this repository needs `eval` somewhere, narrow `target_paths` or delete this file.
 Add rules for your own code with `aegis rule create`.

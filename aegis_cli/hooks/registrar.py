@@ -60,6 +60,7 @@ __all__ = [
     "ShapeError",
     "UsageError",
     "aegis_command",
+    "probe_hook_run",
     "aegis_handlers",
     "codex_rules_file",
     "codex_rules_text",
@@ -232,6 +233,32 @@ def aegis_command(path: Optional[str] = None, scripts_dirs: Optional[Sequence[st
         if os.path.isfile(candidate) and (_windows() or os.access(candidate, os.X_OK)):
             return candidate
     return None
+
+
+def probe_hook_run(host: str, aegis: str, timeout: float = 20.0) -> None:
+    """Raise InstallError unless ``aegis hook run pre-tool --host HOST`` exits 0 on an empty payload.
+
+    An aegis older than 4.1 (an old copy earlier on PATH, or a downgrade) has no ``hook run``:
+    argparse answers with exit 2, which Claude Code and Codex read as "block", so registering
+    it would block every tool call. The handler itself exits 0 for any payload it cannot use.
+    """
+    import subprocess
+    import tempfile
+
+    argv = [aegis, "hook", "run", "pre-tool", "--host", host]
+    try:
+        with tempfile.TemporaryDirectory(prefix="aegis-hook-probe-") as empty:
+            proc = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                  timeout=timeout, cwd=empty, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise InstallError(f"cannot run {aegis} hook run to check it: {exc}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().splitlines()
+        raise InstallError(
+            f"{aegis} does not support `hook run` (exit {proc.returncode}"
+            f"{': ' + detail[-1][:160] if detail else ''}). It is probably an older aegis than 4.1, and "
+            f"{host} would read its exit code as a block on every tool call. Put the 4.1 aegis first on PATH "
+            "(aegis --version), then re-run.")
 
 
 def unavailable_reason(host: str, aegis: Optional[str] = None) -> Optional[str]:
@@ -758,6 +785,10 @@ def _print_text(command: str, results: List[HookResult]) -> None:
 
 def _run(command: str, args: Any) -> int:
     host, scope = str(args.host), getattr(args, "scope", None)
+    try:  # a surface name (codex-app, claude-desktop-code, ...) names its host's config plane
+        host = host_table.resolve(host)
+    except KeyError:
+        pass  # check_host below says which hosts take hooks
     use_json, dry_run = bool(getattr(args, "json", False)), bool(getattr(args, "dry_run", False))
     try:
         check_host(host)
@@ -774,6 +805,7 @@ def _run(command: str, args: Any) -> int:
                     raise InstallError("no absolute aegis command found (not on an absolute PATH entry outside the "
                                        "repository, nor beside this Python): install aegis, then re-run")
             else:
+                probe_hook_run(host, aegis)
                 results = [install(host, scope or "user", home=home, root=root, aegis=aegis, environ=os.environ,
                                    dry_run=dry_run)]
         else:
