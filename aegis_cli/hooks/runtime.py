@@ -11,6 +11,7 @@ stays as a manual check of one command (it fails closed: it asks).
 """
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 import sys
@@ -43,13 +44,61 @@ def _run_safety_gate(args: Any) -> int:
     return rc
 
 
+def _install_description() -> str:
+    from aegis_cli.hooks import registrar
+
+    gaps = "".join(f"  - {gap}\n" for gap in registrar.KNOWN_GAPS)
+    return (
+        "Without --host: install the git pre-commit hook (it runs aegis check --hook).\n\n"
+        f"With --host {'|'.join(registrar.HOOK_HOSTS)}: register `aegis hook run pre-tool --host <h>` as that "
+        "host's PreToolUse hook, at user scope (default) or, with --scope project, in the repository's host "
+        "file, which teammates' hosts will execute. The merge keeps everything else in the file, refuses "
+        "unparseable, symlinked or hard-linked files, and backs the old file up to "
+        "~/.aegis/backups/<stamp>/<scope>/. Codex also gets ~/.codex/rules/aegis.rules and runs the hook only "
+        "after you trust it in /hooks; Antigravity hooks are unavailable on Windows. aegis doctor shows each "
+        "host's entries and tier; it cannot confirm that a host runs them. " + _HOME_NOTE + "\n\n"
+        f"Known gaps:\n{gaps}")
+
+
+#: Every aegis command but `hook run` attaches a workspace first, and $HOME never is one.
+_HOME_NOTE = ("Run it from any directory but your home directory, which Aegis never takes as a workspace, even "
+              "for --scope user (which changes only your user files).")
+
+
+def _uninstall_description() -> str:
+    return (
+        "Without --host: remove the aegis block from the git pre-commit hook.\n\n"
+        "With --host: remove Aegis's PreToolUse entries from that host's files at --scope (default: both "
+        "scopes) and nothing else, backing each file up first; for Codex also ~/.codex/rules/aegis.rules once "
+        "no Aegis Codex hook is left. " + _HOME_NOTE)
+
+
+def _host_options(parser: Any, host_help: str, scope_help: str) -> None:
+    from aegis_cli.hooks import registrar
+
+    hosts = ", ".join(registrar.HOOK_HOSTS)
+    parser.add_argument("--host", default=None, metavar="HOST", help=f"{host_help}: {hosts}")
+    parser.add_argument("--scope", default=None, choices=registrar.SCOPES, help=scope_help)
+
+
 def run_hook(args: Any) -> int:
     """Dispatch `aegis hook <action>`; no action shows the hook status."""
     action = getattr(args, "hook_action", None)
-    if action == "install":
-        return run_hook_install(args)
-    if action == "uninstall":
-        return run_hook_uninstall(args)
+    if action in ("install", "uninstall"):
+        # run_hook is public: a caller's own Namespace may predate --host and --scope.
+        if getattr(args, "host", None) is None:
+            if getattr(args, "scope", None) is not None:
+                print(f"aegis hook {action}: --scope needs --host", file=sys.stderr)
+                return 2
+            return run_hook_install(args) if action == "install" else run_hook_uninstall(args)
+        if getattr(args, "force", False):
+            # --force lets the git hook replace a link; host files are never written through one.
+            print(f"aegis hook {action}: --force applies only to the git hook; with --host nothing is "
+                  "forced (a linked or unparseable host file is always refused)", file=sys.stderr)
+            return 2
+        from aegis_cli.hooks import registrar
+
+        return registrar.run_host_install(args) if action == "install" else registrar.run_host_uninstall(args)
     if action == "safety-gate":
         return _run_safety_gate(args)
     if action == "run":
@@ -62,25 +111,36 @@ def run_hook(args: Any) -> int:
 
 
 class HookCommand(AegisCommand):
-    """Manage the git pre-commit hook."""
+    """Manage the git pre-commit hook and the agent hosts' PreToolUse hooks."""
 
     name = "hook"
     category = CommandCategory.PLUMBING
-    help = "Install, inspect or remove the git pre-commit hook"
+    help = "Install, inspect or remove the git pre-commit hook and the agent hosts' PreToolUse hooks"
 
     def configure_parser(self, parser: Any, parents: Any = None) -> None:
         p_hook_sub = parser.add_subparsers(dest="hook_action")
         p_parents = parents or []
 
-        p_hook_install = p_hook_sub.add_parser("install", parents=p_parents, help="Install the pre-commit hook into the git repository")
-        p_hook_install.add_argument("--force", action="store_true", help="Overwrite symlinks pointing outside repository")
+        p_hook_install = p_hook_sub.add_parser(
+            "install", parents=p_parents,
+            help="Install the git pre-commit hook, or with --host an agent host's PreToolUse hook",
+            description=_install_description(), formatter_class=argparse.RawDescriptionHelpFormatter)
+        p_hook_install.add_argument("--force", action="store_true",
+                                    help="Git hook only: overwrite symlinks pointing outside repository")
         p_hook_install.add_argument("--dry-run", action="store_true", help="Preview without creating or modifying hook")
+        _host_options(p_hook_install, "Register the PreToolUse hook with this host instead of the git hook",
+                      "With --host: user (default) or project")
 
         p_hook_sub.add_parser("status", parents=p_parents, help="Inspect the pre-commit hook and the interpreter it runs")
 
-        p_hook_uninstall = p_hook_sub.add_parser("uninstall", parents=p_parents, help="Remove the aegis block from the pre-commit hook")
-        p_hook_uninstall.add_argument("--force", action="store_true", help="Force removal")
+        p_hook_uninstall = p_hook_sub.add_parser(
+            "uninstall", parents=p_parents,
+            help="Remove the aegis block from the pre-commit hook, or with --host an agent host's PreToolUse hook",
+            description=_uninstall_description(), formatter_class=argparse.RawDescriptionHelpFormatter)
+        p_hook_uninstall.add_argument("--force", action="store_true", help="Git hook only: force removal")
         p_hook_uninstall.add_argument("--dry-run", action="store_true", help="Preview without modifying disk")
+        _host_options(p_hook_uninstall, "Remove Aegis's PreToolUse hook entries from this host instead of the git hook",
+                      "With --host: only this scope (default: both)")
 
         p_h_run = p_hook_sub.add_parser(
             "run", parents=p_parents,
