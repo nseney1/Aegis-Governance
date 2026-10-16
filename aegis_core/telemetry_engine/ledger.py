@@ -1,10 +1,18 @@
-"""The outcome ledger, ``.aegis/state/ledger.jsonl`` (build-sheet D13, ADR 0005 AD-1/AD-5).
+"""The outcome ledger (build-sheet D13, ADR 0005 AD-1/AD-5, v4.2 #7).
 
-The ledger is append-only and the only source of rule fitness. Every row is versioned::
+The ledger is append-only and the only source of rule fitness. In a git repository it is
+ONE file for every worktree, ``<git common dir>/aegis/state/<ws-id>/ledger.jsonl``
+(aegis_core.storage.ledger_site: ``<ws-id>`` names the workspace by its path below the git
+toplevel, so each ``.aegis`` workspace has its own); outside git it is
+``.aegis/state/ledger.jsonl``. Every row is versioned::
 
-    {"v": 2, "seq": 7, "ts": "2026-10-15T12:00:00Z", "rule": "trap-x", "outcome": "tp",
-     "source": "mcp", "host": "claude-code", "session": "…", "key": "report-1",
-     "weight": 0.5, "meta": {…}}
+    {"v": 2, "seq": 7, "ts": "2026-10-15T12:00:00Z", "worktree": "/path/to/worktree",
+     "rule": "trap-x", "outcome": "tp", "source": "mcp", "host": "claude-code",
+     "session": "…", "key": "report-1", "weight": 0.5, "meta": {…}}
+
+``worktree`` (the top of the work tree that wrote the row) is present in the shared ledger
+only. It is attribution, like ``host`` and ``session``: it is not part of a row's payload,
+so the same report retried from another worktree is the same row.
 
 - ``outcome`` is ``tp``, ``fp`` or ``trigger``. Every outcome row is also a trigger (#15):
   a rule credited with a tp was, by definition, relevant. ``trigger`` alone says the
@@ -13,8 +21,10 @@ The ledger is append-only and the only source of rule fitness. Every row is vers
 - ``seq`` increases by one per row. ``(key, rule)`` is the idempotency identity: one
   report naming N rules shares one key and writes N rows; a retry writes nothing and
   returns the stored row. Reusing a key for a different payload is an EventConflictError.
-- Rows are appended under the one workspace lock with one fsync (aegis_core.storage);
-  nothing ever rewrites a row. A migration appends an epoch row instead.
+- Rows are appended under the ledger lock with one fsync (aegis_core.storage.ledger_locked:
+  one lock file next to the shared ledger, taken by every writer of every worktree; the
+  workspace lock outside git); nothing ever rewrites a row. A migration appends an epoch
+  row instead. A caller that holds the worktree lock takes it first.
 
 Readers accept v1 rows (the ``cell``/``rule_id`` + ``signal`` shape of the v3
 ``signals.jsonl``) and convert them in memory; see ``normalize_rows``.
@@ -32,8 +42,8 @@ from pathlib import Path
 import threading
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from aegis_core.storage import append_jsonl, locked, read_jsonl
-from aegis_core.workspace.layout import WorkspaceLayout
+from aegis_core.errors import PathTraversalError
+from aegis_core.storage import append_jsonl, ledger_locked, ledger_site, read_jsonl
 
 __all__ = [
     "LEDGER_VERSION",
@@ -68,7 +78,9 @@ def _utc_now() -> str:
 
 
 def ledger_path(workspace: Any) -> Path:
-    return WorkspaceLayout(Path(os.fspath(workspace)).resolve()).ledger_file
+    """The ledger file of ``workspace`` (aegis_core.storage.ledger_site); nothing is created.
+    Raises PathTraversalError when the shared state directory is not confined."""
+    return ledger_site(workspace, create=False).path
 
 
 def _weight(row: Dict[str, Any]) -> Optional[Decimal]:
@@ -223,8 +235,14 @@ def incomplete(health: Mapping[str, Any]) -> Optional[str]:
 
 
 def read(workspace: Any) -> LedgerView:
-    """Read the ledger. Never raises for its content; a missing ledger is empty."""
-    path = ledger_path(workspace)
+    """Read the ledger. Never raises for its content or for a ledger directory that is not
+    confined (``error`` says why, and the view is incomplete); a missing ledger is empty."""
+    try:
+        path = ledger_path(workspace)
+    except PathTraversalError as exc:
+        return LedgerView([], error=str(exc))
+    except OSError as exc:  # the shared state dir cannot be listed for its confinement check
+        return LedgerView([], error=f"cannot read {exc.filename or 'the ledger directory'}: {exc.strerror or exc}")
     raw = read_jsonl(path)
     rows, unusable = normalize_rows(raw.rows)
     return LedgerView(rows, list(raw.skipped_lines), unusable, raw.torn_tail, raw.error, path)
@@ -449,8 +467,8 @@ def append(workspace: Any, events: Iterable[Dict[str, Any]]) -> List[Dict[str, A
     planned = [_validated(e) for e in events]
     if not planned:
         return []
-    path = ledger_path(workspace)
-    with locked(workspace):
+    with ledger_locked(workspace) as site:
+        path = site.path
         index = _current_index(path)
         seen: Dict[Tuple[str, str], Dict[str, Any]] = {}
         results: List[Dict[str, Any]] = []
@@ -471,6 +489,8 @@ def append(workspace: Any, events: Iterable[Dict[str, Any]]) -> List[Dict[str, A
                 continue
             seq += 1
             written = {"v": LEDGER_VERSION, "seq": seq, "ts": stamp, **{k: v for k, v in row.items() if k != "v"}}
+            if site.worktree is not None:
+                written["worktree"] = site.worktree
             new_rows.append(written)
             results.append(written)
             if identity is not None:
@@ -484,10 +504,12 @@ def append_epoch(workspace: Any, note: Dict[str, Any]) -> Dict[str, Any]:
     """Append an epoch row (no rule, no outcome) recording a migration; return it."""
     if not isinstance(note, dict):
         raise ValueError("note must be a mapping")
-    path = ledger_path(workspace)
-    with locked(workspace):
+    with ledger_locked(workspace) as site:
+        path = site.path
         index = _current_index(path)
         row = {"v": LEDGER_VERSION, "seq": index.last_seq + 1, "ts": _utc_now(), "epoch": note}
+        if site.worktree is not None:
+            row["worktree"] = site.worktree
         _write(path, [row])
         return row
 
@@ -498,8 +520,8 @@ def append_rows(workspace: Any, rows: List[Dict[str, Any]]) -> List[Dict[str, An
     Rows whose ``(key, rule)`` is already in the ledger are skipped, so a re-run adds
     nothing. Returns the rows written.
     """
-    path = ledger_path(workspace)
-    with locked(workspace):
+    with ledger_locked(workspace) as site:
+        path = site.path
         index = _current_index(path)
         seq = index.last_seq
         seen = set(index.keyed)
@@ -510,7 +532,10 @@ def append_rows(workspace: Any, rows: List[Dict[str, Any]]) -> List[Dict[str, An
             if identity is not None and identity in seen:
                 continue
             seq += 1
-            new_rows.append({"v": LEDGER_VERSION, "seq": seq, **{k: v for k, v in row.items() if k not in ("v", "seq")}})
+            written = {"v": LEDGER_VERSION, "seq": seq, **{k: v for k, v in row.items() if k not in ("v", "seq")}}
+            if site.worktree is not None and "worktree" not in written:
+                written["worktree"] = site.worktree
+            new_rows.append(written)
             if identity is not None:
                 seen.add(identity)
         if new_rows:
