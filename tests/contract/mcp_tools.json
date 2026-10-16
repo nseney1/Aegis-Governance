@@ -1,0 +1,190 @@
+{
+  "tools": [
+    {
+      "name": "aegis_scan",
+      "description": "Call before editing files: returns the governance rules that apply to them, ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules (gates, invariants) take at most two slots; the others are listed in omitted_mandatory. stale_rules lists rules edited since the last aegis sync. If any rule file cannot be loaded the scan fails (status FAIL) and names it.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Scan JIT Rules"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Workspace-relative files you are about to edit. Defaults to the git diff."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "summary",
+              "ids"
+            ],
+            "description": "Optional response projection: full (default), summary or ids."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "aegis_report_outcome",
+      "description": "Report whether the rules you were shown helped. Each report is an advisory self-report row in the outcome ledger; it never promotes a rule by itself.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Report Outcome"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "failure",
+              "tp",
+              "fp",
+              "pass",
+              "fail"
+            ],
+            "description": "Verification outcome."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Unique key for this report. Retrying with the same key never records twice."
+          },
+          "rules_used": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Names of the rules this outcome is about, as aegis_scan returned them."
+          },
+          "tests_passed": {
+            "type": "boolean"
+          },
+          "rework_count": {
+            "type": "integer",
+            "default": 0
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional: the files this change edited (workspace-relative). They measure scan-before-edit compliance (aegis status --compliance); they credit no rule."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "summary",
+              "ids"
+            ],
+            "description": "Optional response projection: full (default), summary or ids."
+          }
+        },
+        "required": [
+          "outcome",
+          "rules_used",
+          "idempotency_key"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "aegis_create_rule",
+      "description": "Turn a natural language concern into a prompt that drafts a governance rule. It writes nothing: save the drafted rule under .aegis/rules/ yourself.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Create Rule"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "The concern, in natural language."
+          },
+          "rule_type": {
+            "type": "string",
+            "enum": [
+              "invariant",
+              "trap",
+              "gate",
+              "boundary",
+              "persona",
+              "contract"
+            ],
+            "description": "Optional rule type hint."
+          },
+          "domain": {
+            "type": "string",
+            "description": "Optional domain hint."
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "aegis_list_rules",
+      "description": "List the governance rules as {rules, stale_rules, ignored}: every rule with its type, hypothesis and ledger fitness (a file that cannot be loaded is listed with _error), the rules edited since the last aegis sync, and markdown under .aegis/rules that is not a rule.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "List Rules"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rule_type": {
+            "type": "string",
+            "enum": [
+              "invariant",
+              "trap",
+              "gate",
+              "boundary",
+              "persona",
+              "contract"
+            ],
+            "description": "Optional rule type filter."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "summary",
+              "ids"
+            ],
+            "description": "Optional response projection: full (default), summary or ids."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
+}

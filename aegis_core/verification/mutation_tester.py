@@ -3,22 +3,21 @@ from __future__ import annotations
 """Lightweight mutation testing for the verification framework.
 
 Parses a target function from a file using AST, generates mutations
-(operator swaps, constant replacements, line removals), runs the test
-suite against each mutant, and reports surviving mutations.
+(operator swaps, constant replacements, line removals), runs the given
+test files against each mutant, and reports surviving mutations.
 """
 
 import ast
 import atexit
-import copy
 from dataclasses import dataclass
-import re
+import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence, Union
 
 from aegis_core.ast.schema import MutationPoint, NormalizedAST
+from aegis_core.storage import atomic_write_text
 from . import ToolEvidence
 
 __all__ = ["check", "apply_mutation_point", "collect_mutations_from_ast"]
@@ -80,15 +79,39 @@ def _is_mutable_return(node: ast.AST) -> bool:
     return not (isinstance(node.value, ast.Constant) and node.value.value is None)
 
 
+_SCOPES = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _defined_in(scope: ast.AST, name: str, kinds: tuple[type, ...]) -> Optional[ast.AST]:
+    """The first ``kinds`` definition of ``name`` that belongs to ``scope`` itself: in its
+    body or in a block there (if/else, try, with, loops), never inside a nested scope."""
+    todo = list(ast.iter_child_nodes(scope))
+    for node in todo:  # grows while iterated: breadth first, as runner._discover_functions
+        if isinstance(node, _SCOPES):
+            if isinstance(node, kinds) and node.name == name:
+                return node
+            continue
+        todo.extend(ast.iter_child_nodes(node))
+    return None
+
+
+def _function_node(tree: ast.AST, function_name: str) -> Optional[ast.FunctionDef]:
+    """The function ``function_name`` names: a module-level ``f``, a method ``Class.method``
+    or a nested ``outer.inner`` (runner._discover_functions); the first definition when its
+    scope defines it more than once."""
+    *outer, name = function_name.split(".")
+    scope: Optional[ast.AST] = tree
+    for part in outer:
+        scope = _defined_in(scope, part, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        if scope is None:
+            return None
+    found = _defined_in(scope, name, (ast.FunctionDef,))
+    return found if isinstance(found, ast.FunctionDef) else None
+
+
 def _collect_mutations(source: str, function_name: str) -> list[_Mutation]:
     """Walk the AST of *function_name* and collect all possible mutations."""
-    tree = ast.parse(source)
-    func_node: Optional[ast.FunctionDef] = None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == function_name:
-            func_node = node
-            break
-
+    func_node = _function_node(ast.parse(source), function_name)
     if func_node is None:
         return []
 
@@ -143,11 +166,7 @@ def _apply_mutation_by_index(
     # Collect mutation targets in the exact order of _collect_mutations
     targets2: list[ast.AST] = []
     kinds2: list[str] = []
-    func_node2: Optional[ast.FunctionDef] = None
-    for node in ast.walk(tree2):
-        if isinstance(node, ast.FunctionDef) and node.name == function_name:
-            func_node2 = node
-            break
+    func_node2 = _function_node(tree2, function_name)
     if func_node2 is None:
         return None
 
@@ -232,15 +251,131 @@ def _apply_mutation_by_index(
         return None
 
 
+# A mutant faces at most this many test files (the runner puts the convention file
+# first), and each run may take longer the more files it has: 30 s for one file plus
+# 15 s per extra file, never more than 300 s.
+MAX_TEST_FILES = 15
+_BASE_TIMEOUT_S = 30
+_TIMEOUT_PER_EXTRA_FILE_S = 15
+_MAX_TIMEOUT_S = 300
+
+
+def _run_timeout(file_count: int) -> int:
+    return min(_BASE_TIMEOUT_S + _TIMEOUT_PER_EXTRA_FILE_S * max(0, file_count - 1), _MAX_TIMEOUT_S)
+
+
+def _bounded_test_files(test_file: Union[str, Sequence[str]]) -> tuple[list[str], int]:
+    """The test files that run, in the caller's order, and how many the cap left out."""
+    if isinstance(test_file, (str, os.PathLike)):
+        test_file = [test_file]
+    unique = list(dict.fromkeys(os.fspath(path) for path in test_file))
+    return unique[:MAX_TEST_FILES], max(0, len(unique) - MAX_TEST_FILES)
+
+
+def _files_note(ran: int, left_out: int) -> str:
+    note = f"{ran} test file{'' if ran == 1 else 's'} ran"
+    if left_out:
+        note += f"; the {MAX_TEST_FILES}-file cap left out {left_out}"
+    return note
+
+
+_SWAP_PLUGIN = "_aegis_mutant_swap"
+
+# A pytest plugin (loaded with -p, so before any conftest or test module imports code)
+# that serves the staged source for whichever module resolves to the target file, under
+# that module's own name and __file__. Every importer then sees one mutated module:
+# `from pkg import mod`, `import pkg.mod`, and other modules that call the function.
+# The mutant never touches the source tree. The marker records that the target loaded.
+_SWAP_PLUGIN_BODY = """
+import os
+import sys
+from importlib.abc import Loader
+from importlib.util import spec_from_file_location
+
+_KEY = os.path.normcase(os.path.realpath(_TARGET))
+_STEM = os.path.splitext(os.path.basename(_TARGET))[0]
+
+
+class _StagedSourceLoader(Loader):
+    def __init__(self, source):
+        self._source = source
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        code = compile(self._source, module.__spec__.origin, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+
+
+class _SwapFinder:
+    @staticmethod
+    def find_spec(fullname, path=None, target=None):
+        if fullname.rpartition(".")[2] != _STEM:
+            return None
+        spec = None
+        for finder in sys.meta_path:
+            find = getattr(finder, "find_spec", None)
+            if finder is _SwapFinder or find is None:
+                continue
+            spec = find(fullname, path, target)
+            if spec is not None:
+                break
+        if spec is None or not spec.origin:
+            return spec
+        if os.path.normcase(os.path.realpath(spec.origin)) != _KEY:
+            return spec
+        with open(_SOURCE, encoding="utf-8") as fh:
+            source = fh.read()
+        with open(_LOADED, "w", encoding="utf-8") as fh:
+            fh.write(fullname)
+        return spec_from_file_location(fullname, spec.origin, loader=_StagedSourceLoader(source))
+
+
+sys.meta_path.insert(0, _SwapFinder)
+"""
+
+
+class _ModuleSwap:
+    """Stages a source for the target module of a pytest run (see _SWAP_PLUGIN_BODY)."""
+
+    def __init__(self, target: Path, workdir: str):
+        self.workdir = workdir
+        self.source_file = os.path.join(workdir, "staged_source.txt")
+        self.marker = os.path.join(workdir, "loaded.txt")
+        header = (
+            f"_TARGET = {os.path.abspath(target)!r}\n"
+            f"_SOURCE = {self.source_file!r}\n"
+            f"_LOADED = {self.marker!r}\n"
+        )
+        atomic_write_text(os.path.join(workdir, f"{_SWAP_PLUGIN}.py"), header + _SWAP_PLUGIN_BODY)
+
+    def stage(self, source: str) -> str:
+        """Stage ``source`` for the next run; returns the PYTHONPATH that loads the plugin."""
+        atomic_write_text(self.source_file, source)
+        Path(self.marker).unlink(missing_ok=True)
+        inherited = os.environ.get("PYTHONPATH")
+        return self.workdir + (os.pathsep + inherited if inherited else "")
+
+    def loaded(self) -> bool:
+        return os.path.exists(self.marker)
+
+
 @dataclass
 class TestRunResult:
     passed: bool
     status: str = "pass"  # "pass", "fail", "timeout", "missing_runner", "error"
     detail: str = ""
+    loaded: bool = False  # the run imported the staged source for the target module
 
 
-def _check_tests(test_file: str, timeout: int = 30) -> TestRunResult:
-    """Run pytest on *test_file* and return structured result with diagnostics."""
+def _check_tests(
+    test_files: Sequence[str],
+    timeout: int,
+    swap: Optional[_ModuleSwap] = None,
+    source: Optional[str] = None,
+) -> TestRunResult:
+    """Run pytest on *test_files* (with *source* staged for the target) and return a structured result."""
     from aegis_core.verification.test_runner import resolve_pytest_cmd
 
     pytest_cmd = resolve_pytest_cmd()
@@ -250,27 +385,30 @@ def _check_tests(test_file: str, timeout: int = 30) -> TestRunResult:
             status="missing_runner",
             detail="pytest executable could not be resolved in active environment",
         )
+    cmd = pytest_cmd + ["-x", "-q", "--no-header", "--tb=short", "-p", "no:cacheprovider"]
+    env = dict(os.environ)
+    # No bytecode and no cache: the runs leave the tree as they found it.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    if swap is not None:
+        cmd += ["-p", _SWAP_PLUGIN]
+        env["PYTHONPATH"] = swap.stage(source or "")
+    cmd += list(test_files)
     try:
         result = subprocess.run(
-            pytest_cmd + [test_file, "-x", "-q", "--no-header", "--tb=short"],
+            cmd,
             capture_output=True,
             timeout=timeout,
             text=True,
-        )
-        if result.returncode == 0:
-            return TestRunResult(passed=True, status="pass", detail="")
-        err_msg = (result.stderr or result.stdout or "").strip()
-        tail = "\n".join(err_msg.splitlines()[-5:])
-        return TestRunResult(
-            passed=False,
-            status="fail",
-            detail=f"exit code {result.returncode}: {tail[:300]}",
+            encoding="utf-8",
+            errors="replace",
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return TestRunResult(
             passed=False,
             status="timeout",
-            detail=f"timed out after {timeout}s under load",
+            detail=f"timed out after {timeout}s",
+            loaded=swap is not None and swap.loaded(),
         )
     except Exception as e:
         return TestRunResult(
@@ -278,21 +416,33 @@ def _check_tests(test_file: str, timeout: int = 30) -> TestRunResult:
             status="error",
             detail=f"execution error: {e}",
         )
+    loaded = swap is not None and swap.loaded()
+    if result.returncode == 0:
+        return TestRunResult(passed=True, status="pass", detail="", loaded=loaded)
+    err_msg = (result.stderr or result.stdout or "").strip()
+    tail = "\n".join(err_msg.splitlines()[-5:])
+    return TestRunResult(
+        passed=False,
+        status="fail",
+        detail=f"exit code {result.returncode}: {tail[:300]}",
+        loaded=loaded,
+    )
 
 
-def _run_tests(test_file: str, timeout: int = 30) -> bool:
-    """Run pytest on *test_file*. Returns True if tests PASS."""
-    return _check_tests(test_file, timeout=timeout).passed
+def _baseline_failure(run: TestRunResult, timeout: int, note: str) -> Optional[str]:
+    """Why the unmutated code cannot be assessed, or None when its tests pass.
 
-
-def _run_baseline(test_file: str, timeout: int = 30) -> tuple[bool, str]:
-    """Run baseline tests and return (passed, failure_detail)."""
-    if not _run_tests(test_file, timeout=timeout):
-        res = _check_tests(test_file, timeout=timeout)
-        if not res.passed and res.detail:
-            return False, f"Baseline tests fail against the unmutated code ({res.detail}); cannot assess mutations"
-        return False, "Baseline tests fail against the unmutated code; cannot assess mutations"
-    return True, ""
+    A mutant counts as killed whenever the tests fail, so tests that cannot pass against
+    the original code (syntax/import error, wrong assertion, timeout) would "kill" every
+    mutant and pass (BUG-034). The caller fails closed instead.
+    """
+    if run.passed:
+        return None
+    if run.status == "timeout":
+        return f"could not assess (timeout): the baseline run did not finish within {timeout}s ({note})"
+    if run.status == "missing_runner":
+        return f"Baseline tests fail against the unmutated code ({run.detail}); cannot assess mutations"
+    return f"Baseline tests fail against the unmutated code ({run.detail}; {note}); cannot assess mutations"
 
 
 def apply_mutation_point(source: str, point: MutationPoint) -> Optional[str]:
@@ -368,7 +518,7 @@ def collect_mutations_from_ast(
 def check(
     target_file: str,
     target_function: str,
-    test_file: str,
+    test_file: Union[str, Sequence[str]],
     max_mutations: int | None = None,
     target_lines: Optional[set[int]] = None,
     *,
@@ -376,13 +526,32 @@ def check(
 ) -> ToolEvidence:
     """Run mutation testing on *target_function* in *target_file*.
 
-    For each generated mutation, writes a mutated copy and runs *test_file*.
-    If the tests still pass, the mutation survived (indicating a weak test).
+    *test_file* is one test file or an ordered list of them; the first
+    MAX_TEST_FILES run (the detail says how many ran and how many the cap left
+    out), with a timeout that grows with their number. The baseline and every
+    mutant run the same files. A mutant survives when the tests still pass
+    against it (indicating a weak test); for Python targets it replaces the
+    module for the whole test run, however the tests import it.
 
     Returns ToolEvidence with verdict=True if no mutations survive.
     """
     target_path = Path(target_file)
     source = target_path.read_text(encoding="utf-8")
+    test_files, left_out = _bounded_test_files(test_file)
+    timeout = _run_timeout(len(test_files))
+    note = _files_note(len(test_files), left_out)
+
+    def evidence(verdict: bool, detail: str, lines: Optional[list[int]] = None) -> ToolEvidence:
+        return ToolEvidence(
+            tool="mutation_tester",
+            target=f"{target_file}::{target_function}",
+            verdict=verdict,
+            detail=detail,
+            lines=lines or [],
+        )
+
+    if not test_files:
+        return evidence(False, "could not assess: no test file to run")
 
     if target_path.suffix != ".py":
         from aegis_core.ast.runner import ASTDriverRunner
@@ -390,25 +559,14 @@ def check(
         try:
             norm_ast = runner.parse_file(target_file)
         except Exception as e:
-            return ToolEvidence(
-                tool="mutation_tester",
-                target=f"{target_file}::{target_function}",
-                verdict=False,
-                detail=f"Failed to parse NormalizedAST via driver: {e}",
-            )
+            return evidence(False, f"Failed to parse NormalizedAST via driver: {e}")
 
         mutation_points = collect_mutations_from_ast(norm_ast, target_function)
         if target_lines is not None:
             mutation_points = [m for m in mutation_points if m.line in target_lines]
 
         if not mutation_points:
-            return ToolEvidence(
-                tool="mutation_tester",
-                target=f"{target_file}::{target_function}",
-                verdict=True,
-                detail="No mutations on modified lines",
-                lines=[],
-            )
+            return evidence(True, "No mutations on modified lines")
 
         if max_mutations is not None:
             mutation_points = mutation_points[:max_mutations]
@@ -416,17 +574,12 @@ def check(
         total = len(mutation_points)
         survived: list[int] = []
 
-        if mutation_points:
-            baseline_passed, baseline_detail = _run_baseline(test_file)
-            if not baseline_passed:
-                return ToolEvidence(
-                    tool="mutation_tester",
-                    target=f"{target_file}::{target_function}",
-                    verdict=False,
-                    detail=baseline_detail,
-                    lines=[-1],
-                )
+        failure = _baseline_failure(_check_tests(test_files, timeout), timeout, note)
+        if failure:
+            return evidence(False, failure, [-1])
 
+        # Non-Python mutants are written beside the original: only tests that read
+        # sibling files can observe them.
         for m in mutation_points:
             mutated_source = apply_mutation_point(source, m)
             if mutated_source is None:
@@ -446,22 +599,16 @@ def check(
             clean_target = lambda p=tmp_path: Path(p).unlink(missing_ok=True)
             atexit.register(clean_target)
             try:
-                if _run_tests(test_file):
+                if _check_tests(test_files, timeout).passed:
                     survived.append(m.line)
             finally:
                 atexit.unregister(clean_target)
                 clean_target()
 
-        survived_count = len(survived)
-        verdict = survived_count == 0
+        return evidence(not survived, f"{len(survived)}/{total} survived ({note})", sorted(set(survived)))
 
-        return ToolEvidence(
-            tool="mutation_tester",
-            target=f"{target_file}::{target_function}",
-            verdict=verdict,
-            detail=f"{survived_count}/{total} survived",
-            lines=sorted(set(survived)),
-        )
+    if _function_node(ast.parse(source), target_function) is None:
+        return evidence(False, f"could not assess: no function named {target_function} in {target_path.name}")
 
     all_mutations = _collect_mutations(source, target_function)
 
@@ -473,100 +620,42 @@ def check(
         mutation_candidates.append((idx, mut))
 
     if target_lines is not None and not mutation_candidates:
-        return ToolEvidence(
-            tool="mutation_tester",
-            target=f"{target_file}::{target_function}",
-            verdict=True,
-            detail="No mutations on modified lines",
-            lines=[],
-        )
+        return evidence(True, "No mutations on modified lines")
 
     if max_mutations is not None:
         mutation_candidates = mutation_candidates[:max_mutations]
 
     total = len(mutation_candidates)
-    survived: list[int] = []
+    if not total:
+        return evidence(True, "0/0 survived (no mutations to apply)")
 
-    # A mutant counts as killed whenever the tests fail, so tests that can't
-    # pass against the original code (syntax/import error, wrong assertion)
-    # would "kill" every mutant and pass (BUG-034). Fail closed instead.
-    if mutation_candidates:
-        baseline_passed, baseline_detail = _run_baseline(test_file)
-        if not baseline_passed:
-            return ToolEvidence(
-                tool="mutation_tester",
-                target=f"{target_file}::{target_function}",
-                verdict=False,
-                detail=baseline_detail,
-                lines=[-1],
-            )
+    try:
+        # The baseline runs the unmutated module through the same unparse-and-load
+        # path as the mutants, so a mutant run can differ from it only by the mutation.
+        unmutated = ast.unparse(ast.parse(source))
+    except Exception as exc:
+        return evidence(False, f"could not assess: cannot regenerate {target_path.name}: {type(exc).__name__}: {exc}", [-1])
 
-    for orig_idx, mutation in mutation_candidates:
-        mutated_source = _apply_mutation_by_index(source, target_function, orig_idx)
-        if mutated_source is None:
-            continue
+    survived = []
+    with tempfile.TemporaryDirectory(prefix="aegis-mutants-") as workdir:
+        swap = _ModuleSwap(target_path, workdir)
+        baseline = _check_tests(test_files, timeout, swap, unmutated)
+        failure = _baseline_failure(baseline, timeout, note)
+        if failure:
+            return evidence(False, failure, [-1])
+        if not baseline.loaded:
+            # Nothing that ran imports the module, so no test can detect any mutant.
+            lines = sorted({mutation.lineno for _, mutation in mutation_candidates})
+            return evidence(False, f"{total}/{total} survived: no test that ran imported {target_path.name} ({note})", lines)
 
-        # Write mutant to a temp file at the same location so imports work
-        target_path = Path(target_file)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".py",
-            dir=str(target_path.parent),
-            delete=False,
-            prefix="_mutant_",
-        ) as tmp:
-            tmp.write(mutated_source)
-            tmp_path = tmp.name
+        for orig_idx, mutation in mutation_candidates:
+            mutated_source = _apply_mutation_by_index(source, target_function, orig_idx)
+            if mutated_source is None:
+                continue
+            run = _check_tests(test_files, timeout, swap, mutated_source)
+            # Killed only by a failing (or hung) run that loaded the mutant; a run that
+            # never loaded it says nothing about the tests.
+            if run.passed or not run.loaded:
+                survived.append(mutation.lineno)
 
-        clean_target = lambda p=tmp_path: Path(p).unlink(missing_ok=True)
-        atexit.register(clean_target)
-        try:
-            # Patch test file to import from mutant instead of original
-            test_source = Path(test_file).read_text()
-            original_stem = target_path.stem
-            mutant_stem = Path(tmp_path).stem
-
-            patched_test = re.sub(
-                rf"\bfrom\s+([a-zA-Z0-9_.]*\.)?{re.escape(original_stem)}\s+import\b",
-                rf"from \g<1>{mutant_stem} import",
-                test_source,
-            )
-            patched_test = re.sub(
-                rf"\bimport\s+([a-zA-Z0-9_.]*\.)?{re.escape(original_stem)}\b",
-                rf"import \g<1>{mutant_stem}",
-                patched_test,
-            )
-
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".py",
-                dir=str(Path(test_file).parent),
-                delete=False,
-                prefix="_test_mutant_",
-            ) as test_tmp:
-                test_tmp.write(patched_test)
-                test_tmp_path = test_tmp.name
-
-            clean_test = lambda p=test_tmp_path: Path(p).unlink(missing_ok=True)
-            atexit.register(clean_test)
-            try:
-                if _run_tests(test_tmp_path):
-                    # Tests passed with mutation → mutation survived
-                    survived.append(mutation.lineno)
-            finally:
-                atexit.unregister(clean_test)
-                clean_test()
-        finally:
-            atexit.unregister(clean_target)
-            clean_target()
-
-    survived_count = len(survived)
-    verdict = survived_count == 0
-
-    return ToolEvidence(
-        tool="mutation_tester",
-        target=f"{target_file}::{target_function}",
-        verdict=verdict,
-        detail=f"{survived_count}/{total} survived",
-        lines=sorted(set(survived)),
-    )
+    return evidence(not survived, f"{len(survived)}/{total} survived ({note})", sorted(set(survived)))

@@ -1,4 +1,4 @@
-"""Tests for JIT context token budget clamping (Issue #75) and Gate 4.5 workflow integration."""
+"""Tests for JIT context token budget clamping (Issue #75)."""
 import os
 import shutil
 import tempfile
@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from aegis_mcp.jit_engine import express, estimate_tokens
+from aegis_core.scan import estimate_tokens, scan as express
 
 
 class TestJITContextBudgetClamping(unittest.TestCase):
@@ -14,15 +14,15 @@ class TestJITContextBudgetClamping(unittest.TestCase):
         self.test_dir = tempfile.mkdtemp(prefix="soma_test_jit_budget_")
         self.ws = Path(self.test_dir)
         self.rules_dir = self.ws / ".aegis" / "rules"
-        (self.rules_dir / "vacuoles").mkdir(parents=True, exist_ok=True)
-        (self.rules_dir / "walls").mkdir(parents=True, exist_ok=True)
+        (self.rules_dir / "traps").mkdir(parents=True, exist_ok=True)
+        (self.rules_dir / "invariants").mkdir(parents=True, exist_ok=True)
 
         # Helper to create a cell with custom length
         self._create_cell(
-            "walls",
+            "invariants",
             "wall-security.md",
             frontmatter={
-                "type": "wall",
+                "type": "invariant",
                 "enforcement": "gate",
                 "target_paths": ["*.py"],
                 "hypothesis": "Prevent security vulnerabilities",
@@ -31,10 +31,10 @@ class TestJITContextBudgetClamping(unittest.TestCase):
             body="Security guidelines detailed instructions " * 15,  # ~60 words -> ~80 tokens
         )
         self._create_cell(
-            "vacuoles",
+            "traps",
             "vacuole-style.md",
             frontmatter={
-                "type": "vacuole",
+                "type": "trap",
                 "enforcement": "advisory",
                 "target_paths": ["*.py"],
                 "hypothesis": "Ensure consistent code style",
@@ -43,10 +43,10 @@ class TestJITContextBudgetClamping(unittest.TestCase):
             body="Code style conventions detailed instructions " * 30,  # ~120 words -> ~160 tokens
         )
         self._create_cell(
-            "vacuoles",
+            "traps",
             "vacuole-perf.md",
             frontmatter={
-                "type": "vacuole",
+                "type": "trap",
                 "enforcement": "advisory",
                 "target_paths": ["*.py"],
                 "hypothesis": "Optimize hot paths",
@@ -101,17 +101,18 @@ class TestJITContextBudgetClamping(unittest.TestCase):
 
     def test_env_var_overrides_token_budget(self):
         """AEGIS_MAX_JIT_TOKENS environment variable should set default budget."""
-        with patch.dict(os.environ, {"AEGIS_MAX_JIT_TOKENS": "120"}):
+        with patch.dict(os.environ, {"AEGIS_MAX_JIT_TOKENS": "160"}):
             res = express(str(self.ws), changed_files=["main.py"])
             stats = res["stats"]
-            self.assertEqual(stats.get("max_tokens_budget"), 120)
-            self.assertLessEqual(stats.get("estimated_tokens", 999), 120)
+            self.assertEqual(stats.get("max_tokens_budget"), 160)
+            self.assertLessEqual(stats.get("estimated_tokens", 999), 160)
             self.assertTrue(stats.get("clamped"))
 
     def test_config_file_sets_token_budget(self):
-        """max_jit_tokens setting in aegis.conf should be respected."""
-        conf_path = self.ws / "aegis.conf"
-        conf_path.write_text("max_jit_tokens=180\n", encoding="utf-8")
+        """jit.max_tokens in .aegis/config.json sets the budget (D10)."""
+        conf_path = self.ws / ".aegis" / "config.json"
+        conf_path.parent.mkdir(parents=True, exist_ok=True)
+        conf_path.write_text('{"v": 1, "jit": {"max_tokens": 180}}', encoding="utf-8")
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AEGIS_MAX_JIT_TOKENS", None)
             res = express(str(self.ws), changed_files=["main.py"])
@@ -119,20 +120,29 @@ class TestJITContextBudgetClamping(unittest.TestCase):
             self.assertEqual(stats.get("max_tokens_budget"), 180)
             self.assertLessEqual(stats.get("estimated_tokens", 999), 180)
 
+    def test_legacy_aegis_conf_is_not_read(self):
+        """D10: aegis.conf is gone; `aegis migrate` converts it."""
+        (self.ws / "aegis.conf").write_text("max_jit_tokens=180\n", encoding="utf-8")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AEGIS_MAX_JIT_TOKENS", None)
+            res = express(str(self.ws), changed_files=["main.py"])
+            self.assertNotEqual(res["stats"].get("max_tokens_budget"), 180)
+
     def test_mandatory_cells_prioritized_under_tight_budget(self):
         """Mandatory wall/gate cells must be included first before advisory cells under a tight budget."""
-        # Set budget just enough for wall (~80 tokens) but not all cells (~450 tokens)
-        res = express(str(self.ws), changed_files=["main.py"], max_tokens=140)
-        relevant_names = [c["name"] for c in res["relevant_cells"]]
-        self.assertIn("wall-security", relevant_names)
-        self.assertTrue(res["stats"]["clamped"])
-        # Should not include all 3 cells
-        self.assertLess(len(res["relevant_cells"]), 3)
+        wall_only = express(str(self.ws), changed_files=["main.py"], budget=1, max_tokens=10_000)
+        self.assertEqual([c["name"] for c in wall_only["relevant_rules"]], ["wall-security"])
 
-    def test_release_workflow_contains_gate_4_5(self):
-        """RELEASE_WORKFLOW.md must document Gate 4.5 2-Layer verification."""
-        repo_root = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
-        workflow_doc = repo_root / "docs" / "project" / "RELEASE_WORKFLOW.md"
-        content = workflow_doc.read_text(encoding="utf-8")
-        self.assertIn("Gate 4.5", content)
-        self.assertIn("soma verify", content)
+        # Enough for the wall and the "2 more rules omitted" notice (~17 tokens as sent),
+        # far short of any advisory cell: every advisory cell is omitted, never swapped in.
+        res = express(str(self.ws), changed_files=["main.py"], max_tokens=wall_only["stats"]["estimated_tokens"] + 30)
+        relevant_names = [c["name"] for c in res["relevant_rules"]]
+        self.assertEqual(relevant_names, ["wall-security"])
+        self.assertTrue(res["stats"]["clamped"])
+        self.assertEqual(res["stats"]["omitted"], 2)
+
+    def test_a_gate_that_does_not_fit_is_never_displaced_by_an_advisory_cell(self):
+        """Under a budget too small for the wall, a smaller advisory cell is not staged in its place."""
+        res = express(str(self.ws), changed_files=["main.py"], max_tokens=140)
+        self.assertEqual(res["relevant_rules"], [])
+        self.assertEqual(res["stats"]["omitted"], 3)

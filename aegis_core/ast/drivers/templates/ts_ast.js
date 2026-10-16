@@ -56,6 +56,26 @@ function main() {
 }
 
 /**
+ * One import record. imported_symbols are the names bound in this module; aliases holds a
+ * [bound, original] pair per renamed member so policy checks see `run` as `exec`.
+ */
+function importRecord(moduleName, names, aliases, alias, isWildcard, line) {
+  const record = {
+    source: moduleName,
+    imported_symbols: names,
+    module: moduleName,
+    imported_names: names,
+    alias: alias,
+    is_wildcard: isWildcard,
+    line: line,
+  };
+  if (aliases.length) {
+    record.aliases = aliases;
+  }
+  return record;
+}
+
+/**
  * Robust compiler-backed parser using official typescript module.
  */
 function parseWithTypeScriptCompiler(ts, filePath, source, language) {
@@ -97,6 +117,7 @@ function parseWithTypeScriptCompiler(ts, filePath, source, language) {
     if (ts.isImportDeclaration(node)) {
       const moduleName = node.moduleSpecifier ? node.moduleSpecifier.text : "";
       const names = [];
+      const aliases = [];
       let isWildcard = false;
       let alias = null;
 
@@ -110,22 +131,18 @@ function parseWithTypeScriptCompiler(ts, filePath, source, language) {
             alias = node.importClause.namedBindings.name.text;
           } else if (ts.isNamedImports(node.importClause.namedBindings)) {
             for (const elem of node.importClause.namedBindings.elements) {
+              // `{ exec as run }`: name is the local binding, propertyName the export.
               names.push(elem.name.text);
+              if (elem.propertyName && elem.propertyName.text !== elem.name.text) {
+                aliases.push([elem.name.text, elem.propertyName.text]);
+              }
             }
           }
         }
       }
 
       const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-      imports.push({
-        source: moduleName,
-        imported_symbols: names,
-        module: moduleName,
-        imported_names: names,
-        alias: alias,
-        is_wildcard: isWildcard,
-        line: line + 1,
-      });
+      imports.push(importRecord(moduleName, names, aliases, alias, isWildcard, line + 1));
     }
 
     // 2. Definitions
@@ -277,24 +294,22 @@ function parseWithBuiltinLexer(filePath, source, language) {
       let names = [];
       const moduleName = importMatch[5];
 
+      const aliases = [];
       if (importMatch[1]) {
         isWildcard = true;
         alias = importMatch[2];
       } else if (importMatch[3]) {
-        names = importMatch[3].split(",").map(s => s.trim().split(/\s+as\s+/)[0]).filter(Boolean);
+        for (const member of importMatch[3].split(",")) {
+          const m = member.trim().match(/^(?:type\s+)?([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+          if (!m) continue;
+          names.push(m[2] || m[1]);
+          if (m[2] && m[2] !== m[1]) aliases.push([m[2], m[1]]);
+        }
       } else if (importMatch[4]) {
         names = [importMatch[4]];
       }
 
-      imports.push({
-        source: moduleName,
-        imported_symbols: names,
-        module: moduleName,
-        imported_names: names,
-        alias: alias,
-        is_wildcard: isWildcard,
-        line: lineNum,
-      });
+      imports.push(importRecord(moduleName, names, aliases, alias, isWildcard, lineNum));
     }
 
     // 2. Class Definitions

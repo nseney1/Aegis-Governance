@@ -286,7 +286,7 @@ class TestMutationTesterAppliesEveryCollectedMutation:
 
         result = mutation_tester.check(str(src), "eq", str(test))
         assert result.verdict is False, result.detail
-        assert result.detail == "2/2 survived"
+        assert result.detail == "2/2 survived (1 test file ran)"
 
     def test_checked_boolean_logic_kills_mutants(self, tmp_path):
         from aegis_core.verification import mutation_tester
@@ -308,7 +308,7 @@ class TestMutationTesterAppliesEveryCollectedMutation:
 
         result = mutation_tester.check(str(src), "both", str(test))
         assert result.verdict is True, result.detail
-        assert result.detail == "0/2 survived"
+        assert result.detail == "0/2 survived (1 test file ran)"
 
     def test_docstring_and_return_none_are_not_mutated(self, tmp_path):
         """Deleting a docstring or turning `return None` into `return None`
@@ -338,7 +338,7 @@ class TestMutationTesterAppliesEveryCollectedMutation:
 
         documented = mutation_tester.check(str(src), "add", str(test))
         assert documented.verdict is True, documented.detail
-        assert documented.detail == "0/2 survived"
+        assert documented.detail == "0/2 survived (1 test file ran)"
         returns_none = mutation_tester.check(str(src), "nothing", str(test))
         assert returns_none.verdict is True, returns_none.detail
 
@@ -508,21 +508,26 @@ class TestPolyglotMutationTesterCoverage:
         mock_runner = MagicMock()
         mock_runner.parse_file.return_value = mock_ast
 
+        passed = mutation_tester.TestRunResult(passed=True)
+        failed = mutation_tester.TestRunResult(passed=False, status="fail", detail="exit code 1: E")
+
         # 1. Baseline tests fail
-        with patch("aegis_core.verification.mutation_tester._run_tests", return_value=False):
+        with patch("aegis_core.verification.mutation_tester._check_tests", return_value=failed):
             ev = mutation_tester.check(str(ts_file), "test", str(test_file), ast_runner=mock_runner)
             assert ev.verdict is False
             assert "Baseline tests fail" in ev.detail
+            assert ev.lines == [-1]
 
         # 2. Mutant survives (test passes against mutant)
-        with patch("aegis_core.verification.mutation_tester._run_tests", return_value=True):
+        with patch("aegis_core.verification.mutation_tester._check_tests", return_value=passed):
             ev = mutation_tester.check(str(ts_file), "test", str(test_file), max_mutations=2, ast_runner=mock_runner)
             assert ev.verdict is False
             assert "1/2 survived" in ev.detail
+            assert not list(tmp_path.glob("_mutant_*")), "a mutant was left beside the source"
 
         # 3. Mutant killed (baseline passes, mutant fails)
-        run_results = [True, False]  # first baseline passes, then mutant fails
-        with patch("aegis_core.verification.mutation_tester._run_tests", side_effect=run_results):
+        run_results = [passed, failed]  # first baseline passes, then mutant fails
+        with patch("aegis_core.verification.mutation_tester._check_tests", side_effect=run_results):
             ev = mutation_tester.check(str(ts_file), "test", str(test_file), max_mutations=1, ast_runner=mock_runner)
             assert ev.verdict is True
             assert "0/1 survived" in ev.detail
@@ -551,7 +556,8 @@ class TestPolyglotMutationTesterCoverage:
         with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=["pytest"]):
             ev = mutation_tester.check(str(src), "inc", str(test))
             assert ev.verdict is False
-            assert "timed out after 30s" in ev.detail
+            assert ev.detail.startswith("could not assess (timeout)")
+            assert "within 30s" in ev.detail
 
         # 3. Failure exit code
         def mock_fail(*a, **kw):
@@ -576,11 +582,39 @@ class TestPolyglotMutationTesterCoverage:
             assert ev.verdict is False
             assert "execution error: disk read failure" in ev.detail
 
-        # 5. Empty detail fallback
-        with patch("aegis_core.verification.mutation_tester._check_tests",
-                   return_value=mutation_tester.TestRunResult(passed=False, status="fail", detail="")):
-            passed, detail = mutation_tester._run_baseline(str(test))
-            assert passed is False
-            assert detail == "Baseline tests fail against the unmutated code; cannot assess mutations"
 
 
+
+class TestModuleSwapStaging:
+    """What a mutant run is handed: the staged source, a fresh load marker and the plugin path."""
+
+    def _swap(self, tmp_path):
+        from aegis_core.verification import mutation_tester
+
+        target = tmp_path / "pkg" / "mod.py"
+        target.parent.mkdir()
+        target.write_text("def f():\n    return 1\n", encoding="utf-8")
+        workdir = tmp_path / "swap"
+        workdir.mkdir()
+        return mutation_tester._ModuleSwap(target, str(workdir))
+
+    def test_staging_writes_the_source_the_plugin_will_serve(self, tmp_path):
+        swap = self._swap(tmp_path)
+        swap.stage("def f():\n    return 2\n")
+        assert Path(swap.source_file).read_text(encoding="utf-8") == "def f():\n    return 2\n"
+
+    def test_staging_clears_the_load_marker_of_the_previous_run(self, tmp_path):
+        # A marker left by an earlier run would let a mutant that was never imported
+        # count as killed when its test run fails for another reason.
+        swap = self._swap(tmp_path)
+        Path(swap.marker).write_text("pkg.mod", encoding="utf-8")
+        assert swap.loaded()
+        swap.stage("def f():\n    return 3\n")
+        assert not swap.loaded()
+
+    def test_the_plugin_dir_comes_first_and_an_inherited_pythonpath_is_kept(self, tmp_path, monkeypatch):
+        swap = self._swap(tmp_path)
+        monkeypatch.setenv("PYTHONPATH", "/opt/inherited")
+        assert swap.stage("x = 1\n") == swap.workdir + os.pathsep + "/opt/inherited"
+        monkeypatch.delenv("PYTHONPATH")
+        assert swap.stage("x = 1\n") == swap.workdir

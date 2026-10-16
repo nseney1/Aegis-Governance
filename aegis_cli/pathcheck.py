@@ -1,24 +1,22 @@
-"""Shell-aware PATH guidance for the soma console script (BUG-041).
+"""Shell-aware PATH guidance for the aegis console script (BUG-041).
 
-`pip install --user` puts `soma` in the user scripts directory, which is often
+`pip install --user` puts `aegis` in the user scripts directory, which is often
 not on PATH. zsh in particular never reads ~/.profile, where Debian/Ubuntu add
 ~/.local/bin. This module finds where the script actually is and prints the
 one line the user needs, in their shell's syntax and for the right rc file.
 
-It only reports. It never edits dotfiles; `soma doctor --fix-path` is the
-opt-in command that appends this line (aegis_cli/doctor.py).
-
-Usage: python3 -m aegis_cli.pathcheck --hint [--shell zsh|bash|fish|pwsh]
+It only reports and never edits dotfiles; `aegis doctor` and the end of
+`aegis init` print its hint.
 """
 from __future__ import annotations
 
-import argparse
 import os
 import shlex
-import shutil
 import sys
 import sysconfig
 from typing import Callable, Iterable, Mapping
+
+from aegis_core import pathlookup
 
 KNOWN_SHELLS = ("zsh", "bash", "fish", "pwsh")
 
@@ -158,13 +156,24 @@ def default_candidates() -> list[str]:
     return out
 
 
-def scripts_dir(candidates: Iterable[str] | None = None) -> str | None:
-    """First candidate directory that contains an aegis or soma console script."""
+def scripts_dir(candidates: Iterable[str] | None = None, cmd_name: str = "aegis") -> str | None:
+    """First candidate directory that contains the ``cmd_name`` console script.
+
+    Only that name counts: a leftover v3 ``soma`` script is not where aegis is.
+    """
     for directory in (default_candidates() if candidates is None else candidates):
-        for name in ("aegis", "aegis.exe", "soma", "soma.exe"):
+        for name in (cmd_name, cmd_name + ".exe"):
             if os.path.isfile(os.path.join(directory, name)):
                 return directory
     return None
+
+
+def _script_path(directory: str, cmd_name: str, os_name: str) -> str:
+    """The console script scripts_dir found, quoted when its path has a space."""
+    names = (cmd_name + ".exe", cmd_name) if os_name == "nt" else (cmd_name, cmd_name + ".exe")
+    path = next((os.path.join(directory, n) for n in names if os.path.isfile(os.path.join(directory, n))),
+                os.path.join(directory, names[0]))
+    return f'"{path}"' if " " in path else path
 
 
 def _active_venv_prefix() -> str | None:
@@ -184,29 +193,33 @@ def build_hint(env: Mapping[str, str] | None = None,
                os_name: str | None = None,
                shell: str | None = None,
                venv_prefix: object = _UNSET,
-               cmd_name: str = "soma") -> str | None:
-    """Human-readable remedy, or None when `aegis` or `soma` already resolves."""
+               cmd_name: str = "aegis") -> str | None:
+    """Human-readable remedy, or None when ``cmd_name`` (the aegis command) already resolves.
+
+    It resolves through the lookup doctor uses (aegis_core.pathlookup: absolute PATH
+    entries only), so the hint never calls resolvable what doctor reports missing.
+    """
     env = os.environ if env is None else env
-    which = shutil.which if which is None else which
+    which = pathlookup.which if which is None else which
     home = os.path.expanduser("~") if home is None else home
     platform = sys.platform if platform is None else platform
     os_name = os.name if os_name is None else os_name
     if venv_prefix is _UNSET:
         venv_prefix = _active_venv_prefix()
     path_val = env.get("PATH", "")
-    if which("aegis", path=path_val) or which("soma", path=path_val):
+    if which(cmd_name, path=path_val):
         return None
 
-    is_aegis = cmd_name == "aegis"
-    pkg_name = "aegis-guardrails" if is_aegis else "soma-governance"
-    mod_name = "aegis_cli" if is_aegis else "soma_cli"
+    pkg_name = "aegis-guardrails"
     py = "python" if os_name == "nt" else "python3"
-    fallback = f"    Until then you can run: {py} -m {mod_name} <command>"
-    directory = scripts_dir(candidates if candidates is not None else default_candidates())
+    directory = scripts_dir(candidates if candidates is not None else default_candidates(), cmd_name=cmd_name)
     if directory is None:
         return (f"ℹ️  The '{cmd_name}' command is not installed for this Python.\n"
                 f"    Install it with: {py} -m pip install {pkg_name}\n"
                 f"    (or pipx install {pkg_name})")
+    # The stopgap names the installed script by its full path. `python -m aegis_cli` would
+    # put the current directory first on sys.path and import a repository's own aegis_* code.
+    fallback = f"    Until then you can run it by its full path: {_script_path(directory, cmd_name, os_name)} <command>"
 
     shell = shell or detect_shell(env, os_name=os_name)
     sep = ";" if os_name == "nt" else ":"
@@ -248,25 +261,3 @@ def build_hint(env: Mapping[str, str] | None = None,
     lines.append(f"      {line}")
     lines.append(fallback)
     return "\n".join(lines)
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python3 -m aegis_cli.pathcheck",
-                                     description="Explain how to put the soma CLI on PATH.")
-    parser.add_argument("--hint", action="store_true",
-                        help="Print a remedy if 'soma' does not resolve (default action)")
-    parser.add_argument("--shell", choices=KNOWN_SHELLS,
-                        help="Override shell detection")
-    args = parser.parse_args(argv)
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="replace")  # emoji on cp1252 (BUG-012)
-    text = build_hint(shell=args.shell)
-    if text:
-        print(text)
-    return 0  # advisory only: never fail an install over PATH guidance
-
-
-if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="replace")
-    sys.exit(main())

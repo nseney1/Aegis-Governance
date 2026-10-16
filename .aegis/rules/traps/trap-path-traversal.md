@@ -21,13 +21,6 @@ tags:
   - security
   - path-traversal
   - critical
-fitness:
-  score: 0.625
-  impact_weight: 1.0
-  triggers: 87
-  true_positives: 39.3628
-  false_positives: 29.9993
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Citadel S2 incident: `aegis_cli/verify.py` accepted `--files ../../etc/passwd`

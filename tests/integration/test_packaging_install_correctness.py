@@ -1,56 +1,38 @@
-"""Regression coverage for packaging and Python MCP initialization."""
+"""Regression coverage for packaging."""
 from __future__ import annotations
 
-import json
 import os
 import re
-from pathlib import Path
-
-import pytest
 
 from conftest import REPO_ROOT, read
 
 
-def test_python_init_mcp_merge_targets_project(tmp_path):
-    from aegis_cli.init import generate_mcp_config
-
-    config = tmp_path / ".mcp.json"
-    config.write_text(
-        json.dumps({
-            "unrelated": "preserve",
-            "mcpServers": {"other": {"command": "keep"}},
-        }),
-        encoding="utf-8",
-    )
-    generate_mcp_config(tmp_path)
-    merged = json.loads(config.read_text(encoding="utf-8"))
-    assert merged["unrelated"] == "preserve"
-    assert merged["mcpServers"]["other"] == {"command": "keep"}
-    soma = merged["mcpServers"]["soma"]
-    assert soma["cwd"] == str(tmp_path)
-    assert soma["env"] == {"AEGIS_WORKSPACE": str(tmp_path)}
-
-
-def test_python_init_invalid_mcp_json_is_unchanged(tmp_path):
-    from aegis_cli.init import generate_mcp_config
-
-    config = tmp_path / ".mcp.json"
-    invalid = b"{ definitely not json\n"
-    config.write_bytes(invalid)
-    with pytest.raises((ValueError, json.JSONDecodeError)):
-        generate_mcp_config(tmp_path)
-    assert config.read_bytes() == invalid
-
-
-def test_packaging_excludes_private_soma_state_and_includes_genome_package():
+def test_packaging_excludes_private_state_and_ships_rules_inside_aegis_core():
     manifest = read(os.path.join(REPO_ROOT, "MANIFEST.in"))
     assert "recursive-include .soma" not in manifest
-    assert "prune .soma" in manifest
+    assert "prune .aegis" in manifest
     assert ".aegis/evidence" not in manifest
     assert ".aegis/dreams" not in manifest
 
     pyproject = read(os.path.join(REPO_ROOT, "pyproject.toml"))
-    assert '"rules*"' in pyproject or '"genome*"' in pyproject
-    assert re.search(r"(?m)^(rules|genome)\s*=\s*\[", pyproject)
+    # No top-level `rules`/`skills` package (release review): the sources map into aegis_core.
+    assert '"rules*"' not in pyproject and '"skills*"' not in pyproject
+    assert not re.search(r"(?m)^(rules|skills|genome)\s*=\s*\[", pyproject)
+    assert re.search(r'(?m)^"aegis_core\._data\.rules"\s*=\s*"rules"$', pyproject)
     assert '"*.md"' in pyproject and '".oracles/*.md"' in pyproject
-    assert os.path.isfile(os.path.join(REPO_ROOT, "rules", "__init__.py")) or os.path.isfile(os.path.join(REPO_ROOT, "genome", "__init__.py"))
+
+
+def test_manifest_ships_no_bytecode_and_no_stale_trees():
+    lines = [ln.strip() for ln in read(os.path.join(REPO_ROOT, "MANIFEST.in")).splitlines()]
+    assert "global-exclude __pycache__" in lines
+    assert "global-exclude *.py[cod]" in lines
+    for stale in ("genome", "organs", "soma_cli", "soma_core", "install"):
+        assert not any(re.search(rf"\b{stale}\b", ln) for ln in lines if not ln.startswith("#")), stale
+
+
+def test_runtime_has_no_dependencies_and_only_a_dev_extra():
+    pyproject = read(os.path.join(REPO_ROOT, "pyproject.toml"))
+    assert re.search(r"(?m)^dependencies = \[\]$", pyproject)
+    extras = re.search(r"(?ms)^\[project\.optional-dependencies\]\n(.*?)^\[", pyproject).group(1)
+    names = re.findall(r"(?m)^([A-Za-z0-9_-]+)\s*=", extras)
+    assert names == ["dev"]

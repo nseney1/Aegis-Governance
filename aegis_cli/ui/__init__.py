@@ -5,9 +5,6 @@ from aegis_cli.ui.table import (
     Column,
     Grid,
     Table,
-    render_box,
-    render_error_panel,
-    render_table,
     visible_len,
 )
 from aegis_cli.ui.theme import (
@@ -22,9 +19,6 @@ __all__ = [
     "Grid",
     "OutputContext",
     "Table",
-    "render_box",
-    "render_error_panel",
-    "render_table",
     "strip_ansi",
     "visible_len",
 ]

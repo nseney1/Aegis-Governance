@@ -1,87 +1,140 @@
-"""Deterministic AST-based quality gate checks (Phase 2H).
+"""Deterministic AST-based test quality checks (Phase 2H).
 
-Layer 1 verification tools that parse test files and check for quality signals
-without any LLM involvement — pure AST walking and file-matching logic.
+Layer 1 tools that parse a test module and judge each ``test_*`` function on its
+own, without any LLM: one real assertion in a file must not cover for the stubs
+next to it (#1). ``checkpoint_checks.check_assertion_density`` runs both checks
+over a workspace's ``tests/`` tree.
 """
+from __future__ import annotations
+
 import ast
-import os
-from pathlib import Path
+from typing import List, Tuple, Union
+
+from aegis_core.ast.drivers.python import read_python_source
 
 from . import ToolEvidence
+
+_FuncDef = Union[ast.FunctionDef, ast.AsyncFunctionDef]
+_FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+# pytest.fail / self.fail fail the test on the path they guard: an assertion.
+# A skip or xfail only declares that the test did not run, so it asserts nothing.
+_FAIL_CALLS = {("pytest", "fail"), ("self", "fail")}
+_SKIP_CALLS = {("pytest", "skip"), ("pytest", "xfail"), ("self", "skipTest")}
+_PYTEST_CONTEXT_ASSERTIONS = {"raises", "warns", "deprecated_call"}
+# The call forms check on their own: pytest.raises(E, func, *args), pytest.warns(W, func),
+# pytest.deprecated_call(func). With fewer arguments they only build an unused context manager.
+_PYTEST_CALL_FORM_MIN_ARGS = {"raises": 2, "warns": 2, "deprecated_call": 1}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-def _collect_test_functions(tree: ast.Module) -> list[ast.FunctionDef]:
-    """Return all ``test_*`` functions, both top-level and inside classes."""
-    funcs: list[ast.FunctionDef] = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name.startswith("test_"):
-                funcs.append(node)
-    return funcs
-
-
-def _has_assert(func: ast.FunctionDef) -> bool:
-    """Return True if *func*'s body contains an assertion or assertion-equivalent.
-
-    Recognized patterns:
-    - ``assert`` statements
-    - ``with pytest.raises(...)`` context managers
-    - ``pytest.fail(...)`` calls
-    - ``self.assert*(...)`` calls (unittest style)
-    """
-    for node in ast.walk(func):
-        # Standard assert statement
-        if isinstance(node, ast.Assert):
+def _is_fixture(func: _FuncDef) -> bool:
+    """True for ``@pytest.fixture``, ``@pytest.fixture(...)`` and ``@fixture``."""
+    for dec in func.decorator_list:
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        if isinstance(target, ast.Attribute) and target.attr == "fixture":
             return True
-        # pytest.raises used as context manager: with pytest.raises(...)
-        if isinstance(node, ast.With):
-            for item in node.items:
-                ctx = item.context_expr
-                if isinstance(ctx, ast.Call) and _is_pytest_raises(ctx):
-                    return True
-        # pytest.fail(...) call
-        if isinstance(node, ast.Call) and _is_pytest_fail(node):
-            return True
-        # self.assert*(...) unittest-style call
-        if isinstance(node, ast.Call) and _is_unittest_assert(node):
+        if isinstance(target, ast.Name) and target.id == "fixture":
             return True
     return False
 
 
-def _is_pytest_raises(call: ast.Call) -> bool:
-    """Check if a Call node is ``pytest.raises(...)``."""
+def _collect_test_functions(tree: ast.Module) -> list[_FuncDef]:
+    """Return all ``test_*`` functions, top-level and in classes, except fixtures.
+
+    A fixture may be named ``test_*`` (``def test_workspace(tmp_path)``); pytest
+    never runs it as a test, so it is not judged as one.
+    """
+    funcs: list[_FuncDef] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_") and not _is_fixture(node):
+                funcs.append(node)
+    return funcs
+
+
+def _callee_name(call: ast.Call) -> str:
     func = call.func
-    return (
-        isinstance(func, ast.Attribute)
-        and func.attr == "raises"
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "pytest"
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _receiver(call: ast.Call) -> str:
+    func = call.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        return func.value.id
+    return ""
+
+
+def _is_assertion_call(call: ast.Call) -> bool:
+    """An assertion helper or an explicit failure.
+
+    Recognized: any call whose name starts with ``assert``/``_assert`` (``self.assertEqual``,
+    ``mock.assert_called_once_with``, ``np.testing.assert_equal``, a project helper such as
+    ``assert_identical``), ``pytest.fail`` and ``self.fail``.
+    """
+    name = _callee_name(call)
+    if name.startswith(("assert", "_assert")):
+        return True
+    return (_receiver(call), name) in _FAIL_CALLS
+
+
+def _skips(func: _FuncDef) -> bool:
+    return any(
+        isinstance(node, ast.Call) and (_receiver(node), _callee_name(node)) in _SKIP_CALLS
+        for node in ast.walk(func)
     )
 
 
-def _is_pytest_fail(call: ast.Call) -> bool:
-    """Check if a Call node is ``pytest.fail(...)``."""
-    func = call.func
-    return (
-        isinstance(func, ast.Attribute)
-        and func.attr == "fail"
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "pytest"
-    )
+def _environment_placeholders(tree: ast.Module) -> set[int]:
+    """ids of skipping tests that stand in for a real same-name test in the other ``if`` branch.
+
+    ``if HAVE_X: def test_a(): <real> else: def test_a(): pytest.skip(...)`` defines one
+    test either way; the real branch is judged on its own, so the placeholder is exempt.
+    A twin that is itself only a skip is not real: two placeholders never excuse each other.
+    """
+    exempt: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        branches = (node.body, node.orelse)
+        real = [
+            {f.name for f in branch if isinstance(f, _FUNC_TYPES) and (_has_assert(f) or not _skips(f))}
+            for branch in branches
+        ]
+        for branch, other_real in zip(branches, reversed(real)):
+            for func in branch:
+                if isinstance(func, _FUNC_TYPES) and func.name in other_real and _skips(func):
+                    exempt.add(id(func))
+    return exempt
 
 
-def _is_unittest_assert(call: ast.Call) -> bool:
-    """Check if a Call node is ``self.assert*(...)``."""
-    func = call.func
-    return (
-        isinstance(func, ast.Attribute)
-        and func.attr.startswith("assert")
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "self"
-    )
+def _has_assert(func: _FuncDef) -> bool:
+    """Return True if *func*'s body contains an assertion or assertion-equivalent."""
+    for node in ast.walk(func):
+        if isinstance(node, ast.Assert):
+            return True
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                ctx = item.context_expr
+                if (
+                    isinstance(ctx, ast.Call)
+                    and _receiver(ctx) == "pytest"
+                    and _callee_name(ctx) in _PYTEST_CONTEXT_ASSERTIONS
+                ):
+                    return True
+        if isinstance(node, ast.Call):
+            if _is_assertion_call(node):
+                return True
+            min_args = _PYTEST_CALL_FORM_MIN_ARGS.get(_callee_name(node))
+            if min_args and _receiver(node) == "pytest" and len(node.args) >= min_args:
+                return True
+    return False
 
 
 def _is_docstring_node(node: ast.stmt) -> bool:
@@ -94,159 +147,59 @@ def _is_docstring_node(node: ast.stmt) -> bool:
     )
 
 
-def _is_pass_node(node: ast.stmt) -> bool:
-    return isinstance(node, ast.Pass)
+def _is_pass_or_ellipsis(node: ast.stmt) -> bool:
+    if isinstance(node, ast.Pass):
+        return True
+    return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and node.value.value is ...
 
 
-def _is_ellipsis_node(node: ast.stmt) -> bool:
-    return (
-        isinstance(node, ast.Expr)
-        and isinstance(node.value, ast.Constant)
-        and node.value.value is ...
-    )
-
-
-def _is_bare_pass_func(func: ast.FunctionDef) -> bool:
+def _is_bare_pass_func(func: _FuncDef) -> bool:
     """True if the function body (ignoring a leading docstring) is only pass/ellipsis."""
     body = list(func.body)
-    # Strip leading docstring if present
     if body and _is_docstring_node(body[0]):
         body = body[1:]
     if not body:
         return True
-    # Body must be exactly one statement that is pass or ellipsis
-    if len(body) != 1:
-        return False
-    return _is_pass_node(body[0]) or _is_ellipsis_node(body[0])
+    return len(body) == 1 and _is_pass_or_ellipsis(body[0])
 
 
-def _is_skippable_changed_file(filepath: str) -> bool:
-    """Return True if *filepath* should be excluded from coverage checks."""
-    basename = os.path.basename(filepath)
-    # Non-Python files
-    if not basename.endswith(".py"):
-        return True
-    # Test files
-    if basename.startswith("test_") or basename == "conftest.py":
-        return True
-    # Init and config
-    if basename == "__init__.py":
-        return True
-    return False
+def _parse(test_file: str) -> ast.Module:
+    return ast.parse(read_python_source(test_file), filename=test_file)
+
+
+def _evidence(tool: str, test_file: str, offenders: List[Tuple[str, int]], fail: str, ok: str) -> ToolEvidence:
+    if offenders:
+        return ToolEvidence(
+            tool=tool,
+            target=test_file,
+            verdict=False,
+            detail=f"{fail}: {', '.join(name for name, _ in offenders)}",
+            lines=[lineno for _, lineno in offenders],
+        )
+    return ToolEvidence(tool=tool, target=test_file, verdict=True, detail=ok, lines=[])
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
 
 def check_assertion_density(test_file: str) -> ToolEvidence:
-    """Check that every ``test_*`` function in *test_file* has ≥1 assert."""
-    source = Path(test_file).read_text()
-    tree = ast.parse(source, filename=test_file)
-    test_funcs = _collect_test_functions(tree)
+    """Check that every ``test_*`` function in *test_file* has ≥1 assertion.
 
-    missing: list[tuple[str, int]] = []
-    for func in test_funcs:
-        if not _has_assert(func):
-            missing.append((func.name, func.lineno))
-
-    if missing:
-        names = ", ".join(name for name, _ in missing)
-        detail = f"Tests lacking assertions: {names}"
-        verdict = False
-        lines = [lineno for _, lineno in missing]
-    else:
-        detail = "All tests have assertions"
-        verdict = True
-        lines = []
-
-    return ToolEvidence(
-        tool="assertion_density",
-        target=test_file,
-        verdict=verdict,
-        detail=detail,
-        lines=lines,
-    )
+    Syntactic, so these limits are accepted: an assertion anywhere in the body counts,
+    including one in a nested def that is never called or under ``if False:``, and any
+    call named ``assert*`` counts as an assertion helper.
+    """
+    tree = _parse(test_file)
+    placeholders = _environment_placeholders(tree)
+    missing = [
+        (f.name, f.lineno)
+        for f in _collect_test_functions(tree)
+        if id(f) not in placeholders and not _has_assert(f)
+    ]
+    return _evidence("assertion_density", test_file, missing, "Tests lacking assertions", "All tests have assertions")
 
 
 def check_no_bare_pass(test_file: str) -> ToolEvidence:
     """Check that no ``test_*`` function is a bare pass/ellipsis stub."""
-    source = Path(test_file).read_text()
-    tree = ast.parse(source, filename=test_file)
-    test_funcs = _collect_test_functions(tree)
-
-    stubs: list[tuple[str, int]] = []
-    for func in test_funcs:
-        if _is_bare_pass_func(func):
-            stubs.append((func.name, func.lineno))
-
-    if stubs:
-        names = ", ".join(name for name, _ in stubs)
-        detail = f"Bare pass/ellipsis stubs: {names}"
-        verdict = False
-        lines = [lineno for _, lineno in stubs]
-    else:
-        detail = "No bare pass stubs found"
-        verdict = True
-        lines = []
-
-    return ToolEvidence(
-        tool="no_bare_pass",
-        target=test_file,
-        verdict=verdict,
-        detail=detail,
-        lines=lines,
-    )
-
-
-def check_behavioral_coverage(
-    changed_files: list[str],
-    test_files: list[str],
-    repo_root: str,
-) -> ToolEvidence:
-    """Check that every changed implementation file has a ``test_*.py`` counterpart."""
-    # Build set of test basenames for fast lookup
-    test_basenames: set[str] = set()
-    for tf in test_files:
-        test_basenames.add(os.path.basename(tf))
-
-    impl_files = [f for f in changed_files if not _is_skippable_changed_file(f)]
-    uncovered: list[str] = []
-
-    for filepath in impl_files:
-        stem = Path(filepath).stem  # e.g. "models" from "src/models.py"
-        expected = f"test_{stem}.py"
-
-        # Also check parent-dir convention: aegis_cli/init.py → test_cli.py
-        # Try the full parent dir name and each underscore-split part
-        parent_dir = Path(filepath).parent.name
-        parent_candidates: set[str] = set()
-        if parent_dir:
-            parent_candidates.add(f"test_{parent_dir}.py")
-            for part in parent_dir.split("_"):
-                if part:
-                    parent_candidates.add(f"test_{part}.py")
-
-        if expected in test_basenames:
-            continue
-        if parent_candidates & test_basenames:
-            continue
-        uncovered.append(filepath)
-
-    covered_count = len(impl_files) - len(uncovered)
-    total_count = len(impl_files)
-
-    if uncovered:
-        files_str = ", ".join(uncovered)
-        detail = f"{covered_count}/{total_count} covered. Uncovered: {files_str}"
-        verdict = False
-    else:
-        detail = f"{covered_count}/{total_count} covered" if total_count else "No implementation files changed"
-        verdict = True
-
-    return ToolEvidence(
-        tool="behavioral_coverage",
-        target=repo_root,
-        verdict=verdict,
-        detail=detail,
-        lines=[],
-    )
+    stubs = [(f.name, f.lineno) for f in _collect_test_functions(_parse(test_file)) if _is_bare_pass_func(f)]
+    return _evidence("no_bare_pass", test_file, stubs, "Bare pass/ellipsis stubs", "No bare pass stubs found")

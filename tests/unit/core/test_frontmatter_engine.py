@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 import pytest
-from aegis_core.yaml import (
-    FrontmatterError,
-    dump_frontmatter,
-    parse_rule_frontmatter,
-    parse_frontmatter,
-    parse_yaml_subset,
-)
+from aegis_core.yaml_engine.parser import FrontmatterError, parse_yaml_subset
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter, parse_rule_frontmatter, split_frontmatter
 
 
 class TestFrontmatterParser:
@@ -188,6 +184,15 @@ This is markdown content.
         assert parse_frontmatter("---\n---\nBody") == {}
         assert parse_frontmatter("---\nopened but never closed") is None
 
+    def test_leading_whitespace_before_the_first_key_is_ignored_as_the_rule_loader_ignores_it(self):
+        text = "---\n  id: a\ntype: trap\n---\nbody\n"
+        assert parse_frontmatter(text) == {"id": "a", "type": "trap"}
+        assert parse_rule_frontmatter(text) == ({"id": "a", "type": "trap"}, "body\n")
+
+    def test_a_directory_path_is_read_as_text_not_opened(self, tmp_path):
+        with pytest.raises(ValueError, match="^No frontmatter delimiter$"):
+            parse_rule_frontmatter(str(tmp_path))
+
     def test_parse_cell_frontmatter_body_separation(self, tmp_path):
         cell_file = tmp_path / "cell.md"
         cell_file.write_text(
@@ -300,6 +305,21 @@ items:
 """
         data = parse_yaml_subset(text)
         assert data["items"] == ["first line\nsecond line", "single line"]
+
+
+class TestSplitFrontmatter:
+    """split_frontmatter, the one delimiter scanner: (status, frontmatter text, body)."""
+
+    @pytest.mark.parametrize("content, expected", [
+        ("---", ("unterminated", None, "---")),  # an opening line and nothing after it
+        ("---\nid: a\n", ("unterminated", None, "---\nid: a\n")),
+        ("---\n---\nbody", ("ok", "", "\nbody")),  # the closer can be the very next line
+        ("---\nid: a\n---\nbody\n---\n", ("ok", "id: a\n", "\nbody\n---\n")),  # the first closer wins
+        ("\ufeff---\nid: a\n---\n", ("ok", "id: a\n", "\n")),  # a BOM is not part of the text
+        ("# title\n---\n", ("none", None, "# title\n---\n")),
+    ])
+    def test_split(self, content, expected):
+        assert split_frontmatter(content) == expected
 
 
 class TestFrontmatterDumper:

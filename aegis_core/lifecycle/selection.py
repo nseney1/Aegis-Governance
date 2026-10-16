@@ -1,139 +1,145 @@
-"""Selection pressure, cell crossover, and hypothesis merging."""
+"""Archiving: parking a rule whose ledger evidence says it misfires.
+
+A rule is archived only by an explicit ``aegis rule archive`` or ``aegis sync --apply``
+(ADR 0005 D1), and only when ``promotion.suggest`` says ``archive`` over a complete
+ledger (``ledger.incomplete``: unreadable lines may hide its true positives). Archived
+rules move to ``.aegis/rules/.archive/``, a hidden directory the loader never serves;
+each move is logged to ``.aegis/state/lifecycle.jsonl``.
+"""
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
-import re
-import shutil
-import sys
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
-from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter
-from aegis_core.workspace import Workspace, resolve_workspace
-from .constants import (
-    EXTINCTION_THRESHOLD,
-)
-from .parsers import (
-    find_cell,
-    get_type_plural,
-    parse_cell,
-)
+from aegis_core.fitness import for_rules
+from aegis_core.rules import load_rules
+from aegis_core.storage import append_jsonl, locked
+from aegis_core.telemetry_engine import ledger
+from aegis_core.workspace import literal_workspace
+from aegis_core.workspace.base import Workspace
+from .parsers import find_rule_file, sanitize_rule_id
 
 __all__ = [
-    "run_cell_selection",
-    "select_cell",
-    "prune_cells",
+    "ARCHIVE_DIR",
+    "archive_rule",
+    "evaluate_archives",
+    "prune_rules",
+    "run_rule_selection",
 ]
 
+ARCHIVE_DIR = ".archive"
 
-def run_cell_selection(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
-    """Selection pressure engine for Soma immune cells."""
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    cells_dir = ws.rules_dir
-    archive_dir = cells_dir / ".archive"
-    evidence_dir = ws.evidence_dir
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    fitness_log = evidence_dir / "lifecycle.jsonl"
 
-    if not cells_dir.exists():
-        print("No cells directory found.")
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def evaluate_archives(workspace: Workspace | Path | str, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    """Rules whose evidence supports archiving (``promotion.suggest``)."""
+    from .promotion import suggest
+
+    ws = literal_workspace(workspace)
+    rules = list(load_rules(ws).served)
+    fits = for_rules(ws, rules, now)
+    return [
+        {
+            "rule_id": rule.id,
+            "type": rule.type,
+            "triggers": fits[rule.id].triggers,
+            "tp": fits[rule.id].tp,
+            "fp": fits[rule.id].fp,
+            "fitness": fits[rule.id].score,
+            "misfire": fits[rule.id].misfire,
+        }
+        for rule in rules
+        if suggest(rule, fits[rule.id], now) == "archive"
+    ]
+
+
+def _park(path: Path, dest_dir: Path) -> Path:
+    """Move a rule into ``dest_dir`` without replacing a rule already parked there.
+
+    One rename (the archive is inside the rules directory, so on the same filesystem):
+    it either happens or the rule stays where it was, never a half-copied file.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / path.name
+    n = 1
+    while os.path.lexists(dest):
+        dest = dest_dir / f"{path.stem}.{n}{path.suffix}"
+        n += 1
+    os.replace(path, dest)
+    return dest
+
+
+def _still_misfiring(ws: Workspace, rule_id: str, view: Any) -> bool:
+    from .promotion import suggest
+
+    rule = load_rules(ws).get(rule_id)
+    return rule is not None and suggest(rule, for_rules(ws, [rule], view=view)[rule_id]) == "archive"
+
+
+def archive_rule(workspace: Workspace | Path | str, rule_id: str, dry_run: bool = False) -> Dict[str, Any]:
+    """Move one rule to ``.aegis/rules/.archive/`` and log it.
+
+    Only a rule whose ledger evidence supports archiving (``promotion.suggest``) moves,
+    and that is checked again under the lock: evidence recorded since the caller judged
+    the rule wins.
+    """
+    clean = sanitize_rule_id(rule_id)
+    if not clean:
+        return {"status": "invalid_id", "message": f"Invalid rule ID: '{rule_id}'"}
+    ws = literal_workspace(workspace)
+    path, rule_type = find_rule_file(ws, clean)
+    if path is None:
+        return {"status": "not_found", "message": f"Rule '{clean}' not found in workspace"}
+    archive_dir = ws.rules_dir / ARCHIVE_DIR
+    if dry_run:
+        return {"status": "dry_run", "from_type": rule_type, "source_path": str(path), "target_dir": str(archive_dir)}
+    with locked(ws.root):
+        if not path.is_file():
+            return {"status": "not_found", "message": f"Rule '{clean}' was moved or removed before the rules lock was acquired"}
+        view = ledger.read(ws.root)
+        if view.incomplete:
+            return {
+                "status": "ineligible",
+                "message": f"Rule '{clean}' was not archived: the ledger is incomplete ({view.incomplete})",
+            }
+        if not _still_misfiring(ws, clean, view):
+            return {"status": "ineligible", "message": f"Rule '{clean}' no longer has evidence that supports archiving it"}
+        dest = _park(path, archive_dir)
+        append_jsonl(ws.layout.lifecycle_log, [{
+            "timestamp": _utc_timestamp(),
+            "rule": clean,
+            "action": "moved_to_archive",
+        }])
+    return {"status": "archived", "from_type": rule_type, "source_path": str(path), "target_path": str(dest)}
+
+
+def run_rule_selection(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
+    """Report the rules whose evidence supports archiving; with ``execute``, archive them."""
+    ws = literal_workspace(workspace)
+    if not ws.rules_dir.exists():
+        print("No rules directory found.")
         return 0
-
-    print(f"Running cell selection (execute={execute})...")
-    if execute:
-        archive_dir.mkdir(parents=True, exist_ok=True)
-
-    for root_str, _dirs, files in os.walk(cells_dir):
-        if ".archive" in root_str:
-            continue
-        for f in files:
-            if not f.endswith(".md") or f == "README.md":
-                continue
-            fpath = Path(root_str) / f
-            try:
-                content = fpath.read_text(encoding="utf-8")
-            except Exception:
-                continue
-
-            meta = parse_frontmatter(content)
-            if not meta:
-                continue
-            fitness = meta.get("fitness") if isinstance(meta.get("fitness"), dict) else {}
-
-            def get_val(key: str, default: float = 0.0) -> float:
-                raw = fitness.get(key, meta.get(key))
-                if raw is not None and str(raw) != "null":
-                    try:
-                        return float(raw)
-                    except (ValueError, TypeError):
-                        return default
-                return default
-
-            triggers = get_val("triggers", 0.0)
-            tp = get_val("true_positives", 0.0)
-            fp = get_val("false_positives", 0.0)
-            cell_type = str(meta.get("type", ""))
-            dormant = "dormant_since" in meta or "dormant_since" in fitness
-
-            if triggers == 0:
-                category = "DORMANT"
-                score = 0.0
-            else:
-                score = tp / triggers
-                if fp > 0 and tp > 0 and fp > 2 * tp:
-                    category = "APOPTOSIS_WARNING" if cell_type in ("wall", "invariant") else "APOPTOSIS"
-                elif score > 0.7:
-                    category = "SURVIVE"
-                elif score >= EXTINCTION_THRESHOLD:
-                    category = "ADAPT"
-                else:
-                    category = "EXTINCT"
-
-            print(f"[{category}] {f} (Score: {score:.2f})")
-
-            if execute:
-                action = None
-                if category in ("EXTINCT", "APOPTOSIS"):
-                    if category == "APOPTOSIS":
-                        last_gasp_dir = cells_dir / ".last_gasp_queue"
-                        last_gasp_dir.mkdir(parents=True, exist_ok=True)
-                        dest = last_gasp_dir / f
-                        shutil.move(str(fpath), str(dest))
-                        action = "last_gasp_requested"
-                    else:
-                        dest = archive_dir / f
-                        shutil.move(str(fpath), str(dest))
-                        action = "moved_to_archive"
-                elif category == "DORMANT" and not dormant:
-                    timestamp = datetime.now(timezone.utc).isoformat() + "Z"
-                    meta["dormant_since"] = timestamp
-                    body = _get_body(content).lstrip()
-                    fpath.write_text(dump_frontmatter(meta, body=body), encoding="utf-8")
-                    action = "marked_dormant"
-
-                if action:
-                    with open(fitness_log, "a", encoding="utf-8") as log:
-                        log.write(json.dumps({
-                            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
-                            "cell": f,
-                            "action": action,
-                        }) + "\n")
+    candidates = evaluate_archives(ws)
+    if not candidates:
+        print("No rules to archive.")
+        return 0
+    for c in candidates:
+        note = " (dry run)"
+        if execute:
+            result = archive_rule(ws, c["rule_id"])
+            note = "" if result["status"] == "archived" else f" (not archived: {result['message']})"
+        print(
+            f"[ARCHIVE] {c['rule_id']} (fitness {c['fitness']:.2f}, misfire bound {c['misfire']:.2f}, "
+            f"tp {c['tp']:g}, fp {c['fp']:g}){note}"
+        )
     return 0
 
 
-def prune_cells(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
-    """Evaluate and prune extinct or apoptotic rules."""
-    return run_cell_selection(workspace=workspace, execute=execute)
-
-
-select_cell = run_cell_selection
-prune_rules = prune_cells
-
-
-
-
+def prune_rules(workspace: Workspace | Path | str | None = None, execute: bool = False) -> int:
+    """Archive the rules that misfire (``run_rule_selection``)."""
+    return run_rule_selection(workspace=workspace, execute=execute)

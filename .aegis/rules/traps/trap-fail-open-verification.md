@@ -10,6 +10,7 @@ target_paths:
   - "aegis_core/verification/*.py"
   - aegis_cli/verify.py
   - aegis_cli/checkpoint.py
+  - "aegis_core/ast/**"
 triggers:
   - verification_modification
   - error_handling_change
@@ -24,13 +25,6 @@ tags:
   - verification
   - fail-open
   - critical
-fitness:
-  score: 0.8333
-  impact_weight: 1.0
-  triggers: 65
-  true_positives: 12.0823
-  false_positives: 6.2468
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Verification tools MUST fail-closed: any execution error must produce a
@@ -49,5 +43,21 @@ Citadel Cycle 2 incidents:
    verification ran on nothing, exited 0 (PASS). Fix: exit 1 when explicit
    files are provided but none are in-tree.
 
+4. v4 Citadel review, `forbid_ast` (fixed in wave A1):
+   `extract_normalized_ast` returned None on any exception (a RecursionError on
+   a deeply nested expression, say) and the runner did `continue`, so a
+   forbid_ast gate rule silently passed. Alias forms evaded call bans
+   (`import os as o`, `from os import system as s`, `getattr`, `__import__`,
+   `importlib`, `e = eval`). It was missed because the tests counted positive
+   hits through private helpers with no negative controls, and the code had been
+   moved verbatim, so its gaps were waved off as pre-existing.
+
+Deterministic policy checks follow the same rule: when a file a rule applies
+to cannot be analyzed, emit a failing result instead of skipping the file;
+resolve aliases through the real imported name; parse each file at most once
+per scan, behind a cheap text prefilter.
+
 Detection: grep for `return []` in verification functions and check if the
-caller treats empty as success.
+caller treats empty as success. In `aegis_core/ast/`, every `continue` or
+`return None` after a failed parse must yield a failing result; test with an
+unparseable file and with each alias form, and assert a violation.

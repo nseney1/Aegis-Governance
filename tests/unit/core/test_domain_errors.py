@@ -1,15 +1,8 @@
 """Tests for standardized typed AegisError hierarchy (aegis_core.errors)."""
 from __future__ import annotations
 
-import pytest
 
-from aegis_core.errors import (
-    AegisError,
-    AegisValidationError,
-    RuleCorruptError,
-    ReceiptExpiredError,
-    LockTimeoutError,
-)
+from aegis_core.errors import AegisError, AegisValidationError, LockTimeoutError
 
 
 class TestDomainErrors:
@@ -29,23 +22,9 @@ class TestDomainErrors:
         assert isinstance(err, ValueError)
         assert str(err) == "Invalid value"
 
-    def test_cell_corrupt_error(self):
-        """RuleCorruptError provides structured corruption metadata."""
-        err = RuleCorruptError("Malformed YAML", cell_id="bad_cell", code="CORRUPT_FRONTMATTER")
-        assert isinstance(err, AegisError)
-        assert err.cell_id == "bad_cell"
-        assert err.code == "CORRUPT_FRONTMATTER"
-
-    def test_receipt_expired_error(self):
-        """ReceiptExpiredError inherits from KeyError for dict lookup compatibility."""
-        err = ReceiptExpiredError("Receipt expired", receipt_id="rcpt_123")
-        assert isinstance(err, AegisError)
-        assert isinstance(err, KeyError)
-        assert err.receipt_id == "rcpt_123"
-
     def test_lock_timeout_error(self):
         """LockTimeoutError inherits from TimeoutError."""
-        err = LockTimeoutError("Could not acquire lock", resource="cells")
+        err = LockTimeoutError("Could not acquire lock", path="/w/.aegis/state/lock")
         assert isinstance(err, AegisError)
         assert isinstance(err, TimeoutError)
-        assert err.resource == "cells"
+        assert err.path == "/w/.aegis/state/lock"

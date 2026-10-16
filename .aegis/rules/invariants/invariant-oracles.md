@@ -16,12 +16,6 @@ tags:
   - rules
   - security
 created: 2026-09-28
-fitness:
-  triggers: 12
-  true_positives: 4.6
-  false_positives: 5
-  score: 1.0
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Invariant: Oracles

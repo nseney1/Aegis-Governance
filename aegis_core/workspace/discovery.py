@@ -1,6 +1,6 @@
 """Workspace discovery and compound fingerprinting for Soma (Layer 0 Core).
 
-Discovers project roots via environment variables, upward directory walks, and callers.
+Discovers project roots via the AEGIS_WORKSPACE pin, upward directory walks, and callers.
 Provides compound fingerprinting (is_soma_repo) to distinguish Soma's own repository
 from foreign repositories adopting Soma governance.
 Strictly zero-dependency: uses only Python standard library.
@@ -8,15 +8,25 @@ Strictly zero-dependency: uses only Python standard library.
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
+from aegis_core.config import env_workspace
 from aegis_core.errors import WorkspaceError, WorkspaceNotFoundError
+from aegis_core.workspace.binding import bounded_walk_up, denial
+from aegis_core.workspace.layout import (
+    AEGIS_DIRNAME,
+    LEGACY_REPO_CONFS,
+    LEGACY_SOMA_DIRNAME,
+    LEGACY_UPGRADE_MARKERS,
+    WorkspaceLayout,
+    has_rules_dir,
+    is_aegis_workspace,
+)
 
 LEGACY_SOMA_UPGRADE_MSG = (
     "Legacy .soma/ workspace detected at {path}. "
     "Aegis v3.0+ requires a .aegis/ workspace. "
-    "Please run 'aegis migrate' on aegis-guardrails v2.1.x to upgrade."
+    "Run 'aegis migrate' to see the conversion, then 'aegis migrate --apply'."
 )
 
 
@@ -27,56 +37,79 @@ def _home_str() -> str:
         return ""
 
 
-def check_legacy_soma_sentinel(d: str | Path | os.PathLike[str]) -> None:
-    """Raise an actionable WorkspaceError if directory contains an unmigrated .soma/ workspace."""
+UPGRADE_STATE_MSG = (
+    "Unmigrated v3 state at {path}: {found}. Aegis v4 does not read it "
+    "(the ledger, settings and keys stay unused). "
+    "Run 'aegis migrate' to see the conversion, then 'aegis migrate --apply'."
+)
+
+
+def unconverted_rule_files(d: str | Path | os.PathLike[str]) -> list[Path]:
+    """The rule files still in a v1/v2 rule directory of ``d`` (``.soma/cells/``,
+    ``.soma/rules/``): every ``*.md`` but a README and anything under a dot-directory,
+    as ``aegis migrate`` reads them. Aegis serves none of them."""
+    layout = WorkspaceLayout(Path(d))
+    found: list[Path] = []
+    for folder in layout.legacy_rule_dirs:
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.rglob("*.md")):
+            relative = path.relative_to(folder).parts
+            if path.name.lower() != "readme.md" and not any(part.startswith(".") for part in relative):
+                found.append(path)
+    return found
+
+
+def unmigrated_state(d: str | Path | os.PathLike[str]) -> list[str]:
+    """The v3 files and directories in workspace ``d`` that ``aegis migrate`` converts or
+    retires and v4 never reads (repo-relative POSIX paths, in a fixed order): the v3
+    ledger and its archives, the v2 ledger, aegis.conf, slots.yaml/config.yaml, keys,
+    receipts and the signed manifest. Empty for a v4 workspace."""
+    layout = WorkspaceLayout(Path(d))
+    found = [f"{AEGIS_DIRNAME}/{rel}" for rel in LEGACY_UPGRADE_MARKERS if os.path.lexists(layout.legacy(rel))]
+    found += [name for name in LEGACY_REPO_CONFS if os.path.lexists(layout.root / name)]
+    if os.path.lexists(layout.legacy_predecessor_ledger):
+        found.append(layout.legacy_predecessor_ledger.relative_to(layout.root).as_posix())
+    return found
+
+
+def refuse_unmigrated_v3(d: str | Path | os.PathLike[str]) -> None:
+    """Raise an actionable WorkspaceError if directory contains an unmigrated .soma/ workspace:
+    rule files left in its rule directories (even next to ``.aegis/``, where they would
+    silently not be served), or, without ``.aegis/``, any ``.soma/`` at all."""
     d_str = str(Path(d).resolve())
-    if os.path.isdir(os.path.join(d_str, ".aegis")):
+    if unconverted_rule_files(d_str):
+        raise WorkspaceError(LEGACY_SOMA_UPGRADE_MSG.format(path=d_str))
+    if is_aegis_workspace(d_str):
         return
-    if (
-        os.path.isdir(os.path.join(d_str, ".soma", "cells"))
-        or os.path.isdir(os.path.join(d_str, ".soma", "rules"))
-    ):
+    soma = os.path.join(d_str, LEGACY_SOMA_DIRNAME)
+    if os.path.isdir(os.path.join(soma, "cells")) or os.path.isdir(os.path.join(soma, "rules")):
         raise WorkspaceError(LEGACY_SOMA_UPGRADE_MSG.format(path=d_str))
     if d_str not in ("/tmp", "/var/tmp", _home_str()):
-        if os.path.isdir(os.path.join(d_str, ".soma")):
+        if os.path.isdir(soma):
             raise WorkspaceError(LEGACY_SOMA_UPGRADE_MSG.format(path=d_str))
 
 
-def _is_workspace_dir(d: str) -> bool:
-    """Check if directory contains a valid Aegis workspace marker (.aegis/rules or .aegis)."""
-    if os.path.isdir(os.path.join(d, ".aegis", "rules")):
-        return True
-    if d not in ("/tmp", "/var/tmp", _home_str()):
-        if os.path.isdir(os.path.join(d, ".aegis")):
-            return True
-    return False
-
-
-def is_aegis_repo(root: Path) -> bool:
-    """Compound check to verify if a workspace root is the core Aegis repository.
-
-    Requires:
-    1. pyproject.toml containing non-commented name = 'aegis-guardrails' or 'aegis-governance'
-    2. Both aegis_core/ and aegis_cli/ directories exist.
-    """
-    pyproject = root / "pyproject.toml"
-    if not pyproject.is_file():
-        return False
-
+def _denied(d: str | Path | os.PathLike[str]) -> str | None:
+    """Why ``d`` can never be a workspace ("home_directory", "filesystem_root"), or None.
+    A path that cannot be resolved is denied as well: it is never bound."""
     try:
-        content = pyproject.read_text(encoding="utf-8", errors="replace")
-        if not re.search(
-            r'^[ \t]*name[ \t]*=[ \t]*["\'](?:aegis-guardrails|(?:soma|aegis)-governance)["\']',
-            content,
-            re.MULTILINE,
-        ):
-            return False
-    except OSError:
-        return False
+        return denial(Path(d).resolve())
+    except (OSError, RuntimeError, ValueError):
+        return "unresolvable"
 
-    has_core = (root / "aegis_core").is_dir()
-    has_cli = (root / "aegis_cli").is_dir()
-    return has_core and has_cli
+
+def _is_workspace_dir(d: str) -> bool:
+    """Check if directory contains a valid Aegis workspace marker (.aegis/rules or .aegis).
+
+    Never ``$HOME`` or the filesystem root (AD-4): ``~/.aegis/rules`` is the personal
+    read-only rule layer and ``~/.aegis`` the user plane, so neither marks a workspace.
+    """
+    if _denied(d):
+        return False
+    if has_rules_dir(d):
+        return True
+    return d not in ("/tmp", "/var/tmp") and is_aegis_workspace(d)
 
 
 def resolve_workspace_root(
@@ -85,12 +118,18 @@ def resolve_workspace_root(
     strict_env: bool = False,
 ) -> Path:
     """Find the project root containing .aegis/rules/ or .aegis/."""
-    # 1. AEGIS_WORKSPACE env var
-    aegis_ws = os.environ.get("AEGIS_WORKSPACE")
+    # 1. AEGIS_WORKSPACE, the operator's pin (D11): final, and never $HOME or the root
+    aegis_ws = env_workspace()
     if aegis_ws:
+        denied = _denied(aegis_ws)
+        if denied:
+            raise WorkspaceNotFoundError(
+                f"AEGIS_WORKSPACE is set to {aegis_ws}, which is the {denied.replace('_', ' ')}"
+                if denied != "unresolvable" else f"AEGIS_WORKSPACE is set to {aegis_ws}, which cannot be resolved"
+            )
         if os.path.isdir(aegis_ws):
-            check_legacy_soma_sentinel(aegis_ws)
-        if os.path.isdir(os.path.join(aegis_ws, ".aegis", "rules")):
+            refuse_unmigrated_v3(aegis_ws)
+        if has_rules_dir(aegis_ws):
             return Path(aegis_ws).resolve()
         elif strict_env:
             raise WorkspaceNotFoundError(
@@ -99,66 +138,54 @@ def resolve_workspace_root(
         elif os.path.isdir(aegis_ws):
             return Path(aegis_ws).resolve()
 
-    # 2. AEGIS_ROOT env var
-    aegis_root = os.environ.get("AEGIS_ROOT")
-    if aegis_root:
-        if os.path.isdir(aegis_root):
-            check_legacy_soma_sentinel(aegis_root)
-        if os.path.isdir(os.path.join(aegis_root, ".aegis", "rules")):
-            return Path(aegis_root).resolve()
-        elif strict_env:
-            raise WorkspaceNotFoundError(
-                f"AEGIS_ROOT is set to {aegis_root} but no .aegis/rules found there (missing valid rules)."
-            )
-        elif os.path.isdir(aegis_root):
-            return Path(aegis_root).resolve()
-
-    # 3. Explicit start path walk-up
+    # 3. Explicit start path walk-up, bounded like every walk below (see _walk_up)
     if start is not None:
         cand = os.path.abspath(str(start))
         d = cand if os.path.isdir(cand) else os.path.dirname(cand)
-        check_legacy_soma_sentinel(d)
-        while d != os.path.dirname(d):
-            if _is_workspace_dir(d):
-                return Path(d).resolve()
-            check_legacy_soma_sentinel(d)
-            d = os.path.dirname(d)
-        return Path(cand if os.path.isdir(cand) else os.path.dirname(cand)).resolve()
+        refuse_unmigrated_v3(d)
+        found = _walk_up(d)
+        return found if found is not None else Path(d).resolve()
 
-    # 4. Check CWD directly
+    # 4-5. The cwd, then up from it
     cwd = os.getcwd()
-    check_legacy_soma_sentinel(cwd)
-    if _is_workspace_dir(cwd):
-        return Path(cwd).resolve()
-
-    # 5. Walk up from CWD
-    d = cwd
-    while d != os.path.dirname(d):
-        if _is_workspace_dir(d):
-            return Path(d).resolve()
-        check_legacy_soma_sentinel(d)
-        d = os.path.dirname(d)
+    refuse_unmigrated_v3(cwd)
+    found = _walk_up(cwd)
+    if found is not None:
+        return found
 
     # 6. Walk up from caller_file (skipping vendor/ directories)
     if caller_file is not None:
-        d = os.path.dirname(os.path.abspath(str(caller_file)))
-        while d != os.path.dirname(d):
-            if (
-                _is_workspace_dir(d)
-                and "/vendor/" not in d
-                and os.path.basename(os.path.dirname(d)) != "vendor"
-            ):
-                return Path(d).resolve()
-            d = os.path.dirname(d)
+        def _not_vendored(d: Path) -> bool:
+            return _is_workspace_dir(str(d)) and "vendor" not in d.parts[:-1]
+
+        found = bounded_walk_up(os.path.dirname(os.path.abspath(str(caller_file))), accept=_not_vendored)
+        if found is not None:
+            return found
 
     # 7. Fallback to CWD
     return Path(cwd).resolve()
 
 
+def _walk_up(start: str) -> Path | None:
+    """The nearest workspace from ``start`` upwards (AD-4's bounded walk-up): never above
+    the git toplevel around ``start``, never ``$HOME`` or the filesystem root. A
+    legacy ``.soma/`` met on the way raises, as before."""
+
+    def accept(d: Path) -> bool:
+        if _is_workspace_dir(str(d)):
+            return True
+        refuse_unmigrated_v3(d)
+        return False
+
+    return bounded_walk_up(start, accept=accept)
+
+
 __all__ = [
     "LEGACY_SOMA_UPGRADE_MSG",
+    "UPGRADE_STATE_MSG",
     "_is_workspace_dir",
-    "check_legacy_soma_sentinel",
-    "is_aegis_repo",
+    "refuse_unmigrated_v3",
     "resolve_workspace_root",
+    "unconverted_rule_files",
+    "unmigrated_state",
 ]

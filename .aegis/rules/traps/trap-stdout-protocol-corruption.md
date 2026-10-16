@@ -8,8 +8,6 @@ prediction: "Will fire when a CLI or hook script adds echo/printf to stdout for 
 falsification: 0 findings in 10 sessions → prune
 target_paths:
   - "aegis_cli/hooks/**"
-  - aegis_core/sync.py
-  - install/hooks/pre-commit
   - aegis
 triggers:
   - cli_modification
@@ -26,13 +24,6 @@ tags:
   - stdout
   - silent-corruption
   - critical
-fitness:
-  score: 1.0
-  impact_weight: 1.2
-  triggers: 27
-  true_positives: 8.2156
-  false_positives: 2.4568
-  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 All hook scripts communicate with their caller via JSON on stdout. Any
@@ -51,4 +42,4 @@ Fix pattern: ALL human-readable output in hooks MUST use `>&2`:
   echo "Status message" >&2    # CORRECT
   echo "Status message"        # WRONG — corrupts JSON protocol
 
-Detection: `grep -n 'echo ' install/hooks/*.sh | grep -v '>&2' | grep -v 'echo.*{' | grep -v '^#'`
+Detection: `grep -n 'print(' aegis_cli/hooks/*.py | grep -v 'file=sys.stderr' | grep -v 'json.dumps'`

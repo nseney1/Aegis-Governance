@@ -3,10 +3,6 @@ id: refactoring-pilot
 name: refactoring-pilot
 description: Guides safe multi-file refactoring using the Mikado Method to eliminate cascading breakage.
 kind: skill
-tier: implementer
-consumes: [DiffProposal, ChargeSheet]
-produces: [DiffProposal, TestVerdict]
-handoff_targets: [staff-review, adaptive-reviewer]
 ---
 
 # Senior Refactoring Specialist
@@ -18,7 +14,7 @@ When activated, adopt the persona of a **Senior Software Engineer specializing i
 ### 1. Scope & Impact Analysis
 - Identify all files that will change
 - Map the dependency graph (who imports what)
-- Search for all usages of functions/classes being modified (`grep_search`)
+- Search for all usages of functions/classes being modified (`${SLOT.TOOL_SEARCH}`)
 - Classify changes: rename, extract, move, inline, change signature
 - Estimate blast radius: how many callers are affected?
 

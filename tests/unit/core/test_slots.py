@@ -1,13 +1,14 @@
 """Unit tests for SlotRegistry in aegis_core.skills.slots."""
 from __future__ import annotations
 
-from pathlib import Path
+import json
+
 import pytest
 
 from aegis_core.skills.slots import (
     SlotRegistry,
     SlotResolutionError,
-    SLOT_REF_PATTERN,
+    profile_id,
 )
 
 
@@ -24,32 +25,49 @@ def test_slot_registry_load_nonexistent(tmp_path):
     assert reg.to_dict() == {}
 
 
-def test_slot_registry_load_valid(tmp_path):
-    soma_dir = tmp_path / ".aegis"
-    soma_dir.mkdir()
-    (soma_dir / "slots.yaml").write_text("slots:\n  tool: /usr/bin/tool\n", encoding="utf-8")
+def test_slot_registry_load_reads_packaged_driver_opt_ins(tmp_path):
+    (tmp_path / ".aegis").mkdir()
+    (tmp_path / ".aegis" / "config.json").write_text(
+        json.dumps({"v": 1, "ast": {"packaged_drivers": ["rs"]}}), encoding="utf-8"
+    )
 
     reg = SlotRegistry.load(tmp_path)
-    assert reg.get("tool") == "/usr/bin/tool"
+    assert reg.to_dict() == {"ast_driver_rs": "{python} .aegis/drivers/rust_ast.py"}
 
 
-def test_slot_registry_load_invalid_yaml(tmp_path):
-    soma_dir = tmp_path / ".aegis"
-    soma_dir.mkdir()
-    # Bad yaml syntax
-    (soma_dir / "slots.yaml").write_text(": : invalid", encoding="utf-8")
+def test_an_extension_without_a_packaged_driver_is_ignored_with_a_warning(tmp_path):
+    (tmp_path / ".aegis").mkdir()
+    (tmp_path / ".aegis" / "config.json").write_text(
+        json.dumps({"v": 1, "ast": {"packaged_drivers": ["md", "rs"]}}), encoding="utf-8"
+    )
 
-    with pytest.raises(SlotResolutionError, match="Failed to parse"):
+    reg = SlotRegistry.load(tmp_path)
+    assert reg.to_dict() == {"ast_driver_rs": "{python} .aegis/drivers/rust_ast.py"}
+    assert reg.warnings == [
+        "ignored 1 'ast.packaged_drivers' entry in .aegis/config.json: "
+        "only extensions with a driver that ships inside aegis can be enabled"
+    ]
+
+
+def test_slot_registry_load_invalid_json(tmp_path):
+    (tmp_path / ".aegis").mkdir()
+    (tmp_path / ".aegis" / "config.json").write_text(": : invalid", encoding="utf-8")
+
+    with pytest.raises(SlotResolutionError, match="not valid JSON"):
         SlotRegistry.load(tmp_path)
 
 
-def test_slot_registry_load_non_mapping_slots(tmp_path):
-    soma_dir = tmp_path / ".aegis"
-    soma_dir.mkdir()
-    (soma_dir / "slots.yaml").write_text("slots: 'not a dict'\n", encoding="utf-8")
+def test_slot_registry_load_user_reads_drivers_and_slots(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".aegis").mkdir(parents=True)
+    (home / ".aegis" / "config.json").write_text(
+        json.dumps({"v": 1, "drivers": {"md": "md-ast"}, "slots": {"tool": "/usr/bin/tool"}}), encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
 
-    reg = SlotRegistry.load(tmp_path)
-    assert reg.to_dict() == {}
+    reg = SlotRegistry.load_user(tmp_path / "ws")
+    assert reg.to_dict() == {"tool": "/usr/bin/tool", "ast_driver_md": "md-ast"}
 
 
 def test_slot_registry_resolve_strict():
@@ -97,3 +115,19 @@ def test_slot_registry_get_configured_extensions():
     })
     exts = reg.get_configured_extensions()
     assert exts == {".py", ".rs", ".go", ".ts"}
+
+
+@pytest.mark.parametrize("host, profile", [
+    ("claude-code", "claude-code"),
+    ("  codex-cli\n", "codex-cli"),  # surrounding whitespace is not part of the id
+    ("antigravity", "antigravity"),
+    ("claude-desktop", "generic"),  # identity only: its host row names the generic profile
+    ("claude", "claude-code"),  # v3 platform names keep the profile they had
+    ("gemini", "antigravity"),
+    ("generic", "generic"),
+    ("no-such-host", "generic"),  # an unknown host never borrows a vendor's profile
+    ("", "generic"),
+    (None, "generic"),
+])
+def test_profile_id_names_the_slot_profile_a_host_renders_with(host, profile):
+    assert profile_id(host) == profile

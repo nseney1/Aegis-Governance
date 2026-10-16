@@ -10,19 +10,14 @@ Uses v0.30 bugs as ground truth:
 Each test constructs the exact predictions/claims/evidence that
 our agents would have produced, then verifies the Arbiter catches it.
 """
-import os
 import sys
 
-import pytest
 
 REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
 sys.path.insert(0, REPO_ROOT)
 
-from aegis_core.verification import (
-    ArbitrationResult, Claim, Prediction, RiskCategory,
-    Severity, ToolEvidence, Verdict,
-)
-from aegis_core.verification.arbiter import arbitrate, format_report
+from aegis_core.verification import Claim, Prediction, RiskCategory, Severity, ToolEvidence, Verdict
+from aegis_core.verification.arbiter import arbitrate
 
 
 # ── Arbiter: Core Set Logic ───────────────────────────────────────────────
@@ -194,8 +189,9 @@ class TestArbiterV030GroundTruth:
         assert result.divergences[0].divergence_type == "confirmed_risk"
         assert result.divergences[0].prediction.category == RiskCategory.PERSISTENCE_GAP
 
-    def test_dead_code_detected(self):
-        """Dead NEW/DORMANT branches should be caught by branch_coverage tool."""
+    def test_dead_code_prediction_without_layer1_evidence_revises(self):
+        """No Layer 1 tool adjudicates DEAD_CODE (branch_coverage is cut, #38): an
+        undefended high-severity prediction can only REVISE, not BLOCK."""
         predictions = [
             Prediction(RiskCategory.DEAD_CODE, Severity.HIGH,
                        "NEW/DORMANT status might be unreachable",
@@ -203,15 +199,10 @@ class TestArbiterV030GroundTruth:
                        "the else branch at L189 is dead code",
                        "classify_status"),
         ]
-        claims = []  # Code Agent might not address this
-        evidence = [
-            ToolEvidence("branch_coverage", "cell_fitness.py:179-202",
-                         False, "Lines 189-198 never executed (0% branch coverage)",
-                         [189, 190, 191, 192, 193, 194, 195, 196, 197, 198]),
-        ]
-
-        result = arbitrate(predictions, claims, evidence)
-        assert result.verdict == Verdict.BLOCK
+        result = arbitrate(predictions, [], [ToolEvidence("call_graph", "cell_fitness.py", True, "wired")])
+        assert result.verdict == Verdict.REVISE
+        assert [d.divergence_type for d in result.divergences] == ["unmatched_prediction"]
+        assert result.divergences[0].tool_evidence is None
 
     def test_post_fix_all_clear(self):
         """After all v0.30 fixes, the Arbiter should produce SHIP."""
@@ -234,8 +225,6 @@ class TestArbiterV030GroundTruth:
         evidence = [
             ToolEvidence("persistence_checker", "cell_promote.py:fitness",
                          True, "All 5 keys serialized"),
-            ToolEvidence("branch_coverage", "cell_fitness.py:179-202",
-                         True, "All branches covered"),
         ]
 
         result = arbitrate(predictions, claims, evidence)
@@ -244,30 +233,6 @@ class TestArbiterV030GroundTruth:
 
 
 # ── Report Formatting ─────────────────────────────────────────────────────
-
-class TestReportFormatting:
-    """Verify the report is human-readable and contains key information."""
-
-    def test_report_contains_verdict(self):
-        predictions = []
-        claims = []
-        evidence = [
-            ToolEvidence("persistence_checker", "test", True, "OK"),
-        ]
-        result = arbitrate(predictions, claims, evidence)
-        report = format_report(result)
-        assert "SHIP" in report
-
-    def test_report_contains_divergences(self):
-        predictions = [
-            Prediction(RiskCategory.PERSISTENCE_GAP, Severity.CRITICAL,
-                       "Epoch gap", "mechanism", "apply_decay")
-        ]
-        result = arbitrate(predictions, [], [])
-        report = format_report(result)
-        assert "unmatched_prediction" in report
-        assert "persistence_gap" in report
-
 
 # ── Arbiter: Fail-Closed on Spec Agent Failure ────────────────────────────
 

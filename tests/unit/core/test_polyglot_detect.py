@@ -1,6 +1,6 @@
 """Tests for polyglot language detection and zero-touch AST driver provisioning."""
+import json
 from pathlib import Path
-import pytest
 
 from aegis_core.ast.detect import (
     detect_project_languages,
@@ -84,19 +84,83 @@ def test_provision_ast_driver_slots(tmp_path: Path):
     (tmp_path / "package.json").write_text('{"name": "web"}', encoding="utf-8")
     (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
 
-    slots, created_files = provision_ast_driver_slots(tmp_path, copy_drivers=True)
-    assert "ast_driver_rs" in slots
-    assert "ast_driver_ts" in slots
+    slots, created_files = provision_ast_driver_slots(tmp_path)
+    assert {"ast_driver_rs", "ast_driver_ts", "ast_driver_js"} <= set(slots)
 
-    # Verify slots.yaml was created and readable by SlotRegistry
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    assert slots_file.exists()
+    # The opt-ins live in .aegis/config.json and SlotRegistry reads them back
+    config = tmp_path / ".aegis" / "config.json"
+    assert created_files == [str(config)]
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".rs") is not None
     assert registry.get_ast_driver(".ts") is not None
+    # Nothing is staged in the repository: the packaged templates are what runs
+    assert not (tmp_path / ".aegis" / "drivers").exists()
 
-    # Verify driver files were staged in .aegis/drivers/
-    drivers_dir = tmp_path / ".aegis" / "drivers"
-    assert drivers_dir.is_dir()
-    assert (drivers_dir / "ts_ast.js").exists()
-    assert (drivers_dir / "rust_ast.py").exists()
+
+def test_provision_keeps_existing_config_keys(tmp_path: Path):
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='foo'\n", encoding="utf-8")
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"v": 1, "hosts": ["codex-cli"], "jit": {"max_tokens": 900}}), encoding="utf-8")
+
+    provision_ast_driver_slots(tmp_path)
+
+    assert json.loads(config.read_text(encoding="utf-8")) == {
+        "v": 1, "hosts": ["codex-cli"], "jit": {"max_tokens": 900}, "ast": {"packaged_drivers": ["rs"]},
+    }
+    assert SlotRegistry.load(tmp_path).get_ast_driver(".rs") == "{python} .aegis/drivers/rust_ast.py"
+
+
+def test_provision_does_not_overwrite_unparseable_config(tmp_path: Path):
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='foo'\n", encoding="utf-8")
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{hand-edited, not yet valid\n", encoding="utf-8")
+
+    _, created_files = provision_ast_driver_slots(tmp_path)
+
+    assert config.read_text(encoding="utf-8") == "{hand-edited, not yet valid\n"
+    assert created_files == []
+
+
+def test_provision_dry_run_writes_nothing(tmp_path: Path):
+    (tmp_path / "go.mod").write_text("module x\n", encoding="utf-8")
+
+    slots, created_files = provision_ast_driver_slots(tmp_path, dry_run=True)
+
+    assert slots == {"ast_driver_go": "go run .aegis/drivers/go_ast.go"}
+    assert created_files == []
+    assert not (tmp_path / ".aegis").exists()
+
+
+def test_provision_tolerates_an_unknown_extension_already_listed(tmp_path: Path):
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='foo'\n", encoding="utf-8")
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"v": 1, "ast": {"packaged_drivers": ["md"]}}), encoding="utf-8")
+
+    slots, _ = provision_ast_driver_slots(tmp_path)
+
+    assert slots == {"ast_driver_rs": "{python} .aegis/drivers/rust_ast.py"}
+    assert json.loads(config.read_text(encoding="utf-8"))["ast"]["packaged_drivers"] == ["md", "rs"]
+
+
+def test_provision_merges_into_a_config_written_after_it_was_read(tmp_path: Path, monkeypatch):
+    """Lost update (review B2a-6): another writer lands between the read and the locked write."""
+    from aegis_core import config as config_mod
+
+    (tmp_path / "Cargo.toml").write_text("[package]\nname = 'x'\n", encoding="utf-8")
+    real_load = config_mod.RepoConfig.load
+
+    def load_then_someone_else_writes(cls, root):
+        loaded = real_load(root)
+        config_mod.update_repo_config(root, lambda data: data.update(ast={"packaged_drivers": ["go"]}))
+        return loaded
+
+    monkeypatch.setattr(config_mod.RepoConfig, "load", classmethod(load_then_someone_else_writes))
+    slots, written = provision_ast_driver_slots(tmp_path)
+
+    data = json.loads((tmp_path / ".aegis" / "config.json").read_text(encoding="utf-8"))
+    assert data["ast"]["packaged_drivers"] == ["go", "rs"]
+    assert set(slots) == {"ast_driver_go", "ast_driver_rs"}
+    assert written

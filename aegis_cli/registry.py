@@ -1,8 +1,8 @@
-"""Centralized registry for Soma CLI commands with categorization and alias resolution."""
+"""Registry of aegis CLI commands with categorization and alias resolution."""
 from __future__ import annotations
 
 import argparse
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Union
 
 from aegis_cli.base import CommandCategory, AegisCommand
 
@@ -10,7 +10,7 @@ __all__ = ["CommandRegistry", "create_default_registry", "get_default_registry"]
 
 
 class CommandRegistry:
-    """Registry maintaining active Soma commands, aliases, and categorized discovery."""
+    """Registry of active commands, their aliases, and categorized help."""
 
     def __init__(self) -> None:
         self._commands: Dict[str, AegisCommand] = {}
@@ -74,9 +74,8 @@ class CommandRegistry:
         from aegis_cli.ui.theme import OutputContext
 
         ui = ctx if isinstance(ctx, OutputContext) else OutputContext()
-        prog_title = "Aegis" if prog == "aegis" else "Soma"
         title_line = ui.style(
-            f"{prog_title} Governance — make AI coding agents trustworthy",
+            "Aegis Governance — make AI coding agents trustworthy",
             "bold",
             "cyan",
         )
@@ -118,7 +117,6 @@ class CommandRegistry:
             "  --workspace PATH   Target workspace directory (default: current directory)",
             "  --json             Output results as machine-readable JSON",
             "  --plain            Disable emoji and rich styling",
-            "  -v, --verbose      Enable detailed debug logging",
             "  -h, --help         Show this help message and exit",
             "",
             f"Run '{prog} <command> --help' for details on a specific command.",
@@ -131,47 +129,30 @@ _DEFAULT_REGISTRY: Optional[CommandRegistry] = None
 
 
 def create_default_registry() -> CommandRegistry:
-    """Create and populate a CommandRegistry with canonical verbs + plumbing."""
+    """Create a CommandRegistry holding the v4 command set."""
     reg = CommandRegistry()
 
-    # Category 1: Setup & Environment
-    from aegis_cli.detect import DetectCommand
-    from aegis_cli.doctor import DoctorCommand
-    from aegis_cli.init import InitCommand
-    from aegis_cli.install import InstallCommand, UninstallCommand
-    from aegis_cli.migrate import MigrateCommand
-    from aegis_cli.system import SystemCommand
-
-    # Category 2: Daily Workflow & Verification
     from aegis_cli.check import CheckCommand
-    from aegis_cli.report import ReportCommand
-    from aegis_cli.status import StatusCommand
-
-    # Category 3: Rule Evolution & Intelligence
-    from aegis_cli.rule import RuleCommand
-
-    # Category 4: Plumbing & Machine Protocol
-    from aegis_cli.agent import AgentCommand
-    from aegis_cli.completion import CompletionCommand
+    from aegis_cli.doctor import DoctorCommand
     from aegis_cli.hooks import HookCommand
-    from aegis_cli.skills import HandoffCommand, SkillCommand
+    from aegis_cli.init import InitCommand
+    from aegis_cli.migrate import MigrateCommand
+    from aegis_cli.rule import RuleCommand
+    from aegis_cli.scan import ScanCommand
+    from aegis_cli.status import StatusCommand
+    from aegis_cli.sync import SyncCommand
+    from aegis_cli.uninstall import UninstallCommand
 
     for cmd_cls in (
         InitCommand,
-        InstallCommand,
         UninstallCommand,
         MigrateCommand,
-        DetectCommand,
         DoctorCommand,
-        SystemCommand,
         CheckCommand,
+        ScanCommand,
         StatusCommand,
-        ReportCommand,
         RuleCommand,
-        AgentCommand,
-        SkillCommand,
-        HandoffCommand,
-        CompletionCommand,
+        SyncCommand,
         HookCommand,
     ):
         reg.register(cmd_cls)

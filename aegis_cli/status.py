@@ -1,34 +1,37 @@
-"""soma status — Show active rules and stats."""
+"""aegis status — show active rules and stats."""
 from __future__ import annotations
 
 import argparse
-import re
 from datetime import date, datetime
 from pathlib import Path
 
 from aegis_cli import resolve_root, sanitize_display
 from aegis_cli.base import CommandCategory, AegisCommand
-from aegis_core.evidence import aggregate_signals
 from aegis_core.taxonomy import (
     CHARS_PER_TOKEN_ESTIMATE,
     JIT_DEFAULT_MAX_TOKENS,
-    RULE_TYPE_DISPLAY_ORDER,
-    RULE_TYPE_NORMALIZATION,
+    RULE_TYPES,
 )
-from aegis_core.workspace.layout import WorkspaceLayout
 
-__all__ = ["run_status", "StatusCommand"]
+__all__ = ["run_status", "run_compliance", "StatusCommand"]
 
-from aegis_sdk.rules import parse_rule_file
+from aegis_core.yaml_engine.frontmatter import parse_rule_file
 
 
 def _repo_root(args: argparse.Namespace) -> Path:
-    """Find the Soma install root (where genome/ lives)."""
+    """The workspace, or else the directory aegis_cli is installed in."""
     return resolve_root(args, default=Path(__file__).resolve().parent.parent)
 
 
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return a.is_dir() and b.is_dir() and a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
 def _project_root(args: argparse.Namespace) -> Path:
-    """Find the project root (where .soma/ lives)."""
+    """The workspace the command acts on."""
     return resolve_root(args)
 
 
@@ -90,287 +93,54 @@ def _format_adaptive_expiry(created_val, expiry_days_val) -> str:
     return f"{remaining_days}d"
 
 
-def _read_trigger_counts(evidence_dir: Path) -> dict[str, int]:
-    """Read the canonical trigger count dimension per cell."""
-    try:
-        aggregation = aggregate_signals(str(evidence_dir))
-    except Exception:
-        return {}
-
-    return {
-        str(cell_id): int(entry["triggers"])
-        for cell_id, entry in aggregation.counts.items()
-        if isinstance(entry, dict) and entry.get("has_triggers")
-    }
-
-
-# ── CLAUDE.md merged rules (BUG-033) ────────────────────────────────────────
-# Claude Code reads one CLAUDE.md, so rules are merged rather than copied.
-# Two writers exist and must stay in sync with this parser:
-#   install/install.sh + install.ps1: "# Soma Governance Rules" header, then
-#     per rule a "---" line followed by the frontmatter-stripped body, which
-#     starts with an H1. Bodies may contain their own "---" rules (followed
-#     by H2s), so only "---" + H1 starts a new rule.
-#   aegis_cli/init.py _install_claude_md: <!-- SOMA:START/END --> markers,
-#     sections "## <stem>" (raw file incl. frontmatter) joined by "---".
-
-SOMA_HEADER = "# Soma Governance Rules"
-SOMA_MARKER_START = "<!-- SOMA:START -->"
-SOMA_MARKER_END = "<!-- SOMA:END -->"
-_SECTION_SLUG = re.compile(r"^## ([A-Za-z0-9][A-Za-z0-9._-]*)$")
-_HEADER_LINE = re.compile(r"^# Soma Governance Rules[ \t]*\r?$", re.M)
-
-
-def _frontmatter_id(text: str) -> str | None:
-    """Return ``id`` from a leading YAML frontmatter block, if any."""
-    lines = text.lstrip().splitlines()
-    if not lines or lines[0].strip() != "---":
-        return None
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        m = re.match(r"^id:\s*(.+?)\s*$", line)
-        if m:
-            return m.group(1).strip("'\"") or None
-    return None
-
-
-def _first_h1(text: str) -> str | None:
-    """Return the first top-level heading's text, skipping frontmatter."""
-    lines = text.lstrip().splitlines()
-    start = 0
-    if lines and lines[0].strip() == "---":
-        for i in range(1, len(lines)):
-            if lines[i].strip() == "---":
-                start = i + 1
-                break
-    for line in lines[start:]:
-        s = line.strip()
-        if s.startswith("# "):
-            return s[2:].strip()
-    return None
-
-
-def _genome_heading_map(root: Path) -> dict[str, str]:
-    """Map each packaged rule's H1 to its id, so merged bodies (which lost
-    their frontmatter) still match trigger counts."""
-    mapping: dict[str, str] = {}
-    genome_dir = root / "rules"
-    if not genome_dir.is_dir():
-        genome_dir = root / "genome"
-    for d in (genome_dir, genome_dir / ".oracles"):
-        if not d.is_dir():
-            continue
-        for p in sorted(d.glob("*.md")):
-            try:
-                text = p.read_text(encoding="utf-8")
-            except Exception:
-                continue
-            heading = _first_h1(text)
-            if heading:
-                mapping.setdefault(heading, _frontmatter_id(text) or p.stem)
-    return mapping
-
-
-def _parse_marker_block(lines: list[str]) -> list[dict]:
-    """Parse the soma init block: '## <stem>' after the header or a '---'."""
-    sections: list[dict] = []
-    cur: dict | None = None
-    after_sep = True
-    i = 0
-    while i < len(lines):
-        s = lines[i].strip()
-        if not s:
-            if cur is not None:
-                cur["lines"].append(lines[i])
-            i += 1
-            continue
-        m = _SECTION_SLUG.match(s) if after_sep else None
-        if m:
-            j = next((k for k in range(i + 1, len(lines)) if lines[k].strip()), None)
-            nxt = lines[j].strip() if j is not None else ""
-            # A rule body starts with frontmatter or an H1; a body's own
-            # "---" + "## Section" does not.
-            if j is None or nxt == "---" or nxt.startswith("# "):
-                cur = {"stem": m.group(1), "lines": []}
-                sections.append(cur)
-                after_sep = False
-                i += 1
-                if nxt == "---":  # consume frontmatter so its closing --- is not a separator
-                    end = next((k for k in range(j + 1, len(lines))
-                                if lines[k].strip() == "---"), None)
-                    if end is not None:
-                        cur["lines"].extend(lines[i:end + 1])
-                        i = end + 1
-                continue
-        after_sep = s in ("---", SOMA_HEADER)
-        if cur is not None:
-            cur["lines"].append(lines[i])
-        i += 1
-    out = []
-    for sec in sections:
-        text = "".join(sec["lines"])
-        out.append({
-            "name": _frontmatter_id(text) or sec["stem"],
-            "keys": {sec["stem"], _first_h1(text)} - {None},
-            "text": text,
-        })
-    return out
-
-
-def _parse_install_region(lines: list[str], heading_map: dict[str, str]) -> list[dict]:
-    """Parse install.sh/ps1 output: a rule starts at an H1 right after '---'."""
-    sections: list[dict] = []
-    cur: dict | None = None
-    after_sep = False
-    for line in lines:
-        s = line.strip()
-        if s:
-            if after_sep and s.startswith("# "):
-                cur = {"heading": s[2:].strip(), "lines": []}
-                sections.append(cur)
-            after_sep = s == "---"
-        if cur is not None:
-            cur["lines"].append(line)
-    out = []
-    for sec in sections:
-        name = heading_map.get(sec["heading"], sec["heading"])
-        out.append({
-            "name": name,
-            "keys": {name, sec["heading"]},
-            "text": "".join(sec["lines"]),
-        })
-    return out
-
-
-def _merged_claude_rules(claude_md: Path, heading_map: dict[str, str]) -> tuple[bool, list[dict]]:
-    """Return (has_soma_content, merged rule sections) for a CLAUDE.md."""
-    try:
-        # utf-8-sig: install.ps1 (PowerShell 5.1 Set-Content -Encoding UTF8)
-        # writes a BOM that would otherwise defeat the line-1 header match.
-        text = claude_md.read_text(encoding="utf-8-sig")
-    except Exception:
-        return False, []
-    has_soma = False
-    rules: list[dict] = []
-    rest = text
-    start = text.find(SOMA_MARKER_START)
-    end = text.find(SOMA_MARKER_END)
-    if 0 <= start < end:
-        has_soma = True
-        block = text[start + len(SOMA_MARKER_START):end]
-        rules.extend(_parse_marker_block(block.splitlines(True)))
-        rest = text[:start] + text[end + len(SOMA_MARKER_END):]
-    m = _HEADER_LINE.search(rest)
-    if m:
-        has_soma = True
-        rules.extend(_parse_install_region(rest[m.start():].splitlines(True), heading_map))
-    return has_soma, rules
-
-
-def format_status_summary(data: dict, plumbing: bool = False, plain: bool = False) -> str:
-    """Format status summary text."""
-    active = data.get("active_rules", data.get("active_cells", 0))
-    traps = data.get("trap_count", 0)
-    invariants = data.get("wall_count", data.get("invariant_count", 0))
-    archived = data.get("archived_count", data.get("apoptotic_count", 0))
-    lines = [
-        "📊 Aegis Governance Status",
-        f"  Active Rules:    {active} active",
-        f"  Invariants:      {invariants} enforced",
-        f"  Adaptive Traps:  {traps} active",
-        f"  Archived Rules:  {archived} archived",
-    ]
-
-    text = "\n".join(lines)
-    if plain:
-        from aegis_cli import format_plain
-        text = format_plain(text)
-    return text
-
-
 def run_status(args: argparse.Namespace) -> int:
     """Show active rules and stats."""
     root = _repo_root(args)
     proj = _project_root(args)
 
-    # 1. Count installed rules: detect platform and scan rules dir
-    #    Skip platform auto-detection when _root is explicitly provided (e.g. tests)
-    #    to prevent leaking the real filesystem into test results.
+    # 1. Core rules: the shipped rules, listed only in the Aegis checkout they ship from.
+    #    v4 installs no rule files into host directories (host-matrix spec §3.2), and a
+    #    workspace's own rules/ is its project's, never Aegis's.
+    from aegis_cli.init import packaged_dir, packaged_rules
+
     core_files: list[Path] = []
-    merged_rules: list[dict] = []
-    has_merged_soma = False
-    test_mode = getattr(args, '_root', None) is not None
-    home = getattr(args, '_home', getattr(args, '_home_override', None)) or Path.home()
+    if _same_dir(root / "rules", packaged_dir("rules")):
+        core_files = list(packaged_rules().values())
 
-    if not test_mode:
-        try:
-            from aegis_cli.init import detect_platform, get_rules_dir
-            platform = detect_platform(proj)
-            if platform == "unknown":
-                platform = detect_platform(home)
-            if platform != "unknown":
-                rules_dir = get_rules_dir(platform, home=home, project_root=proj)
-                if rules_dir.is_dir():
-                    for p in sorted(rules_dir.glob("*.md")):
-                        if p.is_file() and p.name.lower() not in ("readme.md", "claude.md"):
-                            core_files.append(p)
-                claude_md = rules_dir / "CLAUDE.md"
-                if platform == "claude" and claude_md.is_file():
-                    has_merged_soma, merged_rules = _merged_claude_rules(
-                        claude_md, _genome_heading_map(root))
-        except (ImportError, ValueError):
-            pass
+    # 2. Workspace rules, through the one loader; fitness from the ledger.
+    from aegis_core.fitness import for_rules
+    from aegis_core.rule_inventory import RuleInventoryError
+    from aegis_core.rules import RuleSet, load_rules
+    from aegis_core.sync import read_derived, stale_rules
 
-    # Drop merged sections that duplicate a loose file (soma init leaves the
-    # loose copies next to its CLAUDE.md block) or an earlier merged section.
-    seen: set[str] = set()
-    for f in core_files:
-        try:
-            loose_text = f.read_text(encoding="utf-8-sig")
-        except Exception:
-            loose_text = ""
-        seen.update(k for k in (f.stem, _frontmatter_id(loose_text),
-                                _first_h1(loose_text)) if k)
-    unique_merged: list[dict] = []
-    for r in merged_rules:
-        if r["name"] in seen or r["keys"] & seen:
-            continue
-        seen.add(r["name"])
-        seen.update(r["keys"])
-        unique_merged.append(r)
-    merged_rules = unique_merged
+    inventory_error = None
+    try:
+        ruleset = load_rules(proj)
+    except RuleInventoryError as exc:
+        inventory_error = str(exc)
+        ruleset = RuleSet(())
+    from aegis_core.telemetry_engine import ledger
 
-    # Fallback: scan genome/ from the resolved root — never when CLAUDE.md
-    # holds Soma content, or a 1-rule install reports the genome count.
-    if not core_files and not has_merged_soma:
-        genome_dir = (root / "rules") if (root / "rules").is_dir() else (root / "genome")
-        if genome_dir.is_dir():
-            for p in sorted(genome_dir.glob("*.md")):
-                if p.is_file() and p.name.lower() != "readme.md":
-                    core_files.append(p)
-        oracles_dir = genome_dir / ".oracles"
-        if oracles_dir.is_dir():
-            for p in sorted(oracles_dir.glob("*.md")):
-                if p.is_file() and p.name.lower() != "readme.md":
-                    core_files.append(p)
+    # One ledger read for every number below; what it could not use is shown.
+    view = ledger.read(proj)
+    loaded = [r for r in ruleset.rules if r.ok]
+    fits = for_rules(proj, loaded, view=view)
+    derived = read_derived(proj)
+    stale = stale_rules(ruleset, derived)
 
-    # 2. Count adaptive rules: .md files in .aegis/rules/ recursively (exclude README.md)
-    adaptive_files: list[Path] = []
-    layout = WorkspaceLayout(proj)
-    cells_dir = layout.rules_dir
-    if cells_dir.is_dir():
-        for p in sorted(cells_dir.rglob("*.md")):
-            if p.is_file() and p.name.lower() != "readme.md":
-                adaptive_files.append(p)
+    # 3. Ledger totals of the host-installed rules (they have no rule file here)
+    from aegis_core.fitness import compute
 
-    # 3. Read canonical trigger counts from .aegis/evidence/signals.jsonl
-    evidence_dir = layout.evidence_dir
-    trigger_counts = _read_trigger_counts(evidence_dir)
+    totals = ledger.aggregate_rows(view.rows)
+
+    def _core_fitness(*names: str) -> tuple[int, float | None]:
+        entry = next((totals[n] for n in names if n in totals), {})
+        fit = compute(entry)
+        return fit.triggers, (fit.score if fit.verdicts else None)
 
     # 4. Process all rules and calculate character overhead
-    _type_norm = RULE_TYPE_NORMALIZATION
-    _type_order = RULE_TYPE_DISPLAY_ORDER
+    # Host-installed instruction rules ("core") list first, then the rule types in table order.
+    _type_order = {"core": 0, **{name: spec.display_order for name, spec in RULE_TYPES.items()}}
 
     total_chars = 0
     all_rules: list[dict] = []
@@ -383,9 +153,7 @@ def run_status(args: argparse.Namespace) -> int:
         total_chars += len(content)
         fm = _parse_frontmatter(str(f))
         rule_name = sanitize_display(str(fm.get("id") or f.stem))
-        triggers = trigger_counts.get(rule_name, trigger_counts.get(f.stem, 0))
-        fitness_block = fm.get("fitness", {})
-        score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
+        triggers, score = _core_fitness(rule_name, f.stem)
         all_rules.append({
             "name": rule_name,
             "type": "core",
@@ -395,40 +163,29 @@ def run_status(args: argparse.Namespace) -> int:
             "is_core": True,
         })
 
-    for r in merged_rules:
-        total_chars += len(r["text"])
-        rule_name = sanitize_display(str(r["name"]))
+    for rule in loaded:
+        total_chars += len(rule.raw.decode("utf-8-sig", "replace"))
+        fit = fits[rule.id]
         all_rules.append({
-            "name": rule_name,
-            "type": "core",
-            "score": None,
-            "triggers": trigger_counts.get(rule_name, 0),
-            "expiry": "∞ (core)",
-            "is_core": True,
-        })
-
-    for f in adaptive_files:
-        try:
-            content = f.read_text(encoding="utf-8-sig")
-        except Exception:
-            content = ""
-        total_chars += len(content)
-        fm = _parse_frontmatter(str(f))
-        rule_name = sanitize_display(str(fm.get("id") or f.stem))
-        raw_type = str(fm.get("type") or f.parent.name).lower()
-        norm_type = _type_norm.get(raw_type, raw_type)
-        fitness_block = fm.get("fitness", {})
-        score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
-        triggers = trigger_counts.get(rule_name, trigger_counts.get(f.stem, 0))
-        expiry_str = _format_adaptive_expiry(fm.get("created"), fm.get("expiry_days"))
-        all_rules.append({
-            "name": rule_name,
-            "type": norm_type,
-            "score": score,
-            "triggers": triggers,
-            "expiry": expiry_str,
+            "name": sanitize_display(rule.id),
+            "type": rule.type,
+            # No verdict yet is not a fitness of zero: show it as unknown.
+            "score": fit.score if fit.verdicts else None,
+            "triggers": fit.triggers,
+            "expiry": "expired" if rule.expired else _format_adaptive_expiry(
+                rule.meta.get("created"), rule.meta.get("expiry_days")),
             "is_core": False,
         })
+    problems = {
+        "rule_errors": [{"path": r.path, "error": r.error} for r in ruleset.errors],
+        "ignored": [{"path": i.path, "reason": i.reason} for i in ruleset.ignored],
+        "stale_rules": stale,
+        "needs_migrate": [{"path": r.path, "keys": list(r.legacy_keys)} for r in ruleset.needs_migrate],
+        "untargeted": [{"id": r.id, "path": r.path} for r in sorted(ruleset.served, key=lambda r: r.id)
+                       if not r.target_paths],
+    }
+    ledger_health = view.health()
+    rc = 1 if (problems["rule_errors"] or inventory_error) else 0
 
     # Context load: total characters / 4
     estimated_tokens = total_chars // CHARS_PER_TOKEN_ESTIMATE
@@ -443,35 +200,42 @@ def run_status(args: argparse.Namespace) -> int:
         )
     )
 
-    if getattr(args, "format", None) == "json" or getattr(args, "json", False):
+    if getattr(args, "json", False):
         import json
         payload = {
-            "core_rules": len(core_files) + len(merged_rules),
-            "adaptive_rules": len(adaptive_files),
+            "core_rules": len(core_files),
+            "adaptive_rules": len(loaded),
             "estimated_tokens": estimated_tokens,
             "rules": all_rules,
+            "last_sync": derived.get("synced_at") if derived else None,
+            "inventory_error": inventory_error,
+            "ledger": ledger_health,
+            **problems,
         }
         print(json.dumps(payload, indent=2))
-        return 0
+        return rc
 
-    import os
     from aegis_cli.ui.table import Table
     from aegis_cli.ui.theme import OutputContext
 
     existing_ui = getattr(args, "ui", None)
     ui = existing_ui if isinstance(existing_ui, OutputContext) else OutputContext.from_env_and_args(args)
-    max_budget = int(os.environ.get("AEGIS_MAX_JIT_TOKENS", str(JIT_DEFAULT_MAX_TOKENS)))
+    from aegis_core.config import jit_max_tokens
+
+    max_budget = jit_max_tokens(proj, JIT_DEFAULT_MAX_TOKENS)
 
     header_title = "🛡️ Aegis Workspace Status" if ui.emoji_enabled else "Aegis Workspace Status"
     print(f"{ui.style(header_title, 'bold', 'cyan')}\n")
-    print(f"  {'Core rules:':<16}{len(core_files) + len(merged_rules)} active")
-    print(f"  {'Adaptive rules:':<16}{len(adaptive_files)} (traps/patterns)")
+    print(f"  {'Core rules:':<16}{len(core_files)} active")
+    print(f"  {'Adaptive rules:':<16}{len(loaded)} (traps/patterns)")
     print(f"  {'Context load:':<16}~{estimated_tokens:,} tokens (pre-JIT max)")
-    print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}\n")
+    print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}")
+    print(f"  {'Last sync:':<16}{derived.get('synced_at') if derived else 'never (run aegis sync)'}\n")
+    _print_problems(inventory_error, problems, view.incomplete)
 
     if not all_rules:
         print("  No rules found. Run 'aegis init' to set up governance rules.")
-        return 0
+        return rc
 
     tbl = Table(ctx=ui)
     tbl.add_column("Rule", no_wrap=True)
@@ -501,6 +265,98 @@ def run_status(args: argparse.Namespace) -> int:
     for line in tbl.render(ui).splitlines():
         print(f"  {line}")
 
+    return rc
+
+
+def _print_problems(inventory_error: str | None, problems: dict, ledger_missing: str | None = None) -> None:
+    """What the scan would refuse, skip or flag, so nothing is excluded unseen."""
+    from aegis_cli.sync import LEDGER_WARNING
+
+    if inventory_error:
+        print(f"  ❌ The rules directory cannot be read safely: {sanitize_display(inventory_error)}")
+    if ledger_missing:
+        print(f"  {LEDGER_WARNING.format(sanitize_display(ledger_missing, 300))}")
+    if problems["rule_errors"]:
+        print(f"  ❌ {len(problems['rule_errors'])} rule file(s) cannot be loaded; aegis scan fails until they are fixed:")
+        for item in problems["rule_errors"]:
+            print(f"     {sanitize_display(item['path'])}: {sanitize_display(item['error'])}")
+    if problems["stale_rules"]:
+        print(f"  ✏️  {len(problems['stale_rules'])} rule(s) changed since the last aegis sync:")
+        for item in problems["stale_rules"]:
+            print(f"     {sanitize_display(str(item['id']))} ({item['change']})")
+    if problems["needs_migrate"]:
+        print(f"  ⚠️  {len(problems['needs_migrate'])} rule file(s) still carry derived counters or retired v3 keys "
+              "(ignored; run aegis migrate --apply to strip them):")
+        for item in problems["needs_migrate"]:
+            print(f"     {sanitize_display(item['path'])}: {', '.join(item['keys'])}")
+    if problems["ignored"]:
+        print(f"  ℹ️  {len(problems['ignored'])} file(s) under .aegis/rules are not rules:")
+        for item in problems["ignored"]:
+            print(f"     {sanitize_display(item['path'])}: {item['reason']}")
+    if problems["untargeted"]:
+        print(f"  ⚠️  {len(problems['untargeted'])} rule(s) apply to no file (no target_paths), "
+              "so scan and check never serve them:")
+        for item in problems["untargeted"]:
+            print(f"     {sanitize_display(str(item['id']))}: {sanitize_display(item['path'])}")
+    if any(problems.values()) or inventory_error or ledger_missing:
+        print()
+
+
+# ── aegis status --compliance (ADR 0005 AD-9) ───────────────────────────────
+
+COMPLIANCE_HELP = (
+    "Show the per-host scan-before-edit rate from the MCP activity log "
+    "(.aegis/state/activity.jsonl), per session and per host. Edits are the files a session "
+    "named in aegis_report_outcome 'files' plus the files of commits inside exactly one "
+    "session's window (first to last event, plus 15 minutes). Limits: an edit time is an upper "
+    "bound (report or commit time), so the rate can overstate compliance; uncommitted edits "
+    "that were never reported are not seen; commits in overlapping sessions count as "
+    "ambiguous, not as misses; a session with no observed edit is unknown, never 0. A host "
+    "rate is an aggregate over sessions, not a per-attempt verdict. Reads only."
+)
+
+
+def _rate_text(row: dict) -> str:
+    return f"{round(row['rate'] * 100)}%" if row.get("rate") is not None else "unknown"
+
+
+def run_compliance(args: argparse.Namespace) -> int:
+    """``aegis status --compliance [--json]``: read-only; writes, syncs and fetches nothing."""
+    import json
+    import sys
+
+    from aegis_core._version import __version__
+    from aegis_core.scan_compliance import report
+    from aegis_core.workspace.layout import is_aegis_workspace
+
+    root = Path(_project_root(args)).resolve()
+    if not is_aegis_workspace(root):
+        print(f"Error: not an Aegis workspace (no .aegis/ in {root}); run aegis init", file=sys.stderr)
+        return 1
+    data = report(root)
+    data = {"schema": data.pop("schema"), "source": data.pop("source"), "aegis_version": __version__, **data}
+    if args.json:  # AegisParser.parse_args always sets it
+        print(json.dumps(data, indent=2))
+        return 0
+
+    print("Scan-before-edit compliance (aegis status --compliance)\n")
+    if not data["hosts"]:
+        print("  No MCP activity recorded yet: the rate is unknown.")
+    else:
+        print(f"  {'Host':<16}{'Sessions':>9}{'Measured':>10}{'Edits':>7}{'Scanned first':>15}{'Rate':>9}")
+        for row in data["hosts"]:
+            scanned = "—" if row["scanned_before_edit"] is None else str(row["scanned_before_edit"])
+            print(f"  {sanitize_display(row['host'], 16):<16}{row['sessions']:>9}{row['sessions_measured']:>10}"
+                  f"{row['edits_observed']:>7}{scanned:>15}{_rate_text(row):>9}")
+        print("\n  Host rates are aggregates over sessions, not a per-attempt verdict; "
+              "--json lists every session.")
+    if data["git"]["status"] != "used":
+        print("  Commits were not read (no git repository or git unavailable): only reported edits count.")
+    elif data["git"]["ambiguous_edits"]:
+        print(f"  {data['git']['ambiguous_edits']} committed file(s) fell in overlapping sessions and were not attributed.")
+    if data["activity"]["skipped"]:
+        print(f"  {data['activity']['skipped']} activity row(s) could not be used.")
+    print(f"\n  How it is measured: {data['heuristic']['edits']}")
     return 0
 
 
@@ -508,18 +364,15 @@ class StatusCommand(AegisCommand):
     """Command to show active rules, rule inventory, and health stats."""
 
     name = "status"
-    aliases = ("rules",)
     category = CommandCategory.WORKFLOW
     help = "Show active rules and stats"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--all",
-            action="store_true",
-            default=False,
-            help="Show all rules without truncation",
-        )
+        """status takes the global flags and --compliance."""
+        parser.add_argument("--compliance", action="store_true", help=COMPLIANCE_HELP)
 
     def execute(self, args: argparse.Namespace) -> int:
+        if getattr(args, "compliance", False):
+            return run_compliance(args)
         return run_status(args)
 

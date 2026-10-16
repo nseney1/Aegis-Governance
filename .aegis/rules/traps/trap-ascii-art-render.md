@@ -8,7 +8,7 @@ prediction: Will fire when commits modify lines inside ASCII box-drawing charact
 falsification: 0 findings in 20 sessions → prune
 target_paths:
   - README.md
-  - "docs/**/*.md"
+  - "docs/*.md"
 triggers:
   - documentation_edit
   - readme_modification
@@ -21,13 +21,6 @@ tags:
   - documentation
   - rendering
   - ascii-art
-fitness:
-  score: 0.3333
-  impact_weight: 1.0
-  triggers: 63
-  true_positives: 18.2494
-  false_positives: 10.8334
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Citadel doc-drift incident: Adding "→ Citadel" to the architecture diagram

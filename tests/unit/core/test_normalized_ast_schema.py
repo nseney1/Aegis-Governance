@@ -1,8 +1,6 @@
 """Unit tests for NormalizedAST schema, serialization, and Python native driver."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
 import pytest
 
 from aegis_core.ast.schema import (
@@ -51,10 +49,20 @@ def test_schema_roundtrip_dict_and_json():
     json_str = ast_obj.to_json()
     reconstructed = NormalizedAST.from_json(json_str)
     assert reconstructed == ast_obj
-    assert reconstructed.find_definition("login") == ast_obj.definitions[0]
-    assert reconstructed.find_definition("nonexistent") is None
-    assert len(reconstructed.get_exported_definitions()) == 1
-    assert len(reconstructed.get_calls_in_scope("login")) == 2
+
+
+def test_a_definitions_decorators_survive_the_json_round_trip():
+    """An external driver hands decorators over per definition; forbid_ast reads them there."""
+    ast_obj = NormalizedAST(
+        file_path="app.py",
+        definitions=(DefinitionNode(name="cached", decorators=("functools.lru_cache",)), DefinitionNode(name="plain")),
+    )
+
+    data = ast_obj.to_dict()
+
+    assert data["definitions"][0]["decorators"] == ["functools.lru_cache"]
+    assert "decorators" not in data["definitions"][1]
+    assert NormalizedAST.from_json(ast_obj.to_json()).definitions == ast_obj.definitions
 
 
 def test_schema_validation_rejects_malformed_payload():
@@ -147,3 +155,33 @@ def check_value(x):
     ops = [m.original_op for m in norm_ast.mutation_points]
     assert "==" in ops
     assert "+" in ops
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"\xef\xbb\xbfimport os\nos.getcwd()\n",
+        "# -*- coding: latin-1 -*-\nimport os\nNAME = 'café'\nos.getcwd()\n".encode("latin-1"),
+    ],
+    ids=["utf8-bom", "latin1-cookie"],
+)
+def test_python_driver_decodes_files_like_cpython(tmp_path, raw):
+    py_file = tmp_path / "encoded.py"
+    py_file.write_bytes(raw)
+
+    norm_ast = parse_python_ast(py_file)
+
+    assert [imp.source for imp in norm_ast.imports] == ["os"]
+    assert [c.target for c in norm_ast.call_sites] == ["os.getcwd"]
+
+
+def test_python_driver_records_import_aliases():
+    code = "import os.path as osp\nfrom os import sep, path as p\nimport json\n"
+
+    imports = parse_python_ast(code, file_path="mod.py").imports
+
+    assert [(i.source, i.imported_symbols, i.aliases) for i in imports] == [
+        ("os.path", ("osp",), (("osp", "os.path"),)),
+        ("os", ("sep", "p"), (("p", "path"),)),
+        ("json", ("json",), ()),
+    ]

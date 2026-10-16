@@ -1,214 +1,133 @@
-"""Telemetry execution handlers: report_outcome, capture_insight, grade, coverage, fitness."""
+"""aegis_report_outcome: advisory self-reports appended to the outcome ledger."""
 from __future__ import annotations
 
-import os
-from typing import Any, Dict
+from pathlib import PurePath
+import sys
+from typing import List, Optional, Set, Tuple
 
-from aegis_mcp.registry import (
-    _STATUS_FAIL,
-    _STATUS_PASS,
-    _VALID_OUTCOMES,
-    _get_workspace,
+from aegis_core.rule_inventory import RuleInventoryError
+from aegis_core.rules import validate_rule_names
+from aegis_core.telemetry_engine import ledger
+from aegis_mcp.registry import _STATUS_FAIL, _VALID_OUTCOMES, _get_workspace
+
+# (workspace root, session, idempotency key) whose edit event is recorded.
+_RECORDED: Set[Tuple[str, str, str]] = set()
+
+_LEDGER_OUTCOME = {
+    "success": "tp",
+    "tp": "tp",
+    "pass": "tp",
+    "failure": "fp",
+    "fp": "fp",
+    "fail": "fp",
+    "partial": "trigger",
+}
+
+_KEY_REQUIRED = (
+    "'idempotency_key' is required: send a unique key per report so a retry is never recorded twice."
+)
+_RULES_REQUIRED = (
+    "'rules_used' must name at least one rule from aegis_scan: "
+    "an outcome with no rule has nothing to credit."
 )
 
-__all__ = [
-    "_handle_report_outcome",
-    "_handle_capture_insight",
-    "_handle_grade",
-    "_handle_coverage",
-    "_handle_fitness",
-    "_handle_rule_fitness",
-]
+
+def _fail(message: str) -> dict:
+    return {"status": _STATUS_FAIL, "error": message}
 
 
-def _handle_report_outcome(args: dict, gov) -> dict:
+def handle_report_outcome(args: dict) -> dict:
     try:
         workspace = _get_workspace(args)
     except ValueError as exc:
-        return {"error": str(exc), "status": _STATUS_FAIL}
-    raw_outcome = args.get("outcome")
-    outcome_value = raw_outcome.strip().lower() if isinstance(raw_outcome, str) else None
-    if outcome_value not in _VALID_OUTCOMES:
-        return {
-            "error": (
-                f"Invalid 'outcome': {raw_outcome!r}. "
-                f"Expected one of {list(_VALID_OUTCOMES)}."
-            ),
-            "status": _STATUS_FAIL,
-        }
-    idempotency_key = args.get("idempotency_key")
-    if not isinstance(idempotency_key, str) or not idempotency_key:
-        return {
-            "error": "'idempotency_key' must be a nonempty string.",
-            "status": _STATUS_FAIL,
-        }
-    raw_cells_used = args.get("cells_used")
-    if raw_cells_used is None:
-        if "cell_id" in args:
-            val = args["cell_id"]
-            raw_cells_used = [val] if isinstance(val, str) else val
-        elif "rule_id" in args:
-            val = args["rule_id"]
-            raw_cells_used = [val] if isinstance(val, str) else val
-    if raw_cells_used is not None:
-        if not isinstance(raw_cells_used, (list, tuple)) or not all(isinstance(c, str) for c in raw_cells_used):
-            return {
-                "error": "'cells_used' must be a list of cell names.",
-                "status": _STATUS_FAIL,
-            }
-        cells_used = list(raw_cells_used)
-    else:
-        cells_used = []
+        return _fail(str(exc))
 
-    if cells_used:
-        invalid = workspace.validate_rule_names(cells_used)
-        if invalid:
-            return {
-                "error": f"Unknown cell(s): {invalid}. Only existing cells can be reported.",
-                "status": _STATUS_FAIL,
-            }
-    tests_passed = args.get("tests_passed")
-    rework_count = args.get("rework_count", 0)
-    notes = args.get("notes", "")
-    signal_map = {
-        "success": "tp",
-        "tp": "tp",
-        "failure": "fp",
-        "fp": "fp",
-        "partial": "trigger",
-        "pass": "tp",
-        "fail": "fp",
+    raw_outcome = args.get("outcome")
+    outcome = raw_outcome.strip().lower() if isinstance(raw_outcome, str) else None
+    if outcome not in _VALID_OUTCOMES:
+        return _fail(f"Invalid 'outcome': {raw_outcome!r}. Expected one of {list(_VALID_OUTCOMES)}.")
+
+    # A generated key would make every retry a new event, so the caller must supply one.
+    idempotency_key = args.get("idempotency_key")
+    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+        return _fail(_KEY_REQUIRED)
+
+    rules_used = args.get("rules_used")
+    if rules_used is None or (isinstance(rules_used, (list, tuple)) and not rules_used):
+        return _fail(_RULES_REQUIRED)
+    if not isinstance(rules_used, (list, tuple)) or not all(isinstance(r, str) for r in rules_used):
+        return _fail("'rules_used' must be a list of rule names.")
+    rules_used = list(rules_used)
+    try:
+        invalid = validate_rule_names(rules_used, workspace)
+    except RuleInventoryError as exc:
+        return _fail(f"Cannot check 'rules_used' against the rules: {exc}")
+    if invalid:
+        return _fail(f"Unknown rule(s): {invalid}. Only existing rules can be reported.")
+    files = args.get("files")
+    edited: Optional[List[str]] = None
+    if files is not None:
+        if not isinstance(files, (list, tuple)) or not all(isinstance(f, str) for f in files):
+            return _fail("'files' must be a list of file paths")
+        try:
+            edited = sorted({PurePath(workspace.confine_path(f)[1]).as_posix() for f in files})
+        except ValueError as exc:
+            return _fail(str(exc))
+
+    meta = {
+        "notes": args.get("notes", ""),
+        "tests_passed": args.get("tests_passed"),
+        "rework_count": args.get("rework_count", 0),
     }
-    metadata = {
-        "notes": notes,
-        "tests_passed": tests_passed,
-        "rework_count": rework_count,
-    }
+    # Attribution comes from the server (clientInfo and its session), never the caller.
+    # The key is scoped by host and session (host-matrix §3.8): two sessions that pick
+    # the same key ("report-1") are two reports. The cost: a retry after a reconnect,
+    # which starts a new session, records again.
+    host, session = args.get("_host"), args.get("_session")
+    ledger_key = f"{host}/{session}/{idempotency_key}" if session else idempotency_key
     events = [
         {
-            "cell_name": cell_id,
-            "signal_type": signal_map.get(outcome_value, "trigger"),
+            "rule": rule,
+            "outcome": _LEDGER_OUTCOME[outcome],
             "source": "mcp",
-            "metadata": metadata,
-            "principal": "mcp",
-            "idempotency_scope": "report_outcome",
-            "idempotency_key": idempotency_key,
+            "host": host,
+            "session": session,
+            "key": ledger_key,
+            "meta": meta,
         }
-        for cell_id in cells_used
+        for rule in rules_used
     ]
     try:
-        from aegis_core.telemetry import append_signals, read_generation
-
-        generation = read_generation(workspace)
-        records = append_signals(workspace, events, expected_generation=generation)
+        records = ledger.append(workspace.root, events)
+    except ledger.EventConflictError:
+        return _fail(
+            f"'idempotency_key' {idempotency_key!r} was already used for a different report: "
+            "send a new key for each new report."
+        )
     except Exception as exc:
-        return {
-            "status": _STATUS_FAIL,
-            "error": f"Failed to record outcome: {exc}",
-        }
+        return _fail(f"Failed to record outcome: {exc}")
+    if edited:
+        _record_edit(workspace, args, idempotency_key, edited)
     return {"status": "recorded", "records": records}
 
 
-def _handle_capture_insight(args: dict, gov) -> dict:
+def _record_edit(workspace, args: dict, idempotency_key: str, files: List[str]) -> None:
+    """One ``edit`` activity event per report, for aegis status --compliance."""
+    from aegis_core import scan_compliance
+
+    session = args.get("_session")
+    if not session:
+        return
+    key = (str(workspace.root), str(session), idempotency_key)
+    if key in _RECORDED:
+        return
     try:
-        workspace = _get_workspace(args)
-    except ValueError as exc:
-        return {"error": str(exc), "status": _STATUS_FAIL}
-    try:
-        import sys
-        if sys.modules.get("aegis_core.insights") is None and "aegis_core.insights" in sys.modules:
-            raise ImportError("aegis_core.insights is not importable.")
-        from aegis_core.insights import capture_insight
-    except ImportError:
-        return {"error": "aegis_core.insights is not importable.", "status": _STATUS_FAIL}
-    try:
-        context_files_arg = args.get("context_files") or []
-        if not isinstance(context_files_arg, (list, tuple)) or not all(isinstance(f, str) for f in context_files_arg):
-            return {"error": "'context_files' must be a list of file paths", "status": _STATUS_FAIL}
-        record = capture_insight(
-            workspace=workspace,
-            insight=args.get("insight", ""),
-            context_files=[str(workspace.confine_path(f)[1]) for f in context_files_arg],
-            source_conversation=args.get("source_conversation"),
-            category=args.get("category"),
-            scaffold_wall=bool(args.get("scaffold_wall", False)),
-            wall_id=args.get("wall_id"),
+        scan_compliance.record(
+            workspace, "edit", host=str(args.get("_host") or "generic"), session=str(session), files=files,
+            client={"name": args.get("_client_name") or "", "version": args.get("_client_version") or ""},
+            binding=args.get("_binding"), basis="report", key=idempotency_key,
         )
-    except ValueError as exc:
-        return {"error": str(exc), "status": _STATUS_FAIL}
-    return {
-        "status": "recorded",
-        "insight": record,
-    }
-
-
-def _handle_grade(args: dict, gov) -> dict:
-    if gov:
-        result = gov.grade()
-    else:
-        try:
-            import aegis_core.metrics as _metrics
-            import aegis_core.telemetry as _telemetry
-
-            workspace = _get_workspace(args)
-            grade_fn = _telemetry.calculate_governance_grade
-            if (
-                grade_fn is _metrics.calculate_governance_grade
-                and _telemetry.calculate_immune_grade is not _metrics.calculate_governance_grade
-            ):
-                grade_fn = _telemetry.calculate_immune_grade
-            result = grade_fn(workspace)
-        except Exception as exc:
-            return {"status": _STATUS_FAIL, "error": str(exc)}
-    if result is None:
-        return {
-            "coverage": {"pct": 0.0, "grade": "F"},
-            "avg_fitness": {"pct": 0.0, "grade": "F", "score": 0.0},
-            "diversity": {"pct": 0.0, "grade": "F"},
-            "staleness": {"pct": 0.0, "grade": "F"},
-            "wall_integrity": {"pct": 0.0, "grade": "F"},
-            "tiers": {},
-            "overall": {"pct": 0.0, "grade": "F"},
-            "status": "PASS",
-            "note": "No cells found to grade",
-        }
-    if not isinstance(result, dict):
-        return {"status": _STATUS_FAIL, "error": str(result)}
-    return result
-
-
-def _handle_coverage(args: dict, gov):
-    if gov:
-        result = gov.coverage_report()
-    else:
-        try:
-            from aegis_core.telemetry import calculate_coverage
-
-            workspace = _get_workspace(args)
-            result = calculate_coverage(workspace)
-        except Exception as exc:
-            return {"status": _STATUS_FAIL, "error": str(exc)}
-    if not isinstance(result, dict):
-        return {"status": _STATUS_FAIL, "error": str(result)}
-    return result
-
-
-def _handle_fitness(args: dict, gov):
-    bayesian = args.get("bayesian", False)
-    if gov:
-        result = gov.fitness_landscape(bayesian=bayesian)
-    else:
-        try:
-            from aegis_core.lifecycle import compute_cells_fitness
-
-            workspace = _get_workspace(args)
-            result = compute_cells_fitness(workspace=workspace, bayesian=bayesian)
-        except Exception as exc:
-            return {"status": _STATUS_FAIL, "error": str(exc)}
-    if isinstance(result, dict) and "error" in result:
-        result["status"] = _STATUS_FAIL
-    return result
-
-
-_handle_rule_fitness = _handle_fitness
-
+    except Exception as exc:  # telemetry only: the outcome is recorded
+        print(f"aegis-mcp: edit event not recorded: {exc}", file=sys.stderr)
+        return
+    _RECORDED.add(key)

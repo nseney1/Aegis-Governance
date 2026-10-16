@@ -9,7 +9,7 @@ hypothesis: "Hardcoded platform paths (e.g. ~/.gemini, ~/.kiro) in scripts break
 prediction: Will flag hardcoded paths where dynamic AEGIS_PLATFORM logic is required
 falsification: 0 findings in 10 sessions → prune
 target_paths:
-  - "aegis_cli/platforms/*.py"
+  - aegis_cli/install_hosts.py
   - "aegis_cli/*.py"
   - "aegis_core/*.py"
 expiry_sessions: 10
@@ -20,13 +20,6 @@ tags:
   - portability
   - cross-platform
   - anti-pattern
-fitness:
-  score: 0.6667
-  impact_weight: 1.0
-  triggers: 81
-  true_positives: 25.9439
-  false_positives: 18.0668
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Scripts should use AEGIS_PLATFORM and resolve_home() to determine paths dynamically,

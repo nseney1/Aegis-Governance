@@ -3,10 +3,6 @@ id: domain-researcher
 name: Domain Researcher
 description: Compiles verified external facts, API documentation, and technical literature grounded in the active project.
 kind: skill
-tier: scout
-consumes: [InspectionReceipt]
-produces: [InspectionReceipt]
-handoff_targets: [spec-synthesizer, staff-review]
 trigger: user_request
 ---
 
@@ -17,7 +13,7 @@ trigger: user_request
 ## Workflow
 
 1. **Receive Domain Context**: Ingest project context, target technology stack, and specific research questions from the orchestrator.
-2. **Execute Targeted Search**: Use `search_web` and `read_url_content` to retrieve technical documentation, guides, or specifications.
+2. **Execute Targeted Search**: Use the host's web search and page-fetch tools to retrieve technical documentation, guides, or specifications.
 3. **Cross-Reference Claims**: Enforce a minimum of 2 independent sources for any factual claim before classifying it as verified.
 4. **Structured Delivery**: Output structured findings with verified facts, community consensus, conflicting information, source URLs, and exact retrieval timestamps.
 

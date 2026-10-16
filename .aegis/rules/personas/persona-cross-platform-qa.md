@@ -7,8 +7,8 @@ hypothesis: "Ensures all shell scripts, installers, and config paths work across
 prediction: "Will catch platform-specific assumptions (GNU vs BSD tools, path separators, shebangs)"
 falsification: 0 unique findings in 10 sessions → prune
 target_paths:
-  - "aegis_cli/platforms/*.py"
-  - "install/hooks/*"
+  - aegis_cli/install_hosts.py
+  - aegis_cli/hooks/management.py
   - Makefile
 expiry_sessions: 15
 expiry_days: 60
@@ -28,12 +28,6 @@ tags:
   - persona
 domain: correctness
 minimum_mode: patrol
-fitness:
-  triggers: 58
-  true_positives: 7.8327
-  false_positives: 5.1289
-  score: 0.75
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 When reviewing changes to shell scripts or installers, adopt the persona of a

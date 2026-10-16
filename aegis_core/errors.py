@@ -25,49 +25,26 @@ class AegisValidationError(AegisError, ValueError):
         super().__init__(message, code=code, **kwargs)
 
 
-class RuleCorruptError(AegisError):
-    """Raised when a rule frontmatter or body is malformed or unparseable."""
-
-    def __init__(
-        self,
-        message: str = "",
-        cell_id: str | None = None,
-        rule_id: str | None = None,
-        code: str = "RULE_CORRUPT",
-        **kwargs: Any,
-    ) -> None:
-        actual_id = rule_id or cell_id
-        super().__init__(message, code=code, cell_id=actual_id, rule_id=actual_id, **kwargs)
-        self.cell_id = actual_id
-        self.rule_id = actual_id
+class RuleNotFoundError(AegisError):
+    """Raised when a rule file does not exist."""
 
 
-class ReceiptExpiredError(AegisError, KeyError):
-    """Raised when a receipt is expired or not found."""
-
-    def __init__(
-        self,
-        message: str = "",
-        receipt_id: str | None = None,
-        code: str = "RECEIPT_EXPIRED",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, receipt_id=receipt_id, **kwargs)
-        self.receipt_id = receipt_id
+class RuleParseError(AegisError):
+    """Raised when a rule file cannot be parsed (missing or malformed frontmatter)."""
 
 
 class LockTimeoutError(AegisError, TimeoutError):
-    """Raised when a workspace lock cannot be acquired within the timeout period."""
+    """Raised when the workspace lock cannot be acquired within the timeout period."""
 
     def __init__(
         self,
         message: str = "",
-        resource: str | None = None,
+        path: str | None = None,
         code: str = "LOCK_TIMEOUT",
         **kwargs: Any,
     ) -> None:
-        super().__init__(message, code=code, resource=resource, **kwargs)
-        self.resource = resource
+        super().__init__(message, code=code, path=path, **kwargs)
+        self.path = path
 
 
 class WorkspaceError(AegisValidationError):
@@ -125,40 +102,12 @@ class NoTestRunnerFoundError(AegisError, RuntimeError):
         super().__init__(message, code=code, **kwargs)
 
 
-class InvalidHandoffPayloadError(AegisValidationError):
-    """Raised when an artifact payload violates its typed schema."""
-
-    def __init__(
-        self,
-        message: str = "",
-        code: str = "ERR_INVALID_HANDOFF_PAYLOAD",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, **kwargs)
-
-
-class HandoffAuthorizationError(AegisError):
-    """Raised when a producer skill/tier lacks authorization to emit an artifact."""
-
-    def __init__(
-        self,
-        message: str = "",
-        code: str = "ERR_HANDOFF_UNAUTHORIZED",
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(message, code=code, **kwargs)
-
-
 __all__ = [
     "AegisError",
     "AegisValidationError",
-    "HandoffAuthorizationError",
-    "InvalidHandoffPayloadError",
     "LockTimeoutError",
     "NoTestRunnerFoundError",
     "PathTraversalError",
-    "ReceiptExpiredError",
-    "RuleCorruptError",
     "WorkspaceBareRepoError",
     "WorkspaceError",
     "WorkspaceNotFoundError",

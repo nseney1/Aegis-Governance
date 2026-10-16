@@ -1,11 +1,10 @@
 """Aegis CLI — user-facing governance commands."""
 from __future__ import annotations
 
-__version__ = "3.1.0"
-
-
 import re
 from pathlib import Path
+
+from aegis_core._version import __version__ as __version__
 
 
 def resolve_root(args, default=None):
@@ -17,24 +16,6 @@ def resolve_root(args, default=None):
         if val:
             return Path(val)
     return default if default is not None else Path.cwd()
-
-
-EMOJI_REPLACEMENTS = {
-    "🧱": "[WALL]",
-    "🧫": "[TRAP]",
-    "🔬": "[GATE]",
-    "🌿": "[PRACTICE]",
-    "🔗": "[CONTRACT]",
-    "📋": "[RULE]",
-    "✅": "[PASS]",
-    "❌": "[FAIL]",
-    "⚠️": "[WARN]",
-    "🔍": "[*]",
-    "🛡️": "[GUARD]",
-    "🛡": "[GUARD]",
-    "⚡": "[FAST]",
-    "⏳": "[WAIT]",
-}
 
 
 def sanitize_display(text: str, max_len: int = 80) -> str:
@@ -49,19 +30,7 @@ def sanitize_display(text: str, max_len: int = 80) -> str:
     return text
 
 
-def format_plain(text: str) -> str:
-    """Convert emojis to plain bracketed text and strip remaining Unicode emoji glyphs."""
-    for emoji, token in EMOJI_REPLACEMENTS.items():
-        if emoji in text:
-            text = text.replace(emoji, token)
-    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
-    text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
-    text = re.sub(r'[\u2600-\u27bf]', '', text)
-    return text
-
-
 __all__ = [
-    "format_plain",
     "resolve_root",
     "sanitize_display",
 ]

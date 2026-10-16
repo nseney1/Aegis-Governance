@@ -18,13 +18,7 @@ triggers:
 minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
-fitness:
-  score: 0.5714
-  impact_weight: 1.0
-  triggers: 85
-  true_positives: 37.6628
-  false_positives: 30.3898
-  last_trigger_date: "2026-10-14T22:29:45Z"
+impact_weight: 1.0
 ---
 
 # Refactoring Sweep: Fix One → Fix All

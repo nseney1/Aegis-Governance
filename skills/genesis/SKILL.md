@@ -3,10 +3,6 @@ id: genesis
 name: Genesis — Codebase Onboarding Reconnaissance
 description: Four-stage read-only reconnaissance protocol mapping structure, history, architecture, and governance in unfamiliar codebases.
 kind: skill
-tier: scout
-consumes: []
-produces: [InspectionReceipt]
-handoff_targets: [domain-researcher, adaptive-reviewer, staff-review, spec-synthesizer]
 trigger: user_request
 aliases: ["genesis", "init", "onboard", "explore", "map this repo", "what is this codebase"]
 ---
@@ -17,14 +13,14 @@ aliases: ["genesis", "init", "onboard", "explore", "map this repo", "what is thi
 
 ## Stages
 
-| Stage | Name | Subagent | Flash Dispatches | Focus |
+| Stage | Name | Subagent | Fast-Tier Dispatches | Focus |
 |:------|:-----|:---------|:----------------:|:------|
 | 1 | 🗺️ **Perimeter** | Broad Repo Scanner | 1–2 | Tech stack, directory tree, dependencies, entry points, test framework, dev environment probe |
 | 2 | 📜 **Chronology** | Git History Analyst | 1 | Branch topology, commit frequency, churn heatmap, high-risk files |
 | 3 | 📖 **Blueprint** | Architecture Analyst | 1–2 | API surface, data models, config patterns, external integrations, cross-repo boundaries |
 | 4 | 🧭 **Policy** | Governance Advisor | 1 | Conventions, test patterns, deployment model, traps, governance config, Context Pre-Seeding |
 
-**Total dispatches**: 4–6 Flash subagents across all stages.
+**Total dispatches**: 4–6 `${SLOT.MODEL_FAST}` subagents across all stages.
 
 ### Stage Selection
 
@@ -52,7 +48,7 @@ Genesis stages are **incremental** — run any subset, in any order. Later stage
 
 ## Stage 1: Perimeter (Repository Structure Mapping)
 
-Dispatch 1–2 Flash broad repo scanners to map the repository's physical structure.
+Dispatch 1–2 `${SLOT.MODEL_FAST}` broad repo scanners to map the repository's physical structure.
 
 ### Scanner Objectives
 
@@ -86,7 +82,7 @@ Dispatch 1–2 Flash broad repo scanners to map the repository's physical struct
 | OS & arch | `uname -s -m` | `os: linux, arch: x86_64` | NOT hostname |
 | Build tools | `command -v make cmake npm cargo go` | `tools: [make, npm, go]` | NOT full paths |
 | Container detection | Check `/.dockerenv` existence | `container: false` | NOT env var values |
-| IDE context | Check known env vars | `ide: antigravity 2.x` | NOT `$TERM_PROGRAM` raw value |
+| IDE context | Check known env vars | `ide: <name> <major>.x` | NOT `$TERM_PROGRAM` raw value |
 | Python environment | Check for venv markers | `python: 3.11, venv: true` | NOT `which python3` path |
 | Git status | `git --version` | `git: 2.43, configured: true` | NOT `git config user.name` |
 | Package managers | `command -v brew apt choco` | `pkg: [apt]` | NOT full paths |
@@ -166,7 +162,7 @@ scripts/     — automation
 
 ## Stage 2: Chronology (Git History Intelligence)
 
-Dispatch 1 Flash git history analyst to extract temporal intelligence from the repository's version control history.
+Dispatch 1 `${SLOT.MODEL_FAST}` git history analyst to extract temporal intelligence from the repository's version control history.
 
 ### Analyst Objectives
 
@@ -236,7 +232,7 @@ Deliver:
 
 ## Stage 3: Blueprint (Architecture Extraction)
 
-Dispatch 1–2 Flash architecture analysts to map the system's logical architecture from code.
+Dispatch 1–2 `${SLOT.MODEL_FAST}` architecture analysts to map the system's logical architecture from code.
 
 ### Analyst Objectives
 
@@ -311,7 +307,7 @@ Deliver:
 
 ## Stage 4: Policy (Contextual Synthesis & Recommendations)
 
-Dispatch 1 Flash governance advisor to synthesize all prior stage outputs into actionable governance configuration.
+Dispatch 1 `${SLOT.MODEL_FAST}` governance advisor to synthesize all prior stage outputs into actionable governance configuration.
 
 ### Advisor Objectives
 
@@ -515,10 +511,10 @@ Genesis output feeds directly into multiple downstream skills and prongs:
 
 | Role | Model | Rationale |
 |:-----|:------|:----------|
-| Perimeter scanner | `flash` | File-system traversal, manifest parsing, structured output |
-| Chronology analyst | `flash` | Git command execution, quantitative analysis, heatmap generation |
-| Blueprint analyst | `flash` | Pattern matching on code (routes, schemas, configs), structured tables |
-| Policy advisor | `flash` | Synthesis of prior outputs, governance recommendation, template generation |
+| Perimeter scanner | `${SLOT.MODEL_FAST}` | File-system traversal, manifest parsing, structured output |
+| Chronology analyst | `${SLOT.MODEL_FAST}` | Git command execution, quantitative analysis, heatmap generation |
+| Blueprint analyst | `${SLOT.MODEL_FAST}` | Pattern matching on code (routes, schemas, configs), structured tables |
+| Policy advisor | `${SLOT.MODEL_FAST}` | Synthesis of prior outputs, governance recommendation, template generation |
 | Report synthesizer | orchestrator (self) | Cross-stage reconciliation, diff generation, artifact persistence |
 
 ---

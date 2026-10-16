@@ -11,6 +11,7 @@ falsification: All escalated reviews are over-kill for 10 sessions → prune
 target_paths:
   - "rules/*.md"
   - "rules/**"
+  - ".aegis/rules/**"
 expiry_sessions: 10
 expiry_days: 45
 created: 2026-09-28
@@ -20,12 +21,6 @@ tags:
   - rules
   - review-escalation
   - core-rules
-fitness:
-  triggers: 15
-  true_positives: 7.5
-  false_positives: 6
-  score: 0.6667
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Changes to the core rules (`rules/`) directory are high-impact changes that affect every

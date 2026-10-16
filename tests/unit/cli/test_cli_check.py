@@ -1,159 +1,533 @@
-"""Unit tests for aegis check command (aegis_cli/check.py)."""
+"""`aegis check`: the v4 verification gate, driven through the real CLI entry point.
+
+Interface: aegis check [FILES...] [--hook] [--strict] [--full]
+           [--plan TEXT | --plan-file PATH] [--llm-cmd CMD] [--dry-run] [--format text|json]
+
+Layer 1 (default) = the workspace checkpoint checks plus call_graph, import_guard
+and forbid_ast on the target files. Layer 2 (--full, or a plan) adds the adversarial
+review, run by one external command (--llm-cmd / AEGIS_LLM_CMD).
+"""
 from __future__ import annotations
 
-import argparse
+import json
+import shlex
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aegis_cli.check import CheckCommand, run_check
+from aegis_cli.cli import main
+
+CLEAN = "def compute(a: int, b: int) -> int:\n    return a + b\n\n\ndef main():\n    return compute(1, 2)\n"
+UNGUARDED_IMPORT = "import unapproved_third_party_pkg_xyz\n\n\ndef main():\n    return 1\n"
+
+FAKE_LLM = textwrap.dedent(
+    """\
+    import json, sys
+    mode = sys.argv[1]
+    prompt = sys.stdin.read()
+    spec = "Spec Agent" in prompt
+    if mode == "fail":
+        sys.stderr.write("quota exceeded\\n")
+        sys.exit(7)
+    if mode == "dump":
+        with open(sys.argv[2], "a", encoding="utf-8") as out:
+            out.write(prompt)
+    if mode == "block" and spec:
+        print(json.dumps([{
+            "category": "code_injection", "severity": "critical",
+            "risk": "eval of untrusted input", "mechanism": "code execution",
+            "affected_function": "compute",
+        }]))
+    else:
+        print("[]")
+    """
+)
 
 
-def test_check_command_contract():
-    cmd = CheckCommand()
-    assert cmd.name == "check"
-    assert "verify" in cmd.aliases
-    assert "checkpoint" in cmd.aliases
-
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-
-    # Test argument parsing
-    args = parser.parse_args(["foo.py", "--hook"])
-    assert args.target_files == ["foo.py"]
-    assert args.hook is True
+def _exit_code(argv: list[str]) -> int:
+    try:
+        return main(argv)
+    except SystemExit as exc:
+        return exc.code
 
 
-def test_check_default_runs_layer1():
-    args = argparse.Namespace(
-        target_files=["foo.py"],
-        files=None,
-        hook=False,
-        full=False,
-        release=False,
-        release_gate=False,
-        checkpoint_only=False,
-        plan=None,
-        plan_file=None,
+@pytest.fixture
+def ws(tmp_path: Path) -> Path:
+    root = tmp_path / "proj"
+    root.mkdir()
+    return root
+
+
+@pytest.fixture
+def llm(tmp_path: Path):
+    script = tmp_path / "fake_llm.py"
+    script.write_text(FAKE_LLM, encoding="utf-8")
+    return lambda mode, *extra: shlex.join([sys.executable, str(script), mode, *extra])
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_backend(monkeypatch):
+    monkeypatch.delenv("AEGIS_LLM_CMD", raising=False)
+    monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _git_repo(root: Path) -> Path:
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    (root / "README.md").write_text("# p\n", encoding="utf-8")
+    _git(root, "add", "README.md")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+def _shallow_clone_of_a_branch_without_main(origin: Path, tmp_path: Path) -> Path:
+    """A depth-1 CI-style checkout: no HEAD~1, no main/develop, so no base to diff against."""
+    _git_repo(origin)
+    _git(origin, "checkout", "-q", "-b", "feature")
+    (origin / "CHANGELOG.md").write_text("- x\n", encoding="utf-8")
+    _git(origin, "add", "CHANGELOG.md")
+    _git(origin, "commit", "-q", "-m", "feature")
+    clone = tmp_path / "ci-checkout"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", "--branch", "feature", "--single-branch", origin.as_uri(), str(clone)],
+        check=True, capture_output=True,
     )
-    with patch("aegis_cli.check.run_verify", return_value=0) as mock_verify:
-        rc = run_check(args)
-        assert rc == 0
-        assert args.files == ["foo.py"]
-        assert args.layer1_only is True
-        mock_verify.assert_called_once_with(args)
+    return clone
 
 
-def test_check_full_runs_full_verification():
-    args = argparse.Namespace(
-        target_files=None,
-        files=["a.py"],
-        hook=False,
-        full=True,
-        release=False,
-        release_gate=False,
-        checkpoint_only=False,
+# ── Flag diet ───────────────────────────────────────────────────────────────
+
+class TestInterface:
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            ["--no-layer2"], ["--all"], ["--files", "a.py"], ["--pre-commit"], ["--checkpoint-only"],
+            ["--layer1-only"], ["--deep"], ["--release"], ["--release-gate"], ["--require-arbitration"],
+            ["--in-band"], ["--provider", "gemini"], ["--format", "sarif"],
+        ],
+        ids=lambda f: f[0] if len(f) == 1 else " ".join(f),
     )
-    with patch("aegis_cli.check.run_verify", return_value=0) as mock_verify:
-        rc = run_check(args)
-        assert rc == 0
-        assert args.layer1_only is False
-        mock_verify.assert_called_once_with(args)
+    def test_removed_flags_are_usage_errors(self, ws, capsys, flag):
+        assert _exit_code(["check", "--workspace", str(ws), *flag]) == 2
+        err = capsys.readouterr().err
+        assert "unrecognized arguments" in err or "invalid choice" in err
+
+    @pytest.mark.parametrize("name", ["verify", "checkpoint"])
+    def test_verify_and_checkpoint_are_no_longer_check_aliases(self, ws, name):
+        assert _exit_code([name, "--workspace", str(ws)]) == 2
+
+    def test_plan_and_plan_file_are_mutually_exclusive(self, ws, capsys):
+        assert _exit_code(["check", "--workspace", str(ws), "--plan", "x", "--plan-file", "p.md"]) == 2
+        assert "not allowed with argument" in capsys.readouterr().err
 
 
-def test_check_release_runs_release_gate():
-    args = argparse.Namespace(
-        target_files=None,
-        files=None,
-        hook=False,
-        full=False,
-        release=True,
-        release_gate=False,
-        checkpoint_only=False,
+# ── Layer 1 (default) ───────────────────────────────────────────────────────
+
+class TestLayer1:
+    def test_clean_file_passes(self, ws, capsys):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "clean.py"]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1:" in out and "PASSED" in out
+        assert "Layer 2" not in out
+
+    def test_unguarded_third_party_import_fails(self, ws, capsys):
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "bad.py"]) == 1
+        assert "import_guard" in capsys.readouterr().out
+
+    def test_only_the_named_files_are_checked(self, ws):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "clean.py"]) == 0
+        assert _exit_code(["check", "--workspace", str(ws), "clean.py", "bad.py"]) == 1
+
+    def test_missing_file_is_an_error(self, ws, capsys):
+        assert _exit_code(["check", "--workspace", str(ws), "nope.py"]) == 1
+        assert "file not found: nope.py" in capsys.readouterr().err
+
+    def test_out_of_tree_files_are_refused(self, ws, capsys):
+        assert _exit_code(["check", "--workspace", str(ws), "../../etc/passwd"]) == 1
+        assert "outside the repository" in capsys.readouterr().err
+
+    def test_no_changed_files_is_a_clean_pass(self, ws, capsys):
+        assert _exit_code(["check", "--workspace", str(ws)]) == 0
+        assert "0 files changed" in capsys.readouterr().out
+
+    def test_an_unreadable_gate_rule_fails_the_check(self, ws, capsys):
+        invariants = ws / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "no-subprocess.md").write_bytes(
+            b"---\nid: no-subprocess\ntype: invariant\nenforcement: gate\n"
+            b"forbid_ast:\n  calls: [subprocess.run]\n---\nNo shelling out \xff here.\n"
+        )
+        (ws / "bad.py").write_text(
+            "import subprocess\n\n\ndef main():\n    return subprocess.run(['true'])\n", encoding="utf-8"
+        )
+        assert _exit_code(["check", "--workspace", str(ws), "bad.py"]) == 1
+        out = capsys.readouterr().out
+        assert "forbid_ast: .aegis/rules/invariants/no-subprocess.md" in out
+        assert "PASSED" not in out
+
+    def test_a_malformed_forbid_ast_rule_fails_the_check(self, ws, capsys):
+        invariants = ws / ".aegis" / "rules" / "invariants"
+        invariants.mkdir(parents=True)
+        (invariants / "r1.md").write_text(
+            "---\nid: r1\ntype: invariant\nenforcement: gate\nforbid_ast:\n  - calls: [eval]\n---\n", encoding="utf-8"
+        )
+        (ws / "bad.py").write_text("def main(x):\n    return eval(x)\n", encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook", "bad.py"]) == 1
+        out = capsys.readouterr().out
+        assert "forbid_ast: .aegis/rules/invariants/r1.md" in out
+        assert "PASSED" not in out
+
+    def test_a_directory_target_checks_the_files_under_it(self, ws, capsys):
+        _git_repo(ws)
+        (ws / "src").mkdir()
+        (ws / "src" / "m.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--format", "json", "src"]) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["files"] == ["src/m.py"]
+        assert [r["tool"] for r in payload["layer1"] if not r["verdict"]] == ["import_guard"]
+
+    def test_a_directory_target_skips_git_ignored_files(self, ws, capsys):
+        _git_repo(ws)
+        (ws / ".gitignore").write_text("build/\n", encoding="utf-8")
+        (ws / "src" / "build").mkdir(parents=True)
+        (ws / "src" / "build" / "gen.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        (ws / "src" / "ok.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--format", "json", "src"]) == 0
+        assert json.loads(capsys.readouterr().out)["files"] == ["src/ok.py"]
+
+    def test_a_directory_target_outside_a_git_work_tree_is_an_error(self, ws, capsys):
+        (ws / "src").mkdir()
+        (ws / "src" / "m.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "src"]) == 1
+        captured = capsys.readouterr()
+        assert "cannot list the files under src" in captured.err
+        assert "PASSED" not in captured.out
+
+    def test_a_named_file_no_check_applies_to_is_not_reported_as_no_changes(self, ws, capsys):
+        (ws / "notes.txt").write_text("remember the milk\n", encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "notes.txt"]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1: no check applies to the 1 target file (0 checks run, PASSED)" in out
+        assert "No changed files" not in out
+
+    def test_no_base_commit_is_said_not_called_a_clean_repository(self, ws, tmp_path, capsys):
+        clone = _shallow_clone_of_a_branch_without_main(ws, tmp_path)
+        assert _exit_code(["check", "--workspace", str(clone)]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1: 0 files changed (no base commit found to diff against" in out
+        assert "clean repository" not in out
+
+    @pytest.mark.parametrize(
+        "extra, fast",
+        [([], True), (["--hook"], True), (["--full", "--plan", "p"], False), (["--plan", "p"], False)],
+        ids=["default", "hook", "full", "plan"],
     )
-    with patch("aegis_cli.check.run_verify", return_value=0) as mock_verify:
-        rc = run_check(args)
-        assert rc == 0
-        assert args.release_gate is True
-        mock_verify.assert_called_once_with(args)
+    def test_mutation_testing_runs_only_behind_layer2(self, ws, monkeypatch, llm, extra, fast):
+        from aegis_core.verification import runner
+
+        seen = []
+
+        def spy(**kwargs):
+            seen.append(kwargs["fast_mode"])
+            return []
+
+        monkeypatch.setattr(runner, "run_layer1", spy)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        backend = ["--llm-cmd", llm("ship")] if "--hook" not in extra else []
+        _exit_code(["check", "--workspace", str(ws), *backend, *extra, "clean.py"])
+        assert seen == [fast]
+
+    def test_changed_files_come_from_git_when_none_are_named(self, ws, capsys):
+        _git_repo(ws)
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        _git(ws, "add", "bad.py")
+        assert _exit_code(["check", "--workspace", str(ws)]) == 1
+        assert "bad.py" in capsys.readouterr().out
+
+    def test_dry_run_lists_files_and_runs_nothing(self, ws, capsys):
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--dry-run", "bad.py"]) == 0
+        out = capsys.readouterr().out
+        assert "Dry run" in out and "bad.py" in out and "Layer 1" in out
+        assert "import_guard" not in out
+
+    def test_json_is_one_document_with_layer1_and_checkpoint(self, ws, capsys):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--format", "json", "clean.py"]) == 0
+        raw = capsys.readouterr().out
+        assert "\x1b[" not in raw
+        payload = json.loads(raw)
+        assert payload["passed"] is True
+        assert payload["files"] == ["clean.py"]
+        assert {r["tool"] for r in payload["layer1"]} >= {"call_graph", "import_guard"}
+        assert isinstance(payload["checkpoint_issues"], list)
+        assert "layer2" not in payload
+
+    def test_global_json_flag_matches_format_json(self, ws, capsys):
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--json", "bad.py"]) == 1
+        assert json.loads(capsys.readouterr().out)["passed"] is False
 
 
-def test_check_hook_mode():
-    args = argparse.Namespace(
-        target_files=None,
-        files=None,
-        hook=True,
-        full=False,
-        release=False,
-        release_gate=False,
-        checkpoint_only=False,
+# ── --strict and the workspace checkpoint ───────────────────────────────────
+
+class TestStrict:
+    def _missing_test_and_hardcoded_path(self, ws: Path) -> None:
+        (ws / "src").mkdir()
+        (ws / "src" / "svc.py").write_text('CACHE = "/home/alice/cache"\n', encoding="utf-8")
+
+    def test_checkpoint_issues_warn_by_default(self, ws, capsys):
+        self._missing_test_and_hardcoded_path(ws)
+        assert _exit_code(["check", "--workspace", str(ws)]) == 0
+        out = capsys.readouterr().out
+        assert "[WARN] Missing test file for svc.py" in out
+        assert "[WARN] Hardcoded absolute path found in svc.py:1" in out
+
+    def test_strict_fails_on_checkpoint_issues(self, ws, capsys):
+        # #12: `check --strict` must not be a passing no-op on a failing workspace.
+        self._missing_test_and_hardcoded_path(ws)
+        assert _exit_code(["check", "--workspace", str(ws), "--strict"]) == 1
+        out = capsys.readouterr().out
+        assert "[FAIL] Missing test file for svc.py" in out
+        assert "[FAIL] Hardcoded absolute path found in svc.py:1" in out
+
+    def test_strict_passes_a_clean_workspace(self, ws):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        (ws / "tests").mkdir()
+        (ws / "tests" / "test_clean.py").write_text(
+            "from clean import compute\n\n\ndef test_compute():\n    assert compute(1, 2) == 3\n", encoding="utf-8"
+        )
+        assert _exit_code(["check", "--workspace", str(ws), "--strict", "clean.py"]) == 0
+
+    def test_json_reports_checkpoint_issues(self, ws, capsys):
+        self._missing_test_and_hardcoded_path(ws)
+        assert _exit_code(["check", "--workspace", str(ws), "--strict", "--format", "json"]) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["passed"] is False
+        assert {i["check"] for i in payload["checkpoint_issues"]} == {"test_coverage", "hardcoded_paths"}
+
+
+# ── --hook (git pre-commit) ─────────────────────────────────────────────────
+
+class TestHook:
+    def test_staged_clean_file_passes(self, ws):
+        _git_repo(ws)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        _git(ws, "add", "clean.py")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook"]) == 0
+
+    def test_staged_unguarded_import_blocks(self, ws, capsys):
+        _git_repo(ws)
+        (ws / "bad.py").write_text(UNGUARDED_IMPORT, encoding="utf-8")
+        _git(ws, "add", "bad.py")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook"]) == 1
+        assert "import_guard: bad.py" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "extra", [["--full"], ["--plan", "x"], ["--plan-file", "plan.md"], ["--plan", ""], ["--plan-file", ""]]
     )
-    with patch("aegis_cli.check.run_checkpoint", return_value=0) as mock_cp, \
-         patch("aegis_cli.check.run_verify", return_value=0) as mock_verify:
-        rc = run_check(args)
-        assert rc == 0
-        assert args.hook is False
-        assert args.layer1_only is True
-        assert args.pre_commit is True
-        mock_cp.assert_called_once_with(args)
-        mock_verify.assert_called_once_with(args)
+    def test_hook_never_runs_layer2(self, ws, capsys, llm, extra):
+        assert _exit_code(["check", "--workspace", str(ws), "--hook", "--llm-cmd", llm("ship"), *extra]) == 2
+        assert "--hook runs Layer 1 only" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("strict", [[], ["--strict"]])
+    def test_hook_fails_when_layer1_cannot_run(self, ws, monkeypatch, capsys, strict):
+        from aegis_core.verification import runner
+
+        def boom(**_kwargs):
+            raise RuntimeError("driver registry exploded")
+
+        monkeypatch.setattr(runner, "run_layer1", boom)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook", *strict, "clean.py"]) == 1
+        assert "Layer 1 could not run: driver registry exploded" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("strict", [[], ["--strict"]])
+    def test_hook_fails_when_a_layer1_tool_raises(self, ws, monkeypatch, capsys, strict):
+        from aegis_core.verification import call_graph
+
+        def boom(*_args, **_kwargs):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(call_graph, "check", boom)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--hook", *strict, "clean.py"]) == 1
+        out = capsys.readouterr().out
+        assert "call_graph: clean.py" in out
+        assert "RecursionError: maximum recursion depth exceeded" in out
 
 
-def test_check_checkpoint_only_mode():
-    args = argparse.Namespace(
-        target_files=None,
-        files=None,
-        hook=False,
-        full=False,
-        release=False,
-        release_gate=False,
-        checkpoint_only=True,
+# ── Layer 2 (--full / --plan) ───────────────────────────────────────────────
+
+class TestLayer2:
+    @pytest.mark.parametrize(
+        "extra", [["--full", "--plan", "p"], ["--plan", "p"], ["--plan-file", "plan.md"], ["--full"]],
+        ids=["full+plan", "plan", "plan-file", "full"],
     )
-    with patch("aegis_cli.check.run_checkpoint", return_value=0) as mock_cp:
-        rc = run_check(args)
-        assert rc == 0
-        mock_cp.assert_called_once_with(args)
+    def test_without_a_backend_exits_2_before_running_anything(self, ws, capsys, extra):
+        (ws / "plan.md").write_text("Add compute\n", encoding="utf-8")
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), *extra, "clean.py"]) == 2
+        captured = capsys.readouterr()
+        assert "Layer 2 needs --llm-cmd or AEGIS_LLM_CMD" in captured.err
+        assert "skipped" not in (captured.out + captured.err).lower()
+        assert "Layer 1:" not in captured.out
 
-
-def test_check_supports_deep_and_all_flags():
-    """v3.0.0: check supports --deep (alias for --full) and --all flags."""
-    cmd = CheckCommand()
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-    parsed = parser.parse_args(["--deep", "--all"])
-    assert parsed.full is True
-    assert parsed.all_files is True
-
-
-def test_check_json_mode_emits_valid_json_without_ansi(tmp_path, capsys):
-    """v3.0.0: aegis check --json emits valid machine-parseable JSON with zero ANSI codes."""
-    import json
-
-    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-    target = tmp_path / "sample.py"
-    target.write_text("def add(a: int, b: int) -> int:\n    return a + b\n", encoding="utf-8")
-
-    args = argparse.Namespace(
-        target_files=["sample.py"],
-        files=None,
-        hook=False,
-        full=False,
-        release=False,
-        release_gate=False,
-        checkpoint_only=False,
-        plan=None,
-        plan_file=None,
-        workspace=str(tmp_path),
-        json=True,
-        format="json",
+    @pytest.mark.parametrize(
+        "extra",
+        [["--plan", ""], ["--plan", "  \n"], ["--plan-file", ""], ["--full", "--plan-file", " "],
+         ["--plan-file", "blank.md"]],
+        ids=["plan-empty", "plan-blank", "plan-file-empty", "full+plan-file-blank", "plan-file-blank-content"],
     )
-    rc = run_check(args)
-    assert rc == 0
-    raw = capsys.readouterr().out
-    assert "\x1b[" not in raw
-    payload = json.loads(raw)
-    assert payload["passed"] is True
-    assert payload["files"] == ["sample.py"]
-    assert isinstance(payload["layer1"], list)
+    @pytest.mark.parametrize("backend", [False, True], ids=["no-backend", "backend"])
+    def test_an_empty_plan_is_a_usage_error_never_a_layer1_pass(self, ws, capsys, llm, extra, backend):
+        # `--plan "$PLAN"` with PLAN unset asked for Layer 2: it must never read as a Layer 1 pass (b1-verify F1).
+        (ws / "blank.md").write_text("  \n", encoding="utf-8")
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        cmd = ["--llm-cmd", llm("ship")] if backend else []
+        assert _exit_code(["check", "--workspace", str(ws), *cmd, *extra, "clean.py"]) == 2
+        captured = capsys.readouterr()
+        # Without a backend, a plan file that is read and found empty may report the missing backend first.
+        needs_plan = backend or "blank.md" not in extra
+        assert ("Layer 2 needs a task plan" if needs_plan else "Layer 2 needs") in captured.err
+        assert "Layer 1:" not in captured.out
 
+    def test_full_with_no_changes_and_no_base_commit_exits_2(self, ws, tmp_path, capsys, llm):
+        clone = _shallow_clone_of_a_branch_without_main(ws, tmp_path)
+        argv = ["check", "--workspace", str(clone), "--full", "--plan", "x", "--llm-cmd", llm("ship")]
+        assert _exit_code(argv) == 2
+        captured = capsys.readouterr()
+        assert "no base commit found to diff against (a shallow clone?)" in captured.err
+        assert "pass the files to review" in captured.err
+        assert "Layer 1:" not in captured.out
+
+    def test_env_backend_ship_passes(self, ws, monkeypatch, capsys, llm):
+        monkeypatch.setenv("AEGIS_LLM_CMD", llm("ship"))
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--full", "--plan", "Add compute", "clean.py"]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 2: ✅ SHIP" in out
+
+    def test_plan_alone_implies_full(self, ws, capsys, llm):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--llm-cmd", llm("ship"), "--plan", "Add compute", "clean.py"]) == 0
+        assert "Layer 2: ✅ SHIP" in capsys.readouterr().out
+
+    def test_flag_beats_env(self, ws, monkeypatch, llm):
+        monkeypatch.setenv("AEGIS_LLM_CMD", llm("fail"))
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        argv = ["check", "--workspace", str(ws), "--llm-cmd", llm("ship"), "--plan", "Add compute", "clean.py"]
+        assert _exit_code(argv) == 0
+
+    def test_block_verdict_fails(self, ws, capsys, llm):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        argv = ["check", "--workspace", str(ws), "--llm-cmd", llm("block"), "--plan", "Add compute", "clean.py"]
+        assert _exit_code(argv) == 1
+        assert "Layer 2: 🔴 BLOCK" in capsys.readouterr().out
+
+    def test_failing_backend_is_an_explicit_error(self, ws, capsys, llm):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        argv = ["check", "--workspace", str(ws), "--llm-cmd", llm("fail"), "--plan", "Add compute", "clean.py"]
+        assert _exit_code(argv) == 1
+        assert "Layer 2 failed: LLM command exited 7: quota exceeded" in capsys.readouterr().err
+
+    def test_full_without_a_plan_exits_2(self, ws, capsys, llm):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        assert _exit_code(["check", "--workspace", str(ws), "--full", "--llm-cmd", llm("ship"), "clean.py"]) == 2
+        assert "Layer 2 needs a task plan" in capsys.readouterr().err
+
+    def test_missing_plan_file_is_an_error(self, ws, capsys, llm):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        argv = ["check", "--workspace", str(ws), "--llm-cmd", llm("ship"), "--plan-file", "missing.md", "clean.py"]
+        assert _exit_code(argv) == 1
+        assert "plan file not found: missing.md" in capsys.readouterr().err
+
+    def test_no_changed_files_says_layer2_had_nothing_to_review(self, ws, capsys, llm):
+        _git_repo(ws)
+        assert _exit_code(["check", "--workspace", str(ws), "--full", "--plan", "x", "--llm-cmd", llm("fail")]) == 0
+        out = capsys.readouterr().out
+        assert "Layer 1: 0 files changed (clean repository)" in out
+        assert "Layer 2: no changed files to review" in out
+
+    def test_no_changed_files_json_reports_layer2_unreviewed(self, ws, capsys, llm):
+        _git_repo(ws)
+        argv = ["check", "--workspace", str(ws), "--format", "json", "--plan", "x", "--llm-cmd", llm("ship")]
+        assert _exit_code(argv) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["passed"] is True
+        assert payload["layer2"] == {"verdict": None, "summary": "Layer 2: no changed files to review"}
+
+    def test_no_changed_files_layer1_only_does_not_mention_layer2(self, ws, capsys):
+        _git_repo(ws)
+        assert _exit_code(["check", "--workspace", str(ws)]) == 0
+        assert "Layer 2" not in capsys.readouterr().out
+
+    def test_no_arbitration_evidence_is_written(self, ws, llm):
+        _git_repo(ws)
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        _git(ws, "add", "clean.py")
+        assert _exit_code(["check", "--workspace", str(ws), "--llm-cmd", llm("ship"), "--plan", "Add compute"]) == 0
+        assert not list(ws.rglob("arbitration_cycle_*.json"))
+
+    def test_json_includes_the_layer2_verdict(self, ws, capsys, llm):
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        argv = ["check", "--workspace", str(ws), "--format", "json", "--llm-cmd", llm("block"), "--plan", "p", "clean.py"]
+        assert _exit_code(argv) == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["passed"] is False
+        assert payload["layer2"]["verdict"] == "block"
+
+
+class TestDefaultPlanDiscovery:
+    """Without --plan/--plan-file, docs/plan.md, .aegis/plan.md or PLAN.md is the plan sent to the model."""
+
+    @staticmethod
+    def _symlink(link: Path, target: Path) -> None:
+        try:
+            link.symlink_to(target, target_is_directory=target.is_dir())
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"cannot create symlinks here: {exc}")
+
+    def test_a_regular_default_plan_is_sent_to_the_model(self, ws, tmp_path, llm):
+        (ws / "PLAN.md").write_text("Add compute\n", encoding="utf-8")
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        prompts = tmp_path / "prompts.txt"
+        argv = ["check", "--workspace", str(ws), "--full", "--llm-cmd", llm("dump", str(prompts)), "clean.py"]
+        assert _exit_code(argv) == 0
+        assert "Add compute" in prompts.read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize("layout", ["file-to-outside", "dir-to-outside", "file-to-inside"])
+    def test_a_symlinked_default_plan_is_never_read(self, ws, tmp_path, capsys, llm, layout):
+        # A hostile branch must not route a secret into the model prompt via PLAN.md (b1-verify review).
+        secrets = tmp_path / "secrets"
+        secrets.mkdir()
+        (secrets / "plan.md").write_text("TOKEN-5150\n", encoding="utf-8")
+        if layout == "file-to-outside":
+            self._symlink(ws / "PLAN.md", secrets / "plan.md")
+        elif layout == "dir-to-outside":
+            self._symlink(ws / "docs", secrets)
+        else:
+            (ws / "notes").mkdir()
+            (ws / "notes" / "real.md").write_text("TOKEN-5150\n", encoding="utf-8")
+            self._symlink(ws / "PLAN.md", ws / "notes" / "real.md")
+        (ws / "clean.py").write_text(CLEAN, encoding="utf-8")
+        prompts = tmp_path / "prompts.txt"
+        argv = ["check", "--workspace", str(ws), "--full", "--llm-cmd", llm("dump", str(prompts)), "clean.py"]
+        assert _exit_code(argv) == 2
+        captured = capsys.readouterr()
+        assert "Layer 2 needs a task plan" in captured.err
+        assert "is a symlink or leaves the repository" in captured.err
+        assert not prompts.exists()
+        assert "TOKEN-5150" not in captured.out + captured.err

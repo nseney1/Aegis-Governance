@@ -23,13 +23,6 @@ tags:
   - cli
   - dead-code
   - contract
-fitness:
-  score: 0.5
-  impact_weight: 0.9
-  triggers: 74
-  true_positives: 13.9063
-  false_positives: 8.3225
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Every CLI flag registered in argparse MUST be consumed by the handler function.

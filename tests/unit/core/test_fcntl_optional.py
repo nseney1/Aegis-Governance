@@ -1,5 +1,5 @@
 from pathlib import Path
-"""BUG-008: soma_mcp and aegis_sdk.telemetry must work where `fcntl` is unavailable.
+"""BUG-008: aegis_mcp and the evidence ledger must work where `fcntl` is unavailable.
 
 `fcntl` is POSIX-only, so on Windows an unconditional import crashed the MCP
 server at startup. Each test runs in a subprocess with `fcntl` blocked
@@ -29,12 +29,12 @@ def _run_without_fcntl(code, env_extra=None):
 
 
 def _make_workspace(tmp_path, cell_name="trap-example"):
-    cells = tmp_path / ".aegis" / "rules" / "vacuoles"
+    cells = tmp_path / ".aegis" / "rules" / "traps"
     cells.mkdir(parents=True)
     (cells / f"{cell_name}.md").write_text(
         "---\n"
         f"id: {cell_name}\n"
-        "type: vacuole\n"
+        "type: trap\n"
         "domain: testing\n"
         "hypothesis: Example hypothesis\n"
         "prediction: Example prediction\n"
@@ -57,38 +57,37 @@ def test_blocking_fcntl_really_raises_import_error():
 
 def test_mcp_server_modules_import_without_fcntl():
     proc = _run_without_fcntl("""
-        import aegis_mcp.server, aegis_mcp.tools, aegis_sdk.telemetry
+        import aegis_mcp.server, aegis_mcp.tools, aegis_core.telemetry_engine.ledger
         print("ok")
     """)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "ok"
 
 
-def test_append_signal_writes_record_without_fcntl(tmp_path):
+def test_ledger_append_writes_a_row_without_fcntl(tmp_path):
     proc = _run_without_fcntl(f"""
-        from aegis_sdk.telemetry import append_signal
-        append_signal({str(tmp_path)!r}, "trap-example", "tp", "mcp")
+        from aegis_core.telemetry_engine import ledger
+        ledger.append({str(tmp_path)!r}, [{{"rule": "trap-example", "outcome": "tp", "source": "mcp"}}])
     """)
     assert proc.returncode == 0, proc.stderr
-    lines = (tmp_path / ".aegis" / "evidence" / "signals.jsonl").read_text(
+    lines = (tmp_path / ".aegis" / "state" / "ledger.jsonl").read_text(
         encoding="utf-8").splitlines()
     assert len(lines) == 1
     record = json.loads(lines[0])
-    assert (record["cell"], record["signal"], record["source"]) == ("trap-example", "tp", "mcp")
+    assert (record["rule"], record["outcome"], record["source"]) == ("trap-example", "tp", "mcp")
 
 
-def test_report_outcome_writes_canonical_signal_without_fcntl(tmp_path):
+def test_report_outcome_writes_a_ledger_row_without_fcntl(tmp_path):
     workspace = _make_workspace(tmp_path)
     proc = _run_without_fcntl("""
         import json
         from aegis_mcp.tools import execute_tool
         result = execute_tool("aegis_report_outcome",
-                              {"outcome": "success", "cells_used": ["trap-example"],
+                              {"outcome": "success", "rules_used": ["trap-example"],
                                "idempotency_key": "no-fcntl-report"})
         print(json.dumps(result))
-    """, env_extra={"AEGIS_ROOT": str(workspace)})
+    """, env_extra={"AEGIS_WORKSPACE": str(workspace)})
     assert proc.returncode == 0, proc.stderr
-    signals = (workspace / ".aegis" / "evidence" / "signals.jsonl").read_text(
+    rows = (workspace / ".aegis" / "state" / "ledger.jsonl").read_text(
         encoding="utf-8").splitlines()
-    assert [json.loads(line)["cell"] for line in signals] == ["trap-example"]
-    assert not (workspace / ".aegis" / "evidence" / "outcomes.jsonl").exists()
+    assert [json.loads(line)["rule"] for line in rows] == ["trap-example"]

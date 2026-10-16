@@ -5,7 +5,7 @@ import pytest
 
 from aegis_cli.init import run_init
 from aegis_core.skills.slots import SlotRegistry
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
 
 
 def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):
@@ -23,9 +23,7 @@ def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):
         ws=Workspace.for_init(tmp_path),
         _project_root=tmp_path,
         dry_run=False,
-        platform="gemini",
         rules="minimal",
-        mcp=False,
         yes=True,
         force=True,
     )
@@ -33,18 +31,17 @@ def test_init_provisions_rust_ast_driver(tmp_path: Path, monkeypatch):
     exit_code = run_init(args)
     assert exit_code == 0
 
-    # Verify .aegis/slots.yaml was auto-provisioned
-    slots_path = tmp_path / ".aegis" / "slots.yaml"
-    assert slots_path.is_file()
+    # The repo opts in to the packaged driver in .aegis/config.json
+    config = tmp_path / ".aegis" / "config.json"
+    assert '"rs"' in config.read_text(encoding="utf-8")
 
     registry = SlotRegistry.load(tmp_path)
     rs_driver = registry.get_ast_driver(".rs")
     assert rs_driver is not None
     assert "rust_ast.py" in rs_driver
 
-    # Verify driver file staged in .aegis/drivers/
-    driver_staged = tmp_path / ".aegis" / "drivers" / "rust_ast.py"
-    assert driver_staged.is_file()
+    # Nothing is staged in the repository: the packaged template is what runs
+    assert not (tmp_path / ".aegis" / "drivers").exists()
 
 
 def test_init_provisions_polyglot_ts_go_drivers(tmp_path: Path, monkeypatch):
@@ -60,9 +57,7 @@ def test_init_provisions_polyglot_ts_go_drivers(tmp_path: Path, monkeypatch):
         ws=Workspace.for_init(tmp_path),
         _project_root=tmp_path,
         dry_run=False,
-        platform="gemini",
         rules="minimal",
-        mcp=False,
         yes=True,
         force=True,
     )
@@ -73,5 +68,4 @@ def test_init_provisions_polyglot_ts_go_drivers(tmp_path: Path, monkeypatch):
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".ts") is not None
     assert registry.get_ast_driver(".go") is not None
-    assert (tmp_path / ".aegis" / "drivers" / "ts_ast.js").is_file()
-    assert (tmp_path / ".aegis" / "drivers" / "go_ast.go").is_file()
+    assert not (tmp_path / ".aegis" / "drivers").exists()

@@ -1,122 +1,96 @@
-from pathlib import Path
-"""Integration test: verify apply_decay is wired into the tier-check path.
+"""Integration test: `aegis rule promote --tier-check` re-tiers enforcement from ledger fitness.
 
-This tests that running `cell_promote.py --tier-check` actually applies
-exponential decay to fitness data before evaluating promotion/demotion,
-so that frozen champions can be displaced over time.
+The tier check reads each rule's fitness from the ledger (aegis_core.fitness) and,
+without --dry-run, rewrites only the `enforcement` key of rules whose evidence moved
+them (an explicit `aegis rule` command). It never writes a fitness block: v3 decayed
+frontmatter counts here, which made every run dirty the rule files.
 """
-import os
-import sys
-import subprocess
+from __future__ import annotations
+
+import json
+
 import pytest
 
-from aegis_core.yaml import parse_frontmatter
-from tests.helpers_rule import soma_workspace, write_cell_with_fitness
-
-REPO_ROOT = str(next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists()))
-sys.path.insert(0, REPO_ROOT)
+from aegis_cli.cli import main
+from aegis_core.yaml_engine.frontmatter import parse_frontmatter
+from tests.helpers_rule import soma_workspace, write_cell_with_fitness  # noqa: F401  (fixture)
 
 
-class TestDecayIntegration:
-    """Verify decay is called during tier-check evaluation."""
+def _tier_check(workspace, *extra: str) -> int:
+    return main(["rule", "promote", "--tier-check", "--workspace", str(workspace), *extra])
 
-    def _read_cell_fitness(self, cell_path):
-        """Read fitness data back from a cell file."""
-        content = cell_path.read_text()
-        meta = parse_frontmatter(content)
-        return meta.get('fitness', {})
 
-    def test_tier_check_decays_counts_on_disk(self, soma_workspace):
-        """After --tier-check --execute, the cell file should have decayed counts."""
-        cells_dir = soma_workspace / ".aegis" / "rules"
-        write_cell_with_fitness(cells_dir, "high-count", "advisory", 100, 90, 10)
+def _meta(path):
+    return parse_frontmatter(open(path, encoding="utf-8").read()) or {}
 
-        result = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; from aegis_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
-             "--tier-check", "--execute"],
-            cwd=str(soma_workspace),
-            capture_output=True, text=True, timeout=30,
-            env={**os.environ, "PYTHONPATH": REPO_ROOT}
-        )
 
-        fitness = self._read_cell_fitness(cells_dir / "high-count.md")
-        # After decay: 100 * 0.95 = 95, 90 * 0.95 = 85, 10 * 0.95 = 9
-        assert fitness['triggers'] < 100, \
-            f"Triggers should be decayed below 100, got {fitness['triggers']}"
-        assert fitness['true_positives'] < 90, \
-            f"TPs should be decayed below 90, got {fitness['true_positives']}"
+@pytest.fixture(autouse=True)
+def _no_workspace_pin(monkeypatch):
+    monkeypatch.delenv("AEGIS_WORKSPACE", raising=False)
 
-    def test_frozen_champion_eventually_demotes(self, soma_workspace):
-        """A gate-tier cell that stops being useful should eventually demote
-        after enough tier-check cycles apply decay + see no new TPs."""
-        cells_dir = soma_workspace / ".aegis" / "rules"
 
-        # Start with a cell that has a massive history but is now getting FPs
-        # After decay, the FP rate will dominate
-        write_cell_with_fitness(cells_dir, "stale-gate", "gate", 100, 95, 5)
+class TestTierCheck:
+    def test_proven_advisory_rule_moves_up_and_only_its_enforcement_changes(self, soma_workspace, capsys):
+        rules = soma_workspace / ".aegis" / "rules"
+        path = write_cell_with_fitness(rules, "proven", "advisory", 25, 25, 0)
 
-        escaped_log = soma_workspace / ".aegis" / "metrics" / "escaped_defects.jsonl"
-        import json
-        escaped_log.write_text(
-            json.dumps({"cell": "stale-gate", "defect": "test"}) + "\n"
-        )
+        assert _tier_check(soma_workspace) == 0
 
-        result = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; from aegis_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
-             "--tier-check", "--execute"],
-            cwd=str(soma_workspace),
-            capture_output=True, text=True, timeout=30,
-            env={**os.environ, "PYTHONPATH": REPO_ROOT}
-        )
+        meta = _meta(path)
+        assert meta["enforcement"] == "mechanical"
+        assert "fitness" not in meta and "triggers" not in meta
+        assert "proven: advisory → mechanical" in capsys.readouterr().out
 
-        # Should demote because of escaped defect
-        content = (cells_dir / "stale-gate.md").read_text()
-        meta = parse_frontmatter(content)
-        assert meta['enforcement'] == 'mechanical', \
-            f"Gate cell with escaped defects should demote, got {meta['enforcement']}"
+    def test_a_self_declared_gate_that_misfires_steps_down(self, soma_workspace, capsys):
+        rules = soma_workspace / ".aegis" / "rules"
+        path = write_cell_with_fitness(rules, "noisy-gate", "gate", 10, 2, 8)
 
-    def test_tier_check_dry_run_does_not_decay(self, soma_workspace):
-        """Dry run (no --execute) should NOT write decayed values to disk."""
-        cells_dir = soma_workspace / ".aegis" / "rules"
-        write_cell_with_fitness(cells_dir, "dry-run-cell", "advisory", 100, 90, 10)
+        assert _tier_check(soma_workspace, "--json") == 0
 
-        result = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; from aegis_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
-             "--tier-check"],  # No --execute
-            cwd=str(soma_workspace),
-            capture_output=True, text=True, timeout=30,
-            env={**os.environ, "PYTHONPATH": REPO_ROOT}
-        )
+        changes = json.loads(capsys.readouterr().out)["changes"]
+        assert [(c["rule"], c["old_tier"], c["new_tier"]) for c in changes] == [("noisy-gate", "gate", "mechanical")]
+        assert _meta(path)["enforcement"] == "mechanical"
 
-        fitness = self._read_cell_fitness(cells_dir / "dry-run-cell.md")
-        assert fitness['triggers'] == 100, \
-            f"Dry run should not modify file, triggers should be 100, got {fitness['triggers']}"
+    def test_a_solid_gate_and_the_mandatory_types_keep_their_tier(self, soma_workspace, capsys):
+        rules = soma_workspace / ".aegis" / "rules"
+        solid = write_cell_with_fitness(rules, "solid-gate", "gate", 100, 95, 5)
+        invariant = write_cell_with_fitness(rules, "noisy-invariant", "gate", 10, 0, 10, cell_type="invariant")
 
-    def test_tier_check_execute_idempotent_consecutive_runs(self, soma_workspace):
-        """Running --tier-check --execute twice in a row should only decay once.
-        The second run must read last_decay_epoch from disk and skip decay."""
-        cells_dir = soma_workspace / ".aegis" / "rules"
-        write_cell_with_fitness(cells_dir, "idempotent-cell", "advisory", 100, 90, 10)
+        assert _tier_check(soma_workspace) == 0
 
-        cmd = [sys.executable, "-c",
-               "import sys; from aegis_core.lifecycle import cli_cell_promote; sys.exit(cli_cell_promote(sys.argv[1:]))",
-               "--tier-check", "--execute"]
-        env = {**os.environ, "PYTHONPATH": REPO_ROOT}
+        assert _meta(solid)["enforcement"] == "gate"
+        assert _meta(invariant)["enforcement"] == "gate"  # invariants are always gates
 
-        # First run: should decay
-        subprocess.run(cmd, cwd=str(soma_workspace), capture_output=True, text=True,
-                       timeout=30, env=env)
-        fitness_after_first = self._read_cell_fitness(cells_dir / "idempotent-cell.md")
-        assert fitness_after_first['triggers'] < 100, \
-            f"First run should decay, got triggers={fitness_after_first['triggers']}"
+    def test_dry_run_changes_nothing(self, soma_workspace, capsys):
+        rules = soma_workspace / ".aegis" / "rules"
+        path = write_cell_with_fitness(rules, "dry-run-rule", "advisory", 25, 25, 0)
+        before = open(path, "rb").read()
 
-        # Second run immediately: should NOT decay again
-        subprocess.run(cmd, cwd=str(soma_workspace), capture_output=True, text=True,
-                       timeout=30, env=env)
-        fitness_after_second = self._read_cell_fitness(cells_dir / "idempotent-cell.md")
-        assert fitness_after_second['triggers'] == fitness_after_first['triggers'], \
-            f"Second run should be idempotent. First: {fitness_after_first['triggers']}, " \
-            f"Second: {fitness_after_second['triggers']}"
+        assert _tier_check(soma_workspace, "--dry-run") == 0
+
+        assert open(path, "rb").read() == before
+        assert "dry-run-rule: advisory → mechanical" in capsys.readouterr().out
+
+    def test_consecutive_runs_converge(self, soma_workspace, capsys):
+        rules = soma_workspace / ".aegis" / "rules"
+        path = write_cell_with_fitness(rules, "steady", "advisory", 25, 25, 0)
+
+        assert _tier_check(soma_workspace) == 0
+        first = open(path, "rb").read()
+        assert _tier_check(soma_workspace) == 0  # mechanical -> gate needs 50 verdicts
+
+        assert open(path, "rb").read() == first
+
+    def test_an_incomplete_ledger_is_named_and_nothing_is_rewritten(self, soma_workspace, capsys):
+        rules = soma_workspace / ".aegis" / "rules"
+        path = write_cell_with_fitness(rules, "proven", "advisory", 25, 25, 0)
+        with open(soma_workspace / ".aegis" / "state" / "ledger.jsonl", "ab") as fh:
+            fh.write(b"{garbled\n")
+        before = open(path, "rb").read()
+
+        assert _tier_check(soma_workspace) == 1
+
+        out = capsys.readouterr().out
+        assert "proven: advisory → mechanical" in out
+        assert "not written: the ledger is incomplete (1 unreadable line(s))" in out
+        assert open(path, "rb").read() == before

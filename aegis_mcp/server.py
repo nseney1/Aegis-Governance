@@ -1,562 +1,412 @@
+"""aegis-mcp stdio server: JSON-RPC framing, client identity, workspace binding and
+server-owned arguments (host-matrix §3.5, §3.6, §3.8).
+
+- **Identity** (§3.5): the registration's ``AEGIS_CLIENT`` names the host when it is a
+  known host id; otherwise the exact ``clientInfo.name`` table in ``aegis_core.hosts``;
+  otherwise ``generic``. Host, client name and version and the session id are server
+  state: no tool argument can set them.
+- **Binding** (§3.6, AD-4): every ``tools/call`` is bound by
+  ``aegis_core.workspace.binding.resolve_binding`` from the operator pin, what the host
+  attests (Codex per-call ``_meta``, ``CLAUDE_PROJECT_DIR``, MCP roots), the registry
+  and a bounded walk-up from the server's cwd. A hold or an error answers the call with
+  a machine-readable reason; unbound, ``aegis_scan`` serves the read-only user layer.
+- **Protocol**: ``ping``; ``protocolVersion`` echoed when supported; ``server/discover``
+  is Method not found so hosts fall back to ``initialize`` (the stateful era);
+  responses to the server's own ``roots/list`` requests are routed, never answered.
+"""
 from __future__ import annotations
 
 import contextlib
-import contextvars
-import hmac
-
 import json
 import os
-import secrets
+import re
 import sys
 import threading
 import time
 import traceback
 import uuid
 from collections import defaultdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
-from .tools import (
-    TOOL_DEFINITIONS,
-    execute_tool,
-    normalize_tool_call,
-)
-from .security import Workspace
-from aegis_core.receipts import (
-    issue_receipt,
-    verify_receipt,
-    strip_server_owned,
-    target_paths,
-    compute_file_digest,
-)
-try:
-    from aegis_core.receipts import compute_rule_digest
-except ImportError:
-    from aegis_core.receipts import compute_cell_digest as compute_rule_digest
-from aegis_core.taxonomy import (
-    DEFAULT_LOCK_TIMEOUT_SECONDS,
-    INTERACTIVE_SESSION_TTL_SECONDS,
-    MCP_DEFAULT_RATE_LIMITS,
-)
-from aegis_core.workspace.layout import LockResource
+from aegis_core import hosts
+from aegis_core._version import __version__
+from aegis_core.bootstrap import instructions_text
+from aegis_core.config import env_client, env_workspace
+from aegis_core.taxonomy import MCP_DEFAULT_RATE_LIMITS
+from aegis_core.workspace.base import Workspace
+from aegis_core.workspace.binding import Attested, Registry, WorkspaceBinding, read_registry, resolve_binding
+from aegis_core.workspace.layout import UserLayout
 
-_session_tokens: set[str] = set()
-_session_token = None
-_canonical_workspace: Workspace | None = None
-_execution_enabled = False
+from .projection import is_error_result
+from .registry import DEFAULT_CLIENT_PLATFORM, NOT_GOVERNED_MESSAGE, TOOL_DEFINITIONS
+from .tools import execute_tool, is_known_tool
 
-
-_READ_TOOLS = frozenset({
-    "aegis_scan", "aegis_grade", "aegis_coverage",
-    "aegis_request_receipt", "aegis_audit_security", "aegis_audit_performance",
-    "aegis_poll_verification", "aegis_list_rules", "aegis_rule_fitness",
-})
-_WRITE_TOOLS = frozenset({
-    "aegis_report_outcome", "aegis_capture_insight", "aegis_create_rule",
-    "aegis_handoff",
-})
-_EXECUTE_TOOLS = frozenset({
-    "aegis_propose_change", "aegis_verify_changes", "aegis_checkpoint",
-    "aegis_generate_manifest",
+# Arguments only the server may set. A client value is dropped before dispatch, so the
+# workspace, the host attribution and the session of a ledger row are never the caller's.
+SERVER_OWNED_KEYS = frozenset({
+    "workspace", "host", "session", "source", "platform",
+    "client_host", "client_name", "client_version",
+    "_host", "_session", "_client_platform", "_client_host", "_client_name", "_client_version",
+    "_binding", "_unbound",
 })
 
-_tool_call_times = defaultdict(list)
+# Versions this server speaks, oldest first. 2025-03-26 is left out: it requires
+# receiving JSON-RPC batches, which this server rejects.
+SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2025-06-18", "2025-11-25")
+_BASELINE_PROTOCOL = SUPPORTED_PROTOCOL_VERSIONS[0]
+_VERSION_SHAPE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# ── Connection state (one MCP client per process; reset by run_stdio_server) ──
+# The operator pin: run_stdio_server sets it from AEGIS_WORKSPACE; an in-process
+# caller may set it directly.
+_canonical_workspace: Workspace | str | None = None
+_client_platform: str = DEFAULT_CLIENT_PLATFORM  # the host id
+_client_name: str = ""
+_client_version: str = ""
+_session_id: Optional[str] = None
+# Set by run_stdio_server when the pin is unusable: every tools/call answers with it.
+_workspace_error: Optional[WorkspaceBinding] = None
+_server_cwd: Optional[str] = None
+_claude_project_dir: Optional[str] = None
+_roots_capable: bool = False
+_host_roots: Tuple[str, ...] = ()
+_outbox: List[Dict[str, Any]] = []
+_pending: Dict[str, str] = {}
+_request_seq: int = 0
+_workspaces: Dict[Tuple[str, str], Workspace] = {}
+_registry_cache: Optional[Tuple[Tuple[Any, ...], Registry]] = None
+
+
+def fresh_state() -> Dict[str, Any]:
+    """The connection state of a new process, by module attribute name."""
+    return {
+        "_canonical_workspace": None,
+        "_client_platform": DEFAULT_CLIENT_PLATFORM,
+        "_client_name": "",
+        "_client_version": "",
+        "_session_id": None,
+        "_workspace_error": None,
+        "_server_cwd": None,
+        "_claude_project_dir": None,
+        "_roots_capable": False,
+        "_host_roots": (),
+        "_outbox": [],
+        "_pending": {},
+        "_request_seq": 0,
+        "_workspaces": {},
+        "_registry_cache": None,
+    }
+
 _RATE_LIMITS = {
-    "aegis_request_receipt": MCP_DEFAULT_RATE_LIMITS["READ"],
-    "aegis_propose_change": MCP_DEFAULT_RATE_LIMITS["EXECUTION"],
     "aegis_report_outcome": MCP_DEFAULT_RATE_LIMITS["MUTATION"],
-    "aegis_verify_changes": MCP_DEFAULT_RATE_LIMITS["VERIFICATION"],
-    "aegis_checkpoint": MCP_DEFAULT_RATE_LIMITS["CHECKPOINT"],
-    "aegis_poll_verification": MCP_DEFAULT_RATE_LIMITS["READ"],
-    "aegis_handoff": MCP_DEFAULT_RATE_LIMITS["MUTATION"],
 }
-
-
+_tool_call_times: Dict[str, list] = defaultdict(list)
 _rate_limit_lock = threading.Lock()
-_mcp_last_lease = contextvars.ContextVar("mcp_last_lease", default=None)
-_mcp_tls = threading.local()
 
 
-def _check_rate_limit(tool_name: str, session_id: str = "default") -> bool:
+def strip_server_owned(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of client arguments without server-owned keys."""
+    # Only an object reaches here: tools/call answers other arguments with -32602 first.
+    return {k: v for k, v in args.items() if k not in SERVER_OWNED_KEYS}
+
+
+def _check_rate_limit(tool_name: str) -> bool:
     """Return True if the call is within rate limits, False if exceeded."""
     if tool_name not in _RATE_LIMITS:
         return True
     max_calls, window_seconds = _RATE_LIMITS[tool_name]
     now = time.monotonic()
-    key = (session_id, tool_name)
     with _rate_limit_lock:
-        entries = _tool_call_times[key]
-        valid_entries = []
-        for e in entries:
-            ts = e[1] if isinstance(e, tuple) else e
-            if now - ts < window_seconds:
-                valid_entries.append(e)
-        _tool_call_times[key] = valid_entries
-        if len(valid_entries) >= max_calls:
+        recent = [ts for ts in _tool_call_times[tool_name] if now - ts < window_seconds]
+        if len(recent) >= max_calls:
+            _tool_call_times[tool_name] = recent
             return False
-        lease_id = uuid.uuid4().hex
-        _mcp_last_lease.set((tool_name, lease_id))
-        _mcp_tls.last_lease = (tool_name, lease_id)
-        _tool_call_times[key].append((lease_id, now))
+        recent.append(now)
+        _tool_call_times[tool_name] = recent
         return True
-
-
-def _rollback_rate_limit(tool_name: str, lease_id: Optional[str] = None, session_id: Optional[str] = None) -> None:
-    """Revert the specific rate-limit lease if authorization/receipt verification fails."""
-    if tool_name in _RATE_LIMITS:
-        target_lease = lease_id
-        if not target_lease:
-            last = _mcp_last_lease.get()
-            if last and last[0] == tool_name:
-                target_lease = last[1]
-        if not target_lease:
-            last = getattr(_mcp_tls, "last_lease", None)
-            if last and last[0] == tool_name:
-                target_lease = last[1]
-        if target_lease is None:
-            return
-        with _rate_limit_lock:
-            keys = [(session_id, tool_name)] if session_id else [k for k in _tool_call_times if (isinstance(k, tuple) and k[1] == tool_name) or k == tool_name]
-            if tool_name in _tool_call_times:
-                keys.append(tool_name)
-            for k in keys:
-                entries = _tool_call_times.get(k, [])
-                for i in range(len(entries) - 1, -1, -1):
-                    e = entries[i]
-                    if isinstance(e, tuple) and e[0] == target_lease:
-                        entries.pop(i)
-                        break
-        last = _mcp_last_lease.get()
-        if last and last == (tool_name, target_lease):
-            _mcp_last_lease.set(None)
-        if hasattr(_mcp_tls, "last_lease") and _mcp_tls.last_lease == (tool_name, target_lease):
-            _mcp_tls.last_lease = None
-
-
-# Messages that mean "the operation did not happen", regardless of the tool.
-_ERROR_STATUSES = ("FAIL", "FAILED", "ERROR", "REJECTED", "BLOCKED", "ESCALATION_REQUIRED")
-_ERROR_TEXT_PREFIXES = ("ERROR", "CRITICAL ERROR")
-
-
-def _server_version() -> str:
-    """Resolve the version from a single source of truth."""
-    version_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "VERSION"
-    )
-    if os.path.isfile(version_file):
-        try:
-            with open(version_file, "r", encoding="utf-8") as fh:
-                val = fh.read().strip()
-                if val:
-                    return val
-        except OSError:
-            pass
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-        for pkg_name in ("aegis-guardrails", "aegis-governance", "soma-governance"):
-            try:
-                return version(pkg_name)
-            except PackageNotFoundError:
-                continue
-    except ImportError:
-        pass
-    return "unknown"
-
-
 
 
 def send_response(response: Dict[str, Any]):
-    # stdout is the JSON-RPC transport: only framed responses may be written here.
+    # stdout is the JSON-RPC transport: only framed messages may be written here.
     print(json.dumps(response), flush=True)
 
-
-def _is_error_text(value: Any) -> bool:
-    return isinstance(value, str) and value.lstrip().upper().startswith(_ERROR_TEXT_PREFIXES)
-
-
-def _is_error_result(result: Any) -> bool:
-    """Decide whether a tool result represents a failure.
-
-    A tool can signal failure three ways: an "error" key, an explicit failure
-    "status", or a failure-prefixed message string. Checking only for "error"
-    reported rejected proposals and failing audits as successes.
-    """
-    if _is_error_text(result):
-        return True
-    if isinstance(result, dict):
-        if "error" in result:
-            return True
-        if str(result.get("status", "")).upper() in _ERROR_STATUSES:
-            return True
-        # Tools that wrap a human-readable verdict in {"result": "..."}.
-        if _is_error_text(result.get("result")):
-            return True
-    return False
 
 def _error(req_id: Any, code: int, message: str) -> Dict[str, Any]:
     return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
-def _state_digests(args: Dict[str, Any]):
-    """(file_digest, rule_digest) for the canonical workspace and the
-    target paths named in args. Raises ValueError on a path escape."""
-    return (
-        compute_file_digest(_canonical_workspace, target_paths(args)),
-        compute_rule_digest(_canonical_workspace),
-    )
-
-
-def _issue_receipt_compat(**kwargs: Any) -> str:
-    rule_digest = kwargs.pop("rule_digest")
-    try:
-        return issue_receipt(**kwargs, rule_digest=rule_digest)
-    except TypeError:
-        return issue_receipt(**kwargs, cell_digest=rule_digest)
-
-
-def _verify_receipt_compat(**kwargs: Any) -> bool:
-    rule_digest = kwargs.pop("rule_digest")
-    try:
-        return verify_receipt(**kwargs, rule_digest=rule_digest)
-    except TypeError:
-        return verify_receipt(**kwargs, cell_digest=rule_digest)
-
-
 def send_error(id: Any, code: int, message: str):
-    send_response({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": {
-            "code": code,
-            "message": message
-        }
-    })
-
-def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        return _handle_request_impl(request)
-    finally:
-        _mcp_last_lease.set(None)
+    send_response(_error(id, code, message))
 
 
-def _handle_request_impl(request: Dict[str, Any]) -> Dict[str, Any]:
-    method = request.get("method")
-    params = request.get("params", {})
-    req_id = request.get("id")
-
-    if method == "initialize":
-        global _session_token
-        new_token = secrets.token_hex(32)
-        _session_token = new_token
-        _session_tokens.add(new_token)
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "aegis-mcp",
-                    "version": _server_version(),
-                    "_sessionToken": new_token
-                }
-            }
-        }
-    elif method == "tools/list":
-        if not _session_token and not _session_tokens:
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": -32002,
-                    "message": "Server not initialized"
-                }
-            }
-            
-        tools = TOOL_DEFINITIONS
-        if not _execution_enabled:
-            tools = [t for t in tools if t["name"] not in _EXECUTE_TOOLS]
-            
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "tools": tools
-            }
-        }
-    elif method == "tools/call":
-        if not _session_token and not _session_tokens:
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": -32002,
-                    "message": "Server not initialized"
-                }
-            }
-            
-        name = params.get("name")
-        args = params.get("arguments", {})
-
-        if not isinstance(args, dict):
-            return _error(req_id, -32602, "Tool arguments must be an object.")
-
-        client_token = params.get("_sessionToken") or (args.get("_sessionToken") if isinstance(args, dict) else None)
-        require_token = os.environ.get("AEGIS_REQUIRE_SESSION_TOKEN") == "1"
-
-        if client_token is not None:
-            from aegis_core.receipts import _safe_compare
-            valid = False
-            for tok in _session_tokens:
-                if _safe_compare(client_token, tok):
-                    valid = True
-                    break
-            if not valid and _session_token and _safe_compare(client_token, _session_token):
-                valid = True
-            if not valid:
-                return _error(req_id, -32002, "Invalid session token")
-            active_session_id = client_token
-        elif require_token:
-            return _error(req_id, -32002, "Session token required for tool execution")
-        else:
-            active_session_id = "default"
-
-        if name == "aegis_request_receipt":
-            if not _check_rate_limit("aegis_request_receipt", session_id=active_session_id):
-                limit_info = _RATE_LIMITS.get("aegis_request_receipt", MCP_DEFAULT_RATE_LIMITS["READ"])
-                return {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {
-                        "code": -32000,
-                        "message": f"Rate limit exceeded for 'aegis_request_receipt': max {limit_info[0]} calls per {limit_info[1]}s"
-                    }
-                }
-            operation = args.get("operation")
-            if "arguments" in args and isinstance(args["arguments"], dict):
-                _, args["arguments"] = normalize_tool_call(operation, args["arguments"])
-
-            if operation not in _EXECUTE_TOOLS and operation not in _WRITE_TOOLS:
-                _rollback_rate_limit("aegis_request_receipt", session_id=active_session_id)
-                return _error(req_id, -32602,
-                              f"Tool '{operation}' does not require a receipt or does not exist.")
-            if operation in _EXECUTE_TOOLS and not _execution_enabled:
-                _rollback_rate_limit("aegis_request_receipt", session_id=active_session_id)
-                return _error(req_id, -32600, "Execution capabilities are disabled.")
-            if not _canonical_workspace:
-                _rollback_rate_limit("aegis_request_receipt", session_id=active_session_id)
-                return _error(req_id, -32600, "Server workspace is not configured.")
-
-            # Bind the receipt to exactly what will be dispatched: the client
-            # arguments minus server-owned keys (workspace is always the
-            # operator-configured one), plus the current content of the target
-            # files and the governance rules. Any change before redemption
-            # makes the receipt stale.
-            op_args = strip_server_owned(args.get("arguments", {}))
-            try:
-                file_digest, rule_digest = _state_digests(op_args)
-            except (ValueError, RuntimeError, OSError) as exc:
-                return _error(req_id, -32602, str(exc))
-            receipt_id = _issue_receipt_compat(
-                session_id=active_session_id,
-                workspace=_canonical_workspace,
-                operation=operation,
-                args=op_args,
-                file_digest=file_digest,
-                rule_digest=rule_digest,
-                ttl_seconds=INTERACTIVE_SESSION_TTL_SECONDS
-            )
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "content": [{"type": "text", "text": json.dumps({"receipt": receipt_id})}],
-                    "isError": False
-                }
-            }
-
-        # The client never chooses the workspace, for read tools included:
-        # strip whatever it sent and dispatch against the canonical one.
-        receipt = args.get("receipt")
-        args = strip_server_owned(args)
-
-        name, args = normalize_tool_call(name, args)
-
-        # Rate limit check BEFORE consuming receipt
-        if not _check_rate_limit(name, session_id=active_session_id):
-            limit_info = _RATE_LIMITS.get(name, (0, 0))
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": -32000,
-                    "message": f"Rate limit exceeded for '{name}': max {limit_info[0]} calls per {limit_info[1]}s"
-                }
-            }
-
-        # Pre-validate read tools with specific requirements (e.g. aegis_poll_verification)
-        # to ensure unauthenticated invalid requests do not drain rate limit quotas
-        if name == "aegis_poll_verification":
-            job_id = args.get("job_id")
-            if not job_id or not isinstance(job_id, str):
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32602, "Missing or invalid 'job_id'")
-            from aegis_core.verification.jobs import get_job
-            if get_job(job_id) is None:
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32602, f"Verification job '{job_id}' not found or expired.")
-
-        # Both EXECUTE and WRITE tools require a valid receipt
-        if name in _EXECUTE_TOOLS or name in _WRITE_TOOLS:
-            if name in _EXECUTE_TOOLS and not _execution_enabled:
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32600, "Execution capabilities are disabled.")
-            if not _canonical_workspace:
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32600, "Server workspace is not configured.")
-            if not receipt or not isinstance(receipt, str):
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32600, f"Tool '{name}' requires a valid 'receipt'.")
-
-            # Recompute the state digests now; a target file or rule edited
-            # since issuance no longer matches and the receipt is consumed.
-            try:
-                file_digest, rule_digest = _state_digests(args)
-            except ValueError as exc:
-                _verify_receipt_compat(
-                    receipt_id=receipt,
-                    session_id=active_session_id,
-                    workspace=_canonical_workspace,
-                    operation=name,
-                    args=args,
-                    file_digest="",
-                    rule_digest="",
-                    consume=True,
-                )
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32602, str(exc))
-            except (RuntimeError, OSError) as exc:
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32602, str(exc))
-            if not _verify_receipt_compat(
-                receipt_id=receipt,
-                session_id=active_session_id,
-                workspace=_canonical_workspace,
-                operation=name,
-                args=args,
-                file_digest=file_digest,
-                rule_digest=rule_digest,
-                consume=True
-            ):
-                _rollback_rate_limit(name, session_id=active_session_id)
-                return _error(req_id, -32600, "Invalid, expired, or mismatched receipt.")
+def _valid_id(value: Any) -> bool:
+    """JSON-RPC ids are strings, numbers or null; anything else is never echoed."""
+    return value is None or isinstance(value, str) or (isinstance(value, (int, float)) and not isinstance(value, bool))
 
 
+def _safe_id(value: Any) -> Any:
+    return value if _valid_id(value) else None
 
-        # Inject the operator-configured workspace only after verification, so
-        # the hashed arguments match issuance and dispatch cannot be redirected.
-        if _canonical_workspace:
-            args["workspace"] = _canonical_workspace
-        if receipt is not None:
-            args["receipt"] = receipt
 
+# ── identity ─────────────────────────────────────────────────────────────────
+
+def _identify(params: Dict[str, Any]) -> Tuple[str, str, str]:
+    """(host id, client name, client version) for an ``initialize``."""
+    info = params.get("clientInfo")
+    name = info.get("name") if isinstance(info, dict) else None
+    version = info.get("version") if isinstance(info, dict) else None
+    name = name[:200] if isinstance(name, str) else ""
+    version = version[:100] if isinstance(version, str) else ""
+    host = hosts.identify(name)
+    registered = env_client()
+    if registered:
         try:
-            # Tool implementations (and the enzymes they call) may print progress
-            # notes. stdout belongs to the JSON-RPC framing, so any stray writes
-            # are re-routed to stderr instead of corrupting the stream.
-            if _canonical_workspace and (name in _WRITE_TOOLS or name in _EXECUTE_TOOLS):
-                from aegis_core.locking import workspace_lock
-                with workspace_lock(_canonical_workspace, LockResource.RULES, timeout_sec=DEFAULT_LOCK_TIMEOUT_SECONDS):
-                    with contextlib.redirect_stdout(sys.stderr):
-                        result = execute_tool(name, args)
-            else:
-                with contextlib.redirect_stdout(sys.stderr):
-                    result = execute_tool(name, args)
-            is_error = _is_error_result(result)
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(result) if not isinstance(result, str) else result
-                        }
-                    ],
-                    "isError": is_error
-                }
-            }
-        except Exception as e:
-            _rollback_rate_limit(name, session_id=active_session_id)
-            traceback.print_exc(file=sys.stderr)
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"Tool execution failed: {str(e)}"
-                        }
-                    ],
-                    "isError": True
-                }
-            }
-    elif method == "notifications/initialized":
-        # Just return None for notifications, no response
+            host = hosts.get(registered).id
+        except KeyError:
+            print(f"aegis-mcp: AEGIS_CLIENT={registered!r} names no known host; "
+                  "identifying the client by clientInfo", file=sys.stderr)
+    return host, name, version
+
+
+def negotiate_protocol(requested: Any) -> str:
+    """The requested version when supported, else the newest supported version older
+    than it, else the baseline (MCP lifecycle: the client disconnects if it cannot
+    speak the answer)."""
+    if isinstance(requested, str) and requested in SUPPORTED_PROTOCOL_VERSIONS:
+        return requested
+    if isinstance(requested, str) and _VERSION_SHAPE.fullmatch(requested):
+        older = [v for v in SUPPORTED_PROTOCOL_VERSIONS if v < requested]
+        if older:
+            return older[-1]
+    return _BASELINE_PROTOCOL
+
+
+# ── roots (server-initiated requests) ────────────────────────────────────────
+
+def take_outbox() -> List[Dict[str, Any]]:
+    """Requests the server wants to send to the client, oldest first (and forget them)."""
+    global _outbox
+    queued, _outbox = _outbox, []
+    return queued
+
+
+def _request_roots() -> None:
+    global _request_seq
+    if not _roots_capable or _session_id is None:
+        return
+    _request_seq += 1
+    request_id = f"aegis-roots-{_request_seq}"
+    _pending[request_id] = "roots/list"
+    _outbox.append({"jsonrpc": "2.0", "id": request_id, "method": "roots/list"})
+
+
+def _file_uri_path(uri: Any) -> Optional[str]:
+    if not isinstance(uri, str):
         return None
-    else:
-        # Method not found
+    parsed = urlparse(uri)
+    if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+        return None
+    path = url2pathname(parsed.path)
+    return path if os.path.isabs(path) else None
+
+
+def _route_response(message: Dict[str, Any]) -> None:
+    """A client's response to one of our requests; unknown ids are ignored."""
+    global _host_roots
+    request_id = message.get("id")
+    kind = _pending.pop(request_id, None) if isinstance(request_id, str) else None
+    result = message.get("result")
+    if kind == "roots/list" and isinstance(result, dict) and isinstance(result.get("roots"), list):
+        paths = (_file_uri_path(r.get("uri")) for r in result["roots"] if isinstance(r, dict))
+        _host_roots = tuple(dict.fromkeys(p for p in paths if p))
+
+
+# ── binding ──────────────────────────────────────────────────────────────────
+
+def _attested(params: Dict[str, Any]) -> List[Attested]:
+    """What the host (never the model) reports about the session, in precedence order."""
+    out: List[Attested] = []
+    if _client_platform == "codex-cli":
+        meta = params.get("_meta")
+        turn = meta.get("x-codex-turn-metadata") if isinstance(meta, dict) else None
+        spaces = turn.get("workspaces") if isinstance(turn, dict) else None
+        names = list(spaces) if isinstance(spaces, (dict, list)) else []
+        out.extend(Attested("codex_meta", p) for p in names if isinstance(p, str) and os.path.isabs(p))
+    if _client_platform == "claude-code" and _claude_project_dir and os.path.isabs(_claude_project_dir):
+        out.append(Attested("claude_project_dir", _claude_project_dir))
+    out.extend(Attested("mcp_roots", p) for p in _host_roots)
+    return out
+
+
+def _registry() -> Registry:
+    """~/.aegis/workspaces.json, re-read only when it changes."""
+    global _registry_cache
+    layout = UserLayout.current()
+    if layout is None:
+        return Registry()
+    path = layout.workspaces_file
+    try:
+        st = os.stat(path)
+        key: Tuple[Any, ...] = (str(path), st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        key = (str(path), None)
+    if _registry_cache is None or _registry_cache[0] != key:
+        _registry_cache = (key, read_registry(path))
+    return _registry_cache[1]
+
+
+def _bind(params: Dict[str, Any], args: Dict[str, Any]) -> WorkspaceBinding:
+    if _workspace_error is not None:
+        return _workspace_error
+    raw_files = args.get("files")
+    files = [f for f in raw_files if isinstance(f, str)] if isinstance(raw_files, list) else None
+    pin = getattr(_canonical_workspace, "root", _canonical_workspace)
+    return resolve_binding(pin=pin, attested=_attested(params), files=files, cwd=_server_cwd, registry=_registry())
+
+
+def _workspace_for(binding: WorkspaceBinding) -> Workspace:
+    """One Workspace per (root, source), reused across calls."""
+    key = (str(binding.root), str(binding.source))
+    if key not in _workspaces:
+        _workspaces[key] = Workspace(root=binding.root)
+    return _workspaces[key]
+
+
+def _unbound_result(binding: WorkspaceBinding) -> Dict[str, Any]:
+    if binding.status == "hold":
+        return {"status": "hold", "reason": binding.reason, "error": binding.message, "binding": binding.as_dict()}
+    if binding.status == "error":
+        return {"status": "FAIL", "error": binding.message, "binding": binding.as_dict()}
+    return {"status": "not_governed", "error": NOT_GOVERNED_MESSAGE, "binding": binding.as_dict()}
+
+
+def _tool_result(req_id: Any, text: str, is_error: bool) -> Dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "result": {"content": [{"type": "text", "text": text}], "isError": is_error},
+    }
+
+
+def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    global _session_id, _client_platform, _client_name, _client_version, _roots_capable, _host_roots
+
+    if not isinstance(request, dict):
+        return _error(None, -32600, "Invalid Request")
+    req_id = request.get("id")
+    if not _valid_id(req_id):
+        return _error(None, -32600, "Invalid Request")
+    if "method" not in request:
+        if "result" in request or "error" in request:
+            _route_response(request)
+            return None
+        return _error(req_id, -32600, "Invalid Request")
+    method = request.get("method")
+    if not isinstance(method, str):
+        return _error(req_id, -32600, "Invalid Request")
+    params = request.get("params")
+    if params is None:
+        params = {}
+
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
+    if method == "initialize":
+        params = params if isinstance(params, dict) else {}
+        _session_id = uuid.uuid4().hex
+        _client_platform, _client_name, _client_version = _identify(params)
+        capabilities = params.get("capabilities")
+        _roots_capable = isinstance(capabilities, dict) and isinstance(capabilities.get("roots"), dict)
+        _host_roots = ()
         return {
             "jsonrpc": "2.0",
             "id": req_id,
-            "error": {
-                "code": -32601,
-                "message": f"Method not found: {method}"
-            }
+            "result": {
+                "protocolVersion": negotiate_protocol(params.get("protocolVersion")),
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "aegis-mcp", "version": __version__},
+                "instructions": instructions_text(),
+            },
         }
+    if method in ("notifications/initialized", "notifications/roots/list_changed"):
+        _request_roots()
+        return None
+    if method.startswith("notifications/"):
+        return None
+    if method not in ("tools/list", "tools/call"):
+        return _error(req_id, -32601, f"Method not found: {method}")
+    if _session_id is None:
+        return _error(req_id, -32002, "Server not initialized")
+    if method == "tools/list":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOL_DEFINITIONS}}
 
-def _on_session_close(workspace: Optional[str] = None) -> None:
-    """Trigger background ACE outcome reflection upon session termination."""
-    reflect_close = os.environ.get("AEGIS_REFLECT_ON_CLOSE", "1")
-    if reflect_close == "0":
-        return
-    ws = workspace or _canonical_workspace
-    if not ws:
-        return
+    if _workspace_error is not None:
+        return _tool_result(req_id, json.dumps(_unbound_result(_workspace_error)), True)
+    if not isinstance(params, dict):
+        return _error(req_id, -32602, "Tool call params must be an object.")
+
+    name = params.get("name")
+    args = params.get("arguments", {})
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        return _error(req_id, -32602, "Tool arguments must be an object.")
+    if not is_known_tool(name):
+        return _error(req_id, -32602, f"Unknown tool: {name}")
+    if not _check_rate_limit(name):
+        max_calls, window = _RATE_LIMITS[name]
+        return _error(req_id, -32000, f"Rate limit exceeded for '{name}': max {max_calls} calls per {window}s")
+
+    # The client never chooses the workspace or the attribution of what it reports.
+    args = strip_server_owned(args)
+    binding = _bind(params, args)
+    if binding.bound:
+        args["workspace"] = _workspace_for(binding)
+        args["_binding"] = binding.source
+    elif binding.status == "unbound" and name == "aegis_scan":
+        args["_unbound"] = binding.reason
+    else:
+        return _tool_result(req_id, json.dumps(_unbound_result(binding)), True)
+    args["_host"] = _client_platform
+    args["_session"] = _session_id
+    args["_client_name"] = _client_name
+    args["_client_version"] = _client_version
+
     try:
-        from aegis_core.outcomes import run_outcome_engine
+        # Handlers may print progress notes; stdout belongs to the JSON-RPC framing.
         with contextlib.redirect_stdout(sys.stderr):
-            run_outcome_engine(ws)
-    except Exception:
-        pass
+            result = execute_tool(name, args)
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        return _tool_result(req_id, f"Tool execution failed: {exc}", True)
+    return _tool_result(req_id, json.dumps(result), is_error_result(result))
+
+
+def _start(environ: Optional[Dict[str, str]] = None) -> None:
+    """Reset the connection state and read what the process was started with."""
+    global _canonical_workspace, _workspace_error, _server_cwd, _claude_project_dir
+    for attr, value in fresh_state().items():
+        globals()[attr] = value
+    env = os.environ if environ is None else environ
+    try:
+        _server_cwd = os.getcwd()
+    except OSError:
+        _server_cwd = None
+    _claude_project_dir = env.get("CLAUDE_PROJECT_DIR") or None
+    pin = env_workspace(env)
+    if pin:
+        checked = resolve_binding(pin=pin)
+        if checked.status == "error":
+            # Stay up so the host does not mark the server failed; tools/call explains why.
+            _workspace_error = checked
+            print(f"aegis-mcp: {checked.message}", file=sys.stderr)
+        else:
+            _canonical_workspace = pin
 
 
 def run_stdio_server():
-    global _canonical_workspace
-    global _execution_enabled
-
-    workspace_env = os.environ.get("AEGIS_WORKSPACE") or os.getcwd()
-    try:
-        from pathlib import Path
-        ws_candidate = Path(workspace_env).resolve()
-        home_resolved = Path.home().resolve()
-        if ws_candidate == home_resolved and not (home_resolved / ".aegis" / "rules").is_dir():
-            (home_resolved / ".aegis" / "rules").mkdir(parents=True, exist_ok=True)
-            os.environ.setdefault("AEGIS_REFLECT_ON_CLOSE", "0")
-    except OSError:
-        pass
-    try:
-        from .security import Workspace
-        _canonical_workspace = Workspace.confine(workspace_env)
-    except ValueError as e:
-        print(f"Error: Invalid canonical workspace: {e}", file=sys.stderr)
-        return 1
-        
-    _execution_enabled = os.environ.get("AEGIS_EXECUTION_ENABLED") == "1"
-    requests_processed = 0
-
+    _start()
     try:
         for line in sys.stdin:
             line = line.strip()
@@ -564,34 +414,43 @@ def run_stdio_server():
                 continue
             try:
                 request = json.loads(line)
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
+                # A deeply nested line exhausts the decoder's recursion budget: answer it
+                # as unparseable and keep serving.
                 send_error(None, -32700, "Parse error")
                 continue
-                
+
+            if not isinstance(request, dict):
+                # Batches are not supported; a scalar or array frame is an Invalid Request.
+                send_error(None, -32600, "Invalid Request")
+                continue
+
             try:
                 if request.get("jsonrpc") != "2.0":
-                    continue # ignore invalid
-                    
-                requests_processed += 1
-                if "id" in request:
-                    # It's a request
-                    response = handle_request(request)
-                    if response:
-                        send_response(response)
-                else:
-                    # It's a notification
-                    handle_request(request)
+                    if "id" in request:
+                        send_error(_safe_id(request["id"]), -32600, "Invalid Request")
+                    continue
+
+                response = handle_request(request)
+                if response is not None and "id" in request:
+                    send_response(response)
             except Exception:
                 traceback.print_exc(file=sys.stderr)
                 if "id" in request:
-                    send_error(request["id"], -32603, "Internal error")
+                    send_error(_safe_id(request["id"]), -32603, "Internal error")
+            for message in take_outbox():
+                send_response(message)
     except (BrokenPipeError, KeyboardInterrupt):
         pass
     finally:
-        if _canonical_workspace:
-            _on_session_close(_canonical_workspace)
-                    
+        # Nothing of this connection may outlive it in an embedding process.
+        for attr, value in fresh_state().items():
+            globals()[attr] = value
+
+    # Shutdown deliberately runs nothing (ADR 0005 AD-1): close-time reflection ran the
+    # project's test target and, with N servers per repo, recorded one change N times.
     return 0
+
 
 def main():
     sys.exit(run_stdio_server())

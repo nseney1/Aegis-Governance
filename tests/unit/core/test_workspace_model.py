@@ -13,13 +13,11 @@ from aegis_core.errors import (
     WorkspaceError,
     WorkspaceNotFoundError,
 )
+from aegis_core.workspace.base import Workspace
+from aegis_core.rules import validate_rule_names
 from aegis_core.workspace import (
-    Workspace,
     confine_path,
-    confine_workspace,
     resolve_workspace,
-    resolve_workspace_path,
-    validate_rule_names,
 )
 
 
@@ -103,9 +101,8 @@ class TestWorkspaceModel:
         ws = Workspace.resolve(aegis_ws)
         assert ws.aegis_dir == ws.root / ".aegis"
         assert ws.rules_dir == ws.root / ".aegis" / "rules"
-        assert ws.metrics_dir == ws.root / ".aegis" / "metrics"
-        assert ws.evidence_dir == ws.root / ".aegis" / "evidence"
-        assert ws.signals_file == ws.root / ".aegis" / "evidence" / "signals.jsonl"
+        assert ws.layout.state_dir == ws.root / ".aegis" / "state"
+        assert ws.layout.ledger_file == ws.root / ".aegis" / "state" / "ledger.jsonl"
         assert ws / "subdir" == ws.root / "subdir"
 
     def test_workspace_pathlike_and_immutability(self, aegis_ws: Path):
@@ -161,10 +158,10 @@ class TestWorkspaceModel:
         with pytest.raises(PathTraversalError, match="reserved Windows device name"):
             ws.confine_path("CON.txt")
 
-    def test_workspace_validate_rule_names(self, aegis_ws: Path):
+    def test_validate_rule_names_takes_a_workspace(self, aegis_ws: Path):
         ws = Workspace.resolve(aegis_ws)
-        assert ws.validate_rule_names(["invariant-test"]) == []
-        assert ws.validate_rule_names(["invariant-test", "invariant-nonexistent"]) == ["invariant-nonexistent"]
+        assert validate_rule_names(["invariant-test"], ws) == []
+        assert validate_rule_names(["invariant-test", "invariant-nonexistent"], ws) == ["invariant-nonexistent"]
 
 
 class TestWorkspaceBackwardCompatibilityFacades:
@@ -173,11 +170,11 @@ class TestWorkspaceBackwardCompatibilityFacades:
         assert isinstance(root_str, str)
         assert root_str == str(aegis_ws.resolve())
 
-        root_path = resolve_workspace_path(aegis_ws)
+        root_path = Workspace.resolve(aegis_ws).root
         assert isinstance(root_path, Path)
         assert root_path == aegis_ws.resolve()
 
-        confined = confine_workspace(str(aegis_ws))
+        confined = str(Workspace.confine(str(aegis_ws)).root)
         assert confined == str(aegis_ws.resolve())
 
         missing = validate_rule_names(["invariant-test", "ghost"], aegis_ws)

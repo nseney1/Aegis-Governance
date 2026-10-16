@@ -5,102 +5,89 @@ The output feeds directly into the Arbiter as Layer 1 evidence.
 """
 from __future__ import annotations
 
+import ast
+import hashlib
 import os
+from pathlib import Path
+import posixpath
+import re
 import sys
-from typing import Optional
+from aegis_core.match import is_test_path
+from aegis_core.workspace.layout import RULES_RELDIR
+from typing import Any, Optional
 
-from . import ToolEvidence, ArbitrationResult
+from . import ToolEvidence
 from . import persistence_checker
 from . import call_graph
 from . import import_guard
 from . import mutation_tester
-from . import branch_coverage
 
 VerificationResult = ToolEvidence
 
 
-def _matches_rule_patterns(rel_path: str, patterns: list[str]) -> bool:
-    """Check if rel_path matches any rule glob pattern (including **/ globs)."""
-    import fnmatch
+_FORBID_AST_KEYS = ("imports", "calls", "decorators")
 
-    if not patterns:
-        return True
-    norm_rel = rel_path.replace("\\", "/").lstrip("/")
-    base = os.path.basename(norm_rel)
-    for raw_pat in patterns:
-        pat = str(raw_pat).replace("\\", "/").strip()
-        if not pat:
+
+def _forbid_ast_spec_error(spec: object) -> Optional[str]:
+    """Why a declared ``forbid_ast`` would enforce nothing as written; None when it is well-formed.
+
+    evaluate_forbid_ast ignores what it cannot use (a list, a string where a list belongs,
+    a misspelt key), so a gate rule in such a shape would pass every file.
+    """
+    if not isinstance(spec, dict):
+        return f"forbid_ast must map imports/calls/decorators to lists, not {type(spec).__name__}"
+    unknown = sorted(str(key) for key in spec if key not in _FORBID_AST_KEYS)
+    if unknown:
+        listed = ", ".join(repr(key) for key in unknown)
+        return f"unknown forbid_ast key {listed} (allowed: {', '.join(_FORBID_AST_KEYS)})"
+    patterns = 0
+    for key, value in spec.items():
+        if not isinstance(value, list) or not all(isinstance(p, str) and p.strip() for p in value):
+            return f"forbid_ast.{key} must be a list of non-empty strings, not {type(value).__name__}"
+        patterns += len(value)
+    return None if patterns else "forbid_ast declares no patterns"
+
+
+def _discover_forbid_ast_rules(
+    repo_root: str,
+) -> tuple[list[tuple[Any, dict]], list[tuple[str, str]]]:
+    """The workspace rules (aegis_core.rules, .aegis/rules/<type>/) that declare forbid_ast.
+
+    Returns (rules, broken): a rule file that cannot be loaded and names forbid_ast, or
+    whose forbid_ast is malformed, would enforce nothing, so each is returned as
+    (relative path, reason) for the caller to fail closed on instead of being dropped.
+    An unsafe rules tree raises (RuleInventoryError), which the caller also fails on.
+    """
+    from aegis_core.rules import load_rules, workspace_root
+
+    ruleset = load_rules(workspace_root(repo_root))
+    discovered: list[tuple[Any, dict]] = []
+    broken: list[tuple[str, str]] = []
+    for rule in ruleset.rules:
+        if not rule.ok:
+            # Only a file that names the key can declare it: a damaged note does not gate.
+            if b"forbid_ast" in rule.raw:
+                broken.append((rule.path, rule.error or "cannot be loaded"))
             continue
-        if norm_rel == pat or fnmatch.fnmatch(norm_rel, pat) or fnmatch.fnmatch(base, pat):
-            return True
-        if pat.startswith("**/"):
-            stripped = pat[3:]
-            if fnmatch.fnmatch(norm_rel, stripped) or fnmatch.fnmatch(base, stripped):
-                return True
-        if "/**/" in pat:
-            collapsed = pat.replace("/**/", "/")
-            if fnmatch.fnmatch(norm_rel, collapsed):
-                return True
-    return False
-
-
-def _discover_forbid_ast_rules(repo_root: str) -> list[tuple[str, dict, list[str]]]:
-    """Discover workspace rules in rules/ and .aegis/rules/ declaring forbid_ast."""
-    from pathlib import Path
-    from aegis_core.yaml import AegisYAML
-    from aegis_core.workspace import Workspace
-
-    root_path = Path(str(getattr(repo_root, "root", repo_root))).resolve()
-    ws_obj = None
-    try:
-        ws_obj = Workspace(root_path)
-    except Exception:
-        ws_obj = None
-
-    candidate_dirs = [root_path / "rules", root_path / ".aegis" / "rules"]
-    discovered: list[tuple[str, dict, list[str]]] = []
-    seen_ids: set[str] = set()
-
-    for rules_dir in candidate_dirs:
-        if not rules_dir.is_dir():
+        if rule.expired or "forbid_ast" not in rule.meta:
             continue
-        for md_file in sorted(rules_dir.rglob("*.md")):
-            if md_file.name == "README.md" or md_file.is_symlink():
-                continue
-            try:
-                rel_md = md_file.relative_to(root_path)
-                if ws_obj is not None:
-                    doc = AegisYAML.parse_file(rel_md, ws_obj)
-                else:
-                    doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
-            except Exception:
-                try:
-                    doc = AegisYAML.parse_text(md_file.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
+        spec = rule.meta.get("forbid_ast")
+        spec_error = _forbid_ast_spec_error(spec)
+        if spec_error:
+            broken.append((rule.path, spec_error))
+            continue
+        discovered.append((rule, spec))
+    return discovered, broken
 
-            if doc.get("expired_at"):
-                continue
-            forbid_spec = doc.get("forbid_ast")
-            if not isinstance(forbid_spec, dict) or not forbid_spec:
-                continue
 
-            rule_id = str(doc.get("id") or doc.get("name") or md_file.stem)
-            if rule_id in seen_ids:
-                continue
-            seen_ids.add(rule_id)
-
-            raw_paths = doc.get("target_paths") or doc.get("paths") or doc.get("globs") or []
-            if isinstance(raw_paths, str):
-                patterns = [raw_paths]
-            elif isinstance(raw_paths, (list, tuple, set)):
-                patterns = [str(p) for p in raw_paths if p]
-            else:
-                patterns = []
-
-            discovered.append((rule_id, forbid_spec, patterns))
-
-    return discovered
+# The tests/ directory that holds each package's tests, most specific first.
+_TEST_HOMES = (
+    ("aegis_core/verification/", "unit/verification"),
+    ("aegis_core/", "unit/core"),
+    ("aegis_cli/", "unit/cli"),
+    ("aegis_mcp/", "unit/mcp"),
+    ("aegis_sdk/", "unit/sdk"),
+)
 
 
 def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
@@ -113,6 +100,8 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
       4. tests/<clean_parent>/test_<stem>.py
       5. tests/test_<clean_parent>/test_<stem>.py
       6. Domain mappings (e.g. runner.py -> test_verification/test_layer1.py)
+    Each name is tried in the source package's own test directory (_TEST_HOMES)
+    before anywhere else.
     """
     norm = filepath.replace("\\", "/").replace("soma_", "aegis_")
     def _find_in_tests(*names: str) -> Optional[str]:
@@ -127,14 +116,6 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
         found = _find_in_tests("test_mcp_handlers.py")
         if found:
             return found
-    if "aegis_core/outcomes/harvest.py" in norm:
-        found = _find_in_tests("test_git_retro_harvest.py")
-        if found:
-            return found
-    if "aegis_core/outcomes/insights.py" in norm:
-        found = _find_in_tests("test_outcomes_insights.py")
-        if found:
-            return found
     if "aegis_core/outcomes/telemetry.py" in norm:
         found = _find_in_tests("test_outcomes_telemetry.py")
         if found:
@@ -147,8 +128,8 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
         found = _find_in_tests("test_slots.py")
         if found:
             return found
-    if "aegis_core/skills" in norm or "aegis_core/schemas/artifacts.py" in norm:
-        found = _find_in_tests("test_skills_and_handoff.py")
+    if "aegis_core/skills" in norm:
+        found = _find_in_tests("test_skills.py")
         if found:
             return found
 
@@ -172,6 +153,15 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
         if found:
             return found
 
+    # A same-named test of another package (tests/unit/core/test_scan.py for
+    # aegis_cli/scan.py) must not win over the source package's own tests.
+    home = next((d for pkg, d in _TEST_HOMES if f"/{pkg}" in f"/{norm}"), None)
+    if home:
+        for cand_name in candidates:
+            p = os.path.join(repo_root, "tests", home, cand_name)
+            if os.path.isfile(p):
+                return p
+
     for cand_name in candidates:
         found = _find_in_tests(cand_name)
         if found:
@@ -180,84 +170,185 @@ def _find_test_file(filepath: str, repo_root: str) -> Optional[str]:
     return None
 
 
-def _discover_functions(filepath: str, target_lines: Optional[set[int]] = None) -> list[str]:
-    """Extract top-level function names from a Python file via AST.
-
-    If target_lines is provided, only functions intersecting target_lines are returned.
-    """
-    import ast
+def _module_names(filepath: str, repo_root: str) -> set[str]:
+    """The dotted names a test can import ``filepath`` by: its package path and its path from the root."""
+    full = os.path.abspath(os.path.join(repo_root, filepath))
+    stem = os.path.splitext(os.path.basename(full))[0]
+    parts = [stem]
+    parent = os.path.dirname(full)
+    while os.path.isfile(os.path.join(parent, "__init__.py")):
+        parts.insert(0, os.path.basename(parent))
+        parent = os.path.dirname(parent)
+    names = {".".join(parts)}
     try:
-        with open(filepath) as f:
-            tree = ast.parse(f.read())
-    except (SyntaxError, OSError):
-        return []
-    funcs: list[str] = []
+        names.add(".".join(Path(os.path.relpath(os.path.splitext(full)[0], repo_root)).parts))
+    except ValueError:  # another drive on Windows
+        pass
+    return names
+
+
+def _imports_module(tree: ast.AST, names: set[str]) -> bool:
+    """Whether a module imports one of ``names``: ``import a.b``, ``from a.b import x`` or ``from a import b``."""
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.FunctionDef)
-            and not node.name.startswith('_')
-            and not node.name.startswith('test_')
-        ):
-            if target_lines is not None:
-                start = node.lineno
-                end = getattr(node, "end_lineno", start)
-                fn_lines = set(range(start, end + 1))
-                if not (fn_lines & target_lines):
-                    continue
-            funcs.append(node.name)
-    return funcs
+        if isinstance(node, ast.Import):
+            if any(alias.name in names for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            if node.module in names or any(f"{node.module}.{alias.name}" in names for alias in node.names):
+                return True
+    return False
+
+
+class _TestModules:
+    """The test modules under ``tests/``, in path order, each read and parsed at most once per run."""
+
+    def __init__(self, repo_root: str):
+        base = os.path.join(repo_root, "tests")
+        found: list[str] = []
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__" and not d.startswith(".")]
+            for name in filenames:
+                stem, ext = os.path.splitext(name)
+                if ext == ".py" and (stem.startswith("test_") or stem.endswith("_test")):
+                    found.append(os.path.join(dirpath, name))
+        self.paths = sorted(found, key=lambda path: Path(os.path.relpath(path, base)).as_posix())
+        self._text: dict[str, str] = {}
+        self._tree: dict[str, Optional[ast.AST]] = {}
+
+    def text(self, path: str) -> str:
+        if path not in self._text:
+            try:
+                self._text[path] = Path(path).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                self._text[path] = ""
+        return self._text[path]
+
+    def tree(self, path: str) -> Optional[ast.AST]:
+        if path not in self._tree:
+            try:
+                self._tree[path] = ast.parse(self.text(path))
+            except (SyntaxError, ValueError, RecursionError):
+                self._tree[path] = None
+        return self._tree[path]
+
+
+def _find_mutation_test_files(filepath: str, repo_root: str, func_name: str, tests: _TestModules) -> list[str]:
+    """The test files that face mutants of ``func_name`` in ``filepath``.
+
+    The convention file (``_find_test_file``) first, then, in path order, every test
+    module under ``tests/`` that imports the module and names the function (a method or
+    nested function by its own name: ``Class.method`` is called as ``obj.method``). A
+    mutant that survives them has met every test that could plausibly detect it, not just
+    the one conventionally named file. mutation_tester caps how many run.
+    """
+    convention = _find_test_file(filepath, repo_root)
+    names = _module_names(filepath, repo_root)
+    tails = {name.rpartition(".")[2] for name in names}
+    mentions = re.compile(rf"\b{re.escape(func_name.rpartition('.')[2])}\b")
+    ordered = [convention] if convention else []
+    convention_key = os.path.normcase(os.path.abspath(convention)) if convention else None
+    for path in tests.paths:
+        text = tests.text(path)
+        if not mentions.search(text) or not any(tail in text for tail in tails):
+            continue
+        tree = tests.tree(path)
+        if (tree is not None and os.path.normcase(os.path.abspath(path)) != convention_key
+                and _imports_module(tree, names)):
+            ordered.append(path)
+    return ordered
+
+
+def _discover_functions(filepath: str, target_lines: Optional[set[int]] = None) -> list[str]:
+    """The public functions of a Python file, by the qualified name mutation_tester resolves.
+
+    A method is ``Class.method`` and a nested function ``outer.inner``; each name is listed
+    once, outer scopes first (breadth first), even when it is defined twice (a platform
+    branch). Unqualified, every method was mutated as the first definition in the file with
+    its name. With target_lines, only the functions intersecting them.
+    """
+    from aegis_core.ast.drivers.python import read_python_source
+
+    try:
+        tree = ast.parse(read_python_source(filepath))
+    except (SyntaxError, OSError, UnicodeError, ValueError):
+        return []
+    found: dict[str, None] = {}
+    todo: list[tuple[ast.AST, str]] = [(tree, "")]
+    for node, scope in todo:  # grows while iterated: a breadth-first walk, as ast.walk
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                inner = f"{scope}{child.name}."
+                if (
+                    isinstance(child, ast.FunctionDef)
+                    and not child.name.startswith(("_", "test_"))
+                    and (target_lines is None
+                         or not target_lines.isdisjoint(range(child.lineno, (child.end_lineno or child.lineno) + 1)))
+                ):
+                    found.setdefault(inner[:-1], None)
+            todo.append((child, inner))
+    return list(found)
 
 
 def _get_modified_lines(filepath: str, repo_root: str, diff_base: Optional[str] = None) -> Optional[set[int]]:
-    """Extract line numbers of additions/modifications in filepath via git diff."""
-    import re
-    import subprocess
-    lines: set[int] = set()
-    found_hunks = False
+    """1-based lines of ``filepath``'s working copy that are new or changed against a base.
 
-    diff_targets = []
+    Bases, in order: ``diff_base`` (``REF...HEAD`` means its merge base with HEAD), HEAD,
+    the merge base with the pull request's base branch, then HEAD~1. The first base the
+    file differs from wins. Returns None when no base shows a change or git cannot answer.
+    Old contents come from ``gitsafe.read_blob``; the comparison is done here, so no
+    porcelain diff (and no repository fsmonitor or diff driver) is involved.
+    """
+    import difflib
+
+    from aegis_core import gitsafe
+
+    try:
+        current = (Path(repo_root) / filepath).read_bytes().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    rel = Path(os.path.relpath(Path(repo_root) / filepath, repo_root)).as_posix()
+
+    bases: list[Optional[str]] = []
     if diff_base:
-        diff_targets.extend([
-            ["git", "diff", "-U0", diff_base, "--", filepath],
-            ["git", "diff", "-U0", f"{diff_base}...HEAD", "--", filepath],
-        ])
-    diff_targets.extend([
-        ["git", "diff", "-U0", "HEAD", "--", filepath],
-        ["git", "diff", "-U0", "--cached", "--", filepath],
-    ])
-    base_ref = os.environ.get("GITHUB_BASE_REF")
-    if base_ref:
-        diff_targets.extend([
-            ["git", "diff", "-U0", f"origin/{base_ref}...HEAD", "--", filepath],
-            ["git", "diff", "-U0", f"{base_ref}...HEAD", "--", filepath],
-        ])
-    diff_targets.extend([
-        ["git", "diff", "-U0", "origin/develop...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "develop...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "origin/main...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "main...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "HEAD~1...HEAD", "--", filepath],
-        ["git", "diff", "-U0", "HEAD~1", "--", filepath],
-    ])
-    for cmd in diff_targets:
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_root, timeout=5)
-            if res.returncode == 0 and res.stdout.strip():
-                for line in res.stdout.splitlines():
-                    if line.startswith("@@"):
-                        found_hunks = True
-                        m = re.search(r"\+(\d+)(?:,(\d+))?", line)
-                        if m:
-                            start = int(m.group(1))
-                            count = int(m.group(2)) if m.group(2) is not None else 1
-                            if count > 0:
-                                lines.update(range(start, start + count))
-                if found_hunks:
-                    break
-        except Exception:
-            pass
-    return lines if found_hunks else None
+        if diff_base.endswith("...HEAD"):
+            bases.append(gitsafe.merge_base(repo_root, diff_base[: -len("...HEAD")]))
+        else:
+            bases.append(gitsafe.resolve_commit(repo_root, diff_base))
+    bases.append(gitsafe.head_commit(repo_root))
+    pr_base = gitsafe.resolve_base_ref(repo_root)
+    if pr_base:
+        bases.append(gitsafe.merge_base(repo_root, pr_base))
+    bases.append(gitsafe.resolve_commit(repo_root, "HEAD~1"))
 
+    seen: set[str] = set()
+    for base in bases:
+        if not base or base in seen:
+            continue
+        seen.add(base)
+        try:
+            old = gitsafe.read_blob(repo_root, base, rel)
+        except gitsafe.GitError:
+            return None
+        before = old.decode("utf-8", "replace").splitlines() if old is not None else []
+        lines: set[int] = set()
+        matcher = difflib.SequenceMatcher(None, before, current, autojunk=False)
+        for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+            if tag in ("replace", "insert"):
+                lines.update(range(j1 + 1, j2 + 1))
+        if lines:
+            return lines
+    return None
+
+
+def _tool_failure(tool: str, target: str, exc: Exception) -> ToolEvidence:
+    """A Layer 1 tool that raised fails the gate; it must never abort the run or pass silently."""
+    return ToolEvidence(
+        tool=tool,
+        target=target,
+        verdict=False,
+        detail=f"{tool}: cannot verify {target}: {type(exc).__name__}: {exc}",
+    )
 
 
 def run_layer1(
@@ -265,7 +356,6 @@ def run_layer1(
     repo_root: str,
     persistence_targets: Optional[list[tuple[str, str]]] = None,
     mutation_targets: Optional[list[tuple[str, str, str]]] = None,
-    coverage_targets: Optional[list[tuple[str, str]]] = None,
     max_mutations: int = 5,
     fast_mode: bool = False,
     diff_base: Optional[str] = None,
@@ -278,9 +368,8 @@ def run_layer1(
         persistence_targets: List of (filepath, dict_name) tuples for
             persistence checking. If None, auto-detects from changed_files.
         mutation_targets: List of (source_file, func_name, test_file) tuples.
-            If None, auto-discovers from changed_files using convention.
-        coverage_targets: List of (source_file, test_file) tuples.
-            If None, auto-discovers from changed_files using convention.
+            If None, auto-discovers the changed functions of changed_files and,
+            for each, the test files that exercise it (_find_mutation_test_files).
         max_mutations: Maximum mutations per function (default: 5).
 
     Returns:
@@ -290,17 +379,7 @@ def run_layer1(
     repo_root_str = str(getattr(repo_root, "root", repo_root))
 
     def _is_test_or_support(fpath: str) -> bool:
-        norm = fpath.replace('\\', '/')
-        bname = os.path.basename(fpath)
-        if norm.startswith(('soma_core/', 'soma_cli/', 'soma_sdk/', 'soma_mcp/')) and os.path.isdir(os.path.join(repo_root_str, 'aegis_core')):
-            return True
-        return (
-            norm.startswith('tests/')
-            or '/tests/' in norm
-            or bname.startswith('test_')
-            or bname.endswith(('_test.go', '_test.py', '.test.ts', '.spec.ts', '.test.js', '.spec.js'))
-            or bname in ('__init__.py', 'conftest.py', 'harness.py', 'helpers_cell.py')
-        )
+        return is_test_path(fpath) or os.path.basename(fpath) == '__init__.py'
 
     # ── Persistence Completeness ──────────────────────────────────────
     if persistence_targets:
@@ -320,19 +399,22 @@ def run_layer1(
         if _is_test_or_support(filepath):
             continue
         ext = os.path.splitext(filepath)[1].lower()
-        if ext == ".py":
-            results.append(call_graph.check(
-                full_path, repo_root_str,
-                exclude_names={'main', '_parse_args', 'parse_args'},
-                fast_mode=fast_mode,
-            ))
-        elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str):
-            results.append(call_graph.check(
-                full_path, repo_root_str,
-                exclude_names={'main', '_parse_args', 'parse_args'},
-                fast_mode=fast_mode,
-                ast_runner=ast_runner,
-            ))
+        try:
+            if ext == ".py":
+                results.append(call_graph.check(
+                    full_path, repo_root_str,
+                    exclude_names={'main', '_parse_args', 'parse_args'},
+                    fast_mode=fast_mode,
+                ))
+            elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str):
+                results.append(call_graph.check(
+                    full_path, repo_root_str,
+                    exclude_names={'main', '_parse_args', 'parse_args'},
+                    fast_mode=fast_mode,
+                    ast_runner=ast_runner,
+                ))
+        except Exception as exc:
+            results.append(_tool_failure("call_graph", filepath, exc))
 
     # ── Import Guards ─────────────────────────────────────────────────
     for filepath in changed_files:
@@ -340,12 +422,32 @@ def run_layer1(
         if os.path.exists(full_path) and filepath.endswith('.py'):
             if _is_test_or_support(filepath):
                 continue
-            results.append(import_guard.check(full_path, project_root=repo_root_str))
+            try:
+                results.append(import_guard.check(full_path, project_root=repo_root_str))
+            except Exception as exc:
+                results.append(_tool_failure("import_guard", filepath, exc))
 
     # ── Declarative Rule-Level forbid_ast ─────────────────────────────
-    from aegis_core.ast.match import evaluate_forbid_ast, extract_normalized_ast
+    from aegis_core.ast.policy import ASTExtractionError, evaluate_forbid_ast, extract_normalized_ast
 
-    forbid_rules = _discover_forbid_ast_rules(repo_root_str)
+    try:
+        forbid_rules, broken_rules = _discover_forbid_ast_rules(repo_root_str)
+    except Exception as exc:
+        # The rules are gate rules: if they cannot be read, nothing may pass unchecked.
+        forbid_rules, broken_rules = [], []
+        results.append(ToolEvidence(
+            tool="forbid_ast",
+            target=RULES_RELDIR,
+            verdict=False,
+            detail=f"forbid_ast: cannot load rules: {type(exc).__name__}: {exc}",
+        ))
+    for rule_path, reason in broken_rules:
+        results.append(ToolEvidence(
+            tool="forbid_ast",
+            target=rule_path,
+            verdict=False,
+            detail=f"forbid_ast: cannot load rule {rule_path}: {reason}",
+        ))
     if forbid_rules:
         ast_cache: dict[str, object] = {}
         for filepath in changed_files:
@@ -356,30 +458,45 @@ def run_layer1(
                 rel_path = os.path.relpath(full_path, repo_root_str).replace("\\", "/")
             except ValueError:
                 rel_path = filepath.replace("\\", "/")
-            is_test_path = (
-                rel_path.startswith("tests/")
-                or "/tests/" in f"/{rel_path}"
-                or os.path.basename(rel_path).startswith("test_")
-            )
-
-            for rule_id, forbid_spec, patterns in forbid_rules:
-                rule_targets_tests = any(
-                    "tests/" in p.replace("\\", "/") or "test_" in p
-                    for p in patterns
-                )
-                if is_test_path and not rule_targets_tests:
-                    continue
-                if patterns and not _matches_rule_patterns(rel_path, patterns):
+            for rule, forbid_spec in forbid_rules:
+                rule_id = rule.id
+                # Rule.applies_to: target_paths ("**" when a forbid_ast rule names none),
+                # and test files only when the patterns name tests. Scan, telemetry and
+                # coverage ask the same question.
+                if not rule.applies_to(rel_path):
                     continue
 
-                if full_path not in ast_cache:
-                    ast_cache[full_path] = extract_normalized_ast(
-                        full_path, workspace_root=repo_root_str, ast_runner=ast_runner
+                try:
+                    if full_path not in ast_cache:
+                        try:
+                            ast_cache[full_path] = extract_normalized_ast(
+                                full_path, workspace_root=repo_root_str, ast_runner=ast_runner
+                            )
+                        except ASTExtractionError as exc:
+                            ast_cache[full_path] = exc
+                    norm_ast = ast_cache[full_path]
+                    if norm_ast is None:  # no AST driver for this file type: rule does not apply
+                        continue
+                    violations: list[str] = []
+                    if not isinstance(norm_ast, ASTExtractionError):
+                        try:
+                            violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                        except ASTExtractionError as exc:  # decorators had to be re-read from disk
+                            norm_ast = exc
+                except Exception as exc:
+                    results.append(_tool_failure(f"forbid_ast:{rule_id}", rel_path, exc))
+                    continue
+                if isinstance(norm_ast, ASTExtractionError):
+                    # Fail closed: a gate rule that cannot read the file must not pass it.
+                    results.append(
+                        VerificationResult(
+                            tool=f"forbid_ast:{rule_id}",
+                            target=rel_path,
+                            verdict=False,
+                            detail=f"forbid_ast: cannot verify {rel_path}: {norm_ast.reason}",
+                        )
                     )
-                norm_ast = ast_cache[full_path]
-                if norm_ast is None:
                     continue
-                violations = evaluate_forbid_ast(norm_ast, forbid_spec)
                 if violations:
                     results.append(
                         VerificationResult(
@@ -401,113 +518,30 @@ def run_layer1(
                         src_path, func, tst_path, max_mutations=max_mutations,
                     ))
         else:
-            # Auto-discover: for each changed .py file, find test file and functions
+            # Auto-discover: for each changed .py file, its changed functions and the
+            # test files that exercise each of them.
+            test_modules: Optional[_TestModules] = None
             for filepath in changed_files:
                 if not filepath.endswith('.py') or _is_test_or_support(filepath):
                     continue
                 full_path = os.path.join(repo_root_str, filepath)
                 if not os.path.exists(full_path):
-                    continue
-                test_file = _find_test_file(filepath, repo_root_str)
-                if test_file is None:
                     continue
                 mod_lines = _get_modified_lines(filepath, repo_root_str, diff_base=diff_base)
                 funcs = _discover_functions(full_path, target_lines=mod_lines)
                 for func_name in funcs[:3]:  # Limit auto-discovery to 3 functions
+                    if test_modules is None:
+                        test_modules = _TestModules(repo_root_str)
+                    test_files = _find_mutation_test_files(filepath, repo_root_str, func_name, test_modules)
+                    if not test_files:
+                        continue
                     results.append(mutation_tester.check(
-                        full_path, func_name, test_file,
+                        full_path, func_name, test_files,
                         max_mutations=max_mutations,
                         target_lines=mod_lines,
                     ))
 
-    # ── Branch Coverage ───────────────────────────────────────────────
-    if not fast_mode:
-        if coverage_targets:
-            for source, test in coverage_targets:
-                src_path = os.path.join(repo_root_str, source)
-                tst_path = os.path.join(repo_root_str, test)
-                if os.path.exists(src_path) and os.path.exists(tst_path):
-                    results.append(branch_coverage.check(src_path, tst_path))
-        else:
-            # Auto-discover: pair changed files with test files by convention
-            for filepath in changed_files:
-                if not filepath.endswith('.py') or _is_test_or_support(filepath):
-                    continue
-                full_path = os.path.join(repo_root_str, filepath)
-                if not os.path.exists(full_path):
-                    continue
-                test_file = _find_test_file(filepath, repo_root_str)
-                if test_file is None:
-                    continue
-                mod_lines = _get_modified_lines(filepath, repo_root_str, diff_base=diff_base)
-                results.append(branch_coverage.check(full_path, test_file, target_lines=mod_lines))
-
     return results
-
-
-def __getattr__(name: str):
-    if name == "DeterministicVerifier":
-        from .pipeline import DeterministicVerifier
-        return DeterministicVerifier
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-# ── Layer 2: Adversarial Verification Orchestrator ────────────────────────
-
-
-def _strip_code_fence(text: str) -> str:
-    """Strip markdown code fences (```json ... ```) from LLM output."""
-    import re
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
-
-
-def run_layer2(
-    changed_files: list[str],
-    repo_root: str,
-    task_plan: str,
-    layer1_evidence: list[ToolEvidence],
-    llm_backend,
-    test_names: Optional[list[str]] = None,
-    test_results: Optional[str] = None,
-) -> 'ArbitrationResult':
-    """Run Layer 2 adversarial verification protocol.
-
-    Thin backward-compatibility adapter delegating to AdversarialVerifier and Arbiter.
-    """
-    if llm_backend is None:
-        raise TypeError("llm_backend must be a callable, got None")
-
-    import warnings
-    warnings.warn(
-        "aegis_core.verification.runner.run_layer2 is deprecated; use VerificationPipeline",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    from .pipeline import VerificationPipeline
-
-    pipeline = VerificationPipeline()
-    res = pipeline.run(
-        changed_files=changed_files,
-        workspace=repo_root,
-        task_plan=task_plan,
-        backend=llm_backend,
-        in_band=False,
-        test_names=test_names,
-        test_results=test_results,
-        layer1_evidence=layer1_evidence,
-    )
-    return res.arbitration_result or ArbitrationResult(
-        divergences=[],
-        convergences=[],
-        verdict=res.verdict,
-        layer1_results=layer1_evidence or [],
-        predictions=[],
-        claims=[],
-    )
 
 
 def gate_verdict(results: list[ToolEvidence]) -> bool:
@@ -527,6 +561,298 @@ def format_summary(results: list[ToolEvidence]) -> str:
     if failed:
         return f"Layer 1: {failed}/{total} FAILED — {', '.join(r.tool for r in results if not r.verdict)}"
     return f"Layer 1: {passed}/{total} PASSED"
+
+
+# ── Layer 1 on the index (`aegis check --hook`) ────────────────────────────
+# `git commit` records the index, which can differ from the working tree (a partial
+# `git add`, an edit after it, a staged file since deleted). The hook therefore checks
+# the staged blobs, written to a temporary tree at their repository paths; the rules,
+# AST driver configuration and local-package context stay the workspace's own.
+
+_INDEX_FILE_MODES = frozenset({"100644", "100755"})  # a symlink or submodule has no source to check
+SNAPSHOT_PREFIX = "aegis-index-"
+# The largest staged file the hook reads from git, and the most it reads per git call:
+# memory stays bounded whatever is staged. A larger source file is not read (see
+# _layer1_on_snapshot for what that means for its checks).
+INDEX_BLOB_LIMIT_BYTES = 5 * 1024 * 1024
+INDEX_NOTE_TOOL = "index"  # passing evidence that says what the hook did not check
+
+
+def _git_blob_id(data: bytes, oid_length: int) -> str:
+    header = b"blob %d\0" % len(data)
+    digest = hashlib.sha256 if oid_length == 64 else hashlib.sha1
+    return digest(header + data).hexdigest()
+
+
+def _index_entries(repo_root: str) -> dict[str, tuple[str, str]]:
+    """Path (relative to ``repo_root``, POSIX) -> (mode, object id) for each merged
+    entry of the index under ``repo_root``: the one ``GIT_INDEX_FILE`` names in a hook."""
+    from aegis_core import gitsafe
+
+    res = gitsafe.run(["ls-files", "-s", "-z"], repo_root)
+    if res.returncode != 0:
+        raise gitsafe.GitError(f"git ls-files failed: {res.stderr.decode('utf-8', 'replace').strip()}")
+    entries: dict[str, tuple[str, str]] = {}
+    for record in res.stdout.split(b"\0"):
+        meta, sep, raw_path = record.partition(b"\t")
+        parts = meta.split()
+        if not sep or len(parts) != 3 or parts[2] != b"0":
+            continue  # an unmerged entry: git refuses the commit before any hook runs
+        entries[os.fsdecode(raw_path)] = (parts[0].decode("ascii"), parts[1].decode("ascii"))
+    return entries
+
+
+def _blob_sizes(repo_root: str, oids: list[str]) -> dict[str, int]:
+    """The size of each blob, from the object headers only (no content is read)."""
+    from aegis_core import gitsafe
+
+    wanted = list(dict.fromkeys(oids))
+    if not wanted:
+        return {}
+    res = gitsafe.run(["cat-file", "--batch-check"], repo_root, stdin="".join(f"{oid}\n" for oid in wanted).encode("ascii"))
+    if res.returncode != 0:
+        raise gitsafe.GitError(f"git cat-file failed: {res.stderr.decode('utf-8', 'replace').strip()}")
+    sizes: dict[str, int] = {}
+    for oid, line in zip(wanted, res.stdout.splitlines()):
+        header = line.split()
+        if len(header) != 3 or header[0] != oid.encode("ascii") or header[1] != b"blob" or not header[2].isdigit():
+            raise gitsafe.GitError(f"git cannot read the staged object {oid}")
+        sizes[oid] = int(header[2])
+    if len(sizes) != len(wanted):
+        raise gitsafe.GitError("git did not describe every staged object")
+    return sizes
+
+
+def _read_blobs(repo_root: str, oids: list[str]) -> dict[str, bytes]:
+    """The content of each blob, each checked against its object id."""
+    from aegis_core import gitsafe
+
+    wanted = list(dict.fromkeys(oids))
+    if not wanted:
+        return {}
+    res = gitsafe.run(["cat-file", "--batch"], repo_root, stdin="".join(f"{oid}\n" for oid in wanted).encode("ascii"))
+    if res.returncode != 0:
+        raise gitsafe.GitError(f"git cat-file failed: {res.stderr.decode('utf-8', 'replace').strip()}")
+    out, pos, blobs = res.stdout, 0, {}
+    for oid in wanted:
+        end = out.find(b"\n", pos)
+        header = out[pos:end].split() if end >= 0 else []
+        if len(header) != 3 or header[0] != oid.encode("ascii") or header[1] != b"blob":
+            raise gitsafe.GitError(f"git cannot read the staged object {oid}")
+        size = int(header[2])
+        data = out[end + 1:end + 1 + size]
+        if len(data) != size or _git_blob_id(data, len(oid)) != oid:
+            raise gitsafe.GitError(f"git returned content that does not match the staged object {oid}")
+        blobs[oid] = data
+        pos = end + 1 + size + 1
+    return blobs
+
+
+def _snapshot_file(snapshot: str, rel: str) -> str:
+    """Where ``rel`` (a repository path) lives in the snapshot; never outside it."""
+    parts = rel.split("/")
+    full = os.path.normpath(os.path.join(snapshot, *parts))
+    if any(part in ("", ".", "..") for part in parts) or not full.startswith(os.path.normpath(snapshot) + os.sep):
+        from aegis_core import gitsafe
+
+        raise gitsafe.GitError(f"refusing the staged path {rel!r}: it leaves the snapshot")
+    return full
+
+
+def snapshot_index(repo_root: str, paths: list[str], snapshot: str) -> tuple[list[str], dict[str, int]]:
+    """Write the staged content of ``paths`` (relative to ``repo_root``) under ``snapshot``
+    at the same relative paths. Return the paths written (regular files only) and the
+    size of each staged file larger than INDEX_BLOB_LIMIT_BYTES, whose content is not read.
+
+    The other Python files the index holds next to each one are written empty: Layer 1
+    reads only their names (import_guard counts a sibling module as local), so their
+    content is never read from git. Raises GitError when git cannot list or read the index.
+    """
+    entries = _index_entries(repo_root)
+    staged = [p for p in dict.fromkeys(paths) if entries.get(p, ("", ""))[0] in _INDEX_FILE_MODES]
+    sizes = _blob_sizes(repo_root, [entries[p][1] for p in staged])
+    too_large = {p: sizes[entries[p][1]] for p in staged if sizes[entries[p][1]] > INDEX_BLOB_LIMIT_BYTES}
+    written = [p for p in staged if p not in too_large]
+    folders = {posixpath.dirname(p) for p in written if p.endswith(".py")}
+    for rel, (mode, _oid) in entries.items():
+        if rel.endswith(".py") and posixpath.dirname(rel) in folders and mode in _INDEX_FILE_MODES:
+            target = _snapshot_file(snapshot, rel)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            open(target, "wb").close()
+    batch: list[str] = []
+    batch_bytes = 0
+    for rel in [*written, None]:
+        size = sizes[entries[rel][1]] if rel is not None else 0
+        if batch and (rel is None or batch_bytes + size > INDEX_BLOB_LIMIT_BYTES):
+            blobs = _read_blobs(repo_root, [entries[r][1] for r in batch])
+            for done in batch:
+                target = _snapshot_file(snapshot, done)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(target, "wb") as fh:
+                    fh.write(blobs[entries[done][1]])
+            batch, batch_bytes = [], 0
+        if rel is not None:
+            batch.append(rel)
+            batch_bytes += size
+    return written, too_large
+
+
+def _without_snapshot(results: list[ToolEvidence], snapshot: str) -> list[ToolEvidence]:
+    """Evidence naming repository paths: a tool's message may quote the snapshot file."""
+    prefixes = sorted({os.path.join(root, "") for root in (snapshot, os.path.realpath(snapshot))}, key=len, reverse=True)
+    for result in results:
+        for prefix in prefixes:
+            result.detail = result.detail.replace(prefix, "")
+            result.target = result.target.replace(prefix, "")
+    return results
+
+
+def _not_in_the_commit(rel: str, full_path: str, repo_root: str) -> list[str]:
+    """The modules ``rel`` imports that are sibling files in the working tree but neither
+    staged nor tracked: the hook (rightly) does not count them as local, so say why."""
+    folder = posixpath.dirname(rel)
+    try:
+        here = os.listdir(os.path.join(repo_root, *folder.split("/")) if folder else repo_root)
+        imported = {imp.module for imp in import_guard.extract_imports(full_path)}
+    except Exception:
+        return []
+    return sorted(
+        name for name in here
+        if name.endswith(".py") and not name.startswith("_") and name[:-3] in imported
+        and not os.path.exists(os.path.join(os.path.dirname(full_path), name))
+    )
+
+
+def _layer1_on_snapshot(
+    files: list[str], repo_root: str, snapshot: str, ast_runner: Any, too_large: dict[str, int],
+) -> list[ToolEvidence]:
+    """run_layer1 in fast mode (call_graph, import_guard, forbid_ast) with each file read
+    from ``snapshot`` and everything else (rules, drivers, local packages) from ``repo_root``.
+
+    A file in ``too_large`` was not read: a forbid_ast gate rule that covers it fails
+    closed; otherwise the call_graph and import_guard checks it would get are skipped,
+    and passing INDEX_NOTE_TOOL evidence says so."""
+    from aegis_core.ast.policy import ASTExtractionError, evaluate_forbid_ast, extract_normalized_ast
+
+    results: list[ToolEvidence] = []
+    checked = [
+        (rel, _snapshot_file(snapshot, rel)) for rel in files
+        if not (is_test_path(rel) or posixpath.basename(rel) == "__init__.py")
+    ]
+    entry_points = {"main", "_parse_args", "parse_args"}
+    for rel, full_path in checked:
+        ext = os.path.splitext(rel)[1].lower()
+        try:
+            if ext == ".py":
+                results.append(call_graph.check(full_path, repo_root, exclude_names=entry_points, fast_mode=True))
+            elif ast_runner.registry.resolve_driver(ext, workspace_root=repo_root):
+                results.append(call_graph.check(
+                    full_path, repo_root, exclude_names=entry_points, fast_mode=True, ast_runner=ast_runner,
+                ))
+        except Exception as exc:
+            results.append(_tool_failure("call_graph", rel, exc))
+    for rel, full_path in checked:
+        if rel.endswith(".py"):
+            try:
+                result = import_guard.check(full_path, project_root=repo_root)
+            except Exception as exc:
+                results.append(_tool_failure("import_guard", rel, exc))
+                continue
+            missing = _not_in_the_commit(rel, full_path, repo_root) if not result.verdict else []
+            if missing:
+                result.detail += (f"; {', '.join(missing)} {'is' if len(missing) == 1 else 'are'} not staged or "
+                                  "tracked, so the commit would not include it")
+            results.append(result)
+
+    try:
+        forbid_rules, broken_rules = _discover_forbid_ast_rules(repo_root)
+    except Exception as exc:
+        forbid_rules, broken_rules = [], []
+        results.append(ToolEvidence(
+            tool="forbid_ast", target=RULES_RELDIR, verdict=False,
+            detail=f"forbid_ast: cannot load rules: {type(exc).__name__}: {exc}",
+        ))
+    for rule_path, reason in broken_rules:
+        results.append(ToolEvidence(
+            tool="forbid_ast", target=rule_path, verdict=False,
+            detail=f"forbid_ast: cannot load rule {rule_path}: {reason}",
+        ))
+    limit = f"{INDEX_BLOB_LIMIT_BYTES / (1024 * 1024):g} MiB"
+    for rel, size in too_large.items():
+        why = f"its staged content is {size} bytes, over the {limit} the pre-commit hook reads from git"
+        covering = [rule for rule, _spec in forbid_rules if rule.applies_to(rel)]
+        for rule in covering:  # a gate rule that cannot read the file must not pass it
+            results.append(ToolEvidence(
+                tool=f"forbid_ast:{rule.id}", target=rel, verdict=False, detail=f"forbid_ast: cannot verify {rel}: {why}",
+            ))
+        if not covering and not (is_test_path(rel) or posixpath.basename(rel) == "__init__.py"):
+            results.append(ToolEvidence(tool=INDEX_NOTE_TOOL, target=rel, verdict=True, detail=f"{rel} not checked: {why}"))
+    for rel in files:
+        # Rule.applies_to: target_paths, and test files only when the patterns name tests.
+        applicable = [(rule, spec) for rule, spec in forbid_rules if rule.applies_to(rel)]
+        if not applicable:
+            continue
+        try:
+            norm_ast = extract_normalized_ast(_snapshot_file(snapshot, rel), workspace_root=repo_root, ast_runner=ast_runner)
+        except ASTExtractionError as exc:
+            norm_ast = exc
+        except Exception as exc:
+            results.extend(_tool_failure(f"forbid_ast:{rule.id}", rel, exc) for rule, _spec in applicable)
+            continue
+        if norm_ast is None:  # no AST driver for this file type: the rules do not apply
+            continue
+        for rule, forbid_spec in applicable:
+            tool = f"forbid_ast:{rule.id}"
+            failure = norm_ast if isinstance(norm_ast, ASTExtractionError) else None
+            violations: list[str] = []
+            if failure is None:
+                try:
+                    violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                except ASTExtractionError as exc:  # decorators had to be re-read from the file
+                    failure = exc
+                except Exception as exc:
+                    results.append(_tool_failure(tool, rel, exc))
+                    continue
+            if failure is not None:
+                # Fail closed: a gate rule that cannot read the file must not pass it.
+                results.append(ToolEvidence(
+                    tool=tool, target=rel, verdict=False, detail=f"forbid_ast: cannot verify {rel}: {failure.reason}",
+                ))
+            elif violations:
+                results.append(ToolEvidence(tool=tool, target=rel, verdict=False, detail="; ".join(violations)))
+    return results
+
+
+def run_layer1_on_index(changed_files: list[str], repo_root: str) -> list[ToolEvidence]:
+    """Layer 1 in fast mode on the staged content of ``changed_files`` (paths relative to
+    ``repo_root``): exactly what ``git commit`` records, whatever the working tree holds.
+
+    Only a file some check can read is read from git: Python, or a type an AST driver
+    handles (forbid_ast skips any other type). A path the index does not hold as a regular
+    file (a deletion, a symlink, a submodule) has no content to check. Raises GitError
+    when git cannot list or read the index, so the caller fails closed.
+    """
+    import tempfile
+
+    from aegis_core.ast.runner import ASTDriverRunner
+
+    repo_root_str = str(getattr(repo_root, "root", repo_root))
+    ast_runner = ASTDriverRunner()
+    driven: dict[str, bool] = {".py": True}
+
+    def readable(rel: str) -> bool:
+        ext = os.path.splitext(rel)[1].lower()
+        if ext not in driven:
+            try:
+                driven[ext] = bool(ast_runner.registry.resolve_driver(ext, workspace_root=repo_root_str))
+            except Exception:
+                driven[ext] = True  # read it: call_graph meets the same error and fails closed on it
+        return driven[ext]
+
+    with tempfile.TemporaryDirectory(prefix=SNAPSHOT_PREFIX) as snapshot:
+        staged, too_large = snapshot_index(repo_root_str, [rel for rel in changed_files if readable(rel)], snapshot)
+        results = _layer1_on_snapshot(staged, repo_root_str, snapshot, ast_runner, too_large)
+        return _without_snapshot(results, snapshot)
 
 
 if __name__ == '__main__':

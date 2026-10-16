@@ -1,4 +1,4 @@
-"""Behavioral tests for aegis_cli.ui.table (Table, Grid, Column, box, and error panel rendering)."""
+"""Behavioral tests for aegis_cli.ui.table (Table, Grid and Column rendering)."""
 from __future__ import annotations
 
 import argparse
@@ -7,9 +7,6 @@ from aegis_cli.ui.table import (
     Column,
     Grid,
     Table,
-    render_box,
-    render_error_panel,
-    render_table,
     visible_len,
 )
 from aegis_cli.ui.theme import OutputContext, strip_ansi
@@ -86,32 +83,20 @@ def test_grid_class_renders_borderless_aligned_columns_for_help_and_summaries():
     assert "│" not in out
 
 
-def test_render_table_plain_mode_emits_zero_ansi_and_ascii_separators():
+def test_table_plain_mode_emits_zero_ansi_and_ascii_separators():
     ctx = _ctx(plain=True, isatty=False)
     headers = ["Check", "Status", "Detail"]
     rows = [
         ["workspace", ctx.badge_pass(), ".aegis/rules active"],
         ["drivers", ctx.badge_warn(), "1 optional driver missing"],
     ]
-    out = render_table(headers, rows, ctx=ctx)
+    tbl = Table(ctx=ctx)
+    for h in headers:
+        tbl.add_column(h)
+    for r in rows:
+        tbl.add_row(*r)
+    out = tbl.render(ctx)
     assert "\x1b[" not in out
     assert "[PASS]" in out
     assert "[WARN]" in out
     assert "╭" not in out
-
-
-def test_render_box_and_error_panel_include_remediation_fix():
-    tty_ctx = _ctx(plain=False, isatty=True)
-    box = render_box("Aegis Workspace Status", ["Grade: A", "Rules: 18 active"], ctx=tty_ctx)
-    assert "Aegis Workspace Status" in strip_ansi(box)
-    assert "╭" in box
-
-    plain_ctx = _ctx(plain=True, isatty=False)
-    err = render_error_panel(
-        "Workspace not initialized",
-        fix="Run 'aegis init' to initialize .aegis/rules/",
-        ctx=plain_ctx,
-    )
-    assert "\x1b[" not in err
-    assert "[FAIL] Workspace not initialized" in err
-    assert "Fix: Run 'aegis init' to initialize .aegis/rules/" in err

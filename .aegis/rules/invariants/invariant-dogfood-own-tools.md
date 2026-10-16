@@ -7,7 +7,7 @@ hypothesis: "A governance framework that doesn't use its own tools to manage its
 prediction: "Will fire when manual file operations (mv, cp, sed, manual frontmatter edits) are used instead of aegis CLI commands (promote, demote, init, checkpoint) for operations that aegis provides tooling for"
 falsification: "If aegis CLI lacks a needed operation for 5 consecutive sessions, the missing operation should be built rather than this rule pruned"
 target_paths:
-  - ".aegis/rules/**/*.md"
+  - ".aegis/rules/*.md"
   - "aegis_cli/*.py"
   - "aegis_core/*.py"
 triggers:
@@ -25,13 +25,6 @@ tags:
   - dogfooding
   - process
   - meta
-fitness:
-  score: 0.6
-  impact_weight: 1.0
-  triggers: 85
-  true_positives: 44.198
-  false_positives: 31.8419
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 When performing lifecycle operations on Aegis's own rules (create, promote,
