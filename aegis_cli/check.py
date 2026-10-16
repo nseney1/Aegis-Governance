@@ -13,17 +13,22 @@
                                       findings it does not hold; --base reads it from REF
   aegis check --write-baseline        record the current findings (aegis_core.baseline)
   aegis check --prune-baseline        drop the baseline entries whose findings are fixed
+  aegis check --record [--tests] [--base REF] [--json]
+                                      bind the work tree to a git tree, run Layer 1 (and the user-scope
+                                      tests.command) on a snapshot of it, write one ledger check row
   aegis check --card [--json]         the day-0 card (aegis_core.card); changes nothing
   aegis check --partition --split NAME=GLOB[,GLOB...] --split NAME=...
                                       cross-lane call, def and import edges between planned
                                       lanes (aegis_core.partition); changes nothing
 
---lane, --partition, --card, --write-baseline and --prune-baseline are modes of their own:
+--lane, --partition, --card, --write-baseline, --prune-baseline and --record are modes of their own:
 one at a time, and none takes FILES, --full or a plan.
 """
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 
 from aegis_cli.base import AegisCommand, CommandCategory
@@ -32,8 +37,68 @@ from aegis_cli.verify import run_verify
 __all__ = ["CheckCommand", "run_check"]
 
 
+# Every other mode and the options a --record run would silently ignore.
+_NOT_WITH_RECORD = (
+    ("--lane", "lane", None), ("--partition", "partition", False), ("--card", "card", False),
+    ("--write-baseline", "write_baseline", False), ("--prune-baseline", "prune_baseline", False),
+    ("--hook", "hook", False), ("--full", "full", False), ("--strict", "strict", False),
+    ("--dry-run", "dry_run", False), ("--plan", "plan", None), ("--plan-file", "plan_file", None),
+    ("--llm-cmd", "llm_cmd", None), ("--paths", "paths", None), ("--base-policy", "base_policy", False),
+    ("--split", "split", None), ("FILES", "files", None),
+)
+
+
+def _record_conflict(args: argparse.Namespace) -> str:
+    for flag, attr, idle in _NOT_WITH_RECORD:
+        value = getattr(args, attr, idle)
+        if value not in (idle, [], ()) and value is not idle:
+            return flag
+    return ""
+
+
+def _run_record(args: argparse.Namespace) -> int:
+    """`aegis check --record [--tests]`: 0 recorded and passed, 1 failed or could not run, 2 usage."""
+    from aegis_cli import sanitize_display
+    from aegis_cli.verify import _resolve_git_cwd, _wants_json
+    from aegis_core import baseline, checkrun
+
+    clash = _record_conflict(args)
+    if clash:
+        print(f"Error: --record does not combine with {clash}: it checks the whole tree and records one row",
+              file=sys.stderr)
+        return 2
+    root = _resolve_git_cwd(args)
+    use_json = _wants_json(args)
+    if not os.path.isdir(root):
+        print(f"Error: workspace does not exist: {sanitize_display(root, max_len=len(root))}", file=sys.stderr)
+        return 1
+    outcome = checkrun.record(root, tests=bool(getattr(args, "tests", False)), base=getattr(args, "base", None))
+    row = outcome.row or {}
+    if use_json:
+        document = baseline.envelope("aegis check --record", {"workspace": str(root), "tree": row.get("tree"),
+                                                              "base": row.get("base")})
+        document.update(status=outcome.status, witness=row.get("witness"), reason=outcome.reason, check=row or None,
+                        tree=outcome.binding.as_dict() if outcome.binding else None)
+        print(json.dumps(document, indent=2))
+    elif outcome.status == "recorded":
+        tests = row.get("tests")
+        detail = f", tests {tests['passed']} passed, {tests['failed']} failed" if tests else ", Layer 1 only"
+        print(f"recorded: tree {row['tree'][:12]} {'passed' if row['passed'] else 'FAILED'}{detail}"
+              + ("; protected paths changed: no credit until approved" if row["protected_changed"] else ""))
+    else:
+        print(f"{outcome.status}: {sanitize_display(outcome.reason, max_len=300)}", file=sys.stderr)
+    if outcome.status != "recorded":
+        return 1
+    return 0 if row.get("passed") else 1
+
+
 def run_check(args: argparse.Namespace) -> int:
     """Execute `aegis check`."""
+    if getattr(args, "record", False):
+        return _run_record(args)
+    if getattr(args, "tests", False):
+        print("Error: --tests only applies with --record", file=sys.stderr)
+        return 2
     return run_verify(args)
 
 
@@ -84,6 +149,21 @@ class CheckCommand(AegisCommand):
             "--dry-run",
             action="store_true",
             help="Show what would be checked without running anything",
+        )
+        parser.add_argument(
+            "--record",
+            action="store_true",
+            help="Bind the work tree to a git tree, run Layer 1 on an exported snapshot of it and write one "
+            "ledger check row (witness: aegis). A label, not proof: only CI on the landing commit confirms it. "
+            "A tree git cannot see completely (assume-unchanged or skip-worktree files) is unbindable and "
+            "writes no row; exit 0 only when the run passed",
+        )
+        parser.add_argument(
+            "--tests",
+            action="store_true",
+            help="With --record: also run the test command from the user-scope config (tests.command in "
+            "~/.aegis/config.json, default python -m pytest, never the repository's) in the snapshot with a "
+            "fixed environment; exit 5 or zero passed tests is never evidence",
         )
         parser.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
         # One mode at a time. run_verify refuses every option a mode would otherwise ignore.

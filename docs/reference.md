@@ -170,6 +170,8 @@ Category: Daily Workflow & Verification.
 | `--plan-file` | `PATH` |  | File holding the task plan (implies --full) |
 | `--llm-cmd` | `CMD` |  | Layer 2 model command, e.g. 'claude -p': gets the prompt on stdin, prints the reply. It runs in an empty temporary directory, never the repository, so give scripts absolute paths (default: $AEGIS_LLM_CMD; never read from repository files) |
 | `--dry-run` |  |  | Show what would be checked without running anything |
+| `--record` |  |  | Bind the work tree to a git tree, run Layer 1 on an exported snapshot of it and write one ledger check row (witness: aegis). A label, not proof: only CI on the landing commit confirms it. A tree git cannot see completely (assume-unchanged or skip-worktree files) is unbindable and writes no row; exit 0 only when the run passed |
+| `--tests` |  |  | With --record: also run the test command from the user-scope config (tests.command in ~/.aegis/config.json, default python -m pytest, never the repository's) in the snapshot with a fixed environment; exit 5 or zero passed tests is never evidence |
 | `--format` | one of `text`, `json` | `"text"` | Output format |
 | `--lane` | `LANE` |  | Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment (every changed path, deletions and both sides of a move included, inside the lane's globs) and Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong as the protection on .github/** and on the base branch |
 | `--partition` |  |  | Report the cross-lane call, def and import edges between lanes planned with --split (at least two), and the [FROZEN_SIGNATURES] of the functions that cross a lane boundary. Python, and Rust when its driver is enabled. A report: it changes nothing and exits 0 even when it finds edges |
@@ -530,7 +532,7 @@ Input schema:
 
 **Report Outcome** (idempotent)
 
-Report whether the rules you were shown helped. Each report is an advisory self-report row in the outcome ledger; it never promotes a rule by itself.
+Report whether the rules you were shown helped. The server ties the report to the tree it computes now: with an `aegis check --record` run of exactly that tree it credits the rules it showed you that match the change (your rules_used is not what is credited), and even then only CI on the landing commit makes it count; without one it records a single unwitnessed claim per session and tree that earns nothing. Reports per session are capped.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |

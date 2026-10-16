@@ -109,6 +109,10 @@ def run_sync(args: argparse.Namespace) -> int:
     rel_path = result.path.relative_to(root).as_posix()
     failed = [a for a in result.applied if a["status"] not in _APPLIED_OK]
     rc = EXIT_PROBLEMS if (result.refused or result.derived["errors"] or failed) else EXIT_OK
+    from aegis_core.credit import claimed_summary
+
+    # Unwitnessed aegis_report_outcome claims: their own count, never a rule's evidence.
+    claimed = claimed_summary(root)
     # Both are always set: --apply is this parser's flag, AegisParser.parse_args sets json.
     if args.json:
         print(json.dumps({
@@ -122,9 +126,13 @@ def run_sync(args: argparse.Namespace) -> int:
             "ignored": result.derived["ignored"],
             "untargeted": result.derived["untargeted"],
             "ledger": result.derived["ledger"],
+            "claimed": claimed,
         }, indent=2, default=str))
     else:
         _print_text(args, result, rel_path)
+        if claimed["claimed"]:
+            print(f"  {claimed['label']}: {claimed['claimed']} report(s) from {claimed['sessions']} session(s), "
+                  "no rule's evidence")
     return rc
 
 
