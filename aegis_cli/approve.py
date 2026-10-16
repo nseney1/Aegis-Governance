@@ -127,9 +127,13 @@ def _approve(root: Path, base: Optional[str], use_json: bool) -> Dict[str, Any]:
         print(f"Governance tree hash: {digest}")
         for warning in warnings:
             print(f"  warning: {warning}")
+    question = (f"Sign an approval of governance state {digest[:12]} on top of "
+                f"{(gitsafe.head_commit(top) or '')[:12]}? [y/N] ")
+    if use_json:  # stdout carries only the JSON document
+        print(question, end="", file=sys.stderr, flush=True)
+        question = ""
     try:
-        answer = input(f"Sign an approval of governance state {digest[:12]} on top of "
-                       f"{(gitsafe.head_commit(top) or '')[:12]}? [y/N] ")
+        answer = input(question)
     except EOFError:
         answer = ""
     if answer.strip().lower() not in ("y", "yes"):

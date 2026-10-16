@@ -458,7 +458,8 @@ def test_approve_json_carries_the_envelope(tmp_path, monkeypatch, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
     digest = _changed_rule_branch(repo)
     repo.home.sign_with(str(keys["human"]))
-    rc, out, _err = _approve(repo, monkeypatch, json=True)
+    rc, out, err = _approve(repo, monkeypatch, json=True)
+    assert "Sign an approval" in err and "Sign an approval" not in out, "the question goes to stderr, not the JSON"
     doc = json.loads(out)
     assert rc == 0 and doc["status"] == "approved" and doc["governance_tree_hash"] == digest
     assert doc["commit"] == repo.head() and doc["categories"] == ["rules"]
