@@ -12,7 +12,7 @@ from pathlib import Path
 
 from aegis_core.config import env_workspace
 from aegis_core.errors import WorkspaceError, WorkspaceNotFoundError
-from aegis_core.workspace.binding import bounded_walk_up
+from aegis_core.workspace.binding import bounded_walk_up, denial
 from aegis_core.workspace.layout import LEGACY_SOMA_DIRNAME, has_rules_dir, is_aegis_workspace
 
 LEGACY_SOMA_UPGRADE_MSG = (
@@ -42,14 +42,26 @@ def refuse_unmigrated_v3(d: str | Path | os.PathLike[str]) -> None:
             raise WorkspaceError(LEGACY_SOMA_UPGRADE_MSG.format(path=d_str))
 
 
+def _denied(d: str | Path | os.PathLike[str]) -> str | None:
+    """Why ``d`` can never be a workspace ("home_directory", "filesystem_root"), or None.
+    A path that cannot be resolved is denied as well: it is never bound."""
+    try:
+        return denial(Path(d).resolve())
+    except (OSError, RuntimeError, ValueError):
+        return "unresolvable"
+
+
 def _is_workspace_dir(d: str) -> bool:
-    """Check if directory contains a valid Aegis workspace marker (.aegis/rules or .aegis)."""
+    """Check if directory contains a valid Aegis workspace marker (.aegis/rules or .aegis).
+
+    Never ``$HOME`` or the filesystem root (AD-4): ``~/.aegis/rules`` is the personal
+    read-only rule layer and ``~/.aegis`` the user plane, so neither marks a workspace.
+    """
+    if _denied(d):
+        return False
     if has_rules_dir(d):
         return True
-    if d not in ("/tmp", "/var/tmp", _home_str()):
-        if is_aegis_workspace(d):
-            return True
-    return False
+    return d not in ("/tmp", "/var/tmp") and is_aegis_workspace(d)
 
 
 def resolve_workspace_root(
@@ -58,9 +70,15 @@ def resolve_workspace_root(
     strict_env: bool = False,
 ) -> Path:
     """Find the project root containing .aegis/rules/ or .aegis/."""
-    # 1. AEGIS_WORKSPACE, the operator's pin (D11)
+    # 1. AEGIS_WORKSPACE, the operator's pin (D11): final, and never $HOME or the root
     aegis_ws = env_workspace()
     if aegis_ws:
+        denied = _denied(aegis_ws)
+        if denied:
+            raise WorkspaceNotFoundError(
+                f"AEGIS_WORKSPACE is set to {aegis_ws}, which is the {denied.replace('_', ' ')}"
+                if denied != "unresolvable" else f"AEGIS_WORKSPACE is set to {aegis_ws}, which cannot be resolved"
+            )
         if os.path.isdir(aegis_ws):
             refuse_unmigrated_v3(aegis_ws)
         if has_rules_dir(aegis_ws):

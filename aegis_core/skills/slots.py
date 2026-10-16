@@ -30,6 +30,7 @@ __all__ = [
     "DEFAULT_SLOTS",
     "profile_id",
     "render_for_host",
+    "render_scan_result",
     "sanitize_slot_value",
     "MAX_SLOT_VALUE_LEN",
 ]
@@ -72,12 +73,13 @@ _CODEX_PROFILE: dict[str, str] = {
     "TOOL_SEARCH": "exec_command",
     "TOOL_RUN": "exec_command",
     "TOOL_SUBAGENT": "spawn_agent",
-    "MODEL_FAST": "fast-tier",
-    "MODEL_STANDARD": "standard-tier",
-    "MODEL_HEAVY": "heavy-tier",
+    "MODEL_FAST": "fast",
+    "MODEL_STANDARD": "standard",
+    "MODEL_HEAVY": "heavy",
 }
 
-# Neutral names for a host Aegis does not know: a tool kind, never one vendor's name.
+# Neutral names for a host Aegis does not know: a tool kind, never one vendor's name. A
+# model tier is a bare adjective, as rules say "use the `${SLOT.MODEL_FAST}` tier".
 _GENERIC_PROFILE: dict[str, str] = {
     "TOOL_READ": "read_file",
     "TOOL_EDIT": "edit_file",
@@ -85,9 +87,9 @@ _GENERIC_PROFILE: dict[str, str] = {
     "TOOL_SEARCH": "grep",
     "TOOL_RUN": "shell",
     "TOOL_SUBAGENT": "subagent",
-    "MODEL_FAST": "fast-tier",
-    "MODEL_STANDARD": "standard-tier",
-    "MODEL_HEAVY": "heavy-tier",
+    "MODEL_FAST": "fast",
+    "MODEL_STANDARD": "standard",
+    "MODEL_HEAVY": "heavy",
 }
 
 # The gemini-cli row is unverified (phase 2): only its documented tool names are bound;
@@ -339,3 +341,59 @@ def render_for_host(text: str, host: Optional[str], workspace: str | Path | None
         files = f"~/{AEGIS_DIRNAME}/config.json" + (f" or {AEGIS_DIRNAME}/config.json" if workspace is not None else "")
         registry, warnings = SlotRegistry(merged), [_CONFIG_UNREADABLE.format(files=files)]
     return registry.sanitized().resolve(text, strict=False), warnings
+
+
+_SCAN_CONFIG_UNREADABLE = (
+    "config files (.aegis/config.json or ~/.aegis/config.json) could not be read or parsed; "
+    "${SLOT.*} placeholders were left unresolved"
+)
+# The scan fields an agent reads that may quote rule text: the guidance, and the
+# hypothesis/prediction (and a body, where one is carried) of each listed rule.
+_SCAN_LISTS = ("relevant_rules", "invariant_warnings")
+_SCAN_RULE_FIELDS = ("body", "hypothesis", "prediction")
+
+
+def _add_warnings(result: Dict[str, Any], warnings: Sequence[str]) -> None:
+    existing = result.get("warnings")
+    merged = list(existing) if isinstance(existing, list) else []
+    merged.extend(w for w in warnings if w not in merged)
+    if merged:
+        result["warnings"] = merged
+
+
+def render_scan_result(result: Dict[str, Any], host: Optional[str],
+                       workspace: str | Path | None = None) -> Dict[str, Any]:
+    """A scan result (aegis_core.scan) with its ${SLOT.*} references rendered for ``host``.
+
+    One renderer for the MCP aegis_scan (the identified host's profile) and the CLI
+    ``aegis scan`` (no host: the generic profile). The agent reads this output, so
+    values are sanitized before they are inlined, and ignored keys or a config file
+    that cannot be parsed are reported in ``result["warnings"]`` (H5). Slot loading
+    never costs the agent its guidance: on such an error the placeholders stay as
+    written and a fixed warning, quoting no file content or path, says so.
+    """
+    try:
+        loaded = SlotRegistry.for_platform(host or GENERIC, workspace=str(workspace) if workspace is not None else None)
+    except (SlotResolutionError, OSError, RuntimeError):
+        _add_warnings(result, [_SCAN_CONFIG_UNREADABLE])
+        return result
+    _add_warnings(result, loaded.warnings)
+    registry = loaded.sanitized()
+
+    guidance = result.get("guidance")
+    if isinstance(guidance, str) and "${SLOT." in guidance:
+        result["guidance"] = registry.resolve(guidance, strict=False)
+    seen = set()
+    for key in _SCAN_LISTS:
+        items = result.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict) or id(item) in seen:
+                continue
+            seen.add(id(item))
+            for name in _SCAN_RULE_FIELDS:
+                value = item.get(name)
+                if isinstance(value, str) and "${SLOT." in value:
+                    item[name] = registry.resolve(value, strict=False)
+    return result

@@ -66,8 +66,8 @@ class TestCrossModelSlotRegistry:
         cursor_reg = SlotRegistry.for_platform("cursor")
         assert cursor_reg.resolve(template) == (
             "Read=read_file Edit=edit_file "
-            "Subagent=subagent Fast=fast-tier "
-            "Std=standard-tier Heavy=heavy-tier"
+            "Subagent=subagent Fast=fast "
+            "Std=standard Heavy=heavy"
         )
 
         # Normalized aliases

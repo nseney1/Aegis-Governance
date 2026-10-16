@@ -25,9 +25,11 @@ def isolated_hosts(tmp_path, monkeypatch):
     # machine's PATH (doctor's own lookup; shutil.which patches do not reach it).
     no_programs = tmp_path / "no-programs"
     no_programs.mkdir()
-    real_which = doctor._which
-    monkeypatch.setattr(doctor, "_which", lambda name, path=None, outside=None:
+    real_which, real_skipped = doctor.which, doctor.only_skipped
+    monkeypatch.setattr(doctor, "which", lambda name, path=None, outside=None:
                         real_which(name, str(no_programs), outside))
+    monkeypatch.setattr(doctor, "only_skipped", lambda name, path=None, outside=None, base=None:
+                        real_skipped(name, str(no_programs), outside, base))
     return home
 
 
@@ -70,7 +72,7 @@ def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch):
     args = argparse.Namespace(_project_root=tmp_path, fix=True, yes=True)
 
     monkeypatch.chdir(tmp_path)
-    with patch("aegis_cli.doctor.shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/go"):
+    with patch("shutil.which", side_effect=lambda cmd, **kw: None if cmd in ("codex", "claude", "agy") else "/bin/go"):
         run_doctor(args)
     registry = SlotRegistry.load(tmp_path)
     assert registry.get_ast_driver(".go") is not None

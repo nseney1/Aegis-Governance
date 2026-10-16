@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 import pytest
 
@@ -57,11 +58,11 @@ def test_every_profile_binds_every_capability_to_a_value_the_sanitizer_keeps(pro
     "host_id, read, edit, subagent, fast",
     [
         # Codex model slugs vary by account and have no recorded evidence: generic tiers.
-        ("codex-cli", "exec_command", "apply_patch", "spawn_agent", "fast-tier"),
+        ("codex-cli", "exec_command", "apply_patch", "spawn_agent", "fast"),
         ("claude-code", "Read", "Edit", "Task", "haiku"),
         ("antigravity", "view_file", "replace_file_content", "invoke_subagent", "flash"),
-        ("gemini-cli", "read_file", "replace", "subagent", "fast-tier"),
-        ("generic", "read_file", "edit_file", "subagent", "fast-tier"),
+        ("gemini-cli", "read_file", "replace", "subagent", "fast"),
+        ("generic", "read_file", "edit_file", "subagent", "fast"),
     ],
 )
 def test_for_platform_renders_each_host_with_its_own_tools(host_id, read, edit, subagent, fast):
@@ -135,3 +136,14 @@ def test_render_for_host_names_both_config_files_when_a_workspace_is_given(tmp_p
     assert text == "exec_command"
     assert warnings == ["~/.aegis/config.json or .aegis/config.json could not be read or parsed; "
                         "built-in slot values were used"]
+
+
+@pytest.mark.parametrize("host_id", sorted(PLATFORM_SLOT_PROFILES))
+def test_shipped_rules_render_as_sentences_for_every_profile(host_id):
+    # "use the `${SLOT.MODEL_FAST}` tier" must not read "use the `fast-tier` tier".
+    rules = Path(__file__).resolve().parents[3] / "rules"
+    texts = sorted(rules.glob("*.md"))
+    assert texts, rules
+    for path in texts:
+        rendered, _ = render_for_host(path.read_text(encoding="utf-8"), host_id)
+        assert not re.search(r"tier`? tier\b", rendered), (path.name, host_id)

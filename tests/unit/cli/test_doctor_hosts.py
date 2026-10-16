@@ -693,9 +693,14 @@ def test_a_codex_in_the_workspace_is_never_found_or_run(env, monkeypatch, tmp_pa
     monkeypatch.setenv("PATH", _path_with(env, layout))
     row = host(env.doctor(), "codex-cli")
     assert env.calls == [], "doctor started a codex the repository supplied"
-    inside = [str(env.ws / "tools" / Path(_decoy_name("codex")))] if layout == "entry_inside_workspace" else []
-    assert row["binary"] == {"found": False, "path": None, "names": ["codex"], "ignored": inside}
+    # Never run, and never called absent either: an empty or relative entry names the
+    # workspace for a host started there (C-fix T4), an absolute one inside it is its own.
+    passed_over = {"cwd_only": [], "empty_entry": [str(env.ws.resolve() / _decoy_name("codex"))],
+                   "relative_entry": [str(env.ws.resolve() / _decoy_name("codex"))],
+                   "entry_inside_workspace": [str(env.ws / "tools" / _decoy_name("codex"))]}[layout]
+    assert row["binary"] == {"found": False, "path": None, "names": ["codex"], "ignored": passed_over}
     assert row["state"] == "missing_binary"
+    assert ("codex-cli.binary" in env.doctor()["unknown"]) is bool(passed_over)
 
 
 @pytest.mark.parametrize("entry", ["", "."])
@@ -1109,7 +1114,7 @@ def test_on_windows_host_cli_children_do_not_search_the_current_directory(monkey
     monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)  # some launchers set it
     monkeypatch.setattr(doctor.sys, "platform", "win32")
     doctor._run_host_cli(["C:\\bin\\codex.cmd", "mcp", "get", "aegis", "--json"], cwd="C:\\repo", timeout=1.0)
-    monkeypatch.setattr(doctor, "_which", lambda name, path=None, outside=None: "C:\\bin\\python3.exe")
+    monkeypatch.setattr(doctor, "which", lambda name, path=None, outside=None: "C:\\bin\\python3.exe")
     doctor.probe_mcp_launcher("C:\\bin")
     assert len(seen) == 3  # codex, then python3's version and import probes
     for kw in seen:
@@ -1120,3 +1125,411 @@ def test_on_windows_host_cli_children_do_not_search_the_current_directory(monkey
     monkeypatch.setattr(doctor.sys, "platform", "linux")
     doctor._run_host_cli(["/usr/bin/codex"], cwd="/repo", timeout=1.0)
     assert "NoDefaultCurrentDirectoryInExePath" not in (seen[0].get("env") or {})
+
+
+# ── a host binary reachable only through a relative PATH entry (C-fix T4) ───
+
+@pytest.mark.parametrize("entry", ["bin", os.path.join(".", "bin"), os.path.join("..", "tools")])
+def test_a_host_binary_reachable_only_through_a_relative_entry_is_unknown_never_run(env, monkeypatch, tmp_path,
+                                                                                    entry):
+    env.claude_registered()
+    env.antigravity_registered()
+    env.register_workspace()
+    env.bootstrap()
+    marker = tmp_path / "decoy-ran"
+    planted = _decoy(Path(os.path.normpath(str(env.ws.resolve() / entry))), "codex", marker)
+    monkeypatch.chdir(tmp_path)  # doctor --workspace REPO from elsewhere: the host starts in REPO
+    monkeypatch.setenv("PATH", os.pathsep.join([entry, str(env.bin)]))
+    payload = env.doctor()
+    row = host(payload, "codex-cli")
+    assert env.calls == [] and not marker.exists()
+    assert row["binary"] == {"found": False, "path": None, "names": ["codex"], "ignored": [str(planted)]}
+    assert row["state"] == "missing_binary"
+    assert "missing_binary" not in codes(row)
+    (reason,) = [r for r in row["reasons"] if r["code"] == "binary_on_relative_path"]
+    assert str(planted) in reason["message"] and repr(entry) in reason["message"]
+    assert row["enforcement_level"] == "unknown"
+    assert "codex-cli.binary" in payload["unknown"]
+    rc, out = env.run()
+    assert "relative PATH entry" in out
+
+
+def test_a_relative_entry_holding_no_host_binary_is_plainly_missing(env, monkeypatch):
+    env.bootstrap()
+    (env.ws / "bin").mkdir()
+    monkeypatch.setenv("PATH", os.pathsep.join(["bin", "", ".", str(env.bin)]))
+    row = host(env.doctor(), "codex-cli")
+    assert row["binary"]["ignored"] == []
+    assert codes(row)[0] == "missing_binary" and row["enforcement_level"] == "none"
+
+
+# ── Claude Code turns aegis off per project (C-fix T1) ──────────────────────
+
+def _claude_disables(env: Env, scope: str, names=("other", "aegis")) -> None:
+    entry = {"command": str(env.mcp), "args": [], "env": {"AEGIS_CLIENT": "claude-code"}}
+    project: Dict[str, Any] = {"disabledMcpServers": list(names)}
+    data: Dict[str, Any] = {"numStartups": 3}
+    if scope == "user":
+        data["mcpServers"] = {"aegis": entry}
+    elif scope == "local":
+        project["mcpServers"] = {"aegis": entry}
+    else:  # project scope, approved: disabledMcpServers still turns it off
+        project["enabledMcpjsonServers"] = ["aegis"]
+        (env.ws / ".mcp.json").write_text(json.dumps({"mcpServers": {"aegis": entry}}), encoding="utf-8")
+    data["projects"] = {str(env.ws.resolve()): project}
+    env.claude_json(data)
+
+
+@pytest.mark.parametrize("scope", ["user", "local", "project"])
+def test_a_server_claude_code_turns_off_for_this_project_is_a_policy_gap(env, scope):
+    env.all_ok()
+    _claude_disables(env, scope)
+    payload = env.doctor()
+    row = host(payload, "claude-code")
+    assert row["registration"]["scope"] == scope
+    assert row["registration"]["enabled"] is False
+    assert row["state"] == "policy_gap"
+    (reason,) = [r for r in row["reasons"] if r["code"] == "registration_disabled"]
+    assert "disabledMcpServers" in reason["message"] and "/mcp" in reason["message"]
+    # The bootstrap still reaches Claude Code through AGENTS.md: advisory, not more.
+    assert row["bootstrap"]["reaches_host"] is True and row["enforcement_level"] == "advisory"
+    rc, out = env.run()
+    assert "disabledMcpServers" in out.split("Claude Code (claude-code)")[1].split("Antigravity")[0]
+
+
+def test_a_turned_off_server_is_advisory_exactly_like_an_unregistered_one(env):
+    # host-matrix §3.9: the advisory tier is the AGENTS.md bootstrap, MCP instructions or JIT
+    # rules. The bootstrap carries its own route when no aegis tool exists (the `aegis scan`
+    # line), so turning the server off leaves the same tier as never registering it.
+    assert "No MCP tools? Run `aegis scan FILE...` in a shell instead." in bootstrap_text()
+    env.all_ok()
+    _claude_disables(env, "user")
+    disabled = host(env.doctor(), "claude-code")
+    env.claude_json({"numStartups": 3})
+    absent = host(env.doctor(), "claude-code")
+    assert (disabled["state"], absent["state"]) == ("policy_gap", "unregistered")
+    assert disabled["enforcement_level"] == absent["enforcement_level"] == "advisory"
+
+
+def test_a_turned_off_server_without_the_bootstrap_has_no_enforcement(env):
+    env.all_ok()
+    _claude_disables(env, "user")
+    (env.ws / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+    row = host(env.doctor(), "claude-code")
+    assert row["state"] == "policy_gap"
+    assert {"registration_disabled", "bootstrap_missing"} <= set(codes(row))
+    assert row["enforcement_level"] == "none"
+
+
+def test_disabled_mcp_servers_naming_other_servers_leaves_aegis_on(env):
+    env.all_ok()
+    _claude_disables(env, "user", names=("other", "aegis-old", "AEGIS"))
+    row = host(env.doctor(), "claude-code")
+    assert row["state"] == "ok" and row["registration"]["enabled"] is None
+
+
+def test_disabled_mcp_servers_of_another_project_does_not_apply_here(env, tmp_path):
+    env.all_ok()
+    _claude_disables(env, "user")
+    data = json.loads((env.home / ".claude.json").read_text(encoding="utf-8"))
+    data["projects"] = {str(tmp_path / "elsewhere"): data["projects"][str(env.ws.resolve())]}
+    env.claude_json(data)
+    assert host(env.doctor(), "claude-code")["state"] == "ok"
+
+
+# ── input that would abort doctor (C-fix T2) ────────────────────────────────
+
+_DEEP = "[" * 100000
+
+
+@pytest.mark.parametrize("use_json", [True, False])
+def test_a_deeply_nested_project_mcp_json_is_unreadable_not_fatal(env, use_json):
+    env.all_ok()
+    (env.ws / ".mcp.json").write_text(_DEEP, encoding="utf-8")
+    rc, out = env.run(json=use_json)
+    if use_json:
+        payload = json.loads(out)
+        assert host(payload, "claude-code")["state"] == "ok"  # the user registration decides
+        (finding,) = [f for f in payload["findings"] if f["code"] == "unreadable_config"]
+        assert Path(finding["path"]).name == ".mcp.json" and "not valid JSON" in finding["message"]
+    else:
+        assert "Claude Code (claude-code): ok" in out and ".mcp.json is not valid JSON" in out
+
+
+def test_a_deeply_nested_claude_json_leaves_the_registration_unknown(env):
+    env.all_ok()
+    (env.home / ".claude.json").write_text(_DEEP, encoding="utf-8")
+    payload = env.doctor()
+    row = host(payload, "claude-code")
+    assert row["state"] == "auth_unknown" and row["registration"]["status"] == "unknown"
+    assert "unreadable_config" in finding_codes(payload)
+
+
+def test_deeply_nested_codex_output_is_an_unanswered_probe(env):
+    env.all_ok()
+    env.replies["codex"] = (0, _DEEP, "")
+    row = host(env.doctor(), "codex-cli")
+    assert row["state"] == "auth_unknown" and "registration_unverifiable" in codes(row)
+
+
+def _realpath_keeping_nul(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make os.path.realpath act as on Windows Python 3.12+: non-strict ntpath.realpath
+    returns a path holding a NUL byte as given (gh-106242) instead of raising ValueError."""
+    real = os.path.realpath
+
+    def realpath(path, *args, **kwargs):
+        text = os.fspath(path)
+        if isinstance(text, str) and "\x00" in text:
+            return os.path.normpath(os.path.abspath(text))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+
+
+@pytest.mark.parametrize("bad", ["absolute-with-nul", "absolute-with-nul-realpath-keeps", {"root": "\u0000x"},
+                                 {"root": "relative/repo"}, {"root": 7}, "not-an-entry"])
+def test_a_registry_entry_doctor_cannot_place_is_skipped_and_reported(env, monkeypatch, bad):
+    env.all_ok()
+    if bad in ("absolute-with-nul", "absolute-with-nul-realpath-keeps"):
+        if bad == "absolute-with-nul-realpath-keeps":
+            _realpath_keeping_nul(monkeypatch)
+        bad = {"root": str(env.ws.resolve()) + "\u0000x"}
+    reg = env.home / ".aegis" / "workspaces.json"
+    data = json.loads(reg.read_text(encoding="utf-8"))
+    data["workspaces"].insert(0, bad)
+    reg.write_text(json.dumps(data), encoding="utf-8")
+    for use_json in (True, False):
+        rc, out = env.run(json=use_json)
+        assert out, "doctor printed nothing"
+    payload = env.doctor()
+    # The good entry still counts: the workspace is registered.
+    assert {h["id"]: h["workspace_registered"] for h in payload["hosts"]} == dict.fromkeys(PHASE1, True)
+    assert host(payload, "antigravity")["state"] == "ok"
+    (finding,) = [f for f in payload["findings"] if f["code"] == "registry_entry_skipped"]
+    assert finding["location"] == "workspaces[0]" and "\x00" not in finding["message"]
+
+
+def test_a_relative_registry_root_never_matches_the_workspace(env, monkeypatch):
+    # The server ignores a root that is not absolute, so doctor must not count it either,
+    # even when it would resolve to the workspace from doctor's own cwd.
+    env.all_ok()
+    reg = env.home / ".aegis" / "workspaces.json"
+    reg.write_text(json.dumps({"v": 1, "workspaces": [{"root": env.ws.name}]}), encoding="utf-8")
+    monkeypatch.chdir(env.ws.parent)
+    agy = host(env.doctor(), "antigravity")
+    assert agy["workspace_registered"] is False and "workspace_unregistered" in codes(agy)
+
+
+# ── every CLAUDE.md Claude Code reads (C-fix T3) ────────────────────────────
+
+@pytest.mark.parametrize("name", ["CLAUDE.local.md", os.path.join(".claude", "CLAUDE.md")])
+def test_any_claude_md_family_file_in_the_workspace_shadows_agents_md(env, name):
+    env.all_ok()
+    path = env.ws / name
+    path.parent.mkdir(exist_ok=True)
+    path.write_text("# my notes\n", encoding="utf-8")
+    payload = env.doctor()
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is False
+    assert claude["state"] == "policy_gap" and "claude_md_shadows_agents_md" in codes(claude)
+    (finding,) = [f for f in payload["findings"] if f["code"] == "claude_md_without_agents_import"]
+    assert Path(finding["path"]) == path
+    assert "aegis init to add" not in finding["message"]  # init edits only the root CLAUDE.md
+    assert host(payload, "codex-cli")["state"] == "ok"
+
+
+@pytest.mark.parametrize("name, line", [
+    ("CLAUDE.local.md", "@AGENTS.md"),
+    (os.path.join(".claude", "CLAUDE.md"), "@../AGENTS.md"),
+])
+def test_an_import_from_any_claude_md_family_file_lets_the_bootstrap_through(env, name, line):
+    env.all_ok()
+    (env.ws / "CLAUDE.md").write_text("# notes, no import\n", encoding="utf-8")
+    path = env.ws / name
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(f"Read {line} first.\n", encoding="utf-8")
+    claude = host(env.doctor(), "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is True and claude["state"] == "ok"
+
+
+def test_an_import_in_dot_claude_resolves_next_to_that_file(env):
+    # @AGENTS.md in .claude/CLAUDE.md names .claude/AGENTS.md, not the root one.
+    env.all_ok()
+    (env.ws / ".claude").mkdir()
+    (env.ws / ".claude" / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    claude = host(env.doctor(), "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is False and "claude_md_shadows_agents_md" in codes(claude)
+
+
+def _nested_workspace(env: Env, tmp_path: Path) -> Path:
+    """The governed workspace copied two levels below a directory the test owns."""
+    import shutil
+    ws = tmp_path / "outer" / "mid" / "repo"
+    shutil.copytree(str(env.ws), str(ws))
+    return ws
+
+
+@pytest.mark.parametrize("ancestor, name", [
+    ("outer", "CLAUDE.md"), ("mid", "CLAUDE.local.md"), ("outer", os.path.join(".claude", "CLAUDE.md")),
+])
+def test_a_claude_md_above_the_workspace_leaves_the_bootstrap_reach_unknown(env, tmp_path, ancestor, name):
+    env.all_ok()
+    ws = _nested_workspace(env, tmp_path)
+    above = (tmp_path / "outer" / "mid") if ancestor == "mid" else (tmp_path / "outer")
+    path = above / name
+    path.parent.mkdir(exist_ok=True)
+    # Even one importing this AGENTS.md by path: doctor reads no file outside the workspace.
+    path.write_text(f"@{ws.resolve() / 'AGENTS.md'}\n", encoding="utf-8")
+    payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None
+    assert "claude-code.bootstrap" in payload["unknown"]
+    assert claude["state"] == "auth_unknown"
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(path) in reason["message"]
+    # Only Claude Code reads CLAUDE.md files.
+    assert host(payload, "codex-cli")["bootstrap"]["reaches_host"] is True
+
+
+@pytest.mark.skipif(os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
+                    reason="needs POSIX permissions and a non-root user")
+def test_an_unreadable_claude_md_above_the_workspace_still_counts(env, tmp_path):
+    env.all_ok()
+    ws = _nested_workspace(env, tmp_path)
+    path = tmp_path / "outer" / "CLAUDE.md"
+    path.write_text("secret\n", encoding="utf-8")
+    path.chmod(0)
+    try:
+        claude = host(json.loads(env.run(json=True, workspace=str(ws))[1]), "claude-code")
+    finally:
+        path.chmod(0o600)
+    assert claude["bootstrap"]["reaches_host"] is None
+
+
+@pytest.mark.skipif(os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
+                    reason="needs POSIX permissions and a non-root user")
+def test_a_claude_md_above_the_workspace_that_cannot_be_checked_still_counts(env, tmp_path):
+    # A .claude directory doctor may not search: whether .claude/CLAUDE.md is there cannot be
+    # told, so the bootstrap's reach stays unknown rather than claimed.
+    env.all_ok()
+    ws = _nested_workspace(env, tmp_path)
+    hidden = tmp_path / "outer" / ".claude"
+    hidden.mkdir()
+    (hidden / "CLAUDE.md").write_text("secret\n", encoding="utf-8")
+    hidden.chmod(0)
+    try:
+        payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    finally:
+        hidden.chmod(0o700)
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
+    assert "claude-code.bootstrap" in payload["unknown"]
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(hidden / "CLAUDE.md") in reason["message"]
+
+
+def test_an_import_inside_the_workspace_wins_over_a_claude_md_above_it(env, tmp_path):
+    env.all_ok()
+    ws = _nested_workspace(env, tmp_path)
+    (tmp_path / "outer" / "CLAUDE.md").write_text("# parent notes\n", encoding="utf-8")
+    (ws / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    claude = host(json.loads(env.run(json=True, workspace=str(ws))[1]), "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is True and claude["state"] == "ok"
+
+    (ws / "CLAUDE.md").write_text("# no import\n", encoding="utf-8")
+    claude = host(json.loads(env.run(json=True, workspace=str(ws))[1]), "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is False and "claude_md_shadows_agents_md" in codes(claude)
+
+
+def test_a_claude_md_above_the_workspace_never_makes_an_unloaded_server_advisory(env, tmp_path):
+    env.all_ok()
+    env.claude_json({})  # Claude Code does not load aegis: only the bootstrap could reach it
+    ws = _nested_workspace(env, tmp_path)
+    (tmp_path / "outer" / "CLAUDE.md").write_text("# parent notes\n", encoding="utf-8")
+    payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    claude = host(payload, "claude-code")
+    assert claude["state"] == "unregistered"
+    assert claude["enforcement_level"] == "unknown"
+    assert tier(payload, "advisory")["status"] != "active"
+
+
+def _workspace_under_home(env: Env) -> Path:
+    import shutil
+    ws = env.home / "projects" / "repo"
+    shutil.copytree(str(env.ws), str(ws))
+    return ws
+
+
+def _user_memory(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "CLAUDE.md"
+    path.write_text("# My global notes\n\nNo import of any AGENTS.md here.\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("config_dir", [None, ".claude"], ids=["default", "CLAUDE_CONFIG_DIR"])
+def test_the_users_own_claude_md_never_shadows_agents_md(env, monkeypatch, config_dir):
+    # Claude Code loads ~/.claude/CLAUDE.md (CLAUDE_CONFIG_DIR/CLAUDE.md) as user memory and
+    # leaves it out of the walk up from the project that decides whether AGENTS.md is read.
+    env.all_ok()
+    ws = _workspace_under_home(env)
+    _user_memory(env.home / ".claude")
+    if config_dir:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(env.home / config_dir))
+        (env.home / ".claude.json").replace(env.home / config_dir / ".claude.json")
+    payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is True
+    assert claude["state"] == "ok" and claude["enforcement_level"] == "advisory"
+    assert "claude-code.bootstrap" not in payload["unknown"]
+    assert "claude_md_outside_workspace" not in codes(claude)
+
+
+def test_under_a_symlinked_home_the_users_claude_md_leaves_the_reach_unknown(env, monkeypatch, tmp_path):
+    # HOME names a link to the real home directory, and the workspace is found by its resolved
+    # path. Whether Claude Code then matches its user memory against the ancestors of the
+    # project by spelling or by resolved path is not known, so doctor claims neither way.
+    env.all_ok()
+    _workspace_under_home(env)
+    link = tmp_path / "home-link"
+    try:
+        link.symlink_to(env.home, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("cannot create a directory symlink here")
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(link))
+    memory = _user_memory(env.home / ".claude")
+    payload = json.loads(env.run(json=True, workspace=str(link / "projects" / "repo"))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(memory.resolve()) in reason["message"]
+
+
+def test_a_dot_claude_md_in_home_counts_when_claude_keeps_its_config_elsewhere(env, monkeypatch, tmp_path):
+    # With CLAUDE_CONFIG_DIR elsewhere, ~/.claude/CLAUDE.md is an ordinary .claude/CLAUDE.md above the
+    # project; the user memory is CLAUDE_CONFIG_DIR/CLAUDE.md, which is not above it.
+    env.all_ok()
+    ws = _workspace_under_home(env)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    _user_memory(tmp_path / "claude-config")
+    (env.home / ".claude.json").replace(tmp_path / "claude-config" / ".claude.json")
+    shadow = _user_memory(env.home / ".claude")
+    payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(shadow) in reason["message"]
+
+
+@pytest.mark.parametrize("name", ["CLAUDE.md", "CLAUDE.local.md"])
+def test_a_claude_md_directly_in_home_still_counts(env, name):
+    env.all_ok()
+    ws = _workspace_under_home(env)
+    _user_memory(env.home / ".claude")
+    (env.home / name).write_text("# notes\n", encoding="utf-8")
+    payload = json.loads(env.run(json=True, workspace=str(ws))[1])
+    claude = host(payload, "claude-code")
+    assert claude["bootstrap"]["reaches_host"] is None and claude["state"] == "auth_unknown"
+    (reason,) = [r for r in claude["reasons"] if r["code"] == "claude_md_outside_workspace"]
+    assert str(env.home / name) in reason["message"]

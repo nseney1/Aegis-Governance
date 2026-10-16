@@ -7,59 +7,11 @@ from typing import Any, List, Optional, Set, Tuple
 
 from aegis_core import hosts
 from aegis_core.scan import scan, scan_user_layer
+from aegis_core.skills.slots import render_scan_result
 from aegis_mcp.registry import _STATUS_FAIL, DEFAULT_CLIENT_PLATFORM, NOT_GOVERNED_MESSAGE, _get_workspace
 
 # (workspace root, session, files) already recorded: one scan event per session and files.
 _RECORDED: Set[Tuple[str, str, Tuple[str, ...]]] = set()
-
-
-def _add_scan_warnings(res: dict, warnings: List[str]) -> None:
-    existing = res.get("warnings")
-    merged = list(existing) if isinstance(existing, list) else []
-    merged.extend(w for w in warnings if w not in merged)
-    if merged:
-        res["warnings"] = merged
-
-
-def _interpolate_scan_slots(res: dict, platform: str, workspace: Any) -> dict:
-    """Resolve ${SLOT.*} placeholders in JIT scan results for the active MCP client platform.
-
-    The agent reads this output, so slot values are sanitized before inlining and
-    ignored keys or unparseable config files are reported in res["warnings"] (H5).
-    """
-    from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
-
-    try:
-        loaded = SlotRegistry.for_platform(platform, workspace=str(workspace) if workspace is not None else None)
-    except (SlotResolutionError, OSError, RuntimeError):
-        # Slot loading must never cost the agent its guidance. The error can quote file
-        # content or paths, so report a fixed message instead.
-        _add_scan_warnings(res, [
-            "config files (.aegis/config.json or ~/.aegis/config.json) could not be read or parsed; "
-            "${SLOT.*} placeholders were left unresolved"
-        ])
-        return res
-    _add_scan_warnings(res, loaded.warnings)
-    reg = loaded.sanitized()
-
-    val = res.get("guidance")
-    if isinstance(val, str) and "${SLOT." in val:
-        res["guidance"] = reg.resolve(val, strict=False)
-
-    seen_ids = set()
-    for list_key in ("relevant_rules", "invariant_warnings"):
-        items = res.get(list_key)
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict) or id(item) in seen_ids:
-                continue
-            seen_ids.add(id(item))
-            for field in ("body", "hypothesis", "prediction"):
-                val = item.get(field)
-                if isinstance(val, str) and "${SLOT." in val:
-                    item[field] = reg.resolve(val, strict=False)
-    return res
 
 
 def _slot_profile(host: Any) -> str:
@@ -116,7 +68,7 @@ def _scan_user_layer(args: dict) -> dict:
     if res.get("status") == _STATUS_FAIL:
         return res
     res = {"status": "not_governed", "message": NOT_GOVERNED_MESSAGE, "reason": args.get("_unbound"), **res}
-    return _interpolate_scan_slots(res, _slot_profile(args.get("_host")), None)
+    return render_scan_result(res, _slot_profile(args.get("_host")), None)
 
 
 def handle_scan(args: dict) -> dict:
@@ -140,4 +92,4 @@ def handle_scan(args: dict) -> dict:
     if res.get("status") == _STATUS_FAIL:
         return res
     _record_scan(workspace, args, files)
-    return _interpolate_scan_slots(res, _slot_profile(args.get("_host")), workspace)
+    return render_scan_result(res, _slot_profile(args.get("_host")), workspace)
