@@ -207,3 +207,39 @@ def test_checker_requires_the_exact_case(tmp_path):
     doc = _write(tmp_path, "a.md", "[c](Docs/Guide.md) [ok](docs/guide.md)\n")
     _write(tmp_path, "docs/guide.md")
     assert broken_links(doc, tmp_path) == ["1: Docs/Guide.md"]
+
+
+# --- text served to agents must not point at deleted docs --------------------------
+
+# Docs the v4.0 docs wave deleted or moved. A rule or skill that names one tells an agent
+# to read or update a file that is not there.
+DELETED_DOCS = (
+    "QUICKSTART.md", "ROADMAP.md", "RELEASE_WORKFLOW.md", "KNOWN_ISSUES_WINDOWS.md", "v4-build-sheet.md",
+    "docs/index.md", "docs/guides/", "docs/project/", "docs/specs/", "docs/architecture/",
+    "docs/archive/", "docs/research/", "docs/releases/",
+)
+# Agent-facing files outside lane f2 that still name one, logged in its debrief for the
+# rules owner. The set must shrink, never grow.
+KNOWN_STALE_AGENT_TEXT = {".aegis/rules/invariants/invariant-decomposition-merge-gate.md"}
+_PRUNE = {".git", "__pycache__", ".venv", "venv", "node_modules", ".tox", ".pytest_cache", "build", "dist"}
+
+
+def _agent_text() -> List[Path]:
+    return sorted(
+        p for base in ("rules", ".aegis/rules", "skills") for p in (ROOT / base).rglob("*.md") if p.is_file()
+    )
+
+
+def test_the_deleted_docs_are_really_gone():
+    names = set()
+    for here, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in _PRUNE]
+        names.update(files)
+    present = [d for d in DELETED_DOCS if ((ROOT / d).exists() if "/" in d else d in names)]
+    assert present == [], "a doc in DELETED_DOCS exists; drop it from the list"
+
+
+def test_rules_and_skills_name_no_deleted_doc():
+    assert _agent_text(), "found no rule or skill files"
+    stale = {_rel(p) for p in _agent_text() if any(d in p.read_text(encoding="utf-8") for d in DELETED_DOCS)}
+    assert stale == KNOWN_STALE_AGENT_TEXT

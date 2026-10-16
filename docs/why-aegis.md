@@ -94,7 +94,7 @@ The first two percentages are re-derived from the quoted counts. The A/B percent
 
 ## 5. What we got wrong, and what v4 does instead
 
-A multi-lens review graded the code at `9e4d976` (v3.3 plus the first v4 wave) 4/10 on product value and design soundness: "a real problem, a prototype-grade solution, over-built roughly 5-10x". It scored code health, end-to-end behavior and test health 6/10 each, and found the deterministic Layer-1 checks and the zero-dependency, local-first claims genuinely true. The reviewers were AI agents working in separate contexts with the project's own review skills ([adaptive-reviewer](../skills/adaptive-reviewer/SKILL.md), escalated to the Citadel mode of [staff-review](../skills/staff-review/SKILL.md)), not a person or an outside auditor, so the grades are one model-assisted opinion, not an external audit. (This is the adaptive review listed under ADR 0005 "Evidence"; its report is not in the repository.) The specific mistakes:
+A multi-lens review graded the code at `9e4d976` (v3.3 plus the first v4 wave) 4/10 on product value and design soundness: "a real problem, a prototype-grade solution, over-built roughly 5-10x and unsound at its centre". Its central finding was that the loop meant to show which rules prove their value measured the wrong thing and was inverted for gates (section 5.2); it also found that receipts were not a security boundary and that Layer 2's adversarial verification was largely unproven. It scored code health, end-to-end behavior and test health 6/10 each, and found the deterministic Layer-1 checks and the zero-dependency, local-first claims genuinely true. The reviewers were AI agents working in separate contexts with the project's own review skills ([adaptive-reviewer](../skills/adaptive-reviewer/SKILL.md), escalated to the Citadel mode of [staff-review](../skills/staff-review/SKILL.md)), not a person or an outside auditor, so the grades are one model-assisted opinion, not an external audit. (This is the adaptive review listed under ADR 0005 "Evidence"; its report is not in the repository.) The specific mistakes:
 
 ### 5.1 Self-minted SHIP receipts
 
@@ -120,7 +120,7 @@ v3 wrote fitness numbers back into each rule file's frontmatter at session close
 
 Across about 690 sessions the author's logs show 73 MCP calls, to only 5 of the 17 tools; 12 tools were never called. No rule was ever promoted, demoted or archived in either governed repository (ADR 0005 §5, from the refactor sweep's count of the author's local session logs).
 
-**v4**: the MCP surface is 4 tools (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`), and the CLI shrinks to the commands in ADR 0005 §5. Receipts, the async job engine (the only daemon thread), the claim and bug registries, the agent-side hook phases and the unreachable code are cut with them. Re-derived at `895bbf5`: the MCP registry lists 4 tools, and the Python in the four `aegis_*` packages went from 39,426 lines in 160 files at `9e4d976` to 22,188 lines in 109 files (43.7% fewer). The docs were cut the same way: this page replaces the evolution log, the metrics log, the research notes and the archive.
+**v4**: the MCP surface is 4 tools (`aegis_scan`, `aegis_report_outcome`, `aegis_create_rule`, `aegis_list_rules`), and the CLI shrinks to the commands in ADR 0005 §5. Receipts, the async job engine (the only daemon thread), the claim and bug registries, the agent-side hook phases and the unreachable code are cut with them. Re-derived: the MCP registry lists 4 tools, and the Python in the four `aegis_*` packages went from 39,426 lines in 160 files at `9e4d976` to 25,963 lines in 107 files at `41cd3f0`, the merge of waves A, B and C (34.1% fewer). The low point was 22,188 lines in 109 files at `895bbf5` (43.7% fewer), after the cuts and before later waves added the storage layer, `aegis migrate`, `gitsafe`, the host plane and `aegis doctor`. The docs were cut the same way: this page replaces the evolution log, the metrics log, the research notes and the archive.
 
 ### 5.5 Five resets in about 21 hours
 
@@ -132,7 +132,7 @@ On 2026-10-14 the project rebranded, tagged v2.0.0, v2.1.0 and v3.0.0, then star
 
 A repository's `.aegis/slots.yaml` named AST-driver commands that `aegis check` executed, and its slot values were inlined into the scan output the agent reads (review H5).
 
-**v4**: one `.aegis/config.json`, and repository config cannot name commands or tool slots. Driver commands come only from packaged templates or user-scope config ([ADR 0005](adr/0005-v4-plan-of-record.md) §5 "Config" and D10; [ADR 0016](adr/0016-zero-touch-polyglot-genesis.md) status). Every git call goes through `gitsafe`, which switches off what a repository's git config could run. The [repository trust table](../SECURITY.md#repository-trust) lists everything Aegis does run and where it comes from; the one case that runs repository code is `aegis check --full`, which runs the tests that match the change.
+**v4**: one `.aegis/config.json`, and repository config cannot name commands or tool slots. Driver commands come only from packaged templates or user-scope config ([ADR 0005](adr/0005-v4-plan-of-record.md) §5 "Config" and D10; [ADR 0016](adr/0016-zero-touch-polyglot-genesis.md) status). Every git call goes through `gitsafe`, which switches off what a repository's git config could run. The [repository trust table](../SECURITY.md#repository-trust) lists everything Aegis does run and where it comes from (`tests/unit/core/test_security_policy.py` fails when a module that starts a program has no row there); the one case that runs repository code is `aegis check --full`, which runs the tests that match the change.
 
 ```mermaid
 flowchart LR
@@ -212,7 +212,7 @@ The trade Aegis does not make: it does not claim enforcement it lacks. CI on eve
 **Re-derived** (run from the repository root at `895bbf5`):
 
 ```sh
-python3 -c "print(749/1339, 180+110+103+50+30, 749-473, 473/749, 1317/7015, 1-22188/39426)"   # 0.559, 473, 276, 0.632, 0.188, 0.437
+python3 -c "print(749/1339, 180+110+103+50+30, 749-473, 473/749, 1317/7015, 1-25963/39426, 1-22188/39426)"   # 0.559, 473, 276, 0.632, 0.188, 0.341, 0.437
 git log -1 --format='%h %ci' 2c85f58; git log -1 --format='%h %ci' 6f47f13   # 02:50 and 23:30 on 2026-10-14; 20 h 40 min is their difference
 git show --shortstat --format='%B' 6f47f13                                     # the subject line only; 40 files changed, 4267 insertions, 3272 deletions
 git rev-list --count 9e4d976; git tag | wc -l                                  # 850, 94
@@ -220,9 +220,9 @@ git log --reverse --format=%ci 9e4d976 | head -1                               #
 git for-each-ref --format='%(creatordate:iso) %(refname:short)' refs/tags/v3.3.0   # 23:14; 16 min is the difference to 6f47f13 (23:30)
 python3 -c "import aegis_mcp.registry as r; print(len(r.TOOL_DEFINITIONS))"   # 4
 # Python lines and files under aegis_core, aegis_cli, aegis_mcp, aegis_sdk (all lines, blank and comment lines included):
-for rev in 9e4d976 895bbf5; do
-  git ls-tree -r --name-only $rev -- aegis_core aegis_cli aegis_mcp aegis_sdk | grep -c '\.py$'    # 160, 109 files
+for rev in 9e4d976 895bbf5 41cd3f0; do
+  git ls-tree -r --name-only $rev -- aegis_core aegis_cli aegis_mcp aegis_sdk | grep -c '\.py$'    # 160, 109, 107 files
   git ls-tree -r --name-only $rev -- aegis_core aegis_cli aegis_mcp aegis_sdk | grep '\.py$' \
-    | while read -r f; do git show "$rev:$f"; done | wc -l                                          # 39426, 22188 lines
+    | while read -r f; do git show "$rev:$f"; done | wc -l                                          # 39426, 22188, 25963 lines
 done
 ```

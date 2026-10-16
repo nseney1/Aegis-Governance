@@ -340,7 +340,7 @@ Every surviving feature gets a Hypothesis / Metric (from the ledger) / Prune-by 
 
 ## 8b. Open question, pinned for after v4.2: did this rule actually help?
 
-The author pinned this on 2026-10-15 to explore after v4.2.0 ships. It is out of scope for v4.x.
+The author pinned this on 2026-10-15 to explore after v4.2.0 ships. It is out of scope for v4.0 to v4.2. Update (2026-10-15): it is now planned work for v4.3, as the per-rule credit model in [why-aegis](../why-aegis.md) section 6. The v4.3 spec, expected to land as ADR 0006, amends §5 of this ADR.
 
 **The problem.** The v3 loop credited every path-matched rule with the whole run's pass/fail. That is inverted for gates: a gate that blocked 4 bad commits scored 4 FP and 1 TP. v4 makes the ledger the only source and turns promotion into a reviewed action (AD-1, AD-2). It still does not answer per-rule attribution.
 

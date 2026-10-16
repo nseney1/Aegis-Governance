@@ -4,7 +4,7 @@ All notable changes to Aegis Guardrails are documented here. The project uses [S
 
 ## [4.0.0] - Unreleased
 
-v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has fewer commands and MCP tools, one config file, an append-only ledger as the only source of rule fitness, and a host plane that registers Aegis with Codex CLI, Claude Code and Antigravity. The reasons, with the evidence and the mistakes behind them, are in [docs/why-aegis.md](docs/why-aegis.md); the decisions are in [ADR 0005](docs/adr/0005-v4-plan-of-record.md). Every removed command and flag exits with status 2 and prints one line naming its replacement.
+v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has fewer commands and MCP tools, one config file, an append-only ledger as the only source of rule fitness, and a host plane that registers Aegis with Codex CLI, Claude Code and Antigravity. The reasons, with the evidence and the mistakes behind them, are in [docs/why-aegis.md](docs/why-aegis.md); the decisions are in [ADR 0005](docs/adr/0005-v4-plan-of-record.md). Every removed command and flag exits with status 2. Removed commands, and the removed `init` and `uninstall` flags, print one line naming the replacement (or saying there is none); the other removed flags get the argument parser's usage error, and the Breaking changes list below names their replacements.
 
 ### Upgrading from 3.x
 
@@ -19,7 +19,7 @@ v4.0 rebuilds v3.3 around what was actually used and what can be checked. It has
 
 - Removed commands and their replacements: `install` → `aegis init --host`; `system`, `sys`, `detect`, `languages`, `drivers`, `audit` → `aegis doctor`; `verify`, `checkpoint` → `aegis check` (v3's `aegis checkpoint` is `aegis check --strict`); `agent` → `aegis scan`, with outcomes recorded through the MCP tool `aegis_report_outcome`; `report`, `rules` → `aegis status`; `completion`, `skill`, `handoff` → no replacement.
 - `aegis migrate` is now a converter (dry run by default, `--apply` to perform it). In v3 it only reported migration status.
-- `aegis rule clean` and `aegis doctor --fix-path` are removed (they rewrote global files and shell rc files). Cleanup goes through `aegis doctor --fix`.
+- `aegis rule clean` and `aegis doctor --fix-path` are removed (they rewrote global files and shell rc files). `aegis doctor --fix` removes legacy rule blocks and unedited v3 rule copies; remove edited copies by hand.
 - `aegis hook pre-commit` is replaced by `aegis check --hook`. The agent-side hook phases `pre-invocation`, `governance-monitor`, `immune-init`, `session-close`, `stop` and `post-session` are removed; remove them from your host's hook config. `python -m aegis_cli.hooks` no longer exists. Git hooks installed by v3 are reported as outdated, and `aegis hook install` rewrites them.
 
 **Flags**
