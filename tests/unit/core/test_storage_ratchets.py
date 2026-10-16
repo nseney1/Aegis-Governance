@@ -20,13 +20,6 @@ PACKAGES = ("aegis_core", "aegis_cli", "aegis_mcp", "aegis_sdk")
 NON_AEGIS_WRITERS = {
     ("aegis_cli/hooks/management.py", "install_hook"): "the git pre-commit hook (.git/hooks)",
     ("aegis_cli/hooks/management.py", "uninstall_hook"): "the git pre-commit hook (.git/hooks)",
-    ("aegis_cli/init.py", "_install_claude_md"): "CLAUDE.md (wave C replaces it with a managed block)",
-    ("aegis_cli/platforms/base.py", "write_json_atomic"): "host MCP JSON configs (wave C deletes platforms/)",
-    ("aegis_cli/platforms/claude.py", "_uninstall_claude_md"): "CLAUDE.md (wave C deletes platforms/)",
-    ("aegis_cli/platforms/claude.py", "ClaudeAdapter.install"): "~/.claude rules and skills (wave C)",
-    ("aegis_cli/platforms/copilot.py", "CopilotAdapter.install"): ".github instructions (wave C)",
-    ("aegis_cli/platforms/gemini.py", "GeminiAdapter.install"): "~/.gemini rules and skills (wave C)",
-    ("aegis_cli/platforms/kiro.py", "KiroAdapter.install"): "~/.kiro steering (wave C)",
 }
 _WRITE_MODE = re.compile(r"[wax+]")
 _COPIES = {"copy", "copy2", "copyfile", "copytree"}

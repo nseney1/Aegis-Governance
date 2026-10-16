@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -87,235 +86,24 @@ def _format_adaptive_expiry(created_val, expiry_days_val) -> str:
     return f"{remaining_days}d"
 
 
-# ── CLAUDE.md merged rules (BUG-033) ────────────────────────────────────────
-# Claude Code reads one CLAUDE.md, so rules are merged rather than copied.
-# Two writers exist and must stay in sync with this parser:
-#   install/install.sh + install.ps1: "# Soma Governance Rules" header, then
-#     per rule a "---" line followed by the frontmatter-stripped body, which
-#     starts with an H1. Bodies may contain their own "---" rules (followed
-#     by H2s), so only "---" + H1 starts a new rule.
-#   aegis_cli/init.py _install_claude_md: <!-- SOMA:START/END --> markers,
-#     sections "## <stem>" (raw file incl. frontmatter) joined by "---".
-
-SOMA_HEADER = "# Soma Governance Rules"
-SOMA_MARKER_START = "<!-- SOMA:START -->"
-SOMA_MARKER_END = "<!-- SOMA:END -->"
-_SECTION_SLUG = re.compile(r"^## ([A-Za-z0-9][A-Za-z0-9._-]*)$")
-_HEADER_LINE = re.compile(r"^# Soma Governance Rules[ \t]*\r?$", re.M)
-
-
-def _frontmatter_id(text: str) -> str | None:
-    """Return ``id`` from a leading YAML frontmatter block, if any."""
-    lines = text.lstrip().splitlines()
-    if not lines or lines[0].strip() != "---":
-        return None
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        m = re.match(r"^id:\s*(.+?)\s*$", line)
-        if m:
-            return m.group(1).strip("'\"") or None
-    return None
-
-
-def _first_h1(text: str) -> str | None:
-    """Return the first top-level heading's text, skipping frontmatter."""
-    lines = text.lstrip().splitlines()
-    start = 0
-    if lines and lines[0].strip() == "---":
-        for i in range(1, len(lines)):
-            if lines[i].strip() == "---":
-                start = i + 1
-                break
-    for line in lines[start:]:
-        s = line.strip()
-        if s.startswith("# "):
-            return s[2:].strip()
-    return None
-
-
-def _package_rule_headings(root: Path) -> dict[str, str]:
-    """Map each packaged rule's H1 to its id, so merged bodies (which lost
-    their frontmatter) still match trigger counts."""
-    mapping: dict[str, str] = {}
-    package_rules_dir = root / "rules"
-    if not package_rules_dir.is_dir():
-        package_rules_dir = root / "genome"
-    for d in (package_rules_dir, package_rules_dir / ".oracles"):
-        if not d.is_dir():
-            continue
-        for p in sorted(d.glob("*.md")):
-            try:
-                text = p.read_text(encoding="utf-8")
-            except Exception:
-                continue
-            heading = _first_h1(text)
-            if heading:
-                mapping.setdefault(heading, _frontmatter_id(text) or p.stem)
-    return mapping
-
-
-def _parse_marker_block(lines: list[str]) -> list[dict]:
-    """Parse the soma init block: '## <stem>' after the header or a '---'."""
-    sections: list[dict] = []
-    cur: dict | None = None
-    after_sep = True
-    i = 0
-    while i < len(lines):
-        s = lines[i].strip()
-        if not s:
-            if cur is not None:
-                cur["lines"].append(lines[i])
-            i += 1
-            continue
-        m = _SECTION_SLUG.match(s) if after_sep else None
-        if m:
-            j = next((k for k in range(i + 1, len(lines)) if lines[k].strip()), None)
-            nxt = lines[j].strip() if j is not None else ""
-            # A rule body starts with frontmatter or an H1; a body's own
-            # "---" + "## Section" does not.
-            if j is None or nxt == "---" or nxt.startswith("# "):
-                cur = {"stem": m.group(1), "lines": []}
-                sections.append(cur)
-                after_sep = False
-                i += 1
-                if nxt == "---":  # consume frontmatter so its closing --- is not a separator
-                    end = next((k for k in range(j + 1, len(lines))
-                                if lines[k].strip() == "---"), None)
-                    if end is not None:
-                        cur["lines"].extend(lines[i:end + 1])
-                        i = end + 1
-                continue
-        after_sep = s in ("---", SOMA_HEADER)
-        if cur is not None:
-            cur["lines"].append(lines[i])
-        i += 1
-    out = []
-    for sec in sections:
-        text = "".join(sec["lines"])
-        out.append({
-            "name": _frontmatter_id(text) or sec["stem"],
-            "keys": {sec["stem"], _first_h1(text)} - {None},
-            "text": text,
-        })
-    return out
-
-
-def _parse_install_region(lines: list[str], heading_map: dict[str, str]) -> list[dict]:
-    """Parse install.sh/ps1 output: a rule starts at an H1 right after '---'."""
-    sections: list[dict] = []
-    cur: dict | None = None
-    after_sep = False
-    for line in lines:
-        s = line.strip()
-        if s:
-            if after_sep and s.startswith("# "):
-                cur = {"heading": s[2:].strip(), "lines": []}
-                sections.append(cur)
-            after_sep = s == "---"
-        if cur is not None:
-            cur["lines"].append(line)
-    out = []
-    for sec in sections:
-        name = heading_map.get(sec["heading"], sec["heading"])
-        out.append({
-            "name": name,
-            "keys": {name, sec["heading"]},
-            "text": "".join(sec["lines"]),
-        })
-    return out
-
-
-def _merged_claude_rules(claude_md: Path, heading_map: dict[str, str]) -> tuple[bool, list[dict]]:
-    """Return (has_soma_content, merged rule sections) for a CLAUDE.md."""
-    try:
-        # utf-8-sig: install.ps1 (PowerShell 5.1 Set-Content -Encoding UTF8)
-        # writes a BOM that would otherwise defeat the line-1 header match.
-        text = claude_md.read_text(encoding="utf-8-sig")
-    except Exception:
-        return False, []
-    has_soma = False
-    rules: list[dict] = []
-    rest = text
-    start = text.find(SOMA_MARKER_START)
-    end = text.find(SOMA_MARKER_END)
-    if 0 <= start < end:
-        has_soma = True
-        block = text[start + len(SOMA_MARKER_START):end]
-        rules.extend(_parse_marker_block(block.splitlines(True)))
-        rest = text[:start] + text[end + len(SOMA_MARKER_END):]
-    m = _HEADER_LINE.search(rest)
-    if m:
-        has_soma = True
-        rules.extend(_parse_install_region(rest[m.start():].splitlines(True), heading_map))
-    return has_soma, rules
-
-
 def run_status(args: argparse.Namespace) -> int:
     """Show active rules and stats."""
     root = _repo_root(args)
     proj = _project_root(args)
 
-    # 1. Count installed rules: detect platform and scan rules dir
-    #    Skip platform auto-detection when _root is explicitly provided (e.g. tests)
-    #    to prevent leaking the real filesystem into test results.
+    # 1. Core rules: the shipped rules of an Aegis checkout (its rules/ and rules/.oracles/).
+    #    v4 installs no rule files into host directories (host-matrix spec §3.2).
     core_files: list[Path] = []
-    merged_rules: list[dict] = []
-    has_merged_soma = False
-    test_mode = getattr(args, '_root', None) is not None
-    home = getattr(args, '_home', getattr(args, '_home_override', None)) or Path.home()
-
-    if not test_mode:
-        try:
-            from aegis_cli.init import detect_platform, get_rules_dir
-            platform = detect_platform(proj)
-            if platform == "unknown":
-                platform = detect_platform(home)
-            if platform != "unknown":
-                rules_dir = get_rules_dir(platform, home=home, project_root=proj)
-                if rules_dir.is_dir():
-                    for p in sorted(rules_dir.glob("*.md")):
-                        if p.is_file() and p.name.lower() not in ("readme.md", "claude.md"):
-                            core_files.append(p)
-                claude_md = rules_dir / "CLAUDE.md"
-                if platform == "claude" and claude_md.is_file():
-                    has_merged_soma, merged_rules = _merged_claude_rules(
-                        claude_md, _package_rule_headings(root))
-        except (ImportError, ValueError):
-            pass
-
-    # Drop merged sections that duplicate a loose file (soma init leaves the
-    # loose copies next to its CLAUDE.md block) or an earlier merged section.
-    seen: set[str] = set()
-    for f in core_files:
-        try:
-            loose_text = f.read_text(encoding="utf-8-sig")
-        except Exception:
-            loose_text = ""
-        seen.update(k for k in (f.stem, _frontmatter_id(loose_text),
-                                _first_h1(loose_text)) if k)
-    unique_merged: list[dict] = []
-    for r in merged_rules:
-        if r["name"] in seen or r["keys"] & seen:
-            continue
-        seen.add(r["name"])
-        seen.update(r["keys"])
-        unique_merged.append(r)
-    merged_rules = unique_merged
-
-    # Fallback: scan genome/ from the resolved root — never when CLAUDE.md
-    # holds Soma content, or a 1-rule install reports the genome count.
-    if not core_files and not has_merged_soma:
-        package_rules_dir = (root / "rules") if (root / "rules").is_dir() else (root / "genome")
-        if package_rules_dir.is_dir():
-            for p in sorted(package_rules_dir.glob("*.md")):
-                if p.is_file() and p.name.lower() != "readme.md":
-                    core_files.append(p)
-        oracles_dir = package_rules_dir / ".oracles"
-        if oracles_dir.is_dir():
-            for p in sorted(oracles_dir.glob("*.md")):
-                if p.is_file() and p.name.lower() != "readme.md":
-                    core_files.append(p)
+    genome_dir = (root / "rules") if (root / "rules").is_dir() else (root / "genome")
+    if genome_dir.is_dir():
+        for p in sorted(genome_dir.glob("*.md")):
+            if p.is_file() and p.name.lower() != "readme.md":
+                core_files.append(p)
+    oracles_dir = genome_dir / ".oracles"
+    if oracles_dir.is_dir():
+        for p in sorted(oracles_dir.glob("*.md")):
+            if p.is_file() and p.name.lower() != "readme.md":
+                core_files.append(p)
 
     # 2. Workspace rules, through the one loader; fitness from the ledger.
     from aegis_core.fitness import for_rules
@@ -373,19 +161,6 @@ def run_status(args: argparse.Namespace) -> int:
             "is_core": True,
         })
 
-    for r in merged_rules:
-        total_chars += len(r["text"])
-        rule_name = sanitize_display(str(r["name"]))
-        triggers, score = _core_fitness(rule_name)
-        all_rules.append({
-            "name": rule_name,
-            "type": "core",
-            "score": score,
-            "triggers": triggers,
-            "expiry": "∞ (core)",
-            "is_core": True,
-        })
-
     for rule in loaded:
         total_chars += len(rule.raw.decode("utf-8-sig", "replace"))
         fit = fits[rule.id]
@@ -426,7 +201,7 @@ def run_status(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         import json
         payload = {
-            "core_rules": len(core_files) + len(merged_rules),
+            "core_rules": len(core_files),
             "adaptive_rules": len(loaded),
             "estimated_tokens": estimated_tokens,
             "rules": all_rules,
@@ -449,7 +224,7 @@ def run_status(args: argparse.Namespace) -> int:
 
     header_title = "🛡️ Aegis Workspace Status" if ui.emoji_enabled else "Aegis Workspace Status"
     print(f"{ui.style(header_title, 'bold', 'cyan')}\n")
-    print(f"  {'Core rules:':<16}{len(core_files) + len(merged_rules)} active")
+    print(f"  {'Core rules:':<16}{len(core_files)} active")
     print(f"  {'Adaptive rules:':<16}{len(loaded)} (traps/patterns)")
     print(f"  {'Context load:':<16}~{estimated_tokens:,} tokens (pre-JIT max)")
     print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}")

@@ -775,49 +775,17 @@
             "type": "str"
           },
           {
-            "const": true,
-            "default": false,
-            "dest": "dry_run",
-            "flags": [
-              "--dry-run"
-            ],
-            "help": "Show what would be installed without doing it",
-            "kind": "store_true",
-            "metavar": null,
-            "nargs": 0,
-            "required": false
-          },
-          {
-            "choices": [
-              "gemini",
-              "claude",
-              "cursor",
-              "copilot",
-              "kiro"
-            ],
             "default": null,
-            "dest": "platform",
+            "dest": "host",
             "flags": [
-              "--platform"
+              "--host"
             ],
-            "help": "Skip platform detection, force a platform",
+            "help": "Register the Aegis MCP server with these hosts (codex-cli, claude-code, antigravity), or 'auto' for the ones detected on this machine. Without it, detected hosts are only listed.",
             "kind": "store",
-            "metavar": null,
+            "metavar": "HOST[,HOST]|auto",
             "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "local",
-            "flags": [
-              "--local"
-            ],
-            "help": "Install rules to project-local directory instead of user home",
-            "kind": "store_true",
-            "metavar": null,
-            "nargs": 0,
-            "required": false
+            "required": false,
+            "type": "_host_option"
           },
           {
             "choices": [
@@ -830,7 +798,7 @@
             "flags": [
               "--rules"
             ],
-            "help": "Rule set to install (default: standard)",
+            "help": "Starter rules to seed into .aegis/rules/personas/ (default: standard)",
             "kind": "store",
             "metavar": null,
             "nargs": null,
@@ -839,11 +807,11 @@
           {
             "const": true,
             "default": false,
-            "dest": "mcp",
+            "dest": "dry_run",
             "flags": [
-              "--mcp"
+              "--dry-run"
             ],
-            "help": "Generate .mcp.json for JIT rule matching",
+            "help": "Check and show every step without writing anything or running a host CLI",
             "kind": "store_true",
             "metavar": null,
             "nargs": 0,
@@ -857,7 +825,7 @@
               "--yes",
               "-y"
             ],
-            "help": "Skip confirmation prompts",
+            "help": "Skip the confirmation prompt",
             "kind": "store_true",
             "metavar": null,
             "nargs": 0,
@@ -870,7 +838,20 @@
             "flags": [
               "--force"
             ],
-            "help": "Overwrite existing rules",
+            "help": "Replace Aegis blocks in AGENTS.md/CLAUDE.md even if they were edited by hand",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "pin",
+            "flags": [
+              "--pin"
+            ],
+            "help": "Pin the host registrations to this workspace (AEGIS_WORKSPACE)",
             "kind": "store_true",
             "metavar": null,
             "nargs": 0,
@@ -883,15 +864,51 @@
             "flags": [
               "--no-hooks"
             ],
-            "help": "Skip installing git pre-commit hook",
+            "help": "Skip installing the git pre-commit hook",
             "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "platform",
+            "flags": [
+              "--platform"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": "?",
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "mcp",
+            "flags": [
+              "--mcp"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
             "metavar": null,
             "nargs": 0,
             "required": false
           }
         ],
-        "description": null,
-        "help": "Set up governance for this project"
+        "description": "Set up .aegis/ (config, starter rules, .gitignore), the Aegis block in AGENTS.md (and an @AGENTS.md block in an existing CLAUDE.md), the git pre-commit hook, and this workspace's entry in ~/.aegis/workspaces.json {\"v\": 1, \"workspaces\": [{root, added_at, added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with --host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add --scope user; antigravity: ~/.gemini/config/mcp_config.json).",
+        "help": "Set up governance for this project and register it with your agent hosts"
       },
       "migrate": {
         "aliases": [],
@@ -1845,37 +1862,17 @@
             "type": "str"
           },
           {
-            "choices": [
-              "gemini",
-              "kiro",
-              "copilot",
-              "claude",
-              "mcp"
-            ],
             "default": null,
-            "dest": "platform",
+            "dest": "host",
             "flags": [
-              "--platform",
-              "-p"
+              "--host"
             ],
-            "help": "Target platform (default: auto-detected or gemini)",
+            "help": "Unregister these hosts even if another workspace uses them (default: the hosts this workspace was registered with)",
             "kind": "store",
-            "metavar": null,
+            "metavar": "HOST[,HOST]",
             "nargs": null,
-            "required": false
-          },
-          {
-            "const": true,
-            "default": false,
-            "dest": "local",
-            "flags": [
-              "--local"
-            ],
-            "help": "Uninstall from project-local directory",
-            "kind": "store_true",
-            "metavar": null,
-            "nargs": 0,
-            "required": false
+            "required": false,
+            "type": "_host_ids"
           },
           {
             "const": true,
@@ -1884,7 +1881,7 @@
             "flags": [
               "--dry-run"
             ],
-            "help": "Show what would be uninstalled without deleting files",
+            "help": "Show what would be removed without changing anything",
             "kind": "store_true",
             "metavar": null,
             "nargs": 0,
@@ -1893,19 +1890,56 @@
           {
             "const": true,
             "default": false,
+            "dest": "force",
+            "flags": [
+              "--force"
+            ],
+            "help": "Also remove Aegis blocks that were edited by hand",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "platform",
+            "flags": [
+              "--platform",
+              "-p"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": "?",
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
             "dest": "purge",
             "flags": [
               "--purge"
             ],
-            "help": "Purge .aegis directory and local governance state",
-            "kind": "store_true",
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
             "metavar": null,
             "nargs": 0,
             "required": false
           }
         ],
-        "description": null,
-        "help": "Uninstall Aegis governance rules and configuration"
+        "description": "Remove the git pre-commit hook block, the Aegis blocks in AGENTS.md and CLAUDE.md, this workspace's entry in ~/.aegis/workspaces.json and the Aegis MCP registration (including the v3 name) of the hosts it was registered with. A host that another registered workspace still lists keeps its registration unless named with --host. Never deletes .aegis/.",
+        "help": "Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/)"
       }
     },
     "description": "Aegis Governance — make AI coding agents trustworthy"
@@ -1932,7 +1966,7 @@
     {
       "aliases": [],
       "category": "Setup & Environment",
-      "help": "Set up governance for this project",
+      "help": "Set up governance for this project and register it with your agent hosts",
       "name": "init"
     },
     {
@@ -1968,7 +2002,7 @@
     {
       "aliases": [],
       "category": "Setup & Environment",
-      "help": "Uninstall Aegis governance rules and configuration",
+      "help": "Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/)",
       "name": "uninstall"
     }
   ],

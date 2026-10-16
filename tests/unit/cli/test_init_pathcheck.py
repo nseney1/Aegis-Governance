@@ -24,12 +24,10 @@ class TestInitPathGuidance:
 
         args = argparse.Namespace(
             project=str(target),
-            platform="gemini",
             rules="minimal",
             force=True,
             yes=True,
             dry_run=False,
-            mcp=False,
             _project_root=str(target),
         )
 
@@ -51,12 +49,10 @@ class TestInitPathGuidance:
 
         args = argparse.Namespace(
             project=str(target),
-            platform="gemini",
             rules="minimal",
             force=True,
             yes=True,
             dry_run=False,
-            mcp=False,
             _project_root=str(target),
         )
 
@@ -96,23 +92,3 @@ class TestInitPathGuidance:
         assert hint_missing is not None
         assert "The 'aegis' command is not installed" in hint_missing
         assert "pip install aegis-guardrails" in hint_missing
-
-    def test_cli_init_falls_back_to_home_platform_detection(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
-        from aegis_cli.cli import main
-
-        fake_home = tmp_path / "home"
-        (fake_home / ".gemini").mkdir(parents=True)
-        proj = tmp_path / "citadel"
-        proj.mkdir()
-
-        monkeypatch.chdir(proj)
-        monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
-        monkeypatch.setenv("HOME", str(fake_home))
-
-        rc = main(["init", "--dry-run", "--yes"])
-        assert rc == 0
-        out = capsys.readouterr().out
-        assert "Detected platform: gemini" in out
-

@@ -155,20 +155,14 @@ class TestInitInstallsHook:
         # Set up a minimal git repo
         git_dir = tmp_path / ".git" / "hooks"
         git_dir.mkdir(parents=True)
-        # Make platform detectable
-        (tmp_path / ".gemini").mkdir()
 
         args = argparse.Namespace(
             dry_run=False,
-            platform="gemini",
             rules="minimal",
-            mcp=False,
             yes=True,
             force=False,
             _project_root=tmp_path,
         )
-        monkeypatch.setattr("aegis_cli.init.Path.home", lambda: tmp_path)
-
         run_init(args)
 
         hook_file = git_dir / "pre-commit"
@@ -182,19 +176,14 @@ class TestInitInstallsHook:
 
         git_dir = tmp_path / ".git" / "hooks"
         git_dir.mkdir(parents=True)
-        (tmp_path / ".gemini").mkdir()
 
         args = argparse.Namespace(
             dry_run=True,
-            platform="gemini",
             rules="minimal",
-            mcp=False,
             yes=True,
             force=False,
             _project_root=tmp_path,
         )
-        monkeypatch.setattr("aegis_cli.init.Path.home", lambda: tmp_path)
-
         run_init(args)
 
         hook_file = git_dir / "pre-commit"

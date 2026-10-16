@@ -83,7 +83,8 @@ def _arguments_table(arguments: List[Dict[str, Any]], skip_common: bool) -> List
     rows = [
         _argument_row(arg)
         for arg in arguments
-        if arg["kind"] != "parsers" and not (skip_common and set(arg["flags"]) & COMMON_FLAGS)
+        if arg["kind"] != "parsers" and arg["help"] != SUPPRESS
+        and not (skip_common and set(arg["flags"]) & COMMON_FLAGS)
     ]
     if not rows:
         return []

@@ -9,7 +9,7 @@ hypothesis: "Changes to the platform installers, the git hook installer and the 
 prediction: Will flag unreviewed changes to core installer infrastructure
 falsification: 0 findings in 15 sessions → prune
 target_paths:
-  - "aegis_cli/platforms/*.py"
+  - aegis_cli/install_hosts.py
   - aegis_cli/cli.py
   - aegis_cli/hooks/management.py
   - Makefile

@@ -382,7 +382,7 @@ def _init(project: Path, tmp_path: Path, monkeypatch) -> int:
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.chdir(project)
-    return main(["init", "--platform", "claude", "--local", "--yes"])
+    return main(["init", "--yes"])
 
 
 def test_init_warns_when_core_hooks_path_is_inside_the_work_tree(tmp_path, monkeypatch, capsys):

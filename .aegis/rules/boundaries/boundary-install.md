@@ -10,7 +10,7 @@ target_paths:
   - aegis_cli/init.py
   - aegis_cli/uninstall.py
   - aegis_cli/hooks/management.py
-  - "aegis_cli/platforms/*.py"
+  - aegis_cli/install_hosts.py
 expiry_sessions: 80
 impact_weight: 1.0
 minimum_mode: bulwark

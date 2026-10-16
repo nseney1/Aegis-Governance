@@ -33,9 +33,9 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | Command | Category | Description |
 | --- | --- | --- |
 | `aegis doctor` | Setup & Environment | System health and governance audit |
-| `aegis init` | Setup & Environment | Set up governance for this project |
+| `aegis init` | Setup & Environment | Set up governance for this project and register it with your agent hosts |
 | `aegis migrate` | Setup & Environment | Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply) |
-| `aegis uninstall` | Setup & Environment | Uninstall Aegis governance rules and configuration |
+| `aegis uninstall` | Setup & Environment | Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/) |
 | `aegis check` | Daily Workflow & Verification | Verify changes: Layer 1 checks, plus a Layer 2 model review with --full |
 | `aegis scan` | Daily Workflow & Verification | Show which rules apply to the given files (run before editing them) |
 | `aegis status` | Daily Workflow & Verification | Show active rules and stats |
@@ -56,20 +56,21 @@ Category: Setup & Environment.
 
 ### `aegis init`
 
-Set up governance for this project
+Set up governance for this project and register it with your agent hosts
+
+Set up .aegis/ (config, starter rules, .gitignore), the Aegis block in AGENTS.md (and an @AGENTS.md block in an existing CLAUDE.md), the git pre-commit hook, and this workspace's entry in ~/.aegis/workspaces.json {"v": 1, "workspaces": [{root, added_at, added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with --host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add --scope user; antigravity: ~/.gemini/config/mcp_config.json).
 
 Category: Setup & Environment.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--dry-run` |  |  | Show what would be installed without doing it |
-| `--platform` | one of `gemini`, `claude`, `cursor`, `copilot`, `kiro` |  | Skip platform detection, force a platform |
-| `--local` |  |  | Install rules to project-local directory instead of user home |
-| `--rules` | one of `minimal`, `standard`, `full` | `"standard"` | Rule set to install (default: standard) |
-| `--mcp` |  |  | Generate .mcp.json for JIT rule matching |
-| `--yes`, `-y` |  |  | Skip confirmation prompts |
-| `--force` |  |  | Overwrite existing rules |
-| `--no-hooks` |  |  | Skip installing git pre-commit hook |
+| `--host` | `HOST[,HOST]|auto` |  | Register the Aegis MCP server with these hosts (codex-cli, claude-code, antigravity), or 'auto' for the ones detected on this machine. Without it, detected hosts are only listed. |
+| `--rules` | one of `minimal`, `standard`, `full` | `"standard"` | Starter rules to seed into .aegis/rules/personas/ (default: standard) |
+| `--dry-run` |  |  | Check and show every step without writing anything or running a host CLI |
+| `--yes`, `-y` |  |  | Skip the confirmation prompt |
+| `--force` |  |  | Replace Aegis blocks in AGENTS.md/CLAUDE.md even if they were edited by hand |
+| `--pin` |  |  | Pin the host registrations to this workspace (AEGIS_WORKSPACE) |
+| `--no-hooks` |  |  | Skip installing the git pre-commit hook |
 
 ### `aegis migrate`
 
@@ -86,16 +87,17 @@ Category: Setup & Environment.
 
 ### `aegis uninstall`
 
-Uninstall Aegis governance rules and configuration
+Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/)
+
+Remove the git pre-commit hook block, the Aegis blocks in AGENTS.md and CLAUDE.md, this workspace's entry in ~/.aegis/workspaces.json and the Aegis MCP registration (including the v3 name) of the hosts it was registered with. A host that another registered workspace still lists keeps its registration unless named with --host. Never deletes .aegis/.
 
 Category: Setup & Environment.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
-| `--platform`, `-p` | one of `gemini`, `kiro`, `copilot`, `claude`, `mcp` |  | Target platform (default: auto-detected or gemini) |
-| `--local` |  |  | Uninstall from project-local directory |
-| `--dry-run` |  |  | Show what would be uninstalled without deleting files |
-| `--purge` |  |  | Purge .aegis directory and local governance state |
+| `--host` | `HOST[,HOST]` |  | Unregister these hosts even if another workspace uses them (default: the hosts this workspace was registered with) |
+| `--dry-run` |  |  | Show what would be removed without changing anything |
+| `--force` |  |  | Also remove Aegis blocks that were edited by hand |
 
 ### `aegis check`
 

@@ -270,7 +270,7 @@ def test_migrate_below_home_never_plans_the_user_plane(home, capsys, monkeypatch
     assert report["ledger"] is None
 
 
-@pytest.mark.parametrize("argv", [["migrate", "--json"], ["uninstall", "--dry-run", "--purge"]])
+@pytest.mark.parametrize("argv", [["migrate", "--json"], ["uninstall", "--dry-run"]])
 def test_migrate_and_uninstall_refuse_home(home, capsys, monkeypatch, argv):
     from aegis_cli.registry import get_default_registry
 
@@ -295,11 +295,11 @@ def test_uninstall_below_home_targets_the_project_not_the_user_plane(home, capsy
     project.mkdir()
     monkeypatch.chdir(project)
 
-    rc = main(["uninstall", "--dry-run", "--purge"])
+    rc = main(["uninstall", "--dry-run"])
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert f"Would remove {home / '.aegis'}" not in out
+    assert str(home / ".aegis") not in out
 
 
 # ── an unmigrated v3 workspace (.soma/ without .aegis/) is refused, as before AD-4 ──

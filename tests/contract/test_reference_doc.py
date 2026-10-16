@@ -68,8 +68,8 @@ def test_every_command_flag_default_and_help_is_documented(gen, snapshots):
         section = _section(text, f"### `aegis {' '.join(path)}`")
         assert node["help"] and node["help"] in section, path
         for arg in node["arguments"]:
-            if set(arg["flags"]) & COMMON or arg["kind"] == "parsers":
-                continue
+            if set(arg["flags"]) & COMMON or arg["kind"] == "parsers" or arg["help"] == "==SUPPRESS==":
+                continue  # hidden flags only exist to name their v4 replacement
             name = ", ".join(f"`{f}`" for f in arg["flags"]) or f"`{arg['dest']}`"
             row = next((line for line in section.splitlines() if line.startswith(f"| {name} |")), None)
             assert row is not None, (path, name)
