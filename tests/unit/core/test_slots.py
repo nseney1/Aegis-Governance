@@ -8,7 +8,6 @@ import pytest
 from aegis_core.skills.slots import (
     SlotRegistry,
     SlotResolutionError,
-    SLOT_REF_PATTERN,
     profile_id,
 )
 
