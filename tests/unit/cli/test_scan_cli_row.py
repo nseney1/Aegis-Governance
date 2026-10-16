@@ -12,7 +12,8 @@ import re
 
 import pytest
 
-from aegis_cli.cli import main
+from aegis_cli.cli import _build_parser, main
+from aegis_cli.scan import run_scan
 from aegis_core.scan_compliance import CLI_HOST, scan_covers
 
 
@@ -119,3 +120,11 @@ def test_a_directory_that_is_not_a_workspace_records_nothing(tmp_path, monkeypat
     assert main(["scan", "a.py"]) == 2
     assert not (plain / ".aegis").exists()
     assert sorted(os.listdir(plain)) == []
+
+
+def test_run_scan_records_the_row_for_the_files_it_scanned(ws, capsys):
+    """run_scan, as the command runs it after parsing, records the row it scanned."""
+    args = _build_parser().parse_args(["scan", "src/a.py", "--json"])
+    assert run_scan(args) == 0
+    assert json.loads(capsys.readouterr().out)["relevant_rules"]
+    assert [(r["host"], r["files"]) for r in _rows(ws)] == [(CLI_HOST, ["src/a.py"])]

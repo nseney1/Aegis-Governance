@@ -67,3 +67,16 @@ def test_an_unusable_repo_config_gives_the_default_window(ws: Path, content: str
 
 def test_a_missing_workspace_gives_the_default_window(tmp_path: Path):
     assert scan_window_s(tmp_path / "nowhere") == 3600
+
+
+@pytest.mark.parametrize("value,window", [(59, 3600), (60, 60), (61, 61), (86399, 86399), (86400, 86400), (86401, 3600)])
+def test_parse_keeps_the_window_only_inside_its_bounds(value, window):
+    config = RepoConfig.parse({"jit": {"scan_window_s": value}})
+    assert config.scan_window_s == window
+    assert bool(config.warnings) is (window == 3600)
+
+
+def test_parse_without_a_jit_section_or_with_a_bad_one_keeps_the_default():
+    assert RepoConfig.parse({}).scan_window_s == 3600
+    bad = RepoConfig.parse({"jit": ["scan_window_s", 60]})
+    assert (bad.scan_window_s, bad.warnings) == (3600, ("ignored 'jit' in .aegis/config.json: it must be an object",))

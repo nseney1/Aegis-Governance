@@ -266,6 +266,23 @@ def test_an_oversized_payload_is_not_read_and_exits_0(ws, capsys, monkeypatch):
     assert _run(capsys, "claude-code", payload) == (0, "", "")
 
 
+def test_a_stdin_stream_is_read_up_to_the_cap_and_no_further(ws, capsys, monkeypatch):
+    """A payload of exactly MAX_PAYLOAD_BYTES is read whole and decided; one byte more is
+    oversized and allowed unread, even when its first MAX_PAYLOAD_BYTES are a payload."""
+    import io
+
+    body = json.dumps(claude(ws, "Bash", {"command": "git push --force"})).encode("utf-8")
+    monkeypatch.setattr(pretool, "MAX_PAYLOAD_BYTES", len(body) + 8)
+    exact = body + b" " * 8
+    assert pretool.run_pre_tool("claude-code", io.BytesIO(exact), {}, now=NOW) == 2
+    assert pretool.run_pre_tool("claude-code", io.BytesIO(exact + b" "), {}, now=NOW) == 0
+    assert pretool.run_pre_tool("claude-code", io.BytesIO(body), {}, now=NOW) == 2
+    huge = io.BytesIO(exact + b" " * 1000)
+    assert pretool.run_pre_tool("claude-code", huge, {}, now=NOW) == 0
+    assert huge.tell() == len(exact) + 1  # the cap plus one byte, never the rest
+    capsys.readouterr()
+
+
 @pytest.mark.parametrize("error", [RuntimeError("boom"), KeyboardInterrupt(), SystemExit(2), MemoryError()])
 def test_any_internal_error_exits_0_silently(ws, capsys, monkeypatch, error):
     def explode(*args, **kwargs):
