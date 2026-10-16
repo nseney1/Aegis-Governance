@@ -102,8 +102,31 @@ def test_a_symlink_that_leaves_the_snapshot_is_refused(tmp_path):
     repo = hv.make_project(tmp_path)
     os.symlink("/etc", repo.root / "escape")
     out = checkrun.record(repo.root, tests=True, base="main")
-    assert out.status == "error" and "symbolic links" in out.reason and "escape" in out.reason
+    assert out.status == "unbindable" and "symbolic link" in out.reason and "escape" in out.reason
     assert hv.rows_of(repo.root, "check") == []
+
+
+@needs_git
+@posix_only
+def test_a_symlink_inside_the_tree_is_refused_too_and_nothing_runs(tmp_path):
+    marker = tmp_path / "ran"
+    repo = hv.make_project(tmp_path, runner=f"import pathlib\npathlib.Path({str(marker)!r}).write_text('x')\n"
+                                            "print('1 passed in 0s')\n")
+    hv.use_stub_runner(repo.home.path)
+    os.symlink("app.py", repo.root / "src" / "alias.py")  # relative, stays inside the tree
+    out = checkrun.record(repo.root, tests=True, base="main")
+    assert out.status == "unbindable" and out.row is None and "src/alias.py" in out.reason
+    assert not marker.exists() and hv.rows_of(repo.root, "check") == []
+
+
+@needs_git
+@posix_only
+def test_a_committed_symlink_is_refused_as_well(tmp_path):
+    repo = hv.make_project(tmp_path)
+    os.symlink("README.md", repo.root / "docs-link")
+    repo.commit("a committed link")
+    out = checkrun.record(repo.root, base="main")
+    assert out.status == "unbindable" and "docs-link" in out.reason
 
 
 @needs_git

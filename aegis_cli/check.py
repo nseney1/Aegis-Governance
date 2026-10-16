@@ -155,8 +155,8 @@ class CheckCommand(AegisCommand):
             action="store_true",
             help="Bind the work tree to a git tree, run Layer 1 on an exported snapshot of it and write one "
             "ledger check row (witness: aegis). A label, not proof: only CI on the landing commit confirms it. "
-            "A tree git cannot see completely (assume-unchanged or skip-worktree files) is unbindable and "
-            "writes no row; exit 0 only when the run passed",
+            "A tree git cannot see completely (assume-unchanged or skip-worktree files) or that holds symbolic "
+            "links is unbindable and writes no row; exit 0 only when the run passed",
         )
         parser.add_argument(
             "--tests",
