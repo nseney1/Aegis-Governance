@@ -1,7 +1,9 @@
 """aegis migrate: convert a v3 workspace or .soma cells to the v4 layout (dry run by default).
 
 The work is aegis_core.migrate; this module parses flags and prints the plan.
-Exit codes: 0 done (or nothing to do), 1 refused (nothing written: an unconfined path,
+``--apply`` also tightens the repository's shared state (``<git common dir>/aegis``) to
+directories 0700 and files 0600, whatever the umask made them; the report's ``state_modes``
+counts what was looser, never naming it. Exit codes: 0 done (or nothing to do), 1 refused (nothing written: an unconfined path,
 the lock held by another process, files that changed between planning and applying, or
 a workspace Aegis would still refuse with nothing to convert, whose blocker is named)
 or something was left unmigrated (an unmapped type, a destination conflict, an
@@ -71,9 +73,28 @@ def _print_report(report: Dict[str, Any], applied: bool, backup: Any) -> None:
         print("  ! not converted:")
         for entry in report["not_converted"]:
             print(f"    {entry['path']}: {entry['reason']}")
+    modes = report.get("state_modes")
+    if modes and modes["looser"]:
+        if applied:
+            print(f"  state modes: tightened {modes['fixed']} of {modes['looser']} loose entries "
+                  f"in the shared state (0700 directories, 0600 files)")
+        else:
+            print(f"  state modes: {modes['looser']} entries in the shared state are looser than 0700/0600 "
+                  "(--apply tightens them)")
     if report["user_config"]:
         print("  For ~/.aegis/config.json (not written: a repository cannot name commands or set slots):")
         print("    " + json.dumps(report["user_config"], indent=2).replace("\n", "\n    "))
+
+
+def _state_modes(root: Path, tighten: bool) -> Any:
+    """The shared state's mode counts (tightened when ``tighten``), or None when unreadable."""
+    from aegis_core import storage
+    from aegis_core.errors import AegisError
+
+    try:
+        return storage.shared_state_modes(root, fix=tighten).as_dict()
+    except (AegisError, OSError):
+        return None
 
 
 def run_migrate(args: argparse.Namespace) -> int:
@@ -96,6 +117,7 @@ def run_migrate(args: argparse.Namespace) -> int:
             report["status"], report["refusal"] = "refused", str(exc)
     if apply_it and report["status"] == "pending":
         report["status"] = "applied"
+    report["state_modes"] = _state_modes(root, tighten=apply_it and report["status"] != "refused")
     report["backup"] = str(backup) if backup else None
     if getattr(args, "json", False):
         print(json.dumps(report, indent=2))
