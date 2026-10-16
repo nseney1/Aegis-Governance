@@ -579,32 +579,58 @@ class TestRegistrationCommands:
         assert Path(root).resolve() == Path(aegis_mcp.__file__).resolve().parent.parent
         assert ih.launch_risk(command) is None
 
+    @staticmethod
+    def _native(argv):
+        """POSIX absolute paths as Windows spells them, where a path needs a drive."""
+        if os.name != "nt":
+            return argv
+        return [("C:" + a.replace("/", "\\")) if a.startswith("/") else a for a in argv]
+
     @pytest.mark.parametrize("argv, risk", [
-        (["/py", "-m", "aegis_mcp"], "-m"),
-        (["/py", "-Im", "aegis_mcp"], "-m"),
-        (["/py", "-maegis_mcp"], "-m"),
-        (["/py", "-W", "ignore", "-m", "aegis_mcp"], "-m"),
+        (["/py", "-m", "aegis_mcp"], "-m without -I"),
+        (["/py", "-maegis_mcp"], "-m without -I"),
+        (["/py", "-W", "ignore", "-m", "aegis_mcp"], "-m without -I"),
+        (["/usr/bin/python3", "-E", "-s", "-m", "aegis_mcp"], "-m without -I"),
         (["/py", "-c", "import aegis_mcp"], "-c without -I"),
+        (["/py", "-"], "stdin without -I"),
         (["python3", "-I", "-c", "x"], "not an absolute path"),
         (["aegis-mcp"], "not an absolute path"),
         (["./aegis-mcp"], "not an absolute path"),
         ([], "not an absolute path"),
+        # A relative script resolves against the start directory, isolated mode or not.
+        (["/usr/bin/python3", "aegis_mcp/server.py"], "aegis_mcp/server.py, a path relative to the directory"),
+        (["/usr/bin/python3.12", "-I", "server.py"], "server.py, a path relative to the directory"),
+        (["/opt/venv/bin/python", "--", "server.py"], "server.py, a path relative to the directory"),
+        (["/usr/bin/pythonw.exe", "run.py"], "run.py, a path relative to the directory"),
+        # env runs the command it is given, looked up on the host's PATH when bare.
+        (["/usr/bin/env", "python3", "-m", "aegis_mcp"], "through env: the command is not an absolute path"),
+        (["/usr/bin/env", "AEGIS_CLIENT=x", "/usr/bin/python3", "-m", "aegis_mcp"], "through env: it runs -m"),
+        (["/usr/bin/env", "-i", "-u", "PATH", "/usr/bin/python3", "-c", "x"], "through env: it runs -c"),
+        (["/usr/bin/env", "--unset=PATH", "--", "/py", "aegis_mcp/server.py"], "through env: it runs the script"),
+        (["/usr/bin/env", "-S", "python3 -m aegis_mcp"], "env -S"),
+        (["/usr/bin/env", "--split-string=python3 -m aegis_mcp"], "env -S"),
+        (["/usr/bin/env"], "through env: the command is not an absolute path"),
     ])
     def test_launch_risk_names_a_command_that_depends_on_the_start_directory(self, argv, risk):
-        assert risk in (ih.launch_risk(argv) or "")
+        assert risk in (ih.launch_risk(self._native(argv)) or "")
 
     @pytest.mark.parametrize("argv", [
         ["/x/aegis-mcp"],
+        ["/x/aegis-mcp", "serve"],  # not an interpreter: its arguments are not scripts
         ["/py", "-I", "-c", "import sys", "/root"],
         ["/py", "-Ic", "import sys"],
         ["/py", "-X", "frozen_modules=off", "-I", "-c", "x"],
         ["/py", "-Xfrozen_modules=off", "-I", "-c", "x"],
         ["/py", "/abs/script.py"],
+        # Isolated mode keeps the start directory off sys.path for -m as for -c.
+        ["/py", "-Im", "aegis_mcp"],
+        ["/usr/bin/python3", "-I", "-m", "aegis_mcp"],
+        ["/usr/bin/python3.12", "-P", "-m", "aegis_mcp"],
+        ["/usr/bin/env", "AEGIS_CLIENT=x", "/x/aegis-mcp"],
+        ["/usr/bin/env", "-i", "--", "/py", "-I", "-c", "x"],
     ])
     def test_launch_risk_accepts_absolute_isolated_commands(self, argv):
-        if os.name == "nt":
-            argv = ["C:" + argv[0].replace("/", "\\")] + argv[1:]
-        assert ih.launch_risk(argv) is None
+        assert ih.launch_risk(self._native(argv)) is None
 
     def test_codex_argv_uses_the_table_template(self):
         argv = ih.register_argv(hosts.get("codex-cli"), ["/x/aegis-mcp"])
@@ -637,6 +663,9 @@ class TestTheRegisteredLauncherNeverImportsFromTheStartDirectory:
     planted aegis_mcp or aegis_core (release review: v4.0.0 registered `python -m aegis_mcp`)."""
 
     def _planted(self, tmp_path):
+        """Aegis's own packages, which the runner's import root shadows anyway, and a
+        standard-library module (json, which the server imports), which only -I keeps
+        the start directory from shadowing."""
         repo = tmp_path / "evil"
         marker = tmp_path / "PLANTED_RAN"
         for package in ("aegis_mcp", "aegis_core"):
@@ -644,6 +673,7 @@ class TestTheRegisteredLauncherNeverImportsFromTheStartDirectory:
             code = f"open({str(marker)!r}, 'a').write({package!r} + '\\n')\n"
             for module in ("__init__.py", "__main__.py", "server.py"):
                 (repo / package / module).write_text(code, encoding="utf-8")
+        (repo / "json.py").write_text(f"open({str(marker)!r}, 'a').write('json\\n')\n", encoding="utf-8")
         return repo, marker
 
     def test_the_fallback_launcher_runs_aegis_and_not_the_planted_package(self, tmp_path):

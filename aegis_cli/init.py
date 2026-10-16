@@ -325,9 +325,10 @@ def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
 
     A hooks directory outside the repository and its git directories (``core.hooksPath``
     set to a team or dotfiles directory, often globally, or a ``.git/hooks`` linked to one)
-    holds a hook every repository using it runs; install_hook would append the Aegis block
-    there, pinned to this machine's aegis, so it is refused here and left to an explicit
-    ``aegis hook install`` (after which shared_hook_in_place lets init through).
+    holds a hook every repository using it runs; install_hook would insert the Aegis block
+    there, right after the shebang so it runs before the hook's own lines, pinned to this
+    machine's aegis, so it is refused here and left to an explicit ``aegis hook install``
+    (after which shared_hook_in_place lets init through).
     """
     from aegis_cli.hooks.management import _replace_hook_block
 

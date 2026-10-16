@@ -1677,6 +1677,25 @@ def _workspace_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
     return found
 
 
+def _upgrade_findings(ctx: _Ctx) -> List[_Finding]:
+    """v3 state here that v4 never reads (discovery.unmigrated_state): status, scan and sync
+    refuse such a workspace, and doctor, which still runs in it, must not call it healthy.
+    The home directory's .aegis/ is the user plane, which aegis migrate never converts."""
+    if ctx.is_home:
+        return []
+    from aegis_core.workspace import discovery
+
+    # The helper comes with the commands that refuse; a build without it has neither.
+    pending = getattr(discovery, "unmigrated_state", None)
+    found = list(pending(ctx.root)) if pending is not None else []
+    if not found:
+        return []
+    return [_Finding("unmigrated_v3_state", ctx.root / found[0],
+                     f"unmigrated v3 state: {', '.join(found)}. Aegis v4 does not read it, and aegis status, "
+                     "scan and sync refuse to run until it is converted: run aegis migrate to see the "
+                     "conversion, then aegis migrate --apply")]
+
+
 def _home_rules_finding(ctx: _Ctx) -> List[_Finding]:
     if ctx.home is None:
         return []
@@ -1808,7 +1827,7 @@ def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagn
     floor, unreached = _floor_status(root)
     rows = [_host_row(spec, ctx, info, roots, floor) for spec in selected]
     claude_user = _claude_user_registered(ctx)
-    findings = (notes + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
+    findings = (notes + _upgrade_findings(ctx) + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
                 + _legacy_block_findings(ctx) + _budget_findings(ctx, info) + _home_rules_finding(ctx)
                 + _v3_copy_findings(ctx))
     if roots is None and ctx.home is not None:

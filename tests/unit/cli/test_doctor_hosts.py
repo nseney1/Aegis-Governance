@@ -461,6 +461,7 @@ def test_enforcement_tiers_report_what_is_in_force_here_and_nothing_more(env):
 
     from aegis_cli.hooks.management import generate_hook_block
     (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)  # git skips a hook it cannot execute
     payload = env.doctor()
     tiers = {t["tier"]: t for t in payload["enforcement_tiers"]}
     assert tiers["local_floor"]["status"] == "active"
@@ -775,15 +776,23 @@ def test_the_mcp_launcher_check_runs_no_python3_and_no_aegis_mcp(env, monkeypatc
         assert "registered for codex-cli, claude-code, antigravity" in detail
 
 
-@pytest.mark.parametrize("command, args", [("{py}", ["-m", "aegis_mcp"]), ("python3", ["-m", "aegis_mcp"])])
-def test_a_dash_m_registration_is_unsafe_on_the_host_row_and_in_the_launcher_check(env, command, args):
-    """The v4.0.0 release candidate's fallback (`<python> -m aegis_mcp`) and a bare `python3 -m aegis_mcp`
-    import from the project directory the host starts the server in."""
+@pytest.mark.parametrize("command, args", [
+    ("{py}", ["-m", "aegis_mcp"]),
+    ("python3", ["-m", "aegis_mcp"]),
+    ("{py}", ["aegis_mcp/server.py"]),
+    ("{env}", ["python3", "-m", "aegis_mcp"]),
+    ("{env}", ["AEGIS_CLIENT=antigravity", "{py}", "-m", "aegis_mcp"]),
+])
+def test_a_registration_that_runs_from_the_start_directory_is_unsafe_on_the_host_row_and_in_the_launcher_check(
+        env, command, args):
+    """The v4.0.0 release candidate's fallback (`<python> -m aegis_mcp`), a bare `python3 -m aegis_mcp`,
+    a relative script, and either one behind `env` import from the project directory the host
+    starts the server in."""
     env.all_ok()
-    py = env.stub("python3")
+    names = {"py": env.stub("python3"), "env": env.stub("env")}
     cfg = env.antigravity_registered()
     data = json.loads(cfg.read_text(encoding="utf-8"))
-    data["mcpServers"]["aegis"].update(command=command.format(py=py), args=args)
+    data["mcpServers"]["aegis"].update(command=command.format(**names), args=[a.format(**names) for a in args])
     cfg.write_text(json.dumps(data), encoding="utf-8")
     payload = env.doctor()
     row = host(payload, "antigravity")
@@ -1057,6 +1066,7 @@ def test_a_host_binary_found_only_inside_the_workspace_is_reported_never_run(env
     hooks = env.ws / ".git" / "hooks"
     hooks.mkdir(parents=True)
     (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)  # git skips a hook it cannot execute
     payload = env.doctor()
     assert tier(payload, "local_floor")["status"] == "active"
     # The floor holds for commits, but not for a host that may not be installed at all.
@@ -1127,6 +1137,7 @@ def test_an_ungoverned_git_repository_is_not_called_a_non_repository(env, tmp_pa
     assert "not a git repository" not in floor["detail"] and ".aegis" in floor["detail"]
 
     (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)  # git skips a hook it cannot execute
     payload = json.loads(env.run(json=True, workspace=str(bare))[1])
     assert tier(payload, "local_floor")["status"] == "inactive"
     assert levels(payload) == dict.fromkeys(PHASE1, "none")
@@ -1144,6 +1155,7 @@ def test_an_active_local_floor_is_never_claimed_for_a_host_that_is_not_installed
     hooks = env.ws / ".git" / "hooks"
     hooks.mkdir(parents=True)
     (hooks / "pre-commit").write_text("#!/bin/sh\n" + generate_hook_block(sys.executable), encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)  # git skips a hook it cannot execute
     payload = env.doctor()
     assert tier(payload, "local_floor")["status"] == "active"
     assert levels(payload) == {"codex-cli": "local_floor", "claude-code": "local_floor", "antigravity": "none"}
@@ -1776,3 +1788,60 @@ def test_a_legacy_workspace_without_rules_is_told_to_migrate_never_to_init(env, 
     main(["doctor"])
     out = capsys.readouterr().out
     assert "Fix: Run 'aegis init' to install starter rules." in out and "aegis migrate" not in out
+
+
+# ── unmigrated v3 state (discovery.unmigrated_state, from the gate/upgrade lane) ──
+
+V3_STATE = [".aegis/evidence/signals.jsonl", "aegis.conf"]
+
+
+def test_unmigrated_v3_state_is_a_warning_that_names_the_files_and_aegis_migrate(env, monkeypatch):
+    """status, scan and sync refuse a workspace with v3 state v4 never reads; doctor, which
+    still runs there, says so instead of reporting a healthy workspace."""
+    from aegis_core.workspace import discovery
+
+    env.all_ok()
+    seen = []
+
+    def pending(root):
+        seen.append(Path(root))
+        return list(V3_STATE)
+
+    monkeypatch.setattr(discovery, "unmigrated_state", pending, raising=False)
+    payload = env.doctor()
+    assert [p.resolve() for p in seen] == [env.ws.resolve()]
+    (finding,) = [f for f in payload["findings"] if f["code"] == "unmigrated_v3_state"]
+    assert finding["severity"] == "warning" and finding["fixable"] is False
+    assert Path(finding["path"]) == env.ws.resolve() / ".aegis" / "evidence" / "signals.jsonl"
+    assert finding["message"] == (
+        "unmigrated v3 state: .aegis/evidence/signals.jsonl, aegis.conf. Aegis v4 does not read it, and "
+        "aegis status, scan and sync refuse to run until it is converted: run aegis migrate to see the "
+        "conversion, then aegis migrate --apply")
+    assert payload["summary"]["warnings"] >= 1
+    rc, out = env.run()
+    assert "unmigrated v3 state: .aegis/evidence/signals.jsonl, aegis.conf" in out.split("Warnings:")[1]
+
+
+def test_no_unmigrated_state_and_no_helper_mean_no_upgrade_warning(env, monkeypatch):
+    """A v4 workspace has none; a build without the helper (it lands in a parallel lane)
+    reports none and does not fail."""
+    from aegis_core.workspace import discovery
+
+    env.all_ok()
+    monkeypatch.setattr(discovery, "unmigrated_state", lambda root: [], raising=False)
+    assert "unmigrated_v3_state" not in finding_codes(env.doctor())
+    monkeypatch.delattr(discovery, "unmigrated_state", raising=False)
+    payload = env.doctor()
+    assert "unmigrated_v3_state" not in finding_codes(payload) and payload["findings"] == []
+
+
+def test_the_home_directory_is_never_checked_for_unmigrated_state(env, monkeypatch):
+    """~/.aegis is the user plane, not a v3 workspace: aegis migrate never runs there."""
+    from aegis_core.workspace import discovery
+
+    env.all_ok()
+    seen = []
+    monkeypatch.setattr(discovery, "unmigrated_state", lambda root: seen.append(root) or list(V3_STATE),
+                        raising=False)
+    payload = env.doctor(workspace=str(env.home))
+    assert seen == [] and "unmigrated_v3_state" not in finding_codes(payload)

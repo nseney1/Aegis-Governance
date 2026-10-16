@@ -170,9 +170,9 @@ def check_packaged_rules_and_skills(ws):
           f"4 MCP tools; top level {', '.join(top_level)})")
 
 
-def _planted_repo(packages):
-    """A directory holding packages a cloned repository could plant, each of which writes
-    a marker when imported, and a rules/pricing.md."""
+def _planted_repo(packages, modules=()):
+    """A directory holding packages and top-level modules a cloned repository could plant,
+    each of which writes a marker when imported, and a rules/pricing.md."""
     repo = tempfile.mkdtemp(prefix="aegis-smoke-planted-")
     marker = os.path.join(repo, "PLANTED_RAN")
     for package in packages + ("rules",):
@@ -180,6 +180,9 @@ def _planted_repo(packages):
         for module in ("__init__.py", "__main__.py"):
             with open(os.path.join(repo, package, module), "w", encoding="utf-8") as f:
                 f.write(f"open({marker!r}, 'a').write({package!r} + chr(10))\n")
+    for module in modules:
+        with open(os.path.join(repo, module + ".py"), "w", encoding="utf-8") as f:
+            f.write(f"open({marker!r}, 'a').write({module!r} + chr(10))\n")
     with open(os.path.join(repo, "rules", "pricing.md"), "w", encoding="utf-8") as f:
         f.write("---\nid: pricing\n---\n# repository text\n")
     return repo, marker
@@ -187,8 +190,8 @@ def _planted_repo(packages):
 
 def check_mcp_launcher():
     """The commands `aegis init --host` registers start the wheel's server from a directory
-    that plants aegis_mcp and aegis_core, and import neither (release review: v4.0.0
-    registered `python -m aegis_mcp` when aegis-mcp was not on PATH)."""
+    that plants aegis_mcp, aegis_core and a json module, and import none of them (release
+    review: v4.0.0 registered `python -m aegis_mcp` when aegis-mcp was not on PATH)."""
     from aegis_cli.install_hosts import launch_risk, mcp_command
 
     requests = "".join(json.dumps(r) + "\n" for r in (
@@ -203,7 +206,9 @@ def check_mcp_launcher():
         risk = launch_risk(command)
         if risk:
             fail(f"the {kind} MCP launcher {command!r} is unsafe: {risk}")
-        repo, marker = _planted_repo(("aegis_mcp", "aegis_core"))
+        # json: a standard-library module the server imports, which only -I (or a console
+        # script, whose own directory leads sys.path) keeps the start directory from shadowing.
+        repo, marker = _planted_repo(("aegis_mcp", "aegis_core"), modules=("json",))
         proc = subprocess.run(command, input=requests, capture_output=True, text=True, timeout=60,
                               cwd=repo, env=env)
         if os.path.exists(marker):

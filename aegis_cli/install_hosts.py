@@ -758,34 +758,93 @@ def mcp_command(path: Optional[str] = None, scripts_dirs: Optional[Sequence[str]
 
 # Interpreter options whose value follows them (attached or as the next argument).
 _PY_VALUE_OPTIONS = "WX"
+# python, python3, python3.12, python3.13t, pythonw, pypy3 and the Windows py launcher.
+_PYTHON_NAME = re.compile(r"(?:python|pypy)(?:\d+(?:\.\d+)*)?[tw]?|pyw?")
+# env options whose value is the next argument unless attached (GNU -u -C, BSD -P -L).
+_ENV_VALUE_LETTERS = "uCPL"
+_ENV_VALUE_LONG = ("--unset", "--chdir")
+_ENV_SPLIT = "it runs env -S, whose command line Aegis does not parse"
+
+
+def _program(path: str) -> str:
+    name = os.path.basename(path).lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def _through_env(args: Sequence[str]) -> Optional[str]:
+    """launch_risk of the command ``env`` runs, after its options and NAME=VALUE pairs."""
+    rest = list(args)
+    while rest:
+        arg = rest[0]
+        if arg == "--":
+            rest = rest[1:]
+            break
+        if arg.startswith("--"):
+            name = arg.split("=", 1)[0]
+            if name == "--split-string":
+                return _ENV_SPLIT
+            rest = rest[2:] if name in _ENV_VALUE_LONG and "=" not in arg else rest[1:]
+            continue
+        if arg.startswith("-"):
+            skip = 1
+            for at, letter in enumerate(arg[1:]):
+                if letter == "S":
+                    return _ENV_SPLIT
+                if letter in _ENV_VALUE_LETTERS:
+                    skip += at == len(arg) - 2  # the value is the next argument
+                    break
+            rest = rest[skip:]
+            continue
+        if "=" not in arg:
+            break
+        rest = rest[1:]
+    risk = launch_risk(rest)
+    return f"through env: {risk}" if risk else None
+
+
+def _script_risk(script: str, python: bool) -> Optional[str]:
+    if python and script and not os.path.isabs(script):
+        return f"it runs the script {script}, a path relative to the directory the host starts it in"
+    return None  # an absolute script, or a non-interpreter's arguments
 
 
 def launch_risk(argv: Sequence[str]) -> Optional[str]:
     """Why ``argv`` could run code from the directory a host starts it in, or None.
 
     A command that is not an absolute path resolves against that directory or a PATH
-    Aegis cannot see; ``python -m`` and ``python -c`` without ``-I`` put that directory
-    first on sys.path, so a repository holding an ``aegis_mcp`` package runs its own code.
+    Aegis cannot see. For a Python interpreter, ``-m``, ``-c`` and a program read from
+    stdin (``-``) without ``-I`` (or ``-P``) put that directory first on sys.path, so a
+    repository holding an ``aegis_mcp`` package runs its own code; and a script named by
+    a relative path is a file in that directory. ``env`` is judged by the command it runs.
     """
     if not argv or not os.path.isabs(argv[0]):
         return "the command is not an absolute path"
+    program = _program(argv[0])
+    if program == "env":
+        return _through_env(argv[1:])
+    python = _PYTHON_NAME.fullmatch(program) is not None
     flags = set()
     rest = iter(argv[1:])
     for arg in rest:
-        if arg.startswith("--") and arg != "--":
+        if arg == "--":
+            return _script_risk(next(rest, ""), python)
+        if arg.startswith("--"):
             if arg == "--check-hash-based-pycs":
                 next(rest, None)
             continue
-        if arg in ("-", "--") or not arg.startswith("-"):
-            return None  # a script path, `-` for stdin, or a non-interpreter's arguments
+        isolated = "I" in flags or "P" in flags
+        if arg == "-":
+            return None if isolated else (
+                "it reads its program from stdin without -I, which imports from the directory the host starts it in")
+        if not arg.startswith("-"):
+            return _script_risk(arg, python)
         body = arg[1:]
         for at, letter in enumerate(body):
-            if letter == "m":
-                return "it runs -m, which imports the module from the directory the host starts it in"
-            if letter == "c":
+            if letter in ("m", "c"):
                 if "I" in flags or "P" in flags:
                     return None
-                return "it runs -c without -I, which imports from the directory the host starts it in"
+                what = "the module " if letter == "m" else ""
+                return f"it runs -{letter} without -I, which imports {what}from the directory the host starts it in"
             if letter in _PY_VALUE_OPTIONS:
                 if at == len(body) - 1:
                     next(rest, None)
