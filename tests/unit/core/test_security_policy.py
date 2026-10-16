@@ -112,6 +112,8 @@ SPAWN_SITES = {
     # one POST after a typed y/N at a terminal; git signs and verifies approvals through ssh-keygen, which only
     # gitsafe-run git starts.
     "aegis_core/human_gate.py": ("`gh`",),
+    # `aegis doctor --release` asks `gh --version`, then `gh attestation verify` (read-only).
+    "aegis_core/release_verify.py": ("`gh`",),
 }
 _SPAWN_MODULES = {"subprocess", "pty", "multiprocessing"}
 _OS_SPAWN = re.compile(r"^(system|popen|startfile|exec\w*|spawn\w*|posix_spawn\w*)$")

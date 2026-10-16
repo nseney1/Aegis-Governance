@@ -670,6 +670,18 @@
             "required": false
           },
           {
+            "default": null,
+            "dest": "release",
+            "flags": [
+              "--release"
+            ],
+            "help": "Verify that the CI verdict job attested this commit (gh attestation verify, gh >= 2.93.0; otherwise UNVERIFIED and a non-zero exit)",
+            "kind": "store",
+            "metavar": "SHA",
+            "nargs": null,
+            "required": false
+          },
+          {
             "choices": [
               "A",
               "B"

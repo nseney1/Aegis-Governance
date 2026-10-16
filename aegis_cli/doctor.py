@@ -45,7 +45,11 @@ of duties; B, solo with signed approvals; C, self-attested. ``--github`` prints 
 need: the exact ruleset JSON, the CODEOWNERS lines and the signing setup. ``--github --apply
 --tier A|B`` creates that ruleset through ``gh api``, and only after an interactive y/N at a
 terminal: ``--yes`` and ``--json`` never apply, and a ruleset of the same name is never
-touched.
+touched. ``--release SHA`` (aegis_core.release_verify) asks ``gh attestation verify`` whether the
+CI verdict job attested that exact commit, pinning repository, workflow, digest and ref; a gh
+that is missing or older than 2.93.0 prints ``UNVERIFIED (gh >= 2.93.0 required)`` and exits
+non-zero, and at tier C the report says "attestation present, but the workflow is agent-editable"
+and exits non-zero too (the release claim needs tier A or B).
 
 Each row lists the ``surfaces`` its config plane covers (CLI, IDE extension, desktop app).
 A row whose host table entry is unverified (``verified_row`` false: Cursor, Copilot, Kiro,
@@ -2768,6 +2772,20 @@ def _run_github(root: Path, use_json: bool, apply: bool, tier: Optional[str]) ->
     return 0
 
 
+# ── --release: was this commit green, by a signed attestation ───────────────
+
+def _run_release(root: Path, sha: str, use_json: bool) -> int:
+    from aegis_core import release_verify
+
+    report = release_verify.verify_release(root, sha)
+    if use_json:
+        print(json.dumps(report.as_dict(root), indent=2))
+    else:
+        for line in report.text_lines():
+            print(_clean(line, 4096))
+    return 0 if report.verified else 1
+
+
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 def _usage_error(message: str) -> int:
@@ -2854,7 +2872,18 @@ def run_doctor(args: argparse.Namespace) -> int:
         return _usage_error("--github --apply asks at a terminal, so it cannot run with --json")
     if apply and tier not in ("A", "B"):
         return _usage_error("--github --apply needs --tier A or --tier B")
+    release = getattr(args, "release", None)
+    if release is not None:
+        others = [flag for flag, given in (("--fix", fix), ("--yes", yes), ("--github", github),
+                                           ("--drivers", bool(getattr(args, "drivers", False)))) if given]
+        if others:
+            return _usage_error(f"--release does not combine with {', '.join(others)}: it only reads")
+        if not str(release).strip():
+            return _usage_error("--release needs a commit")
     root = _resolve_root(args)
+
+    if release is not None:
+        return _run_release(root, str(release).strip(), use_json)
 
     if github:
         return _run_github(root, use_json, apply, tier)
@@ -2946,6 +2975,13 @@ class DoctorCommand(AegisCommand):
             "--apply",
             action="store_true",
             help="With --github --tier: create the ruleset through gh, only after a y/N at a terminal",
+        )
+        parser.add_argument(
+            "--release",
+            metavar="SHA",
+            default=None,
+            help="Verify that the CI verdict job attested this commit (gh attestation verify, gh >= 2.93.0; "
+            "otherwise UNVERIFIED and a non-zero exit)",
         )
         parser.add_argument(
             "--tier",

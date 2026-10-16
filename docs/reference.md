@@ -63,6 +63,7 @@ Category: Setup & Environment.
 | `--drivers` |  |  | Run only AST driver and language detection health check |
 | `--github` |  |  | Print what trust tiers A and B need: the ruleset JSON, CODEOWNERS lines and signing setup |
 | `--apply` |  |  | With --github --tier: create the ruleset through gh, only after a y/N at a terminal |
+| `--release` | `SHA` |  | Verify that the CI verdict job attested this commit (gh attestation verify, gh >= 2.93.0; otherwise UNVERIFIED and a non-zero exit) |
 | `--tier` | one of `A`, `B` |  | With --github --apply: which ruleset to create (A: reviews; B: solo, signed approvals) |
 
 ### `aegis init`
