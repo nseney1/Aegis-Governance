@@ -1,39 +1,19 @@
-"""Shared workspace resolution and path containment for Soma (Layer 0 Core).
+"""Workspace resolution helpers over the Workspace value object (aegis_core.workspace.base).
 
-Modular package architecture providing:
-- Workspace value object (base.py)
-- GitWorkspace with zero-subprocess fast paths (git.py)
-- Workspace discovery & compound fingerprinting (discovery.py)
-- Path confinement and security boundaries (confinement.py)
-- Scaffolding and initialization (scaffold.py)
-- Git hook directory resolution (hooks.py)
-
-Strictly zero-dependency: uses only Python standard library.
+Submodules own the rest: base (Workspace), discovery, confinement, scaffold, hooks
+and layout. Import those names from there. This package's own import loads nothing:
+layout (L0) is imported by storage and config, which base's own imports depend on.
 """
 from __future__ import annotations
 
 import os
-import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from aegis_core.errors import PathTraversalError
-from aegis_core.workspace.base import Workspace
-from aegis_core.workspace.confinement import (
-    _WINDOWS_DEVICE_NAMES,
-    confine_path_internal,
-    validate_workspace_path,
-)
-from aegis_core.workspace.discovery import (
-    LEGACY_SOMA_UPGRADE_MSG,
-    _is_workspace_dir,
-    check_legacy_soma_sentinel,
-    is_aegis_repo,
-    resolve_workspace_root,
-)
-from aegis_core.workspace.git import GitWorkspace, _parse_worktree_porcelain
-from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
-from aegis_core.workspace.layout import LockResource, WorkspaceLayout
-from aegis_core.workspace.scaffold import scaffold_workspace
+
+if TYPE_CHECKING:
+    from aegis_core.workspace.base import Workspace
 
 
 def resolve_workspace(
@@ -42,20 +22,15 @@ def resolve_workspace(
     strict_env: bool = False,
 ) -> str:
     """Find the project root containing .aegis/rules/ or .aegis/."""
+    from aegis_core.workspace.base import Workspace
+
     return str(Workspace.resolve(start=start, caller_file=caller_file, strict_env=strict_env).root)
-
-
-def resolve_workspace_path(
-    start: str | Path | os.PathLike[str] | Workspace | None = None,
-    caller_file: str | Path | os.PathLike[str] | None = None,
-    strict_env: bool = False,
-) -> Path:
-    """Return workspace root as a resolved Path object."""
-    return Workspace.resolve(start=start, caller_file=caller_file, strict_env=strict_env).root
 
 
 def as_workspace(workspace: str | Path | os.PathLike[str] | Workspace | None = None) -> Workspace:
     """Coerce any workspace representation into a strongly-typed Workspace value object."""
+    from aegis_core.workspace.base import Workspace
+
     if isinstance(workspace, Workspace):
         return workspace
     if workspace:
@@ -63,9 +38,21 @@ def as_workspace(workspace: str | Path | os.PathLike[str] | Workspace | None = N
     return Workspace.resolve()
 
 
-def confine_workspace(untrusted_workspace: str | Path | os.PathLike[str] | Workspace) -> str:
-    """Validate and confine a workspace path."""
-    return str(Workspace.confine(untrusted_workspace).root)
+def literal_workspace(workspace: str | Path | os.PathLike[str] | Workspace | None = None) -> Workspace:
+    """The workspace an explicit argument names, taken literally (defense #26 step a).
+
+    A Workspace is returned as is. A path names exactly that directory (resolved, so a
+    symlink is accepted): no AEGIS_WORKSPACE override, no walk-up to an enclosing
+    workspace, no legacy .soma refusal. Only a missing argument falls back to
+    discovery (``Workspace.resolve()``).
+    """
+    from aegis_core.workspace.base import Workspace
+
+    if isinstance(workspace, Workspace):
+        return workspace
+    if workspace:
+        return Workspace(root=Path(os.fspath(workspace)).resolve())
+    return Workspace.resolve()
 
 
 def confine_path(
@@ -73,6 +60,8 @@ def confine_path(
     workspace: str | Path | os.PathLike[str] | Workspace,
 ) -> tuple[str, str]:
     """Resolve and confine a file path within a workspace."""
+    from aegis_core.workspace.base import Workspace
+
     if isinstance(workspace, Workspace):
         return workspace.confine_path(untrusted_path)
     p_str = str(untrusted_path) if untrusted_path is not None else ""
@@ -81,33 +70,9 @@ def confine_path(
     return Workspace.resolve(start=workspace).confine_path(untrusted_path)
 
 
-def validate_rule_names(
-    rule_names: list[str],
-    workspace: str | Path | os.PathLike[str] | Workspace,
-) -> list[str]:
-    """Validate that rule names reference rules that actually exist."""
-    ws = workspace if isinstance(workspace, Workspace) else Workspace.resolve(start=workspace)
-    return ws.validate_rule_names(rule_names)
-
-
 __all__ = [
-    "GitWorkspace",
-    "LEGACY_SOMA_UPGRADE_MSG",
-    "LockResource",
-    "Workspace",
-    "WorkspaceLayout",
     "as_workspace",
-    "check_legacy_soma_sentinel",
     "confine_path",
-    "confine_workspace",
-    "is_aegis_repo",
-    "resolve_git_hooks_dir",
+    "literal_workspace",
     "resolve_workspace",
-    "resolve_workspace_path",
-    "validate_rule_names",
-    "_WINDOWS_DEVICE_NAMES",
-    "_find_git_dirs",
-    "_is_workspace_dir",
-    "_parse_worktree_porcelain",
 ]
-

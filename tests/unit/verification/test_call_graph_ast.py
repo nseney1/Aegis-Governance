@@ -220,3 +220,93 @@ class TestCallGraphAST:
         assert result.verdict is True
         assert len(walk_called) == 0, "fast_mode=True must not execute repo-wide os.walk"
 
+
+
+class TestCrossModuleReferences:
+    """A function another module passes by reference (a callback) is used, as it is within its own module."""
+
+    _TARGET = textwrap.dedent("""\
+        def _call_target(item):
+            return str(item)
+
+        def unused_helper():
+            return 0
+    """)
+
+    def _check(self, tmp_path, consumer: str):
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+        target = tmp_path / "pkg" / "schema.py"
+        target.write_text(self._TARGET, encoding="utf-8")
+        (tmp_path / "pkg" / "policy.py").write_text(textwrap.dedent(consumer), encoding="utf-8")
+        return call_graph.check(str(target), str(tmp_path))
+
+    def test_imported_function_passed_to_map_is_used(self, tmp_path):
+        result = self._check(tmp_path, """\
+            from pkg.schema import _call_target
+
+            def targets(items):
+                return list(map(_call_target, items))
+        """)
+        assert result.verdict is False
+        assert result.detail == "ORPHAN FUNCTIONS: unused_helper (L4) — defined but never called"
+
+    def test_imported_function_passed_as_keyword_is_used(self, tmp_path):
+        result = self._check(tmp_path, """\
+            from pkg.schema import _call_target as key_of
+
+            def ordered(items):
+                return sorted(items, key=key_of)
+        """)
+        assert "_call_target" not in result.detail
+        assert "unused_helper (L4)" in result.detail
+
+    def test_function_called_under_an_import_alias_is_used(self, tmp_path):
+        result = self._check(tmp_path, """\
+            from pkg.schema import _call_target as target_of
+
+            def first(items):
+                return target_of(items[0])
+        """)
+        assert "_call_target" not in result.detail
+        assert "unused_helper (L4)" in result.detail
+
+    def test_function_passed_through_a_module_alias_is_used(self, tmp_path):
+        result = self._check(tmp_path, """\
+            from pkg import schema as sc
+
+            def targets(items):
+                return [*map(sc._call_target, items)]
+        """)
+        assert "_call_target" not in result.detail
+        assert "unused_helper (L4)" in result.detail
+
+    def test_function_stored_in_a_dispatch_table_is_used(self, tmp_path):
+        result = self._check(tmp_path, """\
+            from pkg.schema import _call_target, unused_helper
+
+            HANDLERS = {"call": _call_target}
+            ORDER = [unused_helper]
+        """)
+        assert result.verdict is True, result.detail
+
+    def test_same_name_from_another_module_does_not_count(self, tmp_path):
+        result = self._check(tmp_path, """\
+            from elsewhere import _call_target
+
+            def targets(items):
+                return list(map(_call_target, items))
+        """)
+        assert result.verdict is False
+        assert "_call_target (L1)" in result.detail
+
+    def test_unimported_name_passed_by_reference_does_not_count(self, tmp_path):
+        result = self._check(tmp_path, """\
+            def _call_target(item):
+                return item
+
+            def targets(items):
+                return list(map(_call_target, items))
+        """)
+        assert result.verdict is False
+        assert "_call_target (L1)" in result.detail

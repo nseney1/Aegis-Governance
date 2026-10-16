@@ -18,13 +18,7 @@ tags:
   - adversarial
   - quality
   - anti-pattern
-fitness:
-  score: 0.6
-  impact_weight: 1.0
-  triggers: 75
-  true_positives: 27.0137
-  false_positives: 19.5173
-  last_trigger_date: "2026-10-14T22:29:45Z"
+impact_weight: 1.0
 ---
 
 When reviewing test files, check that every public function under test has at

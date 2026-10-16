@@ -3,16 +3,12 @@ id: governance-auditor
 name: Governance Auditor
 description: Audits session transcripts against governance rules to produce a per-rule PASS/FAIL verdict table.
 kind: skill
-tier: auditor
-consumes: [InspectionReceipt, ArbitrationEvidence]
-produces: [InspectionReceipt]
-handoff_targets: [post-mortem, spec-synthesizer]
 trigger: user_request
 ---
 
 # Governance Auditor
 
-> **Role**: Rule compliance auditor for Antigravity sessions. Inspects session transcripts against installed governance rules, validates adherence across all critical sections, and produces a definitive PASS/FAIL scorecard with grounded step citations.
+> **Role**: Rule compliance auditor for agent sessions. Inspects session transcripts against installed governance rules, validates adherence across all critical sections, and produces a definitive PASS/FAIL scorecard with grounded step citations.
 
 ## Workflow
 
@@ -26,9 +22,9 @@ trigger: user_request
 | Rule | Check Method |
 |:-----|:-------------|
 | **providence §2 (dependencies)** | Grep for `pip`/`npm` install without prior dependency file (`package.json`, `requirements.txt`) verification |
-| **providence §3 (read-before-write)** | Check if `view_file` or equivalent read strictly precedes `replace_file_content` / `multi_replace_file_content` for the same file |
+| **providence §3 (read-before-write)** | Check if a read (`${SLOT.TOOL_READ}` or equivalent) strictly precedes an edit (`${SLOT.TOOL_EDIT}` / `${SLOT.TOOL_WRITE}`) of the same file |
 | **providence §8 (env verification)** | Check for `which python` / shebang / config checks before any environment mutation |
-| **cost-optimization §3 (model tiers)** | Check subagent dispatches (`invoke_subagent`) to verify proper model tiering (`flash` for research, etc.) |
+| **cost-optimization §3 (model tiers)** | Check subagent dispatches (`${SLOT.TOOL_SUBAGENT}`) to verify proper model tiering (`${SLOT.MODEL_FAST}` for research, etc.) |
 | **subagent-delegation §2 (parallel)** | Check for concurrent subagents targeting overlapping or identical files |
 | **git-workflow §2 (pre-push gate)** | Check if `make test` / `pytest` ran and succeeded before any `git push` |
 | **testing §4 (no ast.parse)** | Check for `ast.parse` or syntax-only checks without subsequent test execution |

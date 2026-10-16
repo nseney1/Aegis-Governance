@@ -1,0 +1,2052 @@
+{
+  "command_resolution": {
+    "check": "check",
+    "doctor": "doctor",
+    "hook": "hook",
+    "init": "init",
+    "migrate": "migrate",
+    "rule": "rule",
+    "scan": "scan",
+    "status": "status",
+    "sync": "sync",
+    "uninstall": "uninstall"
+  },
+  "parser": {
+    "arguments": [
+      {
+        "default": "==SUPPRESS==",
+        "dest": "help",
+        "flags": [
+          "-h",
+          "--help"
+        ],
+        "help": "show this help message and exit",
+        "kind": "help",
+        "metavar": null,
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "const": true,
+        "default": "==SUPPRESS==",
+        "dest": "json",
+        "flags": [
+          "--json"
+        ],
+        "help": "Emit machine-readable JSON output",
+        "kind": "store_true",
+        "metavar": null,
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "const": true,
+        "default": "==SUPPRESS==",
+        "dest": "plain",
+        "flags": [
+          "--plain"
+        ],
+        "help": "Strip ANSI styling and emoji",
+        "kind": "store_true",
+        "metavar": null,
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "default": "==SUPPRESS==",
+        "dest": "workspace",
+        "flags": [
+          "--workspace"
+        ],
+        "help": "Target workspace root",
+        "kind": "store",
+        "metavar": null,
+        "nargs": null,
+        "required": false,
+        "type": "str"
+      },
+      {
+        "default": "==SUPPRESS==",
+        "dest": "version",
+        "flags": [
+          "--version"
+        ],
+        "help": "show program's version number and exit",
+        "kind": "version",
+        "metavar": null,
+        "nargs": 0,
+        "required": false
+      },
+      {
+        "default": null,
+        "dest": "command",
+        "flags": [],
+        "help": null,
+        "kind": "parsers",
+        "metavar": null,
+        "nargs": "A...",
+        "required": false
+      }
+    ],
+    "commands": {
+      "check": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "files",
+            "flags": [],
+            "help": "Files to check (default: changed against HEAD, staged, or against the branch base)",
+            "kind": "store",
+            "metavar": "FILES",
+            "nargs": "*",
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "hook",
+            "flags": [
+              "--hook"
+            ],
+            "help": "Git pre-commit mode: Layer 1 only, never a model call",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "strict",
+            "flags": [
+              "--strict"
+            ],
+            "help": "Fail on checkpoint warnings too (missing tests, hardcoded paths, stub tests...)",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "full",
+            "flags": [
+              "--full"
+            ],
+            "help": "Add Layer 2: adversarial review of the change by the --llm-cmd model",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "plan",
+            "flags": [
+              "--plan"
+            ],
+            "help": "Task plan for Layer 2 (implies --full)",
+            "kind": "store",
+            "metavar": "TEXT",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "plan_file",
+            "flags": [
+              "--plan-file"
+            ],
+            "help": "File holding the task plan (implies --full)",
+            "kind": "store",
+            "metavar": "PATH",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "default": null,
+            "dest": "llm_cmd",
+            "flags": [
+              "--llm-cmd"
+            ],
+            "help": "Layer 2 model command, e.g. 'claude -p': gets the prompt on stdin, prints the reply. It runs in an empty temporary directory, never the repository, so give scripts absolute paths (default: $AEGIS_LLM_CMD; never read from repository files)",
+            "kind": "store",
+            "metavar": "CMD",
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "help": "Show what would be checked without running anything",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "text",
+              "json"
+            ],
+            "default": "text",
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "help": "Output format",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false
+          }
+        ],
+        "description": null,
+        "help": "Verify changes: Layer 1 checks, plus a Layer 2 model review with --full"
+      },
+      "doctor": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "fix",
+            "flags": [
+              "--fix"
+            ],
+            "help": "Repair what doctor reported, after confirmation; every file is backed up first",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "yes",
+            "flags": [
+              "--yes"
+            ],
+            "help": "With --fix: apply without asking (required with --json or without a terminal)",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "drivers",
+            "flags": [
+              "--drivers"
+            ],
+            "help": "Run only AST driver and language detection health check",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "description": "Read-only health checks, the host matrix (binary, registration, identity, workspace, bootstrap, budget per host) and the enforcement tiers in force here. --fix changes only what doctor reported (stale v3 and misplaced MCP entries, legacy rule blocks, unedited v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up to ~/.aegis/backups/<UTC stamp>/ first.",
+        "help": "System health and governance audit"
+      },
+      "hook": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "hook_action",
+            "flags": [],
+            "help": null,
+            "kind": "parsers",
+            "metavar": null,
+            "nargs": "A...",
+            "required": false
+          }
+        ],
+        "commands": {
+          "install": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Overwrite symlinks pointing outside repository",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Preview without creating or modifying hook",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "description": null,
+            "help": "Install the pre-commit hook into the git repository"
+          },
+          "safety-gate": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "cmd",
+                "flags": [
+                  "--cmd"
+                ],
+                "help": "Command line to check (default: JSON payload on stdin)",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ],
+            "description": null,
+            "help": "Check a shell command against the safety gate (prints a JSON decision)"
+          },
+          "status": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              }
+            ],
+            "description": null,
+            "help": "Inspect the pre-commit hook and the interpreter it runs"
+          },
+          "uninstall": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": "Emit machine-readable JSON output",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": "Strip ANSI styling and emoji",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": "Target workspace root",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Force removal",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Preview without modifying disk",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "description": null,
+            "help": "Remove the aegis block from the pre-commit hook"
+          }
+        },
+        "description": null,
+        "help": "Install, inspect or remove the git pre-commit hook"
+      },
+      "init": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "host",
+            "flags": [
+              "--host"
+            ],
+            "help": "Register the Aegis MCP server with these hosts (codex-cli, claude-code, antigravity), or 'auto' for the ones detected on this machine. Without it, detected hosts are only listed.",
+            "kind": "store",
+            "metavar": "HOST[,HOST]|auto",
+            "nargs": null,
+            "required": false,
+            "type": "_host_option"
+          },
+          {
+            "choices": [
+              "minimal",
+              "standard",
+              "full"
+            ],
+            "default": "standard",
+            "dest": "rules",
+            "flags": [
+              "--rules"
+            ],
+            "help": "Starter rules to seed into .aegis/rules/personas/ (default: standard)",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "help": "Check and show every step without writing anything or running a host CLI",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "yes",
+            "flags": [
+              "--yes",
+              "-y"
+            ],
+            "help": "Skip the confirmation prompt",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "force",
+            "flags": [
+              "--force"
+            ],
+            "help": "Replace Aegis blocks in AGENTS.md/CLAUDE.md even if they were edited by hand",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "pin",
+            "flags": [
+              "--pin"
+            ],
+            "help": "Pin the host registrations to this workspace (AEGIS_WORKSPACE)",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "no_hooks",
+            "flags": [
+              "--no-hooks"
+            ],
+            "help": "Skip installing the git pre-commit hook",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "platform",
+            "flags": [
+              "--platform"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": "?",
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "mcp",
+            "flags": [
+              "--mcp"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "description": "Set up .aegis/ (config, starter rules, .gitignore), the Aegis block in AGENTS.md (and an @AGENTS.md block in an existing CLAUDE.md), the git pre-commit hook, and this workspace's entry in ~/.aegis/workspaces.json {\"v\": 1, \"workspaces\": [{root, added_at, added_by, hosts}]}, which only aegis init and aegis uninstall write. Hosts named with --host get the 'aegis' MCP server (codex-cli: codex mcp add; claude-code: claude mcp add --scope user; antigravity: ~/.gemini/config/mcp_config.json).",
+        "help": "Set up governance for this project and register it with your agent hosts"
+      },
+      "migrate": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "apply",
+            "flags": [
+              "--apply"
+            ],
+            "help": "Perform the migration (default: dry run)",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "help": "Only report what would change (the default)",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "description": "Plan, then with --apply perform, the move to the v4 layout: the v3 ledger becomes .aegis/state/ledger.jsonl (v2 rows), aegis.conf/slots.yaml/config.yaml become .aegis/config.json, .soma cells move to .aegis/rules/<type>/, derived counters leave rule frontmatter and v3 runtime state is removed. Every changed file is backed up to .aegis/state/migrate-backup-<time>/ first; running it again changes nothing.",
+        "help": "Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply)"
+      },
+      "rule": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "rule_action",
+            "flags": [],
+            "help": null,
+            "kind": "parsers",
+            "metavar": "ACTION",
+            "nargs": "A...",
+            "required": false
+          }
+        ],
+        "commands": {
+          "archive": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Report the rules that would be archived; move nothing",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "description": null,
+            "help": "Archive rules whose ledger evidence says they misfire"
+          },
+          "create": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": "trap",
+                "dest": "type",
+                "flags": [
+                  "-t",
+                  "--type"
+                ],
+                "help": "Rule type (invariant, trap, gate, boundary, persona, contract)",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "hypothesis",
+                "flags": [
+                  "--hypothesis"
+                ],
+                "help": "Testable rule hypothesis",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "prediction",
+                "flags": [
+                  "-p",
+                  "--prediction"
+                ],
+                "help": "Expected outcome when hypothesis holds",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "falsification",
+                "flags": [
+                  "-f",
+                  "--falsification"
+                ],
+                "help": "Criteria that falsify the rule",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "correctness",
+                "dest": "domain",
+                "flags": [
+                  "-d",
+                  "--domain"
+                ],
+                "help": "Governance domain",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "enforcement",
+                "flags": [
+                  "-e",
+                  "--enforcement"
+                ],
+                "help": "Enforcement tier (gate, advisory)",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "id",
+                "flags": [
+                  "-n",
+                  "--name",
+                  "--id"
+                ],
+                "help": "Explicit rule ID stem",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "target_paths",
+                "flags": [
+                  "--target-paths"
+                ],
+                "help": "Comma-separated target path globs",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": "",
+                "dest": "tags",
+                "flags": [
+                  "--tags"
+                ],
+                "help": "Comma-separated tags",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "body_file",
+                "flags": [
+                  "--body-file"
+                ],
+                "help": "Rule body (markdown after the frontmatter) from PATH, or '-' for stdin; max 64 KiB",
+                "kind": "store",
+                "metavar": "PATH",
+                "nargs": null,
+                "required": false
+              }
+            ],
+            "description": null,
+            "help": "Create a new governance rule"
+          },
+          "demote": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "rule_id",
+                "flags": [],
+                "help": "Rule identifier to demote",
+                "kind": "store",
+                "metavar": "RULE_ID",
+                "nargs": "?",
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Preview demotion without moving files",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "description": null,
+            "help": "Demote a rule down lifecycle tiers (no RULE_ID: list candidates)"
+          },
+          "list": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "choices": [
+                  "invariant",
+                  "trap",
+                  "gate",
+                  "boundary",
+                  "persona",
+                  "contract"
+                ],
+                "default": null,
+                "dest": "type",
+                "flags": [
+                  "--type"
+                ],
+                "help": "Filter by rule type",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false
+              },
+              {
+                "default": null,
+                "dest": "min_fitness",
+                "flags": [
+                  "--min-fitness"
+                ],
+                "help": "Filter by minimum fitness score",
+                "kind": "store",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "float"
+              }
+            ],
+            "description": null,
+            "help": "List active rules and fitness metrics"
+          },
+          "promote": {
+            "aliases": [],
+            "arguments": [
+              {
+                "default": "==SUPPRESS==",
+                "dest": "help",
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "help": "show this help message and exit",
+                "kind": "help",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "plain",
+                "flags": [
+                  "--plain"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": "==SUPPRESS==",
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "help": null,
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "default": "==SUPPRESS==",
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "help": null,
+                "kind": "_WorkspaceArg",
+                "metavar": null,
+                "nargs": null,
+                "required": false,
+                "type": "str"
+              },
+              {
+                "default": null,
+                "dest": "rule_id",
+                "flags": [],
+                "help": "Rule identifier to promote",
+                "kind": "store",
+                "metavar": "RULE_ID",
+                "nargs": "?",
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "tier_check",
+                "flags": [
+                  "--tier-check"
+                ],
+                "help": "Evaluate enforcement tier transitions",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "const": true,
+                "default": false,
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Preview promotion without moving files",
+                "kind": "store_true",
+                "metavar": null,
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "description": null,
+            "help": "Promote a rule up lifecycle tiers (no RULE_ID: list candidates)"
+          }
+        },
+        "description": null,
+        "help": "Manage rule lifecycle (list, create, promote, demote, archive)"
+      },
+      "scan": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "files",
+            "flags": [],
+            "help": "File(s) you are about to edit",
+            "kind": "store",
+            "metavar": "FILE",
+            "nargs": "+",
+            "required": true
+          }
+        ],
+        "description": null,
+        "help": "Show which rules apply to the given files (run before editing them)"
+      },
+      "status": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "compliance",
+            "flags": [
+              "--compliance"
+            ],
+            "help": "Show the per-host scan-before-edit rate from the MCP activity log (.aegis/state/activity.jsonl), per session and per host. Edits are the files a session named in aegis_report_outcome 'files' plus the files of commits inside exactly one session's window (first to last event, plus 15 minutes). Limits: an edit time is an upper bound (report or commit time), so the rate can overstate compliance; uncommitted edits that were never reported are not seen; commits in overlapping sessions count as ambiguous, not as misses; a session with no observed edit is unknown, never 0. A host rate is an aggregate over sessions, not a per-attempt verdict. Reads only.",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "description": null,
+        "help": "Show active rules and stats"
+      },
+      "sync": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "apply",
+            "flags": [
+              "--apply"
+            ],
+            "help": "Apply the suggested promote/demote/archive transitions (moves rule files)",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "description": null,
+        "help": "Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them)"
+      },
+      "uninstall": {
+        "aliases": [],
+        "arguments": [
+          {
+            "default": "==SUPPRESS==",
+            "dest": "help",
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "help": "show this help message and exit",
+            "kind": "help",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "help": "Emit machine-readable JSON output",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": "==SUPPRESS==",
+            "dest": "plain",
+            "flags": [
+              "--plain"
+            ],
+            "help": "Strip ANSI styling and emoji",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "workspace",
+            "flags": [
+              "--workspace"
+            ],
+            "help": "Target workspace root",
+            "kind": "store",
+            "metavar": null,
+            "nargs": null,
+            "required": false,
+            "type": "str"
+          },
+          {
+            "default": null,
+            "dest": "host",
+            "flags": [
+              "--host"
+            ],
+            "help": "Unregister these hosts even if another workspace uses them (default: the hosts this workspace was registered with)",
+            "kind": "store",
+            "metavar": "HOST[,HOST]",
+            "nargs": null,
+            "required": false,
+            "type": "_host_ids"
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "dry_run",
+            "flags": [
+              "--dry-run"
+            ],
+            "help": "Show what would be removed without changing anything",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "const": true,
+            "default": false,
+            "dest": "force",
+            "flags": [
+              "--force"
+            ],
+            "help": "Also remove Aegis blocks that were edited by hand",
+            "kind": "store_true",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "platform",
+            "flags": [
+              "--platform",
+              "-p"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": "?",
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "local",
+            "flags": [
+              "--local"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "default": "==SUPPRESS==",
+            "dest": "purge",
+            "flags": [
+              "--purge"
+            ],
+            "help": "==SUPPRESS==",
+            "kind": "RemovedOption",
+            "metavar": null,
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "description": "Remove the git pre-commit hook block, the Aegis blocks in AGENTS.md and CLAUDE.md, this workspace's entry in ~/.aegis/workspaces.json and the Aegis MCP registration (including the v3 name) of the hosts it was registered with. A host that another registered workspace still lists keeps its registration unless named with --host. Never deletes .aegis/.",
+        "help": "Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/)"
+      }
+    },
+    "description": "Aegis Governance — make AI coding agents trustworthy"
+  },
+  "registry": [
+    {
+      "aliases": [],
+      "category": "Daily Workflow & Verification",
+      "help": "Verify changes: Layer 1 checks, plus a Layer 2 model review with --full",
+      "name": "check"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "System health and governance audit",
+      "name": "doctor"
+    },
+    {
+      "aliases": [],
+      "category": "Plumbing",
+      "help": "Install, inspect or remove the git pre-commit hook",
+      "name": "hook"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Set up governance for this project and register it with your agent hosts",
+      "name": "init"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Convert a v3 or .soma workspace to the v4 layout (dry run unless --apply)",
+      "name": "migrate"
+    },
+    {
+      "aliases": [],
+      "category": "Rule Evolution & Intelligence",
+      "help": "Manage rule lifecycle (list, create, promote, demote, archive)",
+      "name": "rule"
+    },
+    {
+      "aliases": [],
+      "category": "Daily Workflow & Verification",
+      "help": "Show which rules apply to the given files (run before editing them)",
+      "name": "scan"
+    },
+    {
+      "aliases": [],
+      "category": "Daily Workflow & Verification",
+      "help": "Show active rules and stats",
+      "name": "status"
+    },
+    {
+      "aliases": [],
+      "category": "Rule Evolution & Intelligence",
+      "help": "Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them)",
+      "name": "sync"
+    },
+    {
+      "aliases": [],
+      "category": "Setup & Environment",
+      "help": "Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/)",
+      "name": "uninstall"
+    }
+  ],
+  "removed_commands": {
+    "agent": "use aegis scan to see which rules apply; record outcomes with the MCP tool aegis_report_outcome",
+    "agent record": "use aegis_report_outcome (MCP)",
+    "agent scan": "use aegis scan",
+    "audit": "use aegis doctor",
+    "checkpoint": "use aegis check",
+    "completion": "no replacement",
+    "detect": "use aegis doctor",
+    "drivers": "use aegis doctor",
+    "handoff": "no replacement",
+    "hook governance-monitor": "no replacement; remove it from your agent host's hook config",
+    "hook immune-init": "no replacement; remove it from your agent host's hook config",
+    "hook post-session": "no replacement; remove it from your agent host's hook config",
+    "hook pre-commit": "use aegis check --hook",
+    "hook pre-invocation": "no replacement; remove it from your agent host's hook config",
+    "hook session-close": "no replacement; remove it from your agent host's hook config",
+    "hook stop": "no replacement; remove it from your agent host's hook config",
+    "install": "use aegis init --host",
+    "languages": "use aegis doctor",
+    "report": "aegis status shows rule trigger counts; outcomes are recorded with the MCP tool aegis_report_outcome",
+    "rule clean": "no replacement; remove leaked global rule copies by hand",
+    "rules": "use aegis status",
+    "skill": "no replacement",
+    "sys": "use aegis doctor",
+    "system": "use aegis doctor",
+    "system doctor": "use aegis doctor",
+    "system drivers": "use aegis doctor",
+    "system hook": "use aegis hook",
+    "verify": "use aegis check"
+  }
+}

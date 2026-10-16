@@ -1,29 +1,85 @@
-"""soma doctor — System health check.
+"""aegis doctor — workspace health, the host matrix and backed-up cleanup (host-matrix §3.9-3.10).
 
-`soma doctor --fix-path [--yes]` is the opt-in PATH fixer: the installers
-never edit dotfiles, and this command only does so after --yes or an
-interactive confirmation. Every line it appends is recorded in
-~/.soma/manifest.json (`path_lines`) so install/uninstall.sh can remove it.
+A read run changes nothing: it reads files, runs ``codex mcp get aegis --json`` (the only
+host CLI it starts: Codex keeps its registrations in TOML, which stdlib-only Aegis does not
+parse), and never syncs, checks, initializes or touches the network. Claude Code is read
+from ``~/.claude.json`` instead of ``claude mcp list``, which starts every configured server.
+
+Each host gets one state, the first of these that applies:
+
+- ``missing_binary``: none of its binaries is in an absolute PATH entry outside the
+  workspace (one found only inside it, or only through an empty or relative entry, is
+  listed in ``binary.ignored`` with the reason ``binary_in_workspace`` or
+  ``binary_on_relative_path``, and makes the host's installation unknown);
+- ``unregistered``: its config has no ``aegis`` server, or the registered command is gone;
+- ``auth_unknown``: doctor cannot confirm the host will load ``aegis`` or read its
+  bootstrap (its CLI failed or timed out, its config cannot be parsed, the registration
+  waits on an approval doctor cannot see, the registered command is a relative path or is
+  found only where doctor does not look, a host that sends no workspace depends on an
+  unreadable registry, or a CLAUDE.md-family file above the workspace, which doctor does
+  not read, decides whether Claude Code reads AGENTS.md; the user's own
+  ``~/.claude/CLAUDE.md``, which Claude Code loads as user memory, never does);
+- ``policy_gap``: ``aegis`` loads, but this repository's policy does not fully reach the
+  host (no or broken bootstrap, a CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md or
+  AGENTS.override.md shadowing AGENTS.md, a file the host truncates, an unregistered
+  workspace for a host without roots, a disabled entry or one Claude Code turns off for
+  the project in ``disabledMcpServers``, another host's identity, or an unsafe
+  registration: a command that is not absolute, or that runs ``-m`` or ``-c`` without
+  ``-I`` and so imports from the project directory the host starts it in);
+- ``ok``: none of the above.
+
+``--json`` prints one ``aegis.doctor/v1`` document: ``schema``, ``source``, ``aegis_version``,
+``checked_at`` (UTC), ``scope``, ``stale`` and ``unknown`` (fields doctor could not
+determine), ``checks_ok`` (no blocking check failed; it says nothing about the hosts),
+``checks``, ``hosts`` (each with ``state``, ``reasons``, the matrix facts,
+``enforcement_level`` and ``trust_tier``, reserved as null until v4.3), ``enforcement_tiers``,
+``findings``, and with ``--fix`` the ``fixes`` it applied and its ``backup_dir``.
+
+``enforcement_level`` is the strongest tier known to be in force for the host here:
+``local_floor``, ``advisory``, ``none`` (an ungoverned workspace, a host not installed,
+or no route by which aegis or its bootstrap reaches the agent) or ``unknown`` (a fact
+that decides it cannot be read, such as a host binary found only inside the workspace).
+The home directory is never a governed workspace: its ``.aegis/`` is the user plane, so
+run from there doctor checks no project rules, state or AST drivers.
+Strings taken from files or host output are printed without control sequences, and
+doctor starts only host CLIs found in absolute PATH entries outside the workspace
+(aegis_core.pathlookup). It never starts the MCP server or a registered command: the MCP
+launcher check compares what each host registered with what ``aegis init --host`` would
+register from this install.
+
+``--fix`` changes only what a finding reported as fixable, after confirmation (``--yes``
+skips it). Every file is first copied to ``~/.aegis/backups/<UTC stamp>/`` with a manifest;
+writes are atomic; a symlink, a hard link or a file that changed since the check is never
+written. It never edits shell rc files (D17) and never writes TOML.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import hashlib
+import io
 import json
 import os
-import shutil
+from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
-import tempfile
-from pathlib import Path
-from typing import Callable, Iterable, Mapping, TextIO
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from aegis_cli.base import CommandCategory, AegisCommand
+from aegis_core.pathlookup import INSIDE_FENCE, Hit, only_skipped, which
 
-__all__ = ["run_doctor", "DoctorCommand"]
+__all__ = ["run_doctor", "DoctorCommand", "probe_mcp_launcher", "SCHEMA", "V3_SHIPPED_RULE_SHA256"]
 
-FIX_PATH_MARKER = "# added by soma doctor --fix-path"
-_EDITABLE_SHELLS = ("zsh", "bash", "fish")
+SCHEMA = "aegis.doctor/v1"
+SOURCE = "aegis doctor"
+SERVER = "aegis"
+# The v3 server name; v4 registers only "aegis" and doctor --fix removes this one.
+LEGACY_SERVER = "soma"
+EXIT_USAGE = 2
 
 
 def _check_python_version() -> bool:
@@ -39,10 +95,10 @@ def _check_python_version() -> bool:
 
 def _check_zero_dependencies() -> bool:
     """Verify that the frontmatter engine is operational with zero dependencies."""
-    from aegis_core.yaml import parse_frontmatter
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
 
-    test_fm = "---\nid: test\ntype: wall\n---\n"
-    ok = parse_frontmatter(test_fm) == {"id": "test", "type": "wall"}
+    test_fm = "---\nid: test\ntype: invariant\n---\n"
+    ok = parse_frontmatter(test_fm) == {"id": "test", "type": "invariant"}
     if ok:
         print("  ✅ zero-dependency runtime operational (pure standard library)")
     else:
@@ -50,229 +106,310 @@ def _check_zero_dependencies() -> bool:
     return ok
 
 
+def _is_home(root: Path) -> bool:
+    """Whether ``root`` is the home directory, whose ``.aegis/`` is the user plane."""
+    from aegis_core.workspace.layout import UserLayout
+
+    layout = UserLayout.current()
+    key = _root_key(root)
+    return layout is not None and key is not None and key == _root_key(layout.home)
 
 
-def _check_platform(project_root: Path | None = None) -> str | None:
-    """Detect AI platform; return platform name or None on failure."""
-    from aegis_cli.init import detect_platform
+def _setup_command(root: Path) -> str:
+    """What sets governance up here: ``aegis migrate`` while an unmigrated v3 workspace is
+    here (``aegis init`` would leave its rules unserved, and the check would then pass on
+    none of them), else ``aegis init``."""
+    from aegis_core.errors import WorkspaceError
+    from aegis_core.workspace.discovery import refuse_unmigrated_v3
 
-    root = project_root or Path.cwd()
-    platform = detect_platform(root)
-    # Fallback: check home directory for global AI configs
-    if platform == "unknown":
-        platform = detect_platform(Path.home())
-    if platform != "unknown":
-        print(f"  ✅ Platform detected: {platform}")
-        return platform
-    print("  ❌ No AI platform detected")
-    print("    Fix: Run 'aegis init' to initialize workspace governance rules.")
-    return None
+    try:
+        refuse_unmigrated_v3(root)
+    except WorkspaceError:
+        return "aegis migrate"
+    return "aegis init"
 
 
-def _check_rules(platform: str | None, project_root: Path | None = None) -> bool:
-    """Check that rules directory has ≥1 .md file."""
-    if platform is None:
-        print("  ❌ Rules check skipped (no platform)")
-        print("    Fix: Run 'aegis init' to install starter rules.")
+def _setup_fix(root: Path, purpose: str) -> str:
+    if _setup_command(root) == "aegis migrate":
+        return "Fix: Run 'aegis migrate' to see how this v3 workspace converts, then 'aegis migrate --apply'."
+    return f"Fix: Run 'aegis init' to {purpose}."
+
+
+def _check_rules(project_root: Path) -> bool:
+    """The workspace serves at least one rule and every rule file loads."""
+    from aegis_core.rules import load_rules
+    from aegis_core.workspace.layout import UserLayout, WorkspaceLayout
+
+    if _is_home(project_root):
+        print(f"  ❌ Rules: {project_root} is your home directory, never a workspace: "
+              f"{UserLayout(Path(project_root)).rules_dir} is your user rule layer, which every workspace adds to its own")
+        print("    Fix: run aegis doctor inside a repository.")
         return False
-    from aegis_cli.init import get_rules_dir
+    rules_dir = WorkspaceLayout(Path(project_root)).rules_dir
+    if not rules_dir.is_dir():
+        print(f"  ❌ No rules directory ({rules_dir})")
+        print("    " + _setup_fix(project_root, "install starter rules"))
+        return False
+    try:
+        ruleset = load_rules(project_root)
+    except Exception as exc:  # an unreadable tree fails closed, here as in scan
+        print(f"  ❌ Rules cannot be loaded from {rules_dir}: {exc}")
+        return False
+    if ruleset.errors:
+        first = ruleset.errors[0]
+        print(f"  ❌ {len(ruleset.errors)} rule file(s) cannot be served, e.g. {first.path}: {first.error}")
+        print("    Fix: correct them; 'aegis check' fails closed until they load.")
+        return False
+    if not ruleset.served:
+        print(f"  ❌ No rules are served from {rules_dir}")
+        print("    " + _setup_fix(project_root, "install starter rules"))
+        return False
+    print(f"  ✅ Rules: {len(ruleset.served)} served from {rules_dir}")
+    return True
 
-    rules_dir = get_rules_dir(platform, project_root=project_root)
-    md_files = [
-        p for p in rules_dir.glob("*.md")
-        if p.name.lower() not in ("readme.md", "claude.md")
-    ] if rules_dir.is_dir() else []
-    if md_files:
-        print(f"  ✅ Rules installed ({len(md_files)} .md files in {rules_dir})")
-        return True
-    print(f"  ❌ No .md rules found in {rules_dir}")
-    print("    Fix: Run 'aegis init' to install starter rules.")
-    return False
 
+def _check_state_dir(project_root: Path | None = None) -> Optional[bool]:
+    """Check .aegis/state/ (ledger, lock) exists and is writable, or can be created (read-only check)."""
+    from aegis_core.workspace.layout import WorkspaceLayout
 
-def _check_evidence_dir(project_root: Path | None = None) -> bool:
-    """Check .aegis/evidence/ exists and is writable (read-only check)."""
-    base = project_root or Path.cwd()
-    evidence = base / ".aegis" / "evidence"
-    if evidence.is_dir():
-        if os.access(str(evidence), os.W_OK):
-            print(f"  ✅ Evidence directory writable ({evidence})")
+    root = Path(project_root or Path.cwd()).resolve()
+    if _is_home(root):
+        print(f"  ℹ️  State directory: not checked: {root} is your home directory, whose .aegis/ is your "
+              "user layer; a workspace keeps its state in its own .aegis/state")
+        return None
+    state = WorkspaceLayout(root).state_dir
+    if state.is_dir():
+        if os.access(str(state), os.W_OK):
+            print(f"  ✅ State directory writable ({state})")
             return True
-        print(f"  ❌ Evidence directory not writable ({evidence})")
-        print(f"    Fix: Verify write permissions on {evidence}.")
+        print(f"  ❌ State directory not writable ({state})")
+        print(f"    Fix: Verify write permissions on {state}.")
         return False
-    # Directory doesn't exist — check if parent is writable
-    parent = evidence.parent
+    parent = state.parent
     if parent.is_dir() and os.access(str(parent), os.W_OK):
-        print(f"  ✅ Evidence directory can be created ({evidence})")
+        print(f"  ✅ State directory can be created ({state})")
         return True
-    print(f"  ❌ Evidence directory does not exist ({evidence})")
-    print("    Fix: Run 'aegis init' to create workspace directories.")
+    print(f"  ❌ State directory does not exist ({state})")
+    print("    " + _setup_fix(root, "create workspace directories"))
     return False
 
 
+def _check_cli_resolvable(project_root: Optional[Path] = None) -> bool:
+    """Check that the 'aegis' CLI the bootstrap sends agents to is on PATH.
 
-def _check_cli_resolvable() -> bool:
-    """Check that 'aegis' CLI is on PATH."""
-    path = shutil.which("aegis")
+    Only absolute PATH entries count (aegis_core.pathlookup): an empty or relative entry
+    resolves against the directory a shell starts in, where a cloned repository can plant
+    an ``aegis``. Doctor runs nothing here, so an absolute entry inside the workspace (a
+    project virtualenv the user put on PATH) counts, and the line says where it is.
+    """
+    root = Path(project_root or Path.cwd()).resolve()
+    path = which("aegis")
     if path:
-        print(f"  ✅ aegis CLI resolvable ({path})")
+        inside = which("aegis", outside=root) != path
+        print(f"  ✅ aegis CLI resolvable ({path}{', inside the workspace' if inside else ''})")
         return True
     print("  ❌ aegis CLI not found on PATH")
-    from aegis_cli.pathcheck import build_hint, scripts_dir
-    sdir = scripts_dir()
-    only_soma = bool(
-        sdir
-        and not os.path.isfile(os.path.join(sdir, "aegis"))
-        and not os.path.isfile(os.path.join(sdir, "aegis.exe"))
-        and (os.path.isfile(os.path.join(sdir, "soma")) or os.path.isfile(os.path.join(sdir, "soma.exe")))
-    )
-    try:
-        hint = build_hint(cmd_name="soma" if only_soma else "aegis")
-    except TypeError:
-        hint = build_hint()
+    for hit in only_skipped("aegis", base=root):
+        print(f"    {hit.path} is reached only through the relative PATH entry {hit.entry!r}, which "
+              "resolves against the current directory: not counted")
+    from aegis_cli.pathcheck import build_hint
+    hint = build_hint()
     if hint:
         print("\n".join("    " + line for line in hint.splitlines()))
     return False
 
 
+# ── Programs doctor starts ───────────────────────────────────────────────────
+
+def _child_env() -> Dict[str, str]:
+    """The environment of a program doctor starts.
+
+    On Windows a ``.cmd`` or ``.bat`` shim (npm's ``codex.cmd``) runs under cmd.exe,
+    which looks for the programs it calls (``node``) in the current directory first:
+    the repository, for the codex probe. This variable turns that search off.
+    """
+    env = dict(os.environ)
+    if sys.platform == "win32":
+        env["NoDefaultCurrentDirectoryInExePath"] = "1"
+    return env
+
+
+def _clean(text: Any, limit: int = 512) -> str:
+    """A string from a file or a host's output, safe to print: no escape or control sequences."""
+    from aegis_cli import sanitize_display
+
+    return sanitize_display(str(text), max_len=limit)
+
+
 # ── MCP launcher ─────────────────────────────────────────────────────────────
 
-# MCP configs start the server as `python3 -m aegis_mcp`. The import probe runs
-# without -I so user site-packages count, but drops the implicit CWD entry so
-# doctor never imports (executes) a aegis_mcp that happens to sit in the cwd.
-_IMPORT_PROBE = "import sys; sys.path[:1] = [p for p in sys.path[:1] if p]; __import__('aegis_mcp')"
+# A registered command, as doctor compares it: (host id, argv as the host config holds it).
+Registered = Tuple[str, Sequence[str]]
 
 
-def probe_mcp_launcher(path_env: str | None = None,
-                       timeout: float = 10.0) -> tuple[str, str]:
-    """Resolve `python3` from PATH like an MCP host and classify it.
+def _same_command(a: Sequence[str], b: Sequence[str]) -> bool:
+    if len(a) != len(b) or not a:
+        return False
+    return os.path.normcase(a[0]) == os.path.normcase(b[0]) and list(a[1:]) == list(b[1:])
 
-    Returns (status, detail); status is one of ok, missing, store_stub,
-    broken, no_soma_mcp.
+
+def _launcher_problem(argv: Sequence[str], current: Sequence[str]) -> Optional[str]:
+    """Why a registered launcher is wrong, or None. Nothing is run."""
+    from aegis_cli.install_hosts import MCP_RUNNER, display_command, launch_risk
+
+    shown = display_command(argv) if argv else "an empty command"
+    risk = launch_risk(argv)
+    if risk:
+        return f"starts `{shown}`, an unsafe registration: {risk}"
+    if not (os.path.isfile(argv[0]) and (os.name == "nt" or os.access(argv[0], os.X_OK))):
+        return f"starts {argv[0]}, which does not exist"
+    if len(argv) == 5 and argv[1:4] == ["-I", "-c", MCP_RUNNER] \
+            and not os.path.isfile(os.path.join(argv[4], "aegis_mcp", "server.py")):
+        return f"starts {argv[0]} with no aegis_mcp in {argv[4]}: that install is gone"
+    if not _same_command(argv, current):
+        return f"starts {shown}, not this install's {display_command(current)}"
+    return None
+
+
+def probe_mcp_launcher(path_env: Optional[str] = None, registered: Sequence[Registered] = (),
+                       scripts_dirs: Optional[Sequence[str]] = None) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """The command `aegis init --host` registers from this install (install_hosts.mcp_command
+    under ``path_env``), and each ``registered`` host whose command is unsafe (launch_risk),
+    gone, or another install's, with the reason.
+
+    Doctor runs neither: the registered argv comes from a host's config file, and
+    starting the server would prove nothing a host does not do at its next session.
     """
-    path_env = os.environ.get("PATH", "") if path_env is None else path_env
-    exe = shutil.which("python3", path=path_env)
-    if not exe:
-        return "missing", "python3 is not on PATH"
+    from aegis_cli.install_hosts import mcp_command
 
-    def _run(argv: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run([exe, *argv], stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, errors="replace",
-                              timeout=timeout)
-
-    try:
-        proc = _run(["-I", "-S", "-c", "import sys; print(sys.version_info[0])"])
-    except subprocess.TimeoutExpired:
-        return "broken", f"{exe} timed out after {timeout:g}s"
-    except OSError as exc:
-        return "broken", f"{exe} could not be started: {exc}"
-    out = proc.stdout.strip()
-    # The App Installer stub exits 49, or prints a Store message and nothing
-    # on stdout, instead of running Python.
-    store_msg = "microsoft store" in (proc.stdout + proc.stderr).lower()
-    if proc.returncode == 49 or (not out and store_msg):
-        return "store_stub", exe
-    if proc.returncode != 0 or out != "3":
-        err = (proc.stderr.strip() or out)[:200]
-        return "broken", f"{exe} exited {proc.returncode}: {err}"
-
-    try:
-        imp = _run(["-c", _IMPORT_PROBE])
-    except subprocess.TimeoutExpired:
-        return "broken", f"{exe} timed out after {timeout:g}s importing aegis_mcp"
-    except OSError as exc:
-        return "broken", f"{exe} could not be started: {exc}"
-    if imp.returncode != 0:
-        return "no_soma_mcp", exe
-    return "ok", exe
+    # None reaches mcp_command as it does from init: $PATH, or the OS default path when unset.
+    current = mcp_command(path_env, scripts_dirs)
+    problems = []
+    for host_id, argv in registered:
+        why = _launcher_problem(list(argv), current)
+        if why:
+            problems.append((host_id, why))
+    return current, problems
 
 
-def _check_mcp_launcher(path_env: str | None = None) -> bool:
-    """Advisory: report whether `python3 -m aegis_mcp` would start."""
-    status, detail = probe_mcp_launcher(path_env)
-    if status == "ok":
-        print(f"  ✅ MCP launcher: python3 ({detail}) runs and imports aegis_mcp")
-        return True
-    if status == "missing":
-        print("  ⚠️  MCP launcher: python3 not found on PATH. MCP configs start the\n"
-              "      server with `python3 -m aegis_mcp`; install Python 3 from python.org\n"
-              "      or put it on PATH (only needed if you use the MCP server).")
-    elif status == "store_stub":
-        print(f"  ⚠️  MCP launcher: {detail} is the Windows Store App Installer stub, not Python.\n"
-              "      Fix: Settings > Apps > Advanced app settings > App execution aliases:\n"
-              "      turn off python.exe and python3.exe, then install Python from python.org\n"
-              "      (or make sure the real python3 comes first on PATH).")
-    elif status == "no_soma_mcp":
-        print(f"  ⚠️  MCP launcher: {detail} runs but cannot import aegis_mcp.\n"
-              f"      Install it for that interpreter: {detail} -m pip install --user aegis-guardrails")
+def _where(hit: Hit, fence: Any) -> str:
+    """Where a program ``only_skipped`` passed over is, and why it was passed over;
+    ``fence`` names what it was inside."""
+    if hit.reason == INSIDE_FENCE:
+        return f"{hit.path}, inside {fence}"
+    return f"{hit.path}, through the relative PATH entry {hit.entry!r}"
+
+
+def _check_mcp_launcher(path_env: Optional[str] = None, workspace: Optional[Path] = None,
+                        registered: Sequence[Registered] = (),
+                        scripts_dirs: Optional[Sequence[str]] = None) -> bool:
+    """Advisory: the MCP launcher this install registers, and whether each host's matches."""
+    from aegis_cli.install_hosts import MCP_SCRIPT, display_command
+
+    current, problems = probe_mcp_launcher(path_env, registered, scripts_dirs)
+    where = ""
+    if len(current) == 1 and workspace is not None:
+        # The script's directory, not the script: a version manager's link resolves elsewhere.
+        key, fence = _root_key(Path(current[0]).parent), _root_key(workspace)
+        if key and fence and (key == fence or key.startswith(fence.rstrip(os.sep) + os.sep)):
+            where = ", inside the workspace"
+    if len(current) == 1:
+        print(f"  {'⚠️ ' if problems else '✅'} MCP launcher: {current[0]}{where} (what aegis init --host registers)")
     else:
-        print(f"  ⚠️  MCP launcher: {detail}")
-    return False
+        print(f"  {'⚠️ ' if problems else '✅'} MCP launcher: no {MCP_SCRIPT} script found, so aegis init --host "
+              f"registers this interpreter in isolated mode: {display_command(current)}")
+    for host_id, why in problems:
+        print(f"      {host_id} {why}. Fix: re-run aegis init --host {host_id}")
+    ok_hosts = [h for h, _ in registered if h not in {p for p, _ in problems}]
+    if ok_hosts:
+        print(f"      registered for {', '.join(ok_hosts)}")
+    return not problems
 
 
-def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> bool:
-    """Check configured AST drivers in .aegis/slots.yaml and verify their binaries."""
+def _missing_ast_extensions(ws_root: Path) -> List[str]:
+    """Detected source extensions with no AST driver configured (what --fix provisions).
+
+    An unreadable config gives none: the AST check reports it, and --fix will not
+    write over a file it cannot parse.
+    """
+    from aegis_core.ast.detect import detect_project_languages
+    from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
+
+    if _is_home(ws_root):
+        return []
+    langs = {k: v for k, v in detect_project_languages(ws_root).items() if k != "python"}
+    configured: set = set()
+    try:
+        registries = (SlotRegistry.load(ws_root), SlotRegistry.load_user(ws_root))
+    except SlotResolutionError:
+        return []
+    for registry in registries:
+        for name in registry.to_dict():
+            if name == "ast_driver":
+                configured.add("default")
+            elif name.startswith("ast_driver_"):
+                configured.add(f".{name[len('ast_driver_'):]}")
+    if "default" in configured:
+        return []
+    return sorted({ext for info in langs.values() for ext in info.get("extensions", []) if ext not in configured})
+
+
+def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> Optional[bool]:
+    """Check the AST drivers this workspace uses and that their executables resolve.
+
+    A repository opts in to a packaged driver in .aegis/config.json; driver commands
+    come only from ~/.aegis/config.json (D10).
+    """
     import shlex
-    from aegis_core.skills.slots import SlotRegistry
+    from aegis_core.errors import PathTraversalError
+    from aegis_core.skills.slots import SlotRegistry, SlotResolutionError
     from aegis_core.ast.detect import detect_project_languages, provision_ast_driver_slots
     from aegis_core.ast.runner import resolve_driver_executable
 
     ws_root = Path(project_root or Path.cwd())
-    slots_path = ws_root / ".aegis" / "slots.yaml"
-
+    if _is_home(ws_root):
+        # Never walk the home directory for sources, nor write a repository's driver
+        # opt-in into ~/.aegis/config.json, which is the user scope.
+        print(f"  ℹ️  AST drivers: not checked: {ws_root} is your home directory, whose .aegis/ is your user layer")
+        return None
     detected_langs = detect_project_languages(ws_root)
     non_py_langs = {k: v for k, v in detected_langs.items() if k != "python"}
 
-    if not slots_path.is_file():
-        if non_py_langs:
-            if fix:
-                new_slots, created = provision_ast_driver_slots(ws_root, detected_langs, copy_drivers=True)
-                if created:
-                    print(f"  ✅ Fixed: Auto-provisioned AST drivers in .aegis/slots.yaml for {', '.join(k.title() for k in sorted(non_py_langs))}")
-            else:
-                missing_exts = sorted(set().union(*(d.get("extensions", []) for d in non_py_langs.values())))
-                ext_str = ", ".join(missing_exts) if missing_exts else ", ".join(non_py_langs.keys())
-                print(f"  ⚠️  AST drivers: unconfigured driver for detected source language(s): {ext_str}. Run 'aegis doctor --fix' to provision.")
-                return False
-        if not slots_path.is_file():
-            print("  ✅ AST drivers: native Python stdlib (in-process)")
-            return True
+    def _configured() -> dict[str, str]:
+        drivers: dict[str, str] = {}
+        for registry in (SlotRegistry.load(ws_root), SlotRegistry.load_user(ws_root)):
+            for slot_name, slot_val in registry.to_dict().items():
+                if slot_name == "ast_driver":
+                    drivers["default"] = str(slot_val)
+                elif slot_name.startswith("ast_driver_"):
+                    drivers[f".{slot_name[len('ast_driver_'):]}"] = str(slot_val)
+        return drivers
 
     try:
-        registry = SlotRegistry.load(ws_root)
-    except Exception as exc:
-        print(f"  ❌ AST drivers: failed to load slots.yaml: {exc}")
+        ast_drivers = _configured()
+    except SlotResolutionError as exc:
+        print(f"  ❌ AST drivers: {exc}")
         return False
 
-    ast_drivers: dict[str, str] = {}
-    for slot_name, slot_val in registry.to_dict().items():
-        if slot_name == "ast_driver":
-            ast_drivers["default"] = str(slot_val)
-        elif slot_name.startswith("ast_driver_"):
-            ext = slot_name[len("ast_driver_"):]
-            ast_drivers[f".{ext}"] = str(slot_val)
-
-    missing: list[str] = []
-    for lang, l_info in non_py_langs.items():
-        for ext in l_info.get("extensions", []):
-            if ext not in ast_drivers and "default" not in ast_drivers:
-                missing.append(ext)
-
+    missing = sorted({
+        ext
+        for l_info in non_py_langs.values()
+        for ext in l_info.get("extensions", [])
+        if ext not in ast_drivers and "default" not in ast_drivers
+    })
     if missing:
         if fix:
-            new_slots, created = provision_ast_driver_slots(ws_root, detected_langs, copy_drivers=True)
-            if created:
-                print(f"  ✅ Fixed: Auto-provisioned missing AST driver slots in .aegis/slots.yaml: {', '.join(missing)}")
-                registry = SlotRegistry.load(ws_root)
-                for slot_name, slot_val in registry.to_dict().items():
-                    if slot_name.startswith("ast_driver_"):
-                        ext = slot_name[len("ast_driver_"):]
-                        ast_drivers[f".{ext}"] = str(slot_val)
+            try:
+                _slots, written = provision_ast_driver_slots(ws_root, detected_langs)
+            except PathTraversalError as exc:
+                print(f"  ❌ AST drivers: {exc}")
+                return False
+            if written:
+                print(f"  ✅ Fixed: enabled the packaged AST drivers in .aegis/config.json for {', '.join(missing)}")
+                ast_drivers = _configured()
         else:
             print(f"  ⚠️  AST drivers: unconfigured driver for detected source extension(s): {', '.join(missing)}. Run 'aegis doctor --fix' to provision.")
             return False
-
 
     if not ast_drivers:
         print("  ✅ AST drivers: native Python stdlib (in-process)")
@@ -288,9 +425,16 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
         if not parts:
             continue
         bin_name = parts[0]
-        found = resolve_driver_executable(bin_name)
+        # As the driver runs: absolute PATH entries outside the workspace, a relative path
+        # joined to the workspace root (aegis_core.ast.runner).
+        found = resolve_driver_executable(bin_name, workspace=ws_root)
+        hits = [] if found else only_skipped(bin_name, outside=ws_root, base=ws_root)
         if found:
             print(f"  ✅ AST driver ({ext}): {bin_name} resolvable ({found})")
+        elif hits:
+            print(f"  ⚠️  AST driver ({ext}): executable '{bin_name}' is found only at "
+                  f"{_where(hits[0], 'the workspace')}, where aegis never runs it")
+            all_resolvable = False
         else:
             print(f"  ⚠️  AST driver ({ext}): executable '{bin_name}' not found on PATH")
             all_resolvable = False
@@ -298,355 +442,1901 @@ def _check_ast_drivers(project_root: Path | None = None, fix: bool = False) -> b
     return all_resolvable
 
 
-# ── Pre-commit hook (BUG-047) ────────────────────────────────────────────────
+# ── Pre-commit hook ──────────────────────────────────────────────────────────
 
 def _check_precommit_hook(project_root: Path | None = None) -> bool | None:
-    """False for a pre-BUG-047 hook block, True if current, None if absent."""
-    from aegis_cli.hooks.management import (
-        AEGIS_HOOK_FORMAT,
-        CURRENT_HOOK_FORMAT_VERSION,
-        SOMA_HOOK_FORMAT,
-        _AEGIS_HOOK_START,
-        _SOMA_HOOK_START,
-    )
-    from aegis_core.workspace import resolve_git_hooks_dir
+    """True for a current, runnable hook block; False for an older one or one whose
+    pinned interpreter or aegis path is gone; None if absent.
 
-    hooks_dir = resolve_git_hooks_dir(project_root)
-    if not hooks_dir:
+    Blocks before the current format resolved aegis through PATH, $VIRTUAL_ENV
+    or the repository's .venv, so repository code could run on commit.
+    """
+    from aegis_cli.hooks.management import hook_status
+
+    st = hook_status(project_root)
+    if not st["managed_by_aegis"]:
         return None
-    hook = hooks_dir / "pre-commit"
-    try:
-        text = hook.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    if _AEGIS_HOOK_START not in text and _SOMA_HOOK_START not in text:
-        return None
-    if (
-        f"{AEGIS_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}" in text
-        or f"{SOMA_HOOK_FORMAT} {CURRENT_HOOK_FORMAT_VERSION}" in text
-        or AEGIS_HOOK_FORMAT in text
-        or SOMA_HOOK_FORMAT in text
-    ):
-        print(f"  ✅ Pre-commit hook is current ({hook})")
+    if st["status"] == "installed":
+        gone = [p["path"] for p in (st["interpreter"], st["aegis_path"]) if p and not p["exists"]]
+        if gone:
+            print(f"  ❌ Pre-commit hook ({st['hook_file']}) pins {gone[0]}, which no longer exists,\n"
+                  "      so every commit fails closed. Re-run `aegis hook install` to re-pin it.")
+            return False
+        if st.get("reachable", True) is False:
+            print(f"  ❌ Pre-commit hook ({st['hook_file']}) is installed but never runs: "
+                  f"{st.get('unreachable_reason') or 'git does not reach the Aegis block'}.\n"
+                  "      Run `aegis hook status` for the fix.")
+            return False
+        print(f"  ✅ Pre-commit hook is current ({st['hook_file']})")
         return True
-    print(f"  ❌ Pre-commit hook uses an old block ({hook}).\n"
-          "      It aborts commits when the CLI is not on the\n"
-          "      hook's PATH (BUG-047). Re-run `aegis system hook install` to refresh it.")
+    print(f"  ❌ Pre-commit hook uses an old block (format {st['format_version']}, {st['hook_file']}).\n"
+          "      It can run an aegis found on PATH or in the repository instead of\n"
+          "      the one you installed. Re-run `aegis hook install` to refresh it.")
     return False
 
 
-# ── --fix-path ───────────────────────────────────────────────────────────────
+# ── Host plane: context ──────────────────────────────────────────────────────
 
-def _under(base: str, path: str) -> bool:
+# Codex's own answer when no server has that name. Any other failure leaves the
+# registration unknown: a CLI that crashed has not said "absent".
+_CODEX_ABSENT = re.compile(r"no mcp server named\s+['\"]?aegis['\"]?\s+found", re.IGNORECASE)
+_PROBE_TIMEOUT = 10.0
+# Hosts that silently keep only the start of an over-budget instruction file: Codex at
+# its 32 KiB project_doc_max_bytes, Antigravity at 24,000 bytes per file (host-matrix
+# §1-§2, verified 2026-10-15). A block that ends within the budget still arrives; for
+# the other hosts the budget is advice.
+_TRUNCATES_TAIL = frozenset({"codex-cli", "antigravity"})
+# Hosts that send no MCP roots and attest no workspace: the registry is how the server
+# finds the repository (host-matrix §2, §3.6).
+_REGISTRY_BOUND = frozenset({"antigravity"})
+# Hosts that read AGENTS.override.md instead of AGENTS.md at the same level.
+_READS_AGENTS_OVERRIDE = frozenset({"codex-cli"})
+_FIX_HINT = "aegis doctor --fix"
+_LEGACY_ENTRY = f"stale v3 '{LEGACY_SERVER}' MCP server"
+
+
+def _run_host_cli(argv: Sequence[str], cwd: str, timeout: float) -> "subprocess.CompletedProcess[str]":
+    """The one place doctor starts a host CLI: an argv (no shell), no stdin, bounded in time."""
+    return subprocess.run(list(argv), cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True,
+                          text=True, errors="replace", timeout=timeout, env=_child_env())
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _aegis_version() -> str:
+    from aegis_core._version import __version__
+    return __version__
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+@dataclass
+class _File:
+    """One file as doctor read it, with the facts --fix needs to decide whether it may write."""
+
+    path: Path
+    raw: Optional[bytes] = None
+    is_link: bool = False
+    error: Optional[str] = None
+    refusal: Optional[str] = None  # why --fix will not write it
+    data: Any = None
+
+    @property
+    def exists(self) -> bool:
+        return self.raw is not None or self.is_link or self.error is not None
+
+
+def _write_refusal(path: Path, st: os.stat_result) -> Optional[str]:
+    if stat.S_ISLNK(st.st_mode):
+        return "it is a symlink, and Aegis never writes through a link"
+    if not stat.S_ISREG(st.st_mode):
+        return "it is not a regular file"
+    if st.st_nlink > 1:
+        return "it has another hard link, and replacing it would split the link"
+    if not (st.st_mode & 0o222) or not os.access(str(path), os.W_OK):
+        return "it is read-only"
+    return None
+
+
+def _read_file(path: Path) -> _File:
+    entry = _File(path)
     try:
-        return os.path.commonpath([base, path]) == base
-    except ValueError:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return entry
+    except OSError as exc:
+        entry.error = f"cannot be read ({exc.strerror or exc})"
+        return entry
+    entry.is_link = stat.S_ISLNK(st.st_mode)
+    entry.refusal = _write_refusal(path, st)
+    if entry.is_link and not path.is_file():
+        entry.error = "is a symlink to no regular file"
+        return entry
+    if not entry.is_link and not stat.S_ISREG(st.st_mode):
+        entry.error = "is not a regular file"
+        return entry
+    try:
+        with open(path, "rb") as fh:
+            entry.raw = fh.read()
+    except OSError as exc:
+        entry.error = f"cannot be read ({exc.strerror or exc})"
+    return entry
+
+
+def _strict_pairs(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate key {key!r}")
+        out[key] = value
+    return out
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not JSON")
+
+
+def _parse_json(entry: _File) -> _File:
+    if entry.raw is None or entry.error:
+        return entry
+    try:
+        text = entry.raw.decode("utf-8")
+        if text.startswith("\ufeff"):
+            raise ValueError("starts with a byte-order mark")
+        entry.data = json.loads(text, object_pairs_hook=_strict_pairs, parse_constant=_reject_constant)
+    except (UnicodeDecodeError, ValueError) as exc:
+        entry.error = f"is not valid JSON ({str(exc)[:120]})"
+        return entry
+    except RecursionError:
+        # A file nested past the parser's depth (a cloned repository's .mcp.json can be)
+        # is as unreadable as a malformed one; it must not abort the whole report.
+        entry.error = "is not valid JSON (nested too deeply to parse)"
+        return entry
+    if not isinstance(entry.data, dict):
+        entry.error = "is not a JSON object"
+        entry.data = None
+    return entry
+
+
+@dataclass
+class _Ctx:
+    """What one doctor run looks at; files are read once."""
+
+    root: Path
+    governed: bool
+    home: Optional[Path]
+    environ: Mapping[str, str]
+    selected: Tuple[Any, ...]
+    selection: str
+    is_home: bool = False
+    # What sets this workspace up: aegis migrate while an unmigrated v3 workspace is here.
+    setup: str = "aegis init"
+    _cache: Dict[Tuple[str, bool], _File] = field(default_factory=dict)
+
+    @property
+    def path_env(self) -> str:
+        return self.environ.get("PATH", "")
+
+    def which(self, name: str) -> Optional[str]:
+        return which(name, self.path_env, outside=self.root)
+
+    def passed_over(self, name: str) -> List[Hit]:
+        """Where ``name`` is when ``which`` refused every place: a relative or empty PATH
+        entry (resolved against the workspace, where a host would start) or an absolute
+        entry inside it. Never run."""
+        return only_skipped(name, self.path_env, outside=self.root, base=self.root)
+
+    def file(self, path: Path, as_json: bool = False) -> _File:
+        key = (os.path.abspath(str(path)), as_json)
+        if key not in self._cache:
+            entry = _read_file(Path(path))
+            self._cache[key] = _parse_json(entry) if as_json else entry
+        return self._cache[key]
+
+    def label(self, path: Path) -> str:
+        """``~/x`` for a file under the home directory (as the docs name them), else the path."""
+        if self.home is not None:
+            try:
+                return "~/" + Path(path).relative_to(self.home).as_posix()
+            except ValueError:
+                pass
+        return str(path)
+
+
+def _claude_dir(ctx: _Ctx) -> Optional[Path]:
+    custom = ctx.environ.get("CLAUDE_CONFIG_DIR")
+    if custom:
+        return Path(custom)
+    return ctx.home / ".claude" if ctx.home else None
+
+
+def _claude_config(ctx: _Ctx) -> Optional[Path]:
+    # Claude Code keeps its user and local MCP scopes in .claude.json: in the home
+    # directory, or in CLAUDE_CONFIG_DIR when that is set.
+    custom = ctx.environ.get("CLAUDE_CONFIG_DIR")
+    if custom:
+        return Path(custom) / ".claude.json"
+    return ctx.home / ".claude.json" if ctx.home else None
+
+
+def _desktop_configs(ctx: _Ctx) -> List[Path]:
+    """Every claude_desktop_config.json location: v3 wrote ~/.config/Claude on every OS."""
+    if ctx.home is None:
+        return []
+    found = [ctx.home / ".config" / "Claude" / "claude_desktop_config.json"]
+    if sys.platform == "darwin":
+        found.append(ctx.home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json")
+    elif os.name == "nt":
+        appdata = ctx.environ.get("APPDATA")
+        if appdata:
+            found.append(Path(appdata) / "Claude" / "claude_desktop_config.json")
+    else:
+        xdg = ctx.environ.get("XDG_CONFIG_HOME", "")
+        if xdg and os.path.isabs(xdg):
+            found.append(Path(xdg) / "Claude" / "claude_desktop_config.json")
+    unique: Dict[str, Path] = {}
+    for path in found:
+        unique.setdefault(os.path.normcase(os.path.abspath(str(path))), path)
+    return list(unique.values())
+
+
+def _host_json_path(spec: Any, ctx: _Ctx) -> Optional[Path]:
+    reg = spec.registration
+    if reg is None or reg.kind != "json_file" or ctx.home is None:
+        return None
+    rel = reg.path[2:] if reg.path.startswith("~/") else reg.path
+    return ctx.home.joinpath(*rel.split("/"))
+
+
+# ── Host plane: registration probes ─────────────────────────────────────────
+
+def _registration(status: str, source: str, **facts: Any) -> Dict[str, Any]:
+    reg = {"status": status, "source": source, "scope": None, "command": None, "command_exists": None,
+           "enabled": None, "approval": None, "detail": None, "aegis_client": None}
+    reg.update(facts)
+    return reg
+
+
+def _entry_facts(entry: Any, ctx: _Ctx) -> Dict[str, Any]:
+    """Command, AEGIS_CLIENT and enabled flag of one MCP server entry.
+
+    The strings come from files a repository can write (a project .mcp.json), so the
+    command is reported without control sequences; the existence check uses it as
+    written, and AEGIS_CLIENT stays raw for the identity decision (``_identity`` cleans
+    what it reports), since the server sees the raw value.
+    """
+    facts: Dict[str, Any] = {}
+    if not isinstance(entry, dict):
+        return facts
+    command = entry.get("command")
+    if isinstance(command, str) and command:
+        args = entry.get("args") if isinstance(entry.get("args"), list) else []
+        facts["command"] = [_clean(command)] + [_clean(a) for a in args]
+        facts["command_exists"] = _command_exists(command, ctx)
+    env = entry.get("env")
+    if isinstance(env, dict) and isinstance(env.get("AEGIS_CLIENT"), str):
+        facts["aegis_client"] = env["AEGIS_CLIENT"]
+    if isinstance(entry.get("disabled"), bool):
+        facts["enabled"] = not entry["disabled"]
+    if isinstance(entry.get("enabled"), bool):
+        facts["enabled"] = entry["enabled"]
+    return facts
+
+
+def _command_exists(command: str, ctx: _Ctx) -> Optional[bool]:
+    """Whether the registered command exists; None when doctor cannot tell.
+
+    A relative path with a directory part resolves against the directory the host starts
+    the server in, which doctor does not know. A bare name found only through an empty or
+    relative PATH entry, or in an absolute entry inside the workspace, is one the host
+    may run but doctor does not count.
+    """
+    if os.path.isabs(command):
+        return os.path.isfile(command) and (os.name == "nt" or os.access(command, os.X_OK))
+    if os.sep in command or (os.altsep and os.altsep in command):
+        return None
+    if ctx.which(command) is not None:
+        return True
+    return None if ctx.passed_over(command) else False
+
+
+def _probe_codex(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
+    source = "codex mcp get aegis --json"
+    if binary is None:
+        detail = ("the only codex on PATH is inside the workspace or behind a relative PATH entry, "
+                  "and doctor does not run it" if ctx.passed_over("codex") else "codex is not on PATH")
+        return _registration("unavailable", source, detail=detail)
+    try:
+        # From the workspace: Codex answers with the config it would use here (user
+        # config plus a trusted project's own).
+        proc = _run_host_cli([binary, "mcp", "get", SERVER, "--json"], cwd=str(ctx.root), timeout=_PROBE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return _registration("unknown", source, detail=f"codex did not answer within {_PROBE_TIMEOUT:g}s")
+    except OSError as exc:
+        return _registration("unknown", source, detail=f"codex could not be started ({exc.strerror or exc})")
+    if proc.returncode != 0:
+        said = ((proc.stderr or "") + (proc.stdout or "")).strip()
+        if _CODEX_ABSENT.search(said):
+            return _registration("absent", source)
+        first = _clean(said.splitlines()[0], 200) if said else "no output"
+        return _registration("unknown", source, detail=f"codex exited {proc.returncode}: {first}")
+    try:
+        data = json.loads(proc.stdout)
+    except (ValueError, RecursionError):  # RecursionError: nested past the parser's depth
+        return _registration("unknown", source, detail="codex printed no JSON")
+    if not isinstance(data, dict) or data.get("name") != SERVER:
+        return _registration("unknown", source, detail="codex answered about another server")
+    transport = data.get("transport") if isinstance(data.get("transport"), dict) else {}
+    facts = _entry_facts(transport, ctx)
+    if isinstance(data.get("enabled"), bool):
+        facts["enabled"] = data["enabled"]
+    return _registration("registered", source, scope="effective", **facts)
+
+
+def _claude_project_keys(ctx: _Ctx) -> List[str]:
+    keys = [str(ctx.root), ctx.root.as_posix()]
+    return list(dict.fromkeys(keys))
+
+
+def _probe_claude(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
+    path = _claude_config(ctx)
+    if path is None:
+        return _registration("unknown", "~/.claude.json", detail="no home directory")
+    source = ctx.label(path)
+    cfg = ctx.file(path, as_json=True)
+    if cfg.error:
+        return _registration("unknown", source, detail=f"{source} {cfg.error}")
+    data = cfg.data or {}
+    projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
+    key = next((k for k in _claude_project_keys(ctx) if isinstance(projects.get(k), dict)), None)
+    project = projects[key] if key is not None else {}
+
+    def facts_of(entry: Any) -> Dict[str, Any]:
+        facts = _entry_facts(entry, ctx)
+        # Claude Code turns off any server this project lists, whatever its scope
+        # (user, local or .mcp.json): "turned off; turn it on in /mcp".
+        if SERVER in _names(project.get("disabledMcpServers")):
+            facts["enabled"] = False
+            facts["detail"] = (f"Claude Code turns aegis off in this project: {source} lists it in "
+                               f"projects[{key}].disabledMcpServers; turn it on in Claude Code's /mcp")
+        return facts
+
+    local = _server_entry(project)
+    user = _server_entry(data)
+    if local is not None:
+        return _registration("registered", source, scope="local", **facts_of(local))
+    if user is not None:
+        return _registration("registered", source, scope="user", **facts_of(user))
+    dot_mcp = ctx.file(ctx.root / ".mcp.json", as_json=True)
+    shared = _server_entry(dot_mcp.data) if not dot_mcp.error else None
+    if shared is not None:
+        # A project .mcp.json server runs only after the user approves it; that answer
+        # lives in settings files doctor does not read, unless .claude.json records it.
+        approved = _names(project.get("enabledMcpjsonServers"))
+        denied = _names(project.get("disabledMcpjsonServers"))
+        approval = ("approved" if SERVER in approved or project.get("enableAllProjectMcpServers") is True
+                    else "denied" if SERVER in denied else "unknown")
+        facts = facts_of(shared)
+        if approval == "denied":
+            facts["enabled"] = False
+        return _registration("registered", ctx.label(ctx.root / ".mcp.json"), scope="project",
+                             approval=approval, **facts)
+    return _registration("absent", source)
+
+
+def _names(value: Any) -> List[str]:
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def _server_entry(data: Any, name: str = SERVER) -> Optional[Any]:
+    if not isinstance(data, dict) or not isinstance(data.get("mcpServers"), dict):
+        return None
+    return data["mcpServers"].get(name)
+
+
+def _probe_json_host(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
+    path = _host_json_path(spec, ctx)
+    if path is None:
+        return _registration("unknown", spec.registration.path, detail="no home directory")
+    source = ctx.label(path)
+    cfg = ctx.file(path, as_json=True)
+    if cfg.error:
+        return _registration("unknown", source, detail=f"{source} {cfg.error}")
+    servers = (cfg.data or {}).get(spec.registration.key)
+    entry = servers.get(SERVER) if isinstance(servers, dict) else None
+    if entry is None:
+        return _registration("absent", source)
+    return _registration("registered", source, scope="user", **_entry_facts(entry, ctx))
+
+
+_PROBES: Dict[str, Callable[[Any, Optional[str], _Ctx], Dict[str, Any]]] = {
+    "codex-cli": _probe_codex,
+    "claude-code": _probe_claude,
+}
+
+
+def _probe(spec: Any, binary: Optional[str], ctx: _Ctx) -> Dict[str, Any]:
+    if spec.id in _PROBES:
+        return _PROBES[spec.id](spec, binary, ctx)
+    if spec.registration is not None and spec.registration.kind == "json_file":
+        return _probe_json_host(spec, binary, ctx)
+    return _registration("unavailable", "-", detail=f"doctor has no check for {spec.display_name}")
+
+
+# ── Host plane: instruction files ───────────────────────────────────────────
+
+_BLOCK_BEGIN = re.compile(r"^<!-- aegis:begin id=(\S+) v=(\S+) sha=(\S+) -->[ \t]*$")
+_BLOCK_END = re.compile(r"^<!-- aegis:end id=(\S+) -->[ \t]*$")
+_HEX12 = re.compile(r"^[0-9a-f]{12}$")
+# An import path runs to the next whitespace, so @AGENTS.md.bak names another file. A
+# relative import resolves next to the file holding it: from .claude/ it is ../AGENTS.md.
+_IMPORTS_AGENTS = re.compile(r"(?<![\w@/.\-])@(?:\./)?AGENTS\.md(?=\s|$)")
+_IMPORTS_PARENT_AGENTS = re.compile(r"(?<![\w@/.\-])@\.\./AGENTS\.md(?=\s|$)")
+# What Claude Code loads as project memory from the directory it starts in and from every
+# parent. Any one of them turns off its native AGENTS.md reading (host research digest:
+# "only when no CLAUDE.md or CLAUDE.local.md exists in cwd or any ancestor"; the binary's
+# candidate list also has .claude/CLAUDE.md).
+_CLAUDE_FAMILY = ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_CODE_SPAN = re.compile(r"(`+).+?\1")
+_INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
+_BOM = "\ufeff"
+
+
+def _fence_step(fence: Optional[Tuple[str, int]], line: str) -> Optional[Tuple[str, int]]:
+    """The fenced-code state after ``line``: None outside a fence, else (fence char, length)."""
+    match = _FENCE.match(line)
+    if fence is None:
+        return (match.group(1)[0], len(match.group(1))) if match else None
+    closes = (match is not None and match.group(1)[0] == fence[0] and len(match.group(1)) >= fence[1]
+              and not line[match.end():].strip())
+    return None if closes else fence
+
+
+def _prose(text: str) -> str:
+    """``text`` without fenced or indented code blocks and inline code spans, where
+    Claude Code evaluates no ``@`` import.
+
+    An indented block starts after a blank line (or at the top) and cannot interrupt a
+    paragraph. List context is not tracked, so an import indented inside a list item
+    after a blank line counts as code: doctor may then under-report it, never over-report.
+    """
+    out, fence, blank_before, indented = [], None, True, False
+    for line in text.splitlines():
+        inside = fence is not None
+        fence = _fence_step(fence, line)
+        if inside or fence is not None:
+            blank_before, indented = False, False
+            continue
+        if not line.strip():
+            blank_before = True
+            continue
+        if _INDENTED_CODE.match(line) and (blank_before or indented):
+            indented, blank_before = True, False
+            continue
+        indented, blank_before = False, False
+        out.append(_CODE_SPAN.sub(" ", line))
+    return "\n".join(out)
+
+
+@dataclass
+class _ClaudeFile:
+    """One CLAUDE.md-family file in the workspace, as Claude Code would load it."""
+
+    name: str  # relative to the workspace, with forward slashes
+    path: Path
+    size: int
+    imports_agents: bool
+    # It and AGENTS.md are one file (a link either way): Claude Code reads AGENTS.md.
+    is_agents: bool
+    link_target: Optional[str]  # where it points when it is a symlink
+
+
+@dataclass
+class _Instructions:
+    agents_bytes: Optional[int] = None
+    bootstrap: str = "not_read"  # current outdated hand_edited malformed missing not_read
+    block_end: Optional[int] = None  # bytes up to the end of the closing marker line
+    claude: List[_ClaudeFile] = field(default_factory=list)  # in the workspace, _CLAUDE_FAMILY order
+    # CLAUDE.md-family files in the workspace's parent directories, except the user memory
+    # file: they count, but doctor reads no file outside the workspace, so whether one
+    # imports this AGENTS.md is unknown.
+    claude_outside: List[Path] = field(default_factory=list)
+    override: bool = False
+
+
+def _bootstrap_state(text: str) -> Tuple[str, Optional[int]]:
+    from aegis_core.bootstrap import BOOTSTRAP_ID, bootstrap_text
+
+    # aegis init keeps a byte-order mark it finds, so the block can start right after one.
+    bom = text.startswith(_BOM)
+    lines = text[1:].splitlines(True) if bom else text.splitlines(True)
+    begins, ends, offset, end_at = [], [], len(_BOM.encode("utf-8")) if bom else 0, None
+    for index, line in enumerate(lines):
+        offset += len(line.encode("utf-8"))
+        bare = line.rstrip("\r\n")
+        begin = _BLOCK_BEGIN.match(bare)
+        if begin and begin.group(1) == BOOTSTRAP_ID:
+            begins.append((index, begin.group(2), begin.group(3)))
+        end = _BLOCK_END.match(bare)
+        if end and end.group(1) == BOOTSTRAP_ID:
+            ends.append(index)
+            end_at = offset
+    if not begins and not ends:
+        return "missing", None
+    if len(begins) != 1 or len(ends) != 1 or ends[0] < begins[0][0]:
+        return "malformed", None
+    start, version, sha = begins[0]
+    if version != "1" or not _HEX12.match(sha):
+        return "malformed", None
+    body = "".join(lines[start + 1:ends[0]]).replace("\r\n", "\n")
+    if _sha256(body.encode("utf-8"))[:12] != sha:
+        return "hand_edited", end_at
+    return ("current" if body == bootstrap_text() else "outdated"), end_at
+
+
+def _instructions(ctx: _Ctx) -> _Instructions:
+    info = _Instructions()
+    if not ctx.governed:
+        return info
+    agents = ctx.file(ctx.root / "AGENTS.md")
+    if agents.raw is not None:
+        info.agents_bytes = len(agents.raw)
+        text = agents.raw.decode("utf-8", errors="replace")
+        info.bootstrap, info.block_end = _bootstrap_state(text)
+    else:
+        info.bootstrap = "missing"
+    for name in _CLAUDE_FAMILY:
+        entry = ctx.file(ctx.root.joinpath(*name.split("/")))
+        if entry.raw is None:
+            continue
+        imports = _IMPORTS_PARENT_AGENTS if name.startswith(".claude/") else _IMPORTS_AGENTS
+        same = False
+        if agents.raw is not None:
+            try:
+                same = os.path.samefile(str(entry.path), str(agents.path))
+            except OSError:
+                same = False
+        info.claude.append(_ClaudeFile(
+            name=name, path=entry.path, size=len(entry.raw),
+            imports_agents=bool(imports.search(_prose(entry.raw.decode("utf-8", errors="replace")))),
+            is_agents=same, link_target=os.path.realpath(str(entry.path)) if entry.is_link else None))
+    # Claude Code loads <config dir>/CLAUDE.md (~/.claude/CLAUDE.md) as user memory and
+    # leaves exactly that path out of the walk that decides whether AGENTS.md is read
+    # (claude 2.1.301: the walk's processed paths start as {managed, user} memory).
+    # The match is by spelling. Under a symlinked home the ancestors of the resolved root
+    # spell that file differently, and whether Claude Code still skips it there is
+    # unverified, so it counts and the reach stays unknown rather than claimed.
+    claude_dir = _claude_dir(ctx)
+    user_memory = _path_key(claude_dir / "CLAUDE.md") if claude_dir is not None else None
+    candidates = (d.joinpath(*name.split("/")) for d in ctx.root.parents for name in _CLAUDE_FAMILY)
+    info.claude_outside = [p for p in candidates if _path_key(p) != user_memory and _present(p)]
+    info.override = (ctx.root / "AGENTS.override.md").exists()
+    return info
+
+
+def _path_key(path: Path) -> str:
+    """``path`` as written, made absolute and case-folded where the OS folds case."""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def _present(path: Path) -> bool:
+    """Whether a file is there, without reading it; True when that cannot be told, so an
+    unreadable parent directory never lets doctor claim the bootstrap through."""
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
         return False
+    except (OSError, ValueError):
+        return True
 
 
-def _umask_mode(mode: int = 0o666) -> int:
-    current = os.umask(0)
-    os.umask(current)
-    return mode & ~current
+def _claude_reads_agents(info: _Instructions) -> bool:
+    return any(f.is_agents or f.imports_agents for f in info.claude)
 
 
-def _atomic_write(path: str, data: bytes, mode: int) -> None:
-    """Exclusive temp in the same directory, given mode, os.replace."""
-    fd, tmp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.soma-",
-                               suffix=".tmp", dir=os.path.dirname(path) or ".")
+def _claude_names(info: _Instructions) -> str:
+    names = [f.name for f in info.claude]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _claude_import_advice(info: _Instructions) -> str:
+    """How to make Claude Code read AGENTS.md. aegis init adds the import only to a
+    CLAUDE.md at the root, and never writes through a link."""
+    root = next((f for f in info.claude if f.name == "CLAUDE.md"), None)
+    if root is not None and root.link_target is not None:
+        return (f"CLAUDE.md is a link to {root.link_target}, which aegis init never writes through: "
+                "add an @AGENTS.md line to that file, or make CLAUDE.md a link to AGENTS.md")
+    if root is not None:
+        return "run aegis init to add the import"
+    first = info.claude[0]
+    line = "@../AGENTS.md" if first.name.startswith(".claude/") else "@AGENTS.md"
+    return f"add the line {line} to {first.name} (aegis init adds it only to a CLAUDE.md at the root)"
+
+
+def _budget(spec: Any, info: _Instructions) -> Dict[str, Any]:
+    budget = spec.budget_bytes
+    if spec.instructions == "agents_md_unless_claude_md" and info.claude:
+        # Claude Code loads every one of them; AGENTS.md too when one imports it, once.
+        whole = any(f.is_agents for f in info.claude)
+        imported = not whole and any(f.imports_agents for f in info.claude)
+        size = sum(f.size for f in info.claude) + ((info.agents_bytes or 0) if imported else 0)
+        name = " + ".join(f.name + (" (= AGENTS.md)" if f.is_agents else "") for f in info.claude)
+        name += " + AGENTS.md" if imported else ""
+    elif spec.instructions in ("agents_md", "agents_md_unless_claude_md"):
+        size, name = info.agents_bytes, "AGENTS.md"
+    else:
+        size, name = None, None
+    within = None if size is None or budget is None else size <= budget
+    return {"file": name, "bytes": size, "budget_bytes": budget, "within": within}
+
+
+def _bootstrap_reaches(spec: Any, info: _Instructions) -> Optional[bool]:
+    if info.bootstrap == "not_read" or spec.instructions in ("gemini_md", "none"):
+        return None
+    if info.bootstrap not in ("current", "outdated"):
+        return False
+    if spec.id in _READS_AGENTS_OVERRIDE and info.override:
+        return False
+    if spec.instructions == "agents_md_unless_claude_md":
+        if _claude_reads_agents(info):
+            return True
+        if info.claude:
+            return False
+        if info.claude_outside:
+            return None  # no native read; an import in a file doctor does not read is unknown
+    return True
+
+
+def _registered_roots(ctx: _Ctx) -> Tuple[Optional[set], List[int]]:
+    """(normalized roots in ~/.aegis/workspaces.json, indexes of the entries skipped).
+
+    The roots are empty when the file is absent and None when it cannot be read. An
+    entry is skipped, as the server's registry reader skips it, unless it is an object
+    whose ``root`` is an absolute path that resolves: a relative root would otherwise be
+    resolved against doctor's own cwd, and a NUL byte makes resolving raise.
+    """
+    if ctx.home is None:
+        return None, []
+    from aegis_core.workspace.layout import UserLayout
+
+    reg = ctx.file(UserLayout(ctx.home).workspaces_file, as_json=True)
+    if not reg.exists:
+        return set(), []
+    if reg.error or reg.data.get("v") != 1 or not isinstance(reg.data.get("workspaces"), list):
+        return None, []
+    roots, skipped = set(), []
+    for index, entry in enumerate(reg.data["workspaces"]):
+        raw = entry.get("root") if isinstance(entry, dict) else None
+        key = _root_key(raw) if isinstance(raw, str) and os.path.isabs(raw) else None
+        if key is None:
+            skipped.append(index)
+        else:
+            roots.add(key)
+    return roots, skipped
+
+
+def _root_key(root: Any) -> Optional[str]:
+    """``root`` resolved and case-folded for comparison, or None when it cannot be resolved.
+
+    A NUL byte is refused here, not left to realpath: realpath raises on it everywhere
+    except Windows Python 3.12+, where it returns the path as given (gh-106242)."""
+    text = str(root)
+    if "\x00" in text:
+        return None
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.chmod(tmp, mode)
-        os.replace(tmp, path)
-    except BaseException:
+        return os.path.normcase(os.path.realpath(text))
+    except (OSError, ValueError):
+        return None
+
+
+# ── Host plane: one row per host ────────────────────────────────────────────
+
+def _identity(spec: Any, reg: Dict[str, Any]) -> Dict[str, Any]:
+    client = reg.get("aegis_client")
+    if reg["status"] != "registered":
+        return {"status": "unknown", "aegis_client": None}
+    if client == spec.id:
+        return {"status": "explicit", "aegis_client": client}
+    if not client:
+        known = bool(spec.client_names or spec.client_prefixes)
+        return {"status": "client_info" if known else "unknown", "aegis_client": None}
+    if set(client) == {"*"}:
+        return {"status": "unknown", "aegis_client": None}
+    return {"status": "mismatch", "aegis_client": _clean(client, 128)}
+
+
+def _any(*facts: Optional[bool]) -> Optional[bool]:
+    """Three-valued or: True if one fact holds, None if none holds but one is unknown."""
+    return True if True in facts else (None if None in facts else False)
+
+
+def _all(*facts: Optional[bool]) -> Optional[bool]:
+    """Three-valued and: False if one fact fails, None if none fails but one is unknown."""
+    return False if False in facts else (None if None in facts else True)
+
+
+def _mcp_loads(reg: Dict[str, Any]) -> Optional[bool]:
+    """Whether the host starts the aegis server: None when doctor cannot tell."""
+    if reg["status"] == "absent":
+        return False
+    if reg["status"] != "registered":
+        return None
+    if reg["command_exists"] is False or reg["enabled"] is False or reg["approval"] == "denied":
+        return False
+    if reg["command_exists"] is None or reg["approval"] == "unknown":
+        return None
+    return True
+
+
+def _advisory(spec: Any, ctx: _Ctx, installed: Optional[bool], reg: Dict[str, Any], bootstrap: Optional[bool],
+              workspace_registered: Optional[bool]) -> Optional[bool]:
+    """Whether the advisory tier reaches this host here; None when a deciding fact is unknown.
+
+    It needs rules to serve (a governed workspace), the host on this machine
+    (``installed`` is None when its only binary sits inside the workspace) and a route
+    to its agent: the server loading in the host, or the bootstrap arriving whole
+    (``bootstrap`` is False when the host cuts it). A host that sends no workspace finds
+    the repository only through the registry, and its bootstrap sends the agent to that
+    server, so it needs this workspace registered as well.
+    """
+    if not ctx.governed or installed is False:
+        return False
+    route = _any(_mcp_loads(reg), False if spec.instructions == "none" else bootstrap)
+    if spec.id in _REGISTRY_BOUND:
+        route = _all(workspace_registered, route)
+    return _all(installed, route)
+
+
+def _level(advisory: Optional[bool], floor: str, governed: bool, installed: Optional[bool]) -> str:
+    """The strongest tier known to be in force for one host (AD-8), never a guess.
+
+    Nothing is enforced on a host in an ungoverned workspace or on a host that is not
+    installed; whether one whose only binary doctor will not run (inside the workspace, or
+    behind an empty or relative PATH entry) is installed is unknown. The local floor
+    holds for every commit made through git.
+    """
+    if not governed or installed is False:
+        return "none"
+    if installed is None:
+        return "unknown"
+    if floor == "active":
+        return "local_floor"
+    if advisory is True:
+        return "advisory"
+    if advisory is None or floor == "unknown":
+        return "unknown"
+    return "none"
+
+
+def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], floor: str) -> Dict[str, Any]:
+    from aegis_cli.install_hosts import launch_risk
+
+    binary = next((found for found in (ctx.which(name) for name in spec.binaries) if found), None)
+    passed = [] if binary else [hit for name in spec.binaries for hit in ctx.passed_over(name)]
+    ignored = list(dict.fromkeys(hit.path for hit in passed))
+    # Installed: True, False, or None when the only binary is one doctor will not run.
+    installed: Optional[bool] = True if binary else (None if passed else False)
+    reg = _probe(spec, binary, ctx)
+    identity = _identity(spec, reg)
+    reasons: List[Dict[str, str]] = []
+    unknown: List[str] = []
+
+    def add(code: str, message: str) -> None:
+        reasons.append({"code": code, "message": _clean(message, 1024)})
+
+    names = " or ".join(f"`{b}`" for b in spec.binaries) or "a binary"
+    if passed:
+        unknown.append("binary")
+    fenced = next((hit for hit in passed if hit.reason == INSIDE_FENCE), None)
+    relative = next((hit for hit in passed if hit.reason != INSIDE_FENCE), None)
+    if fenced is not None:
+        add("binary_in_workspace", f"{names} found only at {fenced.path}, inside the workspace: doctor does not "
+                                   "run programs from the repository, so it cannot tell whether the host is installed")
+    if relative is not None:
+        add("binary_on_relative_path", f"{names} found only at {relative.path}, through the relative PATH entry "
+                                       f"{relative.entry!r}, which resolves against the directory a program starts in "
+                                       "(here the workspace): doctor does not run it, so it cannot tell whether the "
+                                       "host is installed")
+    if binary is None and not passed:
+        add("missing_binary", f"no {names} on PATH")
+    status = reg["status"]
+    if status == "absent":
+        add("not_registered", f"aegis is not registered with {spec.display_name}: run aegis init --host {spec.id}")
+    elif status in ("unknown", "unavailable"):
+        unknown.append("registration")
+        # An installed host doctor cannot ask is never "ok": unknown is not absent either.
+        if status == "unknown" or binary is not None:
+            add("registration_unverifiable", f"cannot tell whether {spec.display_name} loads aegis: {reg['detail']}")
+    else:
+        if reg["command_exists"] is False:
+            add("command_missing", f"the registered command {reg['command'][0]} does not exist: "
+                                   f"run aegis init --host {spec.id}")
+        elif reg["command_exists"] is None:
+            unknown.append("command_exists")
+            if reg["command"]:
+                cmd = reg["command"][0]
+                why = (f"is a relative path, which {spec.display_name} resolves against the directory it starts "
+                       "the server in" if os.sep in cmd or (os.altsep and os.altsep in cmd) else
+                       "is found only through an empty or relative PATH entry or inside the workspace, where "
+                       "doctor does not look")
+                add("command_unverifiable", f"the registered command {cmd} {why}, so doctor cannot tell whether "
+                                            f"it exists: run aegis init --host {spec.id} to register an absolute path")
+        risk = launch_risk(reg["command"]) if reg["command"] else None
+        if risk:
+            add("unsafe_registration", f"the registered command {reg['command'][0]} is an unsafe registration: "
+                                       f"{risk}: run aegis init --host {spec.id}")
+        if reg["approval"] == "unknown":
+            add("approval_unknown", "aegis is registered only in this project's .mcp.json, which Claude Code "
+                                    "runs after an approval doctor cannot see")
+        if reg["enabled"] is False:
+            add("registration_disabled", reg["detail"] or f"the aegis entry is disabled in {reg['source']}")
+        if identity["status"] == "mismatch":
+            add("identity_mismatch", f"the registration says AEGIS_CLIENT={identity['aegis_client']}, so the "
+                                     f"server would act as that host: run aegis init --host {spec.id}")
+        elif identity["status"] == "unknown":
+            unknown.append("identity")
+
+    budget = _budget(spec, info)
+    reaches = _bootstrap_reaches(spec, info)
+    # The host keeps too little of its instruction file for the bootstrap to arrive whole.
+    cut = (budget["within"] is False and info.bootstrap != "missing" and spec.id in _TRUNCATES_TAIL
+           and (info.block_end or 0) > budget["budget_bytes"])
+    workspace_registered = None if roots is None else _root_key(ctx.root) in roots
+    if roots is None:
+        unknown.append("workspace_registered")
+    if not ctx.governed and ctx.is_home:
+        add("workspace_not_governed", f"{ctx.root} is your home directory: its .aegis/ is your user layer, "
+                                      "never a governed workspace. Run aegis doctor inside a repository")
+    elif not ctx.governed:
+        add("workspace_not_governed", f"{ctx.root} has no .aegis/: run {ctx.setup} there")
+    else:
+        if info.bootstrap in ("missing", "hand_edited", "malformed"):
+            add("bootstrap_" + info.bootstrap, {
+                "missing": "AGENTS.md has no Aegis bootstrap block: run aegis init",
+                "hand_edited": "the Aegis block in AGENTS.md was edited by hand: run aegis init --force",
+                "malformed": "the Aegis block markers in AGENTS.md are broken: fix them, then run aegis init",
+            }[info.bootstrap])
+        if spec.instructions == "agents_md_unless_claude_md" and info.claude and not _claude_reads_agents(info):
+            verb = "exists" if len(info.claude) == 1 else "exist"
+            add("claude_md_shadows_agents_md", f"{_claude_names(info)} {verb} without @AGENTS.md, so Claude Code "
+                                               f"does not read AGENTS.md: {_claude_import_advice(info)}")
+        elif spec.instructions == "agents_md_unless_claude_md" and reaches is None and info.claude_outside:
+            unknown.append("bootstrap")
+            add("claude_md_outside_workspace",
+                f"{info.claude_outside[0]} is outside the workspace: Claude Code does not read AGENTS.md "
+                "natively when a CLAUDE.md, CLAUDE.local.md or .claude/CLAUDE.md is in the directory it starts "
+                "in or a parent, and doctor reads no file outside the workspace, so it cannot tell whether "
+                "AGENTS.md reaches Claude Code: add a CLAUDE.md holding the line @AGENTS.md to the workspace")
+        if spec.id in _READS_AGENTS_OVERRIDE and info.override:
+            add("agents_override_shadows_agents_md", "AGENTS.override.md replaces AGENTS.md for Codex")
+        if cut:
+            add("over_budget", f"{budget['file']} is {budget['bytes']} bytes; {spec.display_name} reads "
+                               f"{budget['budget_bytes']} and the Aegis block may not reach it")
+        if spec.id in _REGISTRY_BOUND and workspace_registered is False:
+            add("workspace_unregistered", f"{spec.display_name} sends no workspace, so aegis finds this "
+                                          f"repository only through ~/.aegis/workspaces.json: run aegis init")
+        elif spec.id in _REGISTRY_BOUND and workspace_registered is None:
+            add("workspace_registry_unknown", f"{spec.display_name} sends no workspace and "
+                                              "~/.aegis/workspaces.json cannot be read, so doctor cannot tell "
+                                              "whether aegis finds this repository")
+
+    codes = {r["code"] for r in reasons}
+    if codes & {"missing_binary", "binary_in_workspace", "binary_on_relative_path"}:
+        state = "missing_binary"
+    elif codes & {"not_registered", "command_missing"}:
+        state = "unregistered"
+    elif codes & {"registration_unverifiable", "approval_unknown", "workspace_registry_unknown",
+                   "claude_md_outside_workspace", "command_unverifiable"}:
+        state = "auth_unknown"
+    elif codes:
+        state = "policy_gap"
+    else:
+        state = "ok"
+
+    advisory = _advisory(spec, ctx, installed, reg, False if cut else reaches, workspace_registered)
+    level = _level(advisory, floor, ctx.governed, installed)
+    shown = {k: v for k, v in reg.items() if k != "aegis_client"}
+    return {
+        "id": spec.id,
+        "display_name": spec.display_name,
+        "verified_row": spec.verified,
+        "state": state,
+        "reasons": reasons,
+        "binary": {"found": binary is not None, "path": binary, "names": list(spec.binaries), "ignored": ignored},
+        "registration": shown,
+        "identity": identity,
+        "workspace_registered": workspace_registered,
+        "bootstrap": {"file": "AGENTS.md", "status": info.bootstrap, "reaches_host": reaches,
+                      "stale": info.bootstrap == "outdated"},
+        "budget": budget,
+        "enforcement_level": level,
+        "advisory": advisory,
+        "trust_tier": None,
+        "trust_tier_status": "unavailable",
+        "stale": False,
+        "unknown": unknown,
+    }
+
+
+# ── Enforcement tiers (AD-8) ────────────────────────────────────────────────
+
+def _floor_status(root: Path) -> Tuple[str, Optional[str]]:
+    """The local floor's status, and why an installed, current hook never runs. The floor
+    is active only for a hook that is installed, current and reached by git (hook_status
+    ``reachable``; a status without the key predates it and counts as reachable)."""
+    from aegis_cli.hooks import management
+
+    try:
+        st = management.hook_status(root)
+    except Exception:
+        return "unknown", None
+    if st.get("status") == "no_git_repository":
+        return "unavailable", None
+    if not st.get("managed_by_aegis"):
+        return "inactive", None
+    if st.get("status") != "installed":
+        return "outdated", None
+    gone = [p for p in (st.get("interpreter"), st.get("aegis_path")) if p and not p.get("exists")]
+    if gone:
+        return "outdated", None
+    if st.get("reachable", True) is False:
+        return "inactive", _clean(st.get("unreachable_reason") or "git does not reach the Aegis block", 1024)
+    return "active", None
+
+
+_TIER_TEXT = {
+    "advisory": ("Advisory", "AGENTS.md bootstrap, MCP instructions, JIT rules"),
+    "best_effort": ("Best-effort", "per-host pre-tool hooks"),
+    "local_floor": ("Local floor", "git pre-commit runs aegis check --hook (--no-verify bypasses it)"),
+    "authoritative": ("Authoritative", "CI runs aegis check on the exact SHA; a human merges"),
+}
+
+
+def _tiers(rows: List[Dict[str, Any]], floor: str, governed: bool, unreached: Optional[str] = None,
+           setup: str = "aegis init") -> List[Dict[str, Any]]:
+    ids = [r["id"] for r in rows]
+    reached = [r["id"] for r in rows if r["advisory"] is True]
+    unsure = [r["id"] for r in rows if r["advisory"] is None]
+    if ids and len(reached) == len(ids):
+        advisory = "active"
+    else:
+        advisory = "partial" if reached else ("unknown" if unsure else "inactive")
+    reach = f"reaches {', '.join(reached) or 'no selected host'}"
+    if unsure:
+        reach += f"; unknown for {', '.join(unsure)}"
+    floor_detail = {
+        "active": "the Aegis pre-commit hook is installed and current",
+        "inactive": "no Aegis pre-commit hook: run aegis hook install",
+        "outdated": "the Aegis pre-commit hook is outdated: run aegis hook install",
+        "unavailable": "not a git repository",
+        "unknown": "the git hooks directory could not be read",
+    }[floor]
+    if unreached:
+        floor_detail = f"the Aegis pre-commit hook is installed but never runs: {unreached}; see aegis hook status"
+    if not governed and floor != "unavailable":
+        # A hook here, installed or not, has no rules to check: the floor is not in force.
+        floor, floor_detail = "inactive", f"no .aegis/ here, so a pre-commit hook has nothing to enforce: run {setup}"
+    return [
+        {"tier": "advisory", "mechanism": _TIER_TEXT["advisory"][1], "hosts": ids, "status": advisory,
+         "detail": reach},
+        {"tier": "best_effort", "mechanism": _TIER_TEXT["best_effort"][1], "hosts": [], "status": "unavailable",
+         "detail": "none in 4.0. Planned for v4.1: Claude Code blocks with exit 2; Codex blocks with exit 2 once "
+                   "you trust the hook in /hooks; Antigravity blocks only destructive commands (exit 1) and "
+                   "records scan-before-edit. Each fails open when Aegis errors"},
+        {"tier": "local_floor", "mechanism": _TIER_TEXT["local_floor"][1], "hosts": ids, "status": floor,
+         "detail": floor_detail},
+        {"tier": "authoritative", "mechanism": _TIER_TEXT["authoritative"][1], "hosts": [], "status": "unavailable",
+         "detail": "not checked: aegis doctor makes no network or GitHub calls"},
+    ]
+
+
+# ── Findings ────────────────────────────────────────────────────────────────
+
+@dataclass
+class _Action:
+    """One reported change --fix may make to one file."""
+
+    path: Path
+    kind: str  # remove_keys | remove_lines | delete_file | enable_packaged_ast_drivers
+    sha256: Optional[str]
+    describe: str
+    keys: Tuple[Tuple[str, ...], ...] = ()
+    lines: Tuple[Tuple[int, int], ...] = ()
+
+
+@dataclass
+class _Finding:
+    code: str
+    path: Path
+    message: str
+    location: Optional[str] = None
+    severity: str = "warning"
+    action: Optional[_Action] = None
+
+    def __post_init__(self) -> None:
+        # Messages quote paths, keys and parser errors from files a repository can write.
+        self.message = _clean(self.message, 4096)
+
+    def as_dict(self) -> Dict[str, Any]:
+        # A finding is fixable exactly when it carries the action --fix would take.
+        return {"code": self.code, "severity": self.severity, "path": str(self.path), "location": self.location,
+                "message": self.message, "fixable": self.action is not None}
+
+
+def _location(keys: Tuple[str, ...]) -> str:
+    """Where a key is, for people: the keys (project paths among them) without control sequences."""
+    out = []
+    for key in keys:
+        if out and out[-1] == "projects":
+            out[-1] = f"projects[{_clean(key)}]"
+        else:
+            out.append(_clean(key))
+    return ".".join(out)
+
+
+def _key_finding(ctx: _Ctx, entry: _File, code: str, keys: Tuple[str, ...], message: str,
+                 fixable: bool = True, blocked: Optional[str] = None) -> _Finding:
+    where = _location(keys)
+    action = None
+    text = f"{ctx.label(entry.path)}: {message} ({where})"
+    if not fixable:
+        text += f"; {blocked}" if blocked else ""
+    elif entry.refusal:
+        text += f"; --fix will not change it: {entry.refusal}"
+    else:
+        action = _Action(entry.path, "remove_keys", _sha256(entry.raw or b""), f"remove {where}", keys=(keys,))
+        text += f". Fix: {_FIX_HINT}"
+    return _Finding(code, entry.path, text, location=where, action=action)
+
+
+def _mcp_findings(ctx: _Ctx, claude_user: bool) -> List[_Finding]:
+    found: List[_Finding] = []
+    files: List[Tuple[Path, str]] = []
+    if ctx.home is not None:
+        files.append((ctx.home / ".mcp.json", "dot_mcp"))
+    files.append((ctx.root / ".mcp.json", "dot_mcp"))
+    claude_cfg = _claude_config(ctx)
+    if claude_cfg is not None:
+        files.append((claude_cfg, "claude"))
+    files.extend((p, "desktop") for p in _desktop_configs(ctx))
+    for spec in ctx.selected:
+        path = _host_json_path(spec, ctx)
+        if path is not None:
+            files.append((path, "host"))
+    seen = set()
+    no_user = "keep it until aegis init --host claude-code registers aegis for your user"
+    for path, kind in files:
+        key = os.path.normcase(os.path.abspath(str(path)))
+        if key in seen:
+            continue
+        seen.add(key)
+        entry = ctx.file(path, as_json=True)
+        if not entry.exists:
+            continue
+        if entry.error:
+            found.append(_Finding("unreadable_config", path, f"{ctx.label(path)} {entry.error}; doctor did not "
+                                  "read it and --fix will not change it"))
+            continue
+        data = entry.data or {}
+        servers = data.get("mcpServers") if isinstance(data.get("mcpServers"), dict) else {}
+        if LEGACY_SERVER in servers:
+            found.append(_key_finding(ctx, entry, "legacy_mcp_entry", ("mcpServers", LEGACY_SERVER),
+                                      _LEGACY_ENTRY))
+        if SERVER in servers and kind == "dot_mcp":
+            found.append(_key_finding(ctx, entry, "misplaced_mcp_entry", ("mcpServers", SERVER),
+                                      "Aegis v4 registers 'aegis' per user, never in a .mcp.json file",
+                                      fixable=claude_user, blocked=no_user))
+        if SERVER in servers and kind == "desktop":
+            found.append(_key_finding(ctx, entry, "desktop_mcp_entry", ("mcpServers", SERVER),
+                                      "Claude Desktop is identity only in v4 (H4); its 'aegis' entry moves out"))
+        if kind == "claude" and isinstance(data.get("projects"), dict):
+            for name, project in data["projects"].items():
+                psrv = project.get("mcpServers") if isinstance(project, dict) else None
+                if not isinstance(psrv, dict):
+                    continue
+                if LEGACY_SERVER in psrv:
+                    found.append(_key_finding(ctx, entry, "legacy_mcp_entry",
+                                              ("projects", name, "mcpServers", LEGACY_SERVER),
+                                              _LEGACY_ENTRY))
+                if SERVER in psrv and claude_user:
+                    found.append(_key_finding(ctx, entry, "misplaced_mcp_entry",
+                                              ("projects", name, "mcpServers", SERVER),
+                                              "a local-scope 'aegis' entry shadows your user registration"))
+    return found
+
+
+_LEGACY_MARKER = re.compile(r"^<!-- (SOMA|AEGIS):(START|END) -->[ \t]*$")
+
+
+def _legacy_ranges(text: str) -> Tuple[List[Tuple[int, int]], bool]:
+    """(line ranges of well-formed SOMA/AEGIS START..END blocks, markers are balanced).
+
+    Markers shown inside a fenced code block are text, not a block. Inside an open block
+    the content is v3's own (rule text with its fences), so only its END marker counts.
+    """
+    ranges, open_at, fence = [], None, None
+    for index, line in enumerate(text.splitlines(True)):
+        bare = line.rstrip("\r\n")
+        if index == 0 and bare.startswith(_BOM):
+            bare = bare[1:]
+        if open_at is None:
+            inside = fence is not None
+            fence = _fence_step(fence, bare)
+            if inside or fence is not None:
+                continue
+        match = _LEGACY_MARKER.match(bare)
+        if not match:
+            continue
+        kind, edge = match.groups()
+        if edge == "START":
+            if open_at is not None:
+                return ranges, False
+            open_at = (index, kind)
+        else:
+            if open_at is None or open_at[1] != kind:
+                return ranges, False
+            ranges.append((open_at[0], index))
+            open_at = None
+    return ranges, open_at is None
+
+
+def _instruction_files(ctx: _Ctx) -> List[Path]:
+    files = [ctx.root / name for name in ("CLAUDE.md", "AGENTS.md", "GEMINI.md")]
+    claude_dir = _claude_dir(ctx)
+    if claude_dir is not None:
+        files.append(claude_dir / "CLAUDE.md")
+    if ctx.home is not None:
+        codex_home = ctx.environ.get("CODEX_HOME")
+        files.append((Path(codex_home) if codex_home else ctx.home / ".codex") / "AGENTS.md")
+        files.append(ctx.home / ".gemini" / "GEMINI.md")
+    return files
+
+
+def _legacy_block_findings(ctx: _Ctx) -> List[_Finding]:
+    found = []
+    for path in _instruction_files(ctx):
+        entry = ctx.file(path)
+        if entry.raw is None:
+            continue
         try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
-        raise
+            text = entry.raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        ranges, balanced = _legacy_ranges(text)
+        if not ranges and balanced:
+            continue
+        label = ctx.label(path)
+        where = ", ".join(f"lines {a + 1}-{b + 1}" for a, b in ranges) or None
+        if not balanced:
+            found.append(_Finding("legacy_block", path, f"{label}: unbalanced SOMA/AEGIS START/END markers; "
+                                  "remove the old block by hand (--fix will not guess)", location=where))
+            continue
+        message = f"{label}: legacy Aegis/Soma rules block ({where})"
+        action = None
+        if entry.refusal:
+            message += f"; --fix will not change it: {entry.refusal}"
+        elif _without_lines(entry.raw, ranges) is None:
+            # An emptied CLAUDE.md would still keep Claude Code from reading AGENTS.md, so
+            # the file goes; the plan the user confirms says so.
+            action = _Action(path, "delete_file", _sha256(entry.raw),
+                             f"delete the file (it holds only the legacy block, {where})")
+            message += f"; nothing else is in the file, so --fix deletes the file. Fix: {_FIX_HINT}"
+        else:
+            action = _Action(path, "remove_lines", _sha256(entry.raw), f"remove the legacy block ({where})",
+                             lines=tuple(ranges))
+            message += f". Fix: {_FIX_HINT}"
+        found.append(_Finding("legacy_block", path, message, location=where, action=action))
+    return found
 
 
-def _write_preserving_mode(path: str, data: bytes) -> None:
-    real = os.path.realpath(path)
-    mode = stat.S_IMODE(os.stat(real).st_mode) if os.path.exists(real) else _umask_mode()
-    _atomic_write(real, data, mode)
+def _budget_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
+    found = []
+    budgets = {s.id: s.budget_bytes for s in ctx.selected if s.budget_bytes}
+    agent_hosts = [s for s in ctx.selected if s.budget_bytes and s.instructions in ("agents_md", "agents_md_unless_claude_md")]
+    if info.agents_bytes is not None:
+        over = [s.id for s in agent_hosts if info.agents_bytes > s.budget_bytes]
+        if over:
+            found.append(_Finding("instructions_over_budget", ctx.root / "AGENTS.md",
+                                  f"AGENTS.md is {info.agents_bytes} bytes, over the budget of {', '.join(over)}; "
+                                  "move text out of it (rules belong in .aegis/rules/)"))
+    claude_budget = budgets.get("claude-code")
+    if claude_budget:
+        claude_dir = _claude_dir(ctx)
+        for path in [ctx.root / "CLAUDE.md"] + ([claude_dir / "CLAUDE.md"] if claude_dir else []):
+            entry = ctx.file(path)
+            if entry.raw is not None and len(entry.raw) > claude_budget:
+                found.append(_Finding("instructions_over_budget", path,
+                                      f"{ctx.label(path)} is {len(entry.raw)} bytes, over Claude Code's "
+                                      f"{claude_budget}; inlined v3 rules belong in .aegis/rules/, served by aegis_scan"))
+    return found
 
 
-def _confined_rc(rc_path: str, home: str) -> tuple[str | None, str]:
-    """(real path to write, "") or (None, reason). Must resolve inside HOME."""
-    if not os.path.isabs(rc_path):
-        return None, f"{rc_path} is not an absolute path"
-    home_real = os.path.realpath(home)
-    real = os.path.realpath(rc_path)
-    if real == home_real or not _under(home_real, real):
-        if os.path.islink(rc_path):
-            return None, f"{rc_path} is a symlink to {real}, outside your home directory"
-        return None, f"{rc_path} resolves outside your home directory ({real})"
-    if os.path.lexists(real) and not os.path.isfile(real):
-        return None, f"{real} exists but is not a regular file"
-    return real, ""
+def _workspace_findings(ctx: _Ctx, info: _Instructions) -> List[_Finding]:
+    found = []
+    if info.claude and not _claude_reads_agents(info):
+        where = next((f for f in info.claude if f.name == "CLAUDE.md"), info.claude[0])
+        verb = "does" if len(info.claude) == 1 else "do"
+        found.append(_Finding("claude_md_without_agents_import", where.path,
+                              f"{_claude_names(info)} {verb} not import @AGENTS.md, so Claude Code skips AGENTS.md; "
+                              f"{_claude_import_advice(info)}"))
+    if info.override:
+        found.append(_Finding("agents_override", ctx.root / "AGENTS.override.md",
+                              "AGENTS.override.md replaces AGENTS.md for Codex; move its text into AGENTS.md"))
+    if info.bootstrap == "outdated":
+        found.append(_Finding("bootstrap_outdated", ctx.root / "AGENTS.md",
+                              "the Aegis block in AGENTS.md is from another aegis version: run aegis init",
+                              severity="info"))
+    return found
 
 
-def _load_manifest(path: str) -> dict:
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    if not isinstance(data, dict):
-        raise ValueError("manifest is not a JSON object")
-    if not isinstance(data.get("path_lines", []), list):
-        raise ValueError("manifest field path_lines is not a list")
+def _upgrade_findings(ctx: _Ctx) -> List[_Finding]:
+    """v3 state here that v4 never reads (discovery.unmigrated_state): status, scan and sync
+    refuse such a workspace, and doctor, which still runs in it, must not call it healthy.
+    The home directory's .aegis/ is the user plane, which aegis migrate never converts."""
+    if ctx.is_home:
+        return []
+    from aegis_core.workspace import discovery
+
+    # The helper comes with the commands that refuse; a build without it has neither.
+    pending = getattr(discovery, "unmigrated_state", None)
+    found = list(pending(ctx.root)) if pending is not None else []
+    if not found:
+        return []
+    return [_Finding("unmigrated_v3_state", ctx.root / found[0],
+                     f"unmigrated v3 state: {', '.join(found)}. Aegis v4 does not read it, and aegis status, "
+                     "scan and sync refuse to run until it is converted: run aegis migrate to see the "
+                     "conversion, then aegis migrate --apply")]
+
+
+def _home_rules_finding(ctx: _Ctx) -> List[_Finding]:
+    if ctx.home is None:
+        return []
+    from aegis_core.workspace.layout import UserLayout
+
+    rules = UserLayout(ctx.home).rules_dir
+    if not rules.is_dir() or rules.is_symlink() or any(rules.rglob("*.md")):
+        return []
+    return [_Finding("home_rules_dir", rules,
+                     f"{ctx.label(rules)} is empty; v3.3 created it when an MCP server started in your home "
+                     "directory. v4 reads it as your personal read-only rule layer: remove it if you keep no "
+                     "rules there (doctor --fix leaves directories alone)", severity="info")]
+
+
+#: sha256 of every rules/*.md and rules/.oracles/*.md file shipped in the v3.0.0-v3.3.0
+#: wheels, which v3's Gemini and Kiro adapters copied byte for byte into
+#: ~/.gemini/config/rules and ~/.kiro/steering. Computed from the release tags with
+#: ``git show vX:rules/<file> | sha256sum``. A copy is removed only on an exact match;
+#: names and content are never compared (defense #39).
+V3_SHIPPED_RULE_SHA256 = frozenset({
+    "acab95f21fc4eb254337fc84fe87dbcd8b059173fb56fe520f385224e27825a2",  # .oracles/architectural-tenets
+    "af94c7153052c7488e0e67d86e780a74fdf106caf45da65244cc9fb9643130ba",  # .oracles/atomic-workstream-protocol
+    "3d605fdfe36b2fbef771776c43c079dffbda2a593e71cb5f04175e23807fe9a2",  # .oracles/documentation
+    "03a9e189a1c72f6178d9c1c5eb139fca008db810cd14eddc56400b014b9ce4db",  # .oracles/feature-specs
+    "e5bc5f348d4e2cdf93457471c60b239ab6d64f2420e349f368e4995396c2afc5",  # .oracles/git-workflow
+    "ca215d78f371e0f7aa4ad562a22be47db42e639d0cb28797dc7971157db0ddd8",  # .oracles/optional-import-guard (3.0)
+    "63a857db70e56ceabda0fd07412f8924b128e227ec94b63d839497ef73b7152b",  # .oracles/optional-import-guard (3.1+)
+    "ded22d86c5f47a0a13f64f9da99d543d276ddf830017b6a63f1c5a6e78b5c021",  # .oracles/polyglot-standards
+    "337cee795219e24354a7850acebb9d79e6266e595ca7d31e4598d0d21b9e82f4",  # .oracles/tdd-protocol (3.0)
+    "d33b2a6ebd2dc7c81ac3b98c060e52c38bb80baaf6362a3aea22900463af74c8",  # .oracles/tdd-protocol (3.1+)
+    "863c28d335a31e48a1aef27c83b32dcab881029b3eb07a955e0b8eadd5d198e8",  # .oracles/testing
+    "12d8813c7b251bc310e8122305c6ee7778fe01483dd4103691b26000a3369354",  # META (3.0)
+    "4879bfb58b4a5bd3344e0278c815ce33b90ae746f694f6b82b52e87e80938582",  # META (3.1+)
+    "f7ec0a8f721b64f8d37b5f259e64c86470d98a00dd3e535e68b4ab33813d486c",  # ci-green-before-release
+    "20b2f3294ef1e9ceb23c4714c3d1ed95cd89f6828dd57230099da9e62fd43ecc",  # core-change-protocol (3.0)
+    "8b85634178a5e121581ca98687c490c55c37a0dae4a36950866631fa215f2dcd",  # core-change-protocol (3.1+)
+    "4b1656771eab2a652e0b41f221be1f5712565493506295edd3de06be44978e0c",  # cost-optimization (3.0)
+    "db76ddf60f833f0b0070e0a811cdcd101e02ccc204956d6c62609e929ae13955",  # cost-optimization (3.1+)
+    "25600eecc61dbd447e67ae9d43255425efbcf94195930b8c8ca11c771d26add5",  # desktop-automation
+    "91fdf925befe794b662d882a069fe7035c5acf731e413d961b9e1c83d6432447",  # destructive-ops
+    "2473444c146b5d36d0edefd74347e0175e76a355536ab5d5df51514b69ba7ed1",  # gitflow-review-gate (3.0)
+    "18357403da55489f326c15dad044ded615badaea7b77f37aeb7757f163bdbb3a",  # gitflow-review-gate (3.1+)
+    "2be52fdd2f290e1cbd81600e35d8198bc6766b5c827c0d1b240ce060470984fc",  # no-pre-existing-excuse (3.0)
+    "5187404be379aca6b0cb0ec62436054ebfcad320c264a34ef95e271a42c95767",  # no-pre-existing-excuse (3.1+)
+    "27b596123c2a88dea15b82a846e07215774e0b1dfdc2c3b67f2336b89d3fad3b",  # providence (3.0)
+    "6417ece31939ece9e3f6fec52413d4f8c329fbf38be8c104b01b2f28ee0a5fe6",  # providence (3.1+)
+    "04946d5d7b525f24284ae51f2d958f8b5fcc4d3ed891e391ceec71f5dd5ddd0f",  # subagent-delegation (3.0)
+    "5d54ce9b04be9572698749908558800cbf2d8acdffc15e7b7a651fbf6f39488f",  # subagent-delegation (3.1+)
+})
+
+
+def _v3_copy_findings(ctx: _Ctx) -> List[_Finding]:
+    if ctx.home is None:
+        return []
+    found = []
+    for base in (ctx.home / ".gemini" / "config" / "rules", ctx.home / ".kiro" / "steering"):
+        for directory in (base, base / ".oracles"):
+            if not directory.is_dir() or directory.is_symlink():
+                continue
+            for path in sorted(directory.glob("*.md")):
+                entry = ctx.file(path)
+                if entry.is_link or entry.raw is None or _sha256(entry.raw) not in V3_SHIPPED_RULE_SHA256:
+                    continue
+                message = f"{ctx.label(path)}: an unedited copy of a rule Aegis v3 shipped"
+                action = None
+                if entry.refusal:
+                    message += f"; --fix will not change it: {entry.refusal}"
+                else:
+                    action = _Action(path, "delete_file", _sha256(entry.raw), "delete the v3 rule copy")
+                    message += f". Fix: {_FIX_HINT}"
+                found.append(_Finding("v3_rule_copy", path, message, action=action))
+    return found
+
+
+# ── The diagnosis ───────────────────────────────────────────────────────────
+
+def _selection(root: Path, governed: bool) -> Tuple[Tuple[Any, ...], str, List[_Finding]]:
+    from aegis_core import hosts
+    from aegis_core.config import ConfigError, RepoConfig
+    from aegis_core.workspace.layout import WorkspaceLayout
+
+    config = WorkspaceLayout(root).config_file
+    default = tuple(h for h in hosts.all_hosts(phase=1) if h.registration is not None)
+    if not governed:
+        return default, "default", []
+    try:
+        chosen = RepoConfig.load(root).hosts
+    except ConfigError as exc:
+        return default, "default", [_Finding("unreadable_config", config, str(exc))]
+    if not chosen:
+        return default, "default", []
+    known = {h.id: h for h in hosts.HOSTS if h.registration is not None}
+    table = {h.id: h for h in hosts.HOSTS}
+    named = list(dict.fromkeys(chosen))
+    retired = [h for h in named if h in table and table[h].retired]
+    unknown = [h for h in named if h not in known and h not in retired]
+    notes = [_Finding("retired_host", config, f"{config.name} selects {h!r}, a retired host: {table[h].retired}",
+                      severity="info") for h in retired]
+    if unknown:
+        notes.append(_Finding("unknown_host", config,
+                              f"{config.name} selects {', '.join(repr(h) for h in unknown)}, which doctor "
+                              "cannot check", severity="info"))
+    picked = tuple(h for h in hosts.HOSTS if h.id in set(chosen) and h.id in known)
+    return picked, "config", notes
+
+
+@dataclass
+class _Diagnosis:
+    ctx: _Ctx
+    rows: List[Dict[str, Any]]
+    tiers: List[Dict[str, Any]]
+    findings: List[_Finding]
+
+
+def _diagnose(root: Path, environ: Optional[Mapping[str, str]] = None) -> _Diagnosis:
+    from aegis_core.workspace.layout import UserLayout, is_aegis_workspace
+
+    environ = os.environ if environ is None else environ
+    layout = UserLayout.current()
+    # The home directory's .aegis/ is the user plane (~/.aegis), never a workspace.
+    is_home = _is_home(root)
+    governed = is_aegis_workspace(root) and not is_home
+    selected, selection, notes = _selection(root, governed)
+    ctx = _Ctx(root=root, governed=governed, home=layout.home if layout else None, environ=environ,
+               selected=selected, selection=selection, is_home=is_home,
+               setup="aegis init" if governed or is_home else _setup_command(root))
+    info = _instructions(ctx)
+    roots, skipped = _registered_roots(ctx)
+    floor, unreached = _floor_status(root)
+    rows = [_host_row(spec, ctx, info, roots, floor) for spec in selected]
+    claude_user = _claude_user_registered(ctx)
+    findings = (notes + _upgrade_findings(ctx) + _workspace_findings(ctx, info) + _mcp_findings(ctx, claude_user)
+                + _legacy_block_findings(ctx) + _budget_findings(ctx, info) + _home_rules_finding(ctx)
+                + _v3_copy_findings(ctx))
+    if roots is None and ctx.home is not None:
+        findings.append(_Finding("unreadable_config", UserLayout(ctx.home).workspaces_file,
+                                 "~/.aegis/workspaces.json cannot be read as a v1 registry; doctor "
+                                 "reports workspace registration as unknown"))
+    for index in skipped:
+        findings.append(_Finding("registry_entry_skipped", UserLayout(ctx.home).workspaces_file,
+                                 f"~/.aegis/workspaces.json: entry {index} has no absolute 'root' that resolves; "
+                                 "aegis skips it (run aegis init in that workspace to register it again)",
+                                 location=f"workspaces[{index}]"))
+    return _Diagnosis(ctx, rows, _tiers(rows, floor, governed, unreached, ctx.setup), findings)
+
+
+def _claude_user_registered(ctx: _Ctx) -> bool:
+    path = _claude_config(ctx)
+    if path is None:
+        return False
+    cfg = ctx.file(path, as_json=True)
+    return not cfg.error and _server_entry(cfg.data) is not None
+
+
+# ── --fix ───────────────────────────────────────────────────────────────────
+
+class _Refused(Exception):
+    """A fix that must not be applied; the message says why."""
+
+
+def _confirm(prompt: str) -> bool:
+    """Ask on the terminal; anything but y/yes is no. Without a terminal the answer is no."""
+    try:
+        interactive = sys.stdin.isatty()
+    except (AttributeError, ValueError, OSError):
+        interactive = False
+    if not interactive:
+        print("stdin is not a terminal, so nothing was applied: re-run with --yes to apply these changes.")
+        return False
+    try:
+        answer = input(prompt)
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _backup_root(home: Path) -> Path:
+    from aegis_core.workspace.layout import UserLayout
+
+    layout = UserLayout(home)
+    for path in (layout.aegis_dir, layout.backups_dir):
+        if path.is_symlink():
+            raise _Refused(f"{path} is a symlink; Aegis keeps backups only in a real directory")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    target = layout.backups_dir / stamp
+    target.mkdir(parents=True, mode=0o700)
+    return target
+
+
+def _current_bytes(path: Path, expected: Optional[str]) -> Optional[bytes]:
+    """The file's bytes if it is still the regular, single-link file doctor checked."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        if expected is None:
+            return None
+        raise _Refused("it no longer exists")
+    refusal = _write_refusal(path, st)
+    if refusal:
+        raise _Refused(refusal)
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if expected is not None and _sha256(data) != expected:
+        raise _Refused("it changed since the check; re-run aegis doctor")
     return data
 
 
-def _expand_home(path: str, home: str) -> str:
-    if path == "~" or path.startswith("~/"):
-        path = os.path.join(home, path[2:])
-    return os.path.normpath(path)
+def _dump_like(original: bytes, data: Dict[str, Any]) -> bytes:
+    """``data`` serialized the way ``original`` was: its indent, line endings and final newline."""
+    text = original.decode("utf-8")
+    match = re.search(r"\n([ \t]+)\"", text)
+    indent: Any
+    if match:
+        indent = match.group(1) if "\t" in match.group(1) else len(match.group(1))
+    else:
+        indent = 2 if "\n" in text.strip() else None
+    out = json.dumps(data, indent=indent, ensure_ascii=False)
+    if "\r\n" in text:
+        out = out.replace("\n", "\r\n")
+    if text.endswith(("\n", "\r\n")):
+        out += "\r\n" if "\r\n" in text else "\n"
+    return out.encode("utf-8")
 
 
-def fix_path(yes: bool = False, *,
-             env: Mapping[str, str] | None = None,
-             home: str | None = None,
-             candidates: Iterable[str] | None = None,
-             which: Callable[..., str | None] | None = None,
-             platform: str | None = None,
-             os_name: str | None = None,
-             stdin: TextIO | None = None) -> int:
-    """Append the pathcheck PATH line to the shell rc file (opt-in).
+def _without_keys(raw: bytes, keys: Sequence[Tuple[str, ...]]) -> bytes:
+    data = json.loads(raw.decode("utf-8"), object_pairs_hook=_strict_pairs, parse_constant=_reject_constant)
+    for path in keys:
+        node = data
+        for part in path[:-1]:
+            node = node.get(part) if isinstance(node, dict) else None
+        if not isinstance(node, dict) or path[-1] not in node:
+            raise _Refused(f"{_location(path)} is no longer there")
+        del node[path[-1]]
+    return _dump_like(raw, data)
 
-    Dry run unless `yes` or an interactive y. Returns a process exit code.
+
+def _without_lines(raw: bytes, ranges: Sequence[Tuple[int, int]]) -> Optional[bytes]:
+    """The bytes with the line ranges removed, or None when nothing but whitespace is left.
+
+    A byte-order mark stays at the start of the file even when its first line goes.
     """
-    from aegis_cli import pathcheck
+    text = raw.decode("utf-8")
+    bom = _BOM if text.startswith(_BOM) else ""
+    lines = text[len(bom):].splitlines(True)
+    drop = {i for a, b in ranges for i in range(a, b + 1)}
+    kept = "".join(line for i, line in enumerate(lines) if i not in drop)
+    return (bom + kept).encode("utf-8") if kept.strip(" \t\r\n") else None
 
-    env = os.environ if env is None else env
-    home = os.path.expanduser("~") if home is None else home
-    which = shutil.which if which is None else which
-    platform = sys.platform if platform is None else platform
-    os_name = os.name if os_name is None else os_name
-    stdin = sys.stdin if stdin is None else stdin
-    path_env = env.get("PATH", "")
-    py = "python" if os_name == "nt" else "python3"
 
-    found = which("soma", path=path_env)
-    if found:
-        print(f"✅ soma is already on PATH ({found}). Nothing to change.")
-        return 0
-    directory = pathcheck.scripts_dir(
-        candidates if candidates is not None else pathcheck.default_candidates())
-    if directory is None:
-        print("❌ The 'soma' command is not installed for this Python, so there is no\n"
-              f"   directory to add to PATH. Install it with: {py} -m pip install soma-governance")
-        return 1
-    sep = ";" if os_name == "nt" else ":"
-    if pathcheck.on_path(directory, path_env, sep=sep, casefold=os_name == "nt"):
-        print(f"✅ {directory} is already on PATH. Nothing to change.\n"
-              "   Open a new terminal (or run `hash -r` / `rehash`) so the shell picks it up.")
-        return 0
-    venv = pathcheck._active_venv_prefix()
-    if venv and pathcheck._home_relative(directory, venv, casefold=os_name == "nt") is not None:
-        print(f"❌ soma is installed in the virtual environment {venv}. --fix-path will not\n"
-              "   put a virtualenv's bin directory in a global startup file; activate it instead.")
-        return 1
+@dataclass
+class _Change:
+    path: Path
+    kind: str
+    sha256: Optional[str]
+    describe: List[str] = field(default_factory=list)
+    keys: List[Tuple[str, ...]] = field(default_factory=list)
+    lines: List[Tuple[int, int]] = field(default_factory=list)
 
-    shell = pathcheck.detect_shell(env, os_name=os_name)
-    line = pathcheck.remedy(shell, directory, home, os_name=os_name)
-    if shell not in _EDITABLE_SHELLS:
-        if shell == "pwsh":
-            print("ℹ️  soma doctor --fix-path never edits PowerShell's $PROFILE: it runs on every\n"
-                  "   PowerShell start, may be signed or governed by an execution policy, and on\n"
-                  "   Windows the persistent user Path (not the profile) is where PATH belongs.\n"
-                  "   Run this yourself, then open a new terminal:")
-        else:
-            print(f"ℹ️  Unrecognised shell ({env.get('SHELL') or 'SHELL unset'}). --fix-path only edits\n"
-                  "   zsh, bash and fish startup files. Add the equivalent of this line to yours:")
-        print(f"      {line}")
-        return 0
 
-    rc_path = _expand_home(pathcheck.rc_file(shell, env=env, platform=platform) or "", home)
-    marked = f"{line}  {FIX_PATH_MARKER}"
-    real, why = _confined_rc(rc_path, home)
-    if real is None:
-        print(f"❌ Refusing to edit {rc_path}: {why}.\n"
-              "   Nothing was changed. Add this line yourself if you want it:\n"
-              f"      {marked}")
-        return 1
+def _plan(findings: List[_Finding], ast_missing: List[str], root: Path) -> List[_Change]:
+    changes: Dict[str, _Change] = {}
+    for finding in findings:
+        action = finding.action
+        if action is None:
+            continue
+        key = os.path.normcase(os.path.abspath(str(action.path)))
+        change = changes.setdefault(key, _Change(action.path, action.kind, action.sha256))
+        change.describe.append(action.describe)
+        change.keys.extend(action.keys)
+        change.lines.extend(action.lines)
+    plan = list(changes.values())
+    if ast_missing:
+        from aegis_core.workspace.layout import WorkspaceLayout
 
-    marked_b = marked.encode("utf-8", "surrogateescape")
-    existing = None
-    if os.path.isfile(real):
-        with open(real, "rb") as fh:
-            existing = fh.read()
-        if any(raw.rstrip(b"\r\n") == marked_b for raw in existing.splitlines(True)):
-            print(f"✅ {rc_path} already contains the soma PATH line. Nothing to change.")
-            return 0
+        plan.append(_Change(WorkspaceLayout(root).config_file, "enable_packaged_ast_drivers", None,
+                            [f"enable the packaged AST drivers for {', '.join(ast_missing)}"]))
+    return plan
 
-    print(f"soma doctor --fix-path will append this line to {rc_path}:\n      {marked}")
-    if not yes:
-        if not stdin.isatty():
-            print("Dry run: nothing was changed. Re-run with --yes to apply "
-                  "(or run it in a terminal to confirm).")
-            return 0
-        print("Append it? [y/N] ", end="", flush=True)
-        if stdin.readline().strip().lower() not in ("y", "yes"):
-            print("Not changed.")
-            return 0
 
-    manifest_path = os.path.join(home, ".aegis", "manifest.json")
+def _apply(plan: List[_Change], home: Optional[Path], root: Path) -> Tuple[List[Dict[str, Any]], Optional[Path]]:
+    from aegis_core.storage import atomic_write_bytes
+
+    results: List[Dict[str, Any]] = []
+
+    def result(change: _Change, status: str, action: str, reason: Optional[str] = None) -> None:
+        results.append({"action": action, "path": str(change.path), "status": status,
+                        "changes": list(change.describe), "reason": None if reason is None else _clean(reason, 1024)})
+
+    if home is None:
+        for change in plan:
+            result(change, "failed", change.kind, "no home directory for ~/.aegis/backups")
+        return results, None
     try:
-        old_manifest = None
-        if os.path.exists(manifest_path):
-            with open(manifest_path, "rb") as fh:
-                old_manifest = fh.read()
-        data = _load_manifest(manifest_path)
-    except (OSError, ValueError) as exc:
-        print(f"❌ Cannot record the change in {manifest_path}: {exc}\n"
-              "   Nothing was changed (uninstall could not remove an unrecorded line).")
-        return 1
+        backup = _backup_root(home)
+    except (_Refused, OSError) as exc:
+        for change in plan:
+            result(change, "failed", change.kind, f"no backup could be made: {exc}")
+        return results, None
 
-    created = existing is None
-    existing = existing or b""
-    nl = b"\r\n" if b"\r\n" in existing else b"\n"
-    prefix = bool(existing) and not existing.endswith(b"\n")
-    entry = {"file": rc_path, "line": marked, "created": created, "prefix_newline": prefix}
-    entries = [e for e in data.get("path_lines", [])
-               if not (isinstance(e, dict) and e.get("file") == rc_path and e.get("line") == marked)]
-    data["path_lines"] = entries + [entry]
-
-    # Record first: an entry without its line is harmless (uninstall warns);
-    # a line without its entry could never be removed by uninstall.
-    try:
-        os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
-        _write_preserving_mode(manifest_path, (json.dumps(data, indent=2) + "\n").encode("utf-8"))
-    except OSError as exc:
-        print(f"❌ Cannot write {manifest_path}: {exc}. Nothing was changed.")
-        return 1
-    try:
-        os.makedirs(os.path.dirname(real), exist_ok=True)
-        mode = _umask_mode() if created else stat.S_IMODE(os.stat(real).st_mode)
-        _atomic_write(real, existing + (nl if prefix else b"") + marked_b + nl, mode)
-    except OSError as exc:
+    manifest: List[Dict[str, Any]] = []
+    for index, change in enumerate(plan, 1):
+        action = change.kind
         try:
-            if old_manifest is None:
-                os.unlink(manifest_path)
+            current = _current_bytes(change.path, change.sha256)
+            if current is not None:
+                name = f"{index:02d}-{change.path.name}"
+                # Owner-only whatever the original's bits: a backup of ~/.claude.json holds tokens.
+                atomic_write_bytes(backup / name, current, mode=0o600)
+                manifest.append({"path": str(change.path), "backup": name, "sha256": _sha256(current),
+                                 "action": action})
+                _write_manifest(backup, manifest)
+            if change.kind == "remove_keys":
+                atomic_bytes = _without_keys(current, change.keys)
+                _current_bytes(change.path, change.sha256)  # compare before replace
+                atomic_write_bytes(change.path, atomic_bytes)
+            elif change.kind == "remove_lines":
+                kept = _without_lines(current, change.lines)
+                if kept is None:  # the plan said "edit"; deleting would be a change nobody confirmed
+                    raise _Refused("only the legacy block would be left; re-run aegis doctor")
+                _current_bytes(change.path, change.sha256)
+                atomic_write_bytes(change.path, kept)
+            elif change.kind == "delete_file":
+                _current_bytes(change.path, change.sha256)
+                os.unlink(change.path)
+            elif change.kind == "enable_packaged_ast_drivers":
+                from aegis_core.ast.detect import detect_project_languages, provision_ast_driver_slots
+
+                provision_ast_driver_slots(root, detect_project_languages(root))
+        except _Refused as exc:
+            result(change, "skipped", action, str(exc))
+            continue
+        except Exception as exc:  # report and keep going: other files are independent
+            result(change, "failed", action, str(exc))
+            continue
+        result(change, "applied", action)
+    return results, backup
+
+
+def _write_manifest(backup: Path, files: List[Dict[str, Any]]) -> None:
+    from aegis_core.storage import atomic_write_bytes
+
+    doc = {"schema": "aegis.doctor.backup/v1", "created_at": _utc_now(), "aegis_version": _aegis_version(),
+           "files": files}
+    atomic_write_bytes(backup / "manifest.json", (json.dumps(doc, indent=2) + "\n").encode("utf-8"), mode=0o600)
+
+
+# ── Output ──────────────────────────────────────────────────────────────────
+
+_CHECKS: Tuple[Tuple[str, bool], ...] = (
+    # (id, failing it fails the run); advisory checks only warn.
+    ("python_version", True), ("zero_dependencies", True), ("rules", True), ("state_dir", True),
+    ("cli_on_path", True), ("precommit_hook", True), ("ast_drivers", False), ("mcp_launcher", False),
+)
+
+
+def _registered_launchers(rows: List[Dict[str, Any]]) -> List[Registered]:
+    """The command each host has registered, where doctor could read it."""
+    return [(row["id"], row["registration"]["command"]) for row in rows
+            if row["registration"]["status"] == "registered" and row["registration"]["command"]]
+
+
+def _run_checks(root: Path, fix_ast: bool, only: Optional[Sequence[str]] = None,
+                registered: Sequence[Registered] = ()) -> List[Dict[str, Any]]:
+    calls: Dict[str, Callable[[], Optional[bool]]] = {
+        "python_version": _check_python_version,
+        "zero_dependencies": _check_zero_dependencies,
+        "rules": lambda: _check_rules(root),
+        "state_dir": lambda: _check_state_dir(root),
+        "cli_on_path": lambda: _check_cli_resolvable(root),
+        "precommit_hook": lambda: _check_precommit_hook(root),
+        "ast_drivers": lambda: _check_ast_drivers(root, fix=fix_ast),
+        "mcp_launcher": lambda: _check_mcp_launcher(workspace=root, registered=registered),
+    }
+    out = []
+    for check_id, blocking in _CHECKS:
+        if only is not None and check_id not in only:
+            continue
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ok = calls[check_id]()
+        status = "skip" if ok is None else ("pass" if ok else ("fail" if blocking else "warn"))
+        # The lines quote rule file names, loader errors and paths a repository chooses:
+        # cleaned here, at the one place every check's output passes.
+        text = "".join(_clean(line, 4096) + "\n" for line in buf.getvalue().splitlines())
+        out.append({"id": check_id, "status": status, "text": text,
+                    "detail": [line.strip() for line in text.splitlines() if line.strip()]})
+    return out
+
+
+def _summary(checks: List[Dict[str, Any]], findings: List[_Finding]) -> Dict[str, int]:
+    counted = [c for c in checks if c["status"] != "skip"]
+    warn_checks = sum(c["status"] == "warn" for c in counted)
+    return {"passed": sum(c["status"] == "pass" for c in counted),
+            "warnings": warn_checks + sum(f.severity == "warning" for f in findings),
+            "failed": sum(c["status"] == "fail" for c in counted), "total": len(counted)}
+
+
+def _payload(diag: _Diagnosis, checks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    ctx = diag.ctx
+    summary = _summary(checks, diag.findings)
+    unknown = [f"{r['id']}.{field}" for r in diag.rows for field in r["unknown"]]
+    hosts = [{k: v for k, v in row.items() if k != "advisory"} for row in diag.rows]
+    return {
+        "schema": SCHEMA,
+        "source": SOURCE,
+        "aegis_version": _aegis_version(),
+        "checked_at": _utc_now(),
+        "scope": {"machine": "local", "workspace": str(ctx.root), "workspace_governed": ctx.governed,
+                  "hosts": [s.id for s in ctx.selected], "host_selection": ctx.selection},
+        "stale": False,
+        "unknown": unknown,
+        # Only the checks: a run whose hosts are all unregistered can pass them. The hosts'
+        # verdicts are their own ``state`` and ``enforcement_level``.
+        "checks_ok": summary["failed"] == 0,
+        "summary": summary,
+        "checks": [{k: v for k, v in c.items() if k != "text"} for c in checks],
+        "hosts": hosts,
+        "enforcement_tiers": diag.tiers,
+        "findings": [f.as_dict() for f in diag.findings],
+    }
+
+
+_ICON = {"ok": "✅", "missing_binary": "➖", "unregistered": "❌", "auth_unknown": "❔", "policy_gap": "⚠️ "}
+
+
+def _print_hosts(diag: _Diagnosis) -> None:
+    ctx = diag.ctx
+    how = "from .aegis/config.json" if ctx.selection == "config" else "all v4.0 hosts; aegis init --host picks yours"
+    print(f"\nHosts ({how}):")
+    for row in diag.rows:
+        reg, boot, budget = row["registration"], row["bootstrap"], row["budget"]
+        print(f"  {_ICON[row['state']]} {row['display_name']} ({row['id']}): {row['state']}")
+        binary = row["binary"]
+        where = binary["path"] or ("found only where doctor runs nothing (see below)" if binary["ignored"]
+                                   else "not on PATH")
+        print(f"      binary       {where}")
+        registered = {"registered": f"yes, {reg['scope']} scope", "absent": "no", "unknown": "unknown",
+                      "unavailable": "not checked"}[reg["status"]]
+        print(f"      registered   {registered} ({_clean(reg['source'], 4096)})")
+        if reg["command"]:
+            exists = {True: "exists", False: "MISSING", None: "unknown"}[reg["command_exists"]]
+            print(f"      command      {reg['command'][0]} ({exists})")
+        ident = row["identity"]
+        if reg["status"] == "registered":
+            print(f"      identity     {ident['status']}" + (f" (AEGIS_CLIENT={ident['aegis_client']})"
+                                                             if ident["aegis_client"] else ""))
+        ws = {True: "registered", False: "not registered", None: "unknown"}[row["workspace_registered"]]
+        print(f"      workspace    {ws} in ~/.aegis/workspaces.json")
+        print(f"      bootstrap    {boot['file']}: {boot['status']}")
+        if budget["bytes"] is not None:
+            print(f"      budget       {budget['file']} {budget['bytes']} of {budget['budget_bytes']} bytes")
+        print(f"      enforcement  {row['enforcement_level'].replace('_', ' ')}")
+        for reason in row["reasons"]:
+            if reason["code"] != "missing_binary":
+                print(f"      → {reason['message']}")
+
+
+def _print_tiers(diag: _Diagnosis) -> None:
+    print("\nEnforcement tiers (AD-8):")
+    for tier in diag.tiers:
+        name, mechanism = _TIER_TEXT[tier["tier"]]
+        hosts = ", ".join(tier["hosts"]) or "-"
+        print(f"  {name:<14} {tier['status']:<12} {mechanism}")
+        print(f"  {'':<14} {'':<12} hosts: {hosts}; {tier['detail']}")
+
+
+def _print_findings(findings: List[_Finding]) -> None:
+    if not findings:
+        return
+    print("\nWarnings:")
+    for finding in findings:
+        icon = "ℹ️ " if finding.severity == "info" else "⚠️ "
+        print(f"  {icon} {finding.message}")
+
+
+def _print_plan(plan: List[_Change], home: Optional[Path]) -> None:
+    from aegis_core.workspace.layout import UserLayout
+
+    where = f"{UserLayout(home).backups_dir}{os.sep}<UTC stamp>" if home else "the Aegis backups directory"
+    print(f"\nPlanned changes (each file is backed up to {_clean(where, 4096)} first):")
+    for index, change in enumerate(plan, 1):
+        print(f"  {index}. {_clean(change.path, 4096)}: {_clean('; '.join(change.describe), 4096)}")
+
+
+def _print_results(results: List[Dict[str, Any]], backup: Optional[Path]) -> None:
+    print("")
+    for item in results:
+        icon = {"applied": "✅", "skipped": "⚠️ ", "failed": "❌"}[item["status"]]
+        line = f"  {icon} {_clean(item['path'], 4096)}: {_clean('; '.join(item['changes']), 4096)}"
+        if item["reason"]:
+            line += f" ({item['status']}: {item['reason']})"
+        print(line)
+    if backup is not None:
+        print(f"\nBackups: {_clean(backup, 4096)}")
+
+
+# ── Entry point ─────────────────────────────────────────────────────────────
+
+def _usage_error(message: str) -> int:
+    print(f"aegis doctor: {message}", file=sys.stderr)
+    return EXIT_USAGE
+
+
+def _resolve_root(args: argparse.Namespace) -> Path:
+    from aegis_core.workspace.base import Workspace
+
+    ws = getattr(args, "ws", None)
+    if ws is not None:
+        return Path(ws.root)
+    raw = getattr(args, "workspace", None) or getattr(args, "_project_root", None)
+    return Path(Workspace.resolve(raw).root)
+
+
+def _run_drivers_only(root: Path, use_json: bool, fix: bool, yes: bool) -> int:
+    results: List[Dict[str, Any]] = []
+    backup: Optional[Path] = None
+    declined = False
+    text = io.StringIO()
+    with contextlib.redirect_stdout(text) if use_json else contextlib.nullcontext():
+        if not use_json:
+            print(f"aegis doctor — AST driver health check ({_clean(root, 4096)}):\n")
+        plan = _plan([], _missing_ast_extensions(root), root) if fix else []
+        if plan:
+            _print_plan(plan, _home())
+            if yes or _confirm(f"Apply these {len(plan)} changes? [y/N] "):
+                results, backup = _apply(plan, _home(), root)
+                _print_results(results, backup)
             else:
-                _write_preserving_mode(manifest_path, old_manifest)
-        except OSError:
-            pass
-        print(f"❌ Could not write {rc_path}: {exc}. Nothing was changed.")
-        return 1
-    print(f"✅ Added to {rc_path} (recorded in {manifest_path} for uninstall).\n"
-          f"   Open a new terminal, or run: source {rc_path}")
-    return 0
+                declined = True
+                print("No changes made.")
+        (check,) = [c for c in _run_checks(root, fix_ast=False, only=("ast_drivers",))]
+        if not use_json:
+            print(check["text"], end="")
+    failed = check["status"] != "pass" or declined or any(r["status"] != "applied" for r in results)
+    if use_json:
+        payload = {"schema": SCHEMA, "source": SOURCE, "aegis_version": _aegis_version(), "checked_at": _utc_now(),
+                   "scope": {"machine": "local", "workspace": str(root), "checks": ["ast_drivers"]},
+                   "stale": False, "unknown": [], "checks_ok": check["status"] == "pass",
+                   "checks": [{k: v for k, v in check.items() if k != "text"}]}
+        if fix:
+            payload["fixes"] = results
+            payload["backup_dir"] = str(backup) if backup else None
+        print(json.dumps(payload, indent=2))
+    return 1 if failed else 0
+
+
+def _home() -> Optional[Path]:
+    from aegis_core.workspace.layout import UserLayout
+
+    layout = UserLayout.current()
+    return layout.home if layout else None
 
 
 def run_doctor(args: argparse.Namespace) -> int:
-    """Run all health checks. Returns 0 if all pass, 1 otherwise."""
-    if getattr(args, "fix_path", False):
-        return fix_path(yes=getattr(args, "yes", False))
-    if getattr(args, "yes", False):
-        print("--yes only applies to --fix-path", file=sys.stderr)
-    import contextlib
-    import io
-    from aegis_cli.ui.theme import strip_ansi
-    from aegis_core.workspace import Workspace
+    """Run the health checks and the host matrix; with --fix, repair what they reported.
 
-    ws_obj = getattr(args, "ws", None) or Workspace.resolve(
-        getattr(args, "workspace", None) or getattr(args, "_project_root", None)
-    )
-    ws = ws_obj.root
-    use_json = bool(getattr(args, "json", False) or getattr(args, "format", None) == "json")
+    Exit 0 when no blocking check failed (and every planned fix was applied), 1 otherwise,
+    2 for a usage error.
+    """
+    use_json = bool(getattr(args, "json", False))
+    fix = bool(getattr(args, "fix", False))
+    yes = bool(getattr(args, "yes", False))
+    if yes and not fix:
+        return _usage_error("--yes only applies to --fix")
+    if use_json and fix and not yes:
+        return _usage_error("--json --fix needs --yes (there is no prompt in JSON mode)")
+    root = _resolve_root(args)
 
     if getattr(args, "drivers", False):
+        return _run_drivers_only(root, use_json, fix, yes)
+
+    diag = _diagnose(root)
+    plan = _plan(diag.findings, _missing_ast_extensions(root), root) if fix else []
+    results: List[Dict[str, Any]] = []
+    backup: Optional[Path] = None
+    declined = False
+    text = io.StringIO()
+    with contextlib.redirect_stdout(text) if use_json else contextlib.nullcontext():
         if not use_json:
-            print(f"aegis doctor — AST driver health check ({ws}):\n")
-        fix = getattr(args, "fix", False)
-        ok = _check_ast_drivers(ws, fix=fix)
-        return 0 if ok else 1
-
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf) if use_json else contextlib.nullcontext():
+            print(f"aegis doctor — running health checks ({_clean(root, 4096)}):\n")
+        checks = _run_checks(root, fix_ast=False, registered=_registered_launchers(diag.rows))
         if not use_json:
-            print(f"aegis doctor — running health checks ({ws}):\n")
-        results: list[bool] = []
+            for check in checks:
+                print(check["text"], end="")
+            _print_hosts(diag)
+            _print_tiers(diag)
+            _print_findings(diag.findings)
+        if fix:
+            if not plan:
+                print("\nNothing to fix.")
+            else:
+                _print_plan(plan, diag.ctx.home)
+                if yes or _confirm(f"Apply these {len(plan)} changes? [y/N] "):
+                    results, backup = _apply(plan, diag.ctx.home, root)
+                    _print_results(results, backup)
+                else:
+                    declined = True
+                    print("No changes made.")
 
-        results.append(_check_python_version())
-        results.append(_check_zero_dependencies())
-        platform = _check_platform(ws)
-        results.append(platform is not None)
-        results.append(_check_rules(platform, ws))
-        results.append(_check_evidence_dir(ws))
-        results.append(_check_cli_resolvable())
-        hook_ok = _check_precommit_hook(ws)
-        if hook_ok is not None:
-            results.append(hook_ok)
-        fix = getattr(args, "fix", False)
-        # Advisory: report configured AST drivers (polyglot drivers are optional)
-        ast_ok = _check_ast_drivers(ws, fix=fix)
-        # Advisory: only MCP users need it, so it does not fail the run.
-        mcp_ok = _check_mcp_launcher()
-
-    passed = sum(results)
-    total = len(results)
-    failed = total - passed
-    warnings = (0 if ast_ok else 1) + (0 if mcp_ok else 1)
-
+    payload = _payload(diag, checks)
+    failed = payload["summary"]["failed"] > 0 or declined or any(r["status"] != "applied" for r in results)
     if use_json:
-        payload = {
-            "workspace": str(ws),
-            "passed": passed,
-            "warnings": warnings,
-            "failed": failed,
-            "total": total,
-            "ok": failed == 0,
-            "details": [
-                strip_ansi(line.strip())
-                for line in buf.getvalue().splitlines()
-                if line.strip()
-            ],
-        }
+        if fix:
+            payload["fixes"] = results
+            payload["backup_dir"] = str(backup) if backup else None
         print(json.dumps(payload, indent=2))
-        return 0 if all(results) else 1
+        return 1 if failed else 0
 
-    warn_label = "warning" if warnings == 1 else "warnings"
-    print(f"\n{passed}/{total} checks passed ({passed} passed, {warnings} {warn_label}, {failed} failed).")
-    return 0 if all(results) else 1
-
+    s = payload["summary"]
+    warn_label = "warning" if s["warnings"] == 1 else "warnings"
+    print(f"\n{s['passed']}/{s['total']} checks passed ({s['passed']} passed, {s['warnings']} {warn_label}, "
+          f"{s['failed']} failed).")
+    return 1 if failed else 0
 
 
 class DoctorCommand(AegisCommand):
     """Command for system health and governance audit."""
 
     name = "doctor"
-    aliases = ("audit",)
     category = CommandCategory.SETUP
     help = "System health and governance audit"
+    description = (
+        "Read-only health checks, the host matrix (binary, registration, identity, workspace, "
+        "bootstrap, budget per host) and the enforcement tiers in force here. --fix changes only "
+        "what doctor reported (stale v3 and misplaced MCP entries, legacy rule blocks, unedited "
+        "v3 rule copies, missing packaged AST drivers), after confirmation, backing each file up "
+        "to ~/.aegis/backups/<UTC stamp>/ first."
+    )
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--fix",
             action="store_true",
-            help="Automatically repair detected issues (pre-commit hooks, missing AST drivers)",
+            help="Repair what doctor reported, after confirmation; every file is backed up first",
+        )
+        parser.add_argument(
+            "--yes",
+            action="store_true",
+            help="With --fix: apply without asking (required with --json or without a terminal)",
         )
         parser.add_argument(
             "--drivers",
             action="store_true",
             help="Run only AST driver and language detection health check",
-        )
-        parser.add_argument(
-            "--fix-path",
-            action="store_true",
-            help="Add soma's scripts directory to your shell startup file "
-                 "(dry run unless confirmed or --yes; zsh/bash/fish only)",
-        )
-        parser.add_argument(
-            "--yes",
-            "-y",
-            action="store_true",
-            help="With --fix-path: apply without asking",
         )
 
     def execute(self, args: argparse.Namespace) -> int:

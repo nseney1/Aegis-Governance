@@ -1,27 +1,23 @@
 """Tests for aegis_core.yaml — Pure-Python AegisYAML engine & unified domain model."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import pytest
 
 from conftest import symlink_or_skip
-from aegis_core.yaml import (
-    AegisYAML,
-    AegisDocument,
+from aegis_core.yaml_engine.frontmatter import AegisYAML, parse_frontmatter, parse_rule_frontmatter, _get_body
+from aegis_core.yaml_engine.document import AegisDocument
+from aegis_core.yaml_engine.parser import (
     AegisYAMLError,
     FrontmatterError,
-    dump_frontmatter,
-    parse_frontmatter,
-    parse_rule_frontmatter,
     parse_yaml_subset,
-    _get_body,
     MAX_DOC_BYTES,
     MAX_SCALAR_CHARS,
     MAX_LINES,
     MAX_DEPTH,
 )
-from aegis_core.workspace import Workspace
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.workspace.base import Workspace
 
 
 class TestSomaYAMLCoreParsing:
@@ -149,12 +145,15 @@ enforcement: gate
         with pytest.raises(AegisYAMLError, match="Duplicate key 'key' detected"):
             AegisYAML.parse_text(text)
 
-    def test_zero_width_sanitization(self):
-        # Hidden zero-width characters in key or value
-        text = "\ufeffid:\u200b cell-sanitized\n\u200ctier: \u200dmethod"
-        doc = AegisYAML.parse_text(text)
-        assert doc["id"] == "cell-sanitized"
-        assert doc["tier"] == "method"
+    def test_zero_width_handling(self):
+        # Review M5: stripping zero-width characters inside values silently changed data. Only a
+        # leading document BOM is stripped; values keep them; a raw invisible character in a key
+        # is rejected so it cannot spoof a visually identical key.
+        doc = AegisYAML.parse_text("\ufeffid: cell\u200b-x\ntier: \u200dmethod")
+        assert doc["id"] == "cell\u200b-x"
+        assert doc["tier"] == "\u200dmethod"
+        with pytest.raises(AegisYAMLError, match="invisible"):
+            AegisYAML.parse_text("id: cell\n\u200ctier: method")
 
     def test_control_character_rejection(self):
         text = "key: bad\x07bell"
@@ -189,23 +188,32 @@ enforcement: gate
         assert doc["id"] == "wall-symlink"
         assert "Wall Symlink" in doc.body
 
-    def test_skill_kind_auto_inference(self):
+    def test_a_skill_is_a_document_with_kind_skill_and_gets_no_injected_keys(self):
         text = """---
 id: tdd-cycle
-tier: method
-consumes: [FeatureSpec]
-produces: [VerifiedPatch]
+kind: skill
 ---
 # TDD Cycle
 """
         doc = AegisYAML.parse_text(text)
         assert doc.kind == "skill"
         assert doc.id == "tdd-cycle"
-        assert doc.tier == "method"
-        assert doc.consumes == ["FeatureSpec"]
-        assert doc.produces == ["VerifiedPatch"]
         assert doc.decay is False
-        assert doc.handoff_targets == []
+        # The v4 skill graph is gone: no tier, consumes, produces or handoff_targets default.
+        assert doc.to_dict() == {"id": "tdd-cycle", "kind": "skill"}
+
+    def test_the_removed_handoff_keys_no_longer_make_a_document_a_skill(self):
+        text = """---
+id: legacy-skill
+tier: method
+consumes: [FeatureSpec]
+produces: [VerifiedPatch]
+handoff_targets: [staff-review]
+---
+"""
+        doc = AegisYAML.parse_text(text)
+        assert doc.kind == "rule"
+        assert doc["consumes"] == ["FeatureSpec"]  # kept as data, read by nothing
 
     def test_mapping_interface(self):
         doc = AegisDocument(metadata={"id": "test", "num": 42}, body="# Body", kind="generic")
@@ -323,8 +331,6 @@ class TestBackwardCompatibilityParity:
             parse_yaml_subset("key: 'unclosed")
 
 
-from tests.unit.core.test_frontmatter_engine import TestFrontmatterParser, TestFrontmatterDumper
-from aegis_core.yaml import write_frontmatter
 import datetime
 
 
@@ -337,11 +343,10 @@ class TestSomaYAMLBranchHardening:
         assert doc.id == "s1"
         assert doc.name == "s1"
         assert doc.type == "wall"
-        assert doc.tier == "method"
         assert doc.body == "body text"
         assert doc.source_path == "/tmp/doc.md"
-        assert doc.to_dict() == {"kind": "skill", "id": "s1", "type": "wall", "tier": "method", "consumes": [], "produces": [], "handoff_targets": []}
-        assert list(iter(doc)) == ["kind", "id", "type", "tier", "consumes", "produces", "handoff_targets"]
+        assert doc.to_dict() == {"kind": "skill", "id": "s1", "type": "wall"}
+        assert list(iter(doc)) == ["kind", "id", "type"]
         assert ("AegisDocument" in repr(doc) or "AegisDocument" in repr(doc))
         assert doc["id"] == "s1"
         assert doc.get("nonexistent", "fallback") == "fallback"
@@ -350,9 +355,6 @@ class TestSomaYAMLBranchHardening:
         assert len(doc.items()) >= 3
         assert doc.enforcement is None
         assert doc.target_paths == []
-        assert doc.consumes == []
-        assert doc.produces == []
-        assert doc.handoff_targets == []
         assert doc.decay is False
 
         # rule kind auto inference
@@ -366,7 +368,7 @@ class TestSomaYAMLBranchHardening:
         doc_explicit = AegisDocument(metadata={"id": "e1"}, kind="custom_kind")
         assert doc_explicit.kind == "custom_kind"
 
-    def test_somayaml_parse_text_and_dump(self):
+    def test_somayaml_parse_text(self):
         # parse_text with frontmatter and body
         doc = AegisYAML.parse_text("---\nid: cell-abc\nkind: skill\n---\n# Markdown Body\nHello world")
         assert doc.id == "cell-abc"
@@ -383,16 +385,6 @@ class TestSomaYAMLBranchHardening:
 
         with pytest.raises(FrontmatterError, match="Expected YAML mapping at document root"):
             AegisYAML.parse_text("- item 1\n- item 2\n")
-
-        # dump AegisDocument
-        dumped1 = AegisYAML.dump(doc)
-        assert "id: cell-abc" in dumped1
-        assert "Hello world" in dumped1
-
-        # dump dict with body
-        dumped2 = AegisYAML.dump({"id": "d1"}, body="Body from dict")
-        assert "id: d1" in dumped2
-        assert "Body from dict" in dumped2
 
     def test_somayaml_parse_file_and_write_frontmatter(self, tmp_path: Path):
         # workspace without confine_path raises AegisYAMLError
@@ -421,14 +413,6 @@ class TestSomaYAMLBranchHardening:
                 return str(real_file.resolve())
         doc_str = AegisYAML.parse_file("target.md", StringWS())
         assert doc_str.id == "sym-target"
-
-        # write_frontmatter
-        out_file = tmp_path / "written.md"
-        write_frontmatter(out_file, {"id": "written-id"}, "Written body")
-        assert out_file.exists()
-        doc_written = AegisYAML.parse_file("written.md", ws)
-        assert doc_written.id == "written-id"
-        assert doc_written.body == "Written body"
 
     def test_parse_file_rejects_symlinks_branch_hardening(self, tmp_path: Path):
         ws = Workspace(tmp_path)
@@ -590,7 +574,7 @@ items:
             parse_yaml_subset(f"key: {deep_flow}")
 
         # Unterminated / mismatched quote scalar in _parse_scalar
-        from aegis_core.yaml import _parse_scalar
+        from aegis_core.yaml_engine.parser import _parse_scalar
         with pytest.raises(FrontmatterError, match="unterminated quoted scalar"):
             _parse_scalar("\"mismatched'")
 
@@ -599,11 +583,11 @@ items:
         assert res_bad_big_u["key"] == "U000000ZZ"
 
         # CRLF line continuation
-        from aegis_core.yaml import _unescape_double
+        from aegis_core.yaml_engine.parser import _unescape_double
         assert _unescape_double("line1\\\r\n  line2") == "line1  line2"
 
         # _strip_comment quote escaping
-        from aegis_core.yaml import _strip_comment, _is_quote_closed, _parse_flow
+        from aegis_core.yaml_engine.parser import _strip_comment, _is_quote_closed, _parse_flow
         assert _strip_comment(r'key: "val \"with\" quotes" # c') == r'key: "val \"with\" quotes" '
         assert _strip_comment("key: 'it''s awesome' # c") == "key: 'it''s awesome' "
 
@@ -660,7 +644,7 @@ items:
             parse_yaml_subset("items:\n  - \"unclosed\n  - sibling")
 
         # Depth limits on helper functions directly
-        from aegis_core.yaml import _parse_flow_map, _parse_block_map, _parse_block_seq
+        from aegis_core.yaml_engine.parser import _parse_flow_map, _parse_block_map, _parse_block_seq
         with pytest.raises(AegisYAMLError, match="nesting depth"):
             _parse_flow("a", 0, depth=35)
         with pytest.raises(AegisYAMLError, match="nesting depth"):

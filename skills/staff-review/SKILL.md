@@ -3,10 +3,6 @@ id: staff-review
 name: Staff Review Protocol
 description: Multi-lens review fan-out with staff-level synthesis across six modes from Patrol to Citadel.
 kind: skill
-tier: guardrail
-consumes: [InspectionReceipt, DiffProposal, TestVerdict]
-produces: [ChargeSheet, ArbitrationEvidence, InspectionReceipt]
-handoff_targets: [spec-synthesizer, refactoring-pilot, incident-debug, post-mortem]
 trigger: user_request
 aliases: ["review this code", "code review", "PR review"]
 ---
@@ -16,7 +12,7 @@ aliases: ["review this code", "code review", "PR review"]
 
 ## Review Modes
 
-| Mode | Alias | Prongs | Flash Dispatches | Output Budget | When to Use |
+| Mode | Alias | Prongs | Fast-Tier Dispatches | Output Budget | When to Use |
 |:-----|:------|:------:|:----------------:|:-------------:|:------------|
 | **Patrol** | "patrol", "quick fix" | Probe → Bastion | 2 | ≤2k output | Known defect, single-file fix, rename |
 | **Sweep** | "sweep", "quick review", "review this code", "code review", "PR review" | Sentry → Synthesize | 3–4 | ≤3k output | Quick reviews, PR reviews, code diffs, minor changes |
@@ -39,7 +35,7 @@ Choose protocol by **failure severity**, not scope:
 | Medium | Feature regression | Vanguard (Sentry + Probe + Bastion) | New feature, bug fix |
 | High | API breakage, data loss | Vanguard (full 3-prong) | Public API change, refactor |
 | Critical | Security breach, rule bypass | Bulwark | Auth flow, governance rule changes |
-| Catastrophic | Production outage, data corruption | Fortress + `ask_question` human gate | Infra, schema migration, core protocol |
+| Catastrophic | Production outage, data corruption | Fortress + human approval gate | Infra, schema migration, core protocol |
 | Release | Zero-defect release certification | Citadel | Pre-release adversarial verification |
 
 ### Individual Prongs (run standalone)
@@ -89,13 +85,13 @@ Speculative findings meeting only 1 criterion are logged as ⚠️ warning, not 
 For known defects, renames, or single-file fixes where the problem is already identified. Skips Sentry entirely.
 
 ### Phase 1: Probe (Direct Fix)
-Dispatch 1 Flash analyst directly on the known issue. Provide:
+Dispatch 1 `${SLOT.MODEL_FAST}` analyst directly on the known issue. Provide:
 - The specific file(s) and defect description
 - Expected behavior vs actual behavior
 - The analyst proposes a fix; the **orchestrator** applies the diff
 
 ### Phase 2: Bastion (Verify)
-Dispatch 1 Flash verifier to confirm the applied fix is structurally sound (imports resolve, no orphan references, blast radius check).
+Dispatch 1 `${SLOT.MODEL_FAST}` verifier to confirm the applied fix is structurally sound (imports resolve, no orphan references, blast radius check).
 
 **On BLOCK**: If Bastion issues BLOCK, the orchestrator revises the fix (max 1 revision cycle). If still blocked, escalate to Vanguard for broader survey.
 
@@ -109,7 +105,7 @@ Dispatch 1 Flash verifier to confirm the applied fix is structurally sound (impo
 
 ### Phase 1: Fan-Out (Independent Analysis)
 
-Dispatch 2–4 **Flash-tier research subagents** with orthogonal review lenses. Each reviewer gets:
+Dispatch 2–4 **`${SLOT.MODEL_FAST}` research subagents** with orthogonal review lenses. Each reviewer gets:
 - A specific analytical focus (architecture, performance, security, etc.)
 - Read access to all relevant files (enumerate explicitly in prompt)
 - Structured output format requirements
@@ -164,7 +160,7 @@ Three prongs, each sharper than the last. Scouts find problems, probe analysts p
 ```
   Sentry (width)        Probe (depth)         Bastion (verification)
   ┌─────────────┐      ┌─────────────┐       ┌──────────────┐
-  │ 3-4 Flash   │      │ 1-2 Flash   │       │ 1 Flash      │
+  │ 3-4 fast    │      │ 1-2 fast    │       │ 1 fast       │
   │ broad survey│ ───► │ root cause  │  ───► │ verify fixes │
   │ find issues │      │ deep-dive   │       │ check blast  │
   │ rank by     │      │ propose     │       │ radius       │
@@ -175,7 +171,7 @@ Three prongs, each sharper than the last. Scouts find problems, probe analysts p
 
 ### Prong 1: Sentry (Broad Survey)
 
-Dispatch 3–4 Flash scouts with orthogonal lenses (same as Sweep Protocol Phase 1).
+Dispatch 3–4 `${SLOT.MODEL_FAST}` scouts with orthogonal lenses (same as Sweep Protocol Phase 1).
 
 **Key difference from Sweep**: Scouts do NOT propose fixes. They only:
 - Identify problems with evidence (file:line citations)
@@ -203,7 +199,7 @@ After scouts report, the orchestrator:
 
 ### Prong 2: Probe (Focused Deep-Dive)
 
-Dispatch 1–2 Flash analysts on ONLY the critical findings from Sentry.
+Dispatch 1–2 `${SLOT.MODEL_FAST}` analysts on ONLY the critical findings from Sentry.
 
 **Key differences**:
 - Analysts receive the scout findings as input context
@@ -236,7 +232,7 @@ For each finding:
 
 ### Prong 3: Bastion (Verification Gate)
 
-Dispatch 1 Flash verifier that receives the proposed fixes from Probe.
+Dispatch 1 `${SLOT.MODEL_FAST}` verifier that receives the proposed fixes from Probe.
 
 **Output budget**: 300 tokens (SHIP/BLOCK + max 3 issues).
 
@@ -272,7 +268,7 @@ Extends Vanguard with an adversarial **Gauntlet** prong. Use for changes where c
 
 ### Prong 3b: Gauntlet (Adversarial Falsification)
 
-Dispatch 1–2 Flash breakers with **explicit falsification objectives**. Breakers receive Probe's proposed fixes and actively try to break them.
+Dispatch 1–2 `${SLOT.MODEL_FAST}` breakers with **explicit falsification objectives**. Breakers receive Probe's proposed fixes and actively try to break them.
 
 **Output budget**: 800 tokens per fix tested.
 
@@ -342,14 +338,14 @@ The full-assurance review mode. Extends Bulwark with **Trace** (dependency impac
 
 **Optimization**: Trace may run in parallel with Sentry when target files are known upfront. Gauntlet may run concurrently with Bastion.
 
-**Flash mandate**: All review prongs (Sentry, Trace, Probe, Gauntlet, Bastion, Debrief) use strictly Flash-tier models. No inherit/pro for diff proposers — reserve heavyweight models for orchestrator synthesis only.
+**Fast-tier mandate**: All review prongs (Sentry, Trace, Probe, Gauntlet, Bastion, Debrief) use strictly `${SLOT.MODEL_FAST}` models. No `${SLOT.MODEL_STANDARD}` or `${SLOT.MODEL_HEAVY}` for diff proposers — reserve heavyweight models for orchestrator synthesis only.
 
-**Human gate**: Before Bastion issues final verdict, the orchestrator presents the Gauntlet findings and proposed fixes via `ask_question` for explicit user approval. User may approve, reject, or request revision.
+**Human gate**: Before Bastion issues final verdict, the orchestrator presents the Gauntlet findings and proposed fixes to the user and asks for explicit approval. User may approve, reject, or request revision.
 
 ```
   Sentry (scout)     Trace (map)          Probe (fix)
   ┌────────────┐    ┌──────────────┐    ┌─────────────┐
-  │ 3-4 Flash  │    │ 1-2 Flash    │    │ 1-2 Flash   │
+  │ 3-4 fast   │    │ 1-2 fast     │    │ 1-2 fast    │
   │ find issues│ ─► │ trace deps   │ ─► │ propose     │
   │ rank sev.  │    │ blast radius │    │ solutions   │
   └────────────┘    │ cross-repo   │    └──────┬──────┘
@@ -357,7 +353,7 @@ The full-assurance review mode. Extends Bulwark with **Trace** (dependency impac
                                                ▼
   Debrief (learn)    Bastion (verify)     Gauntlet (break)
   ┌────────────┐    ┌──────────────┐    ┌──────────────┐
-  │ 1 Flash    │    │ 1 Flash      │    │ 1-2 Flash    │
+  │ 1 fast     │    │ 1 fast       │    │ 1-2 fast     │
   │ extract    │ ◄─ │ SHIP/BLOCK   │ ◄─ │ falsify      │
   │ patterns   │    │ human gate   │    │ NASA IV&V    │
   │ → taxonomy │    └──────────────┘    └──────────────┘
@@ -366,7 +362,7 @@ The full-assurance review mode. Extends Bulwark with **Trace** (dependency impac
 
 ### Prong: Trace (Dependency Impact Mapping)
 
-Dispatch 1–2 Flash analysts to map the **blast radius** of the files and symbols identified by Sentry. Trace receives the Sentry findings (affected files, flagged symbols) and traces their dependency graph:
+Dispatch 1–2 `${SLOT.MODEL_FAST}` analysts to map the **blast radius** of the files and symbols identified by Sentry. Trace receives the Sentry findings (affected files, flagged symbols) and traces their dependency graph:
 
 **Output budget**: 800 tokens max.
 
@@ -401,7 +397,7 @@ Output: {blast_radius: [{file, symbol, affected_files: [], affected_repos: [], r
 
 ### Prong: Debrief (Post-Review Learning Extraction)
 
-After Bastion renders its verdict (**SHIP or BLOCK** — Debrief runs either way), dispatch 1 Flash analyst to decompose the review's findings into **proposed learnings** (`DEBRIEF-XXX` entries in `governance/debrief_queue.jsonl`). Debrief is read-only; it proposes changes that the **orchestrator queues for the next session** (not applied immediately, to avoid triggering recursive governance reviews).
+After Bastion renders its verdict (**SHIP or BLOCK** — Debrief runs either way), dispatch 1 `${SLOT.MODEL_FAST}` analyst to decompose the review's findings into **proposed learnings** (`DEBRIEF-XXX` entries in `governance/debrief_queue.jsonl`). Debrief is read-only; it proposes changes that the **orchestrator queues for the next session** (not applied immediately, to avoid triggering recursive governance reviews).
 
 **Output budget**: 500 tokens max.
 
@@ -435,7 +431,7 @@ Propose (do NOT apply directly):
 
 ## Continuous Review Mode (Coding Sessions)
 
-For coding sessions exceeding ~75 steps, the orchestrator should dispatch lightweight Flash review probes at natural breakpoints instead of waiting for a batch review.
+For coding sessions exceeding ~75 steps, the orchestrator should dispatch lightweight `${SLOT.MODEL_FAST}` review probes at natural breakpoints instead of waiting for a batch review.
 
 ### When to Dispatch
 - After completing a logical unit (feature, bugfix, refactor pass)
@@ -444,7 +440,7 @@ For coding sessions exceeding ~75 steps, the orchestrator should dispatch lightw
 - After any subagent delivers code that will be committed
 
 ### Probe Scope (Lightweight — NOT a full staff review)
-The Flash reviewer receives:
+The fast-tier reviewer receives:
 1. List of files modified since last probe (`git diff --name-only`)
 2. The actual diffs (`git diff`)
 3. The project's test runner command
@@ -460,7 +456,7 @@ Structured findings: `{critical: [...], warnings: [...], clean: true/false}`
 If critical findings exist, orchestrator must fix before continuing.
 
 ### Cost Budget
-- Each probe: ~1,000 Flash tokens
+- Each probe: ~1,000 fast-tier tokens
 - At 1 probe per 50 steps over a 500-step session: ~10,000 tokens total
 - ROI: prevents 50-150 steps of rework (50,000-150,000 tokens saved)
 
@@ -500,7 +496,7 @@ When a staff review identifies that specialist analysis is needed, the orchestra
 | Retrospective analysis needed | `post-mortem` | Dispatch with session transcript + metrics |
 | Documentation refresh needed | `readme-writer` | Dispatch with changed file list + project context |
 
-Specialists run as **Flash subagents** and report back like standard reviewers. The orchestrator synthesizes their findings alongside the standard lens results. Specialists may also be activated independently outside of a staff review when the user requests their specific capability.
+Specialists run as **`${SLOT.MODEL_FAST}` subagents** and report back like standard reviewers. The orchestrator synthesizes their findings alongside the standard lens results. Specialists may also be activated independently outside of a staff review when the user requests their specific capability.
 
 ## Anti-Patterns
 
@@ -508,7 +504,7 @@ Specialists run as **Flash subagents** and report back like standard reviewers. 
 - **Don't let reviewers see each other's work** — independence prevents confirmation bias (scouts in Sentry are independent; Probe analysts receive scout findings but not each other's)
 - **Don't skip fact-checking** — reviewer claims must be verified against actual data before presenting to user
 - **Don't fan out >4 reviewers per prong** — diminishing returns; 4 orthogonal lenses catch ~98% of issues
-- **Don't use inherit/pro for reviewers** — Flash is sufficient for read-only analysis; reserve heavyweight models for synthesis. This is a strict mandate for all prongs including diff proposers (see E14, E15 experiments)
+- **Don't use `${SLOT.MODEL_STANDARD}` or `${SLOT.MODEL_HEAVY}` for reviewers** — `${SLOT.MODEL_FAST}` is sufficient for read-only analysis; reserve heavyweight models for synthesis. This is a strict mandate for all prongs including diff proposers (see E14, E15 experiments)
 - **Don't let scouts propose fixes** (Vanguard) — separation of concerns keeps Sentry fast and unbiased
 - **Don't let Probe analysts find new problems** (Vanguard) — scope creep; if new issues surface, log them for the next review cycle
 
@@ -516,12 +512,12 @@ Specialists run as **Flash subagents** and report back like standard reviewers. 
 
 | Role | Model | Max Output | Rationale |
 |:-----|:------|:----------:|:----------|
-| Sentry scout | `flash` | 500 tokens | Read-heavy, structured output, max 5 findings |
-| Trace analyst | `flash` | 800 tokens | Dependency tracing, grep-based, blast radius map |
-| Probe analyst | `flash` | 1,000 tokens/finding | Focused analysis, concrete fix proposals |
-| Gauntlet breaker | `flash` | 800 tokens/fix | Adversarial falsification, edge-case probing |
-| Bastion verifier | `flash` | 300 tokens | Checklist-based, SHIP/BLOCK + max 3 issues |
-| Debrief extractor | `flash` | 500 tokens | Pattern extraction, structured taxonomy output |
+| Sentry scout | `${SLOT.MODEL_FAST}` | 500 tokens | Read-heavy, structured output, max 5 findings |
+| Trace analyst | `${SLOT.MODEL_FAST}` | 800 tokens | Dependency tracing, grep-based, blast radius map |
+| Probe analyst | `${SLOT.MODEL_FAST}` | 1,000 tokens/finding | Focused analysis, concrete fix proposals |
+| Gauntlet breaker | `${SLOT.MODEL_FAST}` | 800 tokens/fix | Adversarial falsification, edge-case probing |
+| Bastion verifier | `${SLOT.MODEL_FAST}` | 300 tokens | Checklist-based, SHIP/BLOCK + max 3 issues |
+| Debrief extractor | `${SLOT.MODEL_FAST}` | 500 tokens | Pattern extraction, structured taxonomy output |
 | Staff synthesizer | orchestrator (self) | Uncapped | Needs cross-cutting context, design authority, write access |
 
 ## Example Prompt Template for Reviewers

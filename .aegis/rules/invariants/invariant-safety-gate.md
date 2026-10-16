@@ -16,16 +16,10 @@ tags:
   - security
   - gate
 created: 2026-09-28
-fitness:
-  triggers: 22
-  true_positives: 3.68
-  false_positives: 0.93
-  score: 1.0
-  last_trigger_date: "2026-10-14T19:43:08Z"
 ---
 
 # Invariant: Safety Gate
 
-Target: `install/hooks/safety_gate.sh`
+Target: `aegis_cli/hooks/safety.py`
 
 Description: Security boundary for the safety gate. It has a hardcoded log path `~/.gemini/antigravity/scratch/ai-conversation-logs/governance/gate_events.jsonl` which needs careful management.

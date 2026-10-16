@@ -1,26 +1,32 @@
 """Language detection and zero-touch AST driver provisioning for polyglot codebases."""
 from __future__ import annotations
 
-import importlib.resources
 import os
 from pathlib import Path
-import shutil
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
-from aegis_core.yaml import AegisYAML
+from aegis_core.pathlookup import which
+from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, WorkspaceLayout
 
 __all__ = [
     "detect_project_languages",
     "resolve_recommended_drivers",
     "provision_ast_driver_slots",
+    "packaged_driver_for_extension",
+    "names_packaged_driver",
     "LANGUAGE_DEFINITIONS",
 ]
 
 _SKIP_DIRS = {
     "__pycache__", ".git", "node_modules", ".pytest_cache",
     ".mypy_cache", ".ruff_cache", "target", "dist", "build",
-    ".aegis", ".soma", ".tox", ".venv", "venv",
+    AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME, ".tox", ".venv", "venv",
 }
+
+# A packaged driver's selector names a v3 staging path; nothing there is ever run (the
+# runner always uses the template inside aegis), it only identifies the driver.
+_SELECTOR_DIR = f"{AEGIS_DIRNAME}/drivers"
+_LEGACY_SELECTOR_DIR = f"{LEGACY_SOMA_DIRNAME}/drivers"
 
 LANGUAGE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "rust": {
@@ -28,7 +34,7 @@ LANGUAGE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "extensions": [".rs"],
         "toolchains": ["cargo", "rustc"],
         "driver_slot": "ast_driver_rs",
-        "default_command": "{python} .aegis/drivers/rust_ast.py",
+        "default_command": f"{{python}} {_SELECTOR_DIR}/rust_ast.py",
         "driver_filename": "rust_ast.py",
     },
     "typescript": {
@@ -36,7 +42,7 @@ LANGUAGE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "extensions": [".ts", ".tsx"],
         "toolchains": ["node"],
         "driver_slot": "ast_driver_ts",
-        "default_command": "node .aegis/drivers/ts_ast.js",
+        "default_command": f"node {_SELECTOR_DIR}/ts_ast.js",
         "driver_filename": "ts_ast.js",
     },
     "javascript": {
@@ -44,7 +50,7 @@ LANGUAGE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "extensions": [".js", ".jsx", ".mjs", ".cjs"],
         "toolchains": ["node"],
         "driver_slot": "ast_driver_js",
-        "default_command": "node .aegis/drivers/ts_ast.js",
+        "default_command": f"node {_SELECTOR_DIR}/ts_ast.js",
         "driver_filename": "ts_ast.js",
     },
     "go": {
@@ -52,7 +58,7 @@ LANGUAGE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "extensions": [".go"],
         "toolchains": ["go"],
         "driver_slot": "ast_driver_go",
-        "default_command": "go run .aegis/drivers/go_ast.go",
+        "default_command": f"go run {_SELECTOR_DIR}/go_ast.go",
         "driver_filename": "go_ast.go",
     },
     "python": {
@@ -66,34 +72,40 @@ LANGUAGE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _find_driver_template(filename: str) -> Optional[Path]:
-    """Locate bundled driver recipe source from repo install/drivers/ or package resources."""
-    # 1. Check repo install/drivers/
-    repo_install_dir = Path(__file__).resolve().parents[2] / "install" / "drivers" / filename
-    if repo_install_dir.is_file():
-        return repo_install_dir
+def packaged_driver_for_extension(extension: str) -> Optional[Dict[str, Any]]:
+    """Return the language definition whose packaged AST driver handles ``extension``, or None.
 
-    # 2. Check aegis_core/ast/drivers/templates/
-    pkg_template = Path(__file__).resolve().parent / "drivers" / "templates" / filename
-    if pkg_template.is_file():
-        return pkg_template
-
-    # 3. Check importlib.resources
-    try:
-        ref = importlib.resources.files("aegis_core.ast.drivers.templates") / filename
-        path = Path(str(ref))
-        if path.is_file():
-            return path
-    except Exception:
-        pass
-
+    Its ``default_command`` is the repo slot value that opts in to that driver; the
+    command itself is never executed (see ``aegis_core.ast.runner``).
+    """
+    ext = "." + extension.strip().lower().lstrip(".")
+    for config in LANGUAGE_DEFINITIONS.values():
+        if ext in config["extensions"] and config.get("driver_filename") and config.get("default_command"):
+            return config
     return None
+
+
+def names_packaged_driver(value: str, config: Mapping[str, Any]) -> bool:
+    """True for a selector `aegis init` provisioned, including legacy forms like 'python3 .soma/drivers/rust_ast.py'."""
+    parts = value.split()
+    canonical = str(config["default_command"]).split()
+    if len(parts) != len(canonical):
+        return False
+    if parts[-1] not in (f"{_SELECTOR_DIR}/{config['driver_filename']}", f"{_LEGACY_SELECTOR_DIR}/{config['driver_filename']}"):
+        return False
+    if canonical[0] == "{python}" and parts[0] in ("python3", "python"):
+        return True
+    return parts[:-1] == canonical[:-1]
 
 
 def detect_project_languages(project_root: Path | str) -> Dict[str, Dict[str, Any]]:
     """Detect all active programming languages in a project using manifests and source scan."""
     root = Path(project_root).resolve()
     detected: Dict[str, Dict[str, Any]] = {}
+
+    def installed(toolchains: List[str]) -> List[str]:
+        # Only what aegis would run: a toolchain the repository itself provides is not one.
+        return [t for t in toolchains if which(t, outside=root)]
 
     # Quick manifest check
     manifest_found: Set[str] = set()
@@ -104,7 +116,7 @@ def detect_project_languages(project_root: Path | str) -> Dict[str, Dict[str, An
                 "manifests": found_manifests,
                 "extensions": set(),
                 "file_count": 0,
-                "toolchains": [t for t in config["toolchains"] if shutil.which(t)],
+                "toolchains": installed(config["toolchains"]),
             }
             manifest_found.add(lang)
 
@@ -125,7 +137,7 @@ def detect_project_languages(project_root: Path | str) -> Dict[str, Dict[str, An
                         "manifests": [],
                         "extensions": set(),
                         "file_count": 0,
-                        "toolchains": [t for t in LANGUAGE_DEFINITIONS[lang]["toolchains"] if shutil.which(t)],
+                        "toolchains": installed(LANGUAGE_DEFINITIONS[lang]["toolchains"]),
                     }
                 detected[lang]["extensions"].add(ext)
                 detected[lang]["file_count"] += 1
@@ -138,88 +150,62 @@ def detect_project_languages(project_root: Path | str) -> Dict[str, Dict[str, An
 
 
 def resolve_recommended_drivers(languages: Dict[str, Any]) -> Dict[str, str]:
-    """Map detected languages to recommended slot bindings for .aegis/slots.yaml."""
+    """Map detected languages to the packaged-driver slots (``ast_driver_<ext>``) that cover them."""
     recommended: Dict[str, str] = {}
-    for lang, data in languages.items():
+    for lang in languages:
         config = LANGUAGE_DEFINITIONS.get(lang)
         if not config or not config.get("driver_slot") or not config.get("default_command"):
             continue
-        slot_key = config["driver_slot"]
-        recommended[slot_key] = config["default_command"]
-
+        recommended[config["driver_slot"]] = config["default_command"]
     return recommended
 
 
 def provision_ast_driver_slots(
     workspace_root: Path | str,
     languages: Optional[Dict[str, Any]] = None,
-    copy_drivers: bool = True,
     dry_run: bool = False,
 ) -> Tuple[Dict[str, str], List[str]]:
-    """Automatically scaffold .aegis/slots.yaml and stage required driver recipes.
+    """Opt the repo in to the packaged AST drivers for its languages (``ast.packaged_drivers``).
+
+    Only drivers that ship inside aegis can be enabled this way; their commands are never
+    read from the repository (H5, D10). Extensions already listed are kept.
+
+    Raises:
+        PathTraversalError: ``.aegis`` or ``.aegis/config.json`` is a symlink. Nothing is written.
 
     Returns:
-        (slots_dict, list_of_created_files)
+        (the ``ast_driver_<ext>`` slots the repo opts in to, the files written). An
+        existing config.json that cannot be read is left untouched and nothing is written.
     """
-    root = Path(workspace_root).resolve()
-    gov_dir = root / ".aegis"
-    drivers_dir = gov_dir / "drivers"
-    slots_path = gov_dir / "slots.yaml"
+    from aegis_core.config import ConfigError, RepoConfig, update_repo_config
 
+    root = Path(workspace_root).resolve()
     if languages is None:
         languages = detect_project_languages(root)
+    recommended = resolve_recommended_drivers(languages)
+    wanted = [slot[len("ast_driver_"):] for slot in recommended]
+    try:
+        current = list(RepoConfig.load(root).packaged_drivers)
+    except ConfigError:
+        return dict(recommended), []
+    merged = current + [ext for ext in wanted if ext not in current]
+    config_path = WorkspaceLayout(root).config_file
+    written: List[str] = []
+    if not dry_run and merged and (merged != current or not config_path.is_file()):
 
-    recommended_slots = resolve_recommended_drivers(languages)
-    created_files: List[str] = []
+        def _enable(data: Dict[str, Any]) -> None:
+            # Merge into the file as it is under the lock, not as it was read above:
+            # another writer may have listed drivers since.
+            listed = list(RepoConfig.parse(data).packaged_drivers)
+            ast = data.get("ast") if isinstance(data.get("ast"), dict) else {}
+            ast["packaged_drivers"] = listed + [ext for ext in wanted if ext not in listed]
+            data["ast"] = ast
 
-    # 1. Copy required driver scripts if requested
-    if copy_drivers and recommended_slots:
-        for lang, config in LANGUAGE_DEFINITIONS.items():
-            slot_name = config.get("driver_slot")
-            filename = config.get("driver_filename")
-            if slot_name in recommended_slots and filename:
-                src_path = _find_driver_template(filename)
-                target_path = drivers_dir / filename
-                if not dry_run:
-                    drivers_dir.mkdir(parents=True, exist_ok=True)
-                    if src_path and src_path.is_file():
-                        shutil.copy2(src_path, target_path)
-                        try:
-                            # Ensure executable
-                            target_path.chmod(0o755)
-                        except OSError:
-                            pass
-                created_files.append(str(target_path))
-
-    # 2. Read or create slots.yaml
-    current_slots: Dict[str, str] = {}
-    if slots_path.is_file():
-        try:
-            doc = AegisYAML.parse_text(slots_path.read_text(encoding="utf-8"))
-            if isinstance(doc, dict) and isinstance(doc.get("slots"), dict):
-                current_slots = {str(k): str(v) for k, v in doc["slots"].items()}
-        except Exception:
-            current_slots = {}
-
-    # Merge newly recommended slots without overwriting custom user overrides
-    merged_slots = dict(current_slots)
-    for k, v in recommended_slots.items():
-        if k not in merged_slots:
-            merged_slots[k] = v
-
-    # Write back slots.yaml
-    if not dry_run and (merged_slots != current_slots or not slots_path.is_file()):
-        gov_dir.mkdir(parents=True, exist_ok=True)
-        lines = [
-            "# .aegis/slots.yaml — Repository skill & driver slot bindings",
-            "# Auto-generated by Aegis Init",
-            "",
-            "slots:",
-        ]
-        for k, v in sorted(merged_slots.items()):
-            lines.append(f'  {k}: "{v}"')
-        lines.append("")
-        slots_path.write_text("\n".join(lines), encoding="utf-8")
-        created_files.append(str(slots_path))
-
-    return merged_slots, created_files
+        merged = list(RepoConfig.parse(update_repo_config(root, _enable)).packaged_drivers)
+        written = [str(config_path)]
+    slots = {
+        f"ast_driver_{ext}": packaged["default_command"]
+        for ext, packaged in ((ext, packaged_driver_for_extension(ext)) for ext in merged)
+        if packaged is not None
+    }
+    return slots, written

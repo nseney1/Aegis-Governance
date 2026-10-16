@@ -1,5 +1,4 @@
 """Fail-closed and read-only regression tests for CLI/MCP checkpoint."""
-import argparse
 import os
 from pathlib import Path
 
@@ -8,14 +7,14 @@ import pytest
 from aegis_core.verification import checkpoint_checks
 
 
-def _write_wall(root, content=None):
-    path = root / '.aegis' / 'rules' / 'walls' / 'wall-test.md'
+def _write_invariant(root, content=None):
+    path = root / '.aegis' / 'rules' / 'invariants' / 'wall-test.md'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content or (
         '---\n'
         'id: wall-test\n'
         'domain: testing\n'
-        'type: wall\n'
+        'type: invariant\n'
         'enforcement: gate\n'
         '---\n'
         '# Test wall\n'
@@ -65,10 +64,10 @@ def test_hardcoded_path_read_failure_is_an_issue(tmp_path, monkeypatch):
     )
 
 
-def test_cell_stat_failure_is_an_issue(tmp_path, monkeypatch):
+def test_rule_stat_failure_is_an_issue(tmp_path, monkeypatch):
     import aegis_core.rule_inventory as inventory
 
-    cell = _write_wall(tmp_path)
+    cell = _write_invariant(tmp_path)
     real_stat = inventory.os.stat
 
     def denied(path, *args, **kwargs):
@@ -77,10 +76,10 @@ def test_cell_stat_failure_is_an_issue(tmp_path, monkeypatch):
         return real_stat(path, *args, **kwargs)
 
     monkeypatch.setattr(inventory.os, 'stat', denied)
-    issues = checkpoint_checks.check_cell_conventions(tmp_path)
+    issues = checkpoint_checks.check_rule_conventions(tmp_path)
     assert any(
-        issue['check'] == 'cell_conventions'
-        and issue.get('file') == '.aegis/rules/walls/wall-test.md'
+        issue['check'] == 'rule_load'
+        and issue.get('file') == '.aegis/rules/invariants/wall-test.md'
         and 'stat' in issue['message'].lower()
         for issue in issues
     )
@@ -91,43 +90,26 @@ def test_cell_stat_failure_is_an_issue(tmp_path, monkeypatch):
     ('---\n- one\n- two\n---\nbody\n', 'mapping'),
     ('---\nid: wall-test\n', 'unterminated'),
 ])
-def test_malformed_cell_frontmatter_is_an_issue(tmp_path, content, expected):
-    _write_wall(tmp_path, content)
-    issues = checkpoint_checks.check_cell_conventions(tmp_path)
+def test_malformed_rule_frontmatter_is_an_issue(tmp_path, content, expected):
+    _write_invariant(tmp_path, content)
+    issues = checkpoint_checks.check_rule_conventions(tmp_path)
     assert any(
-        issue['check'] == 'cell_conventions'
+        issue['check'] == 'rule_load'
         and expected in issue['message'].lower()
         for issue in issues
     ), issues
 
 
 def _run_cli(root):
-    from aegis_cli.checkpoint import run_checkpoint
+    from aegis_cli.cli import main
 
-    return run_checkpoint(argparse.Namespace(
-        workspace=str(root), pre_commit=False, strict=True, json=False,
-    ))
+    return main(['check', '--workspace', str(root), '--strict'])
 
 
-def _run_mcp(root, monkeypatch):
-    from aegis_mcp.tools import execute_tool
-
-    monkeypatch.setattr('aegis_mcp.tools.confine_workspace', lambda path: str(root))
-    return execute_tool('aegis_checkpoint', {'workspace': str(root)})
-
-
-@pytest.mark.parametrize('runner', ['cli', 'mcp'])
 @pytest.mark.parametrize('malformed', [False, True], ids=['pass', 'fail'])
-def test_checkpoint_is_recursively_read_only_on_pass_and_fail(
-    tmp_path, monkeypatch, runner, malformed, capsys
-):
+def test_checkpoint_is_recursively_read_only_on_pass_and_fail(tmp_path, malformed, capsys):
     content = '---\nid: [unterminated\n---\nbody\n' if malformed else None
-    _write_wall(tmp_path, content)
-    evidence_dir = tmp_path / '.aegis' / 'evidence'
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    (evidence_dir / 'arbitration_cycle_1.json').write_text(
-        '{"verdict": "ship", "cycle": 1}', encoding='utf-8'
-    )
+    _write_invariant(tmp_path, content)
     marker = tmp_path / '.marker'
     marker.write_bytes(b'unchanged bytes\x00\xff')
     external = tmp_path.parent / f'{tmp_path.name}-external'
@@ -139,14 +121,11 @@ def test_checkpoint_is_recursively_read_only_on_pass_and_fail(
         pytest.skip('symlinks are unavailable')
 
     before = _snapshot(tmp_path)
-    result = _run_cli(tmp_path) if runner == 'cli' else _run_mcp(tmp_path, monkeypatch)
+    result = _run_cli(tmp_path)
     after = _snapshot(tmp_path)
 
     assert after == before
-    if runner == 'cli':
-        assert result == (1 if malformed else 0)
-    else:
-        assert result['status'] == ('FAIL' if malformed else 'PASS')
+    assert result == (1 if malformed else 0)
 
 
 def test_resolve_canonical_test_candidates(tmp_path: Path):
@@ -166,3 +145,13 @@ def test_resolve_canonical_test_candidates(tmp_path: Path):
     candidates_cli = [p.as_posix() for p in _resolve_canonical_test_candidates(tmp_path, cli_src)]
     assert any("tests/cli/test_promote.py" in c for c in candidates_cli)
     assert any("tests/test_cli_promote.py" in c for c in candidates_cli)
+
+
+def test_a_skills_module_maps_to_the_skills_suite(tmp_path: Path):
+    """aegis_core/skills/* is covered by tests/unit/mcp/test_skills.py (the handoff suite is gone)."""
+    from aegis_core.verification.checkpoint_checks import _resolve_canonical_test_candidates
+
+    src = tmp_path / "aegis_core" / "skills" / "slots.py"
+    candidates = [p.relative_to(tmp_path).as_posix() for p in _resolve_canonical_test_candidates(tmp_path, src)]
+    assert "tests/unit/mcp/test_skills.py" in candidates
+    assert not [c for c in candidates if "handoff" in c]

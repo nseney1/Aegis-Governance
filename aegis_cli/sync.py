@@ -1,119 +1,144 @@
-"""soma sync — reconcile canonical JSONL evidence with cell frontmatter.
+"""aegis sync — rebuild derived state from the rules and the ledger, and suggest transitions.
 
-Reads .soma/evidence/signals.jsonl, aggregates trigger/tp/fp signals per
-cell, and updates cell frontmatter fitness blocks. Idempotent — can be run
-repeatedly.
+`aegis sync` writes .aegis/state/derived.json (fitness, triggers and a suggested
+promote/demote/archive for every rule) and changes no rule file. `aegis sync --apply`
+also applies the suggestions; it is the only command that moves rules in bulk
+(ADR 0005 D1). Exit codes: 0 done, 1 a rule file cannot be loaded or applying was
+refused or failed, 2 usage or workspace error. With --json, stdout carries only the
+JSON document.
 """
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import sys
-import tempfile
-from typing import Optional
+from typing import Any, Dict, List
 
-from aegis_cli import resolve_root
-from aegis_cli.base import CommandCategory, AegisCommand
-from aegis_core.evidence import aggregate_signals
-from aegis_core.sync import aggregate_evidence, sync_frontmatter
+from aegis_cli import sanitize_display
+from aegis_cli.base import AegisCommand, CommandCategory
+from aegis_core.errors import AegisError
+from aegis_core.telemetry_engine.ledger import incomplete as ledger_incomplete
 
-__all__ = ["run_sync", "SyncCommand"]
+__all__ = ["SyncCommand", "run_sync"]
+
+EXIT_OK = 0
+EXIT_PROBLEMS = 1
+EXIT_USAGE = 2
+_APPLIED_OK = frozenset({"promoted", "demoted", "archived"})
+LEDGER_WARNING = (
+    "⚠️  The ledger is incomplete ({}): fitness counts only the rows that could be read, "
+    "so moves that rely on it (sync --apply, rule archive, tier changes) are refused"
+)
+
+
+def _rows(derived: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [dict(entry, id=rule_id) for rule_id, entry in sorted(derived["rules"].items())]
+
+
+def _status(result: Any) -> str:
+    if result.refused:
+        return "refused"
+    if result.derived["errors"]:
+        return "errors"
+    return "applied" if result.applied else "synced"
+
+
+def _print_text(args: argparse.Namespace, result: Any, rel_path: str) -> None:
+    from aegis_cli.ui.table import Table
+    from aegis_cli.ui.theme import OutputContext
+
+    existing = getattr(args, "ui", None)
+    ui = existing if isinstance(existing, OutputContext) else OutputContext.from_env_and_args(args)
+    rows = _rows(result.derived)
+    if rows:
+        tbl = Table(ctx=ui)
+        for column in ("Rule", "Type", "Fitness", "Triggers", "TP", "FP", "Suggestion"):
+            tbl.add_column(column, no_wrap=True)
+        for row in rows:
+            tbl.add_row(
+                sanitize_display(str(row["id"])), ui.color_rule_type(str(row["type"])), f"{row['fitness']:.2f}",
+                str(row["triggers"]), f"{row['tp']:g}", f"{row['fp']:g}", row["suggestion"] or "—",
+            )
+        for line in tbl.render(ui).splitlines():
+            print(f"  {line}")
+    for error in result.derived["errors"]:
+        print(f"  ❌ {sanitize_display(error['path'])}: {sanitize_display(error['error'], 300)}")
+    for ignored in result.derived["ignored"]:
+        print(f"  ⚠️  {sanitize_display(ignored['path'])}: {ignored['reason']}")
+    for rule in result.derived["untargeted"]:
+        print(f"  ⚠️  {sanitize_display(str(rule['id']))}: applies to no file (no target_paths)")
+    missing = ledger_incomplete(result.derived["ledger"])
+    if missing:
+        print(f"  {LEDGER_WARNING.format(sanitize_display(missing, 300))}")
+    for action in result.applied:
+        detail = f" ({action['from_type']} -> {action['to_type']})" if action.get("to_type") else ""
+        print(f"  {action['action']} {sanitize_display(action['rule'])}: {action['status']}{detail}")
+    if result.refused:
+        print(f"  ❌ {result.refused}")
+    pending = sum(1 for row in rows if row["suggestion"])
+    print(f"Wrote {rel_path} ({len(rows)} rules, {pending} suggested transitions).")
+    if pending and not result.applied and not result.refused:
+        print("Apply the suggestions with: aegis sync --apply")
 
 
 def run_sync(args: argparse.Namespace) -> int:
-    """CLI entrypoint for aegis sync."""
-    root = resolve_root(args)
-    evidence_dir = str(root / ".aegis" / "evidence")
-    cells_dir = str(root / ".aegis" / "rules")
+    from aegis_core.sync import sync
+    from aegis_core.workspace.base import Workspace
+    from aegis_core.workspace.layout import is_aegis_workspace
 
-    dry_run = getattr(args, "dry_run", False)
-    as_json = getattr(args, "json", False)
+    raw_ws = getattr(args, "workspace", None)
+    if raw_ws and not os.path.exists(raw_ws):
+        print(f"Error: workspace path does not exist: {raw_ws}", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        root = Workspace.resolve(raw_ws).root.resolve()
+    except AegisError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    if not is_aegis_workspace(root):
+        print(f"Error: not an Aegis workspace (no .aegis/ in {root}); run aegis init", file=sys.stderr)
+        return EXIT_USAGE
 
-    aggregation = aggregate_signals(evidence_dir)
-    counts = aggregation.counts
-    errors: list[dict] = list(aggregation.errors)
-    if not counts and not errors:
-        if as_json:
-            print(json.dumps({
-                "status": "ok", "changes": [], "errors": [],
-                "dry_run": dry_run,
-            }, indent=2))
-        else:
-            print(f"No evidence found in {evidence_dir}")
-        return 0
+    try:
+        result = sync(root, apply=args.apply)
+    except (AegisError, RuntimeError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_PROBLEMS
 
-    if errors:
-        if as_json:
-            print(json.dumps({
-                "status": "error", "changes": [], "errors": errors,
-                "dry_run": dry_run,
-            }, indent=2))
-        else:
-            for error in errors:
-                subject = error.get("file", "evidence")
-                detail = error.get("error", "unknown error")
-                if error.get("line") is not None:
-                    detail = f"line {error['line']}: {detail}"
-                print(f"  ! {subject}: {detail}", file=sys.stderr)
-            print(
-                f"Sync failed for {len(errors)} evidence rows.",
-                file=sys.stderr,
-            )
-        return 1
-
-    changes = sync_frontmatter(
-        cells_dir, counts, dry_run=dry_run, errors=errors
-    )
-
-    if as_json:
+    rel_path = result.path.relative_to(root).as_posix()
+    failed = [a for a in result.applied if a["status"] not in _APPLIED_OK]
+    rc = EXIT_PROBLEMS if (result.refused or result.derived["errors"] or failed) else EXIT_OK
+    # Both are always set: --apply is this parser's flag, AegisParser.parse_args sets json.
+    if args.json:
         print(json.dumps({
-            "status": "error" if errors else "ok",
-            "changes": changes,
-            "errors": errors,
-            "dry_run": dry_run,
-        }, indent=2))
-        return 1 if errors else 0
-
-    for error in errors:
-        subject = error.get("cell_id") or error.get("file", "evidence")
-        detail = error.get("error") or error.get("message", "unknown error")
-        if error.get("line") is not None:
-            detail = f"line {error['line']}: {detail}"
-        print(f"  ! {subject}: {detail}", file=sys.stderr)
-
-    verb = "Would update" if dry_run else "Updated"
-    if not changes and not errors:
-        print("All cells already in sync with evidence.")
-        return 0
-
-    for change in changes:
-        print(
-            f"  ✓ {change['cell_id']}: triggers {change['triggers']}, "
-            f"tp {change['tp']}, fp {change['fp']} → score={change['score']}"
-        )
-
-    if changes:
-        print(f"\n{verb} {len(changes)} cells.")
-    if errors:
-        print(f"Sync failed for {len(errors)} cells.", file=sys.stderr)
-        return 1
-    return 0
+            "status": _status(result),
+            "path": rel_path,
+            "synced_at": result.derived["synced_at"],
+            "rules": _rows(result.derived),
+            "applied": result.applied,
+            "refused": result.refused,
+            "errors": result.derived["errors"],
+            "ignored": result.derived["ignored"],
+            "untargeted": result.derived["untargeted"],
+            "ledger": result.derived["ledger"],
+        }, indent=2, default=str))
+    else:
+        _print_text(args, result, rel_path)
+    return rc
 
 
 class SyncCommand(AegisCommand):
-    """Command to reconcile canonical JSONL evidence with cell frontmatter."""
+    """Rebuild derived rule state and suggest lifecycle transitions."""
 
     name = "sync"
-    category = CommandCategory.WORKFLOW
-    help = "Reconcile evidence JSONL with cell frontmatter"
+    category = CommandCategory.LIFECYCLE
+    help = "Rebuild rule fitness from the ledger and suggest promotions (--apply to apply them)"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Show what would change without writing",
+            "--apply", action="store_true",
+            help="Apply the suggested promote/demote/archive transitions (moves rule files)",
         )
 
     def execute(self, args: argparse.Namespace) -> int:

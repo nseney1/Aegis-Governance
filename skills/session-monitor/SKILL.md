@@ -3,16 +3,12 @@ id: session-monitor
 name: Session Monitor
 description: Real-time session monitoring tracking waste trajectory, dispatching periodic probes, and alerting on regressions.
 kind: skill
-tier: sentinel
-consumes: [InspectionReceipt, TestVerdict]
-produces: [InspectionReceipt, ChargeSheet]
-handoff_targets: [adaptive-reviewer, post-mortem]
 trigger: user_request
 ---
 
 # Session Monitor
 
-> **Role**: Live waste tracking and alerting for active Antigravity sessions. Periodically samples session trajectories, quantifies waste patterns, and alerts the orchestrator upon regression or threshold breaches.
+> **Role**: Live waste tracking and alerting for active agent sessions. Periodically samples session trajectories, quantifies waste patterns, and alerts the orchestrator upon regression or threshold breaches.
 
 ## Workflow
 

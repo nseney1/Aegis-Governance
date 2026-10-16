@@ -1,6 +1,6 @@
 # ADR 0003: Aegis v3.0.0 Clean-Slate Cutover & Zero-Dependency CLI UX
 
-- **Status**: Accepted
+- **Status**: Accepted; partly superseded by [ADR 0005](0005-v4-plan-of-record.md) (2026-10-15): v4 cuts the MCP surface from the 20 tools below to 4, and replaces clean-slate cutovers with versioned formats and `aegis migrate` (AD-5).
 - **Date**: 2026-10-14
 - **Target Release**: v3.0.0
 

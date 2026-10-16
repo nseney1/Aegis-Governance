@@ -8,9 +8,9 @@ prediction: "Enforcing the Delegation-First Mandate for plans spanning >= 2 disj
 falsification: "Direct single-threaded execution achieves lower total latency, lower token cost, and higher verification pass rates than subagent fan-out across 20 multi-file tasks -> prune"
 target_paths:
   - "rules/*.md"
-  - "aegis_core/**/*.py"
-  - "aegis_cli/**/*.py"
-  - "aegis_mcp/**/*.py"
+  - "aegis_core/*.py"
+  - "aegis_cli/*.py"
+  - "aegis_mcp/*.py"
 triggers:
   - feature_implementation
   - refactor
@@ -26,13 +26,6 @@ tags:
   - architecture
   - efficiency
   - concurrency
-fitness:
-  score: null
-  impact_weight: 1.0
-  triggers: 33
-  true_positives: 11.0464
-  false_positives: 6.7256
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Invariant: Prefer Subagent Delegation Protocol

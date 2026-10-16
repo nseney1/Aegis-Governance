@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
+from aegis_core import pathlookup
 from aegis_core.errors import NoTestRunnerFoundError
 
 
@@ -20,7 +20,7 @@ def resolve_pytest_cmd(
     Probing order:
     1. Active virtual environment ($VIRTUAL_ENV/bin/pytest or Scripts/pytest.exe)
     2. Local workspace virtual environment (.venv/bin/pytest or Scripts/pytest.exe)
-    3. System pytest executable on PATH (shutil.which("pytest"))
+    3. System pytest executable in an absolute PATH entry (aegis_core.pathlookup)
     4. Current Python interpreter if pytest package is installed
 
     Args:
@@ -46,14 +46,10 @@ def resolve_pytest_cmd(
     # 2. Local workspace virtual environment (.venv)
     root = None
     if workspace is not None:
-        if hasattr(workspace, "cells_dir") and hasattr(workspace, "root"):
-            # Soma Workspace instance
-            root = Path(workspace.root)
-        else:
-            try:
-                root = Path(workspace)
-            except Exception:
-                root = None
+        try:
+            root = Path(workspace)  # a path, or a Workspace (os.PathLike)
+        except Exception:
+            root = None
 
     if root is not None:
         local_venv = Path(root) / ".venv"
@@ -62,8 +58,9 @@ def resolve_pytest_cmd(
                 if os.name == "nt" or os.access(cand, os.X_OK):
                     return [str(cand)]
 
-    # 3. System pytest executable on PATH
-    which_pytest = shutil.which("pytest")
+    # 3. System pytest executable on PATH. Absolute entries only: an empty or relative
+    # entry (and on Windows the current directory) names the cwd, not an install.
+    which_pytest = pathlookup.which("pytest")
     if which_pytest:
         return [which_pytest]
 
@@ -79,36 +76,6 @@ def resolve_pytest_cmd(
         raise NoTestRunnerFoundError("No pytest runner found in virtual environment, .venv, or PATH")
 
     return []
-
-
-def resolve_pytest_python(workspace: Any = None) -> str:
-    """Resolve the Python executable associated with the discovered pytest runner."""
-    cmd = resolve_pytest_cmd(workspace=workspace)
-    if not cmd:
-        return sys.executable
-    if len(cmd) >= 3 and cmd[1] == "-m" and cmd[2] == "pytest":
-        return cmd[0]
-
-    pytest_bin = cmd[0]
-    # Check shebang line if it is a python script
-    try:
-        with open(pytest_bin, "r", encoding="utf-8", errors="ignore") as f:
-            first_line = f.readline().strip()
-            if first_line.startswith("#!"):
-                py = first_line[2:].strip()
-                if os.path.isfile(py) and (os.name == "nt" or os.access(py, os.X_OK)):
-                    return py
-    except Exception:
-        pass
-
-    # Check parent directory (e.g. venv/bin/python)
-    parent_dir = os.path.dirname(pytest_bin)
-    for cand in ("python3", "python", "python.exe"):
-        cand_path = os.path.join(parent_dir, cand)
-        if os.path.isfile(cand_path) and (os.name == "nt" or os.access(cand_path, os.X_OK)):
-            return cand_path
-
-    return sys.executable
 
 
 def discover_test_evidence(target_files: list[str], repo_root: str) -> tuple[list[str], str]:
@@ -204,6 +171,5 @@ def discover_test_evidence(target_files: list[str], repo_root: str) -> tuple[lis
 __all__ = [
     "NoTestRunnerFoundError",
     "resolve_pytest_cmd",
-    "resolve_pytest_python",
     "discover_test_evidence",
 ]

@@ -6,18 +6,16 @@ Path(), and os.path routines. Strictly zero-dependency (Python standard library 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from aegis_core.errors import WorkspaceError
 from aegis_core.workspace.confinement import confine_path_internal, validate_workspace_path
-from aegis_core.workspace.discovery import is_aegis_repo, resolve_workspace_root
+from aegis_core.workspace.discovery import resolve_workspace_root
 from aegis_core.workspace.hooks import _find_git_dirs, resolve_git_hooks_dir
-from aegis_core.workspace.scaffold import scaffold_workspace
 
 if TYPE_CHECKING:
-    from aegis_core.workspace.git import GitWorkspace
     from aegis_core.workspace.layout import WorkspaceLayout
 
 
@@ -30,20 +28,19 @@ class Workspace(os.PathLike[str]):
     """
 
     root: Path
-    git_hooks_dir: Path | None = field(default=None)
-    is_worktree: bool = field(default=False)
 
     def __post_init__(self) -> None:
-        resolved_root = Path(self.root).resolve()
-        object.__setattr__(self, "root", resolved_root)
+        object.__setattr__(self, "root", Path(self.root).resolve())
 
-        dot_git = resolved_root / ".git"
-        is_wt = dot_git.is_file()
-        object.__setattr__(self, "is_worktree", is_wt)
+    @property
+    def is_worktree(self) -> bool:
+        """True if the root is a linked git worktree (its ``.git`` is a file)."""
+        return (self.root / ".git").is_file()
 
-        if self.git_hooks_dir is None:
-            hooks = resolve_git_hooks_dir(resolved_root)
-            object.__setattr__(self, "git_hooks_dir", hooks)
+    @property
+    def git_hooks_dir(self) -> Path | None:
+        """The hooks directory of the repository rooted here, or None (asks git; not cached)."""
+        return resolve_git_hooks_dir(self.root)
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Workspace):
@@ -71,49 +68,14 @@ class Workspace(os.PathLike[str]):
         return self.layout.aegis_dir
 
     @property
-    def soma_dir(self) -> Path:
-        """Path to .aegis directory."""
-        return self.aegis_dir
-
-    @property
     def rules_dir(self) -> Path:
         """Path to active rules directory (.aegis/rules)."""
         return self.layout.rules_dir
 
     @property
-    def cells_dir(self) -> Path:
-        """Path to active rules directory (.aegis/rules)."""
-        return self.rules_dir
-
-    @property
-    def metrics_dir(self) -> Path:
-        """Path to metrics directory."""
-        return self.layout.metrics_dir
-
-    @property
-    def evidence_dir(self) -> Path:
-        """Path to evidence directory."""
-        return self.layout.evidence_dir
-
-    @property
-    def locks_dir(self) -> Path:
-        """Path to locks directory."""
-        return self.layout.locks_dir
-
-    @property
-    def signals_file(self) -> Path:
-        """Path to signals.jsonl file."""
-        return self.layout.signals_file
-
-    @property
     def is_git(self) -> bool:
-        """True if this workspace is backed by a Git repository or worktree."""
-        return (self.root / ".git").exists() or self.git_hooks_dir is not None
-
-    @property
-    def is_aegis_repo(self) -> bool:
-        """True if this workspace is the core Aegis Governance repository."""
-        return is_aegis_repo(self.root)
+        """True if the root is inside a git repository or worktree that git itself would accept."""
+        return _find_git_dirs(self.root)[0] is not None
 
     def __fspath__(self) -> str:
         return str(self.root)
@@ -132,7 +94,6 @@ class Workspace(os.PathLike[str]):
         """Construct a Workspace for initialization without requiring pre-existing .aegis directory.
 
         Guards against symlink traversal escapes and non-directory files.
-        Polymorphically returns GitWorkspace if a git repository is present.
         """
         p = Path(path)
         if p.is_symlink():
@@ -140,27 +101,15 @@ class Workspace(os.PathLike[str]):
         resolved = p.resolve()
         if resolved.is_file():
             raise WorkspaceError(f"Workspace path must be a directory, not a file: {resolved}")
-        if cls is Workspace:
-            dot_git = resolved / ".git"
-            if dot_git.exists() or _find_git_dirs(resolved)[0] is not None:
-                from aegis_core.workspace.git import GitWorkspace
-                return GitWorkspace(root=resolved)
         return cls(root=resolved)
 
     def scaffold(self, minimal: bool = False, dry_run: bool = False) -> list[Path]:
-        """Scaffold standard directory structure for Aegis governance.
+        """Create the D12 directories (.aegis/rules/<type>/, .aegis/state/); refuse bare repos."""
+        # Imported here: scaffold writes through aegis_core.storage, which imports the
+        # workspace package's layout module, so a module-level import would be circular.
+        from aegis_core.workspace.scaffold import scaffold_workspace
 
-        Creates .aegis/rules/ and .aegis/evidence/ (and .aegis/metrics/).
-        Guards against bare git repositories.
-        """
-        return scaffold_workspace(
-            root=self.root,
-            cells_dir=self.rules_dir,
-            evidence_dir=self.evidence_dir,
-            metrics_dir=self.metrics_dir,
-            minimal=minimal,
-            dry_run=dry_run,
-        )
+        return scaffold_workspace(self.layout, minimal=minimal, dry_run=dry_run)
 
     @classmethod
     def resolve(
@@ -169,31 +118,15 @@ class Workspace(os.PathLike[str]):
         caller_file: str | Path | os.PathLike[str] | None = None,
         strict_env: bool = False,
     ) -> Workspace:
-        """Find the project root containing .aegis/rules/ or .aegis/.
-
-        Polymorphically returns GitWorkspace if backed by a Git repository or worktree.
-        """
-        from aegis_core.workspace.git import GitWorkspace
-
-        def _make_ws(cand_root: Path) -> Workspace:
-            resolved_root = cand_root.resolve()
-            if cls is Workspace:
-                dot_git = resolved_root / ".git"
-                if dot_git.exists() or _find_git_dirs(resolved_root)[0] is not None:
-                    return GitWorkspace(root=resolved_root)
-            return cls(root=resolved_root)
-
+        """Find the project root containing .aegis/rules/ or .aegis/."""
         if isinstance(start, Workspace):
-            if cls is GitWorkspace and not isinstance(start, GitWorkspace):
-                return GitWorkspace(root=start.root)
             return start
-
         cand_root = resolve_workspace_root(
             start=start,
             caller_file=caller_file,
             strict_env=strict_env,
         )
-        return _make_ws(cand_root)
+        return cls(root=cand_root.resolve())
 
     @classmethod
     def confine(
@@ -203,18 +136,10 @@ class Workspace(os.PathLike[str]):
         """Validate and confine a workspace path.
 
         A valid workspace must exist as a directory and contain .aegis/rules/.
-        Returns a Workspace or GitWorkspace instance.
         """
         if isinstance(untrusted_workspace, Workspace):
             return untrusted_workspace
-
-        resolved_path = validate_workspace_path(untrusted_workspace)
-        if cls is Workspace:
-            dot_git = resolved_path / ".git"
-            if dot_git.exists() or _find_git_dirs(resolved_path)[0] is not None:
-                from aegis_core.workspace.git import GitWorkspace
-                return GitWorkspace(root=resolved_path)
-        return cls(root=resolved_path)
+        return cls(root=validate_workspace_path(untrusted_workspace))
 
     def confine_path(self, untrusted_path: str | Path | os.PathLike[str]) -> tuple[str, str]:
         """Resolve and confine a file path within this workspace.
@@ -223,26 +148,6 @@ class Workspace(os.PathLike[str]):
         Raises PathTraversalError if the path escapes the workspace boundary.
         """
         return confine_path_internal(self.root, untrusted_path)
-
-    def validate_rule_names(self, rule_names: list[str]) -> list[str]:
-        """Validate that rule names reference rules that actually exist.
-
-        Returns a list of invalid names (empty list means all names are valid).
-        """
-        if not rule_names:
-            return []
-
-        rules_dir = self.rules_dir
-        if not rules_dir.is_dir():
-            return list(rule_names)
-
-        known = set()
-        for _dirpath, _dirnames, filenames in os.walk(str(rules_dir)):
-            for fn in filenames:
-                if fn.endswith(".md") and fn != "README.md":
-                    known.add(os.path.splitext(fn)[0])
-
-        return [name for name in rule_names if name not in known]
 
 
 __all__ = ["Workspace"]

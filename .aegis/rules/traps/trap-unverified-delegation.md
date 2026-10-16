@@ -17,13 +17,7 @@ triggers:
 minimum_mode: patrol
 expiry_sessions: 30
 expiry_days: 90
-fitness:
-  score: 0.5
-  impact_weight: 1.0
-  triggers: 82
-  true_positives: 35.6628
-  false_positives: 29.3898
-  last_trigger_date: "2026-10-14T22:29:45Z"
+impact_weight: 1.0
 ---
 
 # Trap: Unverified Delegation

@@ -17,12 +17,6 @@ tags:
   - workflows
   - review-escalation
 created: 2026-09-28
-fitness:
-  triggers: 78
-  true_positives: 28.1604
-  false_positives: 21.424
-  score: 0.5
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Boundary: Core & Workflow Escalation

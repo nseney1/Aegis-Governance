@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 from aegis_core.errors import PathTraversalError, WorkspaceError, WorkspaceNotFoundError
+from aegis_core.workspace.layout import has_rules_dir
 
 _WINDOWS_DEVICE_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
@@ -53,8 +54,13 @@ def confine_path_internal(
         if base in _WINDOWS_DEVICE_NAMES:
             raise PathTraversalError(f"reserved Windows device name not permitted: {p_str!r}")
 
-    resolved_root = workspace_root.resolve()
-    candidate = Path(os.path.join(str(resolved_root), p_str)).resolve()
+    try:
+        resolved_root = workspace_root.resolve()
+        candidate = Path(os.path.join(str(resolved_root), p_str)).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        # A symlink loop raises RuntimeError before Python 3.13; callers (the MCP tool
+        # handlers among them) handle confinement failures as ValueError only.
+        raise PathTraversalError(f"{p_str} cannot be resolved: {exc}") from exc
 
     if candidate == resolved_root:
         raise PathTraversalError("refusing to treat the workspace root as a file")
@@ -78,7 +84,7 @@ def validate_workspace_path(
     Returns the resolved Path object.
     Raises WorkspaceError / WorkspaceNotFoundError on invalid or malicious input.
     """
-    from aegis_core.workspace.discovery import check_legacy_soma_sentinel
+    from aegis_core.workspace.discovery import refuse_unmigrated_v3
 
     if not untrusted_workspace or not str(untrusted_workspace).strip():
         raise WorkspaceError("workspace path must not be empty")
@@ -87,10 +93,9 @@ def validate_workspace_path(
     if not os.path.isdir(resolved):
         raise WorkspaceNotFoundError(f"workspace does not exist or is not a directory: {resolved}")
 
-    check_legacy_soma_sentinel(resolved)
+    refuse_unmigrated_v3(resolved)
 
-    aegis_rules = os.path.join(resolved, ".aegis", "rules")
-    if not os.path.isdir(aegis_rules):
+    if not has_rules_dir(resolved):
         raise WorkspaceError(f"not a valid Aegis workspace (missing .aegis/rules): {resolved}")
 
     return Path(resolved)

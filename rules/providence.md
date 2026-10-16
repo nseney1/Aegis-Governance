@@ -7,12 +7,12 @@ description: Global steering rule for codebase governance, claim verification, a
 trigger: always_on
 enforcement: gate
 ---
-# Gemini Providence & Governance
+# Providence & Governance
 
 > **Role**: Highest-priority global steering rule for codebase governance, claim verification, and provenance. Dictates how the agent grounds actions, verifies information, and communicates uncertainty across all projects.
 
 ## 1. Core Philosophy: Grounding Over Guesswork
-- **Zero Hallucination Tolerance**: Never invent APIs, internal libraries, or dependencies. If unsure whether a utility exists, search the codebase first using tools like `grep_search`.
+- **Zero Hallucination Tolerance**: Never invent APIs, internal libraries, or dependencies. If unsure whether a utility exists, search the codebase first with `${SLOT.TOOL_SEARCH}`.
 - **Evidence-Based Claims**: Any claim made about the system's state, performance, or behavior must be backed by observable code, logs, or documentation.
 - **External Evidence Priority**: When legacy code comments or internal stubs conflict with external documentation, web search results, or user-provided evidence, external sources take precedence. Legacy stubs are unverified until confirmed.
 - **Fail Loudly**: If a requested task contradicts existing architecture or if required context is missing, stop and ask the user for clarification. Do not silently work around architectural constraints.
@@ -64,7 +64,7 @@ Before making a technical assertion or implementing a change, verify the followi
   - *Data migrations*: verify source data exists (`ls`, `find`, ask user).
   - *External APIs*: confirm expected behavior (one test call, screenshot, or doc link).
   - *Library features*: verify the feature exists in the installed version.
-  - *Desktop/GUI automation*: verify bindings and coordinates via direct UI screenshots or settings menus; guessing controls or UI coordinates is strictly prohibited (see `desktop-automation.md`).
+  - *Desktop/GUI automation*: verify bindings and coordinates via direct UI screenshots or settings menus; guessing controls or UI coordinates is strictly prohibited.
 - **Data Ingestion Guard**: When ingesting external data directories, verify file dimensions/sizes before bulk processing; filter out metadata, thumbnails, and system files.
 - **One-Step Probes**: Validation must be achievable in 1–3 steps; longer indicates validating too late.
 

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis-guardrails"
-version = "3.3.0"
-description = "Governance framework that makes AI coding agents trustworthy"
+dynamic = ["version"]
+description = "Rules and an MCP server that keep AI coding agents on track: Claude Code, Codex CLI and Antigravity"
 
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -14,8 +14,8 @@ authors = [
     {name = "Aegis Contributors"}
 ]
 keywords = [
-    "ai-governance", "agent-alignment", "evolutionary-rules",
-    "code-review", "ai-coding-assistant", "token-optimization"
+    "ai-coding-agents", "guardrails", "mcp", "agents-md", "claude-code",
+    "codex", "antigravity", "code-review"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -35,35 +35,59 @@ aegis = "aegis_cli.cli:main"
 aegis-mcp = "aegis_mcp.server:main"
 
 [project.optional-dependencies]
-ai = ["google-genai>=1.0"]
-gemini = ["google-genai>=1.0"]
-anthropic = ["anthropic>=0.30"]
-openai = ["openai>=1.0"]
-keyring = ["keyring>=23.0.0"]
-dev = ["pytest", "pytest-xdist>=3.5.0", "ruff", "hypothesis>=6.100.0", "coverage", "pyyaml", "anyio"]
+# Layer 2 runs any model through --llm-cmd / AEGIS_LLM_CMD, so there are no
+# vendor SDK extras. Runtime dependencies stay empty.
+dev = ["pytest", "pytest-xdist>=3.5.0", "ruff", "hypothesis>=6.100.0", "coverage", "pyyaml", "anyio", "build"]
 
 [project.urls]
 Homepage = "https://github.com/nseney1/Aegis-Guardrails"
-Documentation = "https://github.com/nseney1/Aegis-Guardrails/tree/main/docs"
-Changelog = "https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/project/CHANGELOG.md"
+Documentation = "https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/how-it-works.md"
+Changelog = "https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md"
 
 
-
-[tool.setuptools.packages.find]
-include = [
-    "aegis_cli*", "aegis_sdk*", "aegis_core*", "aegis_mcp*",
-    "rules*", "skills*"
-]
 
 [tool.setuptools]
 include-package-data = true
+# Listed, not found: package-dir below maps the repository's rules/ and skills/ into
+# aegis_core/_data/, so the wheel installs no top-level `rules` or `skills` package
+# (one would overwrite another distribution's, or be shadowed by a repository's own).
+# tests/unit/cli/test_install_package_data.py fails when a package is missing here.
+packages = [
+    "aegis_cli",
+    "aegis_cli.formatters",
+    "aegis_cli.hooks",
+    "aegis_cli.ui",
+    "aegis_core",
+    "aegis_core._data.rules",
+    "aegis_core._data.skills",
+    "aegis_core.ast",
+    "aegis_core.ast.drivers",
+    "aegis_core.ast.drivers.templates",
+    "aegis_core.lifecycle",
+    "aegis_core.outcomes",
+    "aegis_core.skills",
+    "aegis_core.telemetry_engine",
+    "aegis_core.verification",
+    "aegis_core.workspace",
+    "aegis_core.yaml_engine",
+    "aegis_mcp",
+    "aegis_mcp.handlers",
+    "aegis_sdk",
+]
+
+[tool.setuptools.package-dir]
+"aegis_core._data.rules" = "rules"
+"aegis_core._data.skills" = "skills"
+
+[tool.setuptools.dynamic]
+# The one version source (D18). setuptools reads the assignment without importing aegis_core.
+version = {attr = "aegis_core._version.__version__"}
 
 [tool.setuptools.package-data]
 aegis_sdk = ["py.typed"]
-aegis_cli = ["starter_rules/*.md"]
 aegis_core = ["ast/drivers/templates/*"]
-rules = ["*.md", ".oracles/*.md"]
-skills = ["*/SKILL.md"]
+"aegis_core._data.rules" = ["*.md", ".oracles/*.md"]
+"aegis_core._data.skills" = ["*/SKILL.md"]
 
 
 [tool.pytest.ini_options]

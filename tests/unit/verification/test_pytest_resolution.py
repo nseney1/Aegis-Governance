@@ -10,7 +10,20 @@ import pytest
 
 from aegis_core.errors import NoTestRunnerFoundError
 from aegis_core.verification.test_runner import resolve_pytest_cmd
-from aegis_core.workspace import Workspace
+from aegis_core.workspace.base import Workspace
+
+
+def _pytest_program(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    program = directory / ("pytest.exe" if os.name == "nt" else "pytest")
+    program.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    program.chmod(0o755)
+    return program
+
+
+def _empty(tmp_path: Path) -> str:
+    (tmp_path / "empty-bin").mkdir(exist_ok=True)
+    return str(tmp_path / "empty-bin")
 
 
 class TestPytestResolution:
@@ -50,97 +63,41 @@ class TestPytestResolution:
             assert cmd_ws == [str(fake_pytest)]
 
     def test_falls_back_to_system_which(self, tmp_path: Path):
-        with patch.dict(os.environ, {"VIRTUAL_ENV": ""}):
-            with patch("aegis_core.verification.test_runner.shutil.which", return_value="/usr/local/bin/pytest"):
-                cmd = resolve_pytest_cmd(workspace=tmp_path)
-                assert cmd == ["/usr/local/bin/pytest"]
+        program = _pytest_program(tmp_path / "bin")
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": str(program.parent)}):
+            cmd = resolve_pytest_cmd(workspace=tmp_path)
+            assert cmd == [str(program)]
+
+    @pytest.mark.parametrize("entry", ["", ".", "bin"])
+    def test_a_pytest_behind_a_relative_path_entry_is_never_chosen(self, tmp_path: Path, monkeypatch, entry):
+        # Absolute PATH entries only (aegis_core.pathlookup): an empty or relative entry
+        # names the cwd, where the repository under verification can plant a program.
+        cwd = tmp_path / "cwd"
+        _pytest_program(cwd)
+        _pytest_program(cwd / "bin")
+        real = _pytest_program(tmp_path / "real-bin")
+        monkeypatch.chdir(cwd)
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": os.pathsep.join([entry, str(real.parent)])}):
+            assert resolve_pytest_cmd(workspace=tmp_path / "ws") == [str(real)]
 
     def test_falls_back_to_sys_executable(self, tmp_path: Path):
-        with patch.dict(os.environ, {"VIRTUAL_ENV": ""}):
-            with patch("aegis_core.verification.test_runner.shutil.which", return_value=None):
-                with patch("importlib.util.find_spec", return_value=object()):
-                    cmd = resolve_pytest_cmd(workspace=tmp_path)
-                    assert cmd == [sys.executable, "-m", "pytest"]
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": _empty(tmp_path)}):
+            with patch("importlib.util.find_spec", return_value=object()):
+                cmd = resolve_pytest_cmd(workspace=tmp_path)
+                assert cmd == [sys.executable, "-m", "pytest"]
 
     def test_returns_empty_when_no_runner_and_not_required(self, tmp_path: Path):
-        with patch.dict(os.environ, {"VIRTUAL_ENV": ""}):
-            with patch("aegis_core.verification.test_runner.shutil.which", return_value=None):
-                with patch("importlib.util.find_spec", return_value=None):
-                    cmd = resolve_pytest_cmd(workspace=tmp_path, required=False)
-                    assert cmd == []
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": _empty(tmp_path)}):
+            with patch("importlib.util.find_spec", return_value=None):
+                cmd = resolve_pytest_cmd(workspace=tmp_path, required=False)
+                assert cmd == []
 
     def test_raises_when_no_runner_and_required(self, tmp_path: Path):
-        with patch.dict(os.environ, {"VIRTUAL_ENV": ""}):
-            with patch("aegis_core.verification.test_runner.shutil.which", return_value=None):
-                with patch("importlib.util.find_spec", return_value=None):
-                    with pytest.raises(NoTestRunnerFoundError) as exc:
-                        resolve_pytest_cmd(workspace=tmp_path, required=True)
-                    assert "No pytest runner found" in str(exc.value)
-
-
-class TestPytestPythonResolution:
-    """Test resolution of python interpreter associated with pytest."""
-
-    def test_returns_sys_executable_when_no_runner(self):
-        from aegis_core.verification.test_runner import resolve_pytest_python
-        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=[]):
-            assert resolve_pytest_python() == sys.executable
-
-    def test_returns_interpreter_when_module_cmd(self):
-        from aegis_core.verification.test_runner import resolve_pytest_python
-        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=["/custom/bin/python", "-m", "pytest"]):
-            assert resolve_pytest_python() == "/custom/bin/python"
-
-    def test_extracts_from_shebang(self, tmp_path):
-        from aegis_core.verification.test_runner import resolve_pytest_python
-        fake_python = tmp_path / "bin" / "python3"
-        fake_python.parent.mkdir(parents=True)
-        fake_python.write_text("#!/bin/sh\n", encoding="utf-8")
-        if os.name != "nt":
-            fake_python.chmod(0o755)
-
-        fake_pytest = tmp_path / "bin" / "pytest"
-        fake_pytest.write_text(f"#!{fake_python}\n# python stub", encoding="utf-8")
-        if os.name != "nt":
-            fake_pytest.chmod(0o755)
-
-        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=[str(fake_pytest)]):
-            assert resolve_pytest_python() == str(fake_python)
-
-    def test_falls_back_to_sibling_python(self, tmp_path):
-        from aegis_core.verification.test_runner import resolve_pytest_python
-        fake_python = tmp_path / "bin" / ("python.exe" if os.name == "nt" else "python3")
-        fake_python.parent.mkdir(parents=True)
-        fake_python.write_text("#!/bin/sh\n", encoding="utf-8")
-        if os.name != "nt":
-            fake_python.chmod(0o755)
-
-        fake_pytest = tmp_path / "bin" / "pytest"
-        fake_pytest.write_text("binary blob without shebang", encoding="utf-8")
-        if os.name != "nt":
-            fake_pytest.chmod(0o755)
-
-        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=[str(fake_pytest)]):
-            assert resolve_pytest_python() == str(fake_python)
-
-    def test_open_exception_falls_back(self, tmp_path):
-        from aegis_core.verification.test_runner import resolve_pytest_python
-        fake_pytest = tmp_path / "bin" / "pytest"
-        fake_pytest.parent.mkdir(parents=True)
-        fake_pytest.write_text("stub", encoding="utf-8")
-
-        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=[str(fake_pytest)]):
-            with patch("builtins.open", side_effect=OSError("permission denied")):
-                assert resolve_pytest_python() == sys.executable
-
-    def test_no_sibling_falls_back_to_sys_executable(self, tmp_path):
-        from aegis_core.verification.test_runner import resolve_pytest_python
-        fake_pytest = tmp_path / "bin" / "pytest"
-        fake_pytest.parent.mkdir(parents=True)
-        fake_pytest.write_text("binary blob without shebang", encoding="utf-8")
-
-        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=[str(fake_pytest)]):
-            assert resolve_pytest_python() == sys.executable
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "", "PATH": _empty(tmp_path)}):
+            with patch("importlib.util.find_spec", return_value=None):
+                with pytest.raises(NoTestRunnerFoundError) as exc:
+                    resolve_pytest_cmd(workspace=tmp_path, required=True)
+                assert "No pytest runner found" in str(exc.value)
 
 
 class TestDiscoverTestEvidence:

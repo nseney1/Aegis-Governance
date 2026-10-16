@@ -1,233 +1,102 @@
-"""Cell file parsing, validation, frontmatter transforms, and discovery."""
+"""Rule ids, slugs, file lookup and frontmatter transforms for the lifecycle."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import glob
-import os
 from pathlib import Path
 import re
-import shutil
 from typing import Any, Optional, Tuple
 
-from aegis_core.storage import atomic_write_and_unlink as _atomic_write_and_unlink
-from aegis_core.yaml import _get_body, dump_frontmatter, parse_frontmatter, parse_rule_frontmatter
-from aegis_core.workspace import Workspace
-from .constants import (
-    TYPE_TO_DIR,
-    VALID_TYPES,
-)
+from aegis_core.yaml_engine.serializer import dump_frontmatter
+from aegis_core.yaml_engine.frontmatter import parse_rule_frontmatter
+from aegis_core.workspace import literal_workspace
+from aegis_core.workspace.base import Workspace
+from aegis_core.taxonomy import RULE_TYPE_DIRS, RULE_TYPES
 
 __all__ = [
-    "find_cell",
-    "find_cell_file",
+    "find_rule_file",
     "generate_slug",
-    "get_type_plural",
-    "parse_cell",
-    "resolve_metrics_dir",
-    "sanitize_cell_id",
-    "validate_cell_id",
+    "rule_age_days",
+    "sanitize_rule_id",
+    "validate_rule_id",
 ]
 
 
-def sanitize_cell_id(cell_id: str) -> Optional[str]:
-    """Validate cell identifier to prevent path traversal."""
-    if not cell_id or "/" in cell_id or "\\" in cell_id or ".." in cell_id:
+def sanitize_rule_id(rule_id: str) -> Optional[str]:
+    """A rule id with no path separator or "..", without a trailing .md (None if invalid)."""
+    if not rule_id or "/" in rule_id or "\\" in rule_id or ".." in rule_id:
         return None
-    cleaned = cell_id.strip()
+    cleaned = rule_id.strip()
     if cleaned.endswith(".md"):
         cleaned = cleaned[:-3]
     return cleaned if cleaned else None
 
 
-def validate_cell_id(cell_id: str | None) -> None:
-    """Validate cell ID to prevent path traversal attacks."""
-    if not cell_id:
+def validate_rule_id(rule_id: str | None) -> None:
+    """Raise ValueError for a rule id that could escape its directory."""
+    if not rule_id:
         return
-    if "/" in cell_id or "\\" in cell_id or ".." in cell_id:
-        raise ValueError(f"Invalid ID_OVERRIDE contains path traversal characters: {cell_id!r}")
+    if "/" in rule_id or "\\" in rule_id or ".." in rule_id:
+        raise ValueError(f"Invalid ID_OVERRIDE contains path traversal characters: {rule_id!r}")
 
 
 def generate_slug(hypothesis: str, id_override: str | None = None) -> str:
-    """Generate safe cell slug identifier."""
+    """A file-safe rule id from the hypothesis (or the explicit override)."""
     if id_override:
-        validate_cell_id(id_override)
+        validate_rule_id(id_override)
         return id_override
 
     cleaned = re.sub(r"[^a-zA-Z0-9 ]", "", hypothesis.lower())
     slug = re.sub(r"\s+", "-", cleaned).strip("-")[:50].rstrip("-")
-    return slug or "unnamed-cell"
+    return slug or "unnamed-rule"
 
 
-def find_cell_file(workspace: Workspace | Path | str, cell_id: str) -> Tuple[Optional[Path], Optional[str]]:
-    """Locate a cell across .aegis/rules/ and rules/ or genome/ directories."""
-    clean_id = sanitize_cell_id(cell_id)
+def find_rule_file(workspace: Workspace | Path | str, rule_id: str) -> Tuple[Optional[Path], Optional[str]]:
+    """Locate a rule in its type directory, ``.aegis/rules/<type dir>/<id>.md``."""
+    clean_id = sanitize_rule_id(rule_id)
     if not clean_id:
         return None, None
 
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    candidate_dirs = [
-        ws.rules_dir,
-    ]
-    rules_dir = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
-
-    seen_dirs = set()
-    for cells_dir in candidate_dirs:
-        if cells_dir in seen_dirs or not cells_dir.is_dir():
-            continue
-        seen_dirs.add(cells_dir)
-        for type_name, dir_name in TYPE_TO_DIR.items():
-            candidate = cells_dir / dir_name / f"{clean_id}.md"
-            if candidate.is_file():
-                return candidate, type_name
-
-    if ws.is_aegis_repo:
-        candidate = rules_dir / f"{clean_id}.md"
+    ws = literal_workspace(workspace)
+    for type_name, dir_name in RULE_TYPE_DIRS.items():
+        candidate = ws.rules_dir / dir_name / f"{clean_id}.md"
         if candidate.is_file():
-            return candidate, "genome"
-
+            return candidate, type_name
     return None, None
 
 
-def find_cell(workspace: Workspace | Path | str, cell_id: str) -> Optional[str]:
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    for cand_dir in (ws.rules_dir,):
-        if not cand_dir.is_dir():
-            continue
-        matches = glob.glob(os.path.join(str(cand_dir), "**", f"*{cell_id}*"), recursive=True)
-        matches = [m for m in matches if os.path.isfile(m) and m.endswith(".md")]
-        if matches:
-            return matches[0]
-    return None
-
-
-def parse_cell(file_path: Path | str) -> tuple[Optional[dict], str]:
-    try:
-        content = Path(file_path).read_text(encoding="utf-8")
-        meta = parse_frontmatter(content)
-        body = _get_body(content).lstrip()
-        return meta, body
-    except Exception:
-        return None, ""
-
-
-def get_type_plural(cell_type: str) -> str:
-    cell_type = cell_type.lower()
-    return VALID_TYPES.get(cell_type, "traps")
-
-
-def _naive_utc(timestamp: Any) -> Optional[datetime]:
-    """Parse a canonical timestamp and normalize it to naive UTC."""
-    if not isinstance(timestamp, str) or not timestamp:
-        return None
-    normalized = timestamp[:-1] + "+00:00" if timestamp.endswith("Z") else timestamp
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except (TypeError, ValueError):
-        return None
-    if parsed.tzinfo is not None:
-        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
-    return parsed
-
-
-def _load_evidence(workspace: Workspace | Path | str) -> dict[str, dict[str, Any]]:
-    """Load lifecycle dimensions from the canonical signal ledger."""
-    from aegis_core.evidence import aggregate_signals
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    evidence_dir = str(ws.evidence_dir)
-    aggregation = aggregate_signals(evidence_dir)
-    return {
-        cell_id: {
-            "triggers": counts["triggers"],
-            "tp": counts["tp"],
-            "fp": counts["fp"],
-            "last_trigger_ts": _naive_utc(counts["last_trigger"]),
-            "has_triggers": counts["has_triggers"],
-        }
-        for cell_id, counts in aggregation.counts.items()
-    }
-
-
-def _load_cells(workspace: Workspace | Path | str) -> list[dict[str, Any]]:
-    """Load cell metadata from .aegis/rules/**/*.md and rules/**/*.md files.
-
-    Returns:
-        List of cell metadata dicts with at minimum: id, type, created, source_path.
-    """
-    ws = workspace if isinstance(workspace, Workspace) else (
-        Workspace(root=Path(workspace).resolve()) if workspace else Workspace.resolve()
-    )
-    cells = []
-    scan_roots = [str(ws.rules_dir)]
-    if ws.is_aegis_repo:
-        rules_root = (ws.root / "rules") if (ws.root / "rules").is_dir() else (ws.root / "genome")
-        if str(rules_root) not in scan_roots:
-            scan_roots.append(str(rules_root))
-
-    seen_paths = set()
-    for cells_root in scan_roots:
-        if not os.path.isdir(cells_root):
-            continue
-
-        for md_path in glob.glob(os.path.join(cells_root, "**", "*.md"), recursive=True):
-            real_md = os.path.abspath(md_path)
-            if real_md in seen_paths or os.path.basename(md_path) == "README.md":
-                continue
-            seen_paths.add(real_md)
-            try:
-                with open(md_path, encoding="utf-8") as f:
-                    content = f.read()
-            except OSError:
-                continue
-
-            meta = parse_frontmatter(content)
-            if not meta:
-                continue
-
-            cell_id = meta.get("id", os.path.splitext(os.path.basename(md_path))[0])
-            cell_type = meta.get("type", "trap")
-            created = meta.get("created", "")
-
-            cells.append({
-                "id": cell_id,
-                "type": cell_type,
-                "created": created,
-                "source_path": md_path,
-                "meta": meta,
-            })
-
-    return cells
-
-
-def _cell_age_days(cell: dict) -> int:
-    """Return cell age in days from its 'created' field."""
-    created = cell.get("created", "")
-    if not created:
+def rule_age_days(rule: Any, now: Optional[datetime] = None) -> int:
+    """Days since the rule's ``created`` date (0 when it has none or it cannot be read)."""
+    created = (getattr(rule, "meta", None) or {}).get("created")
+    if isinstance(created, datetime):
+        created_dt = created if created.tzinfo else created.replace(tzinfo=timezone.utc)
+    elif isinstance(created, str) and created:
+        text = created.strip()
+        text = text[:-1] + "+00:00" if text.endswith("Z") else text
+        try:
+            created_dt = datetime.fromisoformat(text) if "T" in text else datetime.strptime(text[:10], "%Y-%m-%d")
+        except ValueError:
+            return 0
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=timezone.utc)
+    elif hasattr(created, "isoformat"):  # a date
+        created_dt = datetime(created.year, created.month, created.day, tzinfo=timezone.utc)
+    else:
         return 0
-    try:
-        if isinstance(created, str):
-            created_dt = datetime.strptime(created, "%Y-%m-%d")
-        else:
-            created_dt = datetime.combine(created, datetime.min.time())
-        return (datetime.now(timezone.utc).replace(tzinfo=None) - created_dt).days
-    except (ValueError, TypeError):
-        return 0
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return max(0, (current - created_dt).days)
 
 
 def _transform_frontmatter_type(content: str, new_type: str) -> str:
-    """Update type field in cell frontmatter preserving body."""
+    """Set a rule's type (and the enforcement its new tier needs), keeping the body."""
     try:
         meta, body = parse_rule_frontmatter(content)
     except Exception:
         return content
 
     meta["type"] = new_type
-    if new_type in ("wall", "gate", "invariant"):
+    if RULE_TYPES[new_type].mandatory:
         meta["enforcement"] = "gate"
     elif new_type == "trap":
         meta.pop("enforcement", None)
@@ -236,6 +105,3 @@ def _transform_frontmatter_type(content: str, new_type: str) -> str:
     return dump_frontmatter(meta, body=body)
 
 
-def resolve_metrics_dir(workspace: Path | str) -> Path:
-    from aegis_core.telemetry import resolve_metrics_dir as _res_metrics
-    return _res_metrics(workspace)

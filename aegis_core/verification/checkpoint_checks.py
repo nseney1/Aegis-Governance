@@ -1,20 +1,19 @@
 """Shared, deterministic, read-only checkpoint checks for CLI and MCP."""
 from __future__ import annotations
 
-import json
 import os
 import re
 import stat
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import List
 
-from aegis_core.evidence import aggregate_signals
-from aegis_core.taxonomy import DIR_TO_ALLOWED_RULE_TYPES as DIR_TO_TYPE
+from aegis_core.taxonomy import RULE_TYPES
+from aegis_core.workspace.layout import AEGIS_DIRNAME, LEGACY_SOMA_DIRNAME
 
 
 HARDCODED_PATH_RE = re.compile(r'''(?:"|')(/home/|/Users/|/tmp/)''')
 SKIP_DIRS = {
-    "__pycache__", ".git", ".soma", ".aegis", "node_modules", ".venv", "venv",
+    "__pycache__", ".git", LEGACY_SOMA_DIRNAME, AEGIS_DIRNAME, "node_modules", ".venv", "venv",
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", "egg-info",
 }
 
@@ -190,11 +189,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
     elif top_dir in ("aegis_sdk", "soma_sdk"):
         candidates.append(test_dir / f"test_sdk_{stem}.py")
 
-    if stem == "compat":
-        candidates.append(test_dir / "test_compat_aliases.py")
-        candidates.append(test_dir / "unit" / "core" / "test_compat_aliases.py")
-        candidates.append(test_dir / "test_canary_dual_brand.py")
-        candidates.append(test_dir / "unit" / "core" / "test_canary_dual_brand.py")
     if "ast" in parts:
         candidates.append(test_dir / f"test_ast_{stem}.py")
         candidates.append(test_dir / "unit" / "core" / f"test_ast_{stem}.py")
@@ -218,14 +212,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "unit" / "core" / "test_ast_rust.py")
         candidates.append(test_dir / "test_rust_ast_driver.py")
         candidates.append(test_dir / "unit" / "core" / "test_rust_ast_driver.py")
-    if stem == "rules":
-        candidates.append(test_dir / "unit" / "sdk" / "test_cells.py")
-        candidates.append(test_dir / "sdk" / "test_cells.py")
-        candidates.append(test_dir / "test_cells.py")
-        candidates.append(test_dir / "unit" / "sdk" / "test_sdk_behavioral.py")
-        candidates.append(test_dir / "test_rule_content.py")
-    if stem.startswith("genesis_"):
-        candidates.append(test_dir / "test_genesis.py")
     if stem == "checkpoint_checks":
         candidates.append(test_dir / "test_checkpoint_fail_closed.py")
     if stem in ("call_graph", "persistence_checker", "runner"):
@@ -236,36 +222,12 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_hooks_lifecycle.py")
     if stem == "errors":
         candidates.append(test_dir / "test_domain_errors.py")
-        candidates.append(test_dir / "test_sdk_behavioral.py")
-    if stem == "evidence":
-        candidates.append(test_dir / "test_canonical_evidence_readers.py")
     if stem == "frontmatter":
         candidates.append(test_dir / "test_core_lifecycle.py")
-    if stem == "inference_provider":
-        candidates.append(test_dir / "test_keyring_integration.py")
-    if stem in ("verification_jobs", "jobs"):
-        candidates.append(test_dir / "test_mcp_async_verify.py")
-        candidates.append(test_dir / "test_worker_lifecycle.py")
-    if stem in ("arbitration", "proposals"):
-        candidates.append(test_dir / "test_arbitration.py")
-        candidates.append(test_dir / "test_proposals.py")
-    if stem in ("cell_inventory", "rule_inventory"):
-        candidates.append(test_dir / "test_cell_inventory.py")
+    if stem == "rule_inventory":
         candidates.append(test_dir / "test_rule_inventory.py")
-    if stem in ("cell_cache", "rule_cache"):
-        candidates.append(test_dir / "test_cell_cache.py")
-        candidates.append(test_dir / "test_rule_cache.py")
-    if stem == "integrity":
-        candidates.append(test_dir / "test_evidence_integrity.py")
-        candidates.append(test_dir / "unit" / "mcp" / "test_manifest_hmac.py")
-    if stem in ("resilience", "homeostasis"):
-        candidates.append(test_dir / "test_resilience.py")
-        candidates.append(test_dir / "test_homeostasis.py")
-    if stem in ("adversarial_verify", "immune_verify"):
+    if stem == "adversarial_verify":
         candidates.append(test_dir / "unit" / "verification" / "test_adversarial_verify.py")
-        candidates.append(test_dir / "unit" / "verification" / "test_immune_verify.py")
-    if stem in ("match", "ast_match"):
-        candidates.append(test_dir / "unit" / "core" / "test_ast_grep_upgrade.py")
     if stem in ("taxonomy", "operations", "layout", "discovery"):
         candidates.append(test_dir / "unit" / "core" / "test_v3_zero_legacy_invariants.py")
         candidates.append(test_dir / "unit" / "core" / "test_storage.py")
@@ -274,14 +236,8 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_mcp_dispatch.py")
     if stem == "tools":
         candidates.append(test_dir / "test_mcp_tools_contract.py")
-    if stem == "analysis":
-        candidates.append(test_dir / "test_sdk_analysis.py")
-    if stem == "cells":
-        candidates.append(test_dir / "test_rule_content.py")
-    if stem == "invariants":
-        candidates.append(test_dir / "test_enforcement_ladder.py")
-    if parent_name == "skills" or stem in ("graph", "handoff", "slots", "skills", "artifacts"):
-        candidates.append(test_dir / "test_skills_and_handoff.py")
+    if parent_name == "skills" or stem in ("slots", "skills"):
+        candidates.append(test_dir / "test_skills.py")
     if parent_name == "handlers" or stem in ("registry", "projection"):
         candidates.append(test_dir / "test_mcp_tools_contract.py")
         candidates.append(test_dir / "test_mcp_dispatch.py")
@@ -291,9 +247,6 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_outcomes.py")
     if parent_name == "hooks":
         candidates.append(test_dir / "test_hooks_lifecycle.py")
-    if stem in ("somayaml", "yaml"):
-        candidates.append(test_dir / "test_somayaml.py")
-        candidates.append(test_dir / "test_yaml.py")
 
     # 4. Flat root candidates
     candidates.append(test_dir / f"test_{stem}.py")
@@ -412,6 +365,14 @@ def check_hardcoded_paths(root: Path) -> list[dict]:
 
 
 def check_assertion_density(root: Path) -> list[dict]:
+    """Every ``test_*`` function under tests/ must assert something and not be a stub.
+
+    Judged per function by AST (#1): text such as "assert " in a comment, a
+    docstring or a neighbouring test no longer passes a file.
+    """
+    from aegis_core.verification.quality_gate import check_assertion_density as density
+    from aegis_core.verification.quality_gate import check_no_bare_pass as bare_pass
+
     issues = []  # type: List[dict]
     try:
         test_files = find_python_files(root, "tests")
@@ -421,359 +382,129 @@ def check_assertion_density(root: Path) -> list[dict]:
     for test_file in test_files:
         if not test_file.name.startswith("test_"):
             continue
-        if not _is_regular_file(
-            "assertion_density", root, test_file, issues
-        ):
+        if not _is_regular_file("assertion_density", root, test_file, issues):
             continue
         try:
-            content = test_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            issues.append(_failure(
-                "assertion_density", root, test_file, "read", exc
-            ))
+            found = [density(str(test_file)), bare_pass(str(test_file))]
+        except (OSError, SyntaxError, UnicodeError, ValueError) as exc:
+            issues.append(_failure("assertion_density", root, test_file, "parse", exc))
             continue
-        has_assertion = (
-            "assert " in content
-            or "assert(" in content
-            or "pytest.raises" in content
-            or "pytest.fail" in content
-            or "self.assert" in content
-        )
-        if not has_assertion:
-            try:
-                from aegis_core.verification.quality_gate import (
-                    check_assertion_density as ast_check,
-                )
-                evidence = ast_check(str(test_file))
-                if evidence.verdict:
-                    continue
-            except (OSError, UnicodeError, ValueError, SyntaxError) as exc:
-                issues.append(_failure(
-                    "assertion_density", root, test_file, "parse", exc
-                ))
-                continue
-            except ImportError:
-                pass
-            issues.append({
-                "check": "assertion_density",
-                "file": _relative(root, test_file),
-                "message": (
-                    f"Low assertion density in {test_file.name}: "
-                    "no assert statements found"
-                ),
-            })
+        prefixes = ("Low assertion density in", "Placeholder tests in")
+        for prefix, evidence in zip(prefixes, found):
+            if not evidence.verdict:
+                issues.append({
+                    "check": "assertion_density",
+                    "file": _relative(root, test_file),
+                    "lines": evidence.lines,
+                    "message": f"{prefix} {test_file.name}: {evidence.detail[0].lower()}{evidence.detail[1:]}",
+                })
     return issues
 
 
-def check_cell_fitness(root: Path) -> list[dict]:
-    issues = []  # type: List[dict]
-    evidence_dir = root / ".aegis" / "evidence"
-    aggregation = aggregate_signals(evidence_dir)
+def check_rule_fitness(root: Path) -> list[dict]:
+    """Unreadable ledger rows, and rules the ledger says misfire (the lifecycle's own
+    criterion: the Wilson lower bound of the false-positive rate above 0.5)."""
+    from aegis_core.fitness import compute
+    from aegis_core.lifecycle.constants import MISFIRE_THRESHOLD
+    from aegis_core.telemetry_engine import ledger
 
-    for error in aggregation.errors:
-        error_path = Path(error.get("file") or evidence_dir / "signals.jsonl")
-        rel = _relative(root, error_path)
-        line = error.get("line")
-        location = f" line {line}" if line is not None else ""
+    issues = []  # type: List[dict]
+    view = ledger.read(root)
+    rel = _relative(root, Path(view.path)) if view.path is not None else "ledger"
+    if view.error:
+        issues.append({"check": "rule_fitness", "file": rel, "message": f"{rel}: {view.error}"})
+    for line in view.skipped_lines:
         issues.append({
-            "check": "cell_fitness",
+            "check": "rule_fitness",
             "file": rel,
-            "message": f"{rel}:{location} {error.get('error', 'signal aggregation failed')}",
+            "message": f"{rel}: line {line} is not a JSON object row",
+        })
+    if view.unusable_rows:
+        issues.append({
+            "check": "rule_fitness",
+            "file": rel,
+            "message": f"{rel}: {view.unusable_rows} row(s) lack a rule, a valid outcome or a valid weight",
         })
 
-    for cell_id, counts in aggregation.counts.items():
-        tp = counts["tp"]
-        fp = counts["fp"]
-        total = tp + fp
-        if total >= 2 and fp / total > 0.5:
-            rate = fp / total
+    for rule_id, counts in sorted(ledger.aggregate_rows(view.rows).items()):
+        fit = compute(counts, rule=rule_id)
+        if fit.misfire > MISFIRE_THRESHOLD:
             issues.append({
-                "check": "cell_fitness",
-                "cell_id": cell_id,
+                "check": "rule_fitness",
+                "rule": rule_id,
                 "message": (
-                    f"Rule '{cell_id}' has unhealthy fitness: "
-                    f"{fp}/{total} false positives "
-                    f"({rate:.0%} FP rate)"
+                    f"Rule '{rule_id}' misfires: {fit.fp:g} of {fit.verdicts:g} verdicts are false "
+                    f"positives (misfire bound {fit.misfire:.2f} > {MISFIRE_THRESHOLD}); "
+                    "aegis sync suggests demoting or archiving it"
                 ),
             })
     return issues
 
 
-def check_cell_conventions(root: Path) -> list[dict]:
+def check_rule_conventions(root: Path) -> list[dict]:
+    """Every rule file loads (aegis_core.rules) and carries the fields its type needs.
+
+    A rule that cannot be loaded is a ``rule_load`` issue: aegis scan refuses to serve
+    the rule set while it exists, so ``aegis check`` blocks on it too.
+    """
+    from aegis_core.rule_inventory import RuleInventoryError
+    from aegis_core.rules import load_rules
+
     issues = []  # type: List[dict]
-    from aegis_core.rule_inventory import CellInventoryError, inventory_rules
-
     try:
-        inventory = inventory_rules(str(root))
-    except CellInventoryError as exc:
-        path = Path(exc.path)
-        issues.append(_failure(
-            "cell_conventions", root, path, exc.operation, exc
-        ))
-        return issues
+        ruleset = load_rules(root)
+    except RuleInventoryError as exc:
+        return [_failure("rule_load", root, Path(exc.path), exc.operation, exc)]
 
-    from aegis_core.rule_inventory import parse_frontmatter
-
-    for entry in inventory.entries:
-        if os.path.basename(entry.relative_path) == "README.md":
+    for rule in ruleset.rules:
+        if rule.error:
+            issues.append({"check": "rule_load", "file": rule.path, "message": f"{rule.path}: {rule.error}"})
             continue
-        parts = entry.relative_path.split("/")
-        if len(parts) < 4 or parts[:2] != [".aegis", "rules"]:
-            continue
-        type_dir_name = parts[2]
-        allowed_types = DIR_TO_TYPE.get(type_dir_name)
-        if allowed_types is None:
-            continue
-        if isinstance(allowed_types, str):
-            allowed_types = (allowed_types,)
-        expected_type = allowed_types[0]
-        rel = entry.relative_path
-        try:
-            content = entry.content.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            issues.append(_failure(
-                "cell_conventions", root, Path(entry.absolute_path), "decode", exc
-            ))
-            continue
-        if not content.startswith("---"):
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": f"{rel}: missing YAML frontmatter",
-            })
-            continue
-        lines = content.splitlines()
-        closing = next(
-            (index for index, line in enumerate(lines[1:], 1) if line.strip() == "---"),
-            None,
-        )
-        if closing is None:
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": f"{rel}: unterminated YAML frontmatter",
-            })
-            continue
-        try:
-            meta = parse_frontmatter(content)
-        except Exception as exc:
-            issues.append(_failure(
-                "cell_conventions", root, Path(entry.absolute_path), "parse", exc
-            ))
-            continue
-        if meta is None:
-            frontmatter_lines = [line.strip() for line in lines[1:closing] if line.strip()]
-            if frontmatter_lines and frontmatter_lines[0].startswith("-"):
-                message = f"{rel}: cell frontmatter must be a mapping"
-            else:
-                message = f"{rel}: malformed YAML frontmatter"
-            issues.append({
-                "check": "cell_conventions", "file": rel, "message": message,
-            })
-            continue
-        if not isinstance(meta, dict) or not meta:
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": f"{rel}: cell frontmatter must be a non-empty mapping",
-            })
-            continue
-
         required = ["id", "domain", "type"]
-        if any(t in ("wall", "invariant", "trap") for t in allowed_types):
+        if rule.type in ("invariant", "trap"):
             required.append("enforcement")
-        for field in required:
-            if field not in meta:
+        for name in required:
+            if name not in rule.meta:
                 issues.append({
-                    "check": "cell_conventions",
-                    "file": rel,
-                    "message": f"{rel}: missing required field '{field}'",
+                    "check": "rule_conventions",
+                    "file": rule.path,
+                    "message": f"{rule.path}: missing required field '{name}'",
                 })
-        cell_type = meta.get("type", "")
-        if cell_type not in allowed_types:
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": (
-                    f"{rel}: type '{cell_type}' doesn't match directory "
-                    f"'{type_dir_name}' (expected one of {allowed_types})"
-                ),
-            })
-        if cell_type in ("wall", "invariant") and meta.get("enforcement") != "gate":
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": (
-                    f"{rel}: wall/invariant enforcement is '{meta.get('enforcement')}' "
-                    "but must use 'gate'"
-                ),
-            })
-        stem = os.path.splitext(os.path.basename(entry.relative_path))[0]
-        if meta.get("id") != stem:
-            issues.append({
-                "check": "cell_conventions",
-                "file": rel,
-                "message": (
-                    f"{rel}: frontmatter id '{meta.get('id')}' "
-                    f"doesn't match filename '{stem}'"
-                ),
-            })
     return issues
 
 
-def check_arbitration_evidence(root: Path, strict: bool = False) -> list[dict]:
-    issues = []  # type: List[dict]
-    evidence_dir = root / ".aegis" / "evidence"
+def check_paper_gates(root: Path) -> list[dict]:
+    """A gate or invariant rule must use ``gate`` enforcement: one that does not claims to
+    be a gate and enforces nothing. A mandatory-type rule that cannot be loaded cannot be
+    shown to be a gate, so it is reported too."""
+    from aegis_core.rule_inventory import RuleInventoryError
+    from aegis_core.rules import load_rules
+
     try:
-        info = os.stat(evidence_dir, follow_symlinks=False)
-    except FileNotFoundError:
-        if strict:
-            return [{
-                "check": "arbitration_evidence",
-                "file": _relative(root, evidence_dir),
-                "message": f"{_relative(root, evidence_dir)}: evidence directory not found",
-            }]
-        return issues
-    except (OSError, UnicodeError) as exc:
-        return [_failure(
-            "arbitration_evidence", root, evidence_dir, "stat", exc
-        )]
-    if not stat.S_ISDIR(info.st_mode):
-        return [{
-            "check": "arbitration_evidence",
-            "file": _relative(root, evidence_dir),
-            "message": f"{_relative(root, evidence_dir)}: expected a directory",
-        }]
-    files: list[Path] = []
-    try:
-        with os.scandir(evidence_dir) as it:
-            for entry in it:
-                if entry.name.startswith("arbitration_cycle_") and entry.name.endswith(".json") and entry.is_file():
-                    files.append(Path(entry.path))
-    except (OSError, UnicodeError) as exc:
-        return [_failure(
-            "arbitration_evidence", root, evidence_dir, "list", exc
-        )]
-    if not files:
-        if strict:
-            return [{
-                "check": "arbitration_evidence",
-                "file": _relative(root, evidence_dir),
-                "message": f"{_relative(root, evidence_dir)}: no arbitration cycles found in evidence directory",
-            }]
-        return issues
-
-
-    def cycle_number(path: Path) -> int:
-        match = re.search(r"cycle_(\d+)", str(path))
-        return int(match.group(1)) if match else 0
-
-    latest = sorted(files, key=cycle_number)[-1]
-    if not _is_regular_file(
-        "arbitration_evidence", root, latest, issues
-    ):
-        return issues
-    try:
-        text = latest.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        return [_failure(
-            "arbitration_evidence", root, latest, "read", exc
-        )]
-    try:
-        record = json.loads(text)
-    except (json.JSONDecodeError, UnicodeError) as exc:
-        return [_failure(
-            "arbitration_evidence", root, latest, "parse", exc
-        )]
-    if not isinstance(record, dict):
-        return [{
-            "check": "arbitration_evidence",
-            "file": _relative(root, latest),
-            "message": f"{_relative(root, latest)}: evidence must be a JSON object",
-        }]
-
-    verdict = str(record.get("verdict", "unknown")).lower()
-    cycle = record.get("cycle", "?")
-    divergences = record.get("divergence_count", 0)
-    if verdict == "block":
-        message = (
-            f"Arbiter verdict is BLOCK for cycle {cycle} "
-            f"({divergences} divergence(s)). Fix all findings before ship."
-        )
-    elif verdict == "revise":
-        message = (
-            f"Arbiter verdict is REVISE for cycle {cycle} "
-            f"({divergences} divergence(s)). Address high-severity findings."
-        )
-    elif verdict != "ship":
-        message = (
-            f"Unknown arbiter verdict '{verdict}' for cycle {cycle}. "
-            "Only 'ship' passes the gate."
-        )
-    else:
-        # On SHIP verdict, if strict, verify target_files coverage against git modified files
-        if strict:
-            target_files = record.get("target_files")
-            if target_files is not None:
-                try:
-                    import subprocess
-                    res = subprocess.run(
-                        ["git", "diff", "--name-only", "--diff-filter=ACMR", "HEAD"],
-                        capture_output=True, text=True, cwd=str(root), timeout=5,
-                    )
-                    if res.returncode == 0:
-                        changed = [f.strip() for f in res.stdout.splitlines() if f.strip().endswith(".py")]
-                        uncovered = [f for f in changed if f not in target_files and not f.startswith("tests/")]
-                        if uncovered:
-                            issues.append({
-                                "check": "arbitration_evidence",
-                                "file": _relative(root, latest),
-                                "message": (
-                                    f"Arbitration cycle {cycle} does not cover modified files: "
-                                    f"{', '.join(uncovered)}"
-                                ),
-                            })
-                except Exception:
-                    pass
-        return issues
-    issues.append({
-        "check": "arbitration_evidence",
-        "file": _relative(root, latest),
-        "message": message,
-    })
-    return issues
-
-
-def check_paper_walls(root: Path, strict: bool = False) -> list[dict]:
-    """Verify that all wall cells have 'gate' enforcement and valid frontmatter."""
+        ruleset = load_rules(root)
+    except RuleInventoryError as exc:
+        return [_failure("paper_gates", root, Path(exc.path), exc.operation, exc)]
     issues = []
-    walls_dir = root / ".aegis" / "rules" / "invariants"
-    if not walls_dir.is_dir():
-        walls_dir = root / ".aegis" / "rules" / "walls"
-    if not walls_dir.is_dir():
-        return issues
-
-    for wall_file in sorted(walls_dir.glob("*.md")):
-        try:
-            content = wall_file.read_text(encoding="utf-8")
-            from aegis_core.yaml import parse_frontmatter
-            meta = parse_frontmatter(content)
-            if not isinstance(meta, dict):
-                issues.append({
-                    "check": "paper_walls",
-                    "file": _relative(root, wall_file),
-                    "message": f"Wall cell '{wall_file.name}' has missing or invalid frontmatter.",
-                })
-                continue
-            enforcement = meta.get("enforcement")
-            if enforcement != "gate":
-                issues.append({
-                    "check": "paper_walls",
-                    "file": _relative(root, wall_file),
-                    "message": f"Wall cell '{wall_file.name}' enforcement is '{enforcement}', but all walls must use 'gate'.",
-                })
-        except Exception:
+    for rule in ruleset.rules:
+        if rule.type is None or not RULE_TYPES[rule.type].mandatory:
             continue
+        name = rule.path.rsplit("/", 1)[-1]
+        label = f"{rule.type.capitalize()} rule '{name}'"
+        if rule.error:
+            issues.append({
+                "check": "paper_gates",
+                "file": rule.path,
+                "message": f"{label} cannot be read, so it cannot be shown to use 'gate': {rule.error}",
+            })
+        elif rule.enforcement != "gate":
+            issues.append({
+                "check": "paper_gates",
+                "file": rule.path,
+                "message": (
+                    f"{label} enforcement is '{rule.meta.get('enforcement')}', "
+                    f"but all {rule.type} rules must use 'gate'."
+                ),
+            })
     return issues
 
 
@@ -781,31 +512,26 @@ ALL_CHECKS = [
     check_test_coverage,
     check_hardcoded_paths,
     check_assertion_density,
-    check_cell_fitness,
-    check_cell_conventions,
-    check_arbitration_evidence,
-    check_paper_walls,
+    check_rule_fitness,
+    check_rule_conventions,
+    check_paper_gates,
 ]
 CHECK_NAMES = [
     "test_coverage",
     "hardcoded_paths",
     "assertion_density",
-    "cell_fitness",
-    "cell_conventions",
-    "arbitration_evidence",
-    "paper_walls",
+    "rule_fitness",
+    "rule_conventions",
+    "paper_gates",
 ]
 
 
-def run_all_checks(root: Path, strict: bool = False, require_arbitration: bool = False) -> list[dict]:
+def run_all_checks(root: Path) -> list[dict]:
     """Run every check and convert unexpected check failures into issues."""
     issues = []  # type: List[dict]
     for check_fn in ALL_CHECKS:
         try:
-            if check_fn == check_arbitration_evidence:
-                issues.extend(check_fn(root, strict=strict or require_arbitration))
-            else:
-                issues.extend(check_fn(root))
+            issues.extend(check_fn(root))
         except Exception as exc:
             check_name = check_fn.__name__.replace("check_", "", 1)
             issues.append(_failure(check_name, root, root, "check", exc))

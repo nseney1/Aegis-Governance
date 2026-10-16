@@ -9,8 +9,8 @@ falsification: Agents reliably stop at prose human review gates without programm
 target_paths:
   - aegis_core/command_safety.py
   - "aegis_cli/hooks/**"
-  - docs/project/RELEASE_WORKFLOW.md
-  - rules/gitflow-review-gate.md
+  - CONTRIBUTING.md
+  - .aegis/rules/invariants/invariant-gitflow-review-gate.md
 expiry_sessions: 100
 impact_weight: 1.0
 minimum_mode: bulwark
@@ -20,16 +20,10 @@ tags:
   - review-gate
   - human-in-the-loop
 created: 2026-10-07
-fitness:
-  triggers: 55
-  true_positives: 6.1804
-  false_positives: 5.6804
-  score: 1.0
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 # Invariant: Human Review Gate Enforcement
 
-Target: `aegis_core/command_safety.py`, `aegis_cli/hooks.py`
+Target: `aegis_core/command_safety.py`, `aegis_cli/hooks/`
 
 Description: Enforces non-bypassable structural separation between code generation and release authorization. Agents are strictly prohibited from executing `gh pr merge` or direct pushes to `main`. Merge authority on `main` is reserved exclusively for human maintainers.

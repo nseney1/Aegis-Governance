@@ -16,7 +16,7 @@ from aegis_cli.init import (
     SOMA_HOOK_FORMAT,
     install_hook,
 )
-from aegis_core.workspace import resolve_git_hooks_dir
+from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
 
 def _setup_mock_worktree(tmp_path: Path) -> tuple[Path, Path]:

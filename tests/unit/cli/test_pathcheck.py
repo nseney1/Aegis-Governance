@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from aegis_cli import pathcheck
 from aegis_cli.pathcheck import (
     build_hint,
     detect_shell,
@@ -149,17 +148,17 @@ def test_remedy_git_bash_home_match_is_case_insensitive():
 
 # ── scripts_dir ──────────────────────────────────────────────────────────────
 
-def test_scripts_dir_picks_first_candidate_containing_soma(tmp_path):
+def test_scripts_dir_picks_first_candidate_containing_aegis(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     real = tmp_path / "bin"
     real.mkdir()
-    (real / "soma").write_text("#!/bin/sh\n")
+    (real / "aegis").write_text("#!/bin/sh\n")
     assert scripts_dir([str(empty), str(real)]) == str(real)
 
 
 def test_scripts_dir_finds_windows_exe(tmp_path):
-    (tmp_path / "soma.exe").write_bytes(b"MZ")
+    (tmp_path / "aegis.exe").write_bytes(b"MZ")
     assert scripts_dir([str(tmp_path)]) == str(tmp_path)
 
 
@@ -169,23 +168,23 @@ def test_scripts_dir_none_when_not_installed(tmp_path):
 
 # ── build_hint ───────────────────────────────────────────────────────────────
 
-def _bin_with_soma(tmp_path):
+def _bin_with_aegis(tmp_path):
     home = tmp_path / "home"
     bindir = home / ".local" / "bin"
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     return home, bindir
 
 
 def test_build_hint_none_when_resolvable(tmp_path):
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/usr/bin/zsh", "PATH": str(bindir), "HOME": str(home)}
-    assert build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: str(bindir / "soma"),
+    assert build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: str(bindir / "aegis"),
                       home=str(home), platform="linux", os_name="posix") is None
 
 
 def test_build_hint_zsh_names_zshrc_and_fallback(tmp_path):
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin:/bin", "HOME": str(home)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(home), platform="linux", os_name="posix")
@@ -194,13 +193,15 @@ def test_build_hint_zsh_names_zshrc_and_fallback(tmp_path):
     assert "zsh" in text
     assert "~/.zshrc" in text
     assert 'export PATH="$HOME/.local/bin:$PATH"' in text
-    assert "python3 -m soma_cli" in text
+    # The stopgap names the script by its full path; `-m aegis_cli` would import from the cwd.
+    assert f"{bindir / 'aegis'} <command>" in text
+    assert "-m aegis_cli" not in text
 
 
 def test_build_hint_on_path_but_shell_not_refreshed(tmp_path):
     # Directory already on PATH but `which` misses it (e.g. stale hash):
     # don't tell the user to edit their rc file again.
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/usr/bin/zsh", "PATH": str(bindir), "HOME": str(home)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(home), platform="linux", os_name="posix")
@@ -217,8 +218,18 @@ def test_build_hint_not_installed(tmp_path):
     assert "pip install" in text
 
 
+def test_build_hint_defaults_to_the_aegis_package(tmp_path):
+    """The default names aegis-guardrails, never the v3 soma-governance package."""
+    env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin", "HOME": str(tmp_path)}
+    text = build_hint(env=env, candidates=[str(tmp_path)], which=lambda *_a, **_k: None,
+                      home=str(tmp_path), platform="linux", os_name="posix")
+    assert text == ("ℹ️  The 'aegis' command is not installed for this Python.\n"
+                    "    Install it with: python3 -m pip install aegis-guardrails\n"
+                    "    (or pipx install aegis-guardrails)")
+
+
 def test_build_hint_unknown_shell_gives_generic_advice(tmp_path):
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/bin/tcsh", "PATH": "/usr/bin", "HOME": str(home)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(home), platform="linux", os_name="posix")
@@ -231,7 +242,7 @@ def test_build_hint_venv_says_activate_not_rc_file(tmp_path):
     venv = tmp_path / "venv"
     bindir = venv / "bin"
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin", "HOME": str(tmp_path)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(tmp_path), platform="linux", os_name="posix",
@@ -256,11 +267,41 @@ def test_build_hint_which_searches_env_path(tmp_path):
     assert seen["path"] == "/only/this"
 
 
+def _stub_aegis(directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    program = directory / ("aegis.exe" if os.name == "nt" else "aegis")
+    program.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    program.chmod(0o755)
+    return program
+
+
+@pytest.mark.parametrize("entry", ["", ".", "bin"])
+def test_build_hint_by_default_never_counts_an_aegis_behind_a_relative_entry(tmp_path, monkeypatch, entry):
+    # The default lookup is doctor's (aegis_core.pathlookup): an aegis reached only
+    # through an empty or relative entry is one the current directory (a cloned
+    # repository) supplies, so the hint agrees with doctor's "not found".
+    repo = tmp_path / "repo"
+    _stub_aegis(repo)
+    _stub_aegis(repo / "bin")
+    monkeypatch.chdir(repo)
+    env = {"SHELL": "/usr/bin/zsh", "PATH": entry, "HOME": str(tmp_path)}
+    text = build_hint(env=env, candidates=[str(tmp_path / "nowhere")], home=str(tmp_path),
+                      platform="linux", os_name="posix")
+    assert text is not None and "is not installed for this Python" in text
+
+
+def test_build_hint_by_default_finds_aegis_on_an_absolute_entry(tmp_path):
+    program = _stub_aegis(tmp_path / "bin")
+    env = {"SHELL": "/usr/bin/zsh", "PATH": str(program.parent), "HOME": str(tmp_path)}
+    assert build_hint(env=env, candidates=[str(tmp_path / "nowhere")], home=str(tmp_path),
+                      platform="linux", os_name="posix") is None
+
+
 def test_build_hint_venv_path_with_spaces_is_quoted(tmp_path):
     venv = tmp_path / "my venv"
     bindir = venv / "bin"
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin", "HOME": str(tmp_path)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(tmp_path), platform="linux", os_name="posix",
@@ -273,7 +314,7 @@ def test_build_hint_pwsh_venv_activate_is_quoted_call(tmp_path):
     venv = tmp_path / "my venv"
     scripts = venv / "Scripts"
     scripts.mkdir(parents=True)
-    (scripts / "soma.exe").write_bytes(b"MZ")
+    (scripts / "aegis.exe").write_bytes(b"MZ")
     text = build_hint(env={"PATH": "C:\\Windows"}, candidates=[str(scripts)],
                       which=lambda *_a, **_k: None, home="C:\\Users\\U",
                       platform="win32", os_name="nt", shell="pwsh",
@@ -285,7 +326,7 @@ def _venv_hint(tmp_path, name, bin_name, **kw):
     venv = tmp_path / name
     bindir = venv / bin_name
     bindir.mkdir(parents=True)
-    (bindir / "soma").write_text("#!/bin/sh\n")
+    (bindir / "aegis").write_text("#!/bin/sh\n")
     text = build_hint(env={"PATH": "/usr/bin"}, candidates=[str(bindir)],
                       which=lambda *_a, **_k: None, home="/nonexistent",
                       venv_prefix=str(venv), **kw)
@@ -322,7 +363,7 @@ def test_build_hint_git_bash_venv_with_space_is_quoted(tmp_path):
 
 
 def test_build_hint_empty_path_reports_install_dir(tmp_path):
-    home, bindir = _bin_with_soma(tmp_path)
+    home, bindir = _bin_with_aegis(tmp_path)
     env = {"SHELL": "/usr/bin/zsh", "PATH": "", "HOME": str(home)}
     text = build_hint(env=env, candidates=[str(bindir)], which=lambda *_a, **_k: None,
                       home=str(home), platform="linux", os_name="posix", venv_prefix=None)
@@ -333,24 +374,30 @@ def test_build_hint_empty_path_reports_install_dir(tmp_path):
 
 def test_build_hint_windows_uses_python_not_python3(tmp_path):
     home = tmp_path
-    (tmp_path / "soma.exe").write_bytes(b"MZ")
+    (tmp_path / "aegis.exe").write_bytes(b"MZ")
     env = {"PATH": "C:\\Windows"}
     text = build_hint(env=env, candidates=[str(tmp_path)], which=lambda *_a, **_k: None,
                       home=str(home), platform="win32", os_name="nt")
     assert text is not None
-    assert "python -m soma_cli" in text
-    assert "python3 -m" not in text
+    assert f"{tmp_path / 'aegis.exe'} <command>" in text
+    assert "-m aegis_cli" not in text
+
+def test_scripts_dir_ignores_a_v3_soma_script(tmp_path):
+    # v4 installs only `aegis`; a leftover v3 `soma` script is not where aegis is.
+    (tmp_path / "soma").write_text("#!/bin/sh\n")
+    (tmp_path / "soma.exe").write_bytes(b"MZ")
+    assert scripts_dir([str(tmp_path)]) is None
+
+
+def test_build_hint_is_not_silenced_by_a_soma_on_path(tmp_path):
+    env = {"SHELL": "/usr/bin/zsh", "PATH": "/usr/bin", "HOME": str(tmp_path)}
+    text = build_hint(env=env, candidates=[str(tmp_path)],
+                      which=lambda cmd, **_k: "/usr/bin/soma" if cmd == "soma" else None,
+                      home=str(tmp_path), platform="linux", os_name="posix")
+    assert text is not None and "The 'aegis' command is not installed" in text
 
 
 # ── module entry points ──────────────────────────────────────────────────────
-
-def test_pathcheck_module_hint_exits_zero():
-    proc = subprocess.run([sys.executable, "-m", "aegis_cli.pathcheck", "--hint"],
-                          cwd=str(REPO), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
-    assert proc.returncode == 0, proc.stderr
-    assert "Traceback" not in proc.stderr
-
 
 def test_python_m_soma_cli_runs():
     proc = subprocess.run([sys.executable, "-m", "aegis_cli", "--help"],
@@ -358,15 +405,6 @@ def test_python_m_soma_cli_runs():
                           encoding="utf-8", errors="replace")
     assert proc.returncode == 0, proc.stderr
     assert "usage: aegis" in proc.stdout or "usage: soma" in proc.stdout
-
-
-def test_soma_version_flag(capsys):
-    from aegis_cli.cli import main
-    with pytest.raises(SystemExit) as exc:
-        main(["--version"])
-    assert exc.value.code == 0
-    out = capsys.readouterr().out
-    assert (REPO / "VERSION").read_text().strip() in out
 
 
 def test_pathcheck_on_path_handles_windows_colons():

@@ -18,6 +18,14 @@ from aegis_core.ast.schema import NormalizedAST
 from aegis_core.skills.slots import SlotRegistry
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """parse_file consults ~/.aegis/config.json; a developer's own driver config must not run here."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+
 def test_native_python_fast_path(tmp_path):
     py_file = tmp_path / "hello.py"
     py_file.write_text("def greet(): return 'hi'", encoding="utf-8")
@@ -103,18 +111,20 @@ def test_no_driver_configured_raises_expected_error(tmp_path):
         runner.parse_file(target_rs, workspace_root=tmp_path)
 
 
-def test_slot_registry_driver_resolution(tmp_path):
-    slots_file = tmp_path / ".aegis" / "slots.yaml"
-    slots_file.parent.mkdir(parents=True)
-    slots_file.write_text("""
-slots:
-  ast_driver_go: "go run ./ast_parser.go"
-  ast_driver: "generic-driver"
-""", encoding="utf-8")
+def test_workspace_config_only_selects_packaged_drivers(tmp_path):
+    """A repo .aegis/config.json cannot name driver commands (H5, D10): it can only opt
+    in to an extension's packaged driver; any driver command it names is dropped."""
+    config = tmp_path / ".aegis" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        '{"v": 1, "ast": {"packaged_drivers": ["go"]}, '
+        '"drivers": {"go": "go run ./ast_parser.go"}, "ast_driver": "generic-driver"}',
+        encoding="utf-8",
+    )
 
     slot_reg = SlotRegistry.load(tmp_path)
-    assert slot_reg.get_ast_driver(".go") == "go run ./ast_parser.go"
-    assert slot_reg.get_ast_driver(".rs") == "generic-driver"
+    assert slot_reg.get_ast_driver(".go") == "go run .aegis/drivers/go_ast.go"
+    assert slot_reg.get_ast_driver(".rs") is None
     assert slot_reg.get_ast_driver(".py") is None  # Python is native
 
 
@@ -131,7 +141,7 @@ def test_split_command_windows(monkeypatch):
         assert parts2 == [r"C:\Python312\python.exe", r"D:\driver.py"]
 
 
-RUST_DRIVER = Path(__file__).resolve().parents[3] / "install" / "drivers" / "rust_ast.py"
+RUST_DRIVER = Path(__file__).resolve().parents[3] / "aegis_core" / "ast" / "drivers" / "templates" / "rust_ast.py"
 
 
 @pytest.mark.parametrize("interpreter", ["python3", "python"])

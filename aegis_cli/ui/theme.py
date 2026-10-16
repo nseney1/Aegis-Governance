@@ -7,7 +7,7 @@ import re
 import sys
 from typing import Any, Mapping, Optional
 
-from aegis_core.taxonomy import RULE_TYPE_THEME_STYLES
+from aegis_core.taxonomy import RULE_TYPES
 
 __all__ = ["ANSI_ESCAPE_RE", "OutputContext", "strip_ansi"]
 
@@ -26,7 +26,11 @@ _ANSI_CODES: dict[str, str] = {
     "white": "\x1b[37m",
 }
 
-_RULE_TYPE_STYLES: dict[str, tuple[str, ...]] = RULE_TYPE_THEME_STYLES
+# "core" is the status label of host-installed instruction rules, not a rule type.
+_RULE_TYPE_STYLES: dict[str, tuple[str, ...]] = {
+    **{name: spec.style for name, spec in RULE_TYPES.items()},
+    "core": ("bold", "green"),
+}
 
 
 def strip_ansi(text: str) -> str:
@@ -41,8 +45,6 @@ class OutputContext:
     color_enabled: bool = False
     emoji_enabled: bool = False
     json_mode: bool = False
-    quiet: bool = False
-    verbose: bool = False
     plain: bool = False
 
     @classmethod
@@ -56,11 +58,7 @@ class OutputContext:
         tty = isatty if isatty is not None else bool(getattr(sys.stdout, "isatty", lambda: False)())
 
         plain = bool(getattr(args, "plain", False))
-        no_emoji = bool(getattr(args, "no_emoji", False)) or plain
-        fmt = getattr(args, "format", "text")
-        json_mode = bool(getattr(args, "json", False)) or fmt == "json"
-        quiet = bool(getattr(args, "quiet", False))
-        verbose = bool(getattr(args, "verbose", False))
+        json_mode = bool(getattr(args, "json", False))
 
         no_color_env = bool(env.get("NO_COLOR", ""))
         term_dumb = env.get("TERM", "").lower() == "dumb"
@@ -73,14 +71,12 @@ class OutputContext:
         else:
             color_enabled = tty
 
-        emoji_enabled = bool(tty and not plain and not no_emoji and not json_mode and not term_dumb)
+        emoji_enabled = bool(tty and not plain and not json_mode and not term_dumb)
 
         return cls(
             color_enabled=color_enabled,
             emoji_enabled=emoji_enabled,
             json_mode=json_mode,
-            quiet=quiet,
-            verbose=verbose,
             plain=plain or not tty,
         )
 

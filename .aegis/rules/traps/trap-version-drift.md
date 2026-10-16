@@ -3,11 +3,11 @@ id: trap-version-drift
 domain: correctness
 type: trap
 enforcement: advisory
-hypothesis: "Version numbers across VERSION, pyproject.toml, and aegis_sdk/__init__.py must stay in sync"
+hypothesis: "Version numbers across aegis_core/_version.py, pyproject.toml, and aegis_sdk/__init__.py must stay in sync"
 prediction: Will catch version drift when bumping versions in one file but not others
 falsification: 0 version mismatches in 10 sessions → prune
 target_paths:
-  - VERSION
+  - aegis_core/_version.py
   - pyproject.toml
   - aegis_sdk/__init__.py
 expiry_sessions: 10
@@ -19,16 +19,9 @@ tags:
   - versioning
   - consistency
   - release
-fitness:
-  score: 0.7273
-  impact_weight: 1.0
-  triggers: 47
-  true_positives: 29.3
-  false_positives: 9.6
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 Version consistency is enforced across 3 sources:
-- `VERSION` (single source of truth)
+- `aegis_core/_version.py` (single source of truth)
 - `pyproject.toml` (Python package)
 - `aegis_sdk/__init__.py` (Python SDK)

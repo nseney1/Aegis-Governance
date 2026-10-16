@@ -2,128 +2,198 @@
 
 Subcommands:
   aegis rule list                 List active workspace rules and fitness scores
+  aegis rule create               Create a rule (--hypothesis, optional --body-file)
   aegis rule promote <rule_id>    Promote a rule up lifecycle tiers
   aegis rule demote <rule_id>     Demote a rule down lifecycle tiers
-  aegis rule archive [rule_id]    Archive decayed, extinct, or quarantined rules
-  aegis rule clean                Prune leaked or redundant rules
+  aegis rule archive [--dry-run]  Archive rules that misfire (applies unless --dry-run)
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
+from aegis_cli import sanitize_display
 from aegis_cli.base import CommandCategory, AegisCommand
-from aegis_core.taxonomy import RULE_TYPE_DIRS
-from aegis_core.workspace import Workspace
+from aegis_core.errors import WorkspaceNotFoundError
+from aegis_core.lifecycle.creation import MAX_RULE_BODY_BYTES, validate_rule_body
+from aegis_core.taxonomy import CANONICAL_RULE_TYPES
+from aegis_core.workspace.base import Workspace
+from aegis_core.workspace.binding import bounded_walk_up, home_message
 from aegis_core.workspace.layout import WorkspaceLayout
-from aegis_core.lifecycle import (
-    promote_cell,
-    demote_cell,
-    prune_cells,
-    find_cell_file,
+from aegis_core.lifecycle.promotion import (
+    promote_rule,
+    demote_rule,
     evaluate_promotions,
     evaluate_demotions,
-    evaluate_cell_tiers,
+    evaluate_rule_tiers,
 )
+from aegis_core.lifecycle.selection import prune_rules
+from aegis_core.workspace.layout import is_aegis_workspace
 
 __all__ = [
-    "run_rule",
-    "RuleCommand",
-    "run_promote",
-    "run_demote",
-    "_force_promote",
-    "_force_demote",
-    "clean_global_rules",
-    "run_clean_rules",
-    "UNIVERSAL_TENETS",
+    "run_rule", "RuleCommand", "run_promote", "run_demote", "_force_promote",
+    "_force_demote", "collect_workspace_rules",
 ]
 
 
 def run_rule(args: argparse.Namespace) -> int:
     """Entrypoint for aegis rule subcommands."""
-    action = getattr(args, "rule_action", None)
-    if not action:
-        # Default behavior: list rules
-        return _run_list(args)
+    action = getattr(args, "rule_action", None) or "list"
+    handlers = {
+        "list": _run_list, "create": _run_create, "promote": _run_promote,
+        "demote": _run_demote, "archive": _run_archive,
+    }
+    if action not in handlers:
+        print(f"Unknown rule subcommand: {action}", file=sys.stderr)
+        return 1
+    try:
+        return handlers[action](args)
+    except WorkspaceNotFoundError as exc:
+        return _emit_error(args, str(exc))
 
-    if action == "list":
-        return _run_list(args)
-    elif action == "create":
-        return _run_create(args)
-    elif action == "promote":
-        return _run_promote(args)
-    elif action == "demote":
-        return _run_demote(args)
-    elif action == "archive":
-        return _run_archive(args)
-    elif action == "clean":
-        return _run_clean(args)
 
-    print(f"Unknown rule subcommand: {action}", file=sys.stderr)
+def _emit_error(args: argparse.Namespace, msg: str) -> int:
+    if getattr(args, "json", False):
+        print(json.dumps({"status": "error", "error": msg}))
+    else:
+        print(f"Error: {msg}", file=sys.stderr)
     return 1
 
 
-def _resolve_workspace_root(args: argparse.Namespace) -> Path:
-    ws_obj = getattr(args, "ws", None)
-    if ws_obj is not None:
-        return ws_obj.root
-    raw = getattr(args, "workspace", None) or getattr(args, "_project_root", None) or getattr(args, "_root", None)
-    if raw:
-        return Path(raw).resolve()
-    return Workspace.resolve().root
+class _WorkspaceArg(argparse.Action):
+    """Keep the operator's ``--workspace`` verbatim.
+
+    ``cli.main`` replaces ``args.workspace`` with its own walked-up resolution
+    before dispatch, which is how ``rule create`` once landed in ``$HOME``.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[override]
+        setattr(namespace, self.dest, values)
+        setattr(namespace, "_rule_workspace_arg", values)
+
+
+def _home() -> Path | None:
+    try:
+        return Path.home().resolve()
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
+def _not_a_workspace(directory: Path) -> WorkspaceNotFoundError:
+    return WorkspaceNotFoundError(f"not an Aegis workspace (no .aegis/ in {directory}); run aegis init")
+
+
+def _walk_up_to_workspace(start: Path) -> Path:
+    """The workspace an explicit --workspace names: AD-4's bounded walk-up from ``start``
+    (never above its git toplevel, never ``$HOME`` or the filesystem root), else ``start``.
+
+    It ignores AEGIS_WORKSPACE: an explicit --workspace beats the environment, as it
+    already does for create.
+    """
+    return bounded_walk_up(start) or start
+
+
+def _resolve_workspace_root(args: argparse.Namespace, require_aegis: bool = False) -> Path:
+    """Resolve the rule workspace. Never ``$HOME``, never above the git toplevel (H8, AD-4).
+
+    An explicit ``--workspace DIR`` is the start point, whichever position it
+    was given in (``_workspace_arg`` is the raw global flag, when ``cli.main``
+    keeps it). ``rule create`` (``require_aegis``) uses exactly DIR; the other
+    actions take the bounded walk-up from DIR, and DIR must then resolve to a
+    workspace. Without DIR the root comes from ``cli.main``'s discovery, which is
+    bounded the same way.
+    """
+    explicit = getattr(args, "_rule_workspace_arg", None) or getattr(args, "_workspace_arg", None)
+    if explicit:
+        try:
+            start = Path(explicit).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:  # a NUL byte, a link loop before 3.13
+            raise WorkspaceNotFoundError(f"--workspace {explicit} cannot be resolved: {exc}") from exc
+        root = start if require_aegis else _walk_up_to_workspace(start)
+    else:
+        ws_obj = getattr(args, "ws", None)
+        raw = getattr(args, "workspace", None) or getattr(args, "_project_root", None) or getattr(args, "_root", None)
+        if ws_obj is None and raw:
+            root = start = Path(raw).resolve()
+        else:
+            root = Path(ws_obj.root if ws_obj is not None else Workspace.resolve().root).resolve()
+            start = Path.cwd().resolve()
+
+    home = _home()
+    if home is not None and root == home:
+        if start == home:
+            raise WorkspaceNotFoundError(home_message(home))
+        raise _not_a_workspace(start)
+
+    if (explicit or require_aegis) and not is_aegis_workspace(root):
+        raise _not_a_workspace(root)
+    return root
+
+
+def collect_workspace_rules(
+    root: Path,
+    rule_type_filter: str | None = None,
+    min_fitness: float | None = None,
+) -> list[dict[str, Any]]:
+    """The workspace's rules (one loader) with their ledger fitness, filtered.
+
+    A rule file that cannot be loaded is listed with its ``error``; it has no fitness.
+    A rule edited or added since the last ``aegis sync`` carries ``stale`` (``edited``
+    or ``new``); it is listed like any other.
+    """
+    from aegis_core.fitness import for_rules
+    from aegis_core.rules import load_rules
+    from aegis_core.sync import read_derived, stale_rules
+
+    ruleset = load_rules(root)
+    selected = [r for r in ruleset.rules if not rule_type_filter or r.type == rule_type_filter]
+    fits = for_rules(root, [r for r in selected if r.ok])
+    stale = {s["id"]: s["change"] for s in stale_rules(ruleset, read_derived(root))}
+    rules: list[dict[str, Any]] = []
+    for rule in selected:
+        fit = fits.get(rule.id) if rule.ok else None
+        score = fit.score if fit is not None else None
+        if min_fitness is not None and (score is None or score < min_fitness):
+            continue
+        entry: dict[str, Any] = {
+            "id": rule.id,
+            "type": rule.type,
+            "domain": rule.meta.get("domain", "general"),
+            "enforcement": rule.enforcement,
+            "score": score,
+            "triggers": fit.triggers if fit is not None else 0,
+            "path": rule.path,
+        }
+        if rule.error:
+            entry["error"] = rule.error
+        if rule.expired:
+            entry["expired"] = True
+        if rule.id in stale and rule.ok:
+            entry["stale"] = stale[rule.id]
+        rules.append(entry)
+    return rules
 
 
 def _run_list(args: argparse.Namespace) -> int:
     """List active rules and fitness metrics."""
-    from aegis_core.yaml import parse_frontmatter
     root = _resolve_workspace_root(args)
     rules_dir = WorkspaceLayout(root).rules_dir
     if not rules_dir.is_dir():
-        if getattr(args, "json", False):
-            print(json.dumps([]))
-        else:
-            print("No rules directory found.")
+        print(json.dumps([]) if getattr(args, "json", False) else "No rules directory found.")
         return 0
 
-    rule_type_filter = getattr(args, "type", None)
-    min_fitness = getattr(args, "min_fitness", None)
+    from aegis_core.rule_inventory import RuleInventoryError
 
-    rules = []
-    for md_file in sorted(rules_dir.rglob("*.md")):
-        if md_file.name == "README.md":
-            continue
-        try:
-            content = md_file.read_text(encoding="utf-8")
-            fm = parse_frontmatter(content) or {}
-            r_type = fm.get("type", md_file.parent.name.rstrip("s"))
-            if rule_type_filter and r_type != rule_type_filter:
-                continue
-
-            fitness_block = fm.get("fitness", {})
-            score = fitness_block.get("score") if isinstance(fitness_block, dict) else None
-
-            if min_fitness is not None and score is not None and score < min_fitness:
-                continue
-
-            rules.append({
-                "id": fm.get("id", md_file.stem),
-                "type": r_type,
-                "domain": fm.get("domain", "general"),
-                "enforcement": fm.get("enforcement", "advisory"),
-                "score": score,
-                "path": str(md_file.relative_to(root)),
-            })
-        except Exception:
-            continue
-
+    try:
+        rules = collect_workspace_rules(root, getattr(args, "type", None), getattr(args, "min_fitness", None))
+    except RuleInventoryError as exc:
+        return _emit_error(args, str(exc))
     if getattr(args, "json", False):
         print(json.dumps(rules, indent=2))
         return 0
-
     if not rules:
         print("No matching rules found.")
         return 0
@@ -133,22 +203,32 @@ def _run_list(args: argparse.Namespace) -> int:
 
     existing_ui = getattr(args, "ui", None)
     ui = existing_ui if isinstance(existing_ui, OutputContext) else OutputContext.from_env_and_args(args)
-
     tbl = Table(ctx=ui)
-    tbl.add_column("Rule ID", no_wrap=True)
-    tbl.add_column("Type", no_wrap=True)
-    tbl.add_column("Enforcement", no_wrap=True)
+    for col in ("Rule ID", "Type", "Enforcement"):
+        tbl.add_column(col, no_wrap=True)
     tbl.add_column("Fitness", justify="right", no_wrap=True)
     for r in rules:
         score_str = ui.color_fitness(float(r["score"])) if isinstance(r.get("score"), (int, float)) else "—"
-        type_str = ui.color_rule_type(str(r["type"]))
-        tbl.add_row(str(r["id"]), type_str, str(r["enforcement"]), score_str)
+        if r.get("error"):
+            score_str = "error"
+        tbl.add_row(sanitize_display(str(r["id"])), ui.color_rule_type(str(r["type"])), str(r["enforcement"]), score_str)
 
     print(f"Active Rules ({len(rules)} found):")
     for line in tbl.render(ui).splitlines():
         print(f"  {line}")
+    stale = [f"{sanitize_display(str(r['id']))} ({r['stale']})" for r in rules if r.get("stale")]
+    if stale:
+        print(f"  {len(stale)} rule(s) changed since the last aegis sync: {', '.join(stale)}")
     return 0
 
+
+def _emit_status(use_json: bool, payload: dict[str, Any], text: str, rc: int) -> int:
+    print(json.dumps(payload) if use_json else text)
+    return rc
+
+
+def _resolve_rule_id(args: argparse.Namespace) -> str | None:
+    return getattr(args, "rule_id", None)
 
 
 def _run_promote(args: argparse.Namespace) -> int:
@@ -156,13 +236,12 @@ def _run_promote(args: argparse.Namespace) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
     root = _resolve_workspace_root(args)
-    rule_id = getattr(args, "rule", None) or getattr(args, "rule_id", None) or getattr(args, "cell", None) or getattr(args, "cell_id", None)
+    rule_id = _resolve_rule_id(args)
     dry_run = getattr(args, "dry_run", False)
     use_json = getattr(args, "json", False)
-    force = getattr(args, "force", False)
 
     if getattr(args, "tier_check", False):
-        res = evaluate_cell_tiers(root, execute=not dry_run)
+        res = evaluate_rule_tiers(root, execute=not dry_run)
         if use_json:
             print(json.dumps(res, indent=2))
         else:
@@ -170,68 +249,41 @@ def _run_promote(args: argparse.Namespace) -> int:
             print(f"  Evaluated {res.get('evaluated', 0)} rules across enforcement tiers.")
             if not changes:
                 print("  No tier changes required.")
-            else:
-                for c in changes:
-                    print(f"    {c['cell']}: {c['old_tier']} → {c['new_tier']} ({c['reason']})")
-        return 0
+            for c in changes:
+                print(f"    {c['rule']}: {c['old_tier']} → {c['new_tier']} ({c['reason']})")
+            if res.get("refused"):
+                print(f"  ❌ {res['refused']}")
+        return 1 if res.get("refused") else 0
 
     if not rule_id:
         candidates = evaluate_promotions(str(root))
         if use_json:
             print(json.dumps({"candidates": candidates}, indent=2, default=str))
+        elif not candidates:
+            print("  No promotion candidates found.")
         else:
-            if not candidates:
-                print("  No promotion candidates found.")
-            else:
-                print(f"  Promotion Candidates ({len(candidates)}):")
-                print()
-                for c in candidates:
-                    print(f"    {c['cell_id']}: {c['from_type']} → {c['to_type']}")
-                    print(f"      triggers={c['triggers']} tp_rate={c['tp_rate']:.0%} age={c['age_days']}d")
-                print()
+            print(f"  Promotion Candidates ({len(candidates)}):\n")
+            for c in candidates:
+                print(f"    {c['rule_id']}: {c['from_type']} → {c['to_type']}\n      triggers={c['triggers']} fitness={c['fitness']:.2f} age={c['age_days']}d")
+            print()
         return 0
 
-    res = promote_cell(root, rule_id, force=True, dry_run=dry_run)
+    res = promote_rule(root, rule_id, force=True, dry_run=dry_run)
     status = res.get("status")
-
     if status == "not_found":
         msg = f"Rule '{rule_id}' not found in workspace"
-        if use_json:
-            print(json.dumps({"error": msg}))
-        else:
-            print(f"  ❌ {msg}")
-        return 1
-
+        return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
     if status == "already_terminal":
         msg = f"Rule '{rule_id}' is already at terminal tier ('{res.get('current_type')}')"
-        if use_json:
-            print(json.dumps({"info": msg}))
-        else:
-            print(f"  ℹ️  {msg}")
-        return 0
+        return _emit_status(use_json, {"info": msg}, f"  ℹ️  {msg}", 0)
+    if status not in ("promoted", "dry_run"):
+        msg = res.get("message") or f"Promotion of '{rule_id}' failed ({status})"
+        return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
 
-    if status == "target_exists":
-        msg = res.get("message", "Target already exists")
-        if use_json:
-            print(json.dumps({"error": msg}))
-        else:
-            print(f"  ❌ {msg}")
-        return 1
-
-    from_t = res.get("from_type")
-    to_t = res.get("to_type")
+    from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:
-        if use_json:
-            print(json.dumps({"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}))
-        else:
-            print(f"  🔍 Would promote: {rule_id}: {from_t} → {to_t}")
-        return 0
-
-    if use_json:
-        print(json.dumps({"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}))
-    else:
-        print(f"  ✅ Promoted: {rule_id}: {from_t} → {to_t}")
-    return 0
+        return _emit_status(use_json, {"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}, f"  🔍 Would promote: {rule_id}: {from_t} → {to_t}", 0)
+    return _emit_status(use_json, {"action": "promote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Promoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
 def _run_demote(args: argparse.Namespace) -> int:
@@ -239,7 +291,7 @@ def _run_demote(args: argparse.Namespace) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
     root = _resolve_workspace_root(args)
-    rule_id = getattr(args, "rule", None) or getattr(args, "rule_id", None) or getattr(args, "cell", None) or getattr(args, "cell_id", None)
+    rule_id = _resolve_rule_id(args)
     dry_run = getattr(args, "dry_run", False)
     use_json = getattr(args, "json", False)
 
@@ -247,79 +299,48 @@ def _run_demote(args: argparse.Namespace) -> int:
         candidates = evaluate_demotions(str(root))
         if use_json:
             print(json.dumps({"candidates": candidates}, indent=2, default=str))
+        elif not candidates:
+            print("  No demotion candidates found.")
         else:
-            if not candidates:
-                print("  No demotion candidates found.")
-            else:
-                print(f"  ⚠️  Demotion Candidates ({len(candidates)}):")
-                print()
-                for c in candidates:
-                    print(f"    {c['cell_id']}: {c['from_type']} → {c['to_type']} ({c['reason']})")
-                    if c.get("triggers", 0) > 0:
-                        print(f"      triggers={c['triggers']} fp_rate={c.get('fp_rate', 0):.0%}")
-                    else:
-                        print(f"      dormant for {c.get('age_days', 0)}d")
-                print()
+            print(f"  ⚠️  Demotion Candidates ({len(candidates)}):\n")
+            for c in candidates:
+                print(f"    {c['rule_id']}: {c['from_type']} → {c['to_type']} (misfiring)\n      "
+                      f"triggers={c['triggers']} tp={c['tp']:g} fp={c['fp']:g} misfire bound={c['misfire']:.2f}")
+            print()
         return 0
 
     try:
-        res = demote_cell(root, rule_id, dry_run=dry_run)
-    except ValueError as exc:
+        res = demote_rule(root, rule_id, dry_run=dry_run)
+    except ValueError:
         msg = f"Cannot demote core rule: {rule_id}."
-        if use_json:
-            print(json.dumps({"error": msg}))
-        else:
-            print(f"  ❌ {msg}")
-        return 1
+        return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
     except Exception as exc:
         msg = f"Demotion error: {exc}"
-        if use_json:
-            print(json.dumps({"error": msg}))
-        else:
-            print(f"  ❌ {msg}")
-        return 1
+        return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
 
     status = res.get("status")
     if status == "not_found":
         msg = f"Rule '{rule_id}' not found in workspace"
-        if use_json:
-            print(json.dumps({"error": msg}))
-        else:
-            print(f"  ❌ {msg}")
-        return 1
-
+        return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
     if status == "already_base":
         msg = f"Rule '{rule_id}' is already at base tier ('{res.get('current_type')}')"
-        if use_json:
-            print(json.dumps({"error": msg}))
-        else:
-            print(f"  ⚠️  {msg}")
-        return 1
+        return _emit_status(use_json, {"error": msg}, f"  ⚠️  {msg}", 1)
+    if status not in ("demoted", "dry_run"):
+        msg = res.get("message") or f"Demotion of '{rule_id}' failed ({status})"
+        return _emit_status(use_json, {"error": msg}, f"  ❌ {msg}", 1)
 
-    from_t = res.get("from_type")
-    to_t = res.get("to_type")
+    from_t, to_t = res.get("from_type"), res.get("to_type")
     if dry_run:
-        if use_json:
-            print(json.dumps({"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}))
-        else:
-            print(f"  🔍 Would demote: {rule_id}: {from_t} → {to_t}")
-        return 0
-
-    if use_json:
-        print(json.dumps({"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}))
-    else:
-        print(f"  ✅ Demoted: {rule_id}: {from_t} → {to_t}")
-    return 0
+        return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "dry_run": True}, f"  🔍 Would demote: {rule_id}: {from_t} → {to_t}", 0)
+    return _emit_status(use_json, {"action": "demote", "rule_id": rule_id, "from": from_t, "to": to_t, "success": True}, f"  ✅ Demoted: {rule_id}: {from_t} → {to_t}", 0)
 
 
-def _force_promote(project_root: Path, cell_id: str, dry_run: bool = False, use_json: bool = False) -> int:
-    args = argparse.Namespace(_project_root=project_root, rule_id=cell_id, dry_run=dry_run, json=use_json, force=True)
-    return _run_promote(args)
+def _force_promote(project_root: Path, rule_id: str, dry_run: bool = False, use_json: bool = False) -> int:
+    return _run_promote(argparse.Namespace(_project_root=project_root, rule_id=rule_id, dry_run=dry_run, json=use_json, force=True))
 
 
-def _force_demote(project_root: Path, cell_id: str, dry_run: bool = False, use_json: bool = False) -> int:
-    args = argparse.Namespace(_project_root=project_root, rule_id=cell_id, dry_run=dry_run, json=use_json, force=True)
-    return _run_demote(args)
+def _force_demote(project_root: Path, rule_id: str, dry_run: bool = False, use_json: bool = False) -> int:
+    return _run_demote(argparse.Namespace(_project_root=project_root, rule_id=rule_id, dry_run=dry_run, json=use_json, force=True))
 
 
 run_promote = _run_promote
@@ -327,265 +348,90 @@ run_demote = _run_demote
 
 
 def _run_archive(args: argparse.Namespace) -> int:
-    """Archive extinct or decayed rules."""
+    """Archive extinct rules; --dry-run only reports what would move."""
     root = _resolve_workspace_root(args)
-    dry_run = getattr(args, "dry_run", False)
-    execute = not dry_run and getattr(args, "apply", True)
-    return prune_cells(workspace=root, execute=execute)
+    execute = not getattr(args, "dry_run", False)
+    return prune_rules(workspace=root, execute=execute)
 
 
-UNIVERSAL_TENETS = frozenset({
-    "providence",
-    "cost-optimization",
-    "subagent-delegation",
-    "destructive-ops",
-    "testing",
-    "documentation",
-    "architectural-tenets",
-    "polyglot-standards",
-    "feature-specs",
-    "desktop-automation",
-    "tdd-protocol",
-    "atomic-workstream-protocol",
-})
-
-AEGIS_INTERNAL_PURGE_STEMS = frozenset({
-    "core-change-protocol",
-    "optional-import-guard",
-    "ci-green-before-release",
-    "gitflow-review-gate",
-    "no-pre-existing-excuse",
-})
+def _split_csv_arg(raw: Any) -> list[str] | None:
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return None
 
 
-def is_purge_candidate(file_path: Path) -> tuple[bool, str]:
-    """Check if a file matches leaked internal rule signatures."""
-    stem = file_path.stem
+class _BodyFileError(Exception):
+    pass
 
-    if stem.startswith("hgt-"):
-        return True, "leaked_hgt_rule"
 
-    if stem in AEGIS_INTERNAL_PURGE_STEMS:
-        return True, "leaked_internal_rule"
-
+def _read_body_file(raw: str) -> str:
+    """Read a rule body from PATH or stdin (``-``), never more than the size cap + 1 byte."""
+    label = "<stdin>" if raw == "-" else raw
+    limit = MAX_RULE_BODY_BYTES + 1
     try:
-        from aegis_core.yaml import parse_frontmatter
-        content = file_path.read_text(encoding="utf-8-sig", errors="replace")
-        meta = parse_frontmatter(content)
-        if meta and isinstance(meta, dict):
-            if meta.get("aegis_internal") is True or meta.get("soma_internal") is True or meta.get("domain") in ("aegis-internal", "soma-internal"):
-                return True, "internal_marker"
-            if "hgt" in meta or meta.get("domain") == "hgt":
-                return True, "hgt_marker"
-    except Exception:
-        pass
-
-    return False, ""
-
-
-def _clean_claude_sections(content: str) -> tuple[str, list[str]]:
-    """Clean leaked rules from CLAUDE.md while preserving custom user sections."""
-    import re
-    lines = content.splitlines()
-    cleaned_lines: list[str] = []
-    removed_sections: list[str] = []
-
-    in_purge_section = False
-    current_heading = ""
-
-    for line in lines:
-        match = re.match(r"^(#{1,3})\s+(.*)$", line)
-        if match:
-            heading = match.group(2).strip()
-            slug = re.sub(r"[^a-zA-Z0-9]+", "-", heading.lower()).strip("-")
-            should_purge = False
-            for stem in AEGIS_INTERNAL_PURGE_STEMS:
-                if stem in slug or slug in stem:
-                    should_purge = True
-                    break
-            if "hgt" in slug or slug.startswith("hgt-"):
-                should_purge = True
-
-            if should_purge:
-                in_purge_section = True
-                current_heading = heading
-                removed_sections.append(heading)
-                continue
-            else:
-                in_purge_section = False
-                current_heading = ""
-
-        if in_purge_section:
-            continue
-
-        cleaned_lines.append(line)
-
-    cleaned_content = "\n".join(cleaned_lines)
-    if content.endswith("\n") and not cleaned_content.endswith("\n"):
-        cleaned_content += "\n"
-    return cleaned_content, removed_sections
-
-
-def clean_global_rules(
-    home_dir: Path | str | None = None,
-    dry_run: bool = True,
-    force: bool = False,
-    quarantine_dir: Path | str | None = None,
-) -> dict[str, Any]:
-    """Inspect and optionally clean leaked rules across global AI platform directories."""
-    import shutil
-    from datetime import datetime, timezone
-    execute = bool(force and not dry_run)
-    home = Path(home_dir).resolve() if home_dir else Path(os.environ.get("HOME") or Path.home()).resolve()
-
-    q_base = Path(quarantine_dir).resolve() if quarantine_dir else WorkspaceLayout(home).quarantine_dir
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    q_backup = q_base / f"global_rules_backup_{timestamp}"
-
-    candidate_rules_dirs = [
-        home / ".gemini" / "config" / "rules",
-        home / ".cursor" / "rules",
-        home / ".kiro" / "steering",
-    ]
-
-    purged_rules: list[str] = []
-    retained_rules: list[str] = []
-    claude_cleaned = False
-
-    for rdir in candidate_rules_dirs:
-        if not rdir.is_dir():
-            continue
-
-        for rule_file in sorted(rdir.glob("*.md")):
-            should_purge, reason = is_purge_candidate(rule_file)
-            if should_purge:
-                purged_rules.append(rule_file.name)
-                if execute:
-                    q_backup.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(rule_file), str(q_backup / rule_file.name))
-                    rule_file.unlink()
-            else:
-                retained_rules.append(rule_file.name)
-
-    claude_md = home / ".claude" / "CLAUDE.md"
-    if claude_md.is_file():
-        try:
-            claude_content = claude_md.read_text(encoding="utf-8", errors="replace")
-            clean_content, removed = _clean_claude_sections(claude_content)
-            if removed:
-                claude_cleaned = True
-                purged_rules.extend([f"CLAUDE.md:{sec}" for sec in removed])
-                if execute:
-                    q_backup.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(claude_md), str(q_backup / "CLAUDE.md"))
-                    claude_bak = claude_md.parent / f"CLAUDE.md.bak.{timestamp}"
-                    shutil.copy2(str(claude_md), str(claude_bak))
-                    claude_md.write_text(clean_content, encoding="utf-8")
-        except Exception as e:
-            print(f"Warning: Failed inspecting CLAUDE.md: {e}", file=sys.stderr)
-
-    return {
-        "dry_run": not execute,
-        "quarantine_dir": str(q_backup) if execute else str(q_base),
-        "purged_rules": purged_rules,
-        "retained_rules": retained_rules,
-        "claude_cleaned": claude_cleaned,
-    }
-
-
-def _run_clean(args: argparse.Namespace) -> int:
-    """Clean redundant or leaked global rules."""
-    dry_run = getattr(args, "dry_run", False)
-    apply = getattr(args, "apply", False) or getattr(args, "force", False)
-    force = apply and not dry_run
-    q_dir = getattr(args, "quarantine_dir", "") or None
-
-    res = clean_global_rules(dry_run=not force, force=force, quarantine_dir=q_dir)
-
-    print("🛡️  Aegis Global Rules Cleanse Protocol")
-    print(f"  Mode: {'🔍 Dry Run (preview only)' if res['dry_run'] else '⚡ Executed'}")
-
-    if res["purged_rules"]:
-        print(f"\n  🧹 Leaked Rules Targeted ({len(res['purged_rules'])}):")
-        for r in res["purged_rules"]:
-            print(f"    - {r}")
-    else:
-        print("\n  ✨ No leaked rules found in global platform directories.")
-
-    if res["retained_rules"]:
-        print(f"\n  ✅ Retained Rules ({len(res['retained_rules'])}):")
-        for r in res["retained_rules"]:
-            print(f"    - {r}")
-
-    if not res["dry_run"]:
-        print(f"\n  📦 Quarantine backup preserved at: {res['quarantine_dir']}")
-    elif res["purged_rules"]:
-        print("\n  ℹ️  Run with --apply to quarantine and purge leaked rules.")
-
-    return 0
-
-
-run_clean_rules = _run_clean
+        if raw == "-":
+            stream = getattr(sys.stdin, "buffer", None)
+            data = stream.read(limit) if stream is not None else sys.stdin.read(limit).encode("utf-8")
+        else:
+            with open(raw, "rb") as fh:
+                data = fh.read(limit)
+    except OSError as exc:
+        raise _BodyFileError(f"--body-file {label}: cannot read file ({exc.strerror or exc})") from exc
+    if len(data) > MAX_RULE_BODY_BYTES:
+        raise _BodyFileError(f"--body-file {label}: rule body exceeds 64 KiB ({MAX_RULE_BODY_BYTES} bytes)")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _BodyFileError(f"--body-file {label}: rule body is not valid UTF-8") from exc
+    try:
+        return validate_rule_body(text)
+    except ValueError as exc:
+        raise _BodyFileError(f"--body-file {label}: {exc}") from exc
 
 
 def _run_create(args: argparse.Namespace) -> int:
     """Create a new governance rule in the workspace."""
-    from aegis_core.lifecycle.creation import create_cell
-
-    root = _resolve_workspace_root(args)
-    cell_type = getattr(args, "type", None) or getattr(args, "cell_type", None) or "trap"
-    hypothesis = getattr(args, "hypothesis", "") or getattr(args, "description", "")
+    from aegis_core.lifecycle.creation import create_rule
+    rule_type = getattr(args, "type", None) or "trap"
+    hypothesis = getattr(args, "hypothesis", "")
     if not hypothesis:
         print("Error: --hypothesis is required to create a rule.", file=sys.stderr)
         return 1
-
-    raw_tags = getattr(args, "tags", None)
-    if isinstance(raw_tags, list):
-        tags = raw_tags
-    elif isinstance(raw_tags, str) and raw_tags.strip():
-        tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
-    else:
-        tags = None
-
-    raw_paths = getattr(args, "target_paths", None)
-    if isinstance(raw_paths, list):
-        target_paths = raw_paths
-    elif isinstance(raw_paths, str) and raw_paths.strip():
-        target_paths = [p.strip() for p in raw_paths.split(",") if p.strip()]
-    else:
-        target_paths = None
-
-    rule_id = getattr(args, "id", None) or getattr(args, "cell_id", None) or None
+    root = _resolve_workspace_root(args, require_aegis=True)
+    body = None
+    body_file = getattr(args, "body_file", None)
+    if body_file is not None:
+        try:
+            body = _read_body_file(body_file)
+        except _BodyFileError as exc:
+            return _emit_error(args, str(exc))
+    rule_id = getattr(args, "id", None) or None
+    target_paths = _split_csv_arg(getattr(args, "target_paths", None))
     try:
-        created = create_cell(
-            cell_type=cell_type,
-            hypothesis=hypothesis,
-            prediction=getattr(args, "prediction", "") or "",
+        created = create_rule(
+            rule_type=rule_type, hypothesis=hypothesis, prediction=getattr(args, "prediction", "") or "",
             falsification=getattr(args, "falsification", "") or "",
-            weight=float(getattr(args, "weight", 1.0) or 1.0),
-            tags=tags,
-            expiry_sessions=getattr(args, "expiry_sessions", 15),
-            expiry_days=getattr(args, "expiry_days", 60),
-            minimum_mode=getattr(args, "minimum_mode", "") or "",
-            id_override=rule_id,
-            effector=bool(getattr(args, "effector", False)),
-            memory=bool(getattr(args, "memory", False)),
-            target_paths=target_paths,
-            domain=getattr(args, "domain", "correctness") or "correctness",
-            workspace=root,
-            enforcement=getattr(args, "enforcement", None),
+            tags=_split_csv_arg(getattr(args, "tags", None)), id_override=rule_id,
+            target_paths=target_paths, domain=getattr(args, "domain", "correctness") or "correctness",
+            workspace=root, enforcement=getattr(args, "enforcement", None), body=body,
         )
     except Exception as exc:
-        if getattr(args, "json", False):
-            print(json.dumps({"error": str(exc), "status": "error"}))
-        else:
-            print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
+        return _emit_error(args, str(exc))
+    warnings = []
+    if not any(isinstance(p, str) and p.strip() for p in target_paths or []):
+        # Created as asked, but a rule without target_paths applies to no file (aegis_core.match).
+        warnings.append(
+            f"rule {created.stem!r} has no target_paths, so it matches no file: aegis scan never shows it "
+            "and aegis check records nothing for it. Pass --target-paths (for example 'src/**/*.py')."
+        )
     if getattr(args, "json", False):
-        print(json.dumps({"status": "created", "path": str(created), "id": created.stem}, indent=2))
+        print(json.dumps({"status": "created", "path": str(created), "id": created.stem, "warnings": warnings}, indent=2))
     else:
         print(f"Created rule: {created}")
+        for warning in warnings:
+            print(f"Warning: {warning}", file=sys.stderr)
     return 0
 
 
@@ -595,28 +441,21 @@ class RuleCommand(AegisCommand):
     name = "rule"
     aliases = ()
     category = CommandCategory.LIFECYCLE
-    help = "Manage rule lifecycle (list, create, promote, demote, archive, clean)"
+    help = "Manage rule lifecycle (list, create, promote, demote, archive)"
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         common = argparse.ArgumentParser(add_help=False)
-        common.add_argument("--plain", action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("--no-emoji", action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("--format", choices=["text", "json", "mermaid"], default=argparse.SUPPRESS)
-        common.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("-q", "--quiet", action="store_true", default=argparse.SUPPRESS)
-        common.add_argument("--workspace", type=str, default=argparse.SUPPRESS)
-
+        for flag in ("--plain", "--json"):
+            common.add_argument(flag, action="store_true", default=argparse.SUPPRESS)
+        common.add_argument("--workspace", type=str, default=argparse.SUPPRESS, action=_WorkspaceArg)
         sub = parser.add_subparsers(dest="rule_action", metavar="ACTION")
 
-        # list
         p_list = sub.add_parser("list", parents=[common], help="List active rules and fitness metrics")
-        p_list.add_argument("--type", choices=list(RULE_TYPE_DIRS.keys()), help="Filter by rule type")
+        p_list.add_argument("--type", choices=list(CANONICAL_RULE_TYPES), help="Filter by rule type")
         p_list.add_argument("--min-fitness", type=float, help="Filter by minimum fitness score")
 
-        # create
         p_create = sub.add_parser("create", parents=[common], help="Create a new governance rule")
-        p_create.add_argument("-t", "--type", dest="type", default="trap", help="Rule type (trap, invariant, boundary, persona, contract)")
+        p_create.add_argument("-t", "--type", dest="type", default="trap", help=f"Rule type ({', '.join(CANONICAL_RULE_TYPES)})")
         p_create.add_argument("--hypothesis", default="", help="Testable rule hypothesis")
         p_create.add_argument("-p", "--prediction", default="", help="Expected outcome when hypothesis holds")
         p_create.add_argument("-f", "--falsification", default="", help="Criteria that falsify the rule")
@@ -625,41 +464,20 @@ class RuleCommand(AegisCommand):
         p_create.add_argument("-n", "--name", "--id", dest="id", default=None, help="Explicit rule ID stem")
         p_create.add_argument("--target-paths", dest="target_paths", default="", help="Comma-separated target path globs")
         p_create.add_argument("--tags", default="", help="Comma-separated tags")
-        p_create.add_argument("-w", "--weight", type=float, default=1.0, help="Impact weight")
-        p_create.add_argument("--expiry-sessions", dest="expiry_sessions", type=int, default=15, help="Session expiry")
-        p_create.add_argument("--expiry-days", dest="expiry_days", type=int, default=60, help="Day expiry")
-        p_create.add_argument("--minimum-mode", dest="minimum_mode", default="", help="Minimum review mode")
-        p_create.add_argument("--effector", action="store_true", default=False, help="Create as effector cell")
-        p_create.add_argument("--memory", action="store_true", default=False, help="Create as memory cell")
-        p_create.add_argument("--from-description", dest="description", default="", help="Create from description")
+        p_create.add_argument("--body-file", dest="body_file", default=None, metavar="PATH",
+                              help="Rule body (markdown after the frontmatter) from PATH, or '-' for stdin; max 64 KiB")
 
-        # promote
-        p_prom = sub.add_parser("promote", parents=[common], help="Promote a rule up lifecycle tiers")
-        p_prom.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to promote")
-        p_prom.add_argument("--rule", default=None, help="Rule identifier to promote")
-        p_prom.add_argument("--reason", help="Audit explanation for promotion")
-        p_prom.add_argument("--force", action="store_true", help="Bypass evidence threshold checks")
+        p_prom = sub.add_parser("promote", parents=[common], help="Promote a rule up lifecycle tiers (no RULE_ID: list candidates)")
+        p_prom.add_argument("rule_id", nargs="?", default=None, metavar="RULE_ID", help="Rule identifier to promote")
         p_prom.add_argument("--tier-check", action="store_true", help="Evaluate enforcement tier transitions")
         p_prom.add_argument("--dry-run", action="store_true", help="Preview promotion without moving files")
 
-        # demote
-        p_dem = sub.add_parser("demote", parents=[common], help="Demote a rule down lifecycle tiers")
-        p_dem.add_argument("rule_id", nargs="?", default=None, help="Rule identifier to demote")
-        p_dem.add_argument("--rule", default=None, help="Rule identifier to demote")
-        p_dem.add_argument("--reason", help="Audit explanation for demotion")
-        p_dem.add_argument("--force", action="store_true", help="Force demotion")
+        p_dem = sub.add_parser("demote", parents=[common], help="Demote a rule down lifecycle tiers (no RULE_ID: list candidates)")
+        p_dem.add_argument("rule_id", nargs="?", default=None, metavar="RULE_ID", help="Rule identifier to demote")
         p_dem.add_argument("--dry-run", action="store_true", help="Preview demotion without moving files")
 
-        # archive
-        p_arch = sub.add_parser("archive", parents=[common], help="Archive decayed or extinct rules")
-        p_arch.add_argument("rule_id", nargs="?", help="Specific rule ID to archive")
-        p_arch.add_argument("--dry-run", action="store_true", help="Preview rules to archive")
-        p_arch.add_argument("--apply", action="store_true", default=True, help="Apply archive movements")
-
-        # clean
-        p_clean = sub.add_parser("clean", parents=[common], help="Clean redundant or leaked rules")
-        p_clean.add_argument("--dry-run", action="store_true", help="Show purge candidates without deleting")
-        p_clean.add_argument("--apply", action="store_true", help="Apply cleanup deletions")
+        p_arch = sub.add_parser("archive", parents=[common], help="Archive rules whose ledger evidence says they misfire")
+        p_arch.add_argument("--dry-run", action="store_true", help="Report the rules that would be archived; move nothing")
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_rule(args)
@@ -668,3 +486,5 @@ class RuleCommand(AegisCommand):
 if __name__ == "__main__":  # pragma: no cover
     from aegis_cli.cli import main
     sys.exit(main(["rule"] + sys.argv[1:]))
+
+

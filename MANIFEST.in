@@ -1,15 +1,10 @@
 include README.md
 include LICENSE
-include VERSION
 include Makefile
 prune .soma
 prune .aegis
-recursive-include genome *
 recursive-include rules *
-recursive-include organs *
 recursive-include skills *
-recursive-include install *
-recursive-include aegis_cli/starter_rules *.md
 recursive-include aegis_core *
-recursive-include soma_cli/starter_rules *.md
-recursive-include soma_core *
+global-exclude __pycache__
+global-exclude *.py[cod]

@@ -1,21 +1,22 @@
-"""Cross-reader contract tests for canonical signal evidence."""
+"""Cross-reader contract tests: every reader takes rule totals from the one ledger."""
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
-import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from aegis_core.yaml import dump_frontmatter
-import pytest
+from aegis_core.yaml_engine.serializer import dump_frontmatter
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").exists())
 ENZYMES = ROOT / "enzymes"
 if str(ENZYMES) not in sys.path:
     sys.path.insert(0, str(ENZYMES))
+
+
+def _ledger(root: Path) -> Path:
+    return root / ".aegis" / "state" / "ledger.jsonl"
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -32,12 +33,12 @@ def _signal(cell: str, signal: str, timestamp: str = "2026-01-01T00:00:00Z", wei
 
 def _cell(path: Path, cell_id: str, cell_type: str = "trap", age_days: int = 45) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    created = (datetime.now() - timedelta(days=age_days)).strftime("%Y-%m-%d")
+    created = (datetime.now(timezone.utc) - timedelta(days=age_days)).strftime("%Y-%m-%d")
     metadata = {
         "id": cell_id,
         "domain": "testing",
         "type": cell_type,
-        "enforcement": "gate" if cell_type in ("wall", "invariant") else "advisory",
+        "enforcement": "gate" if cell_type in ("gate", "invariant") else "advisory",
         "created": created,
         "expiry_days": 365,
         "expiry_sessions": 365,
@@ -45,67 +46,43 @@ def _cell(path: Path, cell_id: str, cell_type: str = "trap", age_days: int = 45)
     path.write_text(dump_frontmatter(metadata, body=f"# {cell_id}\n"), encoding="utf-8")
 
 
-def test_aggregate_signals_reports_errors_preserves_dimensions_and_weights(tmp_path):
-    from aegis_core.evidence import aggregate_signals
+def test_ledger_reader_reports_bad_lines_and_keeps_weights(tmp_path):
+    from aegis_core.telemetry_engine import ledger
 
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text(
+    path = _ledger(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(
         json.dumps(_signal("outcome-only", "tp", weight="0.25")) + "\n"
         + json.dumps(_signal("outcome-only", "fp", weight="0.5")) + "\n"
         + json.dumps(_signal("triggered", "trigger")) + "\n"
         + "{malformed}\n",
         encoding="utf-8",
     )
-    _write_jsonl(evidence / "fitness.jsonl", [{"cell_id": "legacy", "triggered_at": "x"}])
-    _write_jsonl(evidence / "outcomes.jsonl", [{"cell_id": "legacy", "outcome": "tp"}])
+    legacy = tmp_path / ".aegis" / "evidence"
+    _write_jsonl(legacy / "fitness.jsonl", [{"cell_id": "legacy", "triggered_at": "x"}])
+    _write_jsonl(legacy / "signals.jsonl", [_signal("legacy", "tp")])
 
-    result = aggregate_signals(str(evidence))
-    assert result.counts["outcome-only"] == {
-        "triggers": 0,
-        "tp": 0.25,
-        "fp": 0.5,
-        "last_trigger": None,
-        "has_triggers": False,
-        "has_outcomes": True,
-    }
-    assert result.counts["triggered"]["has_triggers"] is True
-    assert "legacy" not in result.counts
-    assert result.errors and result.errors[0]["line"] == 4
+    totals = ledger.aggregate(tmp_path)
+    # Every outcome row is also a trigger (#15).
+    assert totals["outcome-only"] == {"triggers": 2, "tp": 0.25, "fp": 0.5, "last_ts": "2026-01-01T00:00:00Z"}
+    assert totals["triggered"]["triggers"] == 1
+    assert "legacy" not in totals  # v3 files are read only by `aegis migrate`
+    assert ledger.read(tmp_path).skipped_lines == [4]
 
 
-def test_sync_fails_on_malformed_complete_signal_row(tmp_path, monkeypatch, capsys):
-    import aegis_cli.sync as sync
-
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (tmp_path / ".aegis" / "rules").mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text("{bad}\n", encoding="utf-8")
-    monkeypatch.setattr(sync, "resolve_root", lambda _args: tmp_path)
-
-    assert sync.run_sync(argparse.Namespace(dry_run=False, json=True)) == 1
-    output = json.loads(capsys.readouterr().out)
-    assert output["status"] == "error"
-    assert output["errors"][0]["line"] == 1
-
-
-def test_report_and_status_use_canonical_triggers_not_legacy(tmp_path, capsys):
-    from aegis_cli.report import run_report
+def test_status_uses_ledger_triggers(tmp_path, capsys):
     from aegis_cli.status import run_status
 
-    (tmp_path / "genome").mkdir()
-    (tmp_path / "genome" / "canonical.md").write_text("# canonical\n", encoding="utf-8")
-    evidence = tmp_path / ".aegis" / "evidence"
-    _write_jsonl(evidence / "signals.jsonl", [
+    # A workspace rule: status lists core rules only in the Aegis checkout they ship from.
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    (traps / "canonical.md").write_text("---\nid: canonical\ntarget_paths: ['*.py']\n---\n# canonical\n",
+                                        encoding="utf-8")
+    _write_jsonl(_ledger(tmp_path), [
         _signal("canonical", "trigger", "2026-01-01T00:00:00Z"),
         _signal("canonical", "trigger", "2026-01-01T00:01:00Z"),
     ])
-    _write_jsonl(evidence / "fitness.jsonl", [{"cell_id": "legacy", "triggered_at": "2026-01-01T00:00:00Z"}])
-
-    assert run_report(argparse.Namespace(session=-1, _root=tmp_path)) == 0
-    report_output = capsys.readouterr().out
-    assert "canonical" in report_output and "2 fires" in report_output
-    assert "legacy" not in report_output
+    _write_jsonl(tmp_path / ".aegis" / "evidence" / "signals.jsonl", [_signal("canonical", "trigger")] * 5)
 
     assert run_status(argparse.Namespace(_root=tmp_path)) == 0
     status_output = capsys.readouterr().out
@@ -113,41 +90,49 @@ def test_report_and_status_use_canonical_triggers_not_legacy(tmp_path, capsys):
     assert canonical_line.split()[1] == "2"
 
 
-def test_oracle_and_lifecycle_use_weighted_canonical_signals(tmp_path):
-    from aegis_core.proposals import generate_checkpoint
-    from aegis_core.lifecycle import evaluate_promotions
+def test_lifecycle_uses_weighted_ledger_rows(tmp_path):
+    from aegis_core.lifecycle.promotion import evaluate_promotions
 
     cells = tmp_path / ".aegis" / "rules" / "traps"
     _cell(cells / "canonical.md", "canonical")
-    evidence = tmp_path / ".aegis" / "evidence"
-    signals = [_signal("canonical", "trigger", f"2026-01-01T00:{index:02d}:00Z") for index in range(20)]
-    signals += [_signal("canonical", "tp", weight="0.5") for _ in range(34)]
-    _write_jsonl(evidence / "signals.jsonl", signals)
-    _write_jsonl(evidence / "outcomes.jsonl", [{"cell_id": "canonical", "outcome": "fp"}] * 100)
 
-    report = generate_checkpoint(str(tmp_path))
-    assert "healthy" in report["classifications"]
+    recent = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # no decay
+
+    def rows(n):
+        return [
+            {"v": 2, "seq": i + 1, "ts": recent, "rule": "canonical", "outcome": "tp", "source": "ci", "weight": 0.85}
+            for i in range(n)
+        ]
+
+    # 22 rows weigh 18.7 verdicts: fewer than the 20 a promotion needs.
+    _write_jsonl(_ledger(tmp_path), rows(22))
+    assert evaluate_promotions(str(tmp_path)) == []
+
+    _write_jsonl(_ledger(tmp_path), rows(25))
     candidates = evaluate_promotions(str(tmp_path))
-    assert candidates[0]["cell_id"] == "canonical"
-    assert candidates[0]["tp_rate"] == 0.85
+    assert [(c["rule_id"], c["tp"], c["triggers"]) for c in candidates] == [("canonical", 21.25, 25)]
 
 
 def test_checkpoint_fails_closed_and_uses_weighted_outcomes(tmp_path):
-    from aegis_core.verification.checkpoint_checks import check_cell_fitness
+    from aegis_core.verification.checkpoint_checks import check_rule_fitness
 
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text(
-        json.dumps(_signal("weighted", "tp", weight="0.5")) + "\n"
-        + json.dumps(_signal("weighted", "fp", weight="1.5")) + "\n"
+    path = _ledger(tmp_path)
+    path.parent.mkdir(parents=True)
+    # Counted at full weight the tp would make this 3 false positives of 4 verdicts,
+    # which is not confidently a misfire; at weight 0 it is 3 of 3.
+    path.write_text(
+        json.dumps(_signal("weighted", "tp", weight="0")) + "\n"
+        + "".join(json.dumps(_signal("weighted", "fp", weight="1")) + "\n" for _ in range(3))
         + "not-json\n",
         encoding="utf-8",
     )
-    _write_jsonl(evidence / "outcomes.jsonl", [{"cell_id": "weighted", "outcome": "tp"}] * 10)
 
-    issues = check_cell_fitness(tmp_path)
-    assert any("parse" in issue["message"].lower() for issue in issues)
-    assert any(issue.get("cell_id") == "weighted" and "75%" in issue["message"] for issue in issues)
+    issues = check_rule_fitness(tmp_path)
+    assert any("line 5 is not a JSON object row" in issue["message"] for issue in issues)
+    assert [issue["message"] for issue in issues if issue.get("rule") == "weighted"] == [
+        "Rule 'weighted' misfires: 3 of 3 verdicts are false positives (misfire bound 0.53 > 0.5); "
+        "aegis sync suggests demoting or archiving it"
+    ]
 
 
 def test_owned_production_has_no_active_legacy_evidence_paths():
@@ -169,64 +154,30 @@ def test_owned_production_has_no_active_legacy_evidence_paths():
     assert offenders == {}
 
 
-def test_sync_malformed_ledger_does_not_apply_partial_counts(tmp_path, monkeypatch, capsys):
-    import aegis_cli.sync as sync
+def test_lifecycle_does_not_demote_a_rule_with_outcome_only_rows(tmp_path):
+    from aegis_core.lifecycle.promotion import evaluate_demotions
 
-    cell = tmp_path / ".aegis" / "rules" / "vacuoles" / "mixed.md"
-    _cell(cell, "mixed")
-    original = cell.read_bytes()
-    evidence = tmp_path / ".aegis" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "signals.jsonl").write_text(
-        json.dumps(_signal("mixed", "trigger")) + "\n{bad}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(sync, "resolve_root", lambda _args: tmp_path)
-
-    assert sync.run_sync(argparse.Namespace(dry_run=False, json=True)) == 1
-    assert cell.read_bytes() == original
-    assert json.loads(capsys.readouterr().out)["errors"]
-
-
-def test_lifecycle_does_not_infer_zero_triggers_from_outcome_only_data(tmp_path):
-    from aegis_core.lifecycle import evaluate_demotions
-
-    cell = tmp_path / ".aegis" / "rules" / "walls" / "outcome-only.md"
-    _cell(cell, "outcome-only", cell_type="wall", age_days=120)
-    _write_jsonl(
-        tmp_path / ".aegis" / "evidence" / "signals.jsonl",
-        [_signal("outcome-only", "tp", weight="0.5")],
-    )
+    cell = tmp_path / ".aegis" / "rules" / "invariants" / "outcome-only.md"
+    _cell(cell, "outcome-only", cell_type="invariant", age_days=120)
+    # A v1 outcome row with no trigger row is still a trigger and a verdict: not a misfire.
+    recent = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _write_jsonl(_ledger(tmp_path), [_signal("outcome-only", "tp", recent, weight="0.5")])
 
     assert evaluate_demotions(str(tmp_path)) == []
 
 
-def test_invalid_present_credit_weight_is_a_structured_error(tmp_path):
-    from aegis_core.evidence import aggregate_signals
+def test_invalid_weights_make_a_row_unusable_and_the_checkpoint_says_so(tmp_path):
+    from aegis_core.telemetry_engine import ledger
+    from aegis_core.verification.checkpoint_checks import check_rule_fitness
 
-    evidence = tmp_path / ".aegis" / "evidence"
-    _write_jsonl(evidence / "signals.jsonl", [_signal("bad-weight", "tp", weight="NaN")])
-
-    result = aggregate_signals(str(evidence))
-    assert result.counts["bad-weight"]["tp"] == 0
-    assert result.counts["bad-weight"]["has_outcomes"] is True
-    assert result.errors[0]["line"] == 1
-    assert "credit_weight" in result.errors[0]["error"]
-
-
-def test_negative_or_excessive_credit_weight_rejected(tmp_path):
-    from aegis_core.evidence import aggregate_signals
-
-    evidence = tmp_path / ".aegis" / "evidence"
-    _write_jsonl(evidence / "signals.jsonl", [
+    _write_jsonl(_ledger(tmp_path), [
+        _signal("bad-weight", "tp", weight="NaN"),
         _signal("cell-neg", "tp", weight=-1.5),
         _signal("cell-huge", "tp", weight=50),
+        _signal("fine", "tp", weight=1),
     ])
 
-    result = aggregate_signals(str(evidence))
-    assert result.counts["cell-neg"]["tp"] == 0
-    assert result.counts["cell-huge"]["tp"] == 0
-    assert len(result.errors) == 2
-    assert "credit_weight" in result.errors[0]["error"]
-    assert "credit_weight" in result.errors[1]["error"]
-
+    view = ledger.read(tmp_path)
+    assert [r["rule"] for r in view.rows] == ["fine"]
+    assert view.unusable_rows == 3
+    assert any("3 row(s) lack a rule, a valid outcome or a valid weight" in i["message"] for i in check_rule_fitness(tmp_path))

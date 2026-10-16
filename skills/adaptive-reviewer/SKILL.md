@@ -3,10 +3,6 @@ id: adaptive-reviewer
 name: Adaptive Review Orchestrator
 description: Autonomously selects review protocols and dispatches nested subagents based on Sentry finding severity.
 kind: skill
-tier: sentinel
-consumes: [InspectionReceipt, ChargeSheet, TestVerdict]
-produces: [ChargeSheet, ArbitrationEvidence, InspectionReceipt]
-handoff_targets: [staff-review, spec-synthesizer, governance-auditor, post-mortem]
 trigger: user_request
 ---
 
@@ -16,24 +12,10 @@ trigger: user_request
 
 ## Setup
 
-At session start (or first review request), define the orchestrator:
+Run the orchestrator as one subagent (`${SLOT.TOOL_SUBAGENT}`) that may itself dispatch subagents and write its report. Where the host lets you define a reusable subagent type, define one named `adaptive_reviewer` that may dispatch subagents and write files. Prompt it with:
 
 ```
-define_subagent(
-  name: "adaptive_reviewer",
-  enable_subagent_tools: true,
-  enable_write_tools: true,
-  description: "Adaptive review orchestrator with auto-escalation"
-)
-```
-
-Then invoke it:
-
-```
-invoke_subagent(
-  type: "adaptive_reviewer",
-  prompt: "Review [target files/directory]. Context: [what changed, why]"
-)
+Review [target files/directory]. Context: [what changed, why]
 ```
 
 The orchestrator handles everything internally and reports back with a structured synthesis.
@@ -95,7 +77,7 @@ Before dispatching, the orchestrator inspects the target:
 
 ## Subagent Rules
 
-1. ALL prong subagents: `flash` model, `research` type (read-only)
+1. ALL prong subagents: `${SLOT.MODEL_FAST}` model, read-only (no write tools)
 2. Context Pre-Seed every prompt (~200 token header)
 3. Orthogonal Persona Mandate: no two scouts share the same lens
 4. Kill each subagent immediately after debrief
@@ -125,6 +107,6 @@ Before dispatching, the orchestrator inspects the target:
 
 ## When NOT to Use
 
-- **Patrol** (known single-file defect): Use `review_orchestrator` directly with Patrol mode — adaptive triage adds unnecessary overhead for known defects.
+- **Patrol** (known single-file defect): Use the `staff-review` skill directly in Patrol mode — adaptive triage adds unnecessary overhead for known defects.
 - **Post-mortem analysis**: Use standalone Sentry — no fixes needed.
 - **Live monitoring**: Use `session-monitor` skill instead.

@@ -18,44 +18,6 @@ from aegis_cli.rule import (
 )
 
 
-def test_rule_command_contract():
-    cmd = RuleCommand()
-    assert cmd.name == "rule"
-    assert cmd.aliases == ()
-
-    parser = argparse.ArgumentParser()
-    cmd.configure_parser(parser)
-
-    # Test list
-    args_list = parser.parse_args(["list", "--type", "invariant", "--min-fitness", "0.8"])
-    assert args_list.rule_action == "list"
-    assert args_list.type == "invariant"
-    assert args_list.min_fitness == 0.8
-
-    # Test promote
-    args_prom = parser.parse_args(["promote", "test-rule", "--force", "--dry-run"])
-    assert args_prom.rule_action == "promote"
-    assert args_prom.rule_id == "test-rule"
-    assert args_prom.force is True
-    assert args_prom.dry_run is True
-
-    # Test demote
-    args_dem = parser.parse_args(["demote", "bad-rule", "--dry-run"])
-    assert args_dem.rule_action == "demote"
-    assert args_dem.rule_id == "bad-rule"
-    assert args_dem.dry_run is True
-
-    # Test archive
-    args_arch = parser.parse_args(["archive", "--dry-run"])
-    assert args_arch.rule_action == "archive"
-    assert args_arch.dry_run is True
-
-    # Test clean
-    args_clean = parser.parse_args(["clean", "--apply"])
-    assert args_clean.rule_action == "clean"
-    assert args_clean.apply is True
-
-
 def test_demote_core_rule_fails(tmp_path, capsys):
     """BUG-067: demoting a protected core rule must fail closed."""
     args = argparse.Namespace(
@@ -90,8 +52,15 @@ def test_rule_list_with_rules(tmp_path, capsys):
     rules_dir.mkdir(parents=True)
     rule_file = rules_dir / "inv-test.md"
     rule_file.write_text(
-        "---\nid: inv-test\ntype: invariant\nenforcement: strict\nfitness:\n  score: 0.95\n---\nRule body\n",
+        "---\nid: inv-test\ntype: invariant\nenforcement: gate\n---\nRule body\n",
         encoding="utf-8",
+    )
+    (rules_dir / "inv-young.md").write_text("---\nid: inv-young\nenforcement: gate\n---\n", encoding="utf-8")
+    state = tmp_path / ".aegis" / "state"
+    state.mkdir()
+    # Fitness is the ledger's: 30 of 30 verdicts are true positives (Wilson bound 0.92).
+    (state / "ledger.jsonl").write_text(
+        '{"v": 2, "rule": "inv-test", "outcome": "tp", "source": "ci"}\n' * 30, encoding="utf-8"
     )
 
     args = argparse.Namespace(
@@ -104,11 +73,54 @@ def test_rule_list_with_rules(tmp_path, capsys):
     rc = run_rule(args)
     assert rc == 0
     out = capsys.readouterr().out
-    assert "inv-test" in out
+    assert "inv-test" in out and "0.92" in out
+    assert "inv-young" not in out  # no verdicts yet: below --min-fitness 0.9
+
+
+def test_rule_list_flags_rules_edited_since_the_last_sync(tmp_path, capsys):
+    """The CLI twin of aegis_list_rules' stale_rules: listed, never excluded."""
+    from aegis_core.sync import sync
+
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    (traps / "edited.md").write_text("---\nid: edited\n---\nBefore\n", encoding="utf-8")
+    (traps / "steady.md").write_text("---\nid: steady\n---\nSame\n", encoding="utf-8")
+    sync(tmp_path)
+    (traps / "edited.md").write_text("---\nid: edited\n---\nAfter\n", encoding="utf-8")
+    (traps / "added.md").write_text("---\nid: added\n---\nNew\n", encoding="utf-8")
+
+    def listed(use_json):
+        args = argparse.Namespace(rule_action="list", workspace=str(tmp_path), json=use_json, type=None, min_fitness=None)
+        assert run_rule(args) == 0
+        return capsys.readouterr().out
+
+    rows = {r["id"]: r for r in json.loads(listed(True))}
+    assert set(rows) == {"added", "edited", "steady"}
+    assert (rows["edited"]["stale"], rows["added"]["stale"]) == ("edited", "new")
+    assert "stale" not in rows["steady"]
+
+    out = listed(False)
+    assert "2 rule(s) changed since the last aegis sync: added (new), edited (edited)" in out
+
+
+def test_rule_list_text_never_prints_terminal_escapes_from_rule_names(tmp_path, capsys):
+    traps = tmp_path / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True)
+    try:
+        (traps / "evil\x1b]0;pwned\x07.md").write_text("---\ntype: trap\n---\n", encoding="utf-8")
+    except (OSError, ValueError):
+        pytest.skip("this filesystem refuses control characters in file names")
+
+    args = argparse.Namespace(rule_action="list", workspace=str(tmp_path), json=False, type=None, min_fitness=None, plain=True)
+    assert run_rule(args) == 0
+
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\x07" not in out
+    assert "evil" in out
 
 
 def test_rule_promote_and_force_promote(tmp_path, capsys):
-    with patch("aegis_cli.rule.promote_cell", return_value={"status": "already_terminal", "current_type": "invariant"}):
+    with patch("aegis_cli.rule.promote_rule", return_value={"status": "already_terminal", "current_type": "invariant"}):
         args = argparse.Namespace(
             rule_action="promote",
             rule_id="inv-test",
@@ -127,7 +139,7 @@ def test_rule_promote_and_force_promote(tmp_path, capsys):
 
 
 def test_rule_demote_and_force_demote(tmp_path, capsys):
-    with patch("aegis_cli.rule.demote_cell", return_value={"status": "already_base", "current_type": "trap"}):
+    with patch("aegis_cli.rule.demote_rule", return_value={"status": "already_base", "current_type": "trap"}):
         args = argparse.Namespace(
             rule_action="demote",
             rule_id="trap-test",
@@ -146,35 +158,15 @@ def test_rule_demote_and_force_demote(tmp_path, capsys):
 
 
 def test_rule_archive(tmp_path):
-    with patch("aegis_cli.rule.prune_cells", return_value=0) as mock_prune:
+    with patch("aegis_cli.rule.prune_rules", return_value=0) as mock_prune:
         args = argparse.Namespace(
             rule_action="archive",
             workspace=str(tmp_path),
             dry_run=False,
-            apply=True,
         )
         rc = run_rule(args)
         assert rc == 0
         mock_prune.assert_called_once_with(workspace=tmp_path, execute=True)
-
-
-def test_rule_clean(tmp_path):
-    mock_res = {
-        "dry_run": True,
-        "purged_rules": ["leaked.md"],
-        "retained_rules": ["kept.md"],
-        "quarantine_dir": str(tmp_path / "q"),
-    }
-    with patch("aegis_cli.rule.clean_global_rules", return_value=mock_res) as mock_clean:
-        args = argparse.Namespace(
-            rule_action="clean",
-            workspace=str(tmp_path),
-            dry_run=True,
-            apply=False,
-        )
-        rc = run_rule(args)
-        assert rc == 0
-        mock_clean.assert_called_once_with(dry_run=True, force=False, quarantine_dir=None)
 
 
 def test_rule_list_long_id_not_truncated_and_colored(tmp_path, capsys):
@@ -229,3 +221,83 @@ def test_rule_parser_rejects_legacy_cell_flag():
     with pytest.raises(SystemExit):
         parser.parse_args(["demote", "--cell", "old-id"])
 
+
+
+def test_an_unknown_action_is_reported_on_stderr_and_exits_1(tmp_path, capsys):
+    args = argparse.Namespace(rule_action="graduate", workspace=str(tmp_path), json=False)
+    assert run_rule(args) == 1
+    captured = capsys.readouterr()
+    assert captured.err == "Unknown rule subcommand: graduate\n"
+    assert captured.out == ""
+
+
+# ── `aegis rule <action> [options]` through main(): the parser binds each option ──
+
+
+def _two_rule_workspace(root: Path) -> Path:
+    for folder, rule_id, extra in (("traps", "old-trap", "expired_at: 2026-01-01\n"), ("invariants", "inv", "")):
+        directory = root / ".aegis" / "rules" / folder
+        directory.mkdir(parents=True)
+        (directory / f"{rule_id}.md").write_text(
+            f"---\nid: {rule_id}\ntype: {folder[:-1]}\n{extra}---\nBody\n", encoding="utf-8")
+    return root
+
+
+def _listed(capsys, *argv) -> dict:
+    from aegis_cli.cli import main
+
+    assert main(["rule", "list", "--json", *argv]) == 0
+    return {row["id"]: row for row in json.loads(capsys.readouterr().out)}
+
+
+def test_rule_list_takes_workspace_after_the_action(tmp_path, monkeypatch, capsys):
+    ws = _two_rule_workspace(tmp_path / "ws")
+    monkeypatch.chdir(tmp_path)
+    assert set(_listed(capsys, "--workspace", str(ws))) == {"old-trap", "inv"}
+
+
+def test_rule_list_marks_only_expired_rules(tmp_path, monkeypatch, capsys):
+    ws = _two_rule_workspace(tmp_path / "ws")
+    monkeypatch.chdir(tmp_path)
+    rows = _listed(capsys, "--workspace", str(ws))
+    assert rows["old-trap"]["expired"] is True
+    assert "expired" not in rows["inv"]
+
+
+def test_rule_list_type_filters_and_rejects_an_unknown_type(tmp_path, monkeypatch, capsys):
+    from aegis_cli.cli import main
+
+    ws = _two_rule_workspace(tmp_path / "ws")
+    monkeypatch.chdir(tmp_path)
+    assert set(_listed(capsys, "--type", "invariant", "--workspace", str(ws))) == {"inv"}
+    with pytest.raises(SystemExit) as exc:
+        main(["rule", "list", "--type", "rumor", "--workspace", str(ws)])
+    assert exc.value.code == 2
+    assert "invalid choice: 'rumor'" in capsys.readouterr().err
+
+
+def test_rule_create_binds_type_body_file_and_workspace(tmp_path, monkeypatch, capsys):
+    from aegis_cli.cli import main
+    from aegis_core.yaml_engine.frontmatter import parse_frontmatter
+
+    ws = _two_rule_workspace(tmp_path / "ws")
+    body = tmp_path / "body.md"
+    body.write_text("## Detail\n\nUse argv lists.\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    rc = main(["rule", "create", "--json", "-t", "invariant", "--id", "argv-lists", "--hypothesis", "No shell strings",
+               "--body-file", str(body), "--workspace", str(ws)])
+    assert rc == 0
+    created = Path(json.loads(capsys.readouterr().out)["path"])
+    assert created == ws / ".aegis" / "rules" / "invariants" / "argv-lists.md"
+    text = created.read_text(encoding="utf-8")
+    assert parse_frontmatter(text)["type"] == "invariant"
+    assert text.endswith("---\n## Detail\n\nUse argv lists.\n")
+
+
+def test_rule_create_without_type_makes_a_trap(tmp_path, monkeypatch, capsys):
+    from aegis_cli.cli import main
+
+    ws = _two_rule_workspace(tmp_path / "ws")
+    monkeypatch.chdir(tmp_path)
+    assert main(["rule", "create", "--json", "--id", "plain", "--hypothesis", "h", "--workspace", str(ws)]) == 0
+    assert (ws / ".aegis" / "rules" / "traps" / "plain.md").is_file()

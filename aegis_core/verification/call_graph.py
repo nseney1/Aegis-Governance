@@ -17,10 +17,12 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from aegis_core.ast.drivers.python import read_python_source
 from aegis_core.ast.schema import NormalizedAST
+from aegis_core.match import is_test_path
 from . import ToolEvidence
 
-__all__ = ["check", "check_normalized", "find_definitions", "find_call_sites"]
+__all__ = ["check", "check_normalized"]
 
 
 @dataclass(frozen=True)
@@ -168,8 +170,8 @@ class ExternalModuleInspector(ast.NodeVisitor):
     def __init__(self, target_stems: set[str], target_func_names: set[str]):
         self.target_stems = target_stems
         self.target_func_names = target_func_names
-        # Bound names in this external file that point to our target functions
-        self.bound_direct_names: set[str] = set()
+        # Local name in this external file -> the target function it is bound to
+        self.bound_direct_names: dict[str, str] = {}
         # Aliases/module identifiers that refer to our target module
         self.bound_module_aliases: set[str] = set()
         # Confirmed called functions
@@ -194,47 +196,52 @@ class ExternalModuleInspector(ast.NodeVisitor):
                 if alias.name == "*":
                     self.has_wildcard_import = True
                 elif alias.name in self.target_func_names:
-                    local_name = alias.asname or alias.name
-                    self.bound_direct_names.add(local_name)
+                    self.bound_direct_names[alias.asname or alias.name] = alias.name
                 else:
                     # Could be an imported class whose methods are called
                     self.bound_module_aliases.add(alias.asname or alias.name)
         self.generic_visit(node)
 
+    def _match_reference(self, node: ast.AST) -> None:
+        """Record the target function ``node`` names: ``f`` bound by an import from the
+        target module, or ``alias.f`` through an alias of the module or of a class in it."""
+        if isinstance(node, ast.Name):
+            if node.id in self.bound_direct_names:
+                self.matched_calls.add(self.bound_direct_names[node.id])
+            elif self.has_wildcard_import and node.id in self.target_func_names:
+                self.matched_calls.add(node.id)
+        elif isinstance(node, ast.Attribute) and node.attr in self.target_func_names:
+            if isinstance(node.value, ast.Name):
+                if node.value.id in self.bound_module_aliases or node.value.id in self.target_stems:
+                    self.matched_calls.add(node.attr)
+            elif self.has_wildcard_import:
+                self.matched_calls.add(node.attr)
+
     def visit_Call(self, node: ast.Call):
-        if isinstance(node.func, ast.Name):
-            callee = node.func.id
-            if callee in self.bound_direct_names:
-                self.matched_calls.add(callee)
-            elif self.has_wildcard_import and callee in self.target_func_names:
-                self.matched_calls.add(callee)
-        elif isinstance(node.func, ast.Attribute):
-            attr = node.func.attr
-            if attr in self.target_func_names:
-                # If receiver is an alias to target module or class imported from target
-                if isinstance(node.func.value, ast.Name):
-                    if node.func.value.id in self.bound_module_aliases or node.func.value.id in self.target_stems:
-                        self.matched_calls.add(attr)
-                elif self.has_wildcard_import:
-                    self.matched_calls.add(attr)
+        self._match_reference(node.func)
+        # A function passed as a value (map(f, ...), key=f) is used, as InternalCallCollector
+        # counts it within the module.
+        for arg in node.args:
+            self._match_reference(arg.value if isinstance(arg, ast.Starred) else arg)
+        for kw in node.keywords:
+            self._match_reference(kw.value)
         self.generic_visit(node)
 
+    def visit_Dict(self, node: ast.Dict):
+        for val in node.values:
+            self._match_reference(val)
+        self.generic_visit(node)
 
-def find_definitions(filepath: str) -> dict[str, int]:
-    """Extract all function/method definitions with line numbers.
+    def _visit_elements(self, node: ast.List | ast.Tuple | ast.Set):
+        for elt in node.elts:
+            self._match_reference(elt)
+        self.generic_visit(node)
 
-    Returns {function_name: line_number}
-    """
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            source = f.read()
-        tree = ast.parse(source)
-    except (OSError, SyntaxError, UnicodeDecodeError):
-        return {}
+    visit_List = visit_Tuple = visit_Set = _visit_elements
 
-    visitor = FunctionDefinitionVisitor()
-    visitor.visit(tree)
-    return {name: info.line_no for name, info in visitor.definitions.items()}
+    def visit_Assign(self, node: ast.Assign):
+        self._match_reference(node.value)
+        self.generic_visit(node)
 
 
 def _get_target_module_stems(filepath: str, repo_root: str) -> set[str]:
@@ -261,7 +268,7 @@ def _resolve_searchable_extensions(
 ) -> set[str]:
     """Dynamically determine allowed source extensions for the workspace.
 
-    Discovers extensions from configured workspace slots (.soma/slots.yaml),
+    Discovers extensions from the configured AST drivers (aegis_core.config),
     active AST runner registry, the target file extension, and its language definition.
     Zero hardcoded extension lists.
     """
@@ -326,29 +333,19 @@ def _get_searchable_source_files(
 
     Uses Git to respect .gitignore automatically. Falls back to os.walk for non-git trees.
     """
-    from aegis_core.workspace import as_workspace
-    from aegis_core.workspace.git import GitWorkspace
+    from aegis_core import gitsafe
 
     clean_exts = {e if e.startswith(".") else f".{e}" for e in allowed_extensions}
 
-    try:
-        ws = as_workspace(repo_root)
-        if isinstance(ws, GitWorkspace) and ws.is_git:
-            res = ws._run_git(["git", "ls-files", "--cached", "--others", "--exclude-standard"])
-            if res.returncode == 0:
-                files = []
-                for line in res.stdout.splitlines():
-                    f = line.strip()
-                    if not f:
-                        continue
-                    ext = os.path.splitext(f)[1].lower()
-                    if ext in clean_exts:
-                        full_p = os.path.join(repo_root, f)
-                        if _is_safe_source_file(full_p):
-                            files.append(full_p)
-                return files
-    except Exception:
-        pass
+    listed = gitsafe.list_files(repo_root)  # tracked and untracked, .gitignore respected
+    if listed is not None:
+        files = []
+        for f in listed:
+            if os.path.splitext(f)[1].lower() in clean_exts:
+                full_p = os.path.join(repo_root, f)
+                if _is_safe_source_file(full_p):
+                    files.append(full_p)
+        return files
 
     # Fallback for non-git directories
     matched = []
@@ -364,39 +361,6 @@ def _get_searchable_source_files(
                 if _is_safe_source_file(full_p):
                     matched.append(full_p)
     return matched
-
-
-def find_call_sites(func_name: str, repo_root: str, exclude_file: str = "") -> list[str]:
-    """Find all files in repo_root that call a function by name using AST."""
-    target_stems = _get_target_module_stems(exclude_file, repo_root) if exclude_file else {func_name}
-    target_funcs = {func_name}
-    call_sites: list[str] = []
-    exclude_abs = os.path.abspath(exclude_file) if exclude_file else ""
-
-    for fpath in _get_searchable_source_files(repo_root, {".py"}):
-        if exclude_abs and os.path.abspath(fpath) == exclude_abs:
-            continue
-
-        try:
-            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-        except (OSError, UnicodeDecodeError):
-            continue
-
-        if func_name not in content:
-            continue
-
-        try:
-            tree = ast.parse(content, filename=fpath)
-        except SyntaxError:
-            continue
-
-        inspector = ExternalModuleInspector(target_stems, target_funcs)
-        inspector.visit(tree)
-        if func_name in inspector.matched_calls:
-            call_sites.append(fpath)
-
-    return call_sites
 
 
 _COMMENTS_STRINGS_RE = re.compile(
@@ -473,10 +437,7 @@ def check_normalized(
         norm_file_abs = os.path.abspath(norm_ast.file_path)
 
         for fpath in _get_searchable_source_files(repo_root, allowed_exts):
-            fname = os.path.basename(fpath)
-            if fname.startswith("test_") or fname.endswith(
-                ("_test.go", "_test.py", ".test.ts", ".spec.ts", ".test.js", ".spec.js")
-            ):
+            if is_test_path(os.path.relpath(fpath, repo_root)):
                 continue
             if os.path.abspath(fpath) == norm_file_abs:
                 continue
@@ -557,10 +518,8 @@ def check(
             )
 
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            source = f.read()
-        tree = ast.parse(source, filename=filepath)
-    except (OSError, SyntaxError, UnicodeDecodeError) as e:
+        tree = ast.parse(read_python_source(filepath), filename=filepath)
+    except (OSError, SyntaxError, UnicodeError) as e:
         return ToolEvidence(
             tool="call_graph",
             target=os.path.basename(filepath),

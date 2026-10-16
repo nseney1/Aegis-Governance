@@ -1,9 +1,6 @@
-"""Canary test verifying dual-brand prefix stripping and type directory mappings."""
+"""Canary test verifying dual-brand prefix stripping in test-file resolution."""
 from pathlib import Path
-from aegis_core.verification.checkpoint_checks import (
-    _resolve_canonical_test_candidates,
-    DIR_TO_TYPE,
-)
+from aegis_core.verification.checkpoint_checks import _resolve_canonical_test_candidates
 
 
 def test_prefix_stripping_dual_brand():
@@ -28,13 +25,3 @@ def test_prefix_stripping_dual_brand():
     assert str(root / "tests" / "cli" / "test_verify.py") in soma_cli
     assert str(root / "tests" / "cli" / "test_verify.py") in aegis_cli
 
-
-def test_dir_to_type_dual_mapping():
-    """Verify DIR_TO_TYPE maps canonical engineering directory names."""
-    assert "invariant" in DIR_TO_TYPE["walls"]
-    assert "invariant" in DIR_TO_TYPE["invariants"]
-    assert "trap" in DIR_TO_TYPE["traps"]
-    assert "boundary" in DIR_TO_TYPE["membranes"]
-    assert "boundary" in DIR_TO_TYPE["boundaries"]
-    assert "persona" in DIR_TO_TYPE["personas"]
-    assert "contract" in DIR_TO_TYPE["contracts"]

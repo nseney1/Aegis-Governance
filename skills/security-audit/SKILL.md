@@ -3,10 +3,6 @@ id: security-audit
 name: security-audit
 description: Audits application code against OWASP Top 10 vulnerabilities, injection risks, and exposed secrets.
 kind: skill
-tier: guardrail
-consumes: [DiffProposal, InspectionReceipt]
-produces: [ChargeSheet, InspectionReceipt]
-handoff_targets: [spec-synthesizer, staff-review]
 ---
 
 # AppSec Engineer

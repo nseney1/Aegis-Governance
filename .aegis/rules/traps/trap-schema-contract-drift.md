@@ -10,7 +10,7 @@ prediction: Will catch field name mismatches between module files that read/writ
 falsification: 0 findings in 10 sessions → prune
 target_paths:
   - "aegis_core/*.py"
-  - "aegis_core/**/*.py"
+  - "aegis_core/*.py"
   - "aegis_mcp/*.py"
   - "aegis_cli/*.py"
 triggers:
@@ -24,13 +24,6 @@ tags:
   - pipeline
   - schema
   - silent-failure
-fitness:
-  score: 0.7692
-  impact_weight: 1.0
-  triggers: 89
-  true_positives: 34.1395
-  false_positives: 20.9032
-  last_trigger_date: "2026-10-14T22:29:45Z"
 ---
 
 When modifying a module that writes to a JSONL file (fitness.jsonl,

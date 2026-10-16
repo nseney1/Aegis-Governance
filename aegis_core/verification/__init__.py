@@ -117,12 +117,6 @@ class ArbitrationResult:
     predictions: list[Prediction]
     claims: list[Claim]
 
-    @property
-    def ship_blockers(self) -> list[Divergence]:
-        return [d for d in self.divergences
-                if d.prediction and d.prediction.severity == Severity.CRITICAL]
-
-
 # ── Structured Output Schemas (for agent prompts) ─────────────────────────
 
 PREDICTION_SCHEMA = {
@@ -189,46 +183,15 @@ CLAIM_SCHEMA = {
 }
 
 
-from . import adversarial_verify
-from .pipeline import (
-    AdversarialVerifier,
-    AgentBackend,
-    Arbiter,
-    BaseVerifier,
-    ChargeSheet,
-    DeterministicVerifier,
-    DirectSDKBackend,
-    InBandChargeSheetBackend,
-    MCPSamplingBackend,
-    VerificationPipeline,
-    VerificationPipelineResult,
-)
-
-immune_verify = adversarial_verify
-
 __all__ = [
     "CLAIM_SCHEMA",
     "PREDICTION_SCHEMA",
-    "AdversarialVerifier",
-    "AgentBackend",
     "ArbitrationResult",
-    "Arbiter",
-    "BaseVerifier",
-    "ChargeSheet",
     "Claim",
-    "DeterministicVerifier",
-    "DirectSDKBackend",
     "Divergence",
-    "InBandChargeSheetBackend",
-    "MCPSamplingBackend",
     "Prediction",
     "RiskCategory",
     "Severity",
     "ToolEvidence",
     "Verdict",
-    "VerificationPipeline",
-    "VerificationPipelineResult",
-    "adversarial_verify",
-    "immune_verify",
 ]
-
