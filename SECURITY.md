@@ -35,7 +35,7 @@ In scope: a defect that breaks one of these guarantees.
 - **Host hook registration** ([`aegis_cli/hooks/registrar.py`](aegis_cli/hooks/registrar.py)): `aegis hook install --host` or `uninstall --host` changing anything in a host file other than Aegis's own entry, writing through a link, leaving a file the host cannot parse, or registering a command a repository chose.
 - **Supply chain** ([`.github/workflows/publish.yml`](.github/workflows/publish.yml)): a published wheel or sdist that differs from the one CI built and tested, or secrets in the repository, the wheel or the sdist.
 
-Out of scope: an agent or person with shell access as your user (Aegis advises and checks; it does not sandbox anyone), self-reported outcomes (any connected MCP client can write them; they rank guidance and never change a rule's tier on their own), defects in agent hosts, MCP clients, Python or the OS, denial of service of the local stdio server by its own client, and versions marked ❌ above.
+Out of scope: an agent or person with shell access as your user (Aegis advises and checks; it does not sandbox anyone), self-reported outcomes (any connected MCP client can write them; without a check row for the tree they are recorded as claimed and never count as evidence for a rule), defects in agent hosts, MCP clients, Python or the OS, denial of service of the local stdio server by its own client, and versions marked ❌ above.
 
 ## Repository trust
 
@@ -50,6 +50,8 @@ Aegis treats a repository you clone as untrusted input. What it runs, and from w
 | `aegis`, the hook handler | every matching tool call of a host where you ran `aegis hook install --host` (`aegis hook run pre-tool`); `install` itself runs it once on an empty payload, in an empty temporary directory, to refuse an `aegis` that has no `hook run` | the absolute path `install` registered: the first `aegis` in an absolute PATH entry outside the repository, else the script installed with the Python running Aegis. It must match `[A-Za-z0-9._/+-]+`, so the shell forms need no quoting. It reads the payload, the activity log and `.aegis/config.json`, starts nothing but `git`, and never runs repository code. `aegis benchmark` starts the same handler under the Python running Aegis (`-I -c`), on a built-in fixture payload in a temporary workspace, never on your repository |
 | `pytest` | `aegis check --full` only | your active virtualenv, then `.venv/` inside the repository, then PATH. It runs the tests that match the changed files, which executes repository code (tests, `conftest.py`) just as running the suite yourself would |
 | your model command | `aegis check --full` only | `--llm-cmd` or `AEGIS_LLM_CMD`, never repository files. It runs in an empty temporary directory and receives the prompt, which includes the diff, on stdin |
+| your test command | `aegis check --record --tests` only | `tests.command` in your user `~/.aegis/config.json` (default `python -m pytest`, run under the Python running Aegis), never the repository's config. It runs in a snapshot export of the tree with a fixed environment, no stdin and a timeout that kills its process group; like any test run, it executes the repository's tests and `conftest.py` |
+| `gh` | `aegis doctor` (the trust tier: read-only `gh api` GETs), `aegis doctor --github --apply` (one POST that creates the ruleset, after a typed y/N at a terminal) and `aegis doctor --release` (`gh --version`, then `gh attestation verify`) | by name from an absolute PATH entry outside the repository, with your own gh login. No other command calls GitHub |
 
 Plain `aegis check` and the git pre-commit hook (`aegis check --hook`) parse files and never run the repository's code or a model. Run `aegis check --full` only on code you would run yourself.
 
@@ -68,8 +70,27 @@ The 4.1 hooks and leases change files outside the repository and git refs. What 
 
 The hooks are guardrails, not a security boundary. They fail open on any Aegis error, a timeout or a payload they cannot read; edits made through shell commands never reach the edit check; and an agent running as your user can edit the host files. `aegis check --lane` is self-attested unless `--base-policy` reads the lane's paths from the base branch, and even then a witness is only as strong as the protection on `.github/**` and on the base branch. CI on the exact commit stays the floor.
 
+## Trust tiers
+
+The adversary Aegis plans for is the coding agent itself: it runs as your user, can edit the repository, `$HOME`, host configs and Aegis's own state, and holds your git and gh credentials unless you separate them. Nothing local is a witness against it, so what Aegis sees locally (the ledger, `aegis check --record` rows, commit trailers) is a **label**. What holds depends on what GitHub enforces, which `aegis doctor` detects and prints on every report:
+
+- **Tier A, separation of duties:** the default branch requires a pull request, an approving review by a non-author, the Aegis status checks and CODEOWNERS on the governance files, and the agent's identity cannot approve.
+- **Tier B, solo and signed:** required status checks, plus `aegis approve` commits signed by a key listed in the base branch's `allowed_signers` that the agent cannot use (a hardware key, or a passphrase or touch-confirmed agent). A key stored as a plain, readable file degrades B to C.
+- **Tier C, self-attested:** neither. Detection and audit only, and every report says "self-attested".
+
+`aegis doctor --github` prints the ruleset, CODEOWNERS lines and signing setup tiers A and B need.
+
+| Claim | Tier A | Tier B | Tier C |
+|---|---|---|---|
+| A rule weakening was approved by a human | ✔ | ✔ | ✘ (itemized, auditable) |
+| An outcome credited to a rule was confirmed by CI on the landing commit | ✔ | ✔ | ✔ (CI only, workflow editable by the agent) |
+| A release passed CI on its exact SHA, with a signed attestation | ✔ | ✔ | ✘ (agent can edit the workflow) |
+| Local labels (`witness: aegis`) | label | label | label |
+
+The first row holds only where CI runs `aegis check --ci` as a required check; `aegis init --ci`'s workflow does not add it yet. The second row needs the CI reader that wave 4.3-b adds (`aegis sync --pr`); until then no rule gains confirmed credit. The third is what `aegis doctor --release <sha>` verifies, and it prints `UNVERIFIED` and exits non-zero when it cannot.
+
 ## What Aegis does not claim
 
-Aegis signs nothing. Rules are protected by git history, review and CI on the exact commit, not by Aegis; the v3 HMAC manifest and receipts were removed because a same-user agent could forge them ([why-aegis](docs/why-aegis.md) §5). Witnessed checks, rule integrity with git as the witness and a calibrated Layer 2 arbiter are planned for v4.3 ([why-aegis](docs/why-aegis.md) §6). Until they ship, this policy does not claim them.
+Aegis itself signs nothing and holds no keys: approvals are git signatures that git verifies against the base branch's `allowed_signers`, and the release attestation is GitHub's, which `gh` verifies. The v3 HMAC manifest and receipts were removed because a same-user agent could forge them ([why-aegis](docs/why-aegis.md) §5). v4.3 replaces them with the tiers above: gates and invariants are served from the reviewed base commit, a weakening needs an approval the agent cannot produce, and local checks are labels that only CI on the landing commit confirms. A calibrated Layer 2 arbiter is still planned ([why-aegis](docs/why-aegis.md) §6); until it ships, this policy does not claim it. At tier C, Aegis detects a deliberate same-user attacker's changes; it does not prevent them.
 
 Release artifacts are built once in CI, recorded with SHA-256 digests, given a GitHub build provenance attestation, and published to PyPI with Trusted Publishing, so no long-lived upload token exists.

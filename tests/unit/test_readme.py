@@ -477,9 +477,6 @@ def _registered_commands() -> List[str]:
     return sorted(entry["name"] for entry in tree["registry"])
 
 
-@pytest.mark.xfail(strict=True, reason="deferred to the 4.3-a docs wave: README 'What's included' does not list "
-                   "`approve` yet. Remove this marker when it does: strict, so the test fails loudly once the "
-                   "README is updated.")
 def test_the_readme_lists_every_command_the_cli_registers():
     """'What's included' counts and names the CLI's commands; the contract snapshot, which
     tests/contract holds to the live parser, is the list."""

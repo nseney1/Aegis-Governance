@@ -157,9 +157,6 @@ def test_every_module_that_starts_a_program_is_in_the_inventory():
     assert sorted(_spawning_modules() - set(SPAWN_SITES)) == []
 
 
-@pytest.mark.xfail(strict=True, reason="deferred to the 4.3-a docs wave: SECURITY.md's Repository trust table has no "
-                   "`gh` row yet (human_gate starts gh). Remove this marker when the row lands: strict, so the "
-                   "test fails loudly the moment the table is complete.")
 def test_the_repository_trust_table_names_what_each_spawn_site_starts():
     table = _section(_security_text(), "Repository trust")
     rows = [line for line in table.splitlines() if line.startswith("| ") and not line.startswith("|---")]
