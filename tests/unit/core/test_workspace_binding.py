@@ -412,3 +412,99 @@ def test_without_deciding_files_the_highest_precedence_host_source_wins(home, tm
                 Attested("mcp_roots", str(added))]
     assert resolve_binding(attested=attested).root == project
     assert resolve_binding(attested=attested, files=[str(added / "x.py")]).root == added
+
+
+def test_a_chosen_host_root_holds_when_the_files_belong_to_another_registered_workspace(home, tmp_path):
+    host = _governed(tmp_path / "a")
+    other = _governed(tmp_path / "b")
+    binding = resolve_binding(
+        attested=[Attested("codex_meta", str(host))], files=[str(other / "x.py")],
+        registry=read_registry(_registry(home, [host, other])),
+    )
+    assert (binding.status, binding.reason) == ("hold", "host_root_conflicts_with_registry")
+    assert binding.as_dict()["details"] == {"host_root": str(host), "registered_root": str(other)}
+
+
+# ── unresolvable paths: a symlink loop (RuntimeError before Python 3.13) or a NUL
+#    byte (ValueError) is "cannot be resolved", never an exception ─────────────────
+
+def _loop(where: Path) -> Path:
+    """``where/l1 -> where/l2 -> where/l1``; skipped where symlinks cannot be made."""
+    where.mkdir(parents=True, exist_ok=True)
+    first, second = where / "l1", where / "l2"
+    try:
+        os.symlink(second, first)
+        os.symlink(first, second)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    return first
+
+
+def _unresolvable(tmp_path: Path, kind: str) -> str:
+    return str(_loop(tmp_path / "links")) if kind == "loop" else str(tmp_path / "nul\0byte")
+
+
+@pytest.mark.parametrize("kind", ["loop", "nul"])
+def test_an_unresolvable_pin_is_the_pin_missing_error(home, tmp_path, kind):
+    _governed(tmp_path / "cwd")
+    binding = resolve_binding(pin=_unresolvable(tmp_path, kind), cwd=tmp_path / "cwd")
+    assert (binding.status, binding.reason, binding.source, binding.root) == ("error", "pin_missing", "pin", None)
+
+
+@pytest.mark.parametrize("kind", ["loop", "nul"])
+def test_an_unresolvable_cwd_is_unbound(home, tmp_path, kind):
+    binding = resolve_binding(cwd=_unresolvable(tmp_path, kind))
+    assert (binding.status, binding.reason) == ("unbound", "no_workspace")
+
+
+@pytest.mark.parametrize("kind", ["loop", "nul"])
+def test_an_unresolvable_host_root_is_not_governed(home, tmp_path, kind):
+    binding = resolve_binding(attested=[Attested("codex_meta", _unresolvable(tmp_path, kind))], cwd=tmp_path)
+    assert (binding.status, binding.reason) == ("unbound", "host_roots_not_governed")
+
+
+@pytest.mark.parametrize("kind", ["loop", "nul"])
+def test_an_unresolvable_host_root_disagrees_with_the_pin(home, tmp_path, kind):
+    pin = _governed(tmp_path / "a")
+    binding = resolve_binding(pin=str(pin), attested=[Attested("codex_meta", _unresolvable(tmp_path, kind))])
+    assert (binding.status, binding.reason) == ("hold", "pin_conflicts_with_host_root")
+    assert len(binding.as_dict()["details"]["host_roots"]) == 1
+
+
+@pytest.mark.parametrize("kind", ["loop", "nul"])
+def test_an_unresolvable_host_root_with_files_in_a_registered_workspace_holds(home, tmp_path, kind):
+    other = _governed(tmp_path / "b")
+    binding = resolve_binding(
+        attested=[Attested("codex_meta", _unresolvable(tmp_path, kind))], files=[str(other / "x.py")],
+        registry=read_registry(_registry(home, [other])),
+    )
+    assert (binding.status, binding.reason) == ("hold", "host_root_conflicts_with_registry")
+
+
+def test_call_files_through_a_symlink_loop_never_raise(home, tmp_path):
+    a = _governed(tmp_path / "a")
+    b = _governed(tmp_path / "b")
+    _loop(a)
+    registry = read_registry(_registry(home, [a]))
+    for files in (["l1/x.py"], [str(a / "l1" / "x.py")], ["nul\0.py"], [str(a / "nul\0.py")]):
+        unbound = resolve_binding(files=files, registry=registry, cwd=home)
+        assert unbound.status in ("unbound", "bound") and unbound.root in (None, a), files
+        both = resolve_binding(attested=[Attested("mcp_roots", str(a)), Attested("mcp_roots", str(b))], files=files)
+        assert both.status in ("hold", "bound") and both.root in (None, a), files
+
+
+@pytest.mark.parametrize("kind", ["loop", "nul"])
+def test_a_registry_root_that_cannot_be_resolved_is_skipped(home, tmp_path, kind):
+    a = _governed(tmp_path / "a")
+    registry = read_registry(_registry(home, [_unresolvable(tmp_path, kind), a]))
+    assert registry.roots[-1] == a
+
+
+def test_cli_a_target_through_a_symlink_loop_is_a_workspace_error_or_itself(home, tmp_path):
+    loop = _loop(tmp_path / "links")
+    try:
+        root = resolve_cli_root(explicit=str(loop), cwd=tmp_path)
+    except WorkspaceNotFoundError as exc:
+        assert "cannot be resolved" in str(exc)
+    else:  # Python 3.13+ resolves a loop leniently: the target names itself
+        assert not (root / ".aegis").is_dir()

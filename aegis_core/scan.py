@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from pathlib import PurePath
+from pathlib import Path, PurePath
 import posixpath
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -344,9 +344,18 @@ def scan_user_layer(
     neutral = compute({})
     payload = _select(ruleset, _layer_files(changed_files or []), budget, token_budget, [],
                       lambda served: {rule.id: neutral for rule in served})
-    rules_dir = layout.rules_dir.resolve() if layout is not None else None
-    payload["user_layer"] = {"path": str(rules_dir) if rules_dir else None, "rules": len(ruleset.served)}
+    payload["user_layer"] = {"path": _layer_path(layout.rules_dir) if layout is not None else None,
+                             "rules": len(ruleset.served)}
     return payload
+
+
+def _layer_path(rules_dir: Path) -> str:
+    """Where the user layer lives: its parent resolved, the last part as is, so a
+    symlinked rules directory (never served) is reported where it is, not where it points."""
+    try:
+        return str(rules_dir.parent.resolve() / rules_dir.name)
+    except (OSError, RuntimeError, ValueError):  # a symlink loop raises RuntimeError before 3.13
+        return str(rules_dir)
 
 
 def _layer_files(files: List[str]) -> List[str]:

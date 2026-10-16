@@ -51,6 +51,7 @@ __all__ = [
     "WorkspaceBinding",
     "WorkspaceHold",
     "bounded_walk_up",
+    "check_pin_agrees",
     "denial",
     "git_boundary",
     "home_message",
@@ -139,16 +140,40 @@ def _home() -> Optional[Path]:
     if layout is None:
         return None
     try:
-        return layout.home.resolve()
+        return _resolve(layout.home)
     except OSError:
         return None
 
 
+def _resolve(path: Path) -> Path:
+    """``path.resolve()`` with one failure type: OSError.
+
+    Before Python 3.13 a symlink loop raises RuntimeError, and a NUL byte raises
+    ValueError on every version. Paths here come from the environment, the host and
+    the model, so each of those must read as "cannot be resolved", never escape.
+    """
+    try:
+        return path.resolve()
+    except (ValueError, RuntimeError) as exc:
+        raise OSError(f"cannot resolve {os.fspath(path)!r}: {exc}") from exc
+
+
 def _resolved(path: PathLike, base: Optional[Path] = None) -> Path:
-    p = Path(os.path.expanduser(os.fspath(path)))
+    try:
+        p = Path(os.path.expanduser(os.fspath(path)))
+    except ValueError as exc:
+        raise OSError(f"cannot resolve {path!r}: {exc}") from exc
     if not p.is_absolute() and base is not None:
         p = base / p
-    return p.resolve()
+    return _resolve(p)
+
+
+def _shown(path: PathLike) -> str:
+    """``path`` resolved for a message or a hold's details, or as given when it cannot be."""
+    try:
+        return str(_resolved(path))
+    except OSError:
+        return os.fspath(path)
 
 
 def denial(path: Path) -> Optional[str]:
@@ -176,7 +201,7 @@ def git_boundary(start: Path) -> Optional[Path]:
     top = gitsafe.toplevel(start)
     if top is not None:
         try:
-            top = top.resolve()
+            top = _resolve(top)
         except OSError:
             top = None
     found = [p for p in (marker, top) if p is not None and (p == start or p in start.parents)]
@@ -252,7 +277,7 @@ def read_registry(path: Optional[PathLike] = None) -> Registry:
             problems.append(f"{target}: entry {index} has no absolute 'root'")
             continue
         try:
-            root = Path(raw).resolve()
+            root = _resolve(Path(raw))
         except OSError:
             problems.append(f"{target}: entry {index} root cannot be resolved")
             continue
@@ -280,7 +305,7 @@ def _holds_file(root: Path, file: str) -> bool:
         except (ValueError, OSError):
             return False
     try:
-        candidate = (root / file).resolve()
+        candidate = _resolve(root / file)
         candidate.relative_to(root)
     except (ValueError, OSError):
         return False
@@ -360,7 +385,7 @@ def resolve_binding(
         if problem:
             return _not_bound(ERROR, problem[0], problem[1].replace(str(pin_root), raw_pin), "pin")
         if attested:
-            host_roots = sorted({str(_resolved(a.path)) for a in attested})
+            host_roots = sorted({_shown(a.path) for a in attested})
             # A host root agrees when it lies in the pinned workspace (its walk-up finds
             # the pin) or encloses it (a broad root such as a parent folder).
             agrees = any(
@@ -398,7 +423,7 @@ def resolve_binding(
                     HOLD, "host_root_conflicts_with_registry",
                     f"the host reports the session outside any Aegis workspace, but the files belong to "
                     f"the registered workspace {owner}",
-                    host_roots=sorted({str(_resolved(a.path)) for a in attested}), registered_root=str(owner),
+                    host_roots=sorted({_shown(a.path) for a in attested}), registered_root=str(owner),
                 )
             return _not_bound(UNBOUND, "host_roots_not_governed", "the host's workspace has no .aegis/")
         chosen = candidates[0] if len(candidates) == 1 else None
@@ -446,39 +471,71 @@ def resolve_binding(
     return _not_bound(UNBOUND, "no_workspace", "no Aegis workspace resolves for this call")
 
 
+def _cli_path(path: PathLike, base: Optional[Path] = None, what: str = "") -> Path:
+    try:
+        return _resolved(path, base)
+    except OSError as exc:
+        raise WorkspaceNotFoundError(f"{what}{os.fspath(path)} cannot be resolved: {exc.__cause__ or exc}") from exc
+
+
+def _pin_hold(explicit: PathLike, start: Path, pin_root: Path, accept: Optional[Callable[[Path], bool]]) -> None:
+    target = bounded_walk_up(start, accept) or start
+    if target != pin_root:
+        raise WorkspaceHold(_not_bound(
+            HOLD, "pin_conflicts_with_target",
+            f"--workspace {os.fspath(explicit)} resolves to {target}, but AEGIS_WORKSPACE pins {pin_root}; "
+            "unset the pin or drop --workspace",
+            pin=str(pin_root), target=str(target),
+        ))
+
+
+def check_pin_agrees(
+    explicit: PathLike,
+    pin: PathLike,
+    cwd: Optional[PathLike] = None,
+    accept: Optional[Callable[[Path], bool]] = None,
+) -> None:
+    """Raise WorkspaceHold when an ``AEGIS_WORKSPACE`` pin and an explicit ``--workspace``
+    name different workspaces (the target's bounded walk-up result, else the target).
+
+    For commands that choose their own root (``aegis init`` initializes the target as
+    given) but must not act while the operator's pin says otherwise. Raises
+    WorkspaceNotFoundError when either path cannot be resolved.
+    """
+    base = _cli_path(cwd) if cwd is not None else Path.cwd().resolve()
+    start = _cli_path(explicit, base, "--workspace ")
+    _pin_hold(explicit, start, _cli_path(pin, base, "AEGIS_WORKSPACE "), accept)
+
+
 def resolve_cli_root(
     explicit: Optional[PathLike] = None,
     cwd: Optional[PathLike] = None,
     pin: Optional[PathLike] = None,
+    accept: Optional[Callable[[Path], bool]] = None,
 ) -> Path:
     """The workspace root a CLI command acts on, under the same rules as the server.
 
     ``--workspace X`` (or the cwd) walks up no further than its git toplevel and never
     to ``$HOME`` or the filesystem root; an uninitialized directory resolves to itself
-    so a command can say so. An ``AEGIS_WORKSPACE`` pin wins over the cwd, must be a
-    directory and must agree with an explicit target, or this raises WorkspaceHold.
-    Raises WorkspaceNotFoundError for a denied root or an unusable pin.
+    so a command can say so. ``accept`` widens what the walk stops at (as in
+    ``bounded_walk_up``; ``aegis migrate`` also stops at a legacy ``.soma/``). An
+    ``AEGIS_WORKSPACE`` pin wins over the cwd, must be a directory and must agree with
+    an explicit target, or this raises WorkspaceHold. Raises WorkspaceNotFoundError for
+    a denied root, an unusable pin or a path that cannot be resolved.
     """
-    base = _resolved(cwd) if cwd is not None else Path.cwd().resolve()
-    start = _resolved(explicit, base) if explicit else base
+    base = _cli_path(cwd) if cwd is not None else Path.cwd().resolve()
+    start = _cli_path(explicit, base, "--workspace ") if explicit else base
     if pin:
         raw_pin = os.fspath(pin)
-        pin_root = _resolved(raw_pin, base)
+        pin_root = _cli_path(raw_pin, base, "AEGIS_WORKSPACE ")
         denied = denial(pin_root)
         if denied or not pin_root.is_dir():
             what = f"the {denied.replace('_', ' ')}" if denied else "not a directory"
             raise WorkspaceNotFoundError(f"AEGIS_WORKSPACE is set to {raw_pin}, which is {what}")
         if explicit:
-            target = bounded_walk_up(start) or start
-            if target != pin_root:
-                raise WorkspaceHold(_not_bound(
-                    HOLD, "pin_conflicts_with_target",
-                    f"--workspace {explicit} resolves to {target}, but AEGIS_WORKSPACE pins {pin_root}; "
-                    "unset the pin or drop --workspace",
-                    pin=str(pin_root), target=str(target),
-                ))
+            _pin_hold(explicit, start, pin_root, accept)
         return pin_root
-    found = bounded_walk_up(start)
+    found = bounded_walk_up(start, accept)
     if found is not None:
         return found
     denied = denial(start)

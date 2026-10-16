@@ -296,3 +296,120 @@ def test_one_workspace_object_serves_every_call_bound_to_the_same_root_and_sourc
 
     assert len(seen) == 3 and seen[0].root == root
     assert all(ws is seen[0] for ws in seen)
+
+
+# ── attestation is per host and never the model's ────────────────────────────
+
+@pytest.mark.parametrize("client", ["claude-code", "some-other-client"])
+def test_codex_turn_metadata_from_another_client_is_ignored(home, tmp_path, monkeypatch, capsys, client):
+    other = _governed(tmp_path / "other", "rule-other")
+
+    frames = _serve(monkeypatch, capsys, [_init(client), _call(1, "aegis_list_rules", {}, _codex_meta(other))])
+
+    is_error, payload = _payload(frames[1])
+    assert is_error
+    assert (payload["status"], payload["binding"]["reason"]) == ("not_governed", "no_workspace")
+
+
+@pytest.mark.parametrize("client", ["codex-mcp-client", "some-other-client"])
+def test_an_inherited_claude_project_dir_under_another_client_is_ignored(home, tmp_path, monkeypatch, capsys, client):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(_governed(tmp_path / "other", "rule-other")))
+
+    frames = _serve(monkeypatch, capsys, [_init(client), _call(1, "aegis_list_rules", {})])
+
+    is_error, payload = _payload(frames[1])
+    assert is_error
+    assert (payload["status"], payload["binding"]["reason"]) == ("not_governed", "no_workspace")
+
+
+def test_a_model_supplied_meta_argument_is_never_host_attestation(home, tmp_path, monkeypatch, capsys):
+    other = _governed(tmp_path / "other", "rule-other")
+
+    frames = _serve(monkeypatch, capsys, [_init(), _call(1, "aegis_list_rules", {"_meta": _codex_meta(other)})])
+
+    is_error, payload = _payload(frames[1])
+    assert is_error
+    assert (payload["status"], payload["binding"]["reason"]) == ("not_governed", "no_workspace")
+
+
+# ── the registry is re-read when it changes ──────────────────────────────────
+
+def test_a_registry_rewritten_mid_session_is_read_on_the_next_call(home, tmp_path, monkeypatch, capsys):
+    a = _governed(tmp_path / "a", "rule-a")
+    b = _governed(tmp_path / "b", "rule-b")
+    _registry(home, a)
+    scan_b = {"files": [str(b / "src" / "app.py")]}
+
+    def steps():
+        yield _init("antigravity-client") + "\n"
+        yield _call(1, "aegis_scan", scan_b) + "\n"
+        _registry(home, a, b)  # `aegis init` in b, from another process
+        yield _call(2, "aegis_scan", scan_b) + "\n"
+
+    monkeypatch.setattr("sys.stdin", steps())
+    assert server.run_stdio_server() == 0
+    frames = {f["id"]: f for f in map(json.loads, capsys.readouterr().out.splitlines()) if "method" not in f}
+
+    assert _payload(frames[1])[1]["status"] == "not_governed"
+    assert [r["name"] for r in _payload(frames[2])[1]["relevant_rules"]] == ["rule-b"]
+
+
+# ── unresolvable paths keep the server up ────────────────────────────────────
+
+def _loop(where: Path) -> Path:
+    """``where/l1 -> where/l2 -> where/l1``; skipped where symlinks cannot be made."""
+    where.mkdir(parents=True, exist_ok=True)
+    first, second = where / "l1", where / "l2"
+    try:
+        os.symlink(second, first)
+        os.symlink(first, second)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    return first
+
+
+def test_a_pin_through_a_symlink_loop_keeps_the_server_up_in_an_error_state(home, tmp_path, monkeypatch, capsys):
+    pin = _loop(tmp_path / "links")
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(pin))
+
+    frames = _serve(monkeypatch, capsys, [_init(), _call(1, "aegis_list_rules", {})])
+
+    assert frames[0]["result"]["serverInfo"]["name"] == "aegis-mcp"
+    is_error, payload = _payload(frames[1])
+    assert is_error
+    assert (payload["binding"]["status"], payload["binding"]["reason"]) == ("error", "pin_missing")
+
+
+def test_call_files_through_a_symlink_loop_answer_a_tool_result(home, tmp_path, monkeypatch, capsys):
+    a = _governed(tmp_path / "a", "rule-a")
+    _loop(a)
+    _registry(home, a)
+    files = [[str(a / "l1" / "x.py")], ["l1/x.py"]]
+
+    frames = _serve(monkeypatch, capsys, [
+        _init("antigravity-client"),
+        *(_call(i, "aegis_scan", {"files": f}) for i, f in enumerate(files, 1)),
+    ])
+
+    for req_id in (1, 2):
+        assert "error" not in frames[req_id], frames[req_id]
+        assert frames[req_id]["result"]["content"][0]["type"] == "text"
+
+
+# ── the user layer (H8) ──────────────────────────────────────────────────────
+
+def test_a_symlinked_user_rules_directory_is_never_served(home, tmp_path, monkeypatch, capsys):
+    elsewhere = tmp_path / "elsewhere"
+    _rule(elsewhere, "planted", target="**/*.py")
+    (home / ".aegis").mkdir()
+    try:
+        os.symlink(elsewhere / ".aegis" / "rules", home / ".aegis" / "rules", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+    frames = _serve(monkeypatch, capsys, [_init(), _call(1, "aegis_scan", {"files": ["src/app.py"]})])
+
+    is_error, payload = _payload(frames[1])
+    assert not is_error
+    assert payload["relevant_rules"] == []
+    assert payload["user_layer"] == {"path": str(home / ".aegis" / "rules"), "rules": 0}

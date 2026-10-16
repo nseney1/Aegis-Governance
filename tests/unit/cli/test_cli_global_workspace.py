@@ -136,3 +136,167 @@ def test_doctor_still_runs_from_home(home, monkeypatch):
     _attach_workspace(args)
 
     assert (args.ws, args._project_root, args._workspace_arg) == (None, home, None)
+
+
+# ── scan: the daily command takes the same hold and never governs $HOME ─────────
+
+def _rule_in(root: Path, rule_id: str) -> Path:
+    traps = root / ".aegis" / "rules" / "traps"
+    traps.mkdir(parents=True, exist_ok=True)
+    (traps / f"{rule_id}.md").write_text(
+        f"---\nid: {rule_id}\ntype: trap\ntarget_paths: ['**']\n---\nRule {rule_id}.\n", encoding="utf-8"
+    )
+    return root.resolve()
+
+
+def test_scan_with_a_pin_that_disagrees_with_the_target_holds_and_scans_nothing(home, tmp_path, capsys, monkeypatch):
+    pinned = _rule_in(tmp_path / "a", "trap-a")
+    target = _rule_in(tmp_path / "b", "trap-b")
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(pinned))
+    monkeypatch.chdir(target)
+
+    rc = main(["scan", "--workspace", str(target), "x.py", "--json"])
+
+    out = capsys.readouterr().out
+    assert rc == 2  # scan's contract: a workspace error exits 2
+    payload = json.loads(out)
+    assert (payload["status"], payload["reason"]) == ("hold", "pin_conflicts_with_target")
+    assert payload["details"] == {"pin": str(pinned), "target": str(target)}
+    assert payload["source"] == "aegis scan"
+    assert "relevant_rules" not in payload
+
+
+def test_scan_hold_without_json_is_one_line_on_stderr(home, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(_rule_in(tmp_path / "a", "trap-a")))
+
+    rc = main(["--workspace", str(_rule_in(tmp_path / "b", "trap-b")), "scan", "x.py"])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err.startswith("Hold (pin_conflicts_with_target): --workspace ")
+
+
+def test_scan_with_a_pin_that_agrees_with_the_target_scans_the_pin(home, tmp_path, capsys, monkeypatch):
+    pinned = _rule_in(tmp_path / "a", "trap-a")
+    (pinned / "src").mkdir()
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(pinned))
+    monkeypatch.chdir(pinned)
+
+    rc = main(["scan", "--workspace", str(pinned / "src"), "x.py", "--json"])
+
+    assert rc == 0
+    assert [r["name"] for r in json.loads(capsys.readouterr().out)["relevant_rules"]] == ["trap-a"]
+
+
+def test_scan_from_home_never_scans_the_user_layer_as_a_project(home, capsys, monkeypatch):
+    monkeypatch.chdir(home)
+    before = _tree(home)
+
+    rc = main(["scan", "x.py", "--json"])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err == (
+        f"Error: not an Aegis workspace ({home} is the home directory; ~/.aegis is the user rule layer); "
+        "run aegis init in a project\n"
+    )
+    assert _tree(home) == before
+
+
+# ── init, migrate, uninstall: the pin hold, and never above the toplevel or $HOME ─
+
+@pytest.mark.parametrize("command", ["init", "migrate", "uninstall"])
+def test_a_pin_that_disagrees_with_the_target_holds_before_the_command_runs(home, tmp_path, capsys, monkeypatch, command):
+    from aegis_cli.registry import get_default_registry
+
+    ran = []
+    monkeypatch.setattr(type(get_default_registry().get(command)), "execute", lambda self, args: ran.append(args) or 0)
+    pinned = _governed(tmp_path / "pinned")
+    target = tmp_path / "target"
+    target.mkdir()
+    monkeypatch.setenv("AEGIS_WORKSPACE", str(pinned))
+
+    rc = main(["--json", "--workspace", str(target), command])
+
+    assert rc == 1
+    assert ran == []
+    payload = json.loads(capsys.readouterr().out)
+    assert (payload["status"], payload["reason"]) == ("hold", "pin_conflicts_with_target")
+    assert payload["details"] == {"pin": str(pinned), "target": str(target.resolve())}
+    assert payload["source"] == f"aegis {command}"
+
+
+def test_migrate_never_walks_above_the_git_toplevel(home, tmp_path, capsys, monkeypatch):
+    outer = tmp_path / "outer"
+    (outer / ".aegis").mkdir(parents=True)
+    sub = outer / "repo" / "sub"
+    (outer / "repo" / ".git").mkdir(parents=True)
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+
+    rc = main(["migrate", "--json"])
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["root"] == str(sub.resolve())
+
+
+def test_migrate_still_finds_a_legacy_workspace_inside_its_repository(home, tmp_path, capsys, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".soma").mkdir()
+    (repo / "src").mkdir()
+    monkeypatch.chdir(repo / "src")
+
+    rc = main(["migrate", "--json"])
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["root"] == str(repo.resolve())
+
+
+def test_migrate_below_home_never_plans_the_user_plane(home, capsys, monkeypatch):
+    (home / ".aegis" / "evidence").mkdir(parents=True)
+    (home / ".aegis" / "evidence" / "signals.jsonl").write_text("", encoding="utf-8")
+    sub = home / "proj" / "sub"
+    sub.mkdir(parents=True)
+    monkeypatch.chdir(sub)
+
+    rc = main(["migrate", "--json"])
+
+    report = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert report["root"] == str(sub)
+    assert report["ledger"] is None
+
+
+@pytest.mark.parametrize("argv", [["migrate", "--json"], ["uninstall", "--dry-run", "--purge"]])
+def test_migrate_and_uninstall_refuse_home(home, capsys, monkeypatch, argv):
+    from aegis_cli.registry import get_default_registry
+
+    ran = []
+    monkeypatch.setattr(type(get_default_registry().get(argv[0])), "execute", lambda self, args: ran.append(args) or 0)
+    monkeypatch.chdir(home)
+
+    rc = main(argv)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert ran == []
+    assert captured.out == ""
+    assert captured.err == (
+        f"Error: not an Aegis workspace ({home} is the home directory; ~/.aegis is the user rule layer); "
+        "run aegis init in a project\n"
+    )
+
+
+def test_uninstall_below_home_targets_the_project_not_the_user_plane(home, capsys, monkeypatch):
+    project = home / "proj"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    rc = main(["uninstall", "--dry-run", "--purge"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert f"Would remove {home / '.aegis'}" not in out
