@@ -1,0 +1,713 @@
+"""The host plane writers behind `aegis init` and `aegis uninstall` (host-matrix spec §3.2-3.4).
+
+Everything here edits a file the user owns, so every writer follows one contract: it
+never writes through a symlink (it refuses instead), it refuses input it cannot parse
+instead of repairing or replacing it, it writes atomically, it re-reads the file just
+before replacing it and refuses if the file changed meanwhile, and on any refusal the
+bytes on disk are left as they were. ``dry_run`` runs every check and writes nothing.
+
+**Managed blocks** (AGENTS.md bootstrap, CLAUDE.md ``@AGENTS.md`` shim)::
+
+    <!-- aegis:begin id=<id> v=1 sha=<12 hex> -->
+    ...text Aegis owns...
+    <!-- aegis:end id=<id> -->
+
+``sha`` is the first 12 hex digits of the sha256 of the text between the markers with
+line endings normalized to LF, so a CRLF checkout is not mistaken for a hand edit. A
+writer touches only blocks of its own id; it refuses a block whose text no longer
+matches its sha (a hand edit) unless forced, and a file with malformed markers of its
+id. The block takes the file's line ending, and the bytes around it are kept as they
+are (BOM included).
+
+**MCP registration** uses each host's row in :mod:`aegis_core.hosts`: a native CLI
+(``codex mcp add``, ``claude mcp add --scope user``) run as an argv with no shell, or a
+JSON merge into the host's config file (Antigravity's ``~/.gemini/config/mcp_config.json``).
+The server is always registered as ``aegis``, with an absolute command and the env
+``AEGIS_CLIENT=<host id>`` (plus ``AEGIS_WORKSPACE`` only for an explicit pin).
+Unregistering removes ``aegis`` and the legacy ``soma`` entry and nothing else.
+
+**The workspace registry**, ``~/.aegis/workspaces.json`` (ADR 0005 AD-4)::
+
+    {"v": 1,
+     "workspaces": [{"root": "/abs/path/to/repo",
+                     "added_at": "2026-10-15T12:00:00Z",
+                     "added_by": "aegis init",
+                     "hosts": ["codex-cli", "antigravity"]}]}
+
+- Ownership: `aegis init` and `aegis uninstall` are its only writers. The MCP server
+  and `aegis doctor` only read it. Unknown top-level keys and unknown entry keys are
+  kept as they are.
+- Membership: a workspace is registered when an entry's ``root`` is its absolute,
+  resolved directory; roots are compared after resolving links (and case-folding on
+  Windows), so one directory has at most one entry. A tool call's file paths may only
+  *select among* registered roots; they never add one. ``$HOME`` and the filesystem
+  root are never registered.
+- ``hosts`` lists the hosts `aegis init` registered for that workspace on this machine,
+  in host-table order. `aegis uninstall` unregisters a host only when no other
+  registered workspace still lists it, unless the host is named with ``--host``.
+- ``v`` is the schema version. A reader that finds another version refuses the file
+  instead of guessing.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
+from aegis_core import hosts as host_table
+from aegis_core.config import ENV_CLIENT, ENV_WORKSPACE
+from aegis_core.storage import atomic_write_bytes
+from aegis_core.workspace.layout import UserLayout
+
+__all__ = [
+    "BLOCK_VERSION",
+    "HostAction",
+    "InstallError",
+    "LEGACY_SERVER_NAME",
+    "REGISTRY_VERSION",
+    "SERVER_NAME",
+    "detect_hosts",
+    "display_command",
+    "is_denied_root",
+    "mcp_command",
+    "mcp_entry",
+    "merge_mcp_json",
+    "parse_hosts",
+    "read_registry",
+    "register_argv",
+    "register_host",
+    "register_workspace",
+    "registrable_hosts",
+    "remove_managed_block",
+    "remove_mcp_json",
+    "unregister_argv",
+    "unregister_host",
+    "unregister_workspace",
+    "write_managed_block",
+]
+
+SERVER_NAME = "aegis"
+LEGACY_SERVER_NAME = "soma"
+BLOCK_VERSION = 1
+REGISTRY_VERSION = 1
+CLI_TIMEOUT_SECONDS = 60
+
+
+class InstallError(Exception):
+    """A user-owned file cannot be changed safely; nothing was written to it."""
+
+
+# ── Safe file access ─────────────────────────────────────────────────────────
+
+def _lstat(path: Path) -> Optional[os.stat_result]:
+    try:
+        return os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise InstallError(f"{path}: cannot be read ({exc.strerror or exc}); left unchanged") from exc
+
+
+def _check_target(path: Path, *, allow_hard_links: bool = False) -> Optional[os.stat_result]:
+    """The lstat of ``path`` when it is a regular file we may replace, None when missing."""
+    st = _lstat(path)
+    if st is None:
+        return None
+    if stat.S_ISLNK(st.st_mode):
+        raise InstallError(
+            f"{path}: is a symlink; Aegis never writes through a link (it could point anywhere). "
+            "Replace it with a regular file, then re-run.")
+    if not stat.S_ISREG(st.st_mode):
+        raise InstallError(f"{path}: is not a regular file; left unchanged")
+    if st.st_nlink > 1 and not allow_hard_links:
+        raise InstallError(
+            f"{path}: has another hard link; replacing it would silently split the link. "
+            "Make it a single file, then re-run.")
+    return st
+
+
+def _read(path: Path) -> Optional[bytes]:
+    """Bytes of the regular file at ``path`` (None when missing); refuses links and specials."""
+    if _check_target(path) is None:
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError as exc:
+        raise InstallError(f"{path}: cannot be read ({exc.strerror or exc}); left unchanged") from exc
+
+
+def _is_read_only(path: Path) -> bool:
+    # os.replace swaps a file regardless of its own mode, so the read-only bit is honored
+    # explicitly; root passes every os.access test, hence the mode bits too.
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return False
+    return not (mode & 0o222) or not os.access(path, os.W_OK)
+
+
+def _replace(path: Path, expected: Optional[bytes], data: bytes) -> None:
+    """Atomically write ``data`` if ``path`` still holds ``expected`` (None: still missing)."""
+    if _check_target(path) is not None and _is_read_only(path):
+        raise InstallError(f"{path}: is read-only; left unchanged. Make it writable, then re-run.")
+    if _read(path) != expected:
+        raise InstallError(f"{path}: changed while Aegis was updating it; left unchanged. Re-run.")
+    try:
+        atomic_write_bytes(path, data)
+    except OSError as exc:
+        raise InstallError(f"{path}: cannot be written ({exc.strerror or exc}); left unchanged") from exc
+
+
+def _decode(path: Path, data: bytes) -> str:
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise InstallError(f"{path}: is not UTF-8 text ({exc.reason}); left unchanged") from exc
+
+
+# ── Managed blocks ───────────────────────────────────────────────────────────
+
+_MARKER = re.compile(r"^<!-- aegis:(begin|end)\b(.*?)-->[ \t]*$")
+_BEGIN_FIELDS = re.compile(r"^ id=(\S+) v=(\S+) sha=(\S+) $")
+_END_FIELDS = re.compile(r"^ id=(\S+) $")
+_HEX12 = re.compile(r"^[0-9a-f]{12}$")
+_BLOCK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _digest(body: str) -> str:
+    return hashlib.sha256(body.replace("\r\n", "\n").encode("utf-8")).hexdigest()[:12]
+
+
+def _render(block_id: str, text: str, eol: str) -> List[str]:
+    body = text if text.endswith("\n") else text + "\n"
+    body_lines = [line + eol for line in body[:-1].split("\n")]
+    return ([f"<!-- aegis:begin id={block_id} v={BLOCK_VERSION} sha={_digest(body)} -->{eol}"]
+            + body_lines + [f"<!-- aegis:end id={block_id} -->{eol}"])
+
+
+@dataclass(frozen=True)
+class _Block:
+    begin: int  # line index of the begin marker
+    end: int    # line index of the end marker
+    sha: str
+    body: str   # text between the markers, as it is in the file
+
+
+def _find_block(path: Path, lines: List[str], block_id: str) -> Optional[_Block]:
+    """The one block of ``block_id`` in ``lines``; refuses malformed or repeated markers."""
+    found: List[_Block] = []
+    open_at: Optional[Tuple[int, str]] = None
+    for index, line in enumerate(lines):
+        match = _MARKER.match(line.rstrip("\r\n"))
+        if not match:
+            continue
+        kind, fields = match.groups()
+        if kind == "begin":
+            parsed = _BEGIN_FIELDS.match(fields)
+            if not parsed or parsed.group(1) != block_id:
+                if f"id={block_id} " in fields + " ":
+                    raise InstallError(f"{path}: unrecognised Aegis marker for {block_id!r} on line "
+                                       f"{index + 1}; left unchanged. Fix or remove it, then re-run.")
+                continue
+            version, sha = parsed.group(2), parsed.group(3)
+            if version != str(BLOCK_VERSION) or not _HEX12.match(sha):
+                raise InstallError(f"{path}: Aegis block {block_id!r} on line {index + 1} has an unknown "
+                                   f"format (v={version}); left unchanged. A newer aegis may own it.")
+            if open_at is not None:
+                raise InstallError(f"{path}: Aegis block {block_id!r} opens twice (lines {open_at[0] + 1} "
+                                   f"and {index + 1}); left unchanged")
+            open_at = (index, sha)
+        else:
+            parsed = _END_FIELDS.match(fields)
+            if not parsed or parsed.group(1) != block_id:
+                continue
+            if open_at is None:
+                raise InstallError(f"{path}: Aegis block {block_id!r} closes on line {index + 1} without "
+                                   "opening; left unchanged")
+            begin, sha = open_at
+            found.append(_Block(begin, index, sha, "".join(lines[begin + 1:index])))
+            open_at = None
+    if open_at is not None:
+        raise InstallError(f"{path}: Aegis block {block_id!r} on line {open_at[0] + 1} never closes; "
+                           "left unchanged")
+    if len(found) > 1:
+        raise InstallError(f"{path}: holds {len(found)} Aegis blocks {block_id!r}; left unchanged. "
+                           "Keep one, then re-run.")
+    return found[0] if found else None
+
+
+def _hand_edited(path: Path, block: _Block, block_id: str, force: bool) -> None:
+    if block.sha != _digest(block.body) and not force:
+        raise InstallError(
+            f"{path}: the Aegis block {block_id!r} was edited by hand; left unchanged. "
+            "Move your text outside the block, or re-run with --force to replace it.")
+
+
+def write_managed_block(path: Union[str, Path], block_id: str, text: str, *, force: bool = False,
+                        create: bool = True, dry_run: bool = False) -> str:
+    """Write ``text`` as the managed block ``block_id`` of ``path``; return what happened.
+
+    ``created`` (new file), ``added`` (appended after the existing text, one blank line
+    between), ``updated`` (the block replaced in place), ``unchanged`` or ``absent``
+    (``create`` is False and there is no file). Raises InstallError on a symlink, a hard
+    link, a non-regular or non-UTF-8 file, malformed markers of ``block_id``, or a
+    hand-edited block (unless ``force``).
+    """
+    if not _BLOCK_ID.match(block_id):
+        raise ValueError(f"invalid block id {block_id!r}")
+    path = Path(path)
+    raw = _read(path)
+    if raw is None:
+        if not create:
+            return "absent"
+        if not dry_run:
+            _replace(path, None, "".join(_render(block_id, text, "\n")).encode("utf-8"))
+        return "created"
+    content = _decode(path, raw)
+    eol = "\r\n" if "\r\n" in content else "\n"
+    lines = content.splitlines(True)
+    block = _find_block(path, lines, block_id)
+    new_block = _render(block_id, text, eol)
+    if block is None:
+        prefix = content
+        if prefix.strip("﻿"):
+            if not prefix.endswith("\n"):
+                prefix += eol
+            prefix += eol
+        new_content, status = prefix + "".join(new_block), "added"
+    else:
+        _hand_edited(path, block, block_id, force)
+        if "".join(lines[block.begin:block.end + 1]).replace("\r\n", "\n") == "".join(new_block).replace("\r\n", "\n"):
+            return "unchanged"
+        new_content = "".join(lines[:block.begin] + new_block + lines[block.end + 1:])
+        status = "updated"
+    if not dry_run:
+        _replace(path, raw, new_content.encode("utf-8"))
+    return status
+
+
+def remove_managed_block(path: Union[str, Path], block_id: str, *, force: bool = False,
+                         dry_run: bool = False, delete_if_empty: bool = False) -> str:
+    """Remove the managed block ``block_id`` and the blank line written before it.
+
+    Returns ``removed``, ``deleted`` (nothing else was left and ``delete_if_empty``) or
+    ``absent``. A hand-edited block is refused unless ``force``.
+    """
+    path = Path(path)
+    raw = _read(path)
+    if raw is None:
+        return "absent"
+    content = _decode(path, raw)
+    lines = content.splitlines(True)
+    block = _find_block(path, lines, block_id)
+    if block is None:
+        return "absent"
+    _hand_edited(path, block, block_id, force)
+    start = block.begin
+    # The writer put one blank line between the user's text and the block.
+    if start >= 2 and not lines[start - 1].strip("\r\n") and lines[start - 2].strip("\r\n﻿"):
+        start -= 1
+    remaining = "".join(lines[:start] + lines[block.end + 1:])
+    if delete_if_empty and remaining == "":
+        if not dry_run:
+            if _read(path) != raw:
+                raise InstallError(f"{path}: changed while Aegis was updating it; left unchanged. Re-run.")
+            path.unlink()
+        return "deleted"
+    if not dry_run:
+        _replace(path, raw, remaining.encode("utf-8"))
+    return "removed"
+
+
+# ── JSON configs ─────────────────────────────────────────────────────────────
+
+def _reject_duplicates(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    seen: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError(f"duplicate key {key!r}")
+        seen[key] = value
+    return seen
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not valid JSON")
+
+
+def _load_json_object(path: Path) -> Tuple[Optional[bytes], Dict[str, Any]]:
+    """(raw bytes or None, the JSON object in ``path``); refuses anything it cannot round-trip."""
+    raw = _read(path)
+    if raw is None:
+        return None, {}
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raise InstallError(f"{path}: starts with a UTF-8 BOM; left unchanged. Save it without the BOM, then re-run.")
+    text = _decode(path, raw)
+    if not text.strip():
+        return raw, {}
+    try:
+        data = json.loads(text, object_pairs_hook=_reject_duplicates, parse_constant=_reject_constant)
+    except json.JSONDecodeError as exc:
+        raise InstallError(
+            f"{path}: is not valid JSON ({exc.msg} at line {exc.lineno} column {exc.colno}); left unchanged. "
+            "Comments and trailing commas are not supported: fix the file or move it aside, then re-run."
+        ) from exc
+    except (ValueError, RecursionError) as exc:
+        message = str(exc)
+        if "duplicate key" not in message:
+            message = f"is not valid JSON ({message})"
+        raise InstallError(f"{path}: {message}; left unchanged. Fix the file, then re-run.") from exc
+    if not isinstance(data, dict):
+        raise InstallError(f"{path}: must hold a JSON object; left unchanged")
+    return raw, data
+
+
+def _servers(path: Path, data: Dict[str, Any], key: str) -> Dict[str, Any]:
+    servers = data.get(key)
+    if servers is None:
+        servers = data[key] = {}
+    if not isinstance(servers, dict):
+        raise InstallError(f"{path}: '{key}' must be a JSON object; left unchanged")
+    return servers
+
+
+def _dump(data: Dict[str, Any]) -> bytes:
+    return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def merge_mcp_json(path: Union[str, Path], name: str, entry: Dict[str, Any], *, key: str = "mcpServers",
+                   dry_run: bool = False) -> str:
+    """Set ``key[name] = entry`` in the JSON file at ``path``, keeping everything else.
+
+    Returns ``added``, ``updated`` or ``unchanged``. Raises InstallError for a symlink,
+    a read-only file, invalid JSON (JSONC, trailing commas, NaN, duplicate keys), a BOM,
+    or a non-object ``key``; the file is then left as it was.
+    """
+    path = Path(path)
+    raw, data = _load_json_object(path)
+    servers = _servers(path, data, key)
+    if servers.get(name) == entry:
+        return "unchanged"
+    status = "updated" if name in servers else "added"
+    servers[name] = entry
+    if not dry_run:
+        _replace(path, raw, _dump(data))
+    return status
+
+
+def remove_mcp_json(path: Union[str, Path], names: Sequence[str], *, key: str = "mcpServers",
+                    dry_run: bool = False) -> str:
+    """Delete ``names`` from ``key`` in the JSON file at ``path``; ``removed`` or ``absent``."""
+    path = Path(path)
+    raw, data = _load_json_object(path)
+    if raw is None:
+        return "absent"
+    servers = _servers(path, data, key) if data.get(key) is not None else {}
+    present = [n for n in names if n in servers]
+    if not present:
+        return "absent"
+    for n in present:
+        del servers[n]
+    if not dry_run:
+        _replace(path, raw, _dump(data))
+    return "removed"
+
+
+# ── Workspace registry ───────────────────────────────────────────────────────
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _root_key(root: Union[str, Path]) -> str:
+    return os.path.normcase(os.path.realpath(os.fspath(root)))
+
+
+def is_denied_root(root: Union[str, Path], home: Union[str, Path]) -> bool:
+    """True for the home directory and a filesystem root: never a workspace (AD-4)."""
+    real = os.path.realpath(os.fspath(root))
+    return _root_key(real) == _root_key(home) or os.path.dirname(real) == real
+
+
+def _registry_file(home: Union[str, Path]) -> Path:
+    layout = UserLayout(Path(home))
+    if layout.aegis_dir.is_symlink():
+        raise InstallError(f"{layout.aegis_dir}: is a symlink; Aegis keeps its user files only in a real "
+                           "directory. Replace the link, then re-run.")
+    return layout.workspaces_file
+
+
+def _load_registry(path: Path) -> Tuple[Optional[bytes], Dict[str, Any]]:
+    raw, data = _load_json_object(path)
+    if raw is None or not data:
+        return raw, {"v": REGISTRY_VERSION, "workspaces": []}
+    if data.get("v") != REGISTRY_VERSION:
+        raise InstallError(f"{path}: has schema version {data.get('v')!r}; this aegis reads version "
+                           f"{REGISTRY_VERSION}. Left unchanged.")
+    entries = data.get("workspaces")
+    if not isinstance(entries, list):
+        raise InstallError(f"{path}: 'workspaces' must be a list; left unchanged")
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("root"), str) or not entry["root"]:
+            raise InstallError(f"{path}: every workspace needs a 'root' path; left unchanged")
+    return raw, data
+
+
+def read_registry(home: Union[str, Path]) -> Dict[str, Any]:
+    """The registry document (``{"v": 1, "workspaces": []}`` when there is none)."""
+    return _load_registry(_registry_file(home))[1]
+
+
+def _ordered_hosts(names: Sequence[str]) -> List[str]:
+    known = [h.id for h in host_table.all_hosts()]
+    unique = set(names)
+    return [h for h in known if h in unique] + sorted(unique - set(known))
+
+
+def register_workspace(home: Union[str, Path], root: Union[str, Path], hosts: Sequence[str], *,
+                       dry_run: bool = False, now: Optional[str] = None) -> str:
+    """Add ``root`` (with ``hosts``) to the registry; ``added``, ``updated`` or ``unchanged``."""
+    path = _registry_file(home)
+    raw, data = _load_registry(path)
+    key = _root_key(root)
+    entries = data["workspaces"]
+    entry = next((e for e in entries if _root_key(e["root"]) == key), None)
+    if entry is None:
+        entries.append({"root": os.path.realpath(os.fspath(root)), "added_at": now or _utc_now(),
+                        "added_by": "aegis init", "hosts": _ordered_hosts(hosts)})
+        status = "added"
+    else:
+        current = entry.get("hosts") if isinstance(entry.get("hosts"), list) else []
+        merged = _ordered_hosts([h for h in current if isinstance(h, str)] + list(hosts))
+        if merged == current:
+            return "unchanged"
+        entry["hosts"] = merged
+        status = "updated"
+    if not dry_run:
+        _replace(path, raw, _dump({"v": data.pop("v"), **data}))
+    return status
+
+
+def unregister_workspace(home: Union[str, Path], root: Union[str, Path], *,
+                         dry_run: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
+    """Remove ``root`` from the registry; (``removed`` or ``absent``, the remaining entries)."""
+    path = _registry_file(home)
+    raw, data = _load_registry(path)
+    key = _root_key(root)
+    remaining = [e for e in data["workspaces"] if _root_key(e["root"]) != key]
+    if len(remaining) == len(data["workspaces"]):
+        return "absent", remaining
+    data["workspaces"] = remaining
+    if not dry_run:
+        _replace(path, raw, _dump(data))
+    return "removed", remaining
+
+
+def workspace_hosts(entry: Optional[Dict[str, Any]]) -> List[str]:
+    hosts = entry.get("hosts") if entry else None
+    return [h for h in hosts if isinstance(h, str)] if isinstance(hosts, list) else []
+
+
+def find_workspace(registry: Dict[str, Any], root: Union[str, Path]) -> Optional[Dict[str, Any]]:
+    key = _root_key(root)
+    return next((e for e in registry.get("workspaces", []) if _root_key(e["root"]) == key), None)
+
+
+# ── Hosts ────────────────────────────────────────────────────────────────────
+
+def registrable_hosts() -> Tuple[host_table.HostSpec, ...]:
+    """Hosts `aegis init` can register in this phase (they have a registration row)."""
+    return tuple(h for h in host_table.all_hosts(phase=1) if h.registration is not None)
+
+
+def _user_dir(home: Path, spec: str) -> Path:
+    return home / spec[2:] if spec.startswith("~/") else Path(spec)
+
+
+def detect_hosts(home: Union[str, Path], path: Optional[str] = None) -> List[str]:
+    """Hosts that look installed (a binary on PATH or a user config dir); a proposal only."""
+    home = Path(home)
+    found = []
+    for host in registrable_hosts():
+        if any(shutil.which(b, path=path) for b in host.binaries) or any(
+                _user_dir(home, d).is_dir() for d in host.user_dirs):
+            found.append(host.id)
+    return found
+
+
+def parse_hosts(value: str) -> Union[str, List[str]]:
+    """``auto``, or the comma-separated host ids in host-table order; ValueError otherwise."""
+    names = [v.strip() for v in value.split(",") if v.strip()]
+    if not names:
+        raise ValueError("no host given; use --host auto or a comma-separated list of host ids")
+    if "auto" in names:
+        if names != ["auto"]:
+            raise ValueError("'auto' cannot be combined with host ids")
+        return "auto"
+    registrable = {h.id for h in registrable_hosts()}
+    for name in names:
+        try:
+            spec = host_table.get(name)
+        except KeyError as exc:
+            raise ValueError(f"unknown host {name!r}; hosts: {', '.join(sorted(registrable))}") from exc
+        if spec.registration is None:
+            raise ValueError(f"{name} is identity only: Aegis does not register there (ADR 0005 H4)")
+        if name not in registrable:
+            raise ValueError(f"{name}: registration lands in v4.1; hosts now: {', '.join(sorted(registrable))}")
+    return _ordered_hosts(names)
+
+
+def mcp_command(path: Optional[str] = None) -> List[str]:
+    """The absolute command that starts the Aegis MCP server."""
+    exe = shutil.which("aegis-mcp", path=path)
+    if exe:
+        return [os.path.realpath(exe)]
+    return [sys.executable, "-m", "aegis_mcp"]
+
+
+def _env(host_id: str, pin: Optional[str]) -> Dict[str, str]:
+    env = {ENV_CLIENT: host_id}
+    if pin:
+        env[ENV_WORKSPACE] = pin
+    return env
+
+
+def mcp_entry(host_id: str, command: Sequence[str], pin: Optional[str] = None) -> Dict[str, Any]:
+    """The JSON server entry for a ``json_file`` host."""
+    return {"command": command[0], "args": list(command[1:]), "env": _env(host_id, pin)}
+
+
+def register_argv(host: host_table.HostSpec, command: Sequence[str], pin: Optional[str] = None) -> List[str]:
+    """The host's native registration argv with the command spliced in (and the pin env)."""
+    argv = list(host.registration.argv)  # type: ignore[union-attr]
+    at = argv.index("{command}")
+    argv[at:at + 1] = list(command)
+    if pin:
+        client = next(i for i, a in enumerate(argv) if a.startswith(f"{ENV_CLIENT}="))
+        argv[client + 1:client + 1] = [argv[client - 1], f"{ENV_WORKSPACE}={pin}"]
+    return argv
+
+
+def unregister_argv(host: host_table.HostSpec, name: str = SERVER_NAME) -> List[str]:
+    """The host's native removal argv (``... mcp remove [scope] <name>``)."""
+    template = list(host.registration.argv)  # type: ignore[union-attr]
+    head = template[:template.index(SERVER_NAME)]
+    return ["remove" if a == "add" else a for a in head] + [name]
+
+
+def display_command(argv: Sequence[str]) -> str:
+    """``argv`` as one line to paste into this platform's shell."""
+    if os.name == "nt":
+        return subprocess.list2cmdline(list(argv))
+    import shlex
+    return " ".join(shlex.quote(a) for a in argv)
+
+
+def _run_cli(argv: List[str]) -> "subprocess.CompletedProcess[str]":
+    """Run a host CLI: no shell, no stdin, a neutral cwd (a repository's own host config
+    must not redirect a user-scope registration), bounded time."""
+    with tempfile.TemporaryDirectory(prefix="aegis-host-") as cwd:
+        return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              timeout=CLI_TIMEOUT_SECONDS, cwd=cwd, check=False)
+
+
+@dataclass(frozen=True)
+class HostAction:
+    """What registering or unregistering one host did.
+
+    ``result``: registered, unchanged, would_run, manual (the host CLI is not installed;
+    ``command`` is what the user should run), failed, removed or absent.
+    """
+
+    host: str
+    result: str
+    command: Optional[List[str]] = None
+    detail: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"host": self.host, "result": self.result, "command": self.command, "detail": self.detail}
+
+
+def _call(argv: List[str]) -> Tuple[int, str]:
+    try:
+        proc = _run_cli(argv)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 127, str(exc)
+    tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    return proc.returncode, tail[-1] if tail else ""
+
+
+def _native(host: host_table.HostSpec, steps: List[List[str]], path: Optional[str], dry_run: bool,
+            done: str) -> HostAction:
+    binary = shutil.which(steps[-1][0], path=path)
+    if binary is None:
+        return HostAction(host.id, "manual", steps[-1], f"{steps[-1][0]} is not on PATH")
+    if dry_run:
+        return HostAction(host.id, "would_run", steps[-1])
+    resolved = os.path.realpath(binary)
+    code, detail = 0, ""
+    for step in steps:
+        code, detail = _call([resolved, *step[1:]])
+    if code != 0:
+        return HostAction(host.id, "failed", steps[-1], f"exit {code}: {detail}".rstrip(": "))
+    return HostAction(host.id, done, steps[-1])
+
+
+def _json_path(host: host_table.HostSpec, home: Path) -> Path:
+    return _user_dir(home, host.registration.path)  # type: ignore[union-attr]
+
+
+def register_host(host_id: str, *, home: Union[str, Path], command: Sequence[str], pin: Optional[str] = None,
+                  path: Optional[str] = None, dry_run: bool = False) -> HostAction:
+    """Register the ``aegis`` MCP server with one host.
+
+    A native CLI is run remove-then-add (Claude refuses to add an existing name; Codex
+    overwrites it), so a re-run converges. A ``json_file`` host is merged in place and
+    refused (InstallError) when its file cannot be merged safely.
+    """
+    host = host_table.get(host_id)
+    reg = host.registration
+    if reg is None:
+        raise InstallError(f"{host_id} is identity only: Aegis does not register there")
+    if reg.kind == "json_file":
+        status = merge_mcp_json(_json_path(host, Path(home)), SERVER_NAME, mcp_entry(host_id, command, pin),
+                                key=reg.key, dry_run=dry_run)
+        result = "unchanged" if status == "unchanged" else ("would_run" if dry_run else "registered")
+        return HostAction(host_id, result, None, str(_json_path(host, Path(home))))
+    return _native(host, [unregister_argv(host), register_argv(host, command, pin)], path, dry_run, "registered")
+
+
+def unregister_host(host_id: str, *, home: Union[str, Path], path: Optional[str] = None,
+                    dry_run: bool = False) -> HostAction:
+    """Remove the ``aegis`` and legacy ``soma`` registrations from one host."""
+    host = host_table.get(host_id)
+    reg = host.registration
+    if reg is None:
+        raise InstallError(f"{host_id} is identity only: Aegis does not register there")
+    if reg.kind == "json_file":
+        target = _json_path(host, Path(home))
+        status = remove_mcp_json(target, (SERVER_NAME, LEGACY_SERVER_NAME), key=reg.key, dry_run=dry_run)
+        result = "absent" if status == "absent" else ("would_run" if dry_run else "removed")
+        return HostAction(host_id, result, None, str(target))
+    steps = [unregister_argv(host, SERVER_NAME), unregister_argv(host, LEGACY_SERVER_NAME)]
+    binary = shutil.which(steps[0][0], path=path)
+    if binary is None:
+        return HostAction(host_id, "manual", steps[0], f"{steps[0][0]} is not on PATH")
+    if dry_run:
+        return HostAction(host_id, "would_run", steps[0])
+    resolved = os.path.realpath(binary)
+    code, detail = _call([resolved, *steps[0][1:]])
+    _call([resolved, *steps[1][1:]])  # the legacy name is usually absent; its failure is expected
+    # A host CLI exits non-zero for a name it does not hold, so a failure is reported, not fatal.
+    return HostAction(host_id, "removed" if code == 0 else "absent", steps[0],
+                      "" if code == 0 else f"exit {code}: {detail}".rstrip(": "))
