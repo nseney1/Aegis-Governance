@@ -62,11 +62,12 @@ class Env:
             monkeypatch.delenv(name, raising=False)
         monkeypatch.setattr(doctor, "_run_host_cli", self._no_cli)
         monkeypatch.setattr(registrar, "_windows", lambda: False)
+        suffix = ".exe" if os.name == "nt" else ""  # Windows finds a program on PATH only under a PATHEXT name
         for name in ("aegis", "aegis-mcp"):
-            stub = self.bin / name
+            stub = self.bin / (name + suffix)
             stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             stub.chmod(0o755)
-        self.aegis = str(self.bin / "aegis")
+        self.aegis = str(self.bin / ("aegis" + suffix))
         if not registrar.AEGIS_PATH_CHARSET.fullmatch(self.aegis):
             # A native Windows path ('\\' and ':') is outside the shell-form charset, so
             # install would refuse the Codex and Antigravity entries these tests read back.
