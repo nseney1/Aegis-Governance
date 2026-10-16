@@ -453,7 +453,7 @@ def test_enforcement_tiers_report_what_is_in_force_here_and_nothing_more(env):
     tiers = {t["tier"]: t for t in payload["enforcement_tiers"]}
     assert list(tiers) == ["advisory", "best_effort", "local_floor", "authoritative"]
     assert tiers["advisory"]["status"] == "active"
-    assert tiers["best_effort"]["status"] == "unavailable"
+    assert tiers["best_effort"]["status"] == "inactive"  # no host hook registered (v4.1)
     assert tiers["local_floor"]["status"] == "inactive"
     # doctor makes no network call, so CI is a capability it does not have: unavailable.
     assert tiers["authoritative"]["status"] == "unavailable"
@@ -1754,14 +1754,12 @@ def test_a_hook_status_without_reachability_counts_as_reachable(env):
     assert check["status"] == "pass"
 
 
-def test_the_best_effort_tier_states_the_planned_v41_hooks_as_the_docs_do(env):
+def test_the_best_effort_tier_without_host_hooks_is_inactive_and_names_the_install_command(env):
     env.all_ok()
     best = tier(env.doctor(), "best_effort")
-    assert best["status"] == "unavailable" and best["hosts"] == []
-    assert best["detail"] == (
-        "none in 4.0. Planned for v4.1: Claude Code blocks with exit 2; Codex blocks with exit 2 "
-        "once you trust the hook in /hooks; Antigravity blocks only destructive commands (exit 1) "
-        "and records scan-before-edit. Each fails open when Aegis errors")
+    assert best["status"] == "inactive" and best["hosts"] == []
+    assert best["detail"] == ("no Aegis PreToolUse hook registered for codex-cli, claude-code, antigravity: "
+                              "run aegis hook install --host <host>")
 
 
 def test_a_legacy_workspace_without_rules_is_told_to_migrate_never_to_init(env, tmp_path, monkeypatch, capsys):

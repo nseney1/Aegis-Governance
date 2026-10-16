@@ -52,13 +52,16 @@ __all__ = [
     "KNOWN_GAPS",
     "SCOPES",
     "TIERS",
+    "TRUST_UNCHECKED",
     "UNAVAILABLE",
     "HookResult",
+    "ShapeError",
     "UsageError",
     "aegis_command",
     "aegis_handlers",
     "codex_rules_file",
     "codex_rules_text",
+    "handler_aegis",
     "hook_file",
     "hook_group",
     "install",
@@ -99,6 +102,8 @@ KNOWN_GAPS = (
     "Aegis never emits an 'ask' decision (it fails open on Codex and soft-denies in agy headless runs).",
     "The hooks fail open on any Aegis error: they are guardrails, not a security boundary.",
 )
+#: What doctor says of a Codex entry: trust lives in Codex's own state, not in a file Aegis reads.
+TRUST_UNCHECKED = "needs approval in /hooks (cannot be checked)"
 CODEX_TRUST_STEP = (
     "Codex runs a new or changed hook only after you trust it: open Codex and approve the aegis hook in "
     "/hooks (doctor cannot check this). Until then Codex skips it silently. codex exec has no documented "
@@ -110,6 +115,14 @@ _AEGIS_NAMES = ("aegis", "aegis.exe")
 
 class UsageError(Exception):
     """A host or scope `aegis hook install --host` does not take (exit 2)."""
+
+
+class ShapeError(InstallError):
+    """A hooks file that parses but is not in the shape its host reads."""
+
+    def __init__(self, path: Path, where: str, what: str):
+        self.where, self.what = where, what
+        super().__init__(f"{path}: '{where}' must be {what}; left unchanged. Fix the file, then re-run.")
 
 
 @dataclass
@@ -262,20 +275,28 @@ def _is_aegis_path(token: Any) -> bool:
     return absolute and name.lower() in _AEGIS_NAMES
 
 
-def is_aegis_handler(handler: Any) -> bool:
-    """Whether a hook handler runs ``<absolute aegis> hook run ...`` (exec or shell form)."""
+def handler_aegis(handler: Any) -> Optional[str]:
+    """The absolute ``aegis`` a hook handler runs as ``<aegis> hook run ...`` (exec or
+    shell form), or None when the handler is not an Aegis entry."""
     if not isinstance(handler, dict):
-        return False
+        return None
     command, args = handler.get("command"), handler.get("args")
     if isinstance(args, list) and args:
-        return _is_aegis_path(command) and args[:2] == ["hook", "run"]
+        return command if _is_aegis_path(command) and args[:2] == ["hook", "run"] else None
     if not isinstance(command, str):
-        return False
+        return None
     try:
         tokens = shlex.split(command, posix=True)
     except ValueError:
-        return False
-    return len(tokens) >= 3 and _is_aegis_path(tokens[0]) and tokens[1:3] == ["hook", "run"]
+        return None
+    if len(tokens) >= 3 and _is_aegis_path(tokens[0]) and tokens[1:3] == ["hook", "run"]:
+        return tokens[0]
+    return None
+
+
+def is_aegis_handler(handler: Any) -> bool:
+    """Whether a hook handler runs ``<absolute aegis> hook run ...`` (exec or shell form)."""
+    return handler_aegis(handler) is not None
 
 
 #: (path of keys to a PreToolUse group list, group index, handler index, handler)
@@ -290,7 +311,7 @@ def _event_lists(host: str, data: Dict[str, Any], path: Path, strict: bool) -> L
 
     def bad(where: str, what: str) -> None:
         if strict:
-            raise InstallError(f"{path}: '{where}' must be {what}; left unchanged. Fix the file, then re-run.")
+            raise ShapeError(path, where, what)
 
     if host == "antigravity":
         containers = [((name,), value) for name, value in data.items()]
