@@ -61,6 +61,28 @@ def _not_a_workspace(directory: Path) -> str:
     return f"not an Aegis workspace (no .aegis/ in {directory}); run aegis init"
 
 
+def _said(captured) -> str:
+    """Everything a command printed, with the strings of a --json document decoded:
+    JSON escapes each backslash of a Windows path, so a raw substring check misses it."""
+    text = captured.out + captured.err
+    try:
+        doc = json.loads(captured.out)
+    except ValueError:
+        return text
+
+    def strings(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from strings(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from strings(item)
+
+    return "\n".join([text, *strings(doc)])
+
+
 # ── Workspace resolution ───────────────────────────────────────────────
 
 def test_explicit_workspace_without_aegis_fails_and_writes_nothing(home, monkeypatch, capsys) -> None:
@@ -292,11 +314,12 @@ def test_the_user_rule_layer_never_makes_home_the_rule_workspace(home, monkeypat
     rc = main(["rule", *action, *(["--workspace", str(repo / "src")] if explicit else [])])
 
     captured = capsys.readouterr()
-    assert "user-plane" not in captured.out + captured.err
-    assert str(home / ".aegis") not in captured.out
+    said = _said(captured)
+    assert "user-plane" not in said
+    assert str(home / ".aegis") not in said
     assert _tree(home) == before
     if explicit or action[0] == "create":
-        assert rc == 1 and _not_a_workspace((repo / "src").resolve()) in captured.out + captured.err
+        assert rc == 1 and _not_a_workspace((repo / "src").resolve()) in said
     elif action[0] == "list":
         assert rc == 0 and json.loads(captured.out) == []
 
@@ -325,8 +348,8 @@ def test_an_explicit_workspace_never_walks_past_home(enclosed_home, elsewhere, c
 
     captured = capsys.readouterr()
     assert rc == 1
-    assert _not_a_workspace(notes.resolve()) in captured.out + captured.err
-    assert "outer-rule" not in captured.out
+    assert _not_a_workspace(notes.resolve()) in _said(captured)
+    assert "outer-rule" not in _said(captured)
     assert _tree(outer) == before
 
 
