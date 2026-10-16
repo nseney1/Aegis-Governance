@@ -1,0 +1,406 @@
+"""Acceptance contract for lane f-b2-credit-model (v4.3 spec §3 T4, §9; v4.4 spec §12.9).
+
+Given/When/Then scenarios written before the implementation:
+
+1. Overrides never demote:
+   Given six ``# aegis: allow`` overrides on a healthy gate, when ``sync`` runs,
+   then they count as ``contested`` (override rate flagged for review), never as
+   false positives (``fp == 0``), and no demotion is suggested.
+2. Small n shows no number:
+   Given 4 adjudicated labels, when ``status`` runs, then the rule shows
+   ``insufficient (n=4)``, not a precision number.
+3. A quiet trap decays:
+   Given an insight-born trap exposed in 3H heartbeat-alive eligible sessions
+   with no reinforcing evidence, when ``sync`` runs, then its evidence weight is
+   0.125 of the original, and it becomes an archive candidate only below epsilon
+   with no ``pin``; gates and invariants never archive on silence; and for scoped
+   traps, doubt-served sessions (``scope_basis == "fallback_unscoped"``) are
+   neutral (neither silence credit nor decay) per v4.4 §12.9.
+4. Detector replay, feasibility & four sample-size states, asymmetric transitions
+   with prior cap (<= 10 pseudo-labels and disclosure), silence credit with
+   heartbeat gate, and ``aegis sync --pr`` with 3 sampled examples and no auto-merge.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+from pathlib import Path
+import subprocess
+
+import pytest
+
+from aegis_cli.status import run_status
+from aegis_cli.sync import run_sync
+from aegis_core import credit, fitness, sync
+from aegis_core.verification.runner import run_layer1
+from tests import helpers_humangate as hg
+
+needs_git = pytest.mark.skipif(not hg.git_ok(), reason="needs git")
+
+
+def _write_rule(
+    ws: Path,
+    rule_type: str,
+    rule_id: str,
+    *,
+    created: str = "2026-01-01",
+    target_paths: list[str] | None = None,
+    forbid_calls: list[str] | None = None,
+    pin: bool = False,
+    extra_frontmatter: str = "",
+) -> Path:
+    folder = {
+        "trap": "traps",
+        "invariant": "invariants",
+        "gate": "gates",
+        "persona": "personas",
+    }[rule_type]
+    path = ws / ".aegis" / "rules" / folder / f"{rule_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    enforcement = "gate" if rule_type in ("gate", "invariant") else "advisory"
+    paths = target_paths if target_paths is not None else ["src/*.py"]
+    paths_yaml = "target_paths:\n" + "".join(f"  - '{p}'\n" for p in paths) if paths else ""
+    forbid_yaml = ""
+    if forbid_calls:
+        calls_list = ", ".join(forbid_calls)
+        forbid_yaml = f"forbid_ast:\n  calls: [{calls_list}]\n"
+    pin_yaml = "pin: true\n" if pin else ""
+    text = (
+        f"---\n"
+        f"id: {rule_id}\n"
+        f"type: {rule_type}\n"
+        f"enforcement: {enforcement}\n"
+        f"hypothesis: test hypothesis for {rule_id}\n"
+        f"created: '{created}'\n"
+        f"{paths_yaml}"
+        f"{forbid_yaml}"
+        f"{pin_yaml}"
+        f"{extra_frontmatter}"
+        f"---\n"
+        f"# {rule_id}\n\nRule body for {rule_id}.\n"
+    )
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+# ── 1. Overrides never demote ────────────────────────────────────────────────
+
+
+def test_six_inline_allow_overrides_count_as_contested_and_never_demote_a_healthy_gate(
+    tmp_path: Path,
+) -> None:
+    """§9 T4 Scenario 1: Given six `# aegis: allow` overrides on a healthy gate,
+    when sync runs, then they count as `contested` (override rate flagged for review),
+    never as false positives, and no demotion is suggested."""
+    _write_rule(
+        tmp_path,
+        "gate",
+        "gate-no-eval",
+        target_paths=["src/*.py"],
+        forbid_calls=["eval"],
+    )
+    # Healthy gate with 12 adjudicated true positives across 3 sessions.
+    for i in range(12):
+        credit.record_adjudication(
+            tmp_path,
+            "gate-no-eval",
+            "tp",
+            adjudicator="human",
+            ref=f"PR-{i + 1}",
+            session=f"sess-{(i % 3) + 1}",
+            file="src/app.py",
+            line=i + 1,
+            summary=f"Caught unsafe eval #{i + 1}",
+        )
+
+    # Six `# aegis: allow` overrides in source code evaluated by Layer 1.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    lines = ["def run_dynamic(x):\n"]
+    for i in range(6):
+        lines.append(f"    y_{i} = eval(x)  # aegis: allow: dynamic config {i}\n")
+    lines.append("    return y_0\n")
+    (src_dir / "app.py").write_text("".join(lines), encoding="utf-8")
+
+    layer1_results = run_layer1(["src/app.py"], str(tmp_path), fast_mode=True)
+    forbid_failures = [
+        r for r in layer1_results if r.tool == "forbid_ast:gate-no-eval" and not r.verdict
+    ]
+    assert forbid_failures == [], "All 6 eval() calls were overridden with # aegis: allow"
+
+    override_rows = [r for r in credit.read_rows(tmp_path) if r.get("event") == "override"]
+    assert len(override_rows) == 6
+    assert all(r.get("status") == "contested" and r.get("rule") == "gate-no-eval" for r in override_rows)
+
+    result = sync.sync(tmp_path)
+    gate_info = result.derived["rules"]["gate-no-eval"]
+    assert gate_info["contested"] == 6
+    assert gate_info["fp"] == 0
+    assert gate_info["flagged_for_review"] is True
+    assert gate_info["override_rate"] > 0.0
+    assert gate_info["suggestion"] is None
+
+
+# ── 2. Small n shows no number ───────────────────────────────────────────────
+
+
+def test_small_n_shows_insufficient_and_no_precision_number_in_status(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """§9 T4 Scenario 2: Given 4 adjudicated labels, when status runs,
+    then the rule shows `insufficient (n=4)`, not a precision."""
+    _write_rule(tmp_path, "trap", "trap-small-n", target_paths=["src/*.py"])
+    for i in range(4):
+        credit.record_adjudication(
+            tmp_path,
+            "trap-small-n",
+            "tp" if i < 3 else "fp",
+            adjudicator="human",
+            ref=f"adj-{i + 1}",
+            session=f"sess-{i + 1}",
+        )
+
+    rc = run_status(argparse.Namespace(_root=tmp_path, plain=True))
+    assert rc == 0
+    out = capsys.readouterr().out
+    rule_line = next((line for line in out.splitlines() if "trap-small-n" in line), "")
+    assert "insufficient (n=4)" in rule_line
+    # Must not display a precision decimal like 0.75 or 0.40 on the rule line.
+    for forbidden in ("0.75", "75%", "0.40", "0.39"):
+        assert forbidden not in rule_line
+
+    rc_json = run_status(argparse.Namespace(_root=tmp_path, json=True))
+    assert rc_json == 0
+    payload = json.loads(capsys.readouterr().out)
+    rule_json = next(r for r in payload["rules"] if r["name"] == "trap-small-n")
+    assert rule_json["state"] == "insufficient"
+    assert rule_json["score"] is None
+
+
+# ── 3. A quiet trap decays (with v4.4 §12.9 scope_basis & immunities) ────────
+
+
+def test_quiet_trap_decays_over_eligible_sessions_and_respects_pin_and_tier_immunities(
+    tmp_path: Path,
+) -> None:
+    """§9 T4 Scenario 3 & v4.4 §12.9:
+    Given an insight-born trap exposed in 3H heartbeat-alive eligible sessions
+    with no reinforcing evidence, when sync runs, then its evidence weight is
+    0.125 of the original, and it becomes an archive candidate only below epsilon
+    with no pin; gates and invariants never archive on silence; doubt-served
+    sessions (`scope_basis == 'fallback_unscoped'`) are neutral."""
+    half_life = 20
+    (tmp_path / ".aegis").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".aegis" / "config.json").write_text(
+        json.dumps({"v": 1, "expiry": {"half_life_sessions": half_life, "epsilon": 0.15}}),
+        encoding="utf-8",
+    )
+
+    _write_rule(tmp_path, "trap", "trap-quiet", target_paths=["src/*.py"])
+    _write_rule(tmp_path, "trap", "trap-pinned", target_paths=["src/*.py"], pin=True)
+    _write_rule(tmp_path, "invariant", "inv-quiet", target_paths=["src/*.py"])
+    _write_rule(tmp_path, "gate", "gate-quiet", target_paths=["src/*.py"], forbid_calls=["eval"])
+
+    # Expose all 4 rules in 3 * H = 60 heartbeat-alive eligible sessions (`scope_basis="match"`).
+    for s in range(3 * half_life):
+        credit.record_exposure(
+            tmp_path,
+            "claude-code",
+            f"sess-match-{s}",
+            ["trap-quiet", "trap-pinned", "inv-quiet", "gate-quiet"],
+            paths=["src/app.py"],
+            scope_basis="match",
+            heartbeat=True,
+        )
+
+    # Also expose trap-quiet in 20 doubt-served sessions (`scope_basis="fallback_unscoped"`)
+    # and 10 dead-heartbeat sessions (`heartbeat=False`): both must be neutral!
+    for s in range(20):
+        credit.record_exposure(
+            tmp_path,
+            "claude-code",
+            f"sess-doubt-{s}",
+            ["trap-quiet"],
+            paths=["src/other.py"],
+            scope_basis="fallback_unscoped",
+            heartbeat=True,
+        )
+    for s in range(10):
+        credit.record_exposure(
+            tmp_path,
+            "claude-code",
+            f"sess-dead-{s}",
+            ["trap-quiet"],
+            paths=["src/app.py"],
+            scope_basis="match",
+            heartbeat=False,
+        )
+
+    result = sync.sync(tmp_path)
+    rules = result.derived["rules"]
+
+    # 3H = 60 eligible sessions -> decay_factor == 2**(-3) == 0.125.
+    assert rules["trap-quiet"]["eligible_sessions"] == 60
+    assert rules["trap-quiet"]["decay_factor"] == pytest.approx(0.125, abs=1e-6)
+    assert rules["trap-quiet"]["effective_weight"] == pytest.approx(0.125, abs=1e-6)
+    assert rules["trap-quiet"]["archive_candidate"] is True
+    assert rules["trap-quiet"]["suggestion"] == "archive"
+
+    # Pinned trap decays in weight but never becomes an archive candidate.
+    assert rules["trap-pinned"]["effective_weight"] == pytest.approx(0.125, abs=1e-6)
+    assert rules["trap-pinned"]["archive_candidate"] is False
+    assert rules["trap-pinned"]["suggestion"] is None
+
+    # Invariants and gates never archive on silence.
+    assert rules["inv-quiet"]["archive_candidate"] is False
+    assert rules["inv-quiet"]["suggestion"] is None
+    assert rules["gate-quiet"]["archive_candidate"] is False
+    assert rules["gate-quiet"]["suggestion"] is None
+
+
+# ── 4. Detector replay, states, prior cap, silence credit, and sync --pr ─────
+
+
+@needs_git
+def test_detector_replay_classifies_caught_and_leaked_and_deduplicates_per_branch(
+    tmp_path: Path,
+) -> None:
+    """§3 T4 Detector Replay:
+    - Pattern in intermediate commit and removed before merge -> `caught` (weight 0.5).
+    - Pattern in merged commit that was later reverted/fixed -> `leaked` (weight 1.0).
+    - Deduplicated by `(rule, file, pattern, branch)`."""
+    home = hg.Home(tmp_path / "home")
+    repo = hg.Repo(tmp_path / "repo", home)
+    _write_rule(
+        repo.root,
+        "gate",
+        "no-eval-exec",
+        target_paths=["src/*.py"],
+        forbid_calls=["eval", "exec"],
+    )
+    repo.write("src/app.py", "def f(x):\n    return x + 1\n")
+    repo.commit("initial")
+
+    # Feature branch 1: introduces eval(x) across two intermediate commits, removes before merge.
+    repo.branch("feat-caught")
+    repo.write("src/app.py", "def f(x):\n    return eval(x)\n")
+    repo.commit("wip 1 with eval")
+    repo.write("src/app.py", "def f(x):\n    # still eval\n    return eval(x)\n")
+    repo.commit("wip 2 still with eval")
+    repo.write("src/app.py", "def f(x):\n    return int(x)\n")
+    repo.commit("clean up eval before merge")
+    repo.git("checkout", "main")
+    repo.git("merge", "--no-ff", "feat-caught", "-m", "Merge branch 'feat-caught'")
+
+    # Feature branch 2: merges exec(x) into main, then later reverted/fixed on main.
+    repo.branch("feat-leaked")
+    repo.write("src/app.py", "def f(x):\n    exec(x)\n    return int(x)\n")
+    repo.commit("introduce exec")
+    repo.git("checkout", "main")
+    repo.git("merge", "--no-ff", "feat-leaked", "-m", "Merge branch 'feat-leaked'")
+    repo.write("src/app.py", "def f(x):\n    return int(x)\n")
+    repo.commit("Revert leaked exec on main")
+
+    detections = fitness.replay_detector_history(repo.root)
+    by_pattern = {(d["rule"], d["file"], d["pattern"]): d for d in detections}
+    assert ("no-eval-exec", "src/app.py", "eval") in by_pattern
+    assert ("no-eval-exec", "src/app.py", "exec") in by_pattern
+    assert by_pattern[("no-eval-exec", "src/app.py", "eval")]["disposition"] == "caught"
+    assert by_pattern[("no-eval-exec", "src/app.py", "eval")]["weight"] == pytest.approx(0.5)
+    assert by_pattern[("no-eval-exec", "src/app.py", "exec")]["disposition"] == "leaked"
+    assert by_pattern[("no-eval-exec", "src/app.py", "exec")]["weight"] == pytest.approx(1.0)
+    # Deduplicated: only 1 caught row for eval despite 2 intermediate commits on feat-caught.
+    eval_rows = [d for d in detections if d["pattern"] == "eval"]
+    assert len(eval_rows) == 1
+
+
+def test_prior_cap_at_ten_pseudo_labels_and_asymmetric_transitions(tmp_path: Path) -> None:
+    """§3 T4 Prior cap, feasibility, and asymmetric transitions:
+    - Prior from a 500-verdict pack is capped at <= 10 pseudo-labels and discloses
+      `prior supplies X% of the evidence`.
+    - Untestable state when 180-day MDE at 80% power > 0.6.
+    - Promote requires >=25 adjudicated labels with 0 FP (or >=42 with 1 FP) across
+      >=3 sessions and >=2 repos (or >=14 days)."""
+    alpha_c, beta_c = fitness.cap_prior(490.0, 10.0)
+    assert alpha_c + beta_c == pytest.approx(10.0)
+
+    fit_with_prior = fitness.compute(
+        {"triggers": 6, "tp": 6, "fp": 0},
+        rule="r-prior",
+        prior=(490.0, 10.0),
+    )
+    assert fit_with_prior.prior_mass == pytest.approx(10.0)
+    # 10 / (10 + 6) = 62.5% -> 62%
+    assert fit_with_prior.prior_disclosure == "prior supplies 62% of the evidence"
+
+    # Untestable rule: expected trigger rate 0.01/day -> 1.8 triggers in 180d -> MDE > 0.6.
+    fit_untestable = fitness.compute(
+        {"triggers": 0, "tp": 0, "fp": 0},
+        rule="r-rare",
+        trigger_rate_per_day=0.01,
+    )
+    assert fit_untestable.state == "untestable"
+    assert fit_untestable.mde is not None and fit_untestable.mde > 0.6
+
+    # Silence credit: LR = exp(c * RRR) only when heartbeat is alive.
+    assert fitness.compute_silence_credit(0.5, c=0.1, heartbeat_alive=True) == pytest.approx(
+        math.exp(0.05)
+    )
+    assert fitness.compute_silence_credit(0.5, c=0.1, heartbeat_alive=False) == 1.0
+    assert (
+        fitness.compute_silence_credit(
+            0.5, c=0.1, heartbeat_alive=True, scope_basis="fallback_unscoped"
+        )
+        == 1.0
+    )
+
+
+def test_sync_pr_writes_transitions_with_three_sampled_examples_and_never_auto_merges(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """§3 T4 Evidence-backed `aegis sync --pr`:
+    When a rule reaches `decided`, `aegis sync --pr` writes the transition and opens a PR
+    whose body contains the evidence report and up to 3 sampled examples, via injectable
+    `gh` runner, and never auto-merges."""
+    _write_rule(tmp_path, "trap", "trap-decided", created="2026-01-01", target_paths=["src/*.py"])
+    for i in range(25):
+        credit.record_adjudication(
+            tmp_path,
+            "trap-decided",
+            "tp",
+            adjudicator="human",
+            ref=f"PR-{100 + i}",
+            session=f"sess-{(i % 4) + 1}",
+            repo=f"repo-{(i % 2) + 1}",
+            file="src/app.py",
+            line=10 + i,
+            summary=f"Prevented bug example #{i + 1}",
+        )
+
+    gh_calls: list[list[str]] = []
+
+    def fake_gh(argv: list[str], cwd: str | None = None) -> object:
+        gh_calls.append(list(argv))
+
+        class _Res:
+            returncode = 0
+            stdout = "https://github.com/octo/proj/pull/42\n"
+            stderr = ""
+
+        return _Res()
+
+    rc = run_sync(argparse.Namespace(_root=tmp_path, pr=True, json=True), gh_runner=fake_gh)
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["pr"]["status"] == "opened"
+    assert payload["pr"]["url"] == "https://github.com/octo/proj/pull/42"
+    body = payload["pr"]["body"]
+    assert "trap-decided" in body
+    assert "Prevented bug example #1" in body
+    assert "Prevented bug example #2" in body
+    assert "Prevented bug example #3" in body
+    # Exactly one gh call (`pr create`), never `pr merge`.
+    assert len(gh_calls) == 1
+    assert gh_calls[0][:2] == ["pr", "create"]
+    assert not any("merge" in call for call in gh_calls)

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import ast
+import io
 import os
 from pathlib import Path
-from typing import Any, Optional, Union
+import re
+import tokenize
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from aegis_core.errors import AegisError
 from aegis_core.ast.schema import (
@@ -25,8 +28,100 @@ __all__ = [
     "ASTExtractionError",
     "_match_ImportNode_against_pattern",
     "evaluate_forbid_ast",
+    "evaluate_forbid_ast_with_overrides",
     "extract_normalized_ast",
+    "parse_allow_comments",
 ]
+
+_ALLOW_COMMENT_RE = re.compile(
+    r"#\s*aegis:\s*allow(?:\[([^\]]+)\])?(?:\s*[:\-]?\s*(.*))?$",
+    re.IGNORECASE,
+)
+
+
+def parse_allow_comments(source: str) -> Dict[int, List[Dict[str, Any]]]:
+    """Extract inline ``# aegis: allow`` comments keyed by 1-based line number."""
+    if not source or "aegis" not in source.lower():
+        return {}
+    by_line: Dict[int, List[Dict[str, Any]]] = {}
+    try:
+        for tok_type, tok_str, (srow, _scol), _end, _line in tokenize.generate_tokens(
+            io.StringIO(source).readline
+        ):
+            if tok_type != tokenize.COMMENT:
+                continue
+            match = _ALLOW_COMMENT_RE.search(tok_str)
+            if not match:
+                continue
+            raw_rules, raw_reason = match.group(1), match.group(2)
+            rules = (
+                {r.strip() for r in raw_rules.split(",") if r.strip()}
+                if raw_rules
+                else None
+            )
+            by_line.setdefault(int(srow), []).append(
+                {"rules": rules, "reason": (raw_reason or "").strip()}
+            )
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        for idx, line in enumerate(source.splitlines(), start=1):
+            match = _ALLOW_COMMENT_RE.search(line)
+            if match:
+                raw_rules, raw_reason = match.group(1), match.group(2)
+                rules = (
+                    {r.strip() for r in raw_rules.split(",") if r.strip()}
+                    if raw_rules
+                    else None
+                )
+                by_line.setdefault(idx, []).append(
+                    {"rules": rules, "reason": (raw_reason or "").strip()}
+                )
+    return by_line
+
+
+def _line_of(item: Any) -> Optional[int]:
+    if isinstance(item, Mapping):
+        val = item.get("line")
+    else:
+        val = getattr(item, "line", None)
+    return int(val) if isinstance(val, int) and val > 0 else None
+
+
+def _allow_reason_for_line(
+    allow_map: Mapping[int, List[Dict[str, Any]]],
+    line: Optional[int],
+    rule_id: Optional[str],
+) -> Optional[str]:
+    if not line or line not in allow_map:
+        return None
+    for entry in allow_map[line]:
+        rules = entry.get("rules")
+        if rules is None or not rule_id or rule_id in rules:
+            return str(entry.get("reason") or "")
+    return None
+
+
+def _resolve_allow_map(
+    normalized_ast: NormalizedAST, source: Optional[str] = None
+) -> Dict[int, List[Dict[str, Any]]]:
+    meta = getattr(normalized_ast, "metadata", None)
+    if isinstance(meta, Mapping) and isinstance(meta.get("allow_comments"), dict):
+        return meta["allow_comments"]
+    if isinstance(source, str):
+        return parse_allow_comments(source)
+    fp = getattr(normalized_ast, "file_path", "")
+    if isinstance(fp, str) and os.path.isfile(fp):
+        try:
+            from aegis_core.ast.drivers.python import read_python_source
+
+            text = (
+                read_python_source(fp)
+                if fp.endswith(".py")
+                else Path(fp).read_text(encoding="utf-8", errors="replace")
+            )
+            return parse_allow_comments(text)
+        except Exception:
+            return {}
+    return {}
 
 
 class ASTExtractionError(AegisError):
@@ -54,37 +149,23 @@ def _match_ImportNode_against_pattern(imp: Any, pattern: str) -> bool:
     return False
 
 
-def evaluate_forbid_ast(
+def _evaluate_forbid_ast_core(
     normalized_ast: NormalizedAST,
     forbid_spec: dict[str, Any],
-) -> list[str]:
-    """Evaluate a NormalizedAST against declarative forbid_ast constraints.
-
-    Aliased imports are judged as their plain form (``sp.run()`` after ``import subprocess as
-    sp`` as ``subprocess.run()``; Rust ``Cmd::new`` after ``use std::process::Command as Cmd``
-    as ``Command::new``) plus the literal alias text, against every binding of a name in the
-    file. A module named by literal strings (``'subprocess'``, ``'sub' + 'process'``,
-    ``f'subprocess'``, or a relative name with a literal package) passed to ``__import__``,
-    ``builtins.__import__``, ``__builtins__.__import__`` or ``importlib.import_module``
-    (however imported, positional or by keyword) is an import, and
-    ``__import__("os").system()`` a call.
-
-    Syntactic only, so out of scope: computed module names (a variable or an f-string field),
-    ``getattr``/``globals`` access and subscript access (``__builtins__['__import__']``),
-    ``f = subprocess.run`` rebinding by assignment, a function passed as a value
-    (``map(subprocess.run, ...)``), ``from x import *``, and the package a relative
-    ``__import__(name, ..., level)`` resolves against (its literal name is reported as written).
-
-    Raises ASTExtractionError when decorator patterns must be checked against ``file_path``
-    on disk (the AST carries no decorators) and that file cannot be read or parsed.
-    """
+    *,
+    rule_id: Optional[str] = None,
+    allow_map: Optional[Mapping[int, List[Dict[str, Any]]]] = None,
+) -> Tuple[list[str], list[dict[str, Any]]]:
     if normalized_ast is None or not forbid_spec or not isinstance(forbid_spec, dict):
-        return []
+        return [], []
 
     violations: list[str] = []
+    overrides: list[dict[str, Any]] = []
+    allows = allow_map or {}
+    fp = str(getattr(normalized_ast, "file_path", "") or "")
 
     raw_ast_imports = getattr(normalized_ast, "imports", ()) or ()
-    parsed_imports: list[tuple[str, tuple[str, ...]]] = []
+    parsed_imports: list[tuple[Any, tuple[str, tuple[str, ...]]]] = []
     # File-global and multi-valued: every binding of a name counts, whatever its scope or
     # order, so rebinding a name (``import json as sp`` after ``import subprocess as sp``)
     # can only add candidates, never hide one.
@@ -96,7 +177,7 @@ def evaluate_forbid_ast(
         for name, originals in _import_aliases(imp).items():
             for orig in originals:
                 _add_binding(aliases, name, orig)
-        parsed_imports.append((src, syms))
+        parsed_imports.append((imp, (src, syms)))
         if src:
             for sym in syms:
                 if sym and sym != src:
@@ -110,13 +191,36 @@ def evaluate_forbid_ast(
             mod = _normalize_ast_token(raw_mod)
             if not mod:
                 continue
-            if any(_match_ImportNode_against_pattern(imp_tuple, mod) for imp_tuple in parsed_imports):
+            matching_imps = [
+                raw_imp
+                for raw_imp, imp_tuple in parsed_imports
+                if _match_ImportNode_against_pattern(imp_tuple, mod)
+            ]
+            if not matching_imps:
+                continue
+            unoverridden = False
+            for raw_imp in matching_imps:
+                line = _line_of(raw_imp)
+                reason = _allow_reason_for_line(allows, line, rule_id)
+                if reason is not None and line is not None:
+                    overrides.append(
+                        {
+                            "rule": rule_id or "",
+                            "file": fp,
+                            "line": line,
+                            "kind": "imports",
+                            "pattern": mod,
+                            "reason": reason,
+                            "status": "contested",
+                        }
+                    )
+                else:
+                    unoverridden = True
+            if unoverridden:
                 violations.append(f"Forbidden import '{mod}' matched rule forbid_ast.imports")
 
     # NormalizedAST.calls is derived from call_sites: the targets are read from the field alone.
     raw_call_sites = getattr(normalized_ast, "call_sites", ()) or ()
-    # Each distinct target once: the verdict per pattern is "any call matches".
-    call_targets = list(dict.fromkeys(t for t in map(_call_target, raw_call_sites) if t))
     call_index = _SpellingIndex(imported_qual_map, aliases, qualify_heads=True)
 
     forbidden_calls = forbid_spec.get("calls")
@@ -127,16 +231,41 @@ def evaluate_forbid_ast(
             call = _normalize_ast_token(raw_call)
             if not call:
                 continue
-            if any(call_index.matches(target, _normalize_ast_token(call)) for target in call_targets):
+            norm_call = _normalize_ast_token(call)
+            matching_sites = [
+                site
+                for site in raw_call_sites
+                if _call_target(site) and call_index.matches(_call_target(site), norm_call)
+            ]
+            if not matching_sites:
+                continue
+            unoverridden = False
+            for site in matching_sites:
+                line = _line_of(site)
+                reason = _allow_reason_for_line(allows, line, rule_id)
+                if reason is not None and line is not None:
+                    overrides.append(
+                        {
+                            "rule": rule_id or "",
+                            "file": fp,
+                            "line": line,
+                            "kind": "calls",
+                            "pattern": call,
+                            "reason": reason,
+                            "status": "contested",
+                        }
+                    )
+                else:
+                    unoverridden = True
+            if unoverridden:
                 violations.append(f"Forbidden call '{call}' matched rule forbid_ast.calls")
 
     forbidden_decs = forbid_spec.get("decorators")
     if not isinstance(forbidden_decs, (list, tuple, set)) or not forbidden_decs:
-        return violations
+        return violations, overrides
 
     # NormalizedAST.decorators, and the fallback below for other AST objects, read file_path
     # when the AST carries no decorators: an unreadable file is not "no decorators".
-    fp = getattr(normalized_ast, "file_path", "")
     try:
         raw_decs_sources: list[Any] = list(getattr(normalized_ast, "decorators", None) or ())
     except Exception as exc:
@@ -167,7 +296,52 @@ def evaluate_forbid_ast(
         if any(decorator_index.matches(name, _decorator_pattern(dec)) for name in decorator_names):
             violations.append(f"Forbidden decorator '{dec}' matched rule forbid_ast.decorators")
 
+    return violations, overrides
+
+
+def evaluate_forbid_ast(
+    normalized_ast: NormalizedAST,
+    forbid_spec: dict[str, Any],
+) -> list[str]:
+    """Evaluate a NormalizedAST against declarative forbid_ast constraints.
+
+    Aliased imports are judged as their plain form (``sp.run()`` after ``import subprocess as
+    sp`` as ``subprocess.run()``; Rust ``Cmd::new`` after ``use std::process::Command as Cmd``
+    as ``Command::new``) plus the literal alias text, against every binding of a name in the
+    file. A module named by literal strings (``'subprocess'``, ``'sub' + 'process'``,
+    ``f'subprocess'``, or a relative name with a literal package) passed to ``__import__``,
+    ``builtins.__import__``, ``__builtins__.__import__`` or ``importlib.import_module``
+    (however imported, positional or by keyword) is an import, and
+    ``__import__("os").system()`` a call.
+
+    Syntactic only, so out of scope: computed module names (a variable or an f-string field),
+    ``getattr``/``globals`` access and subscript access (``__builtins__['__import__']``),
+    ``f = subprocess.run`` rebinding by assignment, a function passed as a value
+    (``map(subprocess.run, ...)``), ``from x import *``, and the package a relative
+    ``__import__(name, ..., level)`` resolves against (its literal name is reported as written).
+
+    Raises ASTExtractionError when decorator patterns must be checked against ``file_path``
+    on disk (the AST carries no decorators) and that file cannot be read or parsed.
+    """
+    violations, _overrides = _evaluate_forbid_ast_core(normalized_ast, forbid_spec)
     return violations
+
+
+def evaluate_forbid_ast_with_overrides(
+    normalized_ast: NormalizedAST,
+    forbid_spec: dict[str, Any],
+    *,
+    rule_id: Optional[str] = None,
+    source: Optional[str] = None,
+) -> Tuple[list[str], list[dict[str, Any]]]:
+    """Evaluate a NormalizedAST against declarative ``forbid_ast`` constraints, returning
+    ``(unoverridden_violations, contested_overrides)``."""
+    allow_map = _resolve_allow_map(normalized_ast, source=source) if normalized_ast is not None else {}
+    if not allow_map:
+        return evaluate_forbid_ast(normalized_ast, forbid_spec), []
+    return _evaluate_forbid_ast_core(
+        normalized_ast, forbid_spec, rule_id=rule_id, allow_map=allow_map
+    )
 
 
 def extract_normalized_ast(
@@ -194,9 +368,13 @@ def extract_normalized_ast(
             tree = ast.parse(source_text, filename=path_str)
             norm_ast = parse_python_ast(source_text, file_path=path_str)
             decs = _extract_python_decorators_from_tree(tree)
-            if decs:
+            allows = parse_allow_comments(source_text)
+            if decs or allows:
                 meta = dict(norm_ast.metadata)
-                meta["decorators"] = list(decs)
+                if decs:
+                    meta["decorators"] = list(decs)
+                if allows:
+                    meta["allow_comments"] = allows
                 object.__setattr__(norm_ast, "metadata", meta)
             return norm_ast
 

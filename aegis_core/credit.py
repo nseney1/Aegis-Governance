@@ -61,13 +61,26 @@ __all__ = [
     "parse_trailer",
     "passing_check",
     "read_rows",
+    "record_adjudication",
+    "record_detection",
     "record_exposure",
+    "record_override",
     "record_void",
     "select_ci_run",
     "submit_report",
 ]
 
-EVENTS = ("check", "claimed", "report", "ci", "void")
+EVENTS = (
+    "check",
+    "claimed",
+    "report",
+    "ci",
+    "void",
+    "exposure",
+    "detection",
+    "adjudication",
+    "override",
+)
 #: The most ``claimed`` and ``report`` rows one server session may write: a prompt-injected agent
 #: that calls the tool in a loop fills this and no more.
 MAX_REPORT_ROWS_PER_SESSION = 200
@@ -89,6 +102,15 @@ class ReportConflict(ValueError):
 
 # ── Reading ──────────────────────────────────────────────────────────────────
 
+def _normalize_event_row(row: Mapping[str, Any]) -> Dict[str, Any]:
+    item = dict(row)
+    if "for_rule" in item and "rule" not in item:
+        item["rule"] = item["for_rule"]
+    elif "rule" in item and "for_rule" not in item:
+        item["for_rule"] = item["rule"]
+    return item
+
+
 def read_rows(root: Any) -> List[Dict[str, Any]]:
     """Every event row of this module in the ledger, oldest first. Never raises: a ledger that
     cannot be read yields nothing (its health is ``ledger.read``'s to report)."""
@@ -96,7 +118,11 @@ def read_rows(root: Any) -> List[Dict[str, Any]]:
         raw = read_jsonl(ledger.ledger_path(root)).rows
     except (PathTraversalError, OSError):
         return []
-    return [r for r in raw if r.get("v") == ledger.LEDGER_VERSION and r.get("event") in EVENTS]
+    return [
+        _normalize_event_row(r)
+        for r in raw
+        if isinstance(r, dict) and r.get("v") == ledger.LEDGER_VERSION and r.get("event") in EVENTS
+    ]
 
 
 def _of(rows: Iterable[Mapping[str, Any]], event: str) -> List[Mapping[str, Any]]:
@@ -228,11 +254,82 @@ _EXPOSED: Dict[Tuple[str, str, str], Set[str]] = {}
 _MAX_EXPOSED_SESSIONS = 256
 
 
-def record_exposure(root: Any, host: Optional[str], session: Optional[str], rules: Iterable[str]) -> None:
+def record_exposure(
+    root: Any,
+    host: Optional[str],
+    session: Optional[str],
+    rules: Iterable[str],
+    *,
+    paths: Optional[Iterable[str]] = None,
+    rev: Optional[str] = None,
+    scope_basis: Optional[str] = None,
+    heartbeat: Optional[bool] = None,
+    ts: Optional[str] = None,
+    persist: Optional[bool] = None,
+) -> List[Dict[str, Any]]:
+    rule_list = [r for r in dict.fromkeys(rules) if isinstance(r, str) and r]
     key = (str(root), host or "", session or "")
     if key not in _EXPOSED and len(_EXPOSED) >= _MAX_EXPOSED_SESSIONS:
         _EXPOSED.pop(next(iter(_EXPOSED)))
-    _EXPOSED.setdefault(key, set()).update(r for r in rules if isinstance(r, str))
+    _EXPOSED.setdefault(key, set()).update(rule_list)
+
+    if persist is None:
+        if any(v is not None for v in (paths, rev, scope_basis, heartbeat, ts)):
+            should_persist = True
+        else:
+            import sys
+
+            caller = sys._getframe(1).f_code.co_name if hasattr(sys, "_getframe") else ""
+            should_persist = caller != "_record_exposure"
+    else:
+        should_persist = bool(persist)
+
+    if not should_persist or not rule_list:
+        return []
+
+    stamp = ts or _now()
+    s_id = session or ""
+    h_id = host or ""
+    path_list = [str(p) for p in (paths or ()) if isinstance(p, str)]
+    written: List[Dict[str, Any]] = []
+    try:
+        with ledger_locked(root):
+            existing = _of(read_rows(root), "exposure")
+            seen = {
+                (
+                    str(r.get("session") or ""),
+                    str(r.get("rule") or r.get("for_rule") or ""),
+                    r.get("scope_basis"),
+                )
+                for r in existing
+            }
+            to_append: List[Dict[str, Any]] = []
+            for rule_id in rule_list:
+                dedup_key = (s_id, rule_id, scope_basis)
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+                row: Dict[str, Any] = {
+                    "v": ledger.LEDGER_VERSION,
+                    "ts": stamp,
+                    "event": "exposure",
+                    "for_rule": rule_id,
+                    "session": s_id,
+                    "host": h_id,
+                    "paths": path_list,
+                    "rev": rev,
+                }
+                if scope_basis is not None:
+                    row["scope_basis"] = str(scope_basis)
+                if heartbeat is not None:
+                    row["heartbeat"] = bool(heartbeat)
+                to_append.append(row)
+            if to_append:
+                appended = ledger.append_rows(root, to_append)
+                written = [_normalize_event_row(r) for r in appended]
+    except (PathTraversalError, OSError):
+        return []
+    return written
 
 
 def exposed_rules(root: Any, host: Optional[str], session: Optional[str]) -> Set[str]:
@@ -245,6 +342,134 @@ def _now() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def record_detection(
+    root: Any,
+    rule: str,
+    file: str,
+    pattern: str,
+    *,
+    disposition: str,
+    rev: Optional[str] = None,
+    branch: str = "main",
+    fix_rev: Optional[str] = None,
+    weight: Optional[float] = None,
+    ts: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record a detector replay finding (`caught` or `leaked`), deduplicated by `(rule, file, pattern, branch)`."""
+    if disposition not in ("caught", "leaked"):
+        raise ValueError(f"disposition must be 'caught' or 'leaked', got {disposition!r}")
+    eff_weight = float(weight) if weight is not None else (0.5 if disposition == "caught" else 1.0)
+    with ledger_locked(root):
+        for existing in _of(read_rows(root), "detection"):
+            if (
+                (existing.get("rule") or existing.get("for_rule")) == rule
+                and existing.get("file") == file
+                and existing.get("pattern") == pattern
+                and (existing.get("branch") or "main") == (branch or "main")
+            ):
+                return _normalize_event_row(existing)
+        row: Dict[str, Any] = {
+            "v": ledger.LEDGER_VERSION,
+            "ts": ts or _now(),
+            "event": "detection",
+            "for_rule": rule,
+            "file": file,
+            "pattern": pattern,
+            "disposition": disposition,
+            "branch": branch or "main",
+            "rev": rev,
+            "fix_rev": fix_rev,
+            "weight": eff_weight,
+        }
+        return _normalize_event_row(ledger.append_rows(root, [row])[0])
+
+
+def record_adjudication(
+    root: Any,
+    rule: str,
+    verdict: str,
+    *,
+    adjudicator: str = "human",
+    ref: Optional[str] = None,
+    summary: Optional[str] = None,
+    file: Optional[str] = None,
+    line: Optional[int] = None,
+    snippet: Optional[str] = None,
+    session: Optional[str] = None,
+    repo: Optional[str] = None,
+    ts: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record an adjudicated label (`tp` or `fp`) for `rule`."""
+    norm_verdict = _RESULT.get(verdict, verdict)
+    if norm_verdict not in ("tp", "fp"):
+        raise ValueError(f"adjudication verdict must be 'tp' or 'fp', got {verdict!r}")
+    if adjudicator not in ("human", "automated", "ci", "pr", "revert"):
+        raise ValueError(f"adjudicator must be 'human', 'automated', 'ci', 'pr', or 'revert', got {adjudicator!r}")
+    with ledger_locked(root):
+        if ref is not None:
+            for existing in _of(read_rows(root), "adjudication"):
+                if (existing.get("rule") or existing.get("for_rule")) == rule and existing.get("ref") == ref:
+                    return _normalize_event_row(existing)
+        row: Dict[str, Any] = {
+            "v": ledger.LEDGER_VERSION,
+            "ts": ts or _now(),
+            "event": "adjudication",
+            "for_rule": rule,
+            "verdict": norm_verdict,
+            "adjudicator": adjudicator,
+        }
+        if ref is not None:
+            row["ref"] = str(ref)
+        if summary is not None:
+            row["summary"] = str(summary)
+        if file is not None:
+            row["file"] = str(file)
+        if line is not None:
+            row["line"] = int(line)
+        if snippet is not None:
+            row["snippet"] = str(snippet)
+        if session is not None:
+            row["session"] = str(session)
+        if repo is not None:
+            row["repo"] = str(repo)
+        return _normalize_event_row(ledger.append_rows(root, [row])[0])
+
+
+def record_override(
+    root: Any,
+    rule: str,
+    file: str,
+    line: int,
+    reason: str = "",
+    *,
+    rev: Optional[str] = None,
+    ts: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record a developer override (`# aegis: allow`) as `contested` (never `fp`)."""
+    with ledger_locked(root):
+        for existing in _of(read_rows(root), "override"):
+            if (
+                (existing.get("rule") or existing.get("for_rule")) == rule
+                and existing.get("file") == file
+                and int(existing.get("line") or 0) == int(line)
+                and existing.get("rev") == rev
+            ):
+                return _normalize_event_row(existing)
+        row: Dict[str, Any] = {
+            "v": ledger.LEDGER_VERSION,
+            "ts": ts or _now(),
+            "event": "override",
+            "for_rule": rule,
+            "file": str(file),
+            "line": int(line),
+            "reason": str(reason or ""),
+            "status": "contested",
+        }
+        if rev is not None:
+            row["rev"] = str(rev)
+        return _normalize_event_row(ledger.append_rows(root, [row])[0])
 
 
 def record_void(root: Any, check_id: str, reason: str) -> Dict[str, Any]:

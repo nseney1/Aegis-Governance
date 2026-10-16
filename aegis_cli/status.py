@@ -170,11 +170,17 @@ def run_status(args: argparse.Namespace) -> int:
     for rule in loaded:
         total_chars += len(rule.raw.decode("utf-8-sig", "replace"))
         fit = fits[rule.id]
+        hide_score = not fit.verdicts or fit.state in ("insufficient", "untestable")
         all_rules.append({
             "name": sanitize_display(rule.id),
             "type": rule.type,
-            # No verdict yet is not a fitness of zero: show it as unknown.
-            "score": fit.score if fit.verdicts else None,
+            # No verdict yet or insufficient sample size (n < 10) shows status_label / unknown, never a misleading precision.
+            "score": None if hide_score else fit.score,
+            "state": fit.state,
+            "status_label": fit.status_label,
+            "contested": fit.contested,
+            "override_rate": fit.override_rate,
+            "flagged_for_review": fit.flagged_for_review,
             "triggers": fit.triggers,
             "expiry": "expired" if rule.expired else _format_adaptive_expiry(
                 rule.meta.get("created"), rule.meta.get("expiry_days")),
@@ -260,7 +266,13 @@ def run_status(args: argparse.Namespace) -> int:
         last_type = r_type
 
         score_val = r.get("score")
-        score_str = ui.color_fitness(float(score_val)) if isinstance(score_val, (int, float)) else "—"
+        status_label = r.get("status_label")
+        if isinstance(score_val, (int, float)):
+            score_str = ui.color_fitness(float(score_val))
+        elif status_label:
+            score_str = str(status_label)
+        else:
+            score_str = "—"
         type_str = ui.color_rule_type(r_type)
         tbl.add_row(
             str(r["name"]),
