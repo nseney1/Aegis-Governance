@@ -2,11 +2,11 @@
 
 This page explains where Aegis's rules came from, what the project measured, what it got wrong, and why v4 looks the way it does. It is written for people deciding whether to trust Aegis, and for contributors deciding what to change next.
 
-**Status.** Written during the v4.0 build (2026-10-15). Where this page describes v4, it describes the decisions in [ADR 0005](adr/0005-v4-plan-of-record.md). The CHANGELOG records what has actually shipped. Section 6 is planned work, not a feature list.
+**Status.** Written during the v4.0 build (2026-10-15) and checked against the code once waves A, B and C were merged. Where this page describes v4, it describes what that code does; the decisions behind it are in [ADR 0005](adr/0005-v4-plan-of-record.md), and the [CHANGELOG](../CHANGELOG.md) records each release. Section 6 is planned work, not a feature list.
 
 **How to read the numbers.** Every number here is one of two kinds:
 
-- **Re-derived**: computed by a command run at commit `895bbf5`; every such command is listed under [Sources](#sources). Where a figure is a difference of two printed values (a time span or a day count), the comment next to the command says so.
+- **Re-derived**: computed by a command run at a named commit (`895bbf5` unless the text says otherwise); every such command is listed under [Sources](#sources). Where a figure is a difference of two printed values (a time span or a day count), the comment next to the command says so.
 - **Quoted**: taken from a document, with its source and a caveat. Several sources were deleted from the tree in v4; git keeps them. Read one from the v3.3.0 release tag, for example `git show v3.3.0:docs/project/METRICS.md`.
 
 ## 1. The problem: a rules file is a gentleman's agreement
@@ -100,19 +100,21 @@ A multi-lens review graded the code at `9e4d976` (v3.3 plus the first v4 wave) 4
 
 Release Gate 4.5 required a "SHIP" receipt before a release. For v2.0, v2.1, v3.0 and v3.3 the receipt was written by hand by the agent being gated. One contained placeholder predictions `p1` to `p6`; the v3.3.0 receipt claims 8 convergences and lists 5. A hand-written evidence file with `verdict: ship` and the current tree hash passed the gate (review H6). *Source*: ADR 0005 §1, fact 1.
 
-**v4**: receipts and the release gate are deleted ([ADR 0005](adr/0005-v4-plan-of-record.md) AD-2, §5). A release needs CI green on the exact commit SHA and a reviewed merge. Old receipts are treated as unattested, not rewritten. The pre-tag check is `.github/scripts/ci_green.py <sha>`.
+**v4**: receipts and the release gate are deleted ([ADR 0005](adr/0005-v4-plan-of-record.md) AD-2, §5). A release needs an independent review, CI green on the exact commit SHA, and `aegis check` passing Layer 1 and a cross-vendor Layer 2 ([CONTRIBUTING](../CONTRIBUTING.md#releases)). Old receipts are treated as unattested, not rewritten. The pre-tag check is `.github/scripts/ci_green.py <sha>`.
 
 ### 5.2 The fitness signal was inverted
 
 v3 credited every rule whose paths matched a change with that run's pass or fail. For a gate this is backwards: a gate that blocked 4 bad commits scored 4 false positives and 1 true positive (ADR 0005 §8b). The review also found that "decay to zero" and the sampling the docs described were not what the code did.
 
-**v4**: promotion is a reviewed change. `aegis sync` rebuilds derived state and only *suggests* promotions; applying one is an explicit step (`aegis sync --apply` or `aegis rule promote`) that shows up in review. Credit needs an external signal such as a CI or test exit code, or a revert (AD-2). Which rule actually helped is an open question, pinned for after v4.2 (ADR 0005 §8b); v4 does not claim to answer it.
+**v4**: promotion is a reviewed change. `aegis sync` rebuilds the scores from the ledger and only *suggests* promotions, demotions and archives; applying one is an explicit step (`aegis sync --apply` or `aegis rule promote`) that shows up in review.
+
+**Not fixed yet**: the score itself. `aegis check`, including the pre-commit hook, still records each run's pass or fail against every rule whose paths match the checked files. The verdict is now split by file, so each rule gets a fraction of it, but a gate that blocks a bad commit is still scored as a miss. Self-reports from MCP clients are labeled `source: "mcp"` and still count toward the score, although AD-2 asks for credit from external signals only. So the score only ranks guidance in scan output and feeds `sync` suggestions; it never moves a rule by itself. Which rule actually helped is an open question, pinned for after v4.2 (ADR 0005 §8b); the per-rule credit model in section 6 is the plan to answer it.
 
 ### 5.3 Rules disabled themselves
 
 v3 wrote fitness numbers back into each rule file's frontmatter at session close. The integrity manifest was not refreshed afterwards, so the next scan saw an "edited" rule, treated it as tampered, and dropped it, with the message only on stderr. On `main`, 45 of 49 manifest entries were stale; `aegis_scan` in the author's own session returned 0 rules. The same write path lost about 80 of 120 updates under concurrency, because the read-modify-write was not locked. *Source*: ADR 0005 §1, facts 3 and 4; the review's end-to-end lane.
 
-**v4**: the append-only ledger is the only source of truth for outcomes; fitness and rollups are derived views, rebuilt by one writer under one lock (AD-1). MCP handlers, hooks and session close never rewrite rule files; `tests/integration/test_no_rule_writes.py` pins that. The HMAC manifest and its keys are deleted; rules are protected by git review and CI, not by Aegis.
+**v4**: the append-only ledger is the only source of truth for outcomes; fitness and rollups are derived views, rebuilt by one writer under one lock (AD-1). MCP handlers, hooks and session close never rewrite rule files; `tests/integration/test_no_rule_writes.py` pins that. The HMAC manifest and its keys are deleted; rules are protected by git review and CI, not by Aegis. `aegis sync` keeps an unsigned hash of each rule file, used only to show which rules were edited since the last sync; it never excludes a rule.
 
 ### 5.4 Most of the surface was never used
 
@@ -122,15 +124,15 @@ Across about 690 sessions the author's logs show 73 MCP calls, to only 5 of the 
 
 ### 5.5 Five resets in about 21 hours
 
-On 2026-10-14 the project rebranded, tagged v2.0.0, v2.1.0 and v3.0.0, then started a v4 "Wave 1" 16 minutes after tagging v3.3.0: five foundational resets in about 21 hours. Over its first 19 days it accumulated 850 commits and 94 tags. Wave 1 was committed with the test suite red, as one 4,000-line commit with an empty body. *Source*: ADR 0005 §1 and the review. *Re-derived*: the rebrand (`2c85f58`, 02:50) and Wave 1 (`6f47f13`, 23:30) are 20 h 40 min apart; `9e4d976` has 850 commits since the first one on 2026-09-26, and the repository has 94 tags.
+On 2026-10-14 the project rebranded, tagged v2.0.0, v2.1.0 and v3.0.0, then started a v4 "Wave 1" 16 minutes after tagging v3.3.0: five foundational resets in about 21 hours. Over its first 19 days it accumulated 850 commits and 94 tags. Wave 1 was committed with the test suite red, as one commit of about 4,000 added lines with an empty body. *Source*: ADR 0005 §1 and the review. *Re-derived*: the rebrand (`2c85f58`, 02:50) and Wave 1 (`6f47f13`, 23:30) are 20 h 40 min apart; `6f47f13` changed 40 files (+4,267/−3,272 lines) and its message is a subject line only; `9e4d976` has 850 commits since the first one on 2026-09-26, and the repository has 94 tags.
 
-**v4**: on-disk formats carry versions and change through one `aegis migrate` command, so a major version no longer means a clean-slate purge (AD-5). Further paradigm changes to the rule store, host plane or team model need a new ADR (Two-Pivot Halt, ADR 0005 §9). Every wave is reviewed independently before the next starts, and a tag needs CI green on its SHA (AD-10).
+**v4**: the ledger, the config files, the derived view and the workspace registry carry a format version, and `aegis migrate` converts a v3 or `.soma` workspace in place, dry run first and with backups, instead of a clean-slate purge (AD-5). Rule frontmatter does not carry a schema version yet. Further paradigm changes to the rule store, host plane or team model need a new ADR (Two-Pivot Halt, ADR 0005 §9). Every wave is reviewed independently before the next starts, and a tag needs CI green on its SHA (AD-10).
 
 ### 5.6 Repository files could run commands
 
 A repository's `.aegis/slots.yaml` named AST-driver commands that `aegis check` executed, and its slot values were inlined into the scan output the agent reads (review H5).
 
-**v4**: one `.aegis/config.json`, and repository config cannot name commands or tool slots. Driver commands come only from packaged templates or user-scope config ([ADR 0005](adr/0005-v4-plan-of-record.md) §5 "Config" and D10; [ADR 0016](adr/0016-zero-touch-polyglot-genesis.md) status).
+**v4**: one `.aegis/config.json`, and repository config cannot name commands or tool slots. Driver commands come only from packaged templates or user-scope config ([ADR 0005](adr/0005-v4-plan-of-record.md) §5 "Config" and D10; [ADR 0016](adr/0016-zero-touch-polyglot-genesis.md) status). Every git call goes through `gitsafe`, which switches off what a repository's git config could run. The [repository trust table](../SECURITY.md#repository-trust) lists everything Aegis does run and where it comes from; the one case that runs repository code is `aegis check --full`, which runs the tests that match the change.
 
 ```mermaid
 flowchart LR
@@ -163,18 +165,18 @@ Why this is not in v4.0: the review behind the spec found that nothing on the de
 
 ## 7. Predictions you can check
 
-Each v4 decision carries a falsifiable prediction (principle C6). A failed prediction is a result to act on, not something to explain away; where a decision has a prune condition, the table says what gets removed. The last column says whether the check can be run in the tree today (2026-10-15, wave B2 in progress). Where it cannot, the wave that adds it is named; the exact command is added to this table when that wave ships.
+Each v4 decision carries a falsifiable prediction (principle C6). A failed prediction is a result to act on, not something to explain away; where a decision has a prune condition, the table says what gets removed. The last column says whether the check can be run on the v4.0 code (waves A, B and C merged). Where it cannot, the release that adds it is named.
 
-| Decision | Prediction | How to check | Runnable today? |
+| Decision | Prediction | How to check | Runnable on v4.0? |
 |---|---|---|---|
-| AD-1 ledger only | Zero "tampered rule" exclusions and zero lost increments in a 3-process test | After real sessions, `git status --porcelain .aegis/rules` lists no change made by Aegis; `python3 -m pytest tests/integration/test_no_rule_writes.py` passes; the 3-process ledger test passes | Partly. The no-rule-writes test exists; the 3-process ledger test lands with v4.0-b (wave B2) and is not in the tree yet |
+| AD-1 ledger only | Zero "tampered rule" exclusions and zero lost increments in a 3-process test | After real sessions, `git status --porcelain .aegis/rules` lists no change made by Aegis; `python3 -m pytest tests/integration/test_no_rule_writes.py tests/unit/core/test_ledger.py tests/unit/core/test_locking.py` passes (the last two include 3-process append and lock tests) | Yes |
 | AD-2 CI attestation | No release tag without a green CI run on the same SHA | For each tag: `python3 .github/scripts/ci_green.py "$(git rev-list -n1 <tag>)"` exits 0 (needs the `gh` CLI) | Yes |
-| AD-3 layered core | Duplicate implementations go to 0, and the import-boundary test stays green | `python3 -m pytest tests/integration/test_mulch_invariants.py`; the full layered boundary test once it lands | Partly. `tests/integration/test_mulch_invariants.py` checks that `aegis_core` imports no adapter package and that the CLI and MCP server never import the SDK; the full layered boundary test lands with v4.0-b (wave B2) |
-| AD-4 workspace binding | In 3 real sessions per host, every scan resolves to the intended repository and none to `$HOME` | For each scan, compare the workspace root the resolver reports with the repository you were in | No. The resolver lands with v4.0-c (wave C) and is not in the tree yet |
-| AD-5 versioned formats | The next major version ships without a clean-slate purge | Its CHANGELOG entry gives an `aegis migrate` path, not a purge, for every on-disk format it changes | Partly. `aegis migrate` exists today only as a diagnostic for legacy `.soma/` workspaces; format versions land with v4.0-b (wave B2) |
+| AD-3 layered core | Duplicate implementations go to 0, and the import-boundary test stays green | `python3 -m pytest tests/contract/test_import_boundary.py` | Partly. The boundary test runs; counting duplicate implementations needs a new sweep like the one behind ADR 0005 §5 |
+| AD-4 workspace binding | In 3 real sessions per host, every scan resolves to the intended repository and none to `$HOME` | An MCP scan appends a row (once per session and set of files), with the source of its binding, to `.aegis/state/activity.jsonl` in the repository it resolved to. After the sessions, every scan should appear in the log of the repository you were working in | Yes, after real sessions |
+| AD-5 versioned formats | The next major version ships without a clean-slate purge | Its CHANGELOG entry gives an `aegis migrate` path, not a purge, for every on-disk format it changes | Partly. `aegis migrate` converts v3 and `.soma` workspaces, and the 4.0.0 entry gives that path; rule frontmatter has no schema version yet |
 | AD-6 small contract | The contract changes in under 10% of PRs; ghost CLI flags drop to 0 | `git log --oneline -- tests/contract/` against merged PRs (`python3 -m pytest tests/contract` fails on any CLI or MCP surface change until the snapshot is regenerated in the same PR) | Partly. Ghost flags are options the parser registers and `--help` advertises that the code ignores or does not honor, such as the removed `rule create --from-description`. The snapshot tests list every registered flag, and the flags v4 removed have rejection tests, but nothing yet checks that each registered flag is read |
 | AD-7 git-native team | In 20 multi-lane sessions, no cross-lane write conflict reaches a merge | Merge history; prune leases if none is denied in 30 days | No. `aegis team` and leases are v4.1 (wave D) |
-| AD-9 bootstrap and JIT | Scan-before-edit rate of at least 80% on each Phase-1 host after 3 sessions | The per-host scan-before-edit rate the server records | No. The metric lands with v4.0-c (wave C) and is not in the tree yet |
+| AD-9 bootstrap and JIT | Scan-before-edit rate of at least 80% on each Phase-1 host after 3 sessions | `aegis status --compliance` (it prints the rate per host and per session, and the limits of how edits are observed) | Yes, after real sessions |
 
 New v4.1 and v4.2 features get a prune box before they merge ([ADR 0005](adr/0005-v4-plan-of-record.md) Appendix D). Examples: lane leases are pruned after 0 denials in 30 days of multi-lane use; the test-integrity gate after 0 human-confirmed catches in 60 days; the benchmark after it catches no regression in 3 releases; an experimental host row after it stays unverified for 2 minor releases.
 
@@ -212,6 +214,7 @@ The trade Aegis does not make: it does not claim enforcement it lacks. CI on eve
 ```sh
 python3 -c "print(749/1339, 180+110+103+50+30, 749-473, 473/749, 1317/7015, 1-22188/39426)"   # 0.559, 473, 276, 0.632, 0.188, 0.437
 git log -1 --format='%h %ci' 2c85f58; git log -1 --format='%h %ci' 6f47f13   # 02:50 and 23:30 on 2026-10-14; 20 h 40 min is their difference
+git show --shortstat --format='%B' 6f47f13                                     # the subject line only; 40 files changed, 4267 insertions, 3272 deletions
 git rev-list --count 9e4d976; git tag | wc -l                                  # 850, 94
 git log --reverse --format=%ci 9e4d976 | head -1                               # 2026-09-26; to 2026-10-14 is 19 calendar days, counting both ends
 git for-each-ref --format='%(creatordate:iso) %(refname:short)' refs/tags/v3.3.0   # 23:14; 16 min is the difference to 6f47f13 (23:30)
