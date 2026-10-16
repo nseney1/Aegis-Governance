@@ -78,6 +78,34 @@ def test_only_gemini_cli_is_retired_and_a_retired_row_never_registers():
             assert h.registration is None, h.id
 
 
+def test_skills_dirs_are_the_documented_project_directories_and_none_is_verified():
+    # v4.1 §3: skills project to .claude/skills (Claude Code, DOC) and the shared
+    # .agents/skills (Antigravity DOC, Codex UNVERIFIED). Nothing was probed on a real
+    # install, so no skills_verified is True; it is separate from the row's verified.
+    assert {h.id: (h.skills_dir, h.skills_verified) for h in hosts.HOSTS} == {
+        "codex-cli": (".agents/skills", False),
+        "claude-code": (".claude/skills", False),
+        "claude-desktop": (None, False),
+        "antigravity": (".agents/skills", False),
+        "gemini-cli": (None, False),
+    }
+    assert hosts.get("claude-code").verified is True  # the row's own flag is untouched
+
+
+def test_a_skills_dir_is_a_workspace_relative_posix_directory():
+    for h in hosts.HOSTS:
+        if h.skills_dir is None:
+            continue
+        assert not h.skills_dir.startswith(("/", "~", ".\\")) and "\\" not in h.skills_dir, h.id
+        assert ".." not in h.skills_dir.split("/") and not h.skills_dir.endswith("/"), h.id
+        assert h.registration is not None and not h.retired, h.id
+
+
+def test_new_host_fields_default_to_no_skills():
+    row = hosts.HostSpec(id="x", display_name="X", vendor="V")
+    assert row.skills_dir is None and row.skills_verified is False
+
+
 def test_bootstrap_fits_every_host_budget_and_carries_no_rule_bodies():
     text = bootstrap.bootstrap_text()
     size = len(text.encode("utf-8"))
