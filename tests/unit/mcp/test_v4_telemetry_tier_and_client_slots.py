@@ -98,7 +98,7 @@ def test_unknown_client_gets_the_generic_slot_table_not_another_vendors(tmp_path
                                 "params": {"name": "aegis_scan", "arguments": {"files": ["src/app.py"]}}})
 
     guidance = json.loads(scan_resp["result"]["content"][0]["text"])["guidance"]
-    assert "read_file" in guidance and "fast-tier" in guidance
+    assert "Use read_file with fast." in guidance
     assert "view_file" not in guidance and "flash" not in guidance
 
 

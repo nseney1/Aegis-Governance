@@ -72,12 +72,13 @@ _CODEX_PROFILE: dict[str, str] = {
     "TOOL_SEARCH": "exec_command",
     "TOOL_RUN": "exec_command",
     "TOOL_SUBAGENT": "spawn_agent",
-    "MODEL_FAST": "fast-tier",
-    "MODEL_STANDARD": "standard-tier",
-    "MODEL_HEAVY": "heavy-tier",
+    "MODEL_FAST": "fast",
+    "MODEL_STANDARD": "standard",
+    "MODEL_HEAVY": "heavy",
 }
 
-# Neutral names for a host Aegis does not know: a tool kind, never one vendor's name.
+# Neutral names for a host Aegis does not know: a tool kind, never one vendor's name. A
+# model tier is a bare adjective, as rules say "use the `${SLOT.MODEL_FAST}` tier".
 _GENERIC_PROFILE: dict[str, str] = {
     "TOOL_READ": "read_file",
     "TOOL_EDIT": "edit_file",
@@ -85,9 +86,9 @@ _GENERIC_PROFILE: dict[str, str] = {
     "TOOL_SEARCH": "grep",
     "TOOL_RUN": "shell",
     "TOOL_SUBAGENT": "subagent",
-    "MODEL_FAST": "fast-tier",
-    "MODEL_STANDARD": "standard-tier",
-    "MODEL_HEAVY": "heavy-tier",
+    "MODEL_FAST": "fast",
+    "MODEL_STANDARD": "standard",
+    "MODEL_HEAVY": "heavy",
 }
 
 # The gemini-cli row is unverified (phase 2): only its documented tool names are bound;

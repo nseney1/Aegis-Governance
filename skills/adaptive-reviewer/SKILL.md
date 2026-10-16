@@ -16,7 +16,7 @@ trigger: user_request
 
 ## Setup
 
-Run the orchestrator as one subagent (`${SLOT.TOOL_SUBAGENT}`) that may itself dispatch subagents and write its report. Where the host lets you define a reusable subagent type, define one named `adaptive_reviewer` with those two permissions. Prompt it with:
+Run the orchestrator as one subagent (`${SLOT.TOOL_SUBAGENT}`) that may itself dispatch subagents and write its report. Where the host lets you define a reusable subagent type, define one named `adaptive_reviewer` that may dispatch subagents and write files. Prompt it with:
 
 ```
 Review [target files/directory]. Context: [what changed, why]
