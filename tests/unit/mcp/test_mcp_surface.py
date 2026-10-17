@@ -10,7 +10,13 @@ import pytest
 
 import aegis_mcp.server as server
 
-SURVIVING_TOOLS = {"aegis_scan", "aegis_report_outcome", "aegis_create_rule", "aegis_list_rules"}
+SURVIVING_TOOLS = {
+    "aegis_scan",
+    "aegis_report_outcome",
+    "aegis_create_rule",
+    "aegis_list_rules",
+    "aegis_capture_insight",
+}
 
 REMOVED_TOOLS = [
     "aegis_request_receipt",
@@ -20,7 +26,6 @@ REMOVED_TOOLS = [
     "aegis_verify_changes",
     "aegis_poll_verification",
     "aegis_checkpoint",
-    "aegis_capture_insight",
     "aegis_generate_manifest",
     "aegis_grade",
     "aegis_coverage",

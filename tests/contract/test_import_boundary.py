@@ -79,6 +79,10 @@ CORE_LAYERS: Dict[str, int] = {
     "aegis_core.rule_integrity": 1,
     # v4.3 T2: `aegis doctor --release` (gitsafe, pathlookup, human_gate's tier).
     "aegis_core.release_verify": 2,
+    # v4.3 T8: human insights closed loop (user-scope JSONL, redaction, cue detector, TF-IDF review, recurrence).
+    "aegis_core.insights": 2,
+    # v4.3 T5: fail-to-pass regression check (gitsafe, checkrun hermetic env, human_gate exemptions).
+    "aegis_core.regression": 2,
     "aegis_core.scan": 2,
     "aegis_core.scan_compliance": 2,
     "aegis_core.sync": 2,

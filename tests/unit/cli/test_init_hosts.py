@@ -82,6 +82,9 @@ def snapshot(*roots: Path) -> dict:
     return out
 
 
+# `aegis init` also creates the session-label pseudonymization key (v4.4 spec 3.4 / §12.2).
+LINK_KEY = ".aegis/link.key"
+
 # A new workspace also gets the one active starter rule (v4.1 d5).
 REPO_FILES = {".aegis/config.json", ".aegis/.gitignore", "AGENTS.md", ".aegis/rules/invariants/no-eval.md"} | {
     f".aegis/rules/personas/{n}.md" for n in STANDARD}
@@ -99,7 +102,7 @@ class TestExactFilesPerHostSelection:
     def test_no_host_selected_registers_nothing_and_proposes_detected_hosts(self, env, capsys):
         assert init(env) == 0
         assert files(env.project) == REPO_FILES
-        assert files(env.home) == {".aegis/workspaces.json"}
+        assert files(env.home) == {".aegis/workspaces.json", LINK_KEY}
         assert env.runner.calls == []
         assert json.loads((env.project / ".aegis" / "config.json").read_text(encoding="utf-8")) == {"v": 1}
         (entry,) = json.loads((env.home / ".aegis" / "workspaces.json").read_text(encoding="utf-8"))["workspaces"]
@@ -110,19 +113,19 @@ class TestExactFilesPerHostSelection:
     def test_codex_only(self, env):
         assert init(env, "--host", "codex-cli") == 0
         assert files(env.project) == REPO_FILES
-        assert files(env.home) == {".aegis/workspaces.json"}
+        assert files(env.home) == {".aegis/workspaces.json", LINK_KEY}
         assert env.runner.calls == [["codex", "mcp", "remove", "aegis"], _codex_add(env.mcp)]
         config = json.loads((env.project / ".aegis" / "config.json").read_text(encoding="utf-8"))
         assert config == {"v": 1, "hosts": ["codex-cli"]}
 
     def test_claude_code_only_at_user_scope(self, env):
         assert init(env, "--host", "claude-code") == 0
-        assert files(env.home) == {".aegis/workspaces.json"}
+        assert files(env.home) == {".aegis/workspaces.json", LINK_KEY}
         assert env.runner.calls == [["claude", "mcp", "remove", "--scope", "user", "aegis"], _claude_add(env.mcp)]
 
     def test_antigravity_only_merges_its_json_file(self, env):
         assert init(env, "--host", "antigravity") == 0
-        assert files(env.home) == {".aegis/workspaces.json", ".gemini/config/mcp_config.json"}
+        assert files(env.home) == {".aegis/workspaces.json", LINK_KEY, ".gemini/config/mcp_config.json"}
         assert env.runner.calls == []
         data = json.loads((env.home / ".gemini" / "config" / "mcp_config.json").read_text(encoding="utf-8"))
         assert data == {"mcpServers": {"aegis": {"command": env.mcp, "args": [],
@@ -131,7 +134,7 @@ class TestExactFilesPerHostSelection:
     def test_all_three_hosts(self, env):
         assert init(env, "--host", "antigravity,claude-code,codex-cli") == 0
         assert files(env.project) == REPO_FILES
-        assert files(env.home) == {".aegis/workspaces.json", ".gemini/config/mcp_config.json"}
+        assert files(env.home) == {".aegis/workspaces.json", LINK_KEY, ".gemini/config/mcp_config.json"}
         assert [c[0] for c in env.runner.calls] == ["codex", "codex", "claude", "claude"]
         registry = json.loads((env.home / ".aegis" / "workspaces.json").read_text(encoding="utf-8"))
         assert registry["v"] == 1
@@ -149,7 +152,7 @@ class TestExactFilesPerHostSelection:
     def test_kiro_by_a_surface_alias_merges_its_user_mcp_json_and_stores_the_plane_id(self, env, capsys):
         assert init(env, "--host", "kiro-ide") == 0
         assert files(env.project) == REPO_FILES
-        assert files(env.home) == {".aegis/workspaces.json", ".kiro/settings/mcp.json"}
+        assert files(env.home) == {".aegis/workspaces.json", LINK_KEY, ".kiro/settings/mcp.json"}
         assert env.runner.calls == []
         data = json.loads((env.home / ".kiro" / "settings" / "mcp.json").read_text(encoding="utf-8"))
         assert data == {"mcpServers": {"aegis": {"command": env.mcp, "args": [], "env": {"AEGIS_CLIENT": "kiro"}}}}
@@ -506,7 +509,7 @@ class TestExperimentalHosts:
     @pytest.mark.parametrize("host_id", sorted(EXPERIMENTAL_FILES))
     def test_each_registers_in_its_documented_file_and_warns(self, env, capsys, host_id):
         assert init(env, "--host", host_id) == 0
-        assert files(env.home) == {".aegis/workspaces.json", EXPERIMENTAL_FILES[host_id]}
+        assert files(env.home) == {".aegis/workspaces.json", LINK_KEY, EXPERIMENTAL_FILES[host_id]}
         assert env.runner.calls == []
         data = json.loads(env.home.joinpath(*EXPERIMENTAL_FILES[host_id].split("/")).read_text(encoding="utf-8"))
         assert data == {"mcpServers": {"aegis": {"command": env.mcp, "args": [], "env": {"AEGIS_CLIENT": host_id}}}}
