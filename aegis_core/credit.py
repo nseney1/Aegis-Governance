@@ -1,40 +1,9 @@
-"""The credit state machine (v4.3 spec §3 T1): what a ``check`` row is worth, derived on read.
-
-Nothing local witnesses anything against a same-uid agent, so what Aegis records is a **label**
-and a rule is credited only when CI on the landing commit says so. The ledger holds five kinds
-of event rows (they carry neither ``rule`` nor ``outcome``, so fitness readers never see them):
-
-- ``check``: one verified run of a tree (``aegis_core.checkrun``);
-- ``report``: ``aegis_report_outcome`` with a passing ``check`` row for the current tree, one
-  row per credited rule (credit identity is ``(check, rule)``);
-- ``claimed``: the same call with no such row, at most one per (server session, tree);
-- ``ci``: the required workflow's conclusion for one commit (``ci_conclusion``), an observation;
-- ``void``: a check that CI or a gate falsified.
-
-``derive`` folds them, and a landing lookup, into one ``Credit`` per ``(check, rule)``; it never
-writes. States, strongest first:
-
-==========  ==================================================================================
-voided      terminal: CI failed on the landing commit, a gate or CI divergence voided the check
-confirmed   the required workflow concluded ``success`` on a commit whose tree is the check's
-landed      a commit C has the check's tree, CI has not (yet) said success
-witnessed   a ``check`` row for the tree exists
-==========  ==================================================================================
-
-Only ``confirmed`` counts, and even then not when the run is ``flaky`` (the same tree, command
-and environment class both passed and failed: excluded, no penalty) or when it changed the
-governance set (``protected_changed``) without an approval.
-
-CI is read over REST through an injectable client; the run selected is the newest attempt of the
-required workflow whose head is the commit, from this repository, on a push, dispatch or release
-event, cancelled runs ignored. Its conclusion is stored per head SHA so later consumers can reuse
-it without their own request.
-"""
+"""The credit state machine (v4.3 spec §3 T1, T4): what a ``check`` row is worth, derived on read."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
-import re
+from datetime import datetime, timezone
+import json, re, sys
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
@@ -44,48 +13,15 @@ from aegis_core.storage import ledger_locked, read_jsonl
 from aegis_core.telemetry_engine import ledger
 
 __all__ = [
-    "EVENTS",
-    "MAX_REPORT_ROWS_PER_SESSION",
-    "CIUnavailable",
-    "Credit",
-    "GhRestClient",
-    "ReportConflict",
-    "check_ci_divergence",
-    "claimed_summary",
-    "confirm",
-    "confirmed_outcome_rows",
-    "derive",
-    "exposed_rules",
-    "format_trailer",
-    "landed_lookup",
-    "parse_trailer",
-    "passing_check",
-    "read_rows",
-    "record_adjudication",
-    "record_detection",
-    "record_exposure",
-    "record_override",
-    "record_void",
-    "select_ci_run",
-    "submit_report",
+    "EVENTS", "MAX_REPORT_ROWS_PER_SESSION", "CIUnavailable", "Credit", "GhRestClient",
+    "ReportConflict", "check_ci_divergence", "claimed_summary", "confirm",
+    "confirmed_outcome_rows", "derive", "exposed_rules", "format_trailer", "landed_lookup",
+    "parse_trailer", "passing_check", "read_rows", "record_adjudication", "record_detection",
+    "record_exposure", "record_override", "record_void", "select_ci_run", "submit_report",
 ]
-
-EVENTS = (
-    "check",
-    "claimed",
-    "report",
-    "ci",
-    "void",
-    "exposure",
-    "detection",
-    "adjudication",
-    "override",
-)
-#: The most ``claimed`` and ``report`` rows one server session may write: a prompt-injected agent
-#: that calls the tool in a loop fills this and no more.
+EVENTS = ("check", "claimed", "report", "ci", "void", "exposure", "detection", "adjudication", "override")
 MAX_REPORT_ROWS_PER_SESSION = 200
 CI_EVENTS = ("push", "workflow_dispatch", "release")
-#: Conclusions that falsify a check; any other unfinished or inconclusive state leaves it landed.
 CI_FAILED = ("failure", "timed_out", "startup_failure")
 _RESULT = {"success": "tp", "tp": "tp", "pass": "tp", "failure": "fp", "fp": "fp", "fail": "fp", "partial": "trigger"}
 _TRAILER = re.compile(r"\s*Aegis-Check:\s*tree=([0-9a-f]{40,64})\s+exit=(-?\d+)\s*")
@@ -100,8 +36,6 @@ class ReportConflict(ValueError):
     """An idempotency key was already used by this server session for a different report."""
 
 
-# ── Reading ──────────────────────────────────────────────────────────────────
-
 def _normalize_event_row(row: Mapping[str, Any]) -> Dict[str, Any]:
     item = dict(row)
     if "for_rule" in item and "rule" not in item:
@@ -112,17 +46,11 @@ def _normalize_event_row(row: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def read_rows(root: Any) -> List[Dict[str, Any]]:
-    """Every event row of this module in the ledger, oldest first. Never raises: a ledger that
-    cannot be read yields nothing (its health is ``ledger.read``'s to report)."""
     try:
         raw = read_jsonl(ledger.ledger_path(root)).rows
     except (PathTraversalError, OSError):
         return []
-    return [
-        _normalize_event_row(r)
-        for r in raw
-        if isinstance(r, dict) and r.get("v") == ledger.LEDGER_VERSION and r.get("event") in EVENTS
-    ]
+    return [_normalize_event_row(r) for r in raw if isinstance(r, dict) and r.get("v") == ledger.LEDGER_VERSION and r.get("event") in EVENTS]
 
 
 def _of(rows: Iterable[Mapping[str, Any]], event: str) -> List[Mapping[str, Any]]:
@@ -130,7 +58,6 @@ def _of(rows: Iterable[Mapping[str, Any]], event: str) -> List[Mapping[str, Any]
 
 
 def flaky_keys(rows: Iterable[Mapping[str, Any]]) -> Set[Tuple[Any, Any, Any]]:
-    """The ``(tree, cmd_digest, env_class)`` keys that have both a passing and a failing check."""
     seen: Dict[Tuple[Any, Any, Any], Set[bool]] = {}
     for row in _of(rows, "check"):
         seen.setdefault((row.get("tree"), row.get("cmd_digest"), row.get("env_class")), set()).add(bool(row.get("passed")))
@@ -138,27 +65,20 @@ def flaky_keys(rows: Iterable[Mapping[str, Any]]) -> Set[Tuple[Any, Any, Any]]:
 
 
 def passing_check(rows: Iterable[Mapping[str, Any]], tree: Optional[str]) -> Optional[Mapping[str, Any]]:
-    """The newest ``check`` row that is a usable witness for ``tree``: ``witness: aegis``, passed,
-    bound completely (not ``partial``). None when there is none."""
     if not tree:
         return None
     best = None
     for row in _of(rows, "check"):
-        if (row.get("tree") == tree and row.get("witness") == "aegis" and row.get("passed") is True
-                and not row.get("partial") and isinstance(row.get("id"), str)):
+        if row.get("tree") == tree and row.get("witness") == "aegis" and row.get("passed") is True and not row.get("partial") and isinstance(row.get("id"), str):
             best = row
     return best
 
-
-# ── CI ───────────────────────────────────────────────────────────────────────
 
 def _workflow_path(run: Mapping[str, Any]) -> str:
     return str(run.get("path") or "").split("@", 1)[0]
 
 
 def select_ci_run(runs: Iterable[Mapping[str, Any]], commit: str, workflow: str) -> Optional[Mapping[str, Any]]:
-    """The run that speaks for ``commit``: the required ``workflow``'s newest attempt on that exact
-    SHA, from this repository's own branch, on a push, dispatch or release; cancelled runs are ignored."""
     wanted = f".github/workflows/{workflow}"
     best, best_key = None, None
     for run in runs:
@@ -176,7 +96,6 @@ def select_ci_run(runs: Iterable[Mapping[str, Any]], commit: str, workflow: str)
 
 
 def ci_conclusion(run: Optional[Mapping[str, Any]]) -> str:
-    """``success``, a failing conclusion, ``pending`` (not finished or inconclusive) or ``none`` (no run)."""
     if run is None:
         return "none"
     if run.get("status") != "completed":
@@ -186,19 +105,13 @@ def ci_conclusion(run: Optional[Mapping[str, Any]]) -> str:
 
 
 class GhRestClient:
-    """CI runs of a commit through the user's own ``gh`` (``runs_for``); the runner is injectable."""
-
-    def __init__(self, repo: Optional[str] = None, runner: Optional[Callable[..., Any]] = None,
-                 cwd: Any = None) -> None:
-        self.repo = repo
-        self.runner = runner or human_gate.default_gh_runner
-        self.cwd = cwd
+    def __init__(self, repo: Optional[str] = None, runner: Optional[Callable[..., Any]] = None, cwd: Any = None) -> None:
+        self.repo, self.runner, self.cwd = repo, runner or human_gate.default_gh_runner, cwd
 
     def runs_for(self, commit: str) -> List[Dict[str, Any]]:
         if not re.fullmatch(r"[0-9a-f]{40,64}", commit or ""):
             raise CIUnavailable("not a full commit id")
-        slug = self.repo or "{owner}/{repo}"
-        result = self.runner(["api", f"repos/{slug}/actions/runs?head_sha={commit}&per_page=100"], cwd=self.cwd)
+        result = self.runner(["api", f"repos/{self.repo or '{owner}/{repo}'}/actions/runs?head_sha={commit}&per_page=100"], cwd=self.cwd)
         if result is None:
             raise CIUnavailable("gh is not installed")
         if result.returncode != 0:
@@ -214,8 +127,6 @@ class GhRestClient:
 
 
 def landed_lookup(root: Any, refs: Sequence[str] = ("HEAD",), limit: int = _REV_LIMIT) -> Callable[[str], Optional[str]]:
-    """A function mapping a tree id to the oldest commit with that tree among the last ``limit``
-    commits reachable from ``refs`` (the landing commit of a squash or a fast-forward), or None."""
     top = gitsafe.toplevel(Path(str(root)))
     table: Optional[Dict[str, str]] = None
 
@@ -232,8 +143,7 @@ def landed_lookup(root: Any, refs: Sequence[str] = ("HEAD",), limit: int = _REV_
             if line.startswith("commit "):
                 commit = line.split()[1]
             elif commit and line.strip():
-                found[line.strip()] = commit  # newest first, so the last write is the oldest commit
-                commit = None
+                found[line.strip()], commit = commit, None
         return found
 
     def lookup(tree: str) -> Optional[str]:
@@ -245,163 +155,79 @@ def landed_lookup(root: Any, refs: Sequence[str] = ("HEAD",), limit: int = _REV_
     return lookup
 
 
-# ── What this server session showed ──────────────────────────────────────────
-
-# (workspace root, host, server session) -> the rules its scans served. Held in the server
-# process on purpose: it is the server's own witness of what the agent was shown, so it is
-# neither a file the agent can write nor something the agent's report can extend.
 _EXPOSED: Dict[Tuple[str, str, str], Set[str]] = {}
 _MAX_EXPOSED_SESSIONS = 256
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def record_exposure(
-    root: Any,
-    host: Optional[str],
-    session: Optional[str],
-    rules: Iterable[str],
-    *,
-    paths: Optional[Iterable[str]] = None,
-    rev: Optional[str] = None,
-    scope_basis: Optional[str] = None,
-    heartbeat: Optional[bool] = None,
-    ts: Optional[str] = None,
-    persist: Optional[bool] = None,
+    root: Any, host: Optional[str], session: Optional[str], rules: Iterable[str], *,
+    paths: Optional[Iterable[str]] = None, rev: Optional[str] = None, scope_basis: Optional[str] = None,
+    heartbeat: Optional[bool] = None, ts: Optional[str] = None, persist: Optional[bool] = None,
 ) -> List[Dict[str, Any]]:
     rule_list = [r for r in dict.fromkeys(rules) if isinstance(r, str) and r]
     key = (str(root), host or "", session or "")
     if key not in _EXPOSED and len(_EXPOSED) >= _MAX_EXPOSED_SESSIONS:
         _EXPOSED.pop(next(iter(_EXPOSED)))
     _EXPOSED.setdefault(key, set()).update(rule_list)
-
     if persist is None:
         if any(v is not None for v in (paths, rev, scope_basis, heartbeat, ts)):
             should_persist = True
         else:
-            import sys
-
-            caller = sys._getframe(1).f_code.co_name if hasattr(sys, "_getframe") else ""
-            should_persist = caller != "_record_exposure"
+            should_persist = (sys._getframe(1).f_code.co_name if hasattr(sys, "_getframe") else "") != "_record_exposure"
     else:
         should_persist = bool(persist)
-
     if not should_persist or not rule_list:
         return []
-
-    stamp = ts or _now()
-    s_id = session or ""
-    h_id = host or ""
+    stamp, s_id, h_id = ts or _now(), session or "", host or ""
     path_list = [str(p) for p in (paths or ()) if isinstance(p, str)]
-    written: List[Dict[str, Any]] = []
     try:
         with ledger_locked(root):
-            existing = _of(read_rows(root), "exposure")
-            seen = {
-                (
-                    str(r.get("session") or ""),
-                    str(r.get("rule") or r.get("for_rule") or ""),
-                    r.get("scope_basis"),
-                )
-                for r in existing
-            }
+            seen = {(str(r.get("session") or ""), str(r.get("rule") or r.get("for_rule") or ""), r.get("scope_basis")) for r in _of(read_rows(root), "exposure")}
             to_append: List[Dict[str, Any]] = []
             for rule_id in rule_list:
-                dedup_key = (s_id, rule_id, scope_basis)
-                if dedup_key in seen:
+                if (s_id, rule_id, scope_basis) in seen:
                     continue
-                seen.add(dedup_key)
-                row: Dict[str, Any] = {
-                    "v": ledger.LEDGER_VERSION,
-                    "ts": stamp,
-                    "event": "exposure",
-                    "for_rule": rule_id,
-                    "session": s_id,
-                    "host": h_id,
-                    "paths": path_list,
-                    "rev": rev,
-                }
+                seen.add((s_id, rule_id, scope_basis))
+                row: Dict[str, Any] = {"v": ledger.LEDGER_VERSION, "ts": stamp, "event": "exposure", "for_rule": rule_id, "session": s_id, "host": h_id, "paths": path_list, "rev": rev}
                 if scope_basis is not None:
                     row["scope_basis"] = str(scope_basis)
                 if heartbeat is not None:
                     row["heartbeat"] = bool(heartbeat)
                 to_append.append(row)
-            if to_append:
-                appended = ledger.append_rows(root, to_append)
-                written = [_normalize_event_row(r) for r in appended]
+            return [_normalize_event_row(r) for r in ledger.append_rows(root, to_append)] if to_append else []
     except (PathTraversalError, OSError):
         return []
-    return written
 
 
 def exposed_rules(root: Any, host: Optional[str], session: Optional[str]) -> Set[str]:
     return set(_EXPOSED.get((str(root), host or "", session or ""), ()))
 
 
-# ── Writing ──────────────────────────────────────────────────────────────────
-
-def _now() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def record_detection(
-    root: Any,
-    rule: str,
-    file: str,
-    pattern: str,
-    *,
-    disposition: str,
-    rev: Optional[str] = None,
-    branch: str = "main",
-    fix_rev: Optional[str] = None,
-    weight: Optional[float] = None,
-    ts: Optional[str] = None,
+    root: Any, rule: str, file: str, pattern: str, *, disposition: str,
+    rev: Optional[str] = None, branch: str = "main", fix_rev: Optional[str] = None,
+    weight: Optional[float] = None, ts: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Record a detector replay finding (`caught` or `leaked`), deduplicated by `(rule, file, pattern, branch)`."""
     if disposition not in ("caught", "leaked"):
         raise ValueError(f"disposition must be 'caught' or 'leaked', got {disposition!r}")
     eff_weight = float(weight) if weight is not None else (0.5 if disposition == "caught" else 1.0)
     with ledger_locked(root):
-        for existing in _of(read_rows(root), "detection"):
-            if (
-                (existing.get("rule") or existing.get("for_rule")) == rule
-                and existing.get("file") == file
-                and existing.get("pattern") == pattern
-                and (existing.get("branch") or "main") == (branch or "main")
-            ):
-                return _normalize_event_row(existing)
-        row: Dict[str, Any] = {
-            "v": ledger.LEDGER_VERSION,
-            "ts": ts or _now(),
-            "event": "detection",
-            "for_rule": rule,
-            "file": file,
-            "pattern": pattern,
-            "disposition": disposition,
-            "branch": branch or "main",
-            "rev": rev,
-            "fix_rev": fix_rev,
-            "weight": eff_weight,
-        }
+        for ex in _of(read_rows(root), "detection"):
+            if (ex.get("rule") or ex.get("for_rule")) == rule and ex.get("file") == file and ex.get("pattern") == pattern and (ex.get("branch") or "main") == (branch or "main"):
+                return _normalize_event_row(ex)
+        row = {"v": ledger.LEDGER_VERSION, "ts": ts or _now(), "event": "detection", "for_rule": rule, "file": file, "pattern": pattern, "disposition": disposition, "branch": branch or "main", "rev": rev, "fix_rev": fix_rev, "weight": eff_weight}
         return _normalize_event_row(ledger.append_rows(root, [row])[0])
 
 
 def record_adjudication(
-    root: Any,
-    rule: str,
-    verdict: str,
-    *,
-    adjudicator: str = "human",
-    ref: Optional[str] = None,
-    summary: Optional[str] = None,
-    file: Optional[str] = None,
-    line: Optional[int] = None,
-    snippet: Optional[str] = None,
-    session: Optional[str] = None,
-    repo: Optional[str] = None,
-    ts: Optional[str] = None,
+    root: Any, rule: str, verdict: str, *, adjudicator: str = "human", ref: Optional[str] = None,
+    summary: Optional[str] = None, file: Optional[str] = None, line: Optional[int] = None,
+    snippet: Optional[str] = None, session: Optional[str] = None, repo: Optional[str] = None, ts: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Record an adjudicated label (`tp` or `fp`) for `rule`."""
     norm_verdict = _RESULT.get(verdict, verdict)
     if norm_verdict not in ("tp", "fp"):
         raise ValueError(f"adjudication verdict must be 'tp' or 'fp', got {verdict!r}")
@@ -409,98 +235,51 @@ def record_adjudication(
         raise ValueError(f"adjudicator must be 'human', 'automated', 'ci', 'pr', or 'revert', got {adjudicator!r}")
     with ledger_locked(root):
         if ref is not None:
-            for existing in _of(read_rows(root), "adjudication"):
-                if (existing.get("rule") or existing.get("for_rule")) == rule and existing.get("ref") == ref:
-                    return _normalize_event_row(existing)
-        row: Dict[str, Any] = {
-            "v": ledger.LEDGER_VERSION,
-            "ts": ts or _now(),
-            "event": "adjudication",
-            "for_rule": rule,
-            "verdict": norm_verdict,
-            "adjudicator": adjudicator,
-        }
-        if ref is not None:
-            row["ref"] = str(ref)
-        if summary is not None:
-            row["summary"] = str(summary)
-        if file is not None:
-            row["file"] = str(file)
+            for ex in _of(read_rows(root), "adjudication"):
+                if (ex.get("rule") or ex.get("for_rule")) == rule and ex.get("ref") == ref:
+                    return _normalize_event_row(ex)
+        row: Dict[str, Any] = {"v": ledger.LEDGER_VERSION, "ts": ts or _now(), "event": "adjudication", "for_rule": rule, "verdict": norm_verdict, "adjudicator": adjudicator}
+        for k, v in (("ref", ref), ("summary", summary), ("file", file), ("snippet", snippet), ("session", session), ("repo", repo)):
+            if v is not None:
+                row[k] = str(v)
         if line is not None:
             row["line"] = int(line)
-        if snippet is not None:
-            row["snippet"] = str(snippet)
-        if session is not None:
-            row["session"] = str(session)
-        if repo is not None:
-            row["repo"] = str(repo)
         return _normalize_event_row(ledger.append_rows(root, [row])[0])
 
 
 def record_override(
-    root: Any,
-    rule: str,
-    file: str,
-    line: int,
-    reason: str = "",
-    *,
-    rev: Optional[str] = None,
-    ts: Optional[str] = None,
+    root: Any, rule: str, file: str, line: int, reason: str = "", *, rev: Optional[str] = None, ts: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Record a developer override (`# aegis: allow`) as `contested` (never `fp`)."""
     with ledger_locked(root):
-        for existing in _of(read_rows(root), "override"):
-            if (
-                (existing.get("rule") or existing.get("for_rule")) == rule
-                and existing.get("file") == file
-                and int(existing.get("line") or 0) == int(line)
-                and existing.get("rev") == rev
-            ):
-                return _normalize_event_row(existing)
-        row: Dict[str, Any] = {
-            "v": ledger.LEDGER_VERSION,
-            "ts": ts or _now(),
-            "event": "override",
-            "for_rule": rule,
-            "file": str(file),
-            "line": int(line),
-            "reason": str(reason or ""),
-            "status": "contested",
-        }
+        for ex in _of(read_rows(root), "override"):
+            if (ex.get("rule") or ex.get("for_rule")) == rule and ex.get("file") == file and int(ex.get("line") or 0) == int(line) and ex.get("rev") == rev:
+                return _normalize_event_row(ex)
+        row: Dict[str, Any] = {"v": ledger.LEDGER_VERSION, "ts": ts or _now(), "event": "override", "for_rule": rule, "file": str(file), "line": int(line), "reason": str(reason or ""), "status": "contested"}
         if rev is not None:
             row["rev"] = str(rev)
         return _normalize_event_row(ledger.append_rows(root, [row])[0])
 
 
 def record_void(root: Any, check_id: str, reason: str) -> Dict[str, Any]:
-    """Void a check for good (CI divergence, a failed gate, a revert). Idempotent per check."""
     with ledger_locked(root):
-        if any(r.get("check") == check_id for r in _of(read_rows(root), "void")):
-            return next(r for r in _of(read_rows(root), "void") if r.get("check") == check_id)  # type: ignore[return-value]
-        row = {"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "void", "check": check_id, "reason": reason}
-        return ledger.append_rows(root, [row])[0]
+        existing = next((r for r in _of(read_rows(root), "void") if r.get("check") == check_id), None)
+        if existing is not None:
+            return dict(existing)
+        return ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "void", "check": check_id, "reason": reason}])[0]
 
 
-def confirm(root: Any, *, client: Any, workflow: str, landed: Optional[Callable[[str], Optional[str]]] = None,
-            ) -> Dict[str, Any]:
-    """Ask CI about every landed, not yet decided check and record what it says (a ``ci`` row per
-    commit; a failing conclusion also voids the check). Returns counts and the errors met."""
-    rows = read_rows(root)
-    look = landed or landed_lookup(root)
+def confirm(root: Any, *, client: Any, workflow: str, landed: Optional[Callable[[str], Optional[str]]] = None) -> Dict[str, Any]:
+    rows, look = read_rows(root), landed or landed_lookup(root)
     voided_checks = {r.get("check") for r in _of(rows, "void")}
-    known: Dict[str, str] = {}
-    for row in _of(rows, "ci"):
-        known[str(row.get("commit"))] = str(row.get("ci_conclusion"))
-    reported = {r.get("check") for r in _of(rows, "report")}
+    known = {str(r.get("commit")): str(r.get("ci_conclusion")) for r in _of(rows, "ci")}
     by_id = {r["id"]: r for r in _of(rows, "check") if isinstance(r.get("id"), str)}
     summary: Dict[str, Any] = {"asked": 0, "confirmed": 0, "voided": 0, "errors": []}
     commits: Dict[str, List[str]] = {}
-    for check_id in sorted(reported):
-        if check_id in voided_checks or check_id not in by_id:
-            continue
-        commit = look(str(by_id[check_id].get("tree")))
-        if commit and known.get(commit) != "success":
-            commits.setdefault(commit, []).append(check_id)
+    for check_id in sorted({r.get("check") for r in _of(rows, "report")}):
+        if check_id not in voided_checks and check_id in by_id:
+            commit = look(str(by_id[check_id].get("tree")))
+            if commit and known.get(commit) != "success":
+                commits.setdefault(commit, []).append(check_id)
     for commit, checks in commits.items():
         try:
             runs = client.runs_for(commit)
@@ -511,11 +290,7 @@ def confirm(root: Any, *, client: Any, workflow: str, landed: Optional[Callable[
         run = select_ci_run(runs, commit, workflow)
         conclusion = ci_conclusion(run)
         if known.get(commit) != conclusion:
-            observation = {"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "ci", "commit": commit,
-                           "workflow": workflow, "ci_conclusion": conclusion,
-                           "run_id": run.get("id") if run else None,
-                           "ci_run_attempt": run.get("run_attempt") if run else None}
-            ledger.append_rows(root, [observation])
+            ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "ci", "commit": commit, "workflow": workflow, "ci_conclusion": conclusion, "run_id": run.get("id") if run else None, "ci_run_attempt": run.get("run_attempt") if run else None}])
         if conclusion == "success":
             summary["confirmed"] += len(checks)
         elif conclusion in CI_FAILED:
@@ -529,64 +304,39 @@ def _count(rows: Iterable[Mapping[str, Any]], session: Optional[str]) -> int:
     return sum(1 for r in rows if r.get("event") in ("claimed", "report") and r.get("session") == session)
 
 
-def submit_report(root: Any, *, tree: Optional[str], session: Optional[str], host: Optional[str], key: str,
-                  outcome: str, rules_for: Callable[[Mapping[str, Any]], Sequence[str]],
-                  cap: Optional[int] = None, source: str = "mcp") -> Dict[str, Any]:
-    """Record one ``aegis_report_outcome`` call and say what it earned.
-
-    ``tree`` is the tree the server computed now. With a passing ``check`` row for it, one
-    ``report`` row per credited rule (``rules_for(check_row)``, the server's choice, never the
-    agent's); without one, a single ``claimed`` row per (session, tree) that earns nothing. A
-    session at its cap gets ``rate_limited`` and nothing is written. Raises ReportConflict when
-    the session's key was used for a different outcome. ``host`` and ``session`` are the
-    server's own (None for an in-process call, whose key is then not scoped).
-    """
+def submit_report(
+    root: Any, *, tree: Optional[str], session: Optional[str], host: Optional[str], key: str,
+    outcome: str, rules_for: Callable[[Mapping[str, Any]], Sequence[str]],
+    cap: Optional[int] = None, source: str = "mcp",
+) -> Dict[str, Any]:
     limit = MAX_REPORT_ROWS_PER_SESSION if cap is None else cap
-    result = _RESULT.get(outcome, "trigger")
-    namespaced = f"{host}/{session}/{key}" if session else key
-    # The ledger dedupes on (key, rule) and these rows carry no 'rule', so 'key' is each row's own
-    # identity: (check, rule) for a credit, (session, tree) for a claim. The caller's key, namespaced
-    # by server session, is 'report_key'.
+    result, namespaced = _RESULT.get(outcome, "trigger"), (f"{host}/{session}/{key}" if session else key)
     with ledger_locked(root):
         rows = read_rows(root)
         for row in rows:
-            if (row.get("report_key") == namespaced and row.get("event") in ("claimed", "report")
-                    and row.get("result", result) != result):
+            if row.get("report_key") == namespaced and row.get("event") in ("claimed", "report") and row.get("result", result) != result:
                 raise ReportConflict(namespaced)
-        used = _count(rows, session)
-        check = passing_check(rows, tree)
+        used, check = _count(rows, session), passing_check(rows, tree)
         if check is None:
-            existing = next((r for r in _of(rows, "claimed") if r.get("session") == session and r.get("tree") == tree), None)
-            if existing is not None:
+            if any(r.get("session") == session and r.get("tree") == tree for r in _of(rows, "claimed")):
                 return {"status": "claimed", "witness": "self", "credited": [], "tree": tree, "recorded": False}
             if used >= limit:
                 return {"status": "rate_limited", "limit": limit, "witness": "self", "credited": []}
-            ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "claimed", "witness": "self",
-                                       "tree": tree, "source": source, "session": session, "host": host,
-                                       "key": f"claim:{host}/{session}:{tree}", "report_key": namespaced,
-                                       "result": result}])
+            ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "claimed", "witness": "self", "tree": tree, "source": source, "session": session, "host": host, "key": f"claim:{host}/{session}:{tree}", "report_key": namespaced, "result": result}])
             return {"status": "claimed", "witness": "self", "credited": [], "tree": tree, "recorded": True}
-        rules = [r for r in dict.fromkeys(rules_for(check))]
+        rules = list(dict.fromkeys(rules_for(check)))
         have = {r.get("for_rule") for r in _of(rows, "report") if r.get("check") == check["id"]}
         fresh = [r for r in rules if r not in have]
         if used + len(fresh) > limit:
             return {"status": "rate_limited", "limit": limit, "witness": "aegis", "credited": []}
         if fresh:
             stamp = _now()
-            ledger.append_rows(root, [
-                {"v": ledger.LEDGER_VERSION, "ts": stamp, "event": "report", "witness": "aegis", "check": check["id"],
-                 "tree": tree, "for_rule": rule, "result": result, "source": source, "session": session, "host": host,
-                 "key": f"credit:{check['id']}:{rule}", "report_key": namespaced}
-                for rule in fresh])
+            ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": stamp, "event": "report", "witness": "aegis", "check": check["id"], "tree": tree, "for_rule": rule, "result": result, "source": source, "session": session, "host": host, "key": f"credit:{check['id']}:{rule}", "report_key": namespaced} for rule in fresh])
         return {"status": "recorded", "witness": "aegis", "credited": rules, "check": check["id"], "tree": tree}
 
 
-# ── Deriving ─────────────────────────────────────────────────────────────────
-
 @dataclass(frozen=True)
 class Credit:
-    """One ``(check, rule)`` and what it is worth now."""
-
     check: str
     rule: str
     tree: str
@@ -600,19 +350,14 @@ class Credit:
     protected: Tuple[str, ...] = ()
 
 
-def derive(rows: Sequence[Mapping[str, Any]], *, landed: Callable[[str], Optional[str]],
-           approved: Optional[Callable[[str, Sequence[str]], bool]] = None) -> List[Credit]:
-    """Fold event rows into one ``Credit`` per ``(check, rule)``. Pure: it reads ``rows`` and asks
-    ``landed`` where a tree landed; ``approved(check_id, categories)`` says whether a human approved
-    a protected change (default: never)."""
+def derive(
+    rows: Sequence[Mapping[str, Any]], *, landed: Callable[[str], Optional[str]],
+    approved: Optional[Callable[[str, Sequence[str]], bool]] = None,
+) -> List[Credit]:
     checks = {r["id"]: r for r in _of(rows, "check") if isinstance(r.get("id"), str)}
     voids = {str(r.get("check")): str(r.get("reason") or "voided") for r in _of(rows, "void")}
-    ci: Dict[str, str] = {}
-    for row in _of(rows, "ci"):
-        ci[str(row.get("commit"))] = str(row.get("ci_conclusion"))
-    flaky = flaky_keys(rows)
-    credits: List[Credit] = []
-    seen: Set[Tuple[str, str]] = set()
+    ci = {str(r.get("commit")): str(r.get("ci_conclusion")) for r in _of(rows, "ci")}
+    flaky, credits, seen = flaky_keys(rows), [], set()
     for report in _of(rows, "report"):
         identity = (str(report.get("check")), str(report.get("for_rule")))
         check = checks.get(identity[0])
@@ -629,10 +374,8 @@ def derive(rows: Sequence[Mapping[str, Any]], *, landed: Callable[[str], Optiona
             state, reason = "voided", "ci_failed"
         elif commit and conclusion == "success":
             state = "confirmed"
-        elif commit:
-            state = "landed"
         else:
-            state = "witnessed"
+            state = "landed" if commit else "witnessed"
         is_flaky = (check.get("tree"), check.get("cmd_digest"), check.get("env_class")) in flaky
         categories = tuple(check.get("protected") or ())
         counts = state == "confirmed" and not is_flaky
@@ -640,51 +383,29 @@ def derive(rows: Sequence[Mapping[str, Any]], *, landed: Callable[[str], Optiona
             counts, reason = False, "protected_changed"
         elif is_flaky and not reason:
             reason = "flaky"
-        credits.append(Credit(check=identity[0], rule=identity[1], tree=tree, state=state,
-                              result=str(report.get("result") or "trigger"), commit=commit, reason=reason,
-                              flaky=is_flaky, counts=counts, ts=str(report.get("ts") or ""), protected=categories))
+        credits.append(Credit(check=identity[0], rule=identity[1], tree=tree, state=state, result=str(report.get("result") or "trigger"), commit=commit, reason=reason, flaky=is_flaky, counts=counts, ts=str(report.get("ts") or ""), protected=categories))
     return credits
 
 
 def confirmed_outcome_rows(credits: Iterable[Credit]) -> List[Dict[str, Any]]:
-    """The outcome rows (the shape ``ledger.normalize_rows`` yields) of the credits that count,
-    the only ones a fitness or promotion decision may use."""
-    return [{"v": ledger.LEDGER_VERSION, "ts": c.ts, "rule": c.rule, "outcome": c.result, "source": "ci",
-             "key": f"credit:{c.check}", "host": None, "session": None}
-            for c in credits if c.counts]
+    return [{"v": ledger.LEDGER_VERSION, "ts": c.ts, "rule": c.rule, "outcome": c.result, "source": "ci", "key": f"credit:{c.check}", "host": None, "session": None} for c in credits if c.counts]
 
 
 def claimed_summary(root: Any) -> Dict[str, Any]:
-    """The unwitnessed reports, counted apart from every rule's evidence."""
     claims = _of(read_rows(root), "claimed")
-    return {"label": "claimed (unwitnessed)", "claimed": len(claims),
-            "sessions": len({(c.get("host"), c.get("session")) for c in claims})}
+    return {"label": "claimed (unwitnessed)", "claimed": len(claims), "sessions": len({(c.get("host"), c.get("session")) for c in claims})}
 
-
-# ── The trailer and CI falsification ─────────────────────────────────────────
 
 def format_trailer(tree: str, exit_code: int) -> str:
     return f"Aegis-Check: tree={tree} exit={exit_code}"
 
 
 def parse_trailer(line: str) -> Optional[Dict[str, Any]]:
-    """``{"tree", "exit"}`` of an ``Aegis-Check:`` trailer line, or None for anything else."""
     found = _TRAILER.fullmatch(line.strip("\r\n")) if isinstance(line, str) else None
     return {"tree": found.group(1), "exit": int(found.group(2))} if found else None
 
 
-def check_ci_divergence(trailer: Any, rerun: Mapping[str, Any], second: Optional[Mapping[str, Any]] = None
-                        ) -> Dict[str, Any]:
-    """Compare a head commit's ``Aegis-Check`` trailer with CI's own run of the same code.
-
-    ``trailer`` is the trailer line (or its parsed dict); ``rerun`` and ``second`` are
-    ``{"tree", "exit"}`` of CI's first run and, when the first diverged, its one re-run. Results:
-
-    - ``unbound``: no usable trailer, or CI ran a different tree (a rebase or a squash). Never a failure.
-    - ``agree``: the same tree and the same outcome (a re-run that agrees after a first miss is a flake).
-    - ``rerun``: the same tree, diverging outcome, no re-run yet: run once more.
-    - ``void``: the same tree still diverges on the re-run: the job fails and the check is voided.
-    """
+def check_ci_divergence(trailer: Any, rerun: Mapping[str, Any], second: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     given = parse_trailer(trailer) if isinstance(trailer, str) else (dict(trailer) if isinstance(trailer, Mapping) else None)
     if not given or not given.get("tree") or "exit" not in given:
         return {"result": "unbound", "failed": False, "reason": "no usable Aegis-Check trailer"}

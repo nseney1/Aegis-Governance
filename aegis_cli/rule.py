@@ -729,34 +729,19 @@ class RuleCommand(AegisCommand):
 def _normalize_paths_arg(raw_paths: Any) -> Optional[List[str]]:
     if raw_paths is None:
         return None
-    if isinstance(raw_paths, str):
-        items = [p.strip() for p in raw_paths.split(",") if p.strip()]
-        return items or None
-    if isinstance(raw_paths, (list, tuple)):
-        items = []
-        for elem in raw_paths:
-            for part in str(elem).split(","):
-                if part.strip():
-                    items.append(part.strip())
-        return items or None
-    return None
+    seq = [raw_paths] if isinstance(raw_paths, str) else (raw_paths if isinstance(raw_paths, (list, tuple)) else [])
+    items = [p.strip() for elem in seq for p in str(elem).split(",") if p.strip()]
+    return items or None
 
 
 def _run_insight(args: argparse.Namespace) -> int:
     from aegis_core.insights import (
-        add_insight,
-        enable_host_hook,
-        measure_recurrence,
-        record_decision,
-        review_insights,
-        write_proposal,
+        add_insight, enable_host_hook, measure_recurrence, record_decision, review_insights, write_proposal,
     )
-
     sub_action = getattr(args, "insight_action", None)
     use_json = bool(getattr(args, "json", False))
     if sub_action == "enable":
-        host = getattr(args, "host", None)
-        excerpts = bool(getattr(args, "excerpts", False))
+        host, excerpts = getattr(args, "host", None), bool(getattr(args, "excerpts", False))
         try:
             res = enable_host_hook(host, excerpts=excerpts)
         except Exception as exc:
@@ -764,29 +749,20 @@ def _run_insight(args: argparse.Namespace) -> int:
         if use_json:
             print(json.dumps(res, indent=2))
         else:
-            mode_str = "excerpts + heartbeats" if excerpts else "heartbeats only"
-            print(f"Enabled insight capture for {host} ({mode_str}) in {res['config_path']}")
+            print(f"Enabled insight capture for {host} ({'excerpts + heartbeats' if excerpts else 'heartbeats only'}) in {res['config_path']}")
         return 0
 
     if sub_action == "add":
         root = _resolve_workspace_root(args)
-        text = getattr(args, "text", "")
-        paths = _normalize_paths_arg(getattr(args, "paths", None))
         try:
             row = add_insight(
-                root,
-                text,
-                paths=paths,
-                kind=getattr(args, "kind", None),
-                host=getattr(args, "host", "cli") or "cli",
+                root, getattr(args, "text", ""), paths=_normalize_paths_arg(getattr(args, "paths", None)),
+                kind=getattr(args, "kind", None), host=getattr(args, "host", "cli") or "cli",
                 session=getattr(args, "session", None),
             )
         except Exception as exc:
             return _emit_error(args, str(exc))
-        if use_json:
-            print(json.dumps(row, indent=2))
-        else:
-            print(f"Recorded insight {row['id']} (level={row['level']}, psrc={row['psrc']})")
+        print(json.dumps(row, indent=2) if use_json else f"Recorded insight {row['id']} (level={row['level']}, psrc={row['psrc']})")
         return 0
 
     if sub_action == "review":
@@ -795,60 +771,39 @@ def _run_insight(args: argparse.Namespace) -> int:
         rev = review_insights(root)
         if decision:
             cid = getattr(args, "cluster_id", None)
-            target_cluster = None
-            if cid:
-                target_cluster = next((c for c in rev["clusters"] if c["cluster_id"] == cid), None)
-            elif rev["clusters"]:
-                target_cluster = rev["clusters"][0]
-                cid = target_cluster["cluster_id"]
+            target_cluster = next((c for c in rev["clusters"] if c["cluster_id"] == cid), None) if cid else (rev["clusters"][0] if rev["clusters"] else None)
+            cid = cid or (target_cluster["cluster_id"] if target_cluster else None)
             if not cid:
                 return _emit_error(args, "no cluster available to record decision; pass --cluster")
             ins_ids = target_cluster["insight_ids"] if target_cluster else []
             try:
                 dec_row = record_decision(
-                    root,
-                    cluster_id=cid,
-                    decision=decision,
-                    insight_ids=ins_ids,
-                    reason=getattr(args, "reason", None),
-                    rule_id=getattr(args, "rule_id", None),
+                    root, cluster_id=cid, decision=decision, insight_ids=ins_ids,
+                    reason=getattr(args, "reason", None), rule_id=getattr(args, "rule_id", None),
                 )
-                proposal_path = None
                 if decision == "propose":
                     prop_id = getattr(args, "proposal_id", None) or f"trap-{cid.replace('cluster-', '')}"
                     summary = getattr(args, "summary", None) or f"Address recurring correction cluster {cid}."
                     paths = (target_cluster.get("paths") if target_cluster else None) or ["**"]
-                    proposal_path = str(
-                        write_proposal(
-                            root,
-                            proposal_id=prop_id,
-                            target_paths=paths,
-                            category=getattr(args, "category", "correctness") or "correctness",
-                            summary_bullets=[summary],
-                            insight_ids=ins_ids,
-                        )
-                    )
-                    dec_row["proposal_path"] = proposal_path
+                    dec_row["proposal_path"] = str(write_proposal(
+                        root, proposal_id=prop_id, target_paths=paths,
+                        category=getattr(args, "category", "correctness") or "correctness",
+                        summary_bullets=[summary], insight_ids=ins_ids,
+                    ))
             except Exception as exc:
                 return _emit_error(args, str(exc))
-            if use_json:
-                print(json.dumps(dec_row, indent=2))
-            else:
-                print(f"Recorded decision '{decision}' for {cid}")
+            print(json.dumps(dec_row, indent=2) if use_json else f"Recorded decision '{decision}' for {cid}")
             return 0
 
-        rule_id = getattr(args, "rule_id", None)
-        if rule_id:
+        if rule_id := getattr(args, "rule_id", None):
             try:
                 rev["recurrence"] = measure_recurrence(root, rule_id)
             except Exception as exc:
                 return _emit_error(args, str(exc))
-
         if use_json:
             print(json.dumps(rev, indent=2))
         else:
-            clusters = rev.get("clusters", [])
-            suggestions = rev.get("suggestions", [])
+            clusters, suggestions = rev.get("clusters", []), rev.get("suggestions", [])
             print(f"Insight Review: {len(clusters)} cluster(s), {len(suggestions)} unconfirmed agent suggestion(s)")
             for c in clusters:
                 print(f"  [{c['cluster_id']}] count={c['count']} status={c['match_status']} rule={c.get('matched_rule') or 'none'}")
@@ -860,6 +815,3 @@ def _run_insight(args: argparse.Namespace) -> int:
 if __name__ == "__main__":  # pragma: no cover
     from aegis_cli.cli import main
     sys.exit(main(["rule"] + sys.argv[1:]))
-
-
-
