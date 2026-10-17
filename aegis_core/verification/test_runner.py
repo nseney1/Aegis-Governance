@@ -212,7 +212,10 @@ def run_external_cmd(
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             checkrun.kill_group(proc)
-            out_tail, err_tail = proc.communicate()
+            try:
+                out_tail, err_tail = proc.communicate()
+            except Exception:
+                out_tail, err_tail = "", ""
             return {
                 "returncode": 124,
                 "stdout": out_tail or "",
@@ -222,7 +225,8 @@ def run_external_cmd(
                 "duration_s": time.perf_counter() - t0,
             }
         finally:
-            checkrun.kill_group(proc)
+            if os.name != "nt" or getattr(proc, "poll", lambda: None)() is None:
+                checkrun.kill_group(proc)
         return {
             "returncode": proc.returncode,
             "stdout": out or "",

@@ -31,6 +31,7 @@ def _no_real_gh(monkeypatch):
     from aegis_core import human_gate
 
     monkeypatch.setattr(human_gate, "default_gh_runner", lambda argv, stdin=None, cwd=None: None)
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
 
 
 @pytest.fixture(autouse=True)

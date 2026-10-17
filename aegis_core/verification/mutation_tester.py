@@ -372,6 +372,41 @@ class TestRunResult:
     loaded: bool = False  # the run imported the staged source for the target module
 
 
+def _is_within(path: str, parent: str) -> bool:
+    try:
+        return os.path.commonpath([path, parent]) == parent
+    except ValueError:
+        return False
+
+
+def _resolve_test_rootdir(test_files: Sequence[str]) -> Optional[str]:
+    """Return a bounded pytest rootdir/confcutdir for *test_files*, or None if none exist on disk."""
+    dirs = [os.path.dirname(os.path.abspath(f)) for f in test_files if f and os.path.exists(f)]
+    if not dirs:
+        return None
+    try:
+        common = os.path.commonpath(dirs)
+    except ValueError:
+        return None
+    temp_root = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
+    cur = common
+    conftest_root: Optional[str] = None
+    while True:
+        cur_norm = os.path.normcase(os.path.realpath(cur))
+        base = os.path.basename(cur)
+        if cur_norm == temp_root or base.startswith("pytest-of-"):
+            break
+        if any(os.path.exists(os.path.join(cur, marker)) for marker in ("pyproject.toml", "pytest.ini", "setup.cfg")):
+            return cur
+        if conftest_root is None and os.path.exists(os.path.join(cur, "conftest.py")):
+            conftest_root = cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return conftest_root or common
+
+
 def _check_tests(
     test_files: Sequence[str],
     timeout: int,
@@ -389,6 +424,9 @@ def _check_tests(
             detail="pytest executable could not be resolved in active environment",
         )
     cmd = pytest_cmd + ["-x", "-q", "--no-header", "--tb=short", "-p", "no:cacheprovider"]
+    rootdir = _resolve_test_rootdir(test_files)
+    if rootdir is not None:
+        cmd += [f"--rootdir={rootdir}", f"--confcutdir={rootdir}"]
     env_root = swap.workdir if swap is not None else tempfile.gettempdir()
     env = checkrun.hermetic_env(env_root)
     py_bin_dir = os.path.dirname(sys.executable)
@@ -398,7 +436,17 @@ def _check_tests(
             env["PATH"] = py_bin_dir + (os.pathsep + existing_path if existing_path else "")
     # No bytecode and no cache: the runs leave the tree as they found it.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    sys_dirs = os.pathsep.join(p for p in sys.path if p and os.path.isdir(p))
+    temp_root = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
+    test_real = [os.path.normcase(os.path.realpath(f)) for f in test_files if f and os.path.exists(f)]
+    clean_sys_dirs: list[str] = []
+    for p in sys.path:
+        if not p or not os.path.isdir(p):
+            continue
+        p_real = os.path.normcase(os.path.realpath(p))
+        if _is_within(p_real, temp_root) and not any(_is_within(tf, p_real) for tf in test_real):
+            continue
+        clean_sys_dirs.append(p)
+    sys_dirs = os.pathsep.join(clean_sys_dirs)
     if swap is not None:
         cmd += ["-p", _SWAP_PLUGIN]
         staged = swap.stage(source or "")
@@ -441,9 +489,14 @@ def _check_tests(
                 stderr = err_str or ""
             except subprocess.TimeoutExpired:
                 checkrun.kill_group(proc)
+                try:
+                    proc.communicate()
+                except Exception:
+                    pass
                 raise
             finally:
-                checkrun.kill_group(proc)
+                if os.name != "nt" or getattr(proc, "poll", lambda: None)() is None:
+                    checkrun.kill_group(proc)
     except subprocess.TimeoutExpired:
         return TestRunResult(
             passed=False,

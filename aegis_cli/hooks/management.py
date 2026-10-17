@@ -756,5 +756,10 @@ def run_hook_status(args: Any) -> int:
     return 0
 
 
-from aegis_cli.hooks.insights import enable_insight_hook, insight_hook_status  # noqa: E402
+def __getattr__(name: str) -> Any:
+    if name in ("enable_insight_hook", "insight_hook_status"):
+        from aegis_cli.hooks import insights
+
+        return getattr(insights, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

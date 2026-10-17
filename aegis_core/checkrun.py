@@ -215,6 +215,8 @@ hermetic_env = _hermetic_env
 
 def _kill_group(proc: "subprocess.Popen[Any]") -> None:
     if os.name == "nt":
+        if getattr(proc, "poll", lambda: None)() is not None:
+            return
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, check=False)
         return
     try:
