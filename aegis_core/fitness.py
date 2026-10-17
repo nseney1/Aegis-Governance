@@ -301,6 +301,7 @@ def _collect_t4_events_for_rules(
         return info
     proj = proj_credits if proj_credits is not None else credit.project_credits(workspace)
     confirmed_checks = {(c.check, c.rule) for c in proj.credits if c.counts and c.result == "tp"}
+    active_detections: Dict[Tuple[str, str, str, str], str] = {}
     for raw in raw_rows:
         if not isinstance(raw, dict):
             continue
@@ -331,15 +332,30 @@ def _collect_t4_events_for_rules(
             if len(b["samples"]) < 3:
                 b["samples"].append({"kind": "adjudication", "verdict": verdict, "ref": raw.get("ref"), "file": raw.get("file"), "line": raw.get("line"), "summary": raw.get("summary") or raw.get("snippet") or ""})
         elif ev == "detection":
-            disp = raw.get("disposition")
+            disp = str(raw.get("disposition") or "")
+            d_key = (rid, str(raw.get("file") or ""), str(raw.get("pattern") or ""), str(raw.get("branch") or "main"))
+            prev_disp = active_detections.get(d_key)
+            if prev_disp == "caught":
+                b["caught"] = max(0, b["caught"] - 1)
+            elif prev_disp == "leaked":
+                b["leaked"] = max(0, b["leaked"] - 1)
+            if disp in ("caught", "leaked"):
+                active_detections[d_key] = disp
             if disp == "caught":
                 b["caught"], b["post_reinforce_exposures"] = b["caught"] + 1, {}
             elif disp == "leaked":
                 b["leaked"] += 1
             if isinstance(ts, str) and ts and (b["last_ts"] is None or ts > b["last_ts"]):
                 b["last_ts"] = ts
-            if len(b["samples"]) < 3:
-                b["samples"].append({"kind": "detection", "disposition": disp, "file": raw.get("file"), "pattern": raw.get("pattern"), "branch": raw.get("branch"), "rev": raw.get("rev")})
+            sample_item = {"kind": "detection", "disposition": disp, "file": raw.get("file"), "pattern": raw.get("pattern"), "branch": raw.get("branch"), "rev": raw.get("rev")}
+            replaced = False
+            for idx, s_item in enumerate(b["samples"]):
+                if s_item.get("kind") == "detection" and s_item.get("file") == raw.get("file") and s_item.get("pattern") == raw.get("pattern") and s_item.get("branch") == raw.get("branch"):
+                    b["samples"][idx] = sample_item
+                    replaced = True
+                    break
+            if not replaced and len(b["samples"]) < 3:
+                b["samples"].append(sample_item)
         elif ev == "override":
             b["contested"] += 1
         elif ev == "exposure" and raw.get("session"):
@@ -435,7 +451,7 @@ def _violations_at_commit(root: Path, commit: str, rules: Sequence[Any]) -> Set[
     return hits
 
 
-def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = None, *, branch: str = "main", persist: bool = True) -> List[Dict[str, Any]]:
+def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = None, *, branch: Optional[str] = None, persist: bool = True) -> List[Dict[str, Any]]:
     from aegis_core import credit, gitsafe
     from aegis_core.rules import load_rules, workspace_root
     root = Path(workspace_root(workspace)).resolve()
@@ -443,7 +459,19 @@ def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = Non
     forbid_rules = [r for r in loaded if isinstance((getattr(r, "meta", {}) or {}).get("forbid_ast"), Mapping)]
     if not forbid_rules:
         return []
-    rev_res = gitsafe.run(["rev-list", "--parents", "--reverse", "HEAD"], root)
+    target_branch = branch or credit.resolve_protected_branch(root) or "main"
+    target_rev = next(
+        (c for ref in (f"refs/heads/{target_branch}", f"refs/remotes/origin/{target_branch}", target_branch)
+         if (c := gitsafe.resolve_commit(root, ref))),
+        None,
+    )
+    if target_rev is None:
+        if branch is not None:
+            return []
+        target_rev = gitsafe.resolve_commit(root, "HEAD")
+    if not target_rev:
+        return []
+    rev_res = gitsafe.run(["rev-list", "--parents", "--reverse", target_rev], root)
     commit_lines = [ln.strip().split() for ln in rev_res.stdout.decode("utf-8", "replace").splitlines() if ln.strip()] if rev_res.returncode == 0 else []
     if not commit_lines:
         return []
@@ -464,7 +492,7 @@ def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = Non
         for parts in merge_commits:
             merge_sha, p1, p2 = parts[0], parts[1], parts[2]
             m_branch = _MERGE_BRANCH_RE.search(commit_subject(merge_sha))
-            b_label = m_branch.group(1) if m_branch else f"{branch}:{merge_sha[:8]}"
+            b_label = m_branch.group(1) if m_branch else f"{target_branch}:{merge_sha[:8]}"
             br_res = gitsafe.run(["rev-list", "--reverse", f"{p1}..{p2}"], root)
             branch_shas = [s.strip() for s in br_res.stdout.decode("utf-8", "replace").splitlines() if s.strip()]
             base_hits, merge_hits = hits_for(p1), hits_for(merge_sha)
@@ -481,13 +509,13 @@ def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = Non
         for idx, sha in enumerate(shas):
             prev_hits = hits_for(shas[idx - 1]) if idx > 0 else set()
             for rid, rel, pat in sorted(hits_for(sha) - prev_hits):
-                key = (rid, rel, pat, branch)
+                key = (rid, rel, pat, target_branch)
                 if (rid, rel, pat) in tip_hits:
-                    findings[key] = {"rule": rid, "file": rel, "pattern": pat, "disposition": "leaked", "weight": 1.0, "branch": branch, "rev": sha}
+                    findings[key] = {"rule": rid, "file": rel, "pattern": pat, "disposition": "leaked", "weight": 1.0, "branch": target_branch, "rev": sha}
                 else:
                     fix_sha = next((s for s in shas[idx + 1:] if (rid, rel, pat) not in hits_for(s)), shas[-1])
                     disp = "leaked" if "revert" in commit_subject(fix_sha).lower() else "caught"
-                    findings[key] = {"rule": rid, "file": rel, "pattern": pat, "disposition": disp, "weight": 1.0 if disp == "leaked" else 0.5, "branch": branch, "rev": sha, "fix_rev": fix_sha}
+                    findings[key] = {"rule": rid, "file": rel, "pattern": pat, "disposition": disp, "weight": 1.0 if disp == "leaked" else 0.5, "branch": target_branch, "rev": sha, "fix_rev": fix_sha}
     return [dict(i) for i in findings.values()] if not persist else [
         credit.record_detection(root, i["rule"], i["file"], i["pattern"], disposition=i["disposition"], rev=i.get("rev"), branch=i["branch"], fix_rev=i.get("fix_rev"), weight=i["weight"])
         for i in findings.values()

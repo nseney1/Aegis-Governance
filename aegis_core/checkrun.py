@@ -53,6 +53,7 @@ __all__ = [
     "env_class",
     "plan_command",
     "record",
+    "rerun_commit_snapshot",
     "user_test_command",
 ]
 
@@ -377,3 +378,52 @@ def record(root: object, *, tests: bool = False, base: Optional[str] = None, tim
         row["id"] = hashlib.sha256(identity.encode("ascii")).hexdigest()[:16]
         ledger.append_rows(workspace, [row])
     return CheckOutcome("recorded", row, "", binding)
+
+
+def rerun_commit_snapshot(
+    root: object, commit: str, base_ref: str, *, timeout: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Export ``commit``'s tree into an isolated snapshot and rerun Layer 1 and snapshot tests."""
+    from aegis_core import regression
+
+    workspace = Path(os.fspath(root)).resolve()
+    top = gitsafe.toplevel(workspace)
+    if top is None:
+        return {"tree": "", "exit": 1}
+    commit_tree = gitsafe.run(["rev-parse", f"{commit}^{{tree}}"], top).stdout.decode("ascii", "replace").strip()
+    base_commit = gitsafe.merge_base(top, base_ref, commit) or gitsafe.resolve_commit(top, base_ref) or commit
+    entries = gitsafe.diff_entries(top, base_commit, commit)
+    changed = [p for s, _o, _n, p in entries if s != "D"]
+    tree_entries = regression._tree_blobs(str(top), commit)
+    blobs = regression._read_blobs(str(top), {oid for _m, oid in tree_entries.values()})
+    scratch = Path(tempfile.mkdtemp(prefix="aegis-trailer-rerun-"))
+    try:
+        snapshot = scratch / "snapshot"
+        regression._export_snapshot(snapshot, tree_entries, blobs)
+        layer1 = _layer1(snapshot, changed)
+        user_cmd = user_test_command(workspace)
+        tests_ok, raw_exit = True, 0
+        if user_cmd is not None:
+            junit, home, tmp = scratch / "junit.xml", scratch / "home", scratch / "tmp"
+            home.mkdir(mode=0o700)
+            tmp.mkdir(mode=0o700)
+            argv, _ = plan_command(user_cmd, junit)
+            run = run_tests(argv, snapshot, _hermetic_env(home, tmp), timeout or 120.0, junit, scratch / "output.txt")
+            tests_ok, raw_exit = run.evidence, run.exit
+        else:
+            t_files = [p for p in changed if regression.is_test_file(p) and (snapshot / p).is_file()]
+            if not t_files:
+                t_files = [p for p in tree_entries if regression.is_test_file(p) and (snapshot / p).is_file()]
+            if t_files:
+                out = regression._run_pytest_in_snapshot(snapshot, t_files, workspace, scratch, timeout or 120.0)
+                tests_ok = out.exit_code == 0 and bool(out.passed_ids) and not out.failed_ids and not out.collection_errors
+                raw_exit = out.exit_code
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    passed = layer1["findings"] == 0 and tests_ok
+    return {"tree": commit_tree, "exit": 0 if passed else (raw_exit if raw_exit != 0 else 1)}
+
+
+from aegis_core import credit as _credit_mod  # noqa: E402
+_credit_mod._DEFAULT_SNAPSHOT_RERUN = rerun_commit_snapshot
+

@@ -258,7 +258,7 @@ def _print_ci(report, fmt: str, root: str, reg_report=None, cov_report=None, per
 def _run_ci(args: argparse.Namespace) -> int:
     """`aegis check --ci`: 0 nothing weakened or every weakening approved, 1 otherwise, 2 usage."""
     from aegis_cli import sanitize_display
-    from aegis_core import credit, gitsafe, regression, rule_integrity
+    from aegis_core import checkrun, credit, gitsafe, regression, rule_integrity
 
     stray = [flag for flag, given in (
         ("FILES", bool(getattr(args, "files", None))), ("--full", bool(getattr(args, "full", False))),
@@ -287,7 +287,7 @@ def _run_ci(args: argparse.Namespace) -> int:
     try:
         report = rule_integrity.check_ci(root, base, head)
         reg_report = regression.check_ci_regressions(root, base, head, tier=reg_tier)
-        trailer_checks = credit.verify_commit_trailers(root, base, head)
+        trailer_checks = credit.verify_commit_trailers(root, base, head, rerun_fn=lambda c, _t: checkrun.rerun_commit_snapshot(root, c, base))
     except (rule_integrity.IntegrityError, regression.RegressionError, gitsafe.GitError) as exc:
         print(f"Error: {sanitize_display(str(exc), 400)}", file=sys.stderr)
         return 1

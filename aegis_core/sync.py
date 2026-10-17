@@ -188,13 +188,12 @@ def sync(
             replay_detector_history(ws.root, loaded_ok)
         except (OSError, ValueError):
             pass
-        if ci_client is not None:
-            credit.confirm(ws.root, client=ci_client, workflow=workflow)
-        else:
-            c_root = credit._canon_root(ws.root)
-            ev_rows = credit.read_rows(ws.root)
-            if any(r.get("event") == "report" for r in ev_rows) and not any(k[0] == c_root for k in credit._VERIFIED_CI):
-                credit.confirm(ws.root, client=credit.GhRestClient(cwd=str(ws.root)), workflow=workflow)
+        if ci_client is not None or any(r.get("event") == "report" for r in credit.read_rows(ws.root)):
+            credit.confirm(
+                ws.root,
+                client=ci_client if ci_client is not None else credit.GhRestClient(cwd=str(ws.root)),
+                workflow=workflow,
+            )
         derived = build(ws, ruleset, now, ledger.read(ws))
         missing = ledger.incomplete(derived["ledger"])
         applied, refused = [], None

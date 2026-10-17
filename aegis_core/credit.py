@@ -284,11 +284,16 @@ def record_detection(
     if disposition not in ("caught", "leaked"):
         raise ValueError(f"disposition must be 'caught' or 'leaked', got {disposition!r}")
     eff_weight = float(weight) if weight is not None else (0.5 if disposition == "caught" else 1.0)
+    b_name = branch or "main"
     with ledger_locked(root):
+        latest = None
         for ex in _of(read_rows(root), "detection"):
-            if (ex.get("rule") or ex.get("for_rule")) == rule and ex.get("file") == file and ex.get("pattern") == pattern and (ex.get("branch") or "main") == (branch or "main"):
-                return _normalize_event_row(ex)
-        row = {"v": ledger.LEDGER_VERSION, "ts": ts or _now(), "event": "detection", "for_rule": rule, "file": file, "pattern": pattern, "disposition": disposition, "branch": branch or "main", "rev": rev, "fix_rev": fix_rev, "weight": eff_weight}
+            if (ex.get("rule") or ex.get("for_rule")) == rule and ex.get("file") == file and ex.get("pattern") == pattern and (ex.get("branch") or "main") == b_name:
+                latest = ex
+        if (latest is not None and latest.get("disposition") == disposition and latest.get("rev") == rev
+                and latest.get("fix_rev") == fix_rev and float(latest.get("weight") or 0.0) == eff_weight):
+            return _normalize_event_row(latest)
+        row = {"v": ledger.LEDGER_VERSION, "ts": ts or _now(), "event": "detection", "for_rule": rule, "file": file, "pattern": pattern, "disposition": disposition, "branch": b_name, "rev": rev, "fix_rev": fix_rev, "weight": eff_weight}
         return _normalize_event_row(ledger.append_rows(root, [row])[0])
 
 
@@ -541,6 +546,9 @@ class CreditProjection:
     error: Optional[str] = None
 
 
+_DEFAULT_SNAPSHOT_RERUN: Optional[Callable[[Any, str, str], Mapping[str, Any]]] = None
+
+
 def project_credits(
     root: Any, *, view: Any = None, client: Any = None, workflow: str = DEFAULT_WORKFLOW,
     attestation_runner: Optional[Callable[..., Any]] = None,
@@ -564,21 +572,32 @@ def project_credits(
     if err:
         return CreditProjection((), (), available=False, error=str(err))
     v_map: Dict[str, str] = {}
-    if attestation_runner is not None and p_branch:
+    if p_branch:
+        rest_client = GhRestClient(cwd=str(root)) if (client is None and attestation_runner is None) else None
         for ci_row in _of(rows, "ci"):
             commit = str(ci_row.get("commit") or "")
             if not commit or (c_root, commit) in _UNAVAILABLE_CI or (c_root, commit) in _VERIFIED_CI:
                 continue
+            wf = str(ci_row.get("workflow") or workflow)
+            if rest_client is not None:
+                try:
+                    runs = rest_client.runs_for(commit)
+                    run = select_ci_run(runs, commit, wf, branch=p_branch)
+                    conc, rid, ratt = ci_conclusion(run), (run.get("id") if run else None), (run.get("run_attempt") if run else None)
+                    _VERIFIED_CI[(c_root, commit)] = {"conclusion": conc, "workflow": wf, "branch": p_branch, "run_id": rid, "run_attempt": ratt}
+                    continue
+                except CIUnavailable:
+                    pass
             if ci_row.get("ci_conclusion") == "success":
                 rid, ratt = ci_row.get("run_id"), ci_row.get("ci_run_attempt")
                 exp_run = f"{rid}/{ratt}" if rid is not None and ratt is not None else None
-                wf = str(ci_row.get("workflow") or workflow)
                 rep = release_verify.verify_release(
                     root, commit, run=attestation_runner,
                     source_ref=f"refs/heads/{p_branch}", workflow=f".github/workflows/{wf}", expected_run=exp_run,
                 )
                 if rep.verified:
                     v_map[commit] = "success"
+                    _VERIFIED_CI[(c_root, commit)] = {"conclusion": "success", "workflow": wf, "branch": p_branch, "run_id": rid, "run_attempt": ratt}
     app_fn = approved or approval_lookup(root, rows, landed=look)
     derived = derive(rows, landed=look, approved=app_fn, verified_ci=v_map or None)
     return CreditProjection(tuple(derived), tuple(confirmed_outcome_rows(derived)), available=True, error=None)
@@ -633,6 +652,9 @@ def verify_commit_trailers(
     for chk in _of(rows, "check"):
         if isinstance(chk.get("tree"), str):
             checks_by_tree.setdefault(chk["tree"], []).append(chk)
+    eff_rerun: Optional[Callable[[str, str], Mapping[str, Any]]] = rerun_fn
+    if eff_rerun is None and _DEFAULT_SNAPSHOT_RERUN is not None:
+        eff_rerun = lambda c, _t: _DEFAULT_SNAPSHOT_RERUN(root, c, base)
     results: List[Dict[str, Any]] = []
     for oid in rev.stdout.decode("ascii", "replace").split():
         msg = gitsafe.run(["log", "-1", "--format=%B", oid], top).stdout.decode("utf-8", "replace")
@@ -640,19 +662,15 @@ def verify_commit_trailers(
         trailers = [t for line in msg.splitlines() if (t := parse_trailer(line)) is not None]
         for tr in trailers:
             t_checks = checks_by_tree.get(tr["tree"], [])
-            if rerun_fn is not None:
-                first = rerun_fn(oid, commit_tree)
+            if eff_rerun is not None:
+                first = eff_rerun(oid, commit_tree)
                 verdict = check_ci_divergence(tr, first)
                 if verdict["result"] == "rerun":
-                    verdict = check_ci_divergence(tr, first, rerun_fn(oid, commit_tree))
+                    verdict = check_ci_divergence(tr, first, eff_rerun(oid, commit_tree))
             elif commit_tree != tr["tree"]:
-                verdict = check_ci_divergence(tr, {"tree": commit_tree, "exit": 0})
-            elif t_checks:
-                exits = [{"tree": tr["tree"], "exit": int(c.get("exit", 0 if c.get("passed") else 1))} for c in t_checks]
-                first = exits[0]
-                verdict = check_ci_divergence(tr, first, exits[1] if len(exits) > 1 else exits[0])
+                verdict = check_ci_divergence(tr, {"tree": commit_tree, "exit": 1})
             else:
-                verdict = check_ci_divergence(tr, {"tree": commit_tree, "exit": tr["exit"]})
+                raise RuntimeError("verify_commit_trailers requires a snapshot rerunner (import aegis_core.checkrun or pass rerun_fn)")
             if verdict["failed"]:
                 for c in t_checks:
                     if isinstance(c.get("id"), str):
