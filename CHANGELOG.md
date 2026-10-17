@@ -2,6 +2,18 @@
 
 All notable changes to Aegis Guardrails are documented here. The project uses [Semantic Versioning](https://semver.org/). Releases before 1.0.0 are summarized at the end.
 
+## [4.3.2] - 2026-10-17
+
+### Changed
+
+- **Seeded `no-eval` starter rule uses `builtin: true` (`rules/no-eval.md`, `aegis_cli.init`, `aegis_core.scaffolding`).** The active starter invariant seeded by `aegis init` now uses v4.3's structured `forbid_ast.calls` predicate (`[{"name": "eval", "builtin": true}, {"name": "exec", "builtin": true}]`), blocking builtin `eval()` and `exec()` (including `builtins.eval` / `__builtins__.exec`) while eliminating false positives on method calls such as pandas `df.eval()`, PyTorch `model.eval()`, and SQLModel `session.exec()`.
+- **Monolith modularization across `aegis_cli` and `aegis_core` (`aegis_cli.doctor`, `aegis_cli.init`, `aegis_core.lane_gate`).** Extracted pure test-AST and `pytest` INI/TOML parsing into `aegis_core.lane_ast` (`L0`), rule packaging and CI workflow scaffolding into `aegis_core.scaffolding` (`L1`) and `aegis_cli.init_views`, and decomposed `aegis_cli.doctor` into `doctor_findings`, `doctor_repair`, and `doctor_render` while preserving all public and compatibility re-exports.
+- **README progressive disclosure and search discoverability (`README.md`, `docs/how-it-works.md`, `pyproject.toml`).** Restructured the README quick start around the 3-step loop (Install, Scan before edit, Block bad commits in Git/CI) and moved statistical decay, Wilson interval, and SSH signing ceremony internals into collapsible sections and `docs/how-it-works.md`.
+
+### Fixed
+
+- **Canonical test-suite candidate resolution (`aegis_core.verification.checkpoint_checks`).** Expanded `_resolve_canonical_test_candidates` to include `tests/contract/` and mapped domain test suites so `aegis check` no longer emits false-positive missing-test warnings.
+
 ## [4.3.1] - 2026-10-17
 
 ### Fixed
