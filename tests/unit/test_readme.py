@@ -153,8 +153,8 @@ def _section(text: str, heading: str) -> str:
 
 
 def _lead(text: str) -> str:
-    """The first paragraph after the H1: GitHub's and PyPI's opening words."""
-    return re.search(r"^# .*\n+(.+?)\n", text).group(1)
+    """The first prose paragraph after the H1 (skipping leading badge lines): GitHub's and PyPI's opening words."""
+    return re.search(r"^# .*\n+(?:\[!\[[^\n]+\n+)*(.+?)\n", text).group(1)
 
 
 def _git(root: Path, *args: str) -> None:

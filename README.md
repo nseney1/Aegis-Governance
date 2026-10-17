@@ -1,12 +1,12 @@
 # Aegis Guardrails: Rules, AST Checks & MCP Server for AI Coding Agents
 
-Aegis keeps Claude Code, Codex CLI and Antigravity on your project's rules via a zero-dependency Model Context Protocol (`MCP`) server (`aegis-mcp`), `AGENTS.md` / `CLAUDE.md` bootstrap, git `pre-commit` hooks, and CI governance (`aegis check`). It serves each agent just-in-time rules for the files it is about to edit, then enforces AST and repository invariants before commit and in pull requests.
-
 [![PyPI](https://img.shields.io/pypi/v/aegis-guardrails)](https://pypi.org/project/aegis-guardrails/)
 [![Python](https://img.shields.io/pypi/pyversions/aegis-guardrails)](https://pypi.org/project/aegis-guardrails/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/nseney1/Aegis-Guardrails/blob/main/LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](https://github.com/nseney1/Aegis-Guardrails/blob/main/pyproject.toml)
 [![CI](https://github.com/nseney1/Aegis-Guardrails/actions/workflows/validate.yml/badge.svg)](https://github.com/nseney1/Aegis-Guardrails/actions/workflows/validate.yml)
+
+Aegis keeps Claude Code, Codex CLI and Antigravity on your project's rules via a zero-dependency Model Context Protocol (`MCP`) server (`aegis-mcp`), `AGENTS.md` / `CLAUDE.md` bootstrap, git `pre-commit` hooks, and CI governance (`aegis check`). It serves each agent just-in-time rules for the files it is about to edit, then enforces AST and repository invariants before commit and in pull requests.
 
 ## What is Aegis?
 
