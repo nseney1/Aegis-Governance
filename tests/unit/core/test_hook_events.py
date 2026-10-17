@@ -192,6 +192,7 @@ def test_pure_codex_apply_patch_forms_are_edits_without_a_shell_command(command)
     "apply_patch '*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** End Patch' && git reset --hard",
     'apply_patch "*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** End Patch" && git reset --hard',
     "apply_patch <<EOF\n*** Begin Patch\n*** Add File: a.py\n+$(git reset --hard)\n*** End Patch\nEOF",
+    'apply_patch <<EOF\n*** Begin Patch\n*** Add File: a.py\n+$(echo ")" && git reset --hard)\n*** End Patch\nEOF',
     "apply_patch <<EOF\n*** Begin Patch\n*** Add File: a.py\n+`git reset --hard`\n*** End Patch\nEOF",
     'apply_patch "*** Begin Patch\n*** Add File: a.py\n+$(git reset --hard)\n*** End Patch"',
     "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** End Patch\nEOF\necho done",

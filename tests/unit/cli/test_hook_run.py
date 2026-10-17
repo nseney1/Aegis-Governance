@@ -139,6 +139,7 @@ def test_a_pure_quoted_apply_patch_heredoc_with_destructive_diff_line_is_only_sc
     "apply_patch <<'EOF' && git reset --hard\n*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** End Patch\nEOF",
     "apply_patch '*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** End Patch' && git reset --hard",
     "apply_patch <<EOF\n*** Begin Patch\n*** Add File: a.py\n+$(git reset --hard)\n*** End Patch\nEOF",
+    'apply_patch <<EOF\n*** Begin Patch\n*** Add File: a.py\n+$(echo ")" && git reset --hard)\n*** End Patch\nEOF',
 ])
 def test_codex_apply_patch_command_chaining_and_unquoted_substitutions_are_blocked_by_guard(ws, capsys, command):
     _fresh_row(ws, ["a.py"], host="codex-cli")

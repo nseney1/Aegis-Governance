@@ -645,3 +645,28 @@ class TestModuleSwapStaging:
         assert ev.detail == "0/1 survived (1 test file ran)"
         assert ev.lines == []
 
+    def test_check_tests_kills_process_group_on_timeout(self, tmp_path):
+        """A timed-out subprocess in _check_tests has its process group killed via checkrun.kill_group."""
+        import subprocess
+        from aegis_core.verification import mutation_tester
+
+        test = tmp_path / "test_target.py"
+        test.write_text("def test_inc():\n    assert True\n", encoding="utf-8")
+
+        class _FakeProc:
+            pid = 42424
+
+            def communicate(self, timeout=None):
+                raise subprocess.TimeoutExpired(cmd=["pytest"], timeout=timeout)
+
+        fake_proc = _FakeProc()
+        with patch("aegis_core.verification.test_runner.resolve_pytest_cmd", return_value=["pytest"]), patch(
+            "subprocess.Popen", return_value=fake_proc
+        ) as mock_popen, patch("aegis_core.checkrun.kill_group") as mock_kill_group:
+            res = mutation_tester._check_tests([str(test)], timeout=5)
+
+        assert res.passed is False
+        assert res.status == "timeout"
+        assert mock_popen.called
+        assert mock_kill_group.called
+
