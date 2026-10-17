@@ -28,6 +28,8 @@ import os
 import re
 from typing import Any, List, Mapping, Optional, Tuple
 
+from aegis_core import command_safety
+
 __all__ = [
     "HOSTS",
     "HookCall",
@@ -46,19 +48,8 @@ _CLAUDE_EDIT = {"Write": "file_path", "Edit": "file_path", "NotebookEdit": "note
 _AGY_EDIT = frozenset({"write_to_file", "replace_file_content", "multi_replace_file_content"})
 
 _PATCH_HEADER = re.compile(r"\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)")
-# A shell command Codex runs as a patch: `apply_patch` (or `applypatch`) first, after an
-# optional `cd <dir> &&`, with the patch in a heredoc or an argument.
-_APPLY_PATCH_COMMAND = re.compile(
-    r"\s*(?:cd[ \t]+(?P<dir>'[^'\n]*'|\"(?:[^\"\\`\n]|\\.)*\"|(?:[^\s;&|'\"`$()<>\n\\]|\\[^\n])+)[ \t]*&&[ \t]*)?(?:apply_patch|applypatch)(?=\s|$)"
-)
-_HEREDOC_HEADER = re.compile(
-    r"[ \t]*<<(?P<dash>-?)[ \t]*(?:'(?P<sdelim>[A-Za-z0-9_]+)'|\"(?P<ddelim>[A-Za-z0-9_]+)\"|\\(?P<bdelim>[A-Za-z0-9_]+)|(?P<udelim>[A-Za-z0-9_]+))[ \t]*\r?\n"
-)
-_INLINE_HEREDOC = re.compile(
-    r"<<(?P<dash>-?)[ \t]*(?:'(?P<sdelim>[A-Za-z0-9_]+)'|\"(?P<ddelim>[A-Za-z0-9_]+)\"|\\(?P<bdelim>[A-Za-z0-9_]+)|(?P<udelim>[A-Za-z0-9_]+))"
-)
-_SINGLE_QUOTED_ARG = re.compile(r"[ \t]*'(?P<body>[^']*)'\s*\Z", re.DOTALL)
-_DOUBLE_QUOTED_ARG = re.compile(r'[ \t]*"(?P<body>(?:[^"\\]|\\.)*)"\s*\Z', re.DOTALL)
+_HEREDOC_TOKEN = re.compile(r"<<-?[A-Za-z_][A-Za-z0-9_]*")
+_HEREDOC_DELIM = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 @dataclass(frozen=True)
@@ -110,231 +101,57 @@ def apply_patch_paths(text: str) -> Tuple[str, ...]:
     return tuple(dict.fromkeys(found))
 
 
-def _has_unescaped_cmd_subst(text: str) -> bool:
-    """True when ``text`` contains an unescaped backtick or ``$(`` command substitution."""
-    i = 0
-    n = len(text)
-    while i < n:
-        if text[i] == "\\":
-            i += 2
-            continue
-        if text[i] == "`" or text.startswith("$(", i):
-            return True
-        i += 1
-    return False
+def _parse_codex_patch(
+    command: str, base: Optional[str]
+) -> Tuple[bool, Optional[str], Tuple[str, ...]]:
+    """Classify a Codex Bash command that may carry an ``apply_patch`` payload.
 
-
-def _codex_patch_base(command: str, base: Optional[str]) -> Tuple[Optional[re.Match[str]], Optional[str]]:
-    invocation = _APPLY_PATCH_COMMAND.match(command)
-    if invocation is None:
-        return None, base
-    directory = invocation.group("dir")
-    if directory:
-        if directory.startswith('"') and _has_unescaped_cmd_subst(directory[1:-1]):
-            return None, base
-        directory = directory.strip("'\"")
-        base = directory if os.path.isabs(directory) else (os.path.join(base, directory) if base else None)
-    return invocation, base
-
-
-def _pure_apply_patch_body(rest: str) -> Optional[str]:
-    """The patch body of a pure single-command apply_patch tail (Form A/B/C), or None."""
-    header = _HEREDOC_HEADER.match(rest)
-    if header is not None:
-        strip_tabs = header.group("dash") == "-"
-        quoted = bool(header.group("sdelim") or header.group("ddelim") or header.group("bdelim"))
-        delim = (
-            header.group("sdelim")
-            or header.group("ddelim")
-            or header.group("bdelim")
-            or header.group("udelim")
-        )
-        lines = rest[header.end() :].split("\n")
-        close_idx = None
-        for idx, line in enumerate(lines):
-            raw = line.rstrip("\r")
-            if (raw.lstrip("\t") if strip_tabs else raw) == delim:
-                close_idx = idx
-                break
-        if close_idx is None or "\n".join(lines[close_idx + 1 :]).strip():
-            return None
-        body = "\n".join(lines[:close_idx])
-        if not quoted and ("`" in body or "$(" in body):
-            return None
-        return body if "*** Begin Patch" in body else None
-    sq = _SINGLE_QUOTED_ARG.match(rest)
-    if sq is not None:
-        body = sq.group("body")
-        return body if "*** Begin Patch" in body else None
-    dq = _DOUBLE_QUOTED_ARG.match(rest)
-    if dq is not None:
-        body = dq.group("body")
-        if _has_unescaped_cmd_subst(body):
-            return None
-        return body if "*** Begin Patch" in body else None
-    return None
-
-
-def _sanitize_unquoted_heredoc_body(body: str) -> str:
-    """Turn an unquoted heredoc body into safe ``: ...`` lines that preserve
-    ``$(...)`` and backtick command substitutions for shell analysis."""
-    out: List[str] = []
-    i = 0
-    n = len(body)
-    paren_depth = 0
-    in_backtick = False
-    at_line_start = True
-    while i < n:
-        if at_line_start:
-            out.append(": ")
-            at_line_start = False
-        c = body[i]
-        if c == "\n" and paren_depth == 0 and not in_backtick:
-            out.append("\n")
-            at_line_start = True
-            i += 1
-            continue
-        if c == "\\" and i + 1 < n:
-            if paren_depth > 0 or in_backtick:
-                out.append(body[i : i + 2])
-            i += 2
-            continue
-        if not in_backtick and body.startswith("$(", i):
-            paren_depth += 1
-            out.append("$(")
-            i += 2
-            continue
-        if paren_depth > 0:
-            if c == "(":
-                paren_depth += 1
-            elif c == ")":
-                paren_depth -= 1
-            out.append(c)
-            i += 1
-            continue
-        if c == "`":
-            in_backtick = not in_backtick
-            out.append(c)
-            i += 1
-            continue
-        if not in_backtick and c in "'\"();&|<>":
-            out.append(" ")
-            i += 1
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
-
-
-def _strip_quoted_patch_bodies(text: str) -> str:
-    """Replace quoted patch bodies in ``text`` with harmless placeholders while keeping
-    surrounding shell commands and unquoted heredoc command substitutions."""
-    out: List[str] = []
-    i = 0
-    n = len(text)
-    pending_heredocs: List[Tuple[int, bool, bool, str]] = []
-    while i < n:
-        c = text[i]
-        if c == "\\" and i + 1 < n:
-            out.append(text[i : i + 2])
-            i += 2
-            continue
-        if c == "#" and (i == 0 or text[i - 1] in " \t;&|()\n\r"):
-            nl = text.find("\n", i)
-            i = n if nl == -1 else nl
-            continue
-        if c == "'":
-            end = text.find("'", i + 1)
-            if end != -1:
-                inner = text[i + 1 : end]
-                out.append("''" if "*** Begin Patch" in inner else text[i : end + 1])
-                i = end + 1
-                continue
-        if c == '"':
-            j = i + 1
-            while j < n:
-                if text[j] == "\\":
-                    j += 2
-                    continue
-                if text[j] == '"':
-                    break
-                j += 1
-            if j < n and text[j] == '"':
-                inner = text[i + 1 : j]
-                if "*** Begin Patch" in inner and not _has_unescaped_cmd_subst(inner):
-                    out.append('""')
-                else:
-                    out.append(text[i : j + 1])
-                i = j + 1
-                continue
-        if text.startswith("<<<", i):
-            out.append("<<<")
-            i += 3
-            continue
-        if text.startswith("<<", i):
-            m = _INLINE_HEREDOC.match(text, i)
-            if m is not None:
-                strip_tabs = m.group("dash") == "-"
-                quoted = bool(m.group("sdelim") or m.group("ddelim") or m.group("bdelim"))
-                delim = (
-                    m.group("sdelim")
-                    or m.group("ddelim")
-                    or m.group("bdelim")
-                    or m.group("udelim")
-                )
-                out_idx = len(out)
-                out.append(text[i : m.end()])
-                pending_heredocs.append((out_idx, strip_tabs, quoted, delim))
-                i = m.end()
-                continue
-        if c == "\n" and pending_heredocs:
-            out.append("\n")
-            i += 1
-            for out_idx, strip_tabs, quoted, delim in pending_heredocs:
-                body_lines: List[str] = []
-                closing_line: Optional[str] = None
-                while i < n:
-                    nl = text.find("\n", i)
-                    if nl == -1:
-                        line = text[i:]
-                        i = n
-                    else:
-                        line = text[i:nl]
-                        i = nl + 1
-                    raw = line.rstrip("\r")
-                    if (raw.lstrip("\t") if strip_tabs else raw) == delim:
-                        closing_line = line + ("\n" if nl != -1 else "")
-                        break
-                    body_lines.append(line + ("\n" if nl != -1 else ""))
-                body_full = "".join(body_lines)
-                if "*** Begin Patch" in body_full:
-                    if not quoted and ("`" in body_full or "$(" in body_full):
-                        out[out_idx] = "''"
-                        out.append(_sanitize_unquoted_heredoc_body(body_full))
-                    elif closing_line is not None:
-                        out.append(closing_line)
-                else:
-                    out.append(body_full)
-                    if closing_line is not None:
-                        out.append(closing_line)
-            pending_heredocs.clear()
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
-
-
-def _codex_patch_command(command: str, base: Optional[str]) -> Optional[Tuple[str, ...]]:
-    """The paths of a pure Bash command Codex runs as apply_patch, or None for any other command."""
+    Returns ``(is_pure_edit, safe_shell_command, patched_paths)``.
+    """
     if "*** Begin Patch" not in command:
-        return None
-    invocation, resolved_base = _codex_patch_base(command, base)
-    if invocation is None:
-        return None
-    body = _pure_apply_patch_body(command[invocation.end() :])
-    if body is None:
-        return None
-    return _joined(list(apply_patch_paths(body)), resolved_base)
+        return False, command, ()
+    shell_text, heredoc_scripts = command_safety.split_heredocs(command)
+    subshells = command_safety.extract_subshell_commands(shell_text)
+    try:
+        tokens = command_safety.tokenize_command(shell_text)
+    except ValueError:
+        tokens = []
+    pipelines = command_safety.decompose_command(tokens) if tokens else []
+    if (
+        pipelines
+        and len(pipelines[0].stages) == 1
+        and len(pipelines[0].stages[0].raw_tokens) == 2
+        and pipelines[0].stages[0].raw_tokens[0] == "cd"
+        and not subshells
+    ):
+        cd_dir = pipelines[0].stages[0].raw_tokens[1]
+        base = cd_dir if os.path.isabs(cd_dir) else (os.path.join(base, cd_dir) if base else None)
+    patched = _joined(list(apply_patch_paths(command)), base)
+    if not heredoc_scripts and not subshells and all(len(p.stages) == 1 for p in pipelines):
+        stage = (
+            pipelines[0].stages[0].raw_tokens
+            if len(pipelines) == 1
+            else (
+                pipelines[1].stages[0].raw_tokens
+                if len(pipelines) == 2 and len(tokens) >= 3 and tokens[0] == "cd" and tokens[2] == "&&"
+                else []
+            )
+        )
+        if stage and stage[0] in ("apply_patch", "applypatch"):
+            rest = stage[1:]
+            is_heredoc = "*** Begin Patch" not in shell_text and (
+                (len(rest) == 1 and bool(_HEREDOC_TOKEN.fullmatch(rest[0])))
+                or (len(rest) == 2 and rest[0] in ("<<", "<<-") and bool(_HEREDOC_DELIM.fullmatch(rest[1])))
+            )
+            is_arg = len(rest) == 1 and "*** Begin Patch" in rest[0]
+            if (is_heredoc or is_arg) and patched:
+                return True, None, patched
+    safe_cmd = (
+        command
+        if shell_text != command
+        else re.sub(r"'[^']*\*\*\* Begin Patch[^']*'", "''", command)
+    )
+    return False, safe_cmd, patched
 
 
 def _claude(payload: Mapping[str, Any], environ: Mapping[str, str]) -> HookCall:
@@ -361,17 +178,11 @@ def _codex(payload: Mapping[str, Any]) -> HookCall:
     if tool == "apply_patch":
         kind, paths = KIND_EDIT, _joined(list(apply_patch_paths(text)) if text else [], cwd)
     elif tool == "Bash":
-        patched = _codex_patch_command(text, cwd) if text else None
-        if patched is not None:
-            kind, paths = KIND_EDIT, patched
-        elif text and "*** Begin Patch" in text:
-            _, resolved_base = _codex_patch_base(text, cwd)
-            patched_paths = _joined(list(apply_patch_paths(text)), resolved_base)
-            kind = KIND_SHELL
-            command = _strip_quoted_patch_bodies(text)
-            paths = patched_paths
+        if text:
+            is_edit, command, paths = _parse_codex_patch(text, cwd)
+            kind = KIND_EDIT if is_edit else KIND_SHELL
         else:
-            kind, command = KIND_SHELL, text
+            kind = KIND_SHELL
     return HookCall("codex-cli", tool, kind, command, paths, cwd, "cwd" if cwd else None, _text(payload.get("tool_use_id")))
 
 
