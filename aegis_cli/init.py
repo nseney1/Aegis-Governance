@@ -22,55 +22,84 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import datetime, timezone
-import importlib.resources
-import json
 import os
-import re
-import sys
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from aegis_cli.base import CommandCategory, AegisCommand
+from aegis_cli.base import AegisCommand, CommandCategory
+from aegis_cli.hooks import (  # noqa: F401 — re-exported for tests/unit/core/test_worktree_hooks.py
+    AEGIS_HOOK_FORMAT,
+    SOMA_HOOK_FORMAT,
+    _AEGIS_HOOK_START,
+    _SOMA_HOOK_START,
+    install_hook,
+)
+from aegis_cli.init_views import (
+    Report,
+    Step,
+    _home_label,
+    _no_hooks,
+    _print_actions,
+    _print_active,
+    _print_card,
+    _print_ci,
+    _report_ci,
+    _report_hook,
+    report_partial,
+)
 from aegis_cli.install_hosts import (
     REGISTRY_LABEL,
     InstallError,
-    ordered_hosts,
     detection_evidence,
     display_command,
     is_denied_root,
     mcp_command,
+    ordered_hosts,
     parse_hosts,
     register_host,
     register_workspace,
     registrable_hosts,
     write_managed_block,
 )
-from aegis_core.storage import atomic_write_bytes
-from aegis_core.taxonomy import RULE_TYPES, RuleType
-from aegis_core.workspace.layout import AEGIS_DIRNAME, RULES_RELDIR
-
-# Re-exported for tests/unit/core/test_worktree_hooks.py until that facade is retired.
-from aegis_cli.hooks import (  # noqa: F401
-    _AEGIS_HOOK_START,
-    _SOMA_HOOK_START,
-    AEGIS_HOOK_FORMAT,
-    SOMA_HOOK_FORMAT,
-    install_hook,
+from aegis_core import scaffolding as _scaffolding
+from aegis_core.scaffolding import (
+    ACTIVE_LABEL as _ACTIVE_LABEL,
+    ACTIVE_STARTERS,
+    ACTIVE_TYPE_DIR,
+    CI_WORKFLOW_LABEL,
+    CI_WORKFLOW_PATH,
+    DEFAULT_RULE_PRESET,
+    NO_ACTIVE_PRESETS,
+    RULE_PRESETS,
+    SEED_TYPE,
+    SEED_TYPE_DIR,
+    _CI_WORKFLOW,
+    _declare_type,
+    _runs_aegis_check,
+    _workflow_files,
+    ci_workflow,
+    packaged_dir,
 )
-from aegis_cli.hooks.management import hook_status, work_tree_warning
+from aegis_core.storage import atomic_write_bytes
+from aegis_core.workspace.layout import AEGIS_DIRNAME, RULES_RELDIR
 
 __all__ = [
     "ACTIVE_STARTERS",
     "AGENTS_FILE",
     "CI_WORKFLOW_LABEL",
+    "CI_WORKFLOW_PATH",
     "CLAUDE_FILE",
     "CLAUDE_SHIM_ID",
     "CLAUDE_SHIM_TEXT",
+    "DEFAULT_RULE_PRESET",
     "InitCommand",
+    "NO_ACTIVE_PRESETS",
     "RULE_PRESETS",
     "RemovedOption",
     "Report",
+    "SEED_TYPE",
+    "SEED_TYPE_DIR",
     "Step",
     "ci_workflow",
     "hook_refusal",
@@ -93,147 +122,35 @@ CLAUDE_FILE = "CLAUDE.md"
 CLAUDE_SHIM_ID = "agents-import"
 CLAUDE_SHIM_TEXT = "@AGENTS.md\n"
 
-# ── Starter rules: one locator over the packaged rules/ (defense #20, D16) ───
-
-_STANDARD = ("providence", "destructive-ops", "testing", "cost-optimization", "git-workflow")
-RULE_PRESETS: Dict[str, Optional[Tuple[str, ...]]] = {
-    "minimal": ("providence", "destructive-ops"),
-    "standard": _STANDARD,
-    "full": None,  # every shipped guidance rule
-    "none-active": _STANDARD,  # the standard personas, and no active starter
-}
-# Shipped rules seeded as they are, active, into their own type directory of a new
-# workspace: the personas apply to no file until someone sets their target_paths, so
-# without one `aegis check` enforced nothing on day one (v4.1 field report). They are in
-# no persona preset; ``--rules none-active`` leaves them out.
-ACTIVE_STARTERS: Dict[str, str] = {"no-eval": "bans eval() and exec() in **/*.py, methods named eval or exec included (df.eval(), model.eval())"}
-NO_ACTIVE_PRESETS = ("none-active",)
-ACTIVE_TYPE_DIR = RULE_TYPES[RuleType.INVARIANT].directory
-_ACTIVE_LABEL = f"{RULES_RELDIR}/{ACTIVE_TYPE_DIR}"
-# The shipped rules are process guidance (what to do, not where), so they are seeded as
-# persona rules whose frontmatter says so: ``type: persona`` (the repository's own lint,
-# `aegis check`, requires a declared type) and ``target_paths: []`` (they apply to no file
-# until the repository names the files each one governs; `aegis status` lists them).
-SEED_TYPE = RuleType.PERSONA
-SEED_TYPE_DIR = RULE_TYPES[SEED_TYPE].directory
-_NOT_RULES = {"META.md", "README.md"}
-
-
-def packaged_dir(name: str, base: Optional[Path] = None) -> Path:
-    """The directory of Aegis's shipped ``rules`` or ``skills``.
-
-    A wheel carries them in ``aegis_core/_data/<name>`` (pyproject.toml maps the
-    repository's ``<name>/`` there); a source checkout has them at its root, next to its
-    pyproject.toml. ``base`` is the aegis_core package directory. Nothing is imported by
-    name: a top-level ``rules`` package may be another distribution's, or a repository's
-    own directory first on sys.path. A missing directory is returned as is, for the
-    caller to report.
-    """
-    base = Path(str(importlib.resources.files("aegis_core"))) if base is None else Path(base)
-    installed = base / "_data" / name
-    if installed.is_dir():
-        return installed
-    checkout = base.parent
-    if (checkout / "pyproject.toml").is_file() and (checkout / name).is_dir():
-        return checkout / name
-    return installed
-
 
 def _shipped_rules() -> Dict[str, Path]:
-    base = packaged_dir("rules")
-    found: Dict[str, Path] = {}
-    for directory in (base, base / ".oracles"):
-        if directory.is_dir():
-            for path in sorted(directory.glob("*.md")):
-                if path.is_file() and path.name not in _NOT_RULES:
-                    found.setdefault(path.stem, path)
-    return found
+    return _scaffolding._shipped_rules(locator=packaged_dir)
 
 
 def packaged_rules() -> Dict[str, Path]:
     """Every shipped guidance rule (``rules/*.md``, ``rules/.oracles/*.md``, through
     ``packaged_dir``) by id: what the persona presets seed. The active starters are not
     among them (see packaged_active_rules)."""
-    return {k: v for k, v in _shipped_rules().items() if k not in ACTIVE_STARTERS}
+    return _scaffolding.packaged_rules(locator=packaged_dir)
 
 
 def packaged_active_rules() -> Dict[str, Path]:
     """The shipped active starters (ACTIVE_STARTERS) by id; ValueError when one is missing."""
-    shipped = _shipped_rules()
-    missing = [n for n in ACTIVE_STARTERS if n not in shipped]
-    if missing:
-        raise ValueError(f"packaged rule(s) {', '.join(missing)} not found; reinstall aegis-guardrails")
-    return {n: shipped[n] for n in ACTIVE_STARTERS}
+    return _scaffolding.packaged_active_rules(locator=packaged_dir)
 
 
 def preset_rules(preset: str) -> List[Path]:
     """The packaged rule files of ``preset``; ValueError for an unknown preset or a missing rule."""
-    if preset not in RULE_PRESETS:
-        raise ValueError(f"unknown rule preset {preset!r}; presets: {', '.join(RULE_PRESETS)}")
-    shipped = packaged_rules()
-    names = RULE_PRESETS[preset]
-    if names is None:
-        return [shipped[n] for n in sorted(shipped)]
-    missing = [n for n in names if n not in shipped]
-    if missing:
-        raise ValueError(f"packaged rule(s) {', '.join(missing)} not found; reinstall aegis-guardrails")
-    return [shipped[n] for n in names]
+    return _scaffolding.preset_rules(preset, locator=packaged_dir)
 
 
-_TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:")
-
-
-def _declare_type(source: Path, rule_type: str) -> bytes:
-    """The bytes of ``source`` with its frontmatter declaring ``type: <rule_type>`` and, when
-    it names no files, ``target_paths: []``; the rest of the file is kept as it is."""
-    text = source.read_bytes().decode("utf-8")
-    eol = "\r\n" if "\r\n" in text else "\n"
-    lines = text.splitlines(True)
-    close = next((i for i, line in enumerate(lines[1:], 1) if line.rstrip("\r\n") == "---"), None)
-    if not lines or lines[0].rstrip("\r\n") != "---" or close is None:
-        raise ValueError(f"packaged rule {source.name} has no frontmatter; reinstall aegis-guardrails")
-    keys: Dict[str, int] = {}
-    for index in range(1, close):
-        match = _TOP_LEVEL_KEY.match(lines[index])
-        if match:
-            keys.setdefault(match.group(1), index)
-    added = [] if "target_paths" in keys else [f"target_paths: []{eol}"]
-    if "type" in keys:
-        lines[keys["type"]] = f"type: {rule_type}{eol}"
-        at = keys["type"] + 1
-    else:
-        added.insert(0, f"type: {rule_type}{eol}")
-        at = keys.get("id", 0) + 1
-    lines[at:at] = added
-    return "".join(lines).encode("utf-8")
-
-
-def install_rules(rules_dir: Path, preset: str = "standard", dry_run: bool = False, force: bool = False,
+def install_rules(rules_dir: Path, preset: str = DEFAULT_RULE_PRESET, dry_run: bool = False, force: bool = False,
                   skip: Sequence[str] = (), rule_type: Optional[str] = None) -> List[str]:
-    """Copy the preset's packaged rules into ``rules_dir`` (flat); return the ids now there.
-
-    An existing file is kept unless ``force``; a symlinked destination is never written
-    through; ids in ``skip`` are left out. With ``rule_type`` each copy's frontmatter
-    declares that type (and ``target_paths: []`` when it names none); without it the
-    packaged bytes are copied as they are.
-    """
-    rules_dir = Path(rules_dir)
-    present: List[str] = []
-    for source in preset_rules(preset):
-        name = source.stem
-        if name in skip:
-            continue
-        dest = rules_dir / source.name
-        if dest.is_symlink():
-            continue
-        if dest.exists() and not force:
-            present.append(name)
-            continue
-        data = _declare_type(source, rule_type) if rule_type else source.read_bytes()
-        if not dry_run:
-            atomic_write_bytes(dest, data)
-        present.append(name)
-    return present
+    """Copy the preset's packaged rules into ``rules_dir`` (flat); return the ids now there."""
+    return _scaffolding.install_rules(
+        rules_dir, preset=preset, dry_run=dry_run, force=force,
+        skip=skip, rule_type=rule_type, _preset_fn=preset_rules,
+    )
 
 
 def seed_workspace_rules(root: Path, preset: str, dry_run: bool = False) -> Tuple[List[str], List[str]]:
@@ -336,65 +253,6 @@ def _with_surfaces(host_ids: Sequence[str]) -> str:
 
 # ── The CI floor ─────────────────────────────────────────────────────────────
 
-CI_WORKFLOW_LABEL = ".github/workflows/aegis.yml"
-_RUNS_AEGIS_CHECK = re.compile(r"\baegis\s+check\b")
-_WORKFLOW_READ_LIMIT = 1 << 20
-
-
-def ci_workflow() -> str:
-    """The GitHub Actions workflow init prints, and writes with ``--ci``: ``aegis check`` on
-    every pull request, with the aegis version that wrote it (a newer release may check more)."""
-    from aegis_cli import __version__
-
-    return f"""\
-# aegis check on every pull request. CI is the floor: git commit --no-verify skips the
-# local pre-commit hook, so the same check runs here.
-name: Aegis
-
-on:
-  pull_request:
-  push:
-    branches: [main, master]
-
-permissions:
-  contents: read
-
-jobs:
-  aegis-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0  # aegis check diffs the pull request against its base branch
-          persist-credentials: false
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: pip install aegis-guardrails=={__version__}
-      - run: aegis check
-      - run: aegis check --ci
-"""
-
-
-def _workflow_files(root: Path) -> List[Path]:
-    """The GitHub Actions workflow files (``.github/workflows/*.yml|yaml``; GitHub reads no
-    subdirectory there)."""
-    directory = root / ".github" / "workflows"
-    try:
-        entries = sorted(directory.iterdir()) if directory.is_dir() else []
-    except OSError:
-        return []
-    return [e for e in entries if e.suffix in (".yml", ".yaml") and e.is_file()]
-
-
-def _runs_aegis_check(path: Path) -> bool:
-    try:
-        with open(path, "rb") as handle:
-            text = handle.read(_WORKFLOW_READ_LIMIT).decode("utf-8", "replace")
-    except OSError:
-        return False
-    return bool(_RUNS_AEGIS_CHECK.search(text))
-
 
 def _ci_step(root: Path, write: bool, dry_run: bool) -> "Step":
     """The CI workflow: with ``write`` (--ci) ``.github/workflows/aegis.yml`` is created
@@ -437,26 +295,6 @@ def _ci_step(root: Path, write: bool, dry_run: bool) -> "Step":
     else:
         atomic_write_bytes(dest, data)
     return Step(CI_WORKFLOW_LABEL, "created", "runs aegis check on every pull request")
-
-
-def _report_ci(report: Report, actions: Sequence["Step"]) -> None:
-    """After a real run: CI is the floor. The workflow written, or the one to add."""
-    step = next((a for a in actions if a.target == CI_WORKFLOW_LABEL), None)
-    floor = "CI is the floor: git commit --no-verify skips the pre-commit hook, so CI must run aegis check too."
-    if step is None or step.result not in ("created", "suggested"):
-        return
-    if step.result == "created":
-        report.say(f"  {floor} Review and commit {CI_WORKFLOW_LABEL}.")
-        report.say()
-        return
-    lead = ("No GitHub Actions workflow here runs aegis check yet." if step.names
-            else "This repository has no GitHub Actions workflow yet.")
-    report.say(f"  {floor}")
-    report.say(f"  {lead} Save this as {CI_WORKFLOW_LABEL}, or re-run aegis init with --ci to write it:")
-    report.say()
-    for line in ci_workflow().splitlines():
-        report.say(f"      {line}".rstrip())
-    report.say()
 
 
 # ── The pre-commit hook ──────────────────────────────────────────────────────
@@ -593,66 +431,6 @@ def hook_refusal(root: Path, *, removing: bool = False) -> Optional[str]:
 
 
 # ── The run ──────────────────────────────────────────────────────────────────
-
-@dataclass
-class Step:
-    """One init or uninstall step and what it did (or would do, in a dry run)."""
-
-    target: str
-    result: str
-    detail: str = ""
-    command: Optional[List[str]] = None
-    names: Sequence[str] = ()
-    kept: Sequence[str] = ()
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {"target": self.target, "result": self.result, "detail": self.detail, "command": self.command}
-
-
-class Report:
-    """Human lines on stdout, or one JSON document at the end with --json."""
-
-    def __init__(self, json_mode: bool, source: str) -> None:
-        self.json_mode = json_mode
-        self.source = source
-        self.errors: List[str] = []
-        self.warnings: List[str] = []
-        self.muted = False  # the check pass before a real run stays quiet; the run reports
-
-    def say(self, line: str = "") -> None:
-        if not self.json_mode:
-            print(line)
-
-    def warn(self, line: str) -> None:
-        if self.muted:
-            return
-        self.warnings.append(line)
-        if not self.json_mode:
-            sys.stdout.flush()  # keep the order of stdout and stderr lines in a pipe
-            print(f"  ⚠️  {line}", file=sys.stderr)
-
-    def error(self, line: str) -> None:
-        self.errors.append(line)
-        if not self.json_mode:
-            sys.stdout.flush()  # keep the order of stdout and stderr lines in a pipe
-            print(f"  ❌ {line}", file=sys.stderr)
-
-    def finish(self, status: str, scope: Dict[str, Any], dry_run: bool, actions: Sequence[Step]) -> None:
-        if not self.json_mode:
-            return
-        from aegis_cli import __version__
-
-        print(json.dumps({
-            "source": self.source,
-            "aegis_version": __version__,
-            "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "scope": scope,
-            "dry_run": dry_run,
-            "status": status,
-            "actions": [a.as_dict() for a in actions],
-            "errors": self.errors,
-            "warnings": self.warnings,
-        }, indent=2))
 
 
 def _config_hosts(root: Path, selected: List[str], dry_run: bool, report: Report) -> Step:
@@ -935,119 +713,6 @@ def _link_key_step(home: Path, dry_run: bool) -> Step:
                            f"~/{AEGIS_DIRNAME}, then re-run.") from exc
 
 
-_ICONS = {"failed": "❌", "manual": "👉", "kept": "⚠️ ", "skipped": "⚠️ "}
-# Results that changed nothing on disk (what a failed run reports as already written).
-_NO_CHANGE = {"unchanged", "absent", "none", "kept", "skipped", "linked", "would_run", "manual", "failed",
-              "dry-run", "skipped (not a git repository)", "present", "suggested"}
-_NEXT_RULE = "    Next: add a rule for your own code with aegis rule create (aegis rule create --help)"
-
-
-def _print_active(report: Report, action: Step, dry_run: bool, preset: str) -> None:
-    """The active starter: what it enforces, or that there is none; then the next step."""
-    if action.result == "skipped":
-        report.say(f"  No active rule (--rules {preset}): aegis check enforces no rule until one names files.")
-    elif action.names or action.kept:
-        report.say(f"  Active rule in {action.target}/:")
-        for name in action.names:
-            report.say(f"    {'[DRY-RUN]' if dry_run else '✅'} {name}: {ACTIVE_STARTERS[name]}; "
-                       "aegis check and the pre-commit hook enforce it")
-        for name in action.kept:
-            report.say(f"    [SKIP] {name} (a file with this name exists)")
-    else:
-        return  # a workspace that already had rules: nothing was seeded, nothing to say
-    if not dry_run:
-        report.say(_NEXT_RULE)
-
-
-def _print_ci(report: Report, action: Step, dry_run: bool) -> None:
-    if action.result == "present":
-        report.say(f"  ✅ CI: {action.detail}")
-    elif action.result == "created":
-        report.say(f"  ✅ {action.target}: {'would create' if dry_run else 'created'} ({action.detail})")
-    elif action.result == "kept":
-        report.say(f"  {_ICONS['kept']} {action.target}: kept ({action.detail})")
-    elif action.result == "unchanged":
-        report.say(f"  ✅ {action.target}: unchanged")
-    # "suggested": the workflow is printed after a real run (_report_ci)
-
-
-def _print_actions(report: Report, actions: Sequence[Step], dry_run: bool, preset: str) -> None:
-    for action in actions:
-        if action.target == _ACTIVE_LABEL:
-            _print_active(report, action, dry_run, preset)
-            continue
-        if action.target == CI_WORKFLOW_LABEL:
-            _print_ci(report, action, dry_run)
-            continue
-        if action.target.startswith(RULES_RELDIR + "/"):
-            report.say(f"  Starter rules (preset={preset}) in {action.target}/:")
-            for name in action.names:
-                report.say(f"    {'[DRY-RUN]' if dry_run else '✅'} {name}")
-            for name in action.kept:
-                report.say(f"    [SKIP] {name} (a rule with this id exists)")
-            if action.names:
-                report.say("    They apply to no file until you set their target_paths (aegis status lists them).")
-            continue
-        if action.result == "absent":
-            continue  # CLAUDE.md: Aegis never creates one
-        if action.target == "ast drivers":
-            verb = "Would configure" if dry_run else "Configured"
-            for ext in action.detail.split(", ") if action.detail else []:
-                report.say(f"    ✨ {verb} AST driver (.{ext}): packaged {ext} driver")
-            continue
-        if action.target == "pre-commit hook" and action.result == "unchanged":
-            report.say(f"    🪝 Pre-commit hook: {action.detail}")
-            continue
-        if action.target == "prepare-commit-msg hook" and action.result == "unchanged" and action.detail:
-            report.say(f"    🪝 Prepare-commit-msg hook: {action.detail}")
-            continue
-        if action.target in ("pre-commit hook", "prepare-commit-msg hook", SCAFFOLD_LABEL):
-            continue  # the hook is printed by _report_hook; the directories are in JSON only
-        icon = _ICONS.get(action.result, "✅")
-        if action.result == "manual":
-            report.say(f"  {icon} {action.target}: {action.detail}; run it yourself:")
-            report.say(f"       {display_command(action.command or [])}")
-        elif action.command:
-            result = "would run" if action.result == "would_run" else action.result
-            report.say(f"  {icon} {action.target}: {result} ({display_command(action.command)})")
-        else:
-            detail = f" ({action.detail})" if action.detail else ""
-            report.say(f"  {icon} {action.target}: {action.result}{detail}")
-
-
-def report_partial(report: Report, exc: Exception, actions: Sequence[Step], done: str) -> None:
-    """Report a failure in the middle of a real run with what it had already changed."""
-    if isinstance(exc, OSError):
-        where = f"{exc.filename}: " if exc.filename else ""
-        report.error(f"{where}{exc.strerror or exc}; stopped there.")
-    else:
-        report.error(str(exc))
-    changed = [a.target for a in actions if a.result not in _NO_CHANGE]
-    if changed:
-        report.error(f"Already {done}: {', '.join(changed)}. Fix the cause, then re-run (it keeps what is there).")
-    else:
-        report.error(f"Nothing was {done}.")
-
-
-def _print_card(report: Report, root: Path) -> None:
-    """The day-0 card (aegis_core.card), as `aegis check --card` prints it: what this
-    repository looks like to Aegis now that it is set up. Advisory: init never fails for it."""
-    if report.json_mode:
-        return
-    from aegis_cli import sanitize_display
-
-    try:
-        from aegis_core import card
-
-        lines = card.build(root).text_lines()
-    except Exception as exc:
-        report.warn(f"the day-0 card could not be built: {type(exc).__name__}: {exc}")
-        return
-    for line in lines:
-        report.say(sanitize_display(f"  {line}", max_len=max(len(line) + 2, 80)))
-    report.say()
-
-
 def run_init(args: argparse.Namespace) -> int:
     """Main init flow. Returns the exit code (0 ok, 1 refused or failed, 2 usage)."""
     from aegis_core.ast.detect import detect_project_languages
@@ -1204,36 +869,6 @@ def run_init(args: argparse.Namespace) -> int:
             pass
     report.finish("failed" if failed else "ok", scope, False, actions)
     return 1 if failed else 0
-
-
-def _home_label(evidence: str, home: Path) -> str:
-    """``evidence`` (a path that found a host) as ``~/...`` when it is under ``home``."""
-    if evidence.startswith("~/"):
-        return evidence
-    try:
-        return "~/" + Path(evidence).relative_to(home).as_posix()
-    except ValueError:
-        return evidence
-
-
-def _no_hooks(args: argparse.Namespace) -> bool:
-    return bool(getattr(args, "no_hooks", False)) or not getattr(args, "hooks", True)
-
-
-def _report_hook(report: Report, root: Path, actions: Sequence[Step]) -> None:
-    if not any(a.target == "pre-commit hook" and a.result == "installed" for a in actions):
-        return
-    st = hook_status(root)
-    report.say(f"    🪝 Pre-commit hook installed ({st['hook_file']})")
-    cm = next((a for a in actions if a.target == "prepare-commit-msg hook"), None)
-    if cm is not None:
-        if cm.result in ("installed", "unchanged") and st.get("git_hooks_dir"):
-            cm_file = Path(st["git_hooks_dir"]) / "prepare-commit-msg"
-            report.say(f"    🪝 Prepare-commit-msg hook installed ({cm_file})")
-        elif cm.result == "kept":
-            report.say("    ⚠️  Prepare-commit-msg hook kept (existing hook is not Aegis's; left alone)")
-    if st["hooks_dir_in_work_tree"]:
-        print(work_tree_warning(st["hook_file"]), file=sys.stderr)
 
 
 class InitCommand(AegisCommand):
