@@ -158,7 +158,7 @@ def _count_repo_suppressions(workspace_root: Path | str | None, diff_text: str |
         try: count += sum(1 for ln in ignore_file.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip() and not ln.lstrip().startswith("#"))
         except OSError: pass
     for p in sorted(root.rglob("*")):
-        if not p.is_file() or p.name == ".gitleaksignore" or any(k in (".git", ".aegis", "__pycache__", ".venv", "node_modules") for k in p.relative_to(root).parts):
+        if not p.is_file() or any(k.startswith(".") or k in ("__pycache__", "node_modules") for k in p.relative_to(root).parts):
             continue
         try:
             data = p.read_bytes()
@@ -229,9 +229,11 @@ def build_preset_argv(
     if preset == "ruff":
         return ["ruff", "check", "--isolated", "--select", "S", "--ignore", "S603,S607", "--output-format", "sarif", str(target)]
     if preset == "gitleaks":
+        from aegis_core.workspace.layout import UserLayout
         argv = ["gitleaks", "detect", "--no-git", "--redact", "--report-format", "sarif", "--report-path", "-", "--source", str(target)]
-        user_dir = Path(user_config_dir).resolve() if user_config_dir else (Path.home() / ".aegis").resolve()
-        if not _is_within_dir(user_dir, target):
+        ul = UserLayout.current()
+        user_dir = Path(user_config_dir).resolve() if user_config_dir else (ul.aegis_dir.resolve() if ul else None)
+        if user_dir is not None and not _is_within_dir(user_dir, target):
             cand = Path(config_path).resolve() if config_path else (user_dir / "gitleaks.toml").resolve()
             if _is_within_dir(cand, user_dir) and not _is_within_dir(cand, target) and cand.is_file():
                 argv.extend(["--config", str(cand)])

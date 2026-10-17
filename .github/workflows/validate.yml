@@ -196,7 +196,7 @@ jobs:
           PYTHONUTF8: '0'
         run: |
           python -c "import os; os.makedirs(os.environ['USERPROFILE'], exist_ok=True)"
-          python -m pytest tests/
+          python -m pytest tests/ -q -n auto
 
   # The CI verdict (v4.3 T2). It runs only when every job above succeeded (a failed or
   # skipped need skips it, so nothing is attested and `aegis doctor --release` fails

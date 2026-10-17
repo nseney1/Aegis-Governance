@@ -217,7 +217,7 @@ class TestSarifIngest:
         finding = report["findings"][0]
         assert finding.rule_id == "S307"
         assert finding.fingerprint == expected_fp2
-        # 3 inline suppressions (# noqa, # nosec, # gitleaks:allow) + 2 .gitleaksignore entries = 5
+        # 3 inline suppressions (noqa, nosec, gitleaks:allow) + 2 .gitleaksignore entries = 5
         assert report["suppression_count"] == 5
 
 

@@ -189,7 +189,8 @@ def test_correction_cue_detector_precision_and_recall_and_hook_storage(tmp_path:
     store = insights_path(repo, home=home)
     assert store.exists()
     assert not store.is_relative_to(repo)
-    assert stat.S_IMODE(store.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(store.stat().st_mode) == 0o600
 
     rows = [json.loads(line) for line in store.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(rows) == 1
@@ -285,7 +286,8 @@ def test_keyed_hs_pseudonymization_and_link_key_creation(tmp_path: Path, monkeyp
     key_path, created = create_link_key(home)
     assert created is True
     assert key_path == home / ".aegis" / "link.key"
-    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
     raw_key = read_link_key(home)
     assert raw_key is not None and len(raw_key) == KEY_SIZE == 32
 

@@ -287,14 +287,13 @@ def _run_ci(args: argparse.Namespace) -> int:
 
     perf_report = None
     if getattr(args, "perf", False):
-        import importlib
-        try:
-            perf_mod = importlib.import_module(".".join(("aegis_core", "verification", "perf_check")))
-            perf_report = perf_mod.run_perf_check(root, base_ref=base)
-            if hasattr(perf_report, "as_dict"):
-                perf_report = perf_report.as_dict()
-        except ImportError:
-            perf_report = {"passed": True, "skipped": True}
+        from aegis_core.verification.perf_check import run_perf_check
+        perf_report = run_perf_check(root, base_ref=base)
+        if hasattr(perf_report, "as_dict"):
+            perf_report = perf_report.as_dict()
+        elif isinstance(perf_report, dict) and "passed" not in perf_report:
+            perf_report["passed"] = perf_report.get("status") != "fail"
+
 
     _print_ci(report, fmt, root, reg_report, cov_report=cov_report, perf_report=perf_report)
     cov_ok = True if cov_report is None else bool(cov_report.get("passed", True))
