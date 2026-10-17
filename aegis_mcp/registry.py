@@ -124,7 +124,9 @@ TOOL_DEFINITIONS = [
             "Call before editing files: returns the governance rules that apply to them, "
             "ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules "
             "(gates, invariants) take at most two slots; the others are listed in "
-            "omitted_mandatory. stale_rules lists rules edited since the last aegis sync. "
+            "omitted_mandatory. Gates and invariants are served from the reviewed base commit "
+            "(rules_base); branch-local edits to them never bind and are listed in unreviewed_rules. "
+            "stale_rules lists rules edited since the last aegis sync. "
             "If any rule file cannot be loaded the scan fails (status FAIL) and names it."
         ),
         "annotations": {
@@ -150,8 +152,11 @@ TOOL_DEFINITIONS = [
     {
         "name": "aegis_report_outcome",
         "description": (
-            "Report whether the rules you were shown helped. Each report is an advisory "
-            "self-report row in the outcome ledger; it never promotes a rule by itself."
+            "Report whether the rules you were shown helped. The server ties the report to the tree "
+            "it computes now: with an `aegis check --record` run of exactly that tree it credits the "
+            "rules it showed you that match the change (your rules_used is not what is credited), and "
+            "even then only CI on the landing commit makes it count; without one it records a single "
+            "unwitnessed claim per session and tree that earns nothing. Reports per session are capped."
         ),
         "annotations": {
             # Only readOnlyHint is declared: hosts treat annotations as untrusted hints and no host
@@ -237,6 +242,36 @@ TOOL_DEFINITIONS = [
                 "rule_type": dict(_RULE_TYPE_PROPERTY, description="Optional rule type filter."),
                 "view": _VIEW_PROPERTY,
             },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "aegis_capture_insight",
+        "description": (
+            "Record a user correction as an unconfirmed suggestion in user scope. "
+            "Agent suggestions never count toward proposals or debits and never appear in "
+            "aegis_scan; a suggestion upgrades to W2 only when its quote matches a "
+            "hook-captured prompt in the same session."
+        ),
+        "annotations": {
+            "readOnlyHint": False,
+            "title": "Capture Insight",
+        },
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "quote": {
+                    "type": "string",
+                    "maxLength": 1024,
+                    "description": "Quote of the user's correction (redacted and capped at 300 chars).",
+                },
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional workspace-relative file paths this correction applies to.",
+                },
+            },
+            "required": ["quote"],
             "additionalProperties": False,
         },
     },

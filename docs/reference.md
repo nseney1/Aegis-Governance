@@ -38,6 +38,7 @@ Every command also accepts `-h/--help`, `--json`, `--plain` and `--workspace`.
 | `aegis package` | Setup & Environment | Write an experimental Claude Code plugin directory (MCP server, hook, skills); nothing is published |
 | `aegis skills` | Setup & Environment | Copy the packaged skills into your hosts' project skills folders (sync) |
 | `aegis uninstall` | Setup & Environment | Remove Aegis from this workspace's hosts, AGENTS.md/CLAUDE.md and git hook (keeps .aegis/) |
+| `aegis approve` | Daily Workflow & Verification | Sign a human approval of this branch's governance changes |
 | `aegis check` | Daily Workflow & Verification | Verify changes: Layer 1 checks, plus a Layer 2 model review with --full |
 | `aegis scan` | Daily Workflow & Verification | Show which rules apply to the given files (run before editing them) |
 | `aegis status` | Daily Workflow & Verification | Show active rules and stats |
@@ -60,6 +61,10 @@ Category: Setup & Environment.
 | `--fix` |  |  | Repair what doctor reported, after confirmation; every file is backed up first |
 | `--yes` |  |  | With --fix: apply without asking (required with --json or without a terminal) |
 | `--drivers` |  |  | Run only AST driver and language detection health check |
+| `--github` |  |  | Print what trust tiers A and B need: the ruleset JSON, CODEOWNERS lines and signing setup |
+| `--apply` |  |  | With --github --tier: create the ruleset through gh, only after a y/N at a terminal |
+| `--release` | `SHA` |  | Verify that the CI verdict job attested this commit (gh attestation verify, gh >= 2.93.0; otherwise UNVERIFIED and a non-zero exit) |
+| `--tier` | one of `A`, `B` |  | With --github --apply: which ruleset to create (A: reviews; B: solo, signed approvals) |
 
 ### `aegis init`
 
@@ -138,6 +143,20 @@ Category: Setup & Environment.
 | `--dry-run` |  |  | Show what would be removed without changing anything |
 | `--force` |  |  | Also remove Aegis blocks that were edited by hand |
 
+### `aegis approve`
+
+Sign a human approval of this branch's governance changes
+
+Makes one signed, empty commit 'Aegis-Approve: <governance tree hash>' naming the governance files as committed at HEAD. Refuses when nothing governance-related changed since the base branch, when anything is staged or uncommitted, and without a terminal. The signing key, format and program come from your user-level git config (gpg.format ssh); no key is created.
+
+Category: Daily Workflow & Verification.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--base` | `REF` |  | The base branch to measure governance changes against (default: origin/main, main, origin/develop, develop) |
+| `--exempt-test` | `COMMIT` |  | Sign a test exemption (Aegis-Exempt-Test) for a specific fix commit |
+| `--reason` | `TEXT` |  | Explanation for --exempt-test (must match the fix commit's Aegis-No-Test reason) |
+
 ### `aegis check`
 
 Verify changes: Layer 1 checks, plus a Layer 2 model review with --full
@@ -154,16 +173,22 @@ Category: Daily Workflow & Verification.
 | `--plan-file` | `PATH` |  | File holding the task plan (implies --full) |
 | `--llm-cmd` | `CMD` |  | Layer 2 model command, e.g. 'claude -p': gets the prompt on stdin, prints the reply. It runs in an empty temporary directory, never the repository, so give scripts absolute paths (default: $AEGIS_LLM_CMD; never read from repository files) |
 | `--dry-run` |  |  | Show what would be checked without running anything |
-| `--format` | one of `text`, `json` | `"text"` | Output format |
+| `--record` |  |  | Bind the work tree to a git tree, run Layer 1 on an exported snapshot of it and write one ledger check row (witness: aegis). A label, not proof: only CI on the landing commit confirms it. A tree git cannot see completely (assume-unchanged or skip-worktree files) or that holds symbolic links is unbindable and writes no row; exit 0 only when the run passed |
+| `--tests` |  |  | With --record: also run the test command from the user-scope config (tests.command in ~/.aegis/config.json, default python -m pytest, never the repository's) in the snapshot with a fixed environment; exit 5 or zero passed tests is never evidence |
+| `--format` | one of `text`, `json`, `github`, `sarif` | `"text"` | Output format (github, with --ci only: workflow-command annotations) |
 | `--lane` | `LANE` |  | Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment (every changed path, deletions and both sides of a move included, inside the lane's globs) and Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong as the protection on .github/** and on the base branch |
 | `--partition` |  |  | Report the cross-lane call, def and import edges between lanes planned with --split (at least two), and the [FROZEN_SIGNATURES] of the functions that cross a lane boundary. Python, and Rust when its driver is enabled. A report: it changes nothing and exits 0 even when it finds edges |
 | `--card` |  |  | Print the day-0 card: languages, AST drivers, rules by type, the Layer 1 pass rate on the files and the 5 files with the most findings (above 2000 files it samples, and says so). Changes nothing and never reads baseline.json; --json for the machine-readable form |
 | `--write-baseline` |  |  | Record every current Layer 1 finding in .aegis/baseline.json, so that aegis check then fails only on new ones. Findings are fingerprinted by rule, path, matched line and its occurrence, not by line number. A failure that is not about a line (a rule that cannot load, a file that cannot be parsed) is listed and is never recorded |
 | `--prune-baseline` |  |  | Drop the entries of .aegis/baseline.json whose findings are fixed (or whose file is gone). It never adds a finding, and it refuses to run while a check cannot run |
+| `--ci` |  |  | The CI weakening check: compare the rules that bind (gates, invariants, enforcement: gate) at merge-base(--base, --head) with those at --head, and flag every way one binds less (a deletion or archive, a rank decrease, lost coverage of existing files, a forbid_ast pattern no longer covered, a new or unknown key, any applies_to change, or a mandatory rule added past the scan's slot cap). A flagged change passes only with a signed Aegis-Approve commit (aegis approve) by a key in the base branch's allowed_signers. Also runs T5 fix-commit regression checks (advisory at default warning tier; blocking at gate tier via --strict or user config regression.tier="gate"). Exit 0 pass, 1 fail |
+| `--head` | `REF` |  | With --ci: the commit under review (default: the pull request head in $GITHUB_EVENT_PATH, else HEAD) |
 | `--split` | `NAME=GLOB[,GLOB...]` |  | With --partition: one planned lane and the globs of its files; give at least two. They match as rule target_paths do: a glob without '/' matches at any depth |
-| `--base` | `REF` |  | With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection |
+| `--base` | `REF` |  | With --ci: the pull request's base (default: its base.sha in $GITHUB_EVENT_PATH, else as below). With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection |
 | `--paths` | `GLOB [GLOB ...]` |  | With --lane: the lane's globs instead of its live lease (self-attested). They match as rule target_paths do: a glob without '/' matches at any depth, so CHANGELOG.md also admits docs/CHANGELOG.md. They never allow .aegis/** or .github/workflows/** |
 | `--base-policy` |  |  | With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may .aegis/** and .github/workflows/** change |
+| `--coverage` |  |  | With --ci: run pytest with diff coverage over changed lines |
+| `--perf` |  |  | With --ci: run performance regression check |
 
 ### `aegis scan`
 
@@ -270,7 +295,22 @@ Change a live lease's owner (and role) by compare-and-swap.
 
 Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs
 
-Category: Rule Evolution & Intelligence. Subcommands: `archive`, `create`, `demote`, `export`, `import`, `list`, `promote`.
+Category: Rule Evolution & Intelligence. Subcommands: `adjudicate`, `archive`, `create`, `demote`, `export`, `import`, `insight`, `list`, `promote`.
+
+### `aegis rule adjudicate`
+
+Record a human adjudication verdict (tp or fp) for a rule
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `rule_id` | `RULE_ID` |  | Rule identifier to adjudicate (required) |
+| `verdict` | one of `tp`, `fp` |  | Adjudication verdict (tp or fp) (required) |
+| `--ref` | `REF` |  | Optional commit SHA, PR number, or issue reference |
+| `--summary` | `SUMMARY` |  | Optional one-line summary of the adjudicated example |
+| `--file` | `FILE` |  | Optional file path where the rule applied |
+| `--line` | `LINE` |  | Optional line number in --file |
+| `--session` | `SESSION` |  | Optional session identifier |
+| `--repo` | `REPO` |  | Optional repository identifier |
 
 ### `aegis rule archive`
 
@@ -330,6 +370,47 @@ Add the rules of PACK to the workspace's .aegis/rules. The pack is unsigned: its
 | `--rename` |  |  | Give a rule whose id is taken a free id (<id>-imported, -imported-2, ...) instead of refusing |
 | `--dry-run` |  |  | Check the pack and report what would be added; write nothing |
 
+### `aegis rule insight`
+
+Capture, review, and enable human correction insights (add, review, enable)
+
+Subcommands: `add`, `enable`, `review`.
+
+### `aegis rule insight add`
+
+Record an explicit human correction insight
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `text` | `TEXT` |  | Correction insight text (redacted and capped at 300 chars) (required) |
+| `--paths` | `[PATHS ...]` |  | Target file paths (default: git dirty set) |
+| `--kind` | `KIND` |  | Optional insight category or kind |
+| `--host` | `HOST` | `"cli"` | Host identifier (default: cli) |
+| `--session` | `SESSION` |  | Optional session identifier (stored as keyed hs) |
+
+### `aegis rule insight enable`
+
+Opt-in enable UserPromptSubmit insight capture for a host
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--host` | one of `claude-code`, `codex-cli` |  | Host to configure (claude-code or codex-cli) |
+| `--excerpts` |  |  | Also store redacted <=300 char excerpts on correction cues (default: counters/heartbeats only) |
+
+### `aegis rule insight review`
+
+Cluster and review insights or record a decision
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--decision` | one of `propose`, `reject`, `snooze`, `merge-into-rule`, `noise` |  | Record a review decision for a cluster |
+| `--cluster` | `CLUSTER_ID` |  | Cluster ID for --decision |
+| `--proposal-id` | `PROPOSAL_ID` |  | Proposal ID when --decision propose |
+| `--category` | `CATEGORY` | `"correctness"` | Proposal category when --decision propose |
+| `--summary` | `SUMMARY` |  | Closed-template summary bullet when --decision propose |
+| `--rule` | `RULE_ID` |  | Target rule ID for merge-into-rule or recurrence check |
+| `--reason` | `REASON` |  | Optional reason for the decision |
+
 ### `aegis rule list`
 
 List active rules and fitness metrics
@@ -358,6 +439,7 @@ Category: Rule Evolution & Intelligence.
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--apply` |  |  | Apply the suggested promote/demote/archive transitions (moves rule files) |
+| `--pr` |  |  | Apply decided transitions and open a pull request with the evidence report (never auto-merges) |
 
 ### `aegis benchmark`
 
@@ -471,12 +553,13 @@ The server speaks MCP over stdio. Its tools, as `tools/list` returns them:
 | `aegis_report_outcome` | Report Outcome |
 | `aegis_create_rule` | Create Rule |
 | `aegis_list_rules` | List Rules |
+| `aegis_capture_insight` | Capture Insight |
 
 ### `aegis_scan`
 
 **Scan JIT Rules** (read-only, idempotent)
 
-Call before editing files: returns the governance rules that apply to them, ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules (gates, invariants) take at most two slots; the others are listed in omitted_mandatory. stale_rules lists rules edited since the last aegis sync. If any rule file cannot be loaded the scan fails (status FAIL) and names it.
+Call before editing files: returns the governance rules that apply to them, ranked by ledger fitness and clamped to the JIT token budget. Mandatory rules (gates, invariants) take at most two slots; the others are listed in omitted_mandatory. Gates and invariants are served from the reviewed base commit (rules_base); branch-local edits to them never bind and are listed in unreviewed_rules. stale_rules lists rules edited since the last aegis sync. If any rule file cannot be loaded the scan fails (status FAIL) and names it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -514,7 +597,7 @@ Input schema:
 
 **Report Outcome**
 
-Report whether the rules you were shown helped. Each report is an advisory self-report row in the outcome ledger; it never promotes a rule by itself.
+Report whether the rules you were shown helped. The server ties the report to the tree it computes now: with an `aegis check --record` run of exactly that tree it credits the rules it showed you that match the change (your rules_used is not what is credited), and even then only CI on the landing commit makes it count; without one it records a single unwitnessed claim per session and tree that earns nothing. Reports per session are capped.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -681,6 +764,43 @@ Input schema:
       "description": "Optional response projection: full (default), summary or ids."
     }
   },
+  "additionalProperties": false
+}
+```
+
+### `aegis_capture_insight`
+
+**Capture Insight**
+
+Record a user correction as an unconfirmed suggestion in user scope. Agent suggestions never count toward proposals or debits and never appear in aegis_scan; a suggestion upgrades to W2 only when its quote matches a hook-captured prompt in the same session.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `quote` | string | yes | Quote of the user's correction (redacted and capped at 300 chars). |
+| `paths` | array of string | no | Optional workspace-relative file paths this correction applies to. |
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "quote": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "Quote of the user's correction (redacted and capped at 300 chars)."
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional workspace-relative file paths this correction applies to."
+    }
+  },
+  "required": [
+    "quote"
+  ],
   "additionalProperties": false
 }
 ```

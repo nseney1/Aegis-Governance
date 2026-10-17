@@ -1,0 +1,261 @@
+"""Known-format secret detector, SARIF 2.1.0 ingest, and external scanner presets (v4.3 T7)."""
+from __future__ import annotations
+
+import collections, hashlib, json, math, os, re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Iterable, Mapping, Sequence
+
+from aegis_core import gitsafe
+from aegis_core.verification import test_runner
+
+MAX_LINE_LENGTH = 4096
+_B_PRE, _B_SUF = r"(?<![A-Za-z0-9+/_-])", r"(?![A-Za-z0-9+/=_-])"
+
+TIER_A_PATTERNS: dict[str, re.Pattern[str]] = {
+    "aws-access-key-id": re.compile(_B_PRE + r"(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}" + _B_SUF),
+    "github-pat": re.compile(_B_PRE + r"gh[pousr]_[A-Za-z0-9]{36,255}" + _B_SUF),
+    "github-fine-grained-pat": re.compile(_B_PRE + r"github_pat_[A-Za-z0-9_]{22,255}" + _B_SUF),
+    "slack-token": re.compile(_B_PRE + r"xox[abprs]-[A-Za-z0-9-]{10,255}" + _B_SUF),
+    "stripe-live-secret": re.compile(_B_PRE + r"[sr]k_live_[0-9A-Za-z]{24,99}" + _B_SUF),
+    "anthropic-api-key": re.compile(_B_PRE + r"sk-ant-[A-Za-z0-9_-]{20,255}" + _B_SUF),
+    "openai-api-key": re.compile(_B_PRE + r"sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,255}" + _B_SUF),
+    "google-api-key": re.compile(_B_PRE + r"AIza[0-9A-Za-z_-]{35}" + _B_SUF),
+    "private-key-pem": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----"),
+    "jwt-three-segment": re.compile(_B_PRE + r"eyJ[A-Za-z0-9_-]{10,512}\.eyJ[A-Za-z0-9_-]{10,1024}\.[A-Za-z0-9_-]{10,512}" + _B_SUF),
+    "url-basic-auth": re.compile(r"://([^/\s:@'\"$<>]{1,64}):([^/\s:@'\"$<>]{3,64})@[A-Za-z0-9.-]{1,253}"),
+}
+
+_TIER_B_RE = re.compile(r"""(?i)\b([A-Za-z0-9_.-]{0,32}(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|credential|auth[_-]?token|client[_-]?secret)[A-Za-z0-9_.-]{0,32})\s*[:=]\s*(['"])([^'"\s]{8,256})\2""")
+_TIER_C_RE = re.compile(r"""(['"])([A-Za-z0-9+/=_-]{20,256})\1""")
+_PLACEHOLDER_RE = re.compile(r"(?i)(?:example|dummy|test|placeholder|changeme|your[_-]|fake|redacted|todo|x{3,}|\*{3,}|\.{3}|^<.*>$|^\$\{?.*\}?$|^%.*%$|^(?:true|false|null|none)$)")
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$")
+_HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+_DATA_URL_OR_SRI_RE = re.compile(r"(?:data:[A-Za-z0-9/+.-]{1,64};base64,[A-Za-z0-9+/=]+|\bsha(?:1|256|384|512)-[A-Za-z0-9+/=]{16,})")
+_HASH_FIELD_RE = re.compile(r"(?i)(?:^|[^a-z0-9])(?:sha1|sha256|sha384|sha512|md5|integrity|checksum|digest|hash|commit|oid|etag|fingerprint)(?:$|[^a-z0-9])")
+_SUPPRESSION_RE = re.compile(r"#\s*(?:noqa|nosec|gitleaks:allow)\b", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class Finding:
+    """Normalized scanner or secret finding with masked snippet."""
+    rule_id: str; path: str; line: int; snippet: str; tier: str = "gate"
+    fingerprint: str = ""; severity: str = "error"; message: str = ""
+    rule = property(lambda self: self.rule_id)
+    fp = property(lambda self: self.fingerprint)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "rule_id": self.rule_id, "rule": self.rule_id, "path": self.path, "line": self.line,
+            "snippet": self.snippet, "tier": self.tier, "fingerprint": self.fingerprint,
+            "severity": self.severity, "message": self.message,
+        }
+
+
+def mask_secret(secret: str) -> str:
+    return (f"{secret[:2]}..." if len(secret) > 2 else "***") if len(secret) <= 6 else f"{secret[:4]}...{secret[-2:]}"
+
+
+def sarif_fingerprint(rule_id: str, rel_path: str, line_text: str) -> str:
+    return hashlib.sha256(f"{rule_id}|{rel_path}|{' '.join(line_text.split())}".encode("utf-8")).hexdigest()[:16]
+
+
+def _shannon_entropy(s: str) -> float:
+    if not s: return 0.0
+    counts, n = collections.Counter(s), len(s)
+    return -sum((c / n) * math.log2(c / n) for c in counts.values())
+
+
+def _is_benign_token(val: str) -> bool:
+    return bool(_PLACEHOLDER_RE.search(val) or _UUID_RE.match(val) or _HEX_RE.match(val))
+
+
+def scan_secrets_text(text: str, path: str = "<memory>", *, include_advisory: bool = False) -> list[Finding]:
+    """Scan text for Tier A (blocking) and optionally Tier B/C (advisory) secrets."""
+    findings: list[Finding] = []
+    for lineno, raw_line in enumerate(text.splitlines(), 1):
+        if len(raw_line) > MAX_LINE_LENGTH:
+            continue
+        cleaned = _DATA_URL_OR_SRI_RE.sub('""', raw_line)
+        line_secrets: list[str] = []
+        matched: list[tuple[str, str, str]] = []
+        for rule_id, rx in TIER_A_PATTERNS.items():
+            for m in rx.finditer(cleaned):
+                full = m.group(0)
+                if rule_id == "url-basic-auth":
+                    user, pwd = m.group(1), m.group(2)
+                    if _PLACEHOLDER_RE.search(user) or _PLACEHOLDER_RE.search(pwd) or "$" in user or "$" in pwd:
+                        continue
+                    line_secrets.extend([full, pwd])
+                elif rule_id != "private-key-pem" and _is_benign_token(full):
+                    continue
+                else:
+                    line_secrets.append(full)
+                matched.append((rule_id, "gate", full))
+        if include_advisory and not _HASH_FIELD_RE.search(cleaned):
+            for m in _TIER_B_RE.finditer(cleaned):
+                key_name, val = m.group(1), m.group(3)
+                if not _HASH_FIELD_RE.search(key_name) and not _is_benign_token(val) and not any(val in s or s in val for s in line_secrets):
+                    line_secrets.append(val)
+                    matched.append(("generic-secret-assign", "advisory", val))
+            for m in _TIER_C_RE.finditer(cleaned):
+                val = m.group(2)
+                if not _is_benign_token(val) and not any(val in s or s in val for s in line_secrets) and _shannon_entropy(val) >= 4.5:
+                    line_secrets.append(val)
+                    matched.append(("high-entropy-token", "advisory", val))
+        if not matched:
+            continue
+        masked_line = raw_line.strip()
+        for sec in sorted(set(line_secrets), key=len, reverse=True):
+            masked_line = masked_line.replace(sec, mask_secret(sec))
+        for rule_id, tier, sec in matched:
+            masked_tok = mask_secret(sec)
+            snippet = masked_line if masked_tok in masked_line else masked_tok
+            findings.append(Finding(
+                rule_id, path, lineno, snippet, tier, sarif_fingerprint(rule_id, path, snippet),
+                "error" if tier == "gate" else "warning", f"Detected {rule_id} ({tier})",
+            ))
+    return findings
+
+
+def contains_secret_tier_a(text: str) -> bool:
+    return bool(scan_secrets_text(text, include_advisory=False))
+
+
+def scan_secrets_file(file_path: Path | str, *, repo_root: Path | str | None = None, include_advisory: bool = False) -> list[Finding]:
+    p = Path(file_path)
+    if not p.is_file() or p.is_symlink():
+        return []
+    try: raw = p.read_bytes()
+    except OSError: return []
+    if b"\0" in raw[:4096]:
+        return []
+    rel = p.as_posix()
+    if repo_root is not None:
+        try: rel = p.resolve().relative_to(Path(repo_root).resolve()).as_posix()
+        except ValueError: rel = p.as_posix()
+    return scan_secrets_text(raw.decode("utf-8", "replace"), path=rel, include_advisory=include_advisory)
+
+
+def scan_secrets_workspace(workspace_root: Path | str, *, files: Sequence[str] | None = None, include_advisory: bool = False) -> list[Finding]:
+    root = Path(workspace_root).resolve()
+    rel_files = list(files) if files is not None else (gitsafe.list_files(root) or [])
+    if not rel_files and files is None:
+        rel_files = [
+            p.relative_to(root).as_posix() for p in sorted(root.rglob("*"))
+            if p.is_file() and not any(part.startswith(".") or part == "__pycache__" for part in p.relative_to(root).parts)
+        ]
+    return [f for rel in rel_files for f in scan_secrets_file(root / rel, repo_root=root, include_advisory=include_advisory)]
+
+
+def _count_repo_suppressions(workspace_root: Path | str | None, diff_text: str | None = None) -> int:
+    count = len(_SUPPRESSION_RE.findall(diff_text)) if diff_text else 0
+    if workspace_root is None:
+        return count
+    root = Path(workspace_root).resolve()
+    ignore_file = root / ".gitleaksignore"
+    if ignore_file.is_file():
+        try: count += sum(1 for ln in ignore_file.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip() and not ln.lstrip().startswith("#"))
+        except OSError: pass
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or any(k.startswith(".") or k in ("__pycache__", "node_modules") for k in p.relative_to(root).parts):
+            continue
+        try:
+            data = p.read_bytes()
+            if b"\0" not in data[:4096]:
+                count += len(_SUPPRESSION_RE.findall(data.decode("utf-8", "replace")))
+        except OSError:
+            continue
+    return count
+
+
+def ingest_sarif(
+    sarif_data: str | bytes | Mapping[str, Any] | Path, *, workspace_root: Path | str | None = None,
+    base_sarif: str | bytes | Mapping[str, Any] | Path | None = None, base_fingerprints: Iterable[str] | None = None,
+    diff_text: str | None = None,
+) -> dict[str, Any]:
+    """Ingest SARIF 2.1.0, compute fingerprints, subtract base findings, and count suppressions."""
+    def _load(src: Any) -> Mapping[str, Any]:
+        if isinstance(src, Mapping): return src
+        if isinstance(src, Path): return json.loads(src.read_text(encoding="utf-8"))
+        if isinstance(src, bytes): return json.loads(src.decode("utf-8", "replace"))
+        s = str(src).strip()
+        return json.loads(Path(s).read_text(encoding="utf-8")) if (not s.startswith("{") and Path(s).is_file()) else json.loads(s)
+
+    doc = _load(sarif_data)
+    base_fps: set[str] = set(base_fingerprints or ())
+    if base_sarif is not None:
+        base_fps.update(f.fingerprint for f in ingest_sarif(base_sarif, workspace_root=workspace_root)["findings"])
+    root_path = Path(workspace_root).resolve() if workspace_root else None
+    all_findings: list[Finding] = []
+    sarif_supps = 0
+    for run in doc.get("runs") or []:
+        for res in run.get("results") or []:
+            sarif_supps += len(res.get("suppressions") or ())
+            rule_id, level = str(res.get("ruleId") or "unknown"), str(res.get("level") or "warning").lower()
+            msg = str((res.get("message") or {}).get("text") or "")
+            phys = ((res.get("locations") or [{}])[0].get("physicalLocation") or {})
+            uri = str((phys.get("artifactLocation") or {}).get("uri") or "")
+            uri = uri[7:] if uri.startswith("file://") else uri
+            rel_path = uri.lstrip("./")
+            if root_path and uri:
+                try: rel_path = Path(uri).resolve().relative_to(root_path).as_posix()
+                except ValueError: rel_path = Path(uri).as_posix().lstrip("./")
+            region = phys.get("region") or {}
+            line_no, snippet_raw = int(region.get("startLine") or 0), (region.get("snippet") or {}).get("text")
+            if snippet_raw is None and root_path and rel_path and line_no > 0 and (root_path / rel_path).is_file():
+                lines = (root_path / rel_path).read_text(encoding="utf-8", errors="replace").splitlines()
+                snippet_raw = lines[line_no - 1] if 1 <= line_no <= len(lines) else None
+            norm_line = " ".join(str(snippet_raw if snippet_raw is not None else msg).split())
+            fp = sarif_fingerprint(rule_id, rel_path, norm_line)
+            all_findings.append(Finding(rule_id, rel_path, line_no, norm_line, "gate", fp, "error" if level == "error" else "warning", msg))
+    delta = [f for f in all_findings if f.fingerprint not in base_fps]
+    return {
+        "status": "fail" if delta else "pass", "findings": delta, "total_raw": len(all_findings),
+        "delta_count": len(delta), "base_subtracted": len(all_findings) - len(delta),
+        "suppression_count": sarif_supps + _count_repo_suppressions(workspace_root, diff_text),
+    }
+
+
+def _is_within_dir(path: Path, directory: Path) -> bool:
+    real_p, real_d = os.path.realpath(path), os.path.realpath(directory)
+    return real_p == real_d or real_p.startswith(real_d.rstrip(os.sep) + os.sep)
+
+
+def build_preset_argv(
+    preset: str, target_path: Path | str = ".", *, user_config_dir: Path | str | None = None, config_path: Path | str | None = None,
+) -> list[str]:
+    target = Path(target_path).resolve()
+    if preset == "ruff":
+        return ["ruff", "check", "--isolated", "--select", "S", "--ignore", "S603,S607", "--output-format", "sarif", str(target)]
+    if preset == "gitleaks":
+        from aegis_core.workspace.layout import UserLayout
+        argv = ["gitleaks", "detect", "--no-git", "--redact", "--report-format", "sarif", "--report-path", "-", "--source", str(target)]
+        ul = UserLayout.current()
+        user_dir = Path(user_config_dir).resolve() if user_config_dir else (ul.aegis_dir.resolve() if ul else None)
+        if user_dir is not None and not _is_within_dir(user_dir, target):
+            cand = Path(config_path).resolve() if config_path else (user_dir / "gitleaks.toml").resolve()
+            if _is_within_dir(cand, user_dir) and not _is_within_dir(cand, target) and cand.is_file():
+                argv.extend(["--config", str(cand)])
+        return argv
+    raise ValueError(f"Unsupported scanner preset: {preset!r}")
+
+
+def run_preset_scanner(
+    preset: str, workspace_root: Path | str, *, user_config_dir: Path | str | None = None, config_path: Path | str | None = None,
+    base_fingerprints: Iterable[str] | None = None, timeout: int = 60, runner: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    argv = build_preset_argv(preset, workspace_root, user_config_dir=user_config_dir, config_path=config_path)
+    cmd_runner = runner or test_runner.run_external_cmd
+    try: res = cmd_runner(argv, cwd=Path(workspace_root), timeout=timeout)
+    except FileNotFoundError as exc: return {"status": "unverified", "reason": str(exc), "findings": [], "argv": argv}
+    if res.get("missing_binary") or res.get("timed_out"):
+        reason = res.get("stderr") or (f"{argv[0]} timed out" if res.get("timed_out") else f"{argv[0]} not found")
+        return {"status": "unverified", "reason": reason, "findings": [], "argv": argv}
+    stdout = (res.get("stdout") or "").strip()
+    if stdout.startswith("{"):
+        return {**ingest_sarif(stdout, workspace_root=workspace_root, base_fingerprints=base_fingerprints), "argv": argv}
+    if res.get("returncode", 0) == 0:
+        return {"status": "pass", "findings": [], "suppression_count": _count_repo_suppressions(workspace_root), "argv": argv}
+    return {"status": "unverified", "reason": res.get("stderr") or f"{argv[0]} failed", "findings": [], "argv": argv}
+

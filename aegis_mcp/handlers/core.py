@@ -76,6 +76,18 @@ def _record_scan(workspace: Any, args: dict, files: Optional[List[str]]) -> None
     _RECORDED[key] = datetime.strptime(row["ts"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
+def _record_exposure(workspace: Any, args: dict, res: dict, files: Optional[List[str]] = None) -> None:
+    """Remember which rules this server session was shown: aegis_report_outcome credits only those."""
+    from aegis_core import credit
+    from aegis_core.storage import ledger_site
+
+    names = [item.get("name") for key in ("relevant_rules", "invariant_warnings")
+             for item in (res.get(key) or []) if isinstance(item, dict)]
+    persist = bool(args.get("_session")) and ledger_site(workspace.root, create=False).shared
+    credit.record_exposure(workspace.root, str(args.get("_host") or ""), str(args.get("_session") or ""),
+                           [n for n in names if isinstance(n, str)], paths=files, persist=persist)
+
+
 def _scan_user_layer(args: dict) -> dict:
     """Nothing governs this call (H8): the read-only user layer, never a ledger write."""
     files = args.get("files")
@@ -109,4 +121,5 @@ def handle_scan(args: dict) -> dict:
     if res.get("status") == _STATUS_FAIL:
         return res
     _record_scan(workspace, args, files)
+    _record_exposure(workspace, args, res, files)
     return render_scan_result(res, _slot_profile(args.get("_host")), workspace)

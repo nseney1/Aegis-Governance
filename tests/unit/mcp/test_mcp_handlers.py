@@ -135,7 +135,7 @@ def test_report_outcome_surfaces_a_ledger_write_failure(mcp_workspace: Path, mon
     def disk_full(*_args, **_kwargs):
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(telemetry_handlers.ledger, "append", disk_full)
+    monkeypatch.setattr(telemetry_handlers.credit.ledger, "append_rows", disk_full)
     res = handle_report_outcome({
         "workspace": str(mcp_workspace),
         "outcome": "success",

@@ -42,16 +42,16 @@ def test_report_outcome_batch_failure_then_same_key_retries_once(tmp_path, monke
     _rule(tmp_path, "rule-a")
     _rule(tmp_path, "rule-b")
     monkeypatch.setenv("AEGIS_WORKSPACE", str(tmp_path))
-    real_validate = ledger_mod._validated
+    real_write = ledger_mod._write
     calls = {"count": 0}
 
-    def fail_on_second(event):
+    def fail_first(path, rows):
         calls["count"] += 1
-        if calls["count"] == 2:
-            raise OSError("second row rejected")
-        return real_validate(event)
+        if calls["count"] == 1:
+            raise OSError("write rejected")
+        return real_write(path, rows)
 
-    monkeypatch.setattr(ledger_mod, "_validated", fail_on_second)
+    monkeypatch.setattr(ledger_mod, "_write", fail_first)
     args = {"outcome": "success", "rules_used": ["rule-a", "rule-b"],
             "idempotency_key": "caller-operation-1"}
     result = execute_tool("aegis_report_outcome", args)
@@ -59,9 +59,9 @@ def test_report_outcome_batch_failure_then_same_key_retries_once(tmp_path, monke
     assert result["status"] == "FAIL"
     assert _rows(path) == []
 
-    monkeypatch.setattr(ledger_mod, "_validated", real_validate)
-    assert execute_tool("aegis_report_outcome", args)["status"] == "recorded"
-    assert execute_tool("aegis_report_outcome", args)["status"] == "recorded"
+    monkeypatch.setattr(ledger_mod, "_write", real_write)
+    assert execute_tool("aegis_report_outcome", args)["status"] == "claimed"
+    assert execute_tool("aegis_report_outcome", args)["status"] == "claimed"
     rows = _rows(path)
-    assert sorted(row["rule"] for row in rows) == ["rule-a", "rule-b"]
-    assert len(rows) == 2
+    assert [(row["event"], row["report_key"]) for row in rows] == [("claimed", "caller-operation-1")]
+    assert len(rows) == 1

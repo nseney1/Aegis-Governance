@@ -93,6 +93,39 @@ def _format_adaptive_expiry(created_val, expiry_days_val) -> str:
     return f"{remaining_days}d"
 
 
+def blocked_commands_summary(workspace: Path | str) -> dict:
+    """Count hook-observed blocked commands per host from guard_match events."""
+    from aegis_core import events
+
+    by_host: dict[str, int] = {}
+    ev_read = events.read(workspace, kinds="guard_match")
+    for row in ev_read.rows:
+        if row.get("result") == "block":
+            host = str(row.get("host") or "unknown")
+            by_host[host] = by_host.get(host, 0) + 1
+    total = sum(by_host.values())
+    return {
+        "total": total,
+        "by_host": by_host,
+        "source": "hook-observed",
+        "label": "hook-observed",
+    }
+
+
+def collect_status(workspace: Path | str, home: Path | str | None = None) -> dict:
+    """Return structured workspace status including hook-observed blocked_commands."""
+    blocked = blocked_commands_summary(workspace)
+    return {
+        "workspace": str(workspace),
+        "blocked_commands": blocked,
+        "events": {
+            "blocked_commands": blocked["total"],
+            "blocked_commands_source": "hook-observed",
+            "blocked_commands_by_host": dict(blocked["by_host"]),
+        },
+    }
+
+
 def run_status(args: argparse.Namespace) -> int:
     """Show active rules and stats."""
     root = _repo_root(args)
@@ -121,8 +154,14 @@ def run_status(args: argparse.Namespace) -> int:
         ruleset = RuleSet(())
     from aegis_core.telemetry_engine import ledger
 
-    # One ledger read for every number below; what it could not use is shown.
+    # One ledger read for every per-rule number below; what it could not use is shown.
     view = ledger.read(proj)
+    from aegis_core.credit import claimed_summary, project_credits
+
+    # aegis_report_outcome calls with no check row for their tree: counted apart, never per rule.
+    claimed = claimed_summary(proj)
+    proj_credits = project_credits(proj, view=view)
+    blocked_cmds = blocked_commands_summary(proj)
     loaded = [r for r in ruleset.rules if r.ok]
     fits = for_rules(proj, loaded, view=view)
     derived = read_derived(proj)
@@ -131,12 +170,21 @@ def run_status(args: argparse.Namespace) -> int:
     # 3. Ledger totals of the host-installed rules (they have no rule file here)
     from aegis_core.fitness import compute
 
-    totals = ledger.aggregate_rows(view.rows)
+    combined_rows = []
+    seen_keys: set[tuple[str, str]] = set()
+    for r in list(view.rows) + list(proj_credits.outcome_rows):
+        k, rid = r.get("key"), r.get("rule")
+        if isinstance(k, str) and k and isinstance(rid, str):
+            if (k, rid) in seen_keys:
+                continue
+            seen_keys.add((k, rid))
+        combined_rows.append(r)
+    totals = ledger.aggregate_rows(combined_rows)
 
     def _core_fitness(*names: str) -> tuple[int, float | None]:
         entry = next((totals[n] for n in names if n in totals), {})
-        fit = compute(entry)
-        return fit.triggers, (fit.score if fit.verdicts else None)
+        fit = compute(entry, evidence_available=proj_credits.available, evidence_error=proj_credits.error)
+        return fit.triggers, (fit.score if fit.evidence_available and fit.score is not None and fit.verdicts else None)
 
     # 4. Process all rules and calculate character overhead
     # Host-installed instruction rules ("core") list first, then the rule types in table order.
@@ -166,11 +214,19 @@ def run_status(args: argparse.Namespace) -> int:
     for rule in loaded:
         total_chars += len(rule.raw.decode("utf-8-sig", "replace"))
         fit = fits[rule.id]
+        hide_score = not fit.evidence_available or not fit.verdicts or fit.state in ("insufficient", "untestable", "evidence_unavailable")
         all_rules.append({
             "name": sanitize_display(rule.id),
             "type": rule.type,
-            # No verdict yet is not a fitness of zero: show it as unknown.
-            "score": fit.score if fit.verdicts else None,
+            # No verdict yet or insufficient sample size (n < 10) shows status_label / unknown, never a misleading precision.
+            "score": None if hide_score else fit.score,
+            "state": fit.state,
+            "status_label": fit.status_label,
+            "evidence_available": fit.evidence_available,
+            "evidence_error": fit.evidence_error,
+            "contested": fit.contested,
+            "override_rate": fit.override_rate,
+            "flagged_for_review": fit.flagged_for_review,
             "triggers": fit.triggers,
             "expiry": "expired" if rule.expired else _format_adaptive_expiry(
                 rule.meta.get("created"), rule.meta.get("expiry_days")),
@@ -210,6 +266,8 @@ def run_status(args: argparse.Namespace) -> int:
             "last_sync": derived.get("synced_at") if derived else None,
             "inventory_error": inventory_error,
             "ledger": ledger_health,
+            "claimed": claimed,
+            "blocked_commands": blocked_cmds,
             **problems,
         }
         print(json.dumps(payload, indent=2))
@@ -231,6 +289,12 @@ def run_status(args: argparse.Namespace) -> int:
     print(f"  {'Context load:':<16}~{estimated_tokens:,} tokens (pre-JIT max)")
     print(f"  {'Token budget:':<16}{ui.format_budget_bar(estimated_tokens, max_budget)}")
     print(f"  {'Last sync:':<16}{derived.get('synced_at') if derived else 'never (run aegis sync)'}\n")
+    if blocked_cmds["total"]:
+        by_host_str = ", ".join(f"{sanitize_display(h)}: {n}" for h, n in sorted(blocked_cmds["by_host"].items()))
+        print(f"  {'Blocked cmds:':<16}{blocked_cmds['total']} ({blocked_cmds['label']}: {by_host_str})\n")
+    if claimed["claimed"]:
+        print(f"  {claimed['label']}: {claimed['claimed']} report(s) from {claimed['sessions']} session(s), "
+              "no rule's evidence\n")
     _print_problems(inventory_error, problems, view.incomplete)
 
     if not all_rules:
@@ -252,7 +316,13 @@ def run_status(args: argparse.Namespace) -> int:
         last_type = r_type
 
         score_val = r.get("score")
-        score_str = ui.color_fitness(float(score_val)) if isinstance(score_val, (int, float)) else "—"
+        status_label = r.get("status_label")
+        if isinstance(score_val, (int, float)):
+            score_str = ui.color_fitness(float(score_val))
+        elif status_label:
+            score_str = str(status_label)
+        else:
+            score_str = "—"
         type_str = ui.color_rule_type(r_type)
         tbl.add_row(
             str(r["name"]),

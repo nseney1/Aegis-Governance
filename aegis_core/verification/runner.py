@@ -26,6 +26,22 @@ VerificationResult = ToolEvidence
 
 
 _FORBID_AST_KEYS = ("imports", "calls", "decorators")
+_CALL_SPEC_KEYS = frozenset({"name", "call", "where", "builtin", "unknown"})
+_UNKNOWN_MODES = frozenset({"report", "skip", "flag", "ignore"})
+
+
+def _valid_call_spec(p: object) -> bool:
+    if isinstance(p, str):
+        return bool(p.strip())
+    if not isinstance(p, dict) or not p or not set(p).issubset(_CALL_SPEC_KEYS):
+        return False
+    name = p.get("name") if "name" in p else p.get("call")
+    return (
+        isinstance(name, str) and bool(name.strip())
+        and ("where" not in p or (isinstance(p["where"], dict) and bool(p["where"])))
+        and ("builtin" not in p or isinstance(p["builtin"], bool))
+        and ("unknown" not in p or p["unknown"] in _UNKNOWN_MODES)
+    )
 
 
 def _forbid_ast_spec_error(spec: object) -> Optional[str]:
@@ -42,7 +58,8 @@ def _forbid_ast_spec_error(spec: object) -> Optional[str]:
         return f"unknown forbid_ast key {listed} (allowed: {', '.join(_FORBID_AST_KEYS)})"
     patterns = 0
     for key, value in spec.items():
-        if not isinstance(value, list) or not all(isinstance(p, str) and p.strip() for p in value):
+        check = _valid_call_spec if key == "calls" else (lambda p: isinstance(p, str) and bool(p.strip()))
+        if not isinstance(value, list) or not all(check(p) for p in value):
             return f"forbid_ast.{key} must be a list of non-empty strings, not {type(value).__name__}"
         patterns += len(value)
     return None if patterns else "forbid_ast declares no patterns"
@@ -428,7 +445,12 @@ def run_layer1(
                 results.append(_tool_failure("import_guard", filepath, exc))
 
     # ── Declarative Rule-Level forbid_ast ─────────────────────────────
-    from aegis_core.ast.policy import ASTExtractionError, evaluate_forbid_ast, extract_normalized_ast
+    from aegis_core import credit
+    from aegis_core.ast.policy import (
+        ASTExtractionError,
+        evaluate_forbid_ast_with_overrides,
+        extract_normalized_ast,
+    )
 
     try:
         forbid_rules, broken_rules = _discover_forbid_ast_rules(repo_root_str)
@@ -478,9 +500,12 @@ def run_layer1(
                     if norm_ast is None:  # no AST driver for this file type: rule does not apply
                         continue
                     violations: list[str] = []
+                    overrides: list[dict[str, Any]] = []
                     if not isinstance(norm_ast, ASTExtractionError):
                         try:
-                            violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                            violations, overrides = evaluate_forbid_ast_with_overrides(
+                                norm_ast, forbid_spec, rule_id=rule_id
+                            )
                         except ASTExtractionError as exc:  # decorators had to be re-read from disk
                             norm_ast = exc
                 except Exception as exc:
@@ -497,6 +522,17 @@ def run_layer1(
                         )
                     )
                     continue
+                for ov in overrides:
+                    try:
+                        credit.record_override(
+                            repo_root_str,
+                            rule_id,
+                            rel_path,
+                            int(ov["line"]),
+                            reason=str(ov.get("reason") or ""),
+                        )
+                    except Exception:
+                        pass
                 if violations:
                     results.append(
                         VerificationResult(
@@ -732,7 +768,12 @@ def _layer1_on_snapshot(
     A file in ``too_large`` was not read: a forbid_ast gate rule that covers it fails
     closed; otherwise the call_graph and import_guard checks it would get are skipped,
     and passing INDEX_NOTE_TOOL evidence says so."""
-    from aegis_core.ast.policy import ASTExtractionError, evaluate_forbid_ast, extract_normalized_ast
+    from aegis_core import credit
+    from aegis_core.ast.policy import (
+        ASTExtractionError,
+        evaluate_forbid_ast_with_overrides,
+        extract_normalized_ast,
+    )
 
     results: list[ToolEvidence] = []
     checked = [
@@ -809,9 +850,12 @@ def _layer1_on_snapshot(
             tool = f"forbid_ast:{rule.id}"
             failure = norm_ast if isinstance(norm_ast, ASTExtractionError) else None
             violations: list[str] = []
+            overrides: list[dict[str, Any]] = []
             if failure is None:
                 try:
-                    violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                    violations, overrides = evaluate_forbid_ast_with_overrides(
+                        norm_ast, forbid_spec, rule_id=rule.id
+                    )
                 except ASTExtractionError as exc:  # decorators had to be re-read from the file
                     failure = exc
                 except Exception as exc:
@@ -822,7 +866,19 @@ def _layer1_on_snapshot(
                 results.append(ToolEvidence(
                     tool=tool, target=rel, verdict=False, detail=f"forbid_ast: cannot verify {rel}: {failure.reason}",
                 ))
-            elif violations:
+                continue
+            for ov in overrides:
+                try:
+                    credit.record_override(
+                        repo_root,
+                        rule.id,
+                        rel,
+                        int(ov["line"]),
+                        reason=str(ov.get("reason") or ""),
+                    )
+                except Exception:
+                    pass
+            if violations:
                 results.append(ToolEvidence(tool=tool, target=rel, verdict=False, detail="; ".join(violations)))
     return results
 

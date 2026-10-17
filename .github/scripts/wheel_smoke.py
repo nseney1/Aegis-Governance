@@ -103,15 +103,15 @@ def check_mcp(ws):
     if len(lines) != 3:
         fail(f"MCP returned {len(lines)} responses: {proc.stdout[-500:]} {proc.stderr[-500:]}")
     tools = lines[1]["result"]["tools"]
-    if len(tools) != 4:
-        fail(f"MCP tools/list expected the 4 v4 tools, got {len(tools)}")
+    if len(tools) != 5:
+        fail(f"MCP tools/list expected the 5 v4 tools, got {len(tools)}")
     payload = json.loads(lines[2]["result"]["content"][0]["text"])
     rules = payload.get("rules") if isinstance(payload, dict) else None
     if not isinstance(rules, list):
         fail(f"MCP aegis_list_rules returned no rules list: {payload!r}")
     if "trap-smoke" not in {c.get("_name") for c in rules if isinstance(c, dict)}:
         fail(f"MCP aegis_list_rules did not see the workspace rule: {rules!r}")
-    print("ok  aegis_mcp initialize / tools/list (4 tools) / aegis_list_rules")
+    print("ok  aegis_mcp initialize / tools/list (5 tools) / aegis_list_rules")
 
 
 def check_governance_fitness(ws):
@@ -147,8 +147,8 @@ def check_packaged_rules_and_skills(ws):
     from aegis_cli.init import packaged_active_rules, packaged_dir, packaged_rules
     from aegis_mcp.registry import TOOL_DEFINITIONS
 
-    if len(TOOL_DEFINITIONS) != 4:
-        fail(f"TOOL_DEFINITIONS expected the 4 v4 tools, got {len(TOOL_DEFINITIONS)}")
+    if len(TOOL_DEFINITIONS) != 5:
+        fail(f"TOOL_DEFINITIONS expected the 5 v4 tools, got {len(TOOL_DEFINITIONS)}")
     dist = importlib.metadata.distribution("aegis-guardrails")
     top_level = sorted((dist.read_text("top_level.txt") or "").split())
     if top_level != sorted(PACKAGES):
@@ -172,7 +172,7 @@ def check_packaged_rules_and_skills(ws):
     if len(skills) < 15:
         fail(f"the wheel packages only {len(skills)} skills: {skills!r}")
     print(f"ok  packaged rules and skills in aegis_core/_data ({len(rules)} rules, {len(skills)} skills, "
-          f"4 MCP tools; top level {', '.join(top_level)})")
+          f"5 MCP tools; top level {', '.join(top_level)})")
 
 
 def _planted_repo(packages, modules=()):
@@ -219,8 +219,8 @@ def check_mcp_launcher():
         if os.path.exists(marker):
             fail(f"the {kind} MCP launcher {command!r} imported planted code from its start directory")
         lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
-        if len(lines) != 2 or len(lines[1].get("result", {}).get("tools", [])) != 4:
-            fail(f"the {kind} MCP launcher {command!r} did not serve 4 tools: {proc.stdout[-300:]} {proc.stderr[-300:]}")
+        if len(lines) != 2 or len(lines[1].get("result", {}).get("tools", [])) != 5:
+            fail(f"the {kind} MCP launcher {command!r} did not serve 5 tools: {proc.stdout[-300:]} {proc.stderr[-300:]}")
         print(f"ok  {kind} MCP launcher ignores planted packages: {command[0]}")
 
 

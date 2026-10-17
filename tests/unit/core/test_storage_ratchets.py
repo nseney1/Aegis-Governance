@@ -20,9 +20,13 @@ PACKAGES = ("aegis_core", "aegis_cli", "aegis_mcp", "aegis_sdk")
 NON_AEGIS_WRITERS = {
     ("aegis_cli/hooks/management.py", "install_hook"): "the git pre-commit hook (.git/hooks)",
     ("aegis_cli/hooks/management.py", "uninstall_hook"): "the git pre-commit hook (.git/hooks)",
+    ("aegis_cli/hooks/commitmsg.py", "install"): "the git prepare-commit-msg hook (.git/hooks)",
     ("aegis_core/baseline.py", "Sources._ast"): "a staged non-Python blob copied into a temporary directory for the AST driver",
     ("aegis_core/verification/runner.py", "snapshot_index"): "staged blobs in a temporary directory (aegis check --hook)",
+    ("aegis_core/checkrun.py", "run_tests"): "the test run's output in a temporary directory (aegis check --record)",
+    ("aegis_core/treeid.py", "bind"): "a copy of the git index in a private temporary directory (tree identity)",
     ("aegis_core/benchmark.py", "materialize"): "the fixture corpus in a temporary directory (aegis benchmark)",
+    ("aegis_core/release_verify.py", "verify_release"): "the attestation subject in a temporary directory (aegis doctor --release)",
 }
 _WRITE_MODE = re.compile(r"[wax+]")
 _COPIES = {"copy", "copy2", "copyfile", "copytree"}

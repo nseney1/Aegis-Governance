@@ -548,8 +548,32 @@ def _run_partition(args: argparse.Namespace, root: str, use_json: bool, source: 
     return 0
 
 
+def _run_calibration(args: argparse.Namespace) -> int:
+    """Display Arbiter calibration summary (`aegis verify --calibration`)."""
+    from aegis_core.storage import read_jsonl
+    from aegis_core.verification.arbiter import calibration_summary
+    from aegis_core.workspace.layout import WorkspaceLayout
+
+    root = Path(_resolve_git_cwd(args)).resolve()
+    state_dir = WorkspaceLayout(root).state_dir
+    rows: list[dict[str, Any]] = []
+    for name in ("predictions.jsonl", "arbiter_predictions.jsonl"):
+        p = state_dir / name
+        if p.exists():
+            rows.extend(read_jsonl(p).rows)
+    summary = calibration_summary(rows)
+    if _wants_json(args):
+        print(json.dumps(dict(summary), indent=2))
+    else:
+        print(str(summary))
+    return 0
+
+
 def run_verify(args: argparse.Namespace) -> int:
     """Run `aegis check` for *args*. Returns 0, 1 or 2 (see the module docstring)."""
+    if getattr(args, "calibration", False):
+        return _run_calibration(args)
+
     from aegis_core import baseline
     from aegis_core.inference_provider import MISSING_BACKEND, LLMCommandError, resolve_backend
     from aegis_core.verification.pipeline import VerificationPipeline

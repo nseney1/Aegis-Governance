@@ -1,8 +1,15 @@
-"""Pre-tag release check .github/scripts/ci_green.py (ADR 0005 AD-10, defense #33).
+"""Pre-tag release check .github/scripts/ci_green.py (ADR 0005 AD-10, defense #33; v4.3 T1/T2).
 
-A workflow job cannot see its own run's conclusion, so "CI green on the exact
-SHA" is checked before tagging by asking `gh run list --commit <sha>`. The gh
-subprocess is mocked; every case asserts the exit code and the message.
+A workflow job cannot see its own run's conclusion, so "CI green on the exact SHA" is checked
+before tagging. It asks the REST API (``gh api repos/{o}/{r}/actions/runs?head_sha=<sha>``) and
+applies the v4.3 T1 rules: only runs whose ``path`` is the required workflow, whose head is this
+commit in this repository, and whose event is push, workflow_dispatch or release count; cancelled
+runs are ignored and the newest run (its latest attempt) decides. The gh subprocess is mocked;
+every case asserts the exit code and the message.
+
+The eight v4.0 cases that pinned ``gh run list`` were rewritten to this contract under an
+author waiver (lane f-a3-rule-integrity); the bad-sha, missing-gh and unparseable-output cases
+are kept as they were.
 """
 from __future__ import annotations
 
@@ -10,12 +17,15 @@ import importlib.util
 import json
 import subprocess
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / ".github" / "scripts" / "ci_green.py"
 SHA = "4f2810174fbd6014dd5db3e7c90121e1bc514676"
 OTHER = "175f3b3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+REQUIRED = ".github/workflows/validate.yml"
+REPO = "owner/project"
 
 
 @pytest.fixture
@@ -26,59 +36,149 @@ def ci_green():
     return module
 
 
-def _gh(monkeypatch, module, runs=None, returncode=0, stdout=None, raises=None):
+def _gh(monkeypatch, module, runs=None, returncode=0, stdout=None, raises=None, pages=None):
+    """Each gh call answers the next page of runs (``runs`` is a single page)."""
     calls = []
+    queue: List[List[Dict[str, Any]]] = list(pages) if pages is not None else [list(runs or [])]
 
     def fake_run(argv, **kwargs):
         calls.append(argv)
         if raises is not None:
             raise raises
-        out = stdout if stdout is not None else json.dumps(runs or [])
+        if stdout is not None:
+            out = stdout
+        else:
+            page = queue.pop(0) if queue else []
+            out = json.dumps({"total_count": len(page), "workflow_runs": page})
         return subprocess.CompletedProcess(argv, returncode, stdout=out, stderr="gh: boom" if returncode else "")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     return calls
 
 
-def _run(status: str = "completed", conclusion: str = "success", sha: str = SHA, name: str = "Validate"):
-    return {"headSha": sha, "status": status, "conclusion": conclusion, "workflowName": name}
+def _run(run_id: int = 1, *, status: str = "completed", conclusion: Optional[str] = "success", sha: str = SHA,
+         path: str = REQUIRED, event: str = "push", head: Optional[str] = REPO,
+         started: str = "2026-10-16T10:00:00Z", attempt: int = 1) -> Dict[str, Any]:
+    run: Dict[str, Any] = {
+        "id": run_id, "name": "Validate", "path": path, "head_sha": sha, "event": event, "status": status,
+        "conclusion": conclusion, "run_attempt": attempt, "run_started_at": started,
+        "created_at": "2026-10-16T09:00:00Z", "repository": {"full_name": REPO},
+    }
+    if head is not None:
+        run["head_repository"] = {"full_name": head}
+    return run
 
 
-def test_green_when_every_run_on_the_sha_succeeded(ci_green, monkeypatch, capsys):
-    calls = _gh(monkeypatch, ci_green, [_run(), _run(name="Publish")])
+def _endpoint(slug: str = "{owner}/{repo}", page: int = 1) -> str:
+    return f"repos/{slug}/actions/runs?head_sha={SHA}&per_page=100&page={page}"
+
+
+def test_green_when_the_newest_run_of_the_required_workflow_succeeded(ci_green, monkeypatch, capsys):
+    calls = _gh(monkeypatch, ci_green, [_run()])
     assert ci_green.main([SHA]) == 0
-    assert calls == [["gh", "run", "list", "--commit", SHA, "--json", "conclusion,headSha,status,workflowName", "--limit", "100"]]
-    assert f"CI is green on {SHA}" in capsys.readouterr().out
+    assert calls == [["gh", "api", "-H", "Accept: application/vnd.github+json", _endpoint()]]
+    out = capsys.readouterr().out
+    assert f"CI is green on {SHA}" in out and "validate.yml" in out
 
 
-def test_red_when_any_run_failed(ci_green, monkeypatch, capsys):
-    _gh(monkeypatch, ci_green, [_run(), _run(conclusion="failure", name="Validate")])
+def test_red_when_the_newest_run_failed(ci_green, monkeypatch, capsys):
+    runs = [_run(1, started="2026-10-16T10:00:00Z"), _run(2, conclusion="failure", started="2026-10-16T12:00:00Z")]
+    _gh(monkeypatch, ci_green, runs)
     assert ci_green.main([SHA]) == 1
-    assert "Validate: failure" in capsys.readouterr().err
+    assert "run 2: failure" in capsys.readouterr().err
+
+
+def test_a_successful_rerun_wins_over_the_failed_run_before_it(ci_green, monkeypatch, capsys):
+    runs = [_run(1, conclusion="failure", started="2026-10-16T10:00:00Z"),
+            _run(2, attempt=2, started="2026-10-16T12:00:00Z")]
+    _gh(monkeypatch, ci_green, runs)
+    assert ci_green.main([SHA]) == 0
+    assert "attempt 2" in capsys.readouterr().out
+
+
+def test_a_cancelled_run_is_ignored_and_the_older_success_decides(ci_green, monkeypatch):
+    runs = [_run(2, conclusion="cancelled", started="2026-10-16T12:00:00Z"), _run(1, started="2026-10-16T10:00:00Z")]
+    _gh(monkeypatch, ci_green, runs)
+    assert ci_green.main([SHA]) == 0
+
+
+def test_only_cancelled_runs_is_not_green(ci_green, monkeypatch, capsys):
+    _gh(monkeypatch, ci_green, [_run(conclusion="cancelled")])
+    assert ci_green.main([SHA]) == 1
+    assert f"no CI run of validate.yml found for {SHA}" in capsys.readouterr().err
 
 
 def test_red_while_a_run_is_still_in_progress(ci_green, monkeypatch, capsys):
-    _gh(monkeypatch, ci_green, [_run(status="in_progress", conclusion="")])
+    _gh(monkeypatch, ci_green, [_run(status="in_progress", conclusion=None)])
     assert ci_green.main([SHA]) == 1
-    assert "Validate: in_progress" in capsys.readouterr().err
+    assert "in_progress" in capsys.readouterr().err
 
 
 def test_red_when_no_run_exists_for_the_sha(ci_green, monkeypatch, capsys):
     _gh(monkeypatch, ci_green, [])
     assert ci_green.main([SHA]) == 1
-    assert f"no CI run found for {SHA}" in capsys.readouterr().err
+    assert f"no CI run of validate.yml found for {SHA}" in capsys.readouterr().err
 
 
-def test_runs_for_other_commits_do_not_count(ci_green, monkeypatch, capsys):
-    _gh(monkeypatch, ci_green, [_run(sha=OTHER)])
+@pytest.mark.parametrize("label,run", [
+    ("other-commit", _run(sha=OTHER)),
+    ("other-workflow", _run(path=".github/workflows/publish.yml")),
+    ("fork-head", _run(head="attacker/project")),
+    ("no-head-repo", _run(head=None)),
+    ("pull_request", _run(event="pull_request")),
+    ("pr_target", _run(event="pull_request_target")),
+    ("schedule", _run(event="schedule")),
+])
+def test_runs_that_may_not_decide_do_not_count(ci_green, monkeypatch, capsys, label, run):
+    _gh(monkeypatch, ci_green, [run])
     assert ci_green.main([SHA]) == 1
-    assert f"no CI run found for {SHA}" in capsys.readouterr().err
+    assert f"no CI run of validate.yml found for {SHA}" in capsys.readouterr().err
 
 
-def test_workflow_filter_is_passed_to_gh(ci_green, monkeypatch):
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "release"])
+def test_each_trusted_event_counts(ci_green, monkeypatch, event):
+    _gh(monkeypatch, ci_green, [_run(event=event)])
+    assert ci_green.main([SHA]) == 0
+
+
+def test_a_failing_run_of_another_workflow_does_not_turn_it_red(ci_green, monkeypatch):
+    _gh(monkeypatch, ci_green, [_run(1), _run(2, path=".github/workflows/publish.yml", conclusion="failure",
+                                              started="2026-10-16T12:00:00Z")])
+    assert ci_green.main([SHA]) == 0
+
+
+def test_the_workflow_flag_selects_the_required_workflow_by_path(ci_green, monkeypatch):
+    calls = _gh(monkeypatch, ci_green, [_run(path=".github/workflows/release.yml")])
+    assert ci_green.main([SHA, "--workflow", "release.yml"]) == 0
+    assert calls[0][-1] == _endpoint()
+
+
+def test_the_repo_flag_names_the_endpoint(ci_green, monkeypatch):
     calls = _gh(monkeypatch, ci_green, [_run()])
-    assert ci_green.main([SHA, "--workflow", "validate.yml"]) == 0
-    assert calls[0][-2:] == ["--workflow", "validate.yml"]
+    assert ci_green.main([SHA, "--repo", REPO]) == 0
+    assert calls[0][-1] == _endpoint(REPO)
+
+
+def test_every_page_is_read(ci_green, monkeypatch):
+    filler = [_run(1000 + i, path=".github/workflows/other.yml") for i in range(100)]
+    calls = _gh(monkeypatch, ci_green, pages=[filler, [_run(7)]])
+    assert ci_green.main([SHA]) == 0
+    assert [c[-1] for c in calls] == [_endpoint(page=1), _endpoint(page=2)]
+
+
+@pytest.mark.parametrize("bad", ["sub/validate.yml", "validate.txt", "../validate.yml", ""])
+def test_the_workflow_must_be_a_workflow_file_name(ci_green, monkeypatch, capsys, bad):
+    calls = _gh(monkeypatch, ci_green, [_run()])
+    assert ci_green.main([SHA, "--workflow", bad]) == 2
+    assert calls == []
+    assert "workflow file name" in capsys.readouterr().err
+
+
+def test_a_bad_repo_is_a_usage_error(ci_green, monkeypatch, capsys):
+    calls = _gh(monkeypatch, ci_green, [_run()])
+    assert ci_green.main([SHA, "--repo", "not a repo"]) == 2
+    assert calls == []
+    assert "OWNER/REPO" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("bad", ["4f28101", "HEAD", "4F2810174FBD6014DD5DB3E7C90121E1BC514676", SHA + "0", ""])
@@ -98,16 +198,30 @@ def test_missing_gh_is_an_error(ci_green, monkeypatch, capsys):
 def test_gh_timeout_is_an_error(ci_green, monkeypatch, capsys):
     _gh(monkeypatch, ci_green, raises=subprocess.TimeoutExpired(["gh"], 120))
     assert ci_green.main([SHA]) == 2
-    assert "gh run list did not answer within 120s" in capsys.readouterr().err
+    assert "gh api did not answer within 120s" in capsys.readouterr().err
 
 
 def test_gh_failure_is_an_error(ci_green, monkeypatch, capsys):
     _gh(monkeypatch, ci_green, returncode=1)
     assert ci_green.main([SHA]) == 2
-    assert "gh run list failed (exit 1): gh: boom" in capsys.readouterr().err
+    assert "gh api failed (exit 1): gh: boom" in capsys.readouterr().err
 
 
 def test_unparseable_gh_output_is_an_error(ci_green, monkeypatch, capsys):
     _gh(monkeypatch, ci_green, stdout="not json")
     assert ci_green.main([SHA]) == 2
     assert "could not parse gh output" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("body", ["[]", json.dumps({"workflow_runs": "x"}), json.dumps({"message": "Not Found"})])
+def test_a_body_that_is_not_a_run_list_is_an_error(ci_green, monkeypatch, capsys, body):
+    _gh(monkeypatch, ci_green, stdout=body)
+    assert ci_green.main([SHA]) == 2
+    assert "could not parse gh output" in capsys.readouterr().err
+
+
+def test_a_run_with_a_malformed_id_is_not_counted(ci_green, monkeypatch, capsys):
+    _gh(monkeypatch, ci_green, [_run(1), dict(_run(2, conclusion="failure", started="2026-10-16T12:00:00Z"), id="x")])
+    assert ci_green.main([SHA]) == 0
+    _gh(monkeypatch, ci_green, [dict(_run(2), id=True)])
+    assert ci_green.main([SHA]) == 1

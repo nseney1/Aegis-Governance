@@ -2,6 +2,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 from conftest import REPO_ROOT, read
 
 ROOT = Path(REPO_ROOT)
@@ -106,6 +108,16 @@ SPAWN_SITES = {
     "aegis_cli/hooks/registrar.py": ("`aegis`, the hook handler",),
     # `aegis benchmark` starts the same handler under this Python (-I -c) on a fixture payload, in a temp workspace.
     "aegis_core/benchmark.py": ("`aegis`, the hook handler",),
+    # The trust tier (`aegis doctor`) reads GitHub settings with `gh api` GETs, and `doctor --github --apply` makes
+    # one POST after a typed y/N at a terminal; git signs and verifies approvals through ssh-keygen, which only
+    # gitsafe-run git starts.
+    "aegis_core/human_gate.py": ("`gh`",),
+    # `aegis check --record` computes the tree git would commit with `git` under a scrubbed environment and a
+    # private index, and runs the test command from the user-scope config (never the repository's) in a snapshot.
+    "aegis_core/treeid.py": ("`git`",),
+    "aegis_core/checkrun.py": ("your test command",),
+    # `aegis doctor --release` asks `gh --version`, then `gh attestation verify` (read-only).
+    "aegis_core/release_verify.py": ("`gh`",),
 }
 _SPAWN_MODULES = {"subprocess", "pty", "multiprocessing"}
 _OS_SPAWN = re.compile(r"^(system|popen|startfile|exec\w*|spawn\w*|posix_spawn\w*)$")

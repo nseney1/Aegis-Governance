@@ -90,4 +90,4 @@ def test_report_outcome_writes_a_ledger_row_without_fcntl(tmp_path):
     assert proc.returncode == 0, proc.stderr
     rows = (workspace / ".aegis" / "state" / "ledger.jsonl").read_text(
         encoding="utf-8").splitlines()
-    assert [json.loads(line)["rule"] for line in rows] == ["trap-example"]
+    assert [(json.loads(line)["event"], json.loads(line)["source"]) for line in rows] == [("claimed", "mcp")]

@@ -10,10 +10,19 @@ The Arbiter answers three questions:
 2. Did the Code Agent claim something that Layer 1 tools contradict? (false claim)
 3. Did both agree but Layer 1 shows a problem anyway? (shared blind spot)
 """
+import math
+from pathlib import Path
+import time
+from typing import Any, Optional, Sequence
+
+from aegis_core.match import is_test_path
+
 from . import (
     ArbitrationResult, Claim, Divergence, Prediction,
     RiskCategory, Severity, ToolEvidence, Verdict,
 )
+
+Z95 = 1.959964
 
 
 def arbitrate(
@@ -22,6 +31,12 @@ def arbitrate(
     layer1_evidence: list[ToolEvidence],
     *,
     spec_agent_failed: bool = False,
+    infra_status: Optional[str] = None,
+    changed_files: Optional[list[str]] = None,
+    all_files: Optional[Sequence[str]] = None,
+    rule_miss_counts: Optional[dict[str, int]] = None,
+    arbiter_vendor: Optional[str] = None,
+    generator_vendor: Optional[str] = None,
 ) -> ArbitrationResult:
     """Compare predictions vs claims vs tool evidence.
 
@@ -131,6 +146,26 @@ def arbitrate(
         predictions=predictions,
         spec_agent_failed=spec_agent_failed,
     )
+    l1_verdict = "FAIL" if layer1_failures else "PASS"
+    resolved_infra = (
+        infra_status
+        if infra_status is not None
+        else ("unverified" if spec_agent_failed else "ok")
+    )
+    gaps = (
+        structural_ship_gaps(
+            changed_files,
+            all_files or (),
+            rule_miss_counts=rule_miss_counts,
+        )
+        if changed_files is not None
+        else []
+    )
+    vendor_warn = (
+        check_vendor_independence(arbiter_vendor, generator_vendor)
+        if (arbiter_vendor is not None or generator_vendor is not None)
+        else ""
+    )
 
     return ArbitrationResult(
         divergences=divergences,
@@ -139,6 +174,11 @@ def arbitrate(
         layer1_results=layer1_evidence,
         predictions=predictions,
         claims=claims,
+        layer1_verdict=l1_verdict,
+        infra_status=resolved_infra,
+        llm_predictions=tuple(predictions),
+        structural_gaps=gaps,
+        vendor_warning=vendor_warn,
     )
 
 
@@ -188,3 +228,187 @@ def _compute_verdict(
     return Verdict.SHIP
 
 
+# ── T6: Structural SHIP Gap Report & Calibration ──────────────────────────
+
+
+def structural_ship_gaps(
+    changed_files: Sequence[str],
+    all_files: Sequence[str] = (),
+    rule_miss_counts: Optional[dict[str, int]] = None,
+    *,
+    uncovered_lines: Optional[dict[str, Sequence[int] | set[int]]] = None,
+    high_miss_threshold: int = 3,
+) -> list[dict[str, Any]]:
+    """Deterministically flag changed source files lacking tests, with high rule-miss history, or uncovered lines."""
+    pool = {p.replace("\\", "/") for p in (*all_files, *changed_files)}
+    test_stems: set[str] = set()
+    for p in pool:
+        stem = Path(p).stem
+        if is_test_path(p) or stem.startswith("test_") or stem.endswith("_test"):
+            test_stems.update({stem, stem.removeprefix("test_"), stem.removesuffix("_test")})
+    miss_map, uncov_map, gaps = rule_miss_counts or {}, uncovered_lines or {}, []
+    for raw_path in changed_files:
+        norm = raw_path.replace("\\", "/")
+        p_obj = Path(norm)
+        if is_test_path(norm) or p_obj.name.startswith("test_") or p_obj.name == "__init__.py":
+            continue
+        reasons = [r for r, cond in (
+            ("missing_test", p_obj.suffix in (".py", ".rs", ".js", ".ts", ".go") and p_obj.stem not in test_stems),
+            ("high_rule_miss_history", miss_map.get(norm, miss_map.get(raw_path, 0)) >= high_miss_threshold),
+            ("uncovered_changed_lines", bool(uncov_map.get(norm, uncov_map.get(raw_path, ())))),
+        ) if cond]
+        if reasons:
+            file_uncov = sorted(uncov_map.get(norm, uncov_map.get(raw_path, ())))
+            gaps.append({
+                "file": norm, "path": norm, "kind": reasons[0], "reasons": reasons,
+                "miss_count": miss_map.get(norm, miss_map.get(raw_path, 0)),
+                "uncovered_lines": file_uncov, "detail": ", ".join(reasons),
+            })
+    return gaps
+
+
+def wilson_ci(k: int, n: int, z: float = Z95) -> tuple[float, float]:
+    """Return two-sided Wilson score confidence interval (lower, upper) for k/n."""
+    if n <= 0:
+        return (0.0, 1.0)
+    p, z2 = k / n, z * z
+    d = 1.0 + z2 / n
+    c = (p + z2 / (2.0 * n)) / d
+    h = z * math.sqrt(max(0.0, p * (1.0 - p) / n + z2 / (4.0 * n * n))) / d
+    return (max(0.0, c - h), min(1.0, c + h))
+
+
+def _extract_prob_outcome(item: Any) -> tuple[float, Optional[bool], str, str, str, str]:
+    """Return (p, outcome, disposition, scope, observable, pred_id) from Prediction or dict."""
+    if isinstance(item, Prediction):
+        return (float(item.p), item.outcome, str(item.disposition or "logged"),
+                str(item.scope or item.target or item.affected_function or item.id),
+                str(item.observable or item.claim_type or "fix_touch_in_window"), str(item.id))
+    if isinstance(item, dict):
+        out = item.get("outcome", item.get("correct"))
+        return (float(item.get("p", item.get("confidence", 0.5))), None if out is None else bool(out),
+                str(item.get("disposition", "logged")),
+                str(item.get("scope") or item.get("target") or item.get("affected_function") or item.get("id") or ""),
+                str(item.get("observable") or item.get("claim_type") or "fix_touch_in_window"), str(item.get("id", "")))
+    if isinstance(item, (tuple, list)) and len(item) >= 2:
+        return (float(item[0]), bool(item[1]), "logged", "", "fix_touch_in_window", "")
+    return (0.5, None, "logged", "", "fix_touch_in_window", "")
+
+
+def brier_skill_score(predictions_or_probs: Sequence[Any], outcomes: Optional[Sequence[Any]] = None) -> float:
+    """Compute Brier Skill Score (1 - BS / BS_climatology)."""
+    if outcomes is not None:
+        pairs = [(float(p), 1.0 if bool(y) else 0.0) for p, y in zip(predictions_or_probs, outcomes) if y is not None]
+    else:
+        pairs = [(p, 1.0 if out else 0.0) for p, out, disp, *_ in map(_extract_prob_outcome, predictions_or_probs)
+                 if disp in ("logged", "overridden") and out is not None]
+    if not pairs:
+        return 0.0
+    n = len(pairs)
+    bs = sum((p - y) ** 2 for p, y in pairs) / n
+    base_rate = sum(y for _, y in pairs) / n
+    bs_clim = base_rate * (1.0 - base_rate)
+    return 0.0 if bs_clim <= 1e-12 else 1.0 - (bs / bs_clim)
+
+
+def score_predictions(records: Sequence[Any], outcomes: Optional[dict[str, bool]] = None) -> dict[str, Any]:
+    """Score predictions excluding 'heeded' and deduplicating by (scope, observable)."""
+    n_heeded, raw_eligible = 0, []
+    for idx, rec in enumerate(records):
+        p, out, disp, scope, obs, pid = _extract_prob_outcome(rec)
+        if out is None and outcomes is not None:
+            out = bool(outcomes[pid]) if (pid and pid in outcomes) else (bool(outcomes[scope]) if (scope and scope in outcomes) else None)
+        if disp == "heeded":
+            n_heeded += 1
+        elif disp in ("logged", "overridden") and out is not None:
+            raw_eligible.append((p, bool(out), scope or f"__anon_{idx}", obs, rec))
+
+    seen_keys: set[tuple[str, str]] = set()
+    deduped = [e for e in raw_eligible if not ((e[2], e[3]) in seen_keys or seen_keys.add((e[2], e[3])))]  # type: ignore[func-returns-value]
+    n_effective = len(deduped)
+    hits = sum(1 for _, out, *_ in deduped if out)
+    precision = (hits / n_effective) if n_effective > 0 else 0.0
+    brier = (sum((p - (1.0 if out else 0.0)) ** 2 for p, out, *_ in deduped) / n_effective) if n_effective > 0 else None
+    raw_bss = brier_skill_score([p for p, *_ in deduped], [out for _, out, *_ in deduped]) if n_effective > 0 else 0.0
+    lift_suppressed = bool(n_effective < 100 or precision < 0.05)
+    return {
+        "status": f"insufficient (n={n_effective}/25)" if n_effective < 25 else "ok",
+        "n_total": len(records), "n_heeded_excluded": n_heeded, "n_raw": len(raw_eligible),
+        "n_effective": n_effective, "hits": hits, "k": hits, "precision": precision,
+        "accuracy": precision, "base_rate": precision, "wilson_ci": wilson_ci(hits, n_effective),
+        "brier_score": brier, "brier_skill_score": None if lift_suppressed else raw_bss,
+        "raw_brier_skill_score": raw_bss, "lift_suppressed": lift_suppressed,
+        "scored_predictions": [e[4] for e in deduped],
+    }
+
+
+class CalibrationSummary(dict):
+    def __str__(self) -> str:
+        return str(self.get("summary", super().__str__()))
+
+    def __contains__(self, item: object) -> bool:
+        return super().__contains__(item) or (isinstance(item, str) and item in str(self.get("summary", "")))
+
+
+def calibration_summary(records: Sequence[Any], outcomes: Optional[dict[str, bool]] = None) -> CalibrationSummary:
+    """Build calibration summary with sample-size gates, Wilson 95% CI, and Brier skill score."""
+    s = score_predictions(records, outcomes=outcomes)
+    lo, hi = s["wilson_ci"]
+    bss = s["brier_skill_score"]
+    bss_str = f"brier_skill_score={bss:.3f}" if bss is not None else "brier_skill_score=suppressed (requires n_effective>=100 and base_rate>=5%)"
+    s["summary"] = (
+        f"status: {s['status']} | n_effective={s['n_effective']} (n_raw={s['n_raw']}, heeded_excluded={s['n_heeded_excluded']}) | "
+        f"precision={s['precision']:.1%} (Wilson 95% CI [{lo:.2f}, {hi:.2f}]) | {bss_str}"
+    )
+    return CalibrationSummary(s)
+
+
+class PruneResult(dict):
+    def __iter__(self):
+        yield self["kept"]
+        yield self["buckets"]
+
+
+def prune_predictions(records: Sequence[Any], now_ts: Optional[float] = None, max_age_days: int = 60) -> PruneResult:
+    """Compact scored prediction records older than max_age_days into bucket counters."""
+    cutoff = float(now_ts if now_ts is not None else time.time()) - (max_age_days * 86400.0)
+    kept, pruned_count, scored_count, hits, heeded_count, sum_brier = [], 0, 0, 0, 0, 0.0
+    bins: dict[str, dict[str, int]] = {}
+    for rec in records:
+        p, out, disp, *_ = _extract_prob_outcome(rec)
+        rec_ts = float(rec.ts) if isinstance(rec, Prediction) else (float(rec.get("ts", rec.get("resolved_at", 0.0)) or 0.0) if isinstance(rec, dict) else 0.0)
+        if ((out is not None) or (disp == "heeded")) and 0.0 < rec_ts < cutoff:
+            pruned_count += 1
+            if disp == "heeded":
+                heeded_count += 1
+            elif out is not None:
+                scored_count += 1
+                y = 1 if out else 0
+                hits += y
+                sum_brier += (p - y) ** 2
+                idx = min(4, max(0, int(p * 5)))
+                bucket = bins.setdefault(f"{idx * 0.2:.1f}-{(idx + 1) * 0.2:.1f}", {"n": 0, "hits": 0})
+                bucket["n"] += 1
+                bucket["hits"] += y
+        else:
+            kept.append(rec)
+    buckets = {"pruned_count": pruned_count, "scored_count": scored_count, "hits": hits, "heeded_count": heeded_count, "sum_brier": sum_brier, "bins": bins}
+    return PruneResult(kept=kept, active=kept, buckets=buckets, pruned_count=pruned_count)
+
+
+def _canonical_vendor(raw: Optional[str]) -> str:
+    low = (raw or "").strip().lower()
+    if not low or low == "unknown":
+        return ""
+    for fam, toks in (("anthropic", ("anthropic", "claude")), ("openai", ("openai", "gpt", "codex", "o1", "o3", "o4")), ("google", ("google", "gemini", "antigravity", "agy", "vertex"))):
+        if any(t in low for t in toks):
+            return fam
+    return low.split("/")[0].split("-")[0]
+
+
+def check_vendor_independence(arbiter_vendor: Optional[str], generator_vendor: Optional[str]) -> str:
+    """Warn when arbiter and generator belong to the same model vendor family or are unknown."""
+    arb_fam, gen_fam = _canonical_vendor(arbiter_vendor), _canonical_vendor(generator_vendor)
+    if not arb_fam or not gen_fam:
+        return "Vendor independence unverified: arbiter or generator vendor is unknown."
+    return "Same-vendor arbiter provides prompt isolation only, not model independence." if arb_fam == gen_fam else ""
