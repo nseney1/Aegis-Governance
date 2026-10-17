@@ -2,7 +2,7 @@
 
 This page explains where Aegis's rules came from, what the project measured, what it got wrong, and why v4 looks the way it does. It is written for people deciding whether to trust Aegis, and for contributors deciding what to change next.
 
-**Status.** Written during the v4.0 build (2026-10-15) and checked against the code once waves A, B and C were merged. Where this page describes v4, it describes what that code does; the decisions behind it are in ADR 0005, and the [CHANGELOG](../CHANGELOG.md) records each release. Section 6 is planned work, not a feature list. What 4.1.0 adds (agent hooks, teams and skills) is described in [How Aegis works](how-it-works.md) section 8; here only the AD-7 row of section 7 changed for it.
+**Status.** Written during the v4.0 build (2026-10-15) and checked against the code once waves A, B and C were merged. Where this page describes v4, it describes what that code does; the decisions behind it are in ADR 0005 and ADR 0006, and the [CHANGELOG](../CHANGELOG.md) records each release. Section 6 describes the v4.3 trust and evidence model. What 4.1 to 4.3 add (agent hooks, teams, skills, adoption tools, and trust and evidence) is described in [How Aegis works](how-it-works.md) sections 8–10; here section 6 and the AD-7 row of section 7 were updated as they shipped.
 
 **How to read the numbers.** Every number here is one of two kinds:
 

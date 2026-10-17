@@ -516,6 +516,7 @@ def test_no_doc_calls_a_shipped_version_planned():
     describes_pattern = re.compile(r"\bdescribes aegis\s+v?(\d+)\.(\d+)\b")
     unconditional_stale = (
         "planned, not shipped",
+        "is planned work",
         "not in this repository yet",
         "until they ship",
         "will copy the 15 packaged",
