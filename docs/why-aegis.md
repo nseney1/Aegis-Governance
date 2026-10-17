@@ -2,7 +2,7 @@
 
 This page explains where Aegis's rules came from, what the project measured, what it got wrong, and why v4 looks the way it does. It is written for people deciding whether to trust Aegis, and for contributors deciding what to change next.
 
-**Status.** Written during the v4.0 build (2026-10-15) and checked against the code once waves A, B and C were merged. Where this page describes v4, it describes what that code does; the decisions behind it are in ADR 0005, and the [CHANGELOG](../CHANGELOG.md) records each release. Section 6 is planned work, not a feature list. What 4.1.0 adds (agent hooks, teams and skills) is described in [How Aegis works](how-it-works.md) section 8; here only the AD-7 row of section 7 changed for it.
+**Status.** Written during the v4.0 build (2026-10-15) and checked against the code once waves A, B and C were merged. Where this page describes v4, it describes what that code does; the decisions behind it are in ADR 0005 and ADR 0006, and the [CHANGELOG](../CHANGELOG.md) records each release. Section 6 describes the v4.3 trust and evidence model. What 4.1 to 4.3 add (agent hooks, teams, skills, adoption tools, and trust and evidence) is described in [How Aegis works](how-it-works.md) sections 8–10; here section 6 and the AD-7 row of section 7 were updated as they shipped.
 
 **How to read the numbers.** Every number here is one of two kinds:
 
@@ -145,23 +145,21 @@ flowchart LR
     G -.-> A
 ```
 
-## 6. What is next: v4.3 trust and evidence (planned, not shipped)
+## 6. v4.3 trust and evidence: label locally, confirm externally, approve humanly
 
-> **Planned work.** Nothing in this section exists in v4.0, v4.1 or v4.2. It is planned for v4.3, after v4.2 ships. The reviewed spec (2026-10-15) is not in this repository yet; it is expected to land as ADR 0006 before the work starts. Details may change in review.
+v4.0 removed claims v3 could not back. v4.3 (ADR 0006, [SECURITY.md](../SECURITY.md#trust-tiers)) makes them verifiable rather than dropping them. Its principle is **label locally, confirm externally, approve humanly**: Aegis labels what it observes on the developer's machine (`witness: aegis`), CI on the exact commit confirms outcomes, and approvals the agent cannot produce (a non-author PR review at Tier A, or an `aegis approve` commit signed by a key in the base branch's `allowed_signers` at Tier B) gate governance changes. `aegis doctor` detects the repository's trust tier (`A`, `B` or `C` self-attested) read-only and prints it on every report.
 
-v4 removes claims it could not back. The plan for v4.3 is to make them true rather than drop them. Its principle is **label locally, confirm externally, approve humanly**: Aegis labels what it observes on the developer's machine, CI on the exact commit confirms outcomes, and approvals the agent cannot produce (a second reviewer, or a signature from a key the agent cannot use) gate governance changes. Every report would say which of these it rests on, at one of three trust tiers: separation of duties, solo with signed approvals, or self-attested.
-
-| Planned component | Replaces | What would become true |
+| Component (v4.3) | Replaces | What holds (and at which tier) |
 |---|---|---|
-| Witnessed checks | v3 receipts | Outcomes credited to rules were confirmed by CI on the landing commit; local runs are labeled and re-checked |
-| Git-witnessed rule integrity | the HMAC manifest | The rules in force are the reviewed base-branch versions; weakening one needs approval the agent cannot produce |
-| Per-rule credit model | inverted fitness | Standing comes from evidence the agent cannot forge (detector replay over merged history, human-labeled samples), always shown with its sample size |
-| Regression discipline in CI | the bug registry | Every fix ships with a test that fails without it, or an approved exemption |
-| Calibrated arbiter | the "binding" Layer-2 verdict | Cross-vendor review predictions are scored against outcomes, and bind in CI only once their record earns it |
-| Security checks and SARIF | substring "audits" | A banned-API policy and established scanners run on what a change introduces, with findings in PRs |
-| Human-insights loop | the unused insight tool | Human corrections become reviewed rules, and recurrence of the corrected problem is measured |
+| Witnessed checks (`aegis check --record [--tests]`) | v3 receipts | Outcomes credited to rules are confirmed by a passing check row for the exact git tree; unwitnessed `aegis_report_outcome` calls are recorded as `claimed` and earn no rule credit |
+| Git-witnessed rule integrity (`aegis_scan`, `aegis check --ci`, `aegis approve`) | the HMAC manifest | Gates and invariants bind from the reviewed base branch (`rules_base`); weakening one or leaving a governance/workflow file unowned in `CODEOWNERS` fails `aegis check --ci` without a base-trusted approval |
+| Per-rule credit model (`aegis sync [--pr]`) | inverted fitness | Standing comes from CI-confirmed checks, git detector replay (`caught` vs `leaked`), and human-adjudicated labels, reported as `untestable`, `insufficient (n=K)`, `inconclusive` or `decided` with session-count decay |
+| Regression discipline in CI (`aegis check --ci`) | the bug registry | Non-merge `fix` commits touching source files require a test that fails on `base` and passes on `head`, or a commit-scoped signed `Aegis-Exempt-Test` approval |
+| Calibrated arbiter (`aegis check --calibration`) | the "binding" Layer-2 verdict | Cross-vendor review predictions are logged and scored with Wilson 95% confidence intervals and Brier skill scores (log-only in v4.3; skill claims suppressed below `n_effective >= 100`) |
+| Security checks and SARIF (`aegis check --format sarif`) | substring "audits" | Delta-evaluated structured `forbid_ast` call predicates, an 8-rule Python security pack, known-format secret scanning, and SARIF 2.1.0 ingest/output |
+| Human-insights loop (`aegis rule insight`, `aegis_capture_insight`) | the unused insight tool | User-scope redacted corrections (`~/.aegis/insights/`) and content-bound `Aegis-Approve-Insight` signatures cluster into `.aegis/proposals/` and track post-activation recurrence |
 
-Why this is not in v4.0: the review behind the spec found that nothing on the developer's machine is a reliable witness against an agent running as the same user, that CI is a trust root only when GitHub enforces it, and that per-rule statistics cannot reach a decision at one developer's volume (a holdout would need roughly 500–3,500 eligible sessions per rule, against tens per month). Those findings change the design, so it waits for its own release.
+Why this landed in v4.3 after the v4.0–v4.2 foundation: the review behind ADR 0006 established that nothing on the developer's machine is a reliable witness against a same-user agent, that CI is a trust root only when GitHub enforces it, and that per-rule statistics cannot reach a decision at one developer's volume without detector replay and explicit sample-size states (`insufficient` below `n = 25`).
 
 ## 7. Predictions you can check
 
