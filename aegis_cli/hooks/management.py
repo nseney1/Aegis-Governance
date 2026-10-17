@@ -744,3 +744,7 @@ def run_hook_status(args: Any) -> int:
     if st["unreachable_reason"]:
         print(f"  Reachable:       ❌ {st['unreachable_reason']}")
     return 0
+
+
+from aegis_cli.hooks.insights import enable_insight_hook, insight_hook_status  # noqa: E402
+

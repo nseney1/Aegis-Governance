@@ -125,3 +125,49 @@ def _record_edit(workspace, args: dict, idempotency_key: str, files: List[str]) 
         print(f"aegis-mcp: edit event not recorded: {exc}", file=sys.stderr)
         return
     _RECORDED.add(key)
+
+
+def handle_capture_insight(args: dict) -> dict:
+    from aegis_core.insights import capture_suggestion
+
+    try:
+        workspace = _get_workspace(args)
+    except ValueError as exc:
+        return _fail(str(exc))
+
+    quote = args.get("quote")
+    if not isinstance(quote, str) or not quote.strip():
+        return _fail("'quote' is required and must be a non-empty string.")
+
+    raw_paths = args.get("paths")
+    confined_paths: Optional[List[str]] = None
+    if raw_paths is not None:
+        if not isinstance(raw_paths, (list, tuple)) or not all(isinstance(p, str) for p in raw_paths):
+            return _fail("'paths' must be a list of file paths.")
+        try:
+            confined_paths = sorted({PurePath(workspace.confine_path(p)[1]).as_posix() for p in raw_paths if p.strip()})
+        except ValueError as exc:
+            return _fail(str(exc))
+
+    host = str(args.get("_host") or "mcp")
+    session = args.get("_session")
+    try:
+        row = capture_suggestion(
+            workspace.root,
+            quote=quote,
+            paths=confined_paths,
+            host=host,
+            session=str(session) if session else None,
+        )
+    except Exception as exc:
+        return _fail(f"Failed to capture insight: {exc}")
+
+    return {
+        "status": "OK",
+        "id": row["id"],
+        "level": row["level"],
+        "text": row["text"],
+        "paths": row["paths"],
+        "psrc": row["psrc"],
+    }
+

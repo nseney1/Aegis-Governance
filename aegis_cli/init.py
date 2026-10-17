@@ -889,11 +889,36 @@ def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -
             actions.append(Step("pre-commit hook", "installed" if hooked else "skipped (not a git repository)"))
 
     actions.append(Step(REGISTRY_LABEL, register_workspace(ctx.home, root, ctx.selected, dry_run=dry_run)))
+    actions.append(_link_key_step(ctx.home, dry_run))
     for host in ctx.selected:
         done = register_host(host, home=ctx.home, command=ctx.command, pin=ctx.pin, path=ctx.path_env,
                              dry_run=dry_run)
         actions.append(Step(host, done.result, done.detail, done.command))
     return actions
+
+
+LINK_KEY_LABEL = f"~/{AEGIS_DIRNAME}/link.key"
+
+
+def _link_key_step(home: Path, dry_run: bool) -> Step:
+    """Create the session-label pseudonymization key (v4.4 spec 3.4): 32 random bytes, 0600, made
+    with ``O_EXCL`` here and nowhere else, never replaced or repaired when a file is already
+    there. Without it no ``hs`` exists and agy and Claude labels read unknown."""
+    from aegis_core.insights import create_link_key
+    from aegis_core.workspace.layout import UserLayout
+
+    if os.path.lexists(UserLayout(Path(home)).aegis_dir / "link.key"):
+        return Step(LINK_KEY_LABEL, "present")
+    detail = "pseudonymization key for session labels; stays on this machine"
+    if dry_run:
+        return Step(LINK_KEY_LABEL, "created", detail)
+    try:
+        res = create_link_key(home)
+        status = ("created" if res[1] else "present") if isinstance(res, tuple) else str(res)
+        return Step(LINK_KEY_LABEL, status, detail)
+    except OSError as exc:
+        raise InstallError(f"{LINK_KEY_LABEL}: cannot be created ({exc.strerror or exc}); fix the permissions of "
+                           f"~/{AEGIS_DIRNAME}, then re-run.") from exc
 
 
 _ICONS = {"failed": "❌", "manual": "👉", "kept": "⚠️ ", "skipped": "⚠️ "}

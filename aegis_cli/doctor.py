@@ -1416,6 +1416,8 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
     level = _level(advisory, floor, ctx.governed, installed)
     # The PreToolUse hooks never change ``state`` or ``level``: their presence in a file is
     # not proof that the host runs them (presence never claims enforcement).
+    from aegis_core.insights import host_capture_status
+
     hooks = _hook_row(spec, ctx)
     if hooks["status"] == "unknown":
         unknown.append("hooks")
@@ -1439,6 +1441,7 @@ def _host_row(spec: Any, ctx: _Ctx, info: _Instructions, roots: Optional[set], f
         "enforcement_level": level,
         "advisory": advisory,
         "hooks": hooks,
+        "insight_capture": host_capture_status(spec.id, home=ctx.home),
         "trust_tier": None,
         "trust_tier_status": "unavailable",  # _diagnose fills both from the repository's human_gate tier
         "stale": False,
