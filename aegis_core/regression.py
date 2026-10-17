@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import importlib.util, os, posixpath, re, shutil, sys, sysconfig, tempfile, xml.etree.ElementTree as ET
+import json, os, posixpath, re, shutil, sys, tempfile, xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
@@ -15,7 +15,7 @@ from aegis_core.workspace.layout import UserLayout
 __all__ = [
     "CommitRegression", "DEFAULT_TIER", "DEFAULT_TIMEOUT_S", "EXEMPT_SCOPES", "PRUNE_BOX_EXEMPTION_RATE",
     "RegressionError", "RegressionFinding", "RegressionReport", "SCHEMA", "SOURCE", "UntestedChange",
-    "VALID_TIERS", "check_ci", "check_ci_regressions", "is_config_file", "is_doc_file", "is_fix_commit",
+    "VALID_TIERS", "check_ci_regressions", "is_config_file", "is_doc_file", "is_fix_commit",
     "is_python_test_file", "is_source_file", "is_test_file", "parse_fix_subject",
 ]
 
@@ -35,7 +35,15 @@ _CONFIG_BASENAMES = frozenset({
 _CONVENTIONAL_RE = re.compile(r"\A([a-zA-Z]+)(?:\(([^)]*)\))?(!)?:\s*(.*)\Z")
 _FIXES_LINE_RE = re.compile(r"^[ \t]*(?:fixes|closes)[ \t]*:[ \t]*(\S.*)$", re.IGNORECASE | re.MULTILINE)
 _NO_TEST_LINE_RE = re.compile(r"^[ \t]*aegis-no-test[ \t]*:[ \t]*(\S.*)$", re.IGNORECASE | re.MULTILINE)
-_PYTHON_FLAGS, _PYTEST_FLAGS = ("--check-hash-based-pycs", "always"), ("-p", "no:cacheprovider", "-o", "addopts=")
+_PYTHON_FLAGS, _PYTEST_FLAGS = ("-I", "-S", "-B", "--check-hash-based-pycs", "always"), ("-p", "no:cacheprovider", "-o", "addopts=")
+_SNAPSHOT_RUNNER = (
+    "import json, os, sys\n"
+    "snap, ws, ext = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2]), json.loads(sys.argv[3])\n"
+    "within = lambda p, d: os.path.normcase(os.path.abspath(p)) == os.path.normcase(d) or os.path.normcase(os.path.abspath(p)).startswith(os.path.normcase(d) + os.sep)\n"
+    "sys.path[:] = [snap] + [p for p in (*sys.path, *ext) if p and p != snap and (within(p, snap) or not within(p, ws))]\n"
+    "import pytest\n"
+    "raise SystemExit(pytest.main(sys.argv[4:]))\n"
+)
 
 class RegressionError(AegisError):
     """The commit range or repository trees cannot be read."""
@@ -185,23 +193,6 @@ def _commit_meta(cwd: str, oid: str, default_parent: str) -> _CommitMeta:
 class _PytestOutcome(NamedTuple):
     exit_code: int; timed_out: bool; passed_ids: FrozenSet[str]; failed_ids: FrozenSet[str]; collection_errors: FrozenSet[str]
 
-def _seed_pytest_site(home: Path, workspace: Path) -> None:
-    spec = importlib.util.find_spec("pytest")
-    if spec is None or not spec.origin: return
-    site_dir = Path(spec.origin).resolve().parent.parent
-    if rule_integrity._within(site_dir, workspace): return
-    candidates: Set[Path] = {home / ".local" / "lib" / f"python{sys.version_info[0]}.{sys.version_info[1]}" / "site-packages"}
-    for scheme in ("posix_user", "nt_user", "osx_framework_user"):
-        try:
-            purelib = sysconfig.get_path("purelib", scheme, {"userbase": str(home / ".local")})
-            if purelib: candidates.add(Path(purelib))
-        except (KeyError, ValueError): continue
-    for target_dir in candidates:
-        try:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            atomic_write_bytes(target_dir / "_aegis_pytest.pth", (str(site_dir) + "\n").encode("utf-8"))
-        except OSError: continue
-
 def _parse_junit(path: Path) -> Tuple[Set[str], Set[str], Set[str]]:
     passed, failed, col_errors = set(), set(), set()
     if not path.is_file(): return passed, failed, col_errors
@@ -218,44 +209,33 @@ def _parse_junit(path: Path) -> Tuple[Set[str], Set[str], Set[str]]:
 def _run_pytest_in_snapshot(snapshot: Path, test_files: Sequence[str], workspace: Path, scratch: Path, timeout: float) -> _PytestOutcome:
     home, tmp, junit, output = scratch / "home", scratch / "tmp", scratch / "junit.xml", scratch / "output.txt"
     home.mkdir(parents=True, exist_ok=True); tmp.mkdir(parents=True, exist_ok=True)
-    _seed_pytest_site(home, workspace)
-    argv = [sys.executable, *_PYTHON_FLAGS, "-m", "pytest", *_PYTEST_FLAGS, f"--junitxml={junit}", "--", *test_files]
+    ws = workspace.resolve()
+    ext_dirs = [str(Path(p).resolve()) for p in sys.path if p and Path(p).is_dir() and not rule_integrity._within(Path(p).resolve(), ws)]
+    pytest_args = [*_PYTEST_FLAGS, f"--junitxml={junit}", "--", *test_files]
+    argv = [sys.executable, *_PYTHON_FLAGS, "-c", _SNAPSHOT_RUNNER, str(snapshot.resolve()), str(ws), json.dumps(ext_dirs), *pytest_args]
     res = checkrun.run_tests(argv, snapshot, checkrun._hermetic_env(home, tmp), timeout, junit, output)
     passed, failed, col_errors = _parse_junit(junit)
     return _PytestOutcome(res.exit, res.timed_out, frozenset(passed), frozenset(failed), frozenset(col_errors))
 
-def _find_branch_approval(root: str, base_commit: str, head_commit: str) -> Optional[human_gate.Approval]:
+def _cached_tree(root: str, c_oid: str, tree_cache: Dict[str, Dict[str, Tuple[str, str]]]) -> Dict[str, Tuple[str, str]]:
+    if c_oid not in tree_cache:
+        tree_cache[c_oid] = _tree_blobs(root, c_oid)
+    return tree_cache[c_oid]
+
+def _resolve_commit_exemption(root: str, head_commit: str, base_commit: str, meta: _CommitMeta) -> Optional[human_gate.Approval]:
     try:
-        found = human_gate.find_approval(root, head_commit, base_commit)
+        found = human_gate.find_test_exemption(root, head_commit, base_commit, meta.oid, expected_reason=meta.no_test_reason)
         return found if (found is not None and found.valid) else None
-    except (human_gate.HumanGateError, gitsafe.GitError): return None
+    except (human_gate.HumanGateError, gitsafe.GitError):
+        return None
 
-def _evaluate_fix_commit(
+def _run_fail_to_pass_snapshots(
     root: str, workspace: Path, meta: _CommitMeta, merge_commit: str,
-    tree_cache: Dict[str, Dict[str, Tuple[str, str]]], branch_approval: Optional[human_gate.Approval], timeout: float,
-) -> Tuple[CommitRegression, Optional[RegressionFinding]]:
-    source_files = tuple(p for p in meta.changed_files if is_source_file(p))
-    test_files = tuple(p for p in meta.present_files if is_python_test_file(p))
-    primary_path = test_files[0] if test_files else (source_files[0] if source_files else "")
-    approval = branch_approval
-    if approval is None:
-        try:
-            cand = human_gate.verify_approval(root, meta.oid, human_gate.governance_tree_hash(root, meta.oid), merge_commit)
-            approval = cand if cand.valid else None
-        except (human_gate.HumanGateError, gitsafe.GitError): approval = None
-
-    def _make(status: str, reason: str, f_base: bool = False, p_head: bool = False, f2p: Tuple[str, ...] = (), exempted: bool = False, app: Any = None) -> CommitRegression:
-        return CommitRegression(meta.oid, meta.subject, status, reason, f_base, p_head, f2p, source_files, test_files, meta.fixes, meta.no_test_reason, exempted, app)
-
-    nt_note = f" (Aegis-No-Test: {meta.no_test_reason!r} is an explanation only; exemption requires human_gate approval)" if meta.no_test_reason else ""
-    if not test_files:
-        if approval is not None and approval.valid: return _make("exempted", "exempted", exempted=True, app=approval), None
-        msg = f"fix commit {meta.oid[:10]} ({meta.subject}) modifies source without adding or updating a test{nt_note}"
-        return _make("failed", "no_test_changes"), RegressionFinding("no_test_changes", meta.oid, primary_path, msg, meta.no_test_reason)
-
-    get_tree = lambda c_oid: tree_cache.setdefault(c_oid, _tree_blobs(root, c_oid))
-    base_tree, commit_tree = get_tree(merge_commit), get_tree(meta.oid)
-    parent_tree = get_tree(meta.parent) if (meta.parent and meta.parent != merge_commit) else base_tree
+    test_files: Sequence[str], tree_cache: Dict[str, Dict[str, Tuple[str, str]]], timeout: float,
+) -> Tuple[_PytestOutcome, _PytestOutcome]:
+    base_tree = _cached_tree(root, merge_commit, tree_cache)
+    commit_tree = _cached_tree(root, meta.oid, tree_cache)
+    parent_tree = _cached_tree(root, meta.parent, tree_cache) if (meta.parent and meta.parent != merge_commit) else base_tree
     overlay = {p: commit_tree[p] for p in test_files if p in commit_tree}
     blobs = _read_blobs(root, {oid for t in (base_tree, commit_tree, parent_tree) for _m, oid in t.values()})
 
@@ -272,13 +252,20 @@ def _evaluate_fix_commit(
             if parent_run.failed_ids & head_run.passed_ids: base_run = parent_run
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+    return base_run, head_run
 
+def _classify_regression_outcome(
+    meta: _CommitMeta, source_files: Tuple[str, ...], test_files: Tuple[str, ...], primary_path: str,
+    base_run: _PytestOutcome, head_run: _PytestOutcome, approval: Optional[human_gate.Approval], nt_note: str,
+) -> Tuple[CommitRegression, Optional[RegressionFinding]]:
     passed_on_head = head_run.exit_code == 0 and not head_run.timed_out and bool(head_run.passed_ids) and not head_run.failed_ids and not head_run.collection_errors
     f2p = tuple(sorted(base_run.failed_ids & head_run.passed_ids)) if passed_on_head else ()
     failed_on_base = bool(base_run.failed_ids) and not base_run.collection_errors
 
-    if passed_on_head and f2p: return _make("passed", "ok", True, True, f2p), None
-    if approval is not None and approval.valid: return _make("exempted", "exempted", failed_on_base, passed_on_head, f2p, True, approval), None
+    if passed_on_head and f2p:
+        return CommitRegression(meta.oid, meta.subject, "passed", "ok", True, True, f2p, source_files, test_files, meta.fixes, meta.no_test_reason, False, None), None
+    if approval is not None and approval.valid:
+        return CommitRegression(meta.oid, meta.subject, "exempted", "exempted", failed_on_base, passed_on_head, f2p, source_files, test_files, meta.fixes, meta.no_test_reason, True, approval), None
 
     if not head_run.passed_ids and not head_run.failed_ids and not head_run.collection_errors:
         reason, detail = "no_tests_collected", "no tests were collected from the changed test files"
@@ -289,7 +276,26 @@ def _evaluate_fix_commit(
     else:
         reason, detail = "passed_on_base", "no test failed on base and passed on head (tests passed on base too)"
     finding = RegressionFinding(reason, meta.oid, primary_path, f"fix commit {meta.oid[:10]} ({meta.subject}): {detail}{nt_note}", meta.no_test_reason)
-    return _make("failed", reason, failed_on_base, passed_on_head, f2p), finding
+    return CommitRegression(meta.oid, meta.subject, "failed", reason, failed_on_base, passed_on_head, f2p, source_files, test_files, meta.fixes, meta.no_test_reason, False, None), finding
+
+def _evaluate_fix_commit(
+    root: str, workspace: Path, meta: _CommitMeta, merge_commit: str, head_commit: str, base_commit: str,
+    tree_cache: Dict[str, Dict[str, Tuple[str, str]]], timeout: float,
+) -> Tuple[CommitRegression, Optional[RegressionFinding]]:
+    source_files = tuple(p for p in meta.changed_files if is_source_file(p))
+    test_files = tuple(p for p in meta.present_files if is_python_test_file(p))
+    primary_path = test_files[0] if test_files else (source_files[0] if source_files else "")
+    approval = _resolve_commit_exemption(root, head_commit, base_commit, meta)
+    nt_note = f" (Aegis-No-Test: {meta.no_test_reason!r} is an explanation only; exemption requires human_gate approval)" if meta.no_test_reason else ""
+
+    if not test_files:
+        if approval is not None and approval.valid:
+            return CommitRegression(meta.oid, meta.subject, "exempted", "exempted", False, False, (), source_files, test_files, meta.fixes, meta.no_test_reason, True, approval), None
+        msg = f"fix commit {meta.oid[:10]} ({meta.subject}) modifies source without adding or updating a test{nt_note}"
+        return CommitRegression(meta.oid, meta.subject, "failed", "no_test_changes", False, False, (), source_files, test_files, meta.fixes, meta.no_test_reason, False, None), RegressionFinding("no_test_changes", meta.oid, primary_path, msg, meta.no_test_reason)
+
+    base_run, head_run = _run_fail_to_pass_snapshots(root, workspace, meta, merge_commit, test_files, tree_cache, timeout)
+    return _classify_regression_outcome(meta, source_files, test_files, primary_path, base_run, head_run, approval, nt_note)
 
 def check_ci_regressions(workspace: Any, base: str, head: str = "HEAD", *, tier: Optional[str] = None, timeout: float = DEFAULT_TIMEOUT_S) -> RegressionReport:
     root, workspace_path = workspace_root(workspace), Path(workspace_root(workspace)).resolve()
@@ -315,13 +321,11 @@ def check_ci_regressions(workspace: Any, base: str, head: str = "HEAD", *, tier:
     if not fix_metas:
         return RegressionReport(base_commit, head_commit, merge_commit, effective_tier, (), (), tuple(untested), None)
 
-    branch_approval = _find_branch_approval(root, base_commit, head_commit)
     tree_cache: Dict[str, Dict[str, Tuple[str, str]]] = {}
     evaluated, findings = [], []
     for meta in fix_metas:
-        res, finding = _evaluate_fix_commit(root, workspace_path, meta, merge_commit, tree_cache, branch_approval, timeout)
+        res, finding = _evaluate_fix_commit(root, workspace_path, meta, merge_commit, head_commit, base_commit, tree_cache, timeout)
         evaluated.append(res)
         if finding is not None: findings.append(finding)
-    return RegressionReport(base_commit, head_commit, merge_commit, effective_tier, tuple(evaluated), tuple(findings), tuple(untested), branch_approval)
-
-check_ci = check_ci_regressions
+    first_exemption = next((c.approval for c in evaluated if c.approval is not None), None)
+    return RegressionReport(base_commit, head_commit, merge_commit, effective_tier, tuple(evaluated), tuple(findings), tuple(untested), first_exemption)

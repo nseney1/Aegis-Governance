@@ -154,6 +154,8 @@ Category: Daily Workflow & Verification.
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--base` | `REF` |  | The base branch to measure governance changes against (default: origin/main, main, origin/develop, develop) |
+| `--exempt-test` | `COMMIT` |  | Sign a test exemption (Aegis-Exempt-Test) for a specific fix commit |
+| `--reason` | `TEXT` |  | Explanation for --exempt-test (must match the fix commit's Aegis-No-Test reason) |
 
 ### `aegis check`
 
@@ -173,18 +175,20 @@ Category: Daily Workflow & Verification.
 | `--dry-run` |  |  | Show what would be checked without running anything |
 | `--record` |  |  | Bind the work tree to a git tree, run Layer 1 on an exported snapshot of it and write one ledger check row (witness: aegis). A label, not proof: only CI on the landing commit confirms it. A tree git cannot see completely (assume-unchanged or skip-worktree files) or that holds symbolic links is unbindable and writes no row; exit 0 only when the run passed |
 | `--tests` |  |  | With --record: also run the test command from the user-scope config (tests.command in ~/.aegis/config.json, default python -m pytest, never the repository's) in the snapshot with a fixed environment; exit 5 or zero passed tests is never evidence |
-| `--format` | one of `text`, `json`, `github` | `"text"` | Output format (github, with --ci only: workflow-command annotations) |
+| `--format` | one of `text`, `json`, `github`, `sarif` | `"text"` | Output format (github, with --ci only: workflow-command annotations) |
 | `--lane` | `LANE` |  | Post-lane gate: check the lane's commits since merge-base(--base, HEAD) for containment (every changed path, deletions and both sides of a move included, inside the lane's globs) and Python test integrity (removed tests, added skips or xfails, pytest collection changes; assert weakening is not detected). Any finding fails. Self-attested from the live lease or --paths; witnessed with --base-policy. As a CI job it is advisory in v4.1, and a witness is only as strong as the protection on .github/** and on the base branch |
 | `--partition` |  |  | Report the cross-lane call, def and import edges between lanes planned with --split (at least two), and the [FROZEN_SIGNATURES] of the functions that cross a lane boundary. Python, and Rust when its driver is enabled. A report: it changes nothing and exits 0 even when it finds edges |
 | `--card` |  |  | Print the day-0 card: languages, AST drivers, rules by type, the Layer 1 pass rate on the files and the 5 files with the most findings (above 2000 files it samples, and says so). Changes nothing and never reads baseline.json; --json for the machine-readable form |
 | `--write-baseline` |  |  | Record every current Layer 1 finding in .aegis/baseline.json, so that aegis check then fails only on new ones. Findings are fingerprinted by rule, path, matched line and its occurrence, not by line number. A failure that is not about a line (a rule that cannot load, a file that cannot be parsed) is listed and is never recorded |
 | `--prune-baseline` |  |  | Drop the entries of .aegis/baseline.json whose findings are fixed (or whose file is gone). It never adds a finding, and it refuses to run while a check cannot run |
-| `--ci` |  |  | The CI weakening check: compare the rules that bind (gates, invariants, enforcement: gate) at merge-base(--base, --head) with those at --head, and flag every way one binds less (a deletion or archive, a rank decrease, lost coverage of existing files, a forbid_ast pattern no longer covered, a new or unknown key, any applies_to change, or a mandatory rule added past the scan's slot cap). A flagged change passes only with a signed Aegis-Approve commit (aegis approve) by a key in the base branch's allowed_signers. Exit 0 pass, 1 fail |
+| `--ci` |  |  | The CI weakening check: compare the rules that bind (gates, invariants, enforcement: gate) at merge-base(--base, --head) with those at --head, and flag every way one binds less (a deletion or archive, a rank decrease, lost coverage of existing files, a forbid_ast pattern no longer covered, a new or unknown key, any applies_to change, or a mandatory rule added past the scan's slot cap). A flagged change passes only with a signed Aegis-Approve commit (aegis approve) by a key in the base branch's allowed_signers. Also runs T5 fix-commit regression checks (advisory at default warning tier; blocking at gate tier via --strict or user config regression.tier="gate"). Exit 0 pass, 1 fail |
 | `--head` | `REF` |  | With --ci: the commit under review (default: the pull request head in $GITHUB_EVENT_PATH, else HEAD) |
 | `--split` | `NAME=GLOB[,GLOB...]` |  | With --partition: one planned lane and the globs of its files; give at least two. They match as rule target_paths do: a glob without '/' matches at any depth |
 | `--base` | `REF` |  | With --ci: the pull request's base (default: its base.sha in $GITHUB_EVENT_PATH, else as below). With --lane: the base branch (default: origin/$GITHUB_BASE_REF, $GITHUB_BASE_REF, origin/main, main, origin/develop or develop). A shallow clone fails: fetch with fetch-depth 0. Without --lane: read .aegis/baseline.json from REF (label baseline: base@<sha>; absent there means empty: baseline: absent at base) and check what changed since REF; the working tree's baseline is then not consulted, and a REF that does not resolve is an error. Without --base the working tree's baseline is used and labelled self-attested: a candidate can edit its own. There is no CI detection |
 | `--paths` | `GLOB [GLOB ...]` |  | With --lane: the lane's globs instead of its live lease (self-attested). They match as rule target_paths do: a glob without '/' matches at any depth, so CHANGELOG.md also admits docs/CHANGELOG.md. They never allow .aegis/** or .github/workflows/** |
 | `--base-policy` |  |  | With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may .aegis/** and .github/workflows/** change |
+| `--coverage` |  |  | With --ci: run pytest with diff coverage over changed lines |
+| `--perf` |  |  | With --ci: run performance regression check |
 
 ### `aegis scan`
 
@@ -291,7 +295,22 @@ Change a live lease's owner (and role) by compare-and-swap.
 
 Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs
 
-Category: Rule Evolution & Intelligence. Subcommands: `archive`, `create`, `demote`, `export`, `import`, `insight`, `list`, `promote`.
+Category: Rule Evolution & Intelligence. Subcommands: `adjudicate`, `archive`, `create`, `demote`, `export`, `import`, `insight`, `list`, `promote`.
+
+### `aegis rule adjudicate`
+
+Record a human adjudication verdict (tp or fp) for a rule
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `rule_id` | `RULE_ID` |  | Rule identifier to adjudicate (required) |
+| `verdict` | one of `tp`, `fp` |  | Adjudication verdict (tp or fp) (required) |
+| `--ref` | `REF` |  | Optional commit SHA, PR number, or issue reference |
+| `--summary` | `SUMMARY` |  | Optional one-line summary of the adjudicated example |
+| `--file` | `FILE` |  | Optional file path where the rule applied |
+| `--line` | `LINE` |  | Optional line number in --file |
+| `--session` | `SESSION` |  | Optional session identifier |
+| `--repo` | `REPO` |  | Optional repository identifier |
 
 ### `aegis rule archive`
 

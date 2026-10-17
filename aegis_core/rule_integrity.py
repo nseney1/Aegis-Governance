@@ -166,12 +166,15 @@ class _Tree:
 def _dotted_covers(kind: str, broad: str, narrow: str) -> bool:
     return broad == narrow or (narrow.startswith(broad + ".") if kind == "imports" else narrow.endswith("." + broad))
 
-def _forbid_patterns(spec: Any, kind: str) -> List[str]:
+def _forbid_tokens(spec: Any, kind: str = "calls") -> List[str]:
     from aegis_core.ast.schema import _normalize_ast_token
-    values = spec.get(kind) if isinstance(spec, dict) else None
+    values = spec.get(kind) if isinstance(spec, Mapping) else spec
     if isinstance(values, str): values = [values]
     if not isinstance(values, (list, tuple)): return []
-    return [t for t in (_normalize_ast_token(v) for v in values if isinstance(v, str)) if t]
+    raw = (v if isinstance(v, str) else (str(v.get("name") or v.get("call") or "") if isinstance(v, Mapping) else "") for v in values)
+    return [t for t in (_normalize_ast_token(r) for r in raw if r) if t]
+
+_forbid_patterns = _forbid_tokens
 
 def _is_superset(before: Any, after: Any) -> bool:
     if before is None: return True

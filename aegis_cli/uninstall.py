@@ -152,7 +152,8 @@ def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, d
     Each finished step is appended to ``actions`` as it completes, so a run that fails
     part way still says what it had already removed.
     """
-    from aegis_cli.hooks import uninstall_hook
+    from aegis_cli.hooks import commitmsg, uninstall_hook
+    from aegis_core.workspace.hooks import resolve_git_hooks_dir
 
     actions = [] if actions is None else actions
     hosts = explicit if explicit is not None else _recorded_hosts(root, home, report)
@@ -162,6 +163,14 @@ def _steps(root: Path, home: Path, explicit: Optional[List[str]], force: bool, d
         raise InstallError(f"pre-commit hook: {refusal}.")
     removed = uninstall_hook(project_root=root, dry_run=dry_run)
     actions.append(Step("pre-commit hook", "removed" if removed else "absent"))
+    hooks_dir = resolve_git_hooks_dir(root)
+    cm_removed = commitmsg.uninstall(hooks_dir, dry_run=dry_run) if hooks_dir else "absent"
+    actions.append(
+        Step(
+            "prepare-commit-msg hook",
+            "removed" if cm_removed == "removed" else ("kept" if cm_removed == "foreign" else "absent"),
+        )
+    )
     actions.append(_bootstrap(root, force, dry_run))
     actions.append(_claude_shim(root, force, dry_run))
 
@@ -206,7 +215,7 @@ def run_uninstall(args: argparse.Namespace) -> int:
         return 1
     report.muted = False
     scope["hosts"] = [a.target for a in plan if a.target not in
-                      ("pre-commit hook", AGENTS_FILE, CLAUDE_FILE, REGISTRY_LABEL)]
+                      ("pre-commit hook", "prepare-commit-msg hook", AGENTS_FILE, CLAUDE_FILE, REGISTRY_LABEL)]
     actions = plan
     if not dry_run:
         actions = []

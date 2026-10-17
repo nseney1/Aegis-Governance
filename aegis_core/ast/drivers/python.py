@@ -63,6 +63,31 @@ def _call_argument(call: ast.Call, position: int, keyword: str) -> Optional[ast.
     return next((k.value for k in call.keywords if k.arg == keyword), None)
 
 
+def _render_arg(node: ast.AST) -> str:
+    if isinstance(node, ast.Constant):
+        return repr(node.value)[:64]
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)):
+        return f"-{node.operand.value!r}"[:64]
+    chain: List[str] = []
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        chain.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        chain.append(cur.id)
+        return ".".join(reversed(chain))[:64]
+    return "<expr>"
+
+
+def _call_args(call: ast.Call) -> Dict[str, str]:
+    args: Dict[str, str] = {}
+    for idx, arg in enumerate(call.args):
+        args["*" if isinstance(arg, ast.Starred) else f"#{idx}"] = "" if isinstance(arg, ast.Starred) else _render_arg(arg)
+    for kw in call.keywords:
+        args[kw.arg if kw.arg else "**"] = _render_arg(kw.value) if kw.arg else ""
+    return args
+
+
 def _resolve_relative(name: str, package: Optional[str]) -> str:
     """``importlib.import_module``'s resolution of a leading-dot name; ``name`` when it cannot resolve."""
     level = len(name) - len(name.lstrip("."))
@@ -329,12 +354,14 @@ class _PythonASTVisitor:
             self.imports.append(ImportNode(source=found[0], line=node.lineno))
 
         caller_scope = self.scope_stack[-1] if self.scope_stack else None
+        call_args = _call_args(node)
         for target in self._call_targets(node.func):
             self.call_sites.append(
                 CallSiteNode(
                     target=target,
                     line=node.lineno,
                     caller_scope=caller_scope,
+                    args=call_args,
                 )
             )
 

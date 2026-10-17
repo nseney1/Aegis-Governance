@@ -149,11 +149,71 @@ def _approve(root: Path, base: Optional[str], use_json: bool) -> Dict[str, Any]:
             "key_custody": custody.status, "warnings": warnings}
 
 
+def _approve_test_exemption(root: Path, base: Optional[str], exempt_commit: str, reason: str, use_json: bool) -> Dict[str, Any]:
+    top = gitsafe.toplevel(root)
+    if top is None:
+        raise _Refused("not_git", f"{root} is not inside a git work tree")
+    if not gitsafe.head_commit(top):
+        raise _Refused("no_head", "the repository has no commit yet")
+    base_ref = base or gitsafe.resolve_base_ref(top)
+    if not base_ref:
+        raise _Refused("no_base", "no base branch found (origin/main, main, origin/develop, develop); pass --base")
+    if not gitsafe.merge_base(top, base_ref, "HEAD"):
+        raise _Refused("no_base", f"HEAD shares no history with {base_ref}: fetch with fetch-depth 0")
+    fix_commit = gitsafe.resolve_commit(top, exempt_commit.strip())
+    if not fix_commit:
+        raise _Refused("unresolved", f"cannot resolve {exempt_commit!r} to a commit in {top}")
+    if _staged(top):
+        raise _Refused("staged", "changes are staged: an approval commit stays empty, so commit or unstage them first")
+
+    custody = human_gate.check_key_custody(top)
+    if custody.status in ("none", "unsupported"):
+        raise _Refused("no_key", f"{custody.detail}. Set it up with: git config --global gpg.format ssh; "
+                       "git config --global user.signingkey <your key>")
+    warnings = [custody.detail] if custody.status in ("plain_file", "agent", "unknown") else []
+    if not _stdin_is_tty():
+        raise _Refused("no_terminal", "an approval needs a terminal and a typed y: a person has to look at what is "
+                       "approved, so this does not run from a script or an agent's shell")
+    clean_reason = reason.strip()
+    if not use_json:
+        print(f"Exempting fix commit: {fix_commit}")
+        print(f"Reason: {clean_reason}")
+        for warning in warnings:
+            print(f"  warning: {warning}")
+    question = (f"Sign a test exemption for {fix_commit[:12]} on top of "
+                f"{(gitsafe.head_commit(top) or '')[:12]}? [y/N] ")
+    if use_json:
+        print(question, end="", file=sys.stderr, flush=True)
+        question = ""
+    try:
+        answer = input(question)
+    except EOFError:
+        answer = ""
+    if answer.strip().lower() not in ("y", "yes"):
+        raise _Refused("declined", "No approval made.")
+    try:
+        commit = human_gate.signed_empty_commit(top, human_gate.exemption_message(fix_commit, clean_reason))
+    except human_gate.HumanGateError as exc:
+        raise _Refused("sign_failed", str(exc)) from exc
+    verdict = human_gate.verify_test_exemption(top, commit, fix_commit, base_ref, expected_reason=clean_reason)
+    return {"commit": commit, "exempt_commit": fix_commit, "reason": clean_reason, "base": base_ref,
+            "verified": verdict.valid, "verification": {"code": verdict.code, "reason": verdict.reason},
+            "key_custody": custody.status, "warnings": warnings}
+
+
 def run_approve(args: argparse.Namespace) -> int:
     root = Path(getattr(args, "workspace", None) or getattr(args, "_project_root", None) or Path.cwd())
     use_json = bool(getattr(args, "json", False))
+    exempt_test = getattr(args, "exempt_test", None)
+    reason = getattr(args, "reason", None)
+    if exempt_test is not None and (not str(exempt_test).strip() or not isinstance(reason, str) or not reason.strip()):
+        print("aegis approve: --exempt-test requires a non-empty --reason", file=sys.stderr)
+        return 2
     try:
-        result = _approve(root, getattr(args, "base", None), use_json)
+        if exempt_test is not None:
+            result = _approve_test_exemption(root, getattr(args, "base", None), str(exempt_test), str(reason), use_json)
+        else:
+            result = _approve(root, getattr(args, "base", None), use_json)
     except _Refused as exc:
         if use_json:
             print(json.dumps(_envelope(root, "declined" if exc.code == "declined" else "refused",
@@ -165,7 +225,10 @@ def run_approve(args: argparse.Namespace) -> int:
     if use_json:
         print(json.dumps(_envelope(root, "approved", **result), indent=2))
         return 0
-    print(f"Approved governance state {result['governance_tree_hash']} in commit {result['commit']}.")
+    if "exempt_commit" in result:
+        print(f"Approved test exemption for {result['exempt_commit']} in commit {result['commit']}.")
+    else:
+        print(f"Approved governance state {result['governance_tree_hash']} in commit {result['commit']}.")
     if not result["verified"]:
         print(f"  warning: it does not verify against {human_gate.ALLOWED_SIGNERS} on {result['base']} yet "
               f"({result['verification']['code']}): CI will not accept it until your key is listed there.")
@@ -190,6 +253,10 @@ class ApproveCommand(AegisCommand):
         parser.add_argument("--base", metavar="REF", default=None,
                             help="The base branch to measure governance changes against (default: origin/main, "
                                  "main, origin/develop, develop)")
+        parser.add_argument("--exempt-test", metavar="COMMIT", default=None,
+                            help="Sign a test exemption (Aegis-Exempt-Test) for a specific fix commit")
+        parser.add_argument("--reason", metavar="TEXT", default=None,
+                            help="Explanation for --exempt-test (must match the fix commit's Aegis-No-Test reason)")
 
     def execute(self, args: argparse.Namespace) -> int:
         return run_approve(args)

@@ -376,16 +376,23 @@ class CallSiteNode:
     target: str
     line: int = 1
     caller_scope: Optional[str] = None
+    args: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"target": self.target, "line": self.line, "caller_scope": self.caller_scope}
+        res: Dict[str, Any] = {"target": self.target, "line": self.line, "caller_scope": self.caller_scope}
+        if self.args:
+            res["args"] = dict(self.args)
+        return res
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> CallSiteNode:
+        raw_args = data.get("args") or {}
+        args = {str(k): v for k, v in (raw_args.items() if isinstance(raw_args, Mapping) else raw_args)}
         return cls(
             target=str(data["target"]),
             line=int(data.get("line", 1)),
             caller_scope=str(data["caller_scope"]) if data.get("caller_scope") else None,
+            args=args,
         )
 
 

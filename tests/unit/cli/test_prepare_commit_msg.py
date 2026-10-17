@@ -122,3 +122,27 @@ def test_hook_install_and_uninstall_manage_the_trailer_hook_beside_pre_commit(tm
     assert cli.main(["hook", "uninstall", "--workspace", str(repo.root)]) == 0
     assert not (hooks / HOOK).exists()
     capsys.readouterr()
+
+
+@needs_git
+def test_init_installs_both_hooks_and_commit_of_checked_tree_gets_one_trailer(tmp_path, capsys):
+    from aegis_cli import cli
+
+    repo = hv.make_project(tmp_path, runner=hv.PASSING)
+    hv.use_stub_runner(repo.home.path)
+    hooks = repo.root / ".git" / "hooks"
+    assert cli.main(["init", "--workspace", str(repo.root), "--yes", "--rules", "minimal"]) == 0
+    capsys.readouterr()
+    assert (hooks / "pre-commit").is_file() and (hooks / HOOK).is_file()
+
+    repo.write("src/app.py", "def app():\n    return 2\n")
+    row = checkrun.record(repo.root, tests=True, base="main").row
+    body = _commit(repo)
+    assert body.count("Aegis-Check:") == 1
+    assert body.splitlines()[-1] == f"Aegis-Check: tree={row['tree']} exit=0"
+    assert repo.git("rev-parse", "HEAD^{tree}") == row["tree"]
+
+    assert cli.main(["uninstall", "--workspace", str(repo.root)]) == 0
+    capsys.readouterr()
+    assert not (hooks / HOOK).exists()
+

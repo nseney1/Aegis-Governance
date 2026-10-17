@@ -266,11 +266,12 @@ def test_confirm_stores_the_conclusion_per_head_sha_and_does_not_ask_twice(tmp_p
     checkrun.record(repo.root, tests=True, base="main")
     hv.mcp_call("aegis_report_outcome", repo.root, outcome="success", rules_used=["trap-sample"], idempotency_key="k")
     commit = repo.commit("work")
+    repo.git("branch", "-f", "main", commit)
     ci = hv.FakeCI([hv.ci_run(commit)])
     landed = credit.landed_lookup(repo.root)
     first = credit.confirm(repo.root, client=ci, workflow=hv.CI_WORKFLOW, landed=landed)
     again = credit.confirm(repo.root, client=ci, workflow=hv.CI_WORKFLOW, landed=landed)
-    assert first["confirmed"] == 1 and again["asked"] == 0 and ci.asked == [commit]
+    assert first["confirmed"] == 1 and again["confirmed"] == 1 and ci.asked == [commit, commit]
     row, = hv.rows_of(repo.root, "ci")
     assert row["commit"] == commit and row["ci_conclusion"] == "success" and row["ci_run_attempt"] == 1
 
@@ -283,7 +284,8 @@ def test_an_unreachable_ci_leaves_credit_where_it_is(tmp_path):
     hv.mcp_call("aegis_scan", repo.root, files=["src/app.py"])
     checkrun.record(repo.root, tests=True, base="main")
     hv.mcp_call("aegis_report_outcome", repo.root, outcome="success", rules_used=["trap-sample"], idempotency_key="k")
-    repo.commit("work")
+    commit = repo.commit("work")
+    repo.git("branch", "-f", "main", commit)
     summary = credit.confirm(repo.root, client=hv.FakeCI(error="gh is not installed"), workflow=hv.CI_WORKFLOW,
                              landed=credit.landed_lookup(repo.root))
     assert summary["errors"] == ["gh is not installed"] and hv.rows_of(repo.root, "ci") == []
@@ -358,7 +360,9 @@ def test_derive_is_pure_and_needs_a_report_to_name_a_rule():
     ci = {"event": "ci", "commit": "c" * 40, "ci_conclusion": "success"}
     rows = [check, report, report, ci]
     snapshot = json.dumps(rows, sort_keys=True)
-    credits = credit.derive(rows, landed=lambda tree: "c" * 40)
+    unverified = credit.derive(rows, landed=lambda tree: "c" * 40)
+    assert [(c.state, c.reason, c.counts) for c in unverified] == [("landed", "unverified_ci", False)]
+    credits = credit.derive(rows, landed=lambda tree: "c" * 40, verified_ci={"c" * 40: "success"})
     assert [(c.state, c.counts) for c in credits] == [("confirmed", True)]  # a duplicate report is one credit
     assert json.dumps(rows, sort_keys=True) == snapshot
     assert credit.derive([check], landed=lambda tree: None) == []

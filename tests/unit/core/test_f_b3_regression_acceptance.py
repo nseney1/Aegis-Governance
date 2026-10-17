@@ -72,26 +72,13 @@ def keys(tmp_path: Path) -> Dict[str, Any]:
 
 def make_calc_repo(tmp_path: Path, signer_pub: str | None = None) -> hg.Repo:
     """Create a repo on ``main`` with a buggy ``src/calc.py``, then check out ``work``."""
-    home = hg.Home(tmp_path / "home")
-    repo = hg.Repo(tmp_path / "project", home)
+    repo = hg.Repo(tmp_path / "project", hg.Home(tmp_path / "home"))
     repo.write("README.md", "# calc\n")
     repo.write("pyproject.toml", "[project]\nname = 'calc'\nversion = '0.1.0'\n")
     repo.write("src/__init__.py", "")
-    repo.write(
-        "src/calc.py",
-        "def divide(a: int, b: int) -> float:\n"
-        "    return a / b\n\n"
-        "def add(a: int, b: int) -> int:\n"
-        "    return a - b  # buggy on base!\n",
-    )
-    repo.write(
-        "tests/test_calc.py",
-        "from src.calc import divide\n\n"
-        "def test_divide():\n"
-        "    assert divide(6, 2) == 3.0\n",
-    )
-    if signer_pub is not None:
-        repo.write("allowed_signers", hg.allowed_signers_text(signer_pub))
+    repo.write("src/calc.py", "def divide(a: int, b: int) -> float:\n    return a / b\n\ndef add(a: int, b: int) -> int:\n    return a - b  # buggy on base!\n")
+    repo.write("tests/test_calc.py", "from src.calc import divide\n\ndef test_divide():\n    assert divide(6, 2) == 3.0\n")
+    if signer_pub is not None: repo.write("allowed_signers", hg.allowed_signers_text(signer_pub))
     repo.commit("initial base")
     repo.git("update-ref", "refs/remotes/origin/main", "HEAD")
     repo.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
@@ -319,11 +306,14 @@ def test_aegis_no_test_with_verified_human_gate_approval_exempts_and_reports_rat
     )
     repo.commit("fix: fix add")
 
-    # Fix 2: no test, carries Aegis-No-Test explanation + signed human_gate approval
+    # Fix 2: no test, carries Aegis-No-Test explanation + signed human_gate test exemption
     repo.write("src/other.py", "def ping() -> str:\n    return 'pong'\n")
-    repo.commit("fix: add fallback ping\n\nAegis-No-Test: trivial constant return")
-    digest = human_gate.governance_tree_hash(repo.root, "HEAD")
-    repo.commit(f"chore: approve exemption\n\nAegis-Approve: {digest}\n", sign_key=keys["human"], allow_empty=True)
+    fix2_oid = repo.commit("fix: add fallback ping\n\nAegis-No-Test: trivial constant return")
+    repo.commit(
+        human_gate.exemption_message(fix2_oid, "trivial constant return"),
+        sign_key=keys["human"],
+        allow_empty=True,
+    )
 
     report = regression.check_ci_regressions(repo.root, "main", "HEAD")
     assert report.passed is True
@@ -336,6 +326,110 @@ def test_aegis_no_test_with_verified_human_gate_approval_exempts_and_reports_rat
     assert report.commits[1].exempted is True
     assert report.commits[1].no_test_reason == "trivial constant return"
     assert report.findings == ()
+
+
+@needs_git
+@needs_signing
+def test_governance_tree_approval_never_exempts_testless_fix_commit(
+    tmp_path: Path, keys: Dict[str, Any]
+):
+    repo = make_calc_repo(tmp_path, signer_pub=keys["human_pub"])
+    repo.write("src/other.py", "def ping() -> str:\n    return 'pong'\n")
+    fix_oid = repo.commit("fix: add fallback ping without test\n\nAegis-No-Test: trivial constant return")
+    digest = human_gate.governance_tree_hash(repo.root, "HEAD")
+    repo.commit(human_gate.approval_message(digest), sign_key=keys["human"], allow_empty=True)
+
+    report = regression.check_ci_regressions(repo.root, "main", "HEAD")
+    assert report.passed is False
+    assert report.total_fix_commits == 1
+    assert report.exempted_count == 0
+    assert report.commits[0].commit == fix_oid
+    assert report.commits[0].status == "failed"
+    assert report.commits[0].exempted is False
+    assert report.approval is None
+
+
+@needs_git
+@needs_signing
+def test_targeted_test_exemption_exempts_only_named_fix_commit(
+    tmp_path: Path, keys: Dict[str, Any]
+):
+    repo = make_calc_repo(tmp_path, signer_pub=keys["human_pub"])
+    repo.write("src/other.py", "def ping() -> str:\n    return 'pong'\n")
+    fix1_oid = repo.commit("fix: exempted fallback ping\n\nAegis-No-Test: trivial constant return")
+    repo.write("src/another.py", "def pong() -> str:\n    return 'ping'\n")
+    fix2_oid = repo.commit("fix: unapproved second fix\n\nAegis-No-Test: unapproved reason")
+    repo.commit(
+        human_gate.exemption_message(fix1_oid, "trivial constant return"),
+        sign_key=keys["human"],
+        allow_empty=True,
+    )
+
+    report = regression.check_ci_regressions(repo.root, "main", "HEAD")
+    assert report.passed is False
+    assert report.total_fix_commits == 2
+    assert report.exempted_count == 1
+    assert report.failed_count == 1
+    by_oid = {c.commit: c for c in report.commits}
+    assert by_oid[fix1_oid].status == "exempted"
+    assert by_oid[fix1_oid].exempted is True
+    assert by_oid[fix2_oid].status == "failed"
+    assert by_oid[fix2_oid].exempted is False
+
+
+@needs_git
+def test_tree_blobs_is_cached_and_not_recomputed_on_cache_hits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo = make_calc_repo(tmp_path)
+    repo.write(
+        "src/calc.py",
+        "def divide(a: int, b: int) -> float:\n"
+        "    return a / b\n\n"
+        "def add(a: int, b: int) -> int:\n"
+        "    return a + b\n",
+    )
+    repo.write(
+        "tests/test_calc.py",
+        "from src.calc import add, divide\n\n"
+        "def test_divide():\n"
+        "    assert divide(6, 2) == 3.0\n\n"
+        "def test_add():\n"
+        "    assert add(2, 3) == 5\n",
+    )
+    repo.commit("fix: fix add")
+
+    repo.write(
+        "src/calc.py",
+        "def divide(a: int, b: int) -> float:\n"
+        "    return 0.0 if b == 0 else a / b\n\n"
+        "def add(a: int, b: int) -> int:\n"
+        "    return a + b\n",
+    )
+    repo.write(
+        "tests/test_calc.py",
+        "from src.calc import add, divide\n\n"
+        "def test_divide():\n"
+        "    assert divide(6, 2) == 3.0\n\n"
+        "def test_divide_by_zero():\n"
+        "    assert divide(6, 0) == 0.0\n\n"
+        "def test_add():\n"
+        "    assert add(2, 3) == 5\n",
+    )
+    repo.commit("fix: guard divide by zero")
+
+    real_tree_blobs = regression._tree_blobs
+    call_counts: Dict[str, int] = {}
+
+    def counting_tree_blobs(cwd: str, commit: str):
+        call_counts[commit] = call_counts.get(commit, 0) + 1
+        return real_tree_blobs(cwd, commit)
+
+    monkeypatch.setattr(regression, "_tree_blobs", counting_tree_blobs)
+    report = regression.check_ci_regressions(repo.root, "main", "HEAD")
+    assert report.passed is True
+    assert report.total_fix_commits == 2
+    assert all(count == 1 for count in call_counts.values()), call_counts
 
 
 # ── 4. Warning-tier rollout & `aegis check --ci` integration ─────────────────
@@ -385,3 +479,63 @@ def test_check_ci_in_strict_or_gate_mode_fails_on_unapproved_regression(
     assert payload["regression"]["tier"] == "gate"
     assert payload["regression"]["passed"] is False
     assert payload["regression"]["blocking"] is True
+
+
+@needs_git
+def test_editable_install_pth_and_pep660_finder_cannot_shadow_snapshot_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    home = hg.Home(tmp_path / "home")
+    repo = hg.Repo(tmp_path / "project", home)
+    repo.write("README.md", "# app\n")
+    repo.write("src/__init__.py", "")
+    repo.write("src/app.py", "def app() -> int:\n    return 1\n")
+    repo.write("tests/test_app.py", "from src.app import app\n\ndef test_app():\n    assert app() == 1\n")
+    repo.commit("initial base")
+    repo.git("update-ref", "refs/remotes/origin/main", "HEAD")
+    repo.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    repo.branch("work")
+
+    repo.write("src/app.py", "def app() -> int:\n    return 2\n")
+    repo.write(
+        "tests/test_app.py",
+        "from pathlib import Path\n"
+        "import src.app\n"
+        "from src.app import app\n\n"
+        "def test_app():\n"
+        "    assert Path(src.app.__file__).resolve().parent == (Path.cwd() / 'src').resolve()\n"
+        "    assert app() == 2\n",
+    )
+    repo.commit("fix: return 2 from app")
+
+    # Mutate live working tree to return 999 and plant both a path-based .pth and an executable PEP 660 .pth
+    repo.write("src/app.py", "def app() -> int:\n    return 999\n")
+    fake_site = tmp_path / "fake_site_packages"
+    fake_site.mkdir()
+    (fake_site / "editable_path.pth").write_text(f"{repo.root}\n", encoding="utf-8")
+    (fake_site / "_pep660_hook.py").write_text(
+        "import importlib.abc, importlib.machinery, sys\n"
+        f"LIVE_ROOT = {str(repo.root)!r}\n"
+        "class _EditableFinder(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, fullname, path=None, target=None):\n"
+        "        if fullname == 'src' or fullname.startswith('src.'):\n"
+        "            return importlib.machinery.PathFinder.find_spec(fullname, [LIVE_ROOT], target)\n"
+        "        return None\n"
+        "def install():\n"
+        "    sys.meta_path.insert(0, _EditableFinder())\n",
+        encoding="utf-8",
+    )
+    (fake_site / "__editable__.app-0.1.0.pth").write_text(
+        "import _pep660_hook; _pep660_hook.install()\n", encoding="utf-8"
+    )
+    monkeypatch.syspath_prepend(str(fake_site))
+    monkeypatch.syspath_prepend(str(repo.root))
+
+    report = regression.check_ci_regressions(repo.root, "main", "HEAD")
+    assert report.passed is True
+    assert report.total_fix_commits == 1
+    item = report.commits[0]
+    assert item.status == "passed"
+    assert item.failed_on_base is True
+    assert item.passed_on_head is True
+    assert report.findings == ()

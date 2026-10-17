@@ -12,6 +12,8 @@ import os
 
 import pytest
 
+from tests.conftest import symlink_or_skip  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
 def _isolated_user_plane(tmp_path_factory, monkeypatch):

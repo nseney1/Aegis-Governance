@@ -404,3 +404,324 @@ def test_sync_pr_writes_transitions_with_three_sampled_examples_and_never_auto_m
     assert len(gh_calls) == 1
     assert gh_calls[0][:2] == ["pr", "create"]
     assert not any("merge" in call for call in gh_calls)
+
+
+@needs_git
+def test_end_to_end_claimed_to_recorded_to_landed_to_confirmed_to_scored_and_approved_protected_change(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end lifecycle: claimed -> recorded -> landed -> confirmed -> scored in fitness/status/sync,
+    plus signed human approval unlocking protected-change credit, trailer divergence in check --ci,
+    unavailable evidence state, and `aegis rule adjudicate` CLI."""
+    from aegis_cli.cli import main
+    from aegis_core import checkrun, human_gate
+    from tests import helpers_verified as hv
+
+    repo = hv.make_project(tmp_path)
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(repo.home.path))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    hv.use_stub_runner(repo.home.path)
+    priv_key, pub_key = hg.keygen(tmp_path / "keys", "human")
+    repo.git("checkout", "main")
+    repo.write("allowed_signers", hg.allowed_signers_text(pub_key))
+    repo.commit("add allowed_signers on main")
+    repo.git("checkout", "work")
+    repo.git("merge", "main")
+
+    # 1. Claimed (before checkrun.record)
+    repo.write("src/app.py", "def app():\n    return 2\n")
+    hv.mcp_call("aegis_scan", repo.root, session="s1", files=["src/app.py"])
+    claim_res = hv.mcp_call("aegis_report_outcome", repo.root, session="s1", outcome="success",
+                            rules_used=["trap-sample"], idempotency_key="k1")
+    assert claim_res["status"] == "claimed"
+
+    # 2. Recorded (witnessed) with protected conftest.py change
+    repo.write("conftest.py", "# protected change\n")
+    chk = checkrun.record(repo.root, tests=True, base="main")
+    assert chk.status == "recorded" and chk.row["passed"] is True and chk.row["protected_changed"] is True
+    rec_res = hv.mcp_call("aegis_report_outcome", repo.root, session="s1", outcome="success",
+                          rules_used=["trap-sample"], idempotency_key="k2")
+    assert rec_res["status"] == "recorded"
+    assert credit.project_credits(repo.root).credits[0].state == "witnessed"
+
+    # 3. Landed on main
+    c_land = repo.commit("feat: update app and conftest")
+    repo.git("branch", "-f", "main", c_land)
+    assert credit.project_credits(repo.root).credits[0].state == "landed"
+
+    # 4. Confirmed by CI, but withheld until conftest.py governance state is approved
+    ci = hv.FakeCI([hv.ci_run(c_land, "success", head_branch="main")])
+    credit.confirm(repo.root, client=ci, workflow=hv.CI_WORKFLOW)
+    withheld = credit.project_credits(repo.root).credits[0]
+    assert withheld.state == "confirmed" and withheld.counts is False and withheld.reason == "protected_changed"
+
+    # 5. Signed governance approval unlocks credit and scores in fitness, status, and sync (deduplicated once)
+    gov_hash = human_gate.governance_tree_hash(repo.root, c_land)
+    c_app = repo.commit(human_gate.approval_message(gov_hash), sign_key=priv_key, allow_empty=True)
+    repo.git("branch", "-f", "main", c_app)
+    approved_proj = credit.project_credits(repo.root, client=hv.FakeCI([hv.ci_run(c_app, "success", head_branch="main")]),
+                                           workflow=hv.CI_WORKFLOW)
+    assert approved_proj.credits[0].state == "confirmed" and approved_proj.credits[0].counts is True
+    assert len(approved_proj.outcome_rows) == 1
+
+    s_res = sync.sync(repo.root, ci_client=hv.FakeCI([hv.ci_run(c_land, "success", head_branch="main"),
+                                                      hv.ci_run(c_app, "success", head_branch="main")]))
+    assert s_res.derived["rules"]["trap-sample"]["tp"] == 1
+    assert s_res.derived["rules"]["trap-sample"]["triggers"] == 1
+
+    # 6. CLI `aegis rule adjudicate` adds human adjudication
+    monkeypatch.chdir(repo.root)
+    capsys.readouterr()
+    assert main(["rule", "adjudicate", "trap-sample", "tp", "--ref", "PR-1", "--summary", "good catch", "--json"]) == 0
+    adj_out = json.loads(capsys.readouterr().out)
+    assert adj_out["event"] == "adjudication" and adj_out["verdict"] == "tp"
+
+    # 7. Corrupt ledger line -> evidence unavailable in fitness, status, and sync refuses transitions
+    hv.ledger_path(repo.root).open("ab").write(b"{corrupt json line\n")
+    capsys.readouterr()
+    run_status(argparse.Namespace(_root=repo.root, plain=True))
+    status_text = capsys.readouterr().out
+    assert "evidence unavailable" in status_text
+    refused_sync = sync.sync(repo.root, apply=True)
+    assert refused_sync.refused is not None and "incomplete" in refused_sync.refused
+    assert refused_sync.derived["rules"]["trap-sample"]["evidence_available"] is False
+
+
+@needs_git
+def test_repeated_sync_refreshes_reruns_and_new_landed_checks_and_fresh_status_verifies(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1. Repeated `sync.sync()` calls refresh CI on every call (revoking on later failure, querying newly landed commits).
+    2. A fresh `status` process (`_VERIFIED_CI` cleared, no `client` passed) verifies recorded `ci` rows via GitHub REST or attestation."""
+    from aegis_core import checkrun, human_gate, rules
+    from tests import helpers_verified as hv
+
+    repo = hv.make_project(tmp_path)
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(repo.home.path))
+    hv.use_stub_runner(repo.home.path)
+
+    # First check lands on main -> first sync confirms it
+    repo.write("src/app.py", "def app():\n    return 10\n")
+    hv.mcp_call("aegis_scan", repo.root, session="s1", files=["src/app.py"])
+    checkrun.record(repo.root, tests=True, base="main")
+    hv.mcp_call("aegis_report_outcome", repo.root, session="s1", outcome="success",
+                rules_used=["trap-sample"], idempotency_key="k1")
+    c1 = repo.commit("feat: first change")
+    repo.git("branch", "-f", "main", c1)
+
+    r1_ok = hv.ci_run(c1, "success", run_id=10, attempt=1, run_started_at="2026-10-17T10:00:00Z")
+    s1 = sync.sync(repo.root, ci_client=hv.FakeCI([r1_ok]))
+    assert s1.derived["rules"]["trap-sample"]["tp"] == 1
+
+    # Fresh status process (empty _VERIFIED_CI) verifies recorded ci row via default_gh_runner
+    credit._VERIFIED_CI.clear()
+    credit._UNAVAILABLE_CI.clear()
+    monkeypatch.setattr(
+        human_gate,
+        "default_gh_runner",
+        lambda argv, stdin=None, cwd=None: subprocess.CompletedProcess(
+            argv, 0, json.dumps({"workflow_runs": [r1_ok]}).encode("utf-8"), b"",
+        ),
+    )
+    capsys.readouterr()
+    run_status(argparse.Namespace(_root=repo.root, plain=True))
+    status_out = capsys.readouterr().out
+    assert "insufficient (n=1)" in status_out
+    assert "no evidence" not in status_out
+
+    # Later failed CI rerun on c1 -> second sync revokes c1 credit even though c1 was already in _VERIFIED_CI
+    r1_fail = hv.ci_run(c1, "failure", run_id=11, attempt=2, run_started_at="2026-10-17T10:05:00Z")
+    s2 = sync.sync(repo.root, ci_client=hv.FakeCI([r1_ok, r1_fail]))
+    assert s2.derived["rules"]["trap-sample"]["tp"] == 0
+
+    # Second check lands on main -> third sync queries c2 even though c1 was already cached
+    repo.write("src/app.py", "def app():\n    return 20\n")
+    hv.mcp_call("aegis_scan", repo.root, session="s2", files=["src/app.py"])
+    checkrun.record(repo.root, tests=True, base="main")
+    hv.mcp_call("aegis_report_outcome", repo.root, session="s2", outcome="success",
+                rules_used=["trap-sample"], idempotency_key="k2")
+    c2 = repo.commit("feat: second change")
+    repo.git("branch", "-f", "main", c2)
+    r2_ok = hv.ci_run(c2, "success", run_id=20, attempt=1, run_started_at="2026-10-17T10:10:00Z")
+    s3 = sync.sync(repo.root, ci_client=hv.FakeCI([r1_ok, r1_fail, r2_ok]))
+    assert s3.derived["rules"]["trap-sample"]["tp"] == 1
+    assert fitness.for_rules(repo.root, rules.load_rules(repo.root).served)["trap-sample"].tp == 1
+
+
+@needs_git
+def test_check_ci_trailer_independently_reruns_snapshot_without_local_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Production `aegis check --ci` independently exports and reruns each commit's snapshot
+    even when no local `check` row exists in the ledger, failing when the snapshot check fails."""
+    from aegis_cli.cli import main
+    from tests import helpers_verified as hv
+
+    repo = hv.make_project(tmp_path)
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(repo.home.path))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    hv.use_stub_runner(repo.home.path)
+
+    # Make the commit's run_checks.py fail (exit 1) while its trailer falsely claims exit=0
+    repo.write("run_checks.py", "import sys\nprint('1 failed in 0.01s')\nsys.exit(1)\n")
+    repo.write("src/app.py", "def app():\n    return 99\n")
+    tree = hv.tree_now(repo.root)
+    repo.commit(f"feat: broken change with forged trailer\n\n{credit.format_trailer(tree, 0)}")
+    # Ensure local ledger has NO check rows at all (just like a fresh CI checkout)
+    assert credit.read_rows(repo.root) == []
+
+    monkeypatch.chdir(repo.root)
+    capsys.readouterr()
+    rc = main(["check", "--ci", "--base", "main", "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert len(out["trailer_checks"]) == 1
+    assert out["trailer_checks"][0]["result"] == "void"
+    assert out["trailer_checks"][0]["failed"] is True
+
+
+@needs_git
+def test_detector_replay_ignores_unmerged_head_and_reconciles_leaked_to_caught_after_fix(
+    tmp_path: Path,
+) -> None:
+    """`replay_detector_history` walks the target protected branch (`main`), ignoring unmerged feature
+    commits on `HEAD`, and reconciles a previously recorded `leaked` finding to `caught` after a later fix."""
+    from aegis_core import rules
+
+    home = hg.Home(tmp_path / "home")
+    repo = hg.Repo(tmp_path / "repo", home)
+    _write_rule(
+        repo.root,
+        "gate",
+        "no-eval-exec",
+        target_paths=["src/*.py"],
+        forbid_calls=["eval", "exec"],
+    )
+    repo.write("src/app.py", "def f(x):\n    return x + 1\n")
+    repo.commit("initial")
+
+    # Commit 1 on main introduces eval(x) (currently at tip of main -> leaked)
+    repo.git("checkout", "main")
+    repo.write("src/app.py", "def f(x):\n    return eval(x)\n")
+    repo.commit("introduce eval on main")
+
+    # Switch HEAD to an unmerged feature branch `work` that introduces exec(x)
+    repo.branch("work")
+    repo.write("src/app.py", "def f(x):\n    exec(x)\n    return 1\n")
+    repo.commit("unmerged exec on work")
+
+    # Replay while HEAD is on `work`: must walk `main`, recording `eval` as leaked and ignoring `exec` on `work`
+    first_replay = fitness.replay_detector_history(repo.root)
+    patterns_1 = {d["pattern"]: d["disposition"] for d in first_replay}
+    assert patterns_1 == {"eval": "leaked"}
+    fit_1 = fitness.for_rules(repo.root, rules.load_rules(repo.root).served)["no-eval-exec"]
+    assert fit_1.leaked == 1 and fit_1.caught == 0
+
+    # Now land a non-revert fix on `main` removing eval(x), while HEAD stays on `work`
+    repo.git("checkout", "main")
+    repo.write("src/app.py", "def f(x):\n    return int(x)\n")
+    repo.commit("fix: replace eval with int on main")
+    repo.git("checkout", "work")
+
+    # Re-running replay / sync reconciles the earlier `leaked` finding for `eval` to `caught`
+    second_replay = fitness.replay_detector_history(repo.root)
+    patterns_2 = {d["pattern"]: d["disposition"] for d in second_replay}
+    assert patterns_2 == {"eval": "caught"}
+    fit_2 = fitness.for_rules(repo.root, rules.load_rules(repo.root).served)["no-eval-exec"]
+    assert fit_2.leaked == 0 and fit_2.caught == 1
+
+
+@needs_git
+def test_trailer_rerun_executes_unchanged_tests_and_works_in_fresh_credit_only_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a commit modifies `src/app.py` (breaking an existing unchanged test) and adds a new passing
+    test file, trailer verification runs all snapshot tests (catching the broken unchanged test) and works
+    in a fresh Python process that imports only `aegis_core.credit`."""
+    import sys
+    from aegis_core import checkrun
+    from tests import helpers_verified as hv
+
+    home = hg.Home(tmp_path / "home")
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(home.path))
+    repo = hg.Repo(tmp_path / "repo", home)
+    repo.write("src/app.py", "def value():\n    return 1\n")
+    repo.write("tests/test_existing.py", "from src.app import value\n\ndef test_existing():\n    assert value() == 1\n")
+    repo.commit("initial")
+
+    # Branch and make a commit that breaks `test_existing.py` (without touching it) and adds `test_new.py`
+    repo.branch("work")
+    repo.write("src/app.py", "def value():\n    return 2\n")
+    repo.write("tests/test_new.py", "def test_new():\n    assert True\n")
+    tree = hv.tree_now(repo.root)
+    repo.commit(f"feat: break existing test while adding passing test\n\n{credit.format_trailer(tree, 0)}")
+
+    # 1. Layer 2 `checkrun.verify_commit_trailers` runs all snapshot tests and catches the broken unchanged test
+    v_res = checkrun.verify_commit_trailers(repo.root, "main", "HEAD")
+    assert len(v_res) == 1
+    assert v_res[0]["result"] == "void"
+    assert v_res[0]["failed"] is True
+
+    # 2. Layer 1 `credit.verify_commit_trailers` requires an explicit `rerun_fn` (no import-order hook or subprocess spawn)
+    code = (
+        "import json, sys\n"
+        "from aegis_core import credit\n"
+        "assert 'aegis_core.checkrun' not in sys.modules\n"
+        "assert 'subprocess' not in credit.__dict__\n"
+        "res = credit.verify_commit_trailers(sys.argv[1], 'main', 'HEAD', rerun_fn=lambda _c, t: {'tree': t, 'exit': 1})\n"
+        "print(json.dumps(res))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code, str(repo.root)],
+        capture_output=True, text=True, check=True,
+    )
+    parsed = json.loads(proc.stdout.strip())
+    assert len(parsed) == 1
+    assert parsed[0]["result"] == "void"
+    assert parsed[0]["failed"] is True
+
+
+@needs_git
+def test_detector_replay_walks_commits_after_merge_and_prefers_ahead_remote_branch(
+    tmp_path: Path,
+) -> None:
+    """`replay_detector_history` detects violations introduced in ordinary commits after a merge commit
+    and prefers `refs/remotes/origin/main` when local `refs/heads/main` is behind."""
+    home = hg.Home(tmp_path / "home")
+    repo = hg.Repo(tmp_path / "repo", home)
+    _write_rule(
+        repo.root,
+        "gate",
+        "no-eval-exec",
+        target_paths=["src/*.py"],
+        forbid_calls=["eval", "exec"],
+    )
+    repo.write("src/app.py", "def f(x):\n    return x + 1\n")
+    repo.commit("initial")
+
+    # Create a harmless merge commit on `main`
+    repo.branch("harmless")
+    repo.write("README.md", "# docs\n")
+    repo.commit("docs: readme")
+    repo.git("checkout", "main")
+    repo.write("NOTES.md", "# notes\n")
+    repo.commit("docs: notes")
+    repo.git("merge", "--no-ff", "harmless", "-m", "Merge branch 'harmless'")
+    merge_oid = repo.git("rev-parse", "HEAD").strip()
+
+    # Introduce an ordinary commit with `eval(x)` after the merge commit
+    repo.write("src/app.py", "def f(x):\n    return eval(x)\n")
+    ahead_oid = repo.commit("feat: ordinary commit with eval after merge")
+
+    # Rewind local `refs/heads/main` to `merge_oid` while `refs/remotes/origin/main` points to `ahead_oid`
+    repo.git("update-ref", "refs/remotes/origin/main", ahead_oid)
+    repo.git("reset", "--hard", merge_oid)
+
+    detections = fitness.replay_detector_history(repo.root)
+    assert any(d["pattern"] == "eval" and d["disposition"] == "leaked" for d in detections)

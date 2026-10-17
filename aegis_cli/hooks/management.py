@@ -649,7 +649,7 @@ def hook_status(project_root: str | Path | Any | None = None) -> dict[str, Any]:
     }
 
 
-def _trailer_hook(status: dict[str, Any], action: str) -> str | None:
+def _trailer_hook(status: dict[str, Any], action: str, *, dry_run: bool = False) -> str | None:
     """Install or remove the prepare-commit-msg hook that adds the Aegis-Check trailer, beside the pre-commit hook."""
     from aegis_cli.hooks import commitmsg
 
@@ -658,7 +658,11 @@ def _trailer_hook(status: dict[str, Any], action: str) -> str | None:
         return None
     hooks_dir = Path(hook_file).parent
     try:
-        return commitmsg.install(hooks_dir) if action == "install" else commitmsg.uninstall(hooks_dir)
+        return (
+            commitmsg.install(hooks_dir, dry_run=dry_run)
+            if action == "install"
+            else commitmsg.uninstall(hooks_dir, dry_run=dry_run)
+        )
     except (OSError, ValueError) as exc:
         print(f"aegis: prepare-commit-msg hook not {action}ed: {exc}", file=sys.stderr)
         return None
@@ -672,7 +676,7 @@ def run_hook_install(args: Any) -> int:
 
     ok = install_hook(ws, force=force, dry_run=dry_run)
     st = hook_status(ws) if ok else {}
-    trailer = _trailer_hook(st, "install") if ok and not dry_run else None
+    trailer = _trailer_hook(st, "install", dry_run=dry_run) if ok else None
     if use_json:
         print(json.dumps({"status": "installed" if ok else "failed", "success": ok}))
     else:
@@ -696,8 +700,8 @@ def run_hook_uninstall(args: Any) -> int:
 
     st = hook_status(ws)
     ok = uninstall_hook(ws, force=force, dry_run=dry_run)
-    if ok and not dry_run:
-        _trailer_hook(st, "uninstall")
+    if ok:
+        _trailer_hook(st, "uninstall", dry_run=dry_run)
     if use_json:
         print(json.dumps({"status": "uninstalled" if ok else "not_found", "success": ok}))
     else:

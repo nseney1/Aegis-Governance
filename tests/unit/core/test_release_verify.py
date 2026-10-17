@@ -231,6 +231,8 @@ def test_gh_refusing_the_attestation_is_not_verified(tmp_path, monkeypatch):
     ("subject", {"statement__subject": [{"digest": {"sha256": "0" * 64}}]}),
     ("predicate-commit", {"predicate__commit": "f" * 40}),
     ("predicate-tree", {"predicate__tree": "e" * 40}),
+    ("predicate-run-bad", {"predicate__run": "not-an-id"}),
+    ("predicate-run-missing", {"predicate__run": None}),
     ("a-job-failed", {"predicate__jobs": {"validate": "success", "test-windows": "failure"}}),
     ("no-jobs", {"predicate__jobs": {}}),
     ("source-digest", {"cert__sourceRepositoryDigest": "f" * 40}),
@@ -248,6 +250,19 @@ def test_exit_zero_is_not_enough_the_json_is_rechecked(tmp_path, monkeypatch, la
     gh = FakeGh("2.93.0", (0, json.dumps([record(commit, tree, digest, **overrides)]), ""))
     report = rv.verify_release(repo.root, commit, run=gh)
     assert not report.verified and report.code == "bad_output", label
+
+
+@needs_git
+def test_expected_run_pin_rejects_mismatched_run_id_or_attempt(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    commit, tree, digest = facts(repo)
+    as_tier(monkeypatch, "A")
+    gh_mismatch = FakeGh("2.93.0", (0, json.dumps([record(commit, tree, digest, predicate__run="1/1")]), ""))
+    bad = rv.verify_release(repo.root, commit, run=gh_mismatch, expected_run="1/2")
+    assert not bad.verified and bad.code == "bad_output"
+    gh_match = FakeGh("2.93.0", (0, json.dumps([record(commit, tree, digest, predicate__run="42/3")]), ""))
+    good = rv.verify_release(repo.root, commit, run=gh_match, expected_run="42/3")
+    assert good.verified and good.details.get("run") == "42/3"
 
 
 @needs_git

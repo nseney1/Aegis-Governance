@@ -594,7 +594,7 @@ def ledger_locked(workspace: Any, timeout: Optional[float] = None) -> Iterator[L
         yield site
 
 
-def _open_regular(path: Path, flags: int) -> int:
+def _open_regular(path: Path, flags: int, mode: Optional[int] = None) -> int:
     """``os.open`` that refuses a symlink at ``path`` and anything but a regular file.
 
     Raises PathTraversalError for a symlink (an existing one, or, on POSIX, one swapped
@@ -609,8 +609,9 @@ def _open_regular(path: Path, flags: int) -> int:
         raise _link_error(path)
     if st is not None and not stat.S_ISREG(st.st_mode):
         raise PathTraversalError(f"refusing to use {path}: it is not a regular file", path=str(path))
+    create_mode = _NEW_FILE_MODE if mode is None else stat.S_IMODE(mode)
     try:
-        fd = os.open(str(path), flags | _O_NOFOLLOW | _O_BINARY | _O_CLOEXEC, _NEW_FILE_MODE)
+        fd = os.open(str(path), flags | _O_NOFOLLOW | _O_BINARY | _O_CLOEXEC, create_mode)
     except OSError as exc:
         if os.path.islink(path):  # ELOOP (EMLINK on BSD): a link replaced it since the lstat
             raise _link_error(path) from exc
@@ -618,7 +619,9 @@ def _open_regular(path: Path, flags: int) -> int:
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise PathTraversalError(f"refusing to use {path}: it is not a regular file", path=str(path))
-        if st is None and _in_shared_state(Path(path)):
+        if mode is not None:
+            _make_private(fd, stat.S_IMODE(mode))
+        elif st is None and _in_shared_state(Path(path)):
             _make_private(fd, _PRIVATE_FILE_MODE)
     except BaseException:
         os.close(fd)
@@ -844,7 +847,7 @@ def _encode_rows(rows: Iterable[Dict[str, Any]]) -> bytes:
     return "".join(line + "\n" for line in lines).encode("ascii")
 
 
-def append_jsonl(path: Path | str, rows: Iterable[Dict[str, Any]]) -> int:
+def append_jsonl(path: Path | str, rows: Iterable[Dict[str, Any]], *, mode: Optional[int] = None) -> int:
     """Append ``rows`` as JSON lines with one ``O_APPEND`` write and one fsync.
 
     Every row is serialized before anything is written, so a row that is not JSON
@@ -861,7 +864,7 @@ def append_jsonl(path: Path | str, rows: Iterable[Dict[str, Any]]) -> int:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     created = not os.path.lexists(target)
-    fd = _open_regular(target, os.O_RDWR | os.O_APPEND | os.O_CREAT)
+    fd = _open_regular(target, os.O_RDWR | os.O_APPEND | os.O_CREAT, mode=mode)
     try:
         size = os.fstat(fd).st_size
         if size:

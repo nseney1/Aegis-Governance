@@ -76,14 +76,19 @@ def rows_of(root: Path, event: str) -> List[Dict[str, Any]]:
 
 def ci_run(commit: str, conclusion: Optional[str] = "success", *, status: str = "completed",
            workflow: str = CI_WORKFLOW, event: str = "push", attempt: int = 1, run_id: int = 1,
-           same_repo: bool = True, created: str = "2026-10-17T10:00:00Z") -> Dict[str, Any]:
+           same_repo: bool = True, created: str = "2026-10-17T10:00:00Z",
+           head_branch: Optional[str] = "main", run_started_at: Optional[str] = None) -> Dict[str, Any]:
     """One workflow run as GitHub's REST API lists it."""
-    return {
+    run: Dict[str, Any] = {
         "id": run_id, "run_attempt": attempt, "head_sha": commit, "event": event, "status": status,
         "conclusion": conclusion, "path": f".github/workflows/{workflow}", "created_at": created,
+        "head_branch": head_branch,
         "repository": {"full_name": "octo/proj"},
         "head_repository": {"full_name": "octo/proj" if same_repo else "fork/proj"},
     }
+    if run_started_at is not None:
+        run["run_started_at"] = run_started_at
+    return run
 
 
 class FakeCI:

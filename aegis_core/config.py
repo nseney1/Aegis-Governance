@@ -45,6 +45,7 @@ __all__ = [
     "RepoConfig",
     "UserConfig",
     "env_client",
+    "env_github_step_summary",
     "env_llm_cmd",
     "env_max_jit_tokens",
     "env_workspace",
@@ -70,7 +71,7 @@ ENV_LLM_CMD = "AEGIS_LLM_CMD"
 ENV_VARS = (ENV_WORKSPACE, ENV_CLIENT, ENV_MAX_JIT_TOKENS, ENV_LLM_CMD)
 
 _REPO_KEYS = frozenset({"v", "hosts", "jit", "expiry", "ast"})
-_USER_KEYS = frozenset({"v", "drivers", "slots"})
+_USER_KEYS = frozenset({"v", "drivers", "slots", "arbiter_vendor"})
 # Keys a repository might use to smuggle in a command. Only these names (aegis's own
 # vocabulary) are ever echoed in a warning; any other unknown key is only counted,
 # since warnings reach the agent and key names are repo-chosen text.
@@ -108,6 +109,11 @@ def env_client(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
 def env_llm_cmd(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
     """``AEGIS_LLM_CMD``: the Layer-2 model command, or None."""
     return _env(ENV_LLM_CMD, environ)
+
+
+def env_github_step_summary(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
+    """``GITHUB_STEP_SUMMARY``: path to GitHub Actions job summary file, or None."""
+    return _env("GITHUB_STEP_SUMMARY", environ)
 
 
 def env_max_jit_tokens(environ: Optional[Mapping[str, str]] = None) -> Optional[int]:
@@ -372,6 +378,7 @@ class UserConfig:
     drivers: Mapping[str, str] = field(default_factory=dict)
     slots: Mapping[str, str] = field(default_factory=dict)
     warnings: Tuple[str, ...] = ()
+    arbiter_vendor: Optional[str] = None
 
     @classmethod
     def load(cls, workspace_root: Any = None, user: Optional[UserLayout] = None) -> "UserConfig":
@@ -414,7 +421,9 @@ class UserConfig:
             slots = {str(k): str(v) for k, v in raw_slots.items() if v is not None}
         else:
             warnings.append(f"ignored 'slots' in {USER_LABEL}: it must be an object")
-        return cls(drivers=drivers, slots=slots, warnings=tuple(warnings))
+        raw_vendor = raw.get("arbiter_vendor")
+        arbiter_vendor = str(raw_vendor).strip() if isinstance(raw_vendor, str) and raw_vendor.strip() else None
+        return cls(drivers=drivers, slots=slots, warnings=tuple(warnings), arbiter_vendor=arbiter_vendor)
 
 
 # ── Resolved values ──────────────────────────────────────────────────────────

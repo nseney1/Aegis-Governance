@@ -69,7 +69,6 @@ def test_a_forged_trailer_on_an_unsigned_commit_is_not_an_approval(tmp_path, key
     result = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert (result.valid, result.code) == (False, "unsigned")
 
-
 @needs_signing
 def test_a_commit_signed_by_a_key_outside_the_base_allowed_signers_is_not_an_approval(tmp_path, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
@@ -77,7 +76,6 @@ def test_a_commit_signed_by_a_key_outside_the_base_allowed_signers_is_not_an_app
     repo.commit(f"approve\n\nAegis-Approve: {digest}\n", sign_key=keys["other"], allow_empty=True)
     result = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert (result.valid, result.code) == (False, "untrusted_signature")
-
 
 @needs_signing
 def test_adding_the_attackers_key_to_allowed_signers_on_the_branch_does_not_make_it_trusted(tmp_path, keys):
@@ -88,7 +86,6 @@ def test_adding_the_attackers_key_to_allowed_signers_on_the_branch_does_not_make
     result = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert (result.valid, result.code) == (False, "untrusted_signature")
 
-
 @needs_signing
 def test_a_valid_signature_over_another_governance_state_is_not_an_approval(tmp_path, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
@@ -97,7 +94,6 @@ def test_a_valid_signature_over_another_governance_state_is_not_an_approval(tmp_
     result = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert (result.valid, result.code) == (False, "hash_mismatch")
 
-
 @needs_signing
 def test_a_signed_commit_with_no_trailer_is_not_an_approval(tmp_path, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
@@ -105,7 +101,6 @@ def test_a_signed_commit_with_no_trailer_is_not_an_approval(tmp_path, keys):
     repo.commit("looks fine to me", sign_key=keys["human"], allow_empty=True)
     result = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert (result.valid, result.code) == (False, "no_trailer")
-
 
 @needs_signing
 def test_a_signed_trailer_from_an_allowed_key_is_an_approval(tmp_path, keys):
@@ -116,7 +111,6 @@ def test_a_signed_trailer_from_an_allowed_key_is_an_approval(tmp_path, keys):
     assert (result.valid, result.code, result.commit) == (True, "ok", commit)
     assert result.signer and result.signer.startswith("SHA256:")
 
-
 @needs_signing
 @pytest.mark.parametrize("line", ["Aegis-Accept: rule-x", "aegis-accept: rule-x", "  Aegis-Accept : rule-x"])
 def test_the_reserved_aegis_accept_line_voids_an_otherwise_valid_approval(tmp_path, keys, line):
@@ -126,25 +120,20 @@ def test_the_reserved_aegis_accept_line_voids_an_otherwise_valid_approval(tmp_pa
     result = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert (result.valid, result.code) == (False, "accept_reserved")
 
-
 @needs_signing
 def test_the_reserved_line_in_the_body_voids_it_too(tmp_path, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
     digest = _changed_rule_branch(repo)
-    repo.commit(f"approve\n\nAegis-Accept: x\n\nmore prose\n\nAegis-Approve: {digest}\n",
-                sign_key=keys["human"], allow_empty=True)
+    repo.commit(f"approve\n\nAegis-Accept: x\n\nmore prose\n\nAegis-Approve: {digest}\n", sign_key=keys["human"], allow_empty=True)
     assert human_gate.verify_approval(repo.root, "HEAD", digest, "main").code == "accept_reserved"
-
 
 @needs_signing
 def test_two_conflicting_approve_trailers_are_not_an_approval(tmp_path, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
     digest = _changed_rule_branch(repo)
-    repo.commit(f"approve\n\nAegis-Approve: {digest}\nAegis-Approve: {'1' * 64}\n",
-                sign_key=keys["human"], allow_empty=True)
+    repo.commit(f"approve\n\nAegis-Approve: {digest}\nAegis-Approve: {'1' * 64}\n", sign_key=keys["human"], allow_empty=True)
     result = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert (result.valid, result.code) == (False, "multiple_trailers")
-
 
 @needs_signing
 def test_the_base_must_carry_allowed_signers(tmp_path, keys):
@@ -155,13 +144,11 @@ def test_the_base_must_carry_allowed_signers(tmp_path, keys):
     result = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert (result.valid, result.code) == (False, "no_allowed_signers")
 
-
 @needs_signing
 def test_an_unresolvable_commit_is_an_error_not_an_approval(tmp_path, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
     result = human_gate.verify_approval(repo.root, "nonesuch", "0" * 64, "main")
     assert (result.valid, result.code) == (False, "unresolved")
-
 
 @needs_signing
 def test_find_approval_scans_the_branch_and_returns_the_valid_one(tmp_path, keys):
@@ -172,7 +159,6 @@ def test_find_approval_scans_the_branch_and_returns_the_valid_one(tmp_path, keys
     found = human_gate.find_approval(repo.root, "HEAD", "main")
     assert found is not None and found.valid and found.commit == good
 
-
 @needs_signing
 def test_a_later_governance_change_voids_an_earlier_approval(tmp_path, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
@@ -181,7 +167,6 @@ def test_a_later_governance_change_voids_an_earlier_approval(tmp_path, keys):
     repo.write(".aegis/rules/traps/trap-sample.md", hg.RULE.replace("sample", "weakest"))
     repo.commit("one more weakening")
     assert human_gate.find_approval(repo.root, "HEAD", "main") is None
-
 
 # ── 2. Tier C is self-attested ───────────────────────────────────────────────
 
@@ -193,27 +178,20 @@ def test_tier_c_says_self_attested_in_text_and_json(tmp_path):
     assert "self-attested" in report.text_lines()[0]
     doc = report.as_dict()
     assert doc["tier"] == "C" and doc["label"] == "self-attested"
-    for key in ("source", "aegis_version", "checked_at", "scope"):
-        assert doc[key]
-
+    for key in ("source", "aegis_version", "checked_at", "scope"): assert doc[key]
 
 @needs_git
 def test_doctor_prints_the_tier_on_every_report(tmp_path, monkeypatch):
     from aegis_cli import doctor
-
     repo = hg.make_repo(tmp_path)
     monkeypatch.setattr(human_gate, "default_gh_runner", lambda argv, stdin=None, cwd=None: None)
-    args = argparse.Namespace(workspace=str(repo.root), fix=False, yes=False, drivers=False, json=False,
-                              github=False, apply=False, tier=None)
+    args = argparse.Namespace(workspace=str(repo.root), fix=False, yes=False, drivers=False, json=False, github=False, apply=False, tier=None)
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        doctor.run_doctor(args)
-    assert "Trust tier (human_gate): C" in out.getvalue()
-    assert "self-attested" in out.getvalue()
+    with contextlib.redirect_stdout(out): doctor.run_doctor(args)
+    assert "Trust tier (human_gate): C" in out.getvalue() and "self-attested" in out.getvalue()
     args.json = True
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        doctor.run_doctor(args)
+    with contextlib.redirect_stdout(out): doctor.run_doctor(args)
     payload = json.loads(out.getvalue())
     assert payload["human_gate"]["tier"] == "C" and payload["human_gate"]["label"] == "self-attested"
     assert all(h["trust_tier"] == "C" for h in payload["hosts"])
@@ -223,75 +201,52 @@ def test_doctor_prints_the_tier_on_every_report(tmp_path, monkeypatch):
 
 def _doctor_github(repo: hg.Repo, monkeypatch, gh: hg.FakeGh, answers=None, tty=False, workflow=True, **kw):
     from aegis_cli import doctor
-
     if workflow:
         repo.write(".github/workflows/ci.yml", "name: CI\non: [push]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n")
-
     monkeypatch.setattr(human_gate, "default_gh_runner", gh)
     monkeypatch.setattr(doctor, "_stdin_is_tty", lambda: tty)
     replies = iter(answers or [])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(replies))
-    args = argparse.Namespace(workspace=str(repo.root), fix=False, yes=False, drivers=False, json=False,
-                              github=True, apply=False, tier=None)
-    for key, value in kw.items():
-        setattr(args, key, value)
+    args = argparse.Namespace(workspace=str(repo.root), fix=False, yes=False, drivers=False, json=False, github=True, apply=False, tier=None)
+    for key, value in kw.items(): setattr(args, key, value)
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = doctor.run_doctor(args)
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): rc = doctor.run_doctor(args)
     return rc, out.getvalue(), err.getvalue()
-
 
 @needs_git
 @pytest.mark.parametrize("yes", [False, True])
 def test_apply_without_a_terminal_refuses_and_posts_nothing(tmp_path, monkeypatch, yes):
-    repo = hg.make_repo(tmp_path)
-    gh = hg.FakeGh()
+    repo, gh = hg.make_repo(tmp_path), hg.FakeGh()
     rc, out, err = _doctor_github(repo, monkeypatch, gh, tty=False, apply=True, tier="B", yes=yes)
-    assert rc != 0
-    assert gh.posts == []
-    assert "terminal" in (out + err)
-
+    assert rc != 0 and gh.posts == [] and "terminal" in (out + err)
 
 @needs_git
 def test_apply_with_a_terminal_asks_and_a_no_posts_nothing(tmp_path, monkeypatch):
-    repo = hg.make_repo(tmp_path)
-    gh = hg.FakeGh()
+    repo, gh = hg.make_repo(tmp_path), hg.FakeGh()
     rc, out, _err = _doctor_github(repo, monkeypatch, gh, answers=["n"], tty=True, apply=True, tier="B")
-    assert rc != 0 and gh.posts == []
-    assert "No changes made" in out
-
+    assert rc != 0 and gh.posts == [] and "No changes made" in out
 
 @needs_git
 def test_apply_with_a_terminal_and_a_yes_creates_exactly_the_printed_ruleset(tmp_path, monkeypatch):
-    repo = hg.make_repo(tmp_path)
-    gh = hg.FakeGh()
+    repo, gh = hg.make_repo(tmp_path), hg.FakeGh()
     rc, _out, _err = _doctor_github(repo, monkeypatch, gh, answers=["y"], tty=True, apply=True, tier="B")
     assert rc == 0
     ((argv, body),) = gh.posts
     assert argv[:3] == ("api", "--method", "POST") and "rulesets" in argv[3]
-    sent = json.loads(body)
-    printed = human_gate.build_ruleset("B", ["validate"])
-    assert sent == printed
-    assert sent["enforcement"] == "active" and sent["bypass_actors"] == []
-
+    sent, printed = json.loads(body), human_gate.build_ruleset("B", ["validate"])
+    assert sent == printed and sent["enforcement"] == "active" and sent["bypass_actors"] == []
 
 @needs_git
 def test_apply_never_overwrites_a_ruleset_of_the_same_name(tmp_path, monkeypatch):
-    repo = hg.make_repo(tmp_path)
-    gh = hg.FakeGh(rulesets=[{"id": 3, "name": human_gate.RULESET_NAME}])
+    repo, gh = hg.make_repo(tmp_path), hg.FakeGh(rulesets=[{"id": 3, "name": human_gate.RULESET_NAME}])
     rc, out, err = _doctor_github(repo, monkeypatch, gh, answers=["y"], tty=True, apply=True, tier="B")
-    assert rc != 0 and gh.posts == []
-    assert "already exists" in (out + err)
-
+    assert rc != 0 and gh.posts == [] and "already exists" in (out + err)
 
 @needs_git
 def test_apply_refuses_when_there_is_no_workflow_job_to_require(tmp_path, monkeypatch):
-    repo = hg.make_repo(tmp_path)
-    gh = hg.FakeGh()
+    repo, gh = hg.make_repo(tmp_path), hg.FakeGh()
     rc, out, err = _doctor_github(repo, monkeypatch, gh, answers=["y"], tty=True, workflow=False, apply=True, tier="B")
-    assert rc != 0 and gh.posts == []
-    assert "workflow" in out + err
-
+    assert rc != 0 and gh.posts == [] and "workflow" in out + err
 
 @needs_git
 def test_github_prints_both_rulesets_the_codeowners_lines_and_the_signing_setup(tmp_path, monkeypatch):
@@ -299,51 +254,38 @@ def test_github_prints_both_rulesets_the_codeowners_lines_and_the_signing_setup(
     rc, out, _err = _doctor_github(repo, monkeypatch, hg.FakeGh())
     assert rc == 0
     for needle in ("Ruleset, tier A", "Ruleset, tier B", '"required_approving_review_count": 1', "~DEFAULT_BRANCH",
-                   "/.aegis/rules/ @octo", "conftest.py @octo", "allowed_signers", "gpg.format ssh", "aegis approve",
-                   "Trust tier (human_gate): C"):
+                   "/.aegis/rules/ @octo", "conftest.py @octo", "allowed_signers", "gpg.format ssh", "aegis approve", "Trust tier (human_gate): C"):
         assert needle in out, needle
-
 
 @needs_git
 def test_github_json_carries_the_envelope_and_applies_nothing(tmp_path, monkeypatch):
-    repo = hg.make_repo(tmp_path)
-    gh = hg.FakeGh()
+    repo, gh = hg.make_repo(tmp_path), hg.FakeGh()
     rc, out, _err = _doctor_github(repo, monkeypatch, gh, json=True)
     doc = json.loads(out)
     assert rc == 0 and doc["status"] == "printed" and gh.posts == []
     assert doc["github"]["ruleset"]["B"] == human_gate.build_ruleset("B", doc["github"]["required_checks"])
-    for key in ("source", "aegis_version", "checked_at", "scope"):
-        assert doc[key]
-
+    for key in ("source", "aegis_version", "checked_at", "scope"): assert doc[key]
 
 @needs_git
 def test_apply_without_github_is_a_usage_error(tmp_path, monkeypatch):
     from aegis_cli import doctor
-
     repo = hg.make_repo(tmp_path)
-    args = argparse.Namespace(workspace=str(repo.root), fix=False, yes=False, drivers=False, json=False,
-                              github=False, apply=True, tier="B")
+    args = argparse.Namespace(workspace=str(repo.root), fix=False, yes=False, drivers=False, json=False, github=False, apply=True, tier="B")
     err = io.StringIO()
-    with contextlib.redirect_stderr(err):
-        assert doctor.run_doctor(args) == 2
+    with contextlib.redirect_stderr(err): assert doctor.run_doctor(args) == 2
     assert "--github" in err.getvalue()
-
 
 # ── 4. aegis approve ─────────────────────────────────────────────────────────
 
 def _approve(repo: hg.Repo, monkeypatch, tty=True, answer="y", **kw):
     from aegis_cli import approve
-
     monkeypatch.setattr(approve, "_stdin_is_tty", lambda: tty)
     monkeypatch.setattr("builtins.input", lambda prompt="": answer)
     args = argparse.Namespace(workspace=str(repo.root), json=False, base=None)
-    for key, value in kw.items():
-        setattr(args, key, value)
+    for key, value in kw.items(): setattr(args, key, value)
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = approve.run_approve(args)
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): rc = approve.run_approve(args)
     return rc, out.getvalue(), err.getvalue()
-
 
 @needs_signing
 def test_approve_makes_one_signed_empty_commit_naming_the_hash_it_approved(tmp_path, monkeypatch, keys):
@@ -354,16 +296,13 @@ def test_approve_makes_one_signed_empty_commit_naming_the_hash_it_approved(tmp_p
     key_bytes = {p: p.read_bytes() for p in (keys["human"], Path(str(keys["human"]) + ".pub"))}
     rc, out, err = _approve(repo, monkeypatch)
     assert rc == 0, out + err
-    assert digest in out
-    assert repo.git("rev-parse", "HEAD~1") == before
+    assert digest in out and repo.git("rev-parse", "HEAD~1") == before
     assert repo.git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD") == ""
     assert f"Aegis-Approve: {digest}" in repo.git("log", "-1", "--format=%B")
     verified = human_gate.verify_approval(repo.root, "HEAD", digest, "main")
     assert verified.valid, verified
-    assert {p: p.read_bytes() for p in key_bytes} == key_bytes  # never writes a key
-    assert sorted(p.name for p in keys["human"].parent.iterdir()) == sorted(
-        ["human", "human.pub", "intruder", "intruder.pub"])
-
+    assert {p: p.read_bytes() for p in key_bytes} == key_bytes
+    assert sorted(p.name for p in keys["human"].parent.iterdir()) == sorted(["human", "human.pub", "intruder", "intruder.pub"])
 
 @needs_signing
 def test_approve_refuses_when_nothing_governance_related_changed(tmp_path, monkeypatch, keys):
@@ -373,9 +312,7 @@ def test_approve_refuses_when_nothing_governance_related_changed(tmp_path, monke
     repo.home.sign_with(str(keys["human"]))
     before = repo.head()
     rc, out, err = _approve(repo, monkeypatch)
-    assert rc == 1 and repo.head() == before
-    assert "nothing governance-related changed" in out + err
-
+    assert rc == 1 and repo.head() == before and "nothing governance-related changed" in out + err
 
 @needs_signing
 def test_approve_without_a_terminal_refuses(tmp_path, monkeypatch, keys):
@@ -384,9 +321,7 @@ def test_approve_without_a_terminal_refuses(tmp_path, monkeypatch, keys):
     repo.home.sign_with(str(keys["human"]))
     before = repo.head()
     rc, out, err = _approve(repo, monkeypatch, tty=False)
-    assert rc == 1 and repo.head() == before
-    assert "terminal" in out + err
-
+    assert rc == 1 and repo.head() == before and "terminal" in out + err
 
 @needs_signing
 def test_approve_declined_at_the_prompt_commits_nothing(tmp_path, monkeypatch, keys):
@@ -395,9 +330,7 @@ def test_approve_declined_at_the_prompt_commits_nothing(tmp_path, monkeypatch, k
     repo.home.sign_with(str(keys["human"]))
     before = repo.head()
     rc, out, _err = _approve(repo, monkeypatch, answer="n")
-    assert rc == 1 and repo.head() == before
-    assert "No approval" in out
-
+    assert rc == 1 and repo.head() == before and "No approval" in out
 
 @needs_signing
 def test_approve_refuses_staged_changes_so_the_approval_commit_stays_empty(tmp_path, monkeypatch, keys):
@@ -408,9 +341,7 @@ def test_approve_refuses_staged_changes_so_the_approval_commit_stays_empty(tmp_p
     repo.git("add", "src/app.py")
     before = repo.head()
     rc, out, err = _approve(repo, monkeypatch)
-    assert rc == 1 and repo.head() == before
-    assert "staged" in out + err
-
+    assert rc == 1 and repo.head() == before and "staged" in out + err
 
 @needs_signing
 def test_approve_refuses_uncommitted_governance_changes(tmp_path, monkeypatch, keys):
@@ -420,9 +351,7 @@ def test_approve_refuses_uncommitted_governance_changes(tmp_path, monkeypatch, k
     repo.write(".aegis/rules/traps/trap-sample.md", hg.RULE.replace("sample", "dirty"))
     before = repo.head()
     rc, out, err = _approve(repo, monkeypatch)
-    assert rc == 1 and repo.head() == before
-    assert "uncommitted" in out + err
-
+    assert rc == 1 and repo.head() == before and "uncommitted" in out + err
 
 @needs_signing
 def test_approve_needs_ssh_signing_configured_at_user_scope(tmp_path, monkeypatch, keys):
@@ -430,16 +359,13 @@ def test_approve_needs_ssh_signing_configured_at_user_scope(tmp_path, monkeypatc
     _changed_rule_branch(repo)
     before = repo.head()
     rc, out, err = _approve(repo, monkeypatch)
-    assert rc == 1 and repo.head() == before
-    assert "gpg.format" in out + err
-
+    assert rc == 1 and repo.head() == before and "gpg.format" in out + err
 
 @posix_only
 @needs_signing
 def test_a_repository_cannot_choose_the_signing_program(tmp_path, monkeypatch, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
-    marker = tmp_path / "ran"
-    program = tmp_path / "evil.sh"
+    marker, program = tmp_path / "ran", tmp_path / "evil.sh"
     program.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n", encoding="utf-8")
     program.chmod(0o755)
     _changed_rule_branch(repo)
@@ -452,7 +378,6 @@ def test_a_repository_cannot_choose_the_signing_program(tmp_path, monkeypatch, k
     digest = human_gate.governance_tree_hash(repo.root, "HEAD")
     assert human_gate.verify_approval(repo.root, "HEAD", digest, "main").valid
 
-
 @needs_signing
 def test_approve_json_carries_the_envelope(tmp_path, monkeypatch, keys):
     repo = hg.make_repo(tmp_path, keys["human_pub"])
@@ -463,9 +388,25 @@ def test_approve_json_carries_the_envelope(tmp_path, monkeypatch, keys):
     doc = json.loads(out)
     assert rc == 0 and doc["status"] == "approved" and doc["governance_tree_hash"] == digest
     assert doc["commit"] == repo.head() and doc["categories"] == ["rules"]
-    for key in ("source", "aegis_version", "checked_at", "scope"):
-        assert doc[key]
+    for key in ("source", "aegis_version", "checked_at", "scope"): assert doc[key]
 
+@needs_signing
+def test_approve_exempt_test_signs_and_verifies_commit_scoped_exemption(tmp_path, monkeypatch, keys):
+    repo = hg.make_repo(tmp_path, keys["human_pub"])
+    repo.write("src/app.py", "def app():\n    return 2\n")
+    fix_oid = repo.commit("fix: hotfix app\n\nAegis-No-Test: verified manually")
+    repo.home.sign_with(str(keys["human"]))
+    rc_missing, _out_m, err_m = _approve(repo, monkeypatch, exempt_test=fix_oid, reason=None)
+    assert rc_missing == 2 and "--reason" in err_m
+    rc, out, err = _approve(repo, monkeypatch, exempt_test=fix_oid, reason="verified manually")
+    assert rc == 0, out + err
+    assert fix_oid in out
+    verdict = human_gate.verify_test_exemption(repo.root, "HEAD", fix_oid, "main", expected_reason="verified manually")
+    assert verdict.valid, verdict
+
+def test_repo_workflow_contexts_returns_aggregate_aegis_check():
+    root = Path(__file__).resolve().parents[3]
+    assert human_gate.workflow_contexts(root) == ["aegis-check"]
 
 # ── 5. the Aegis-Test-Change trailer authorizes nothing ──────────────────────
 
@@ -479,16 +420,12 @@ def test_the_aegis_test_change_trailer_is_not_an_exemption_in_the_lane_gate(tmp_
     repo.write("tests/test_app.py", "def test_a():\n    assert 1\n")
     repo.commit("drop a test\n\nAegis-Test-Change: the test was redundant\n")
     result = lane_gate.check_lane(repo.root, "docs", base="main", paths=["**"])
-    assert not result.passed
-    assert [(f.kind, f.name) for f in result.findings] == [("removed", "test_b")]
+    assert not result.passed and [(f.kind, f.name) for f in result.findings] == [("removed", "test_b")]
     assert lane_gate.NOTE_EXEMPTION in result.text_lines()
-
 
 # ── 6. file modes of the shared state ────────────────────────────────────────
 
-def _mode(path: Path) -> int:
-    return stat.S_IMODE(os.stat(path).st_mode)
-
+def _mode(path: Path) -> int: return stat.S_IMODE(os.stat(path).st_mode)
 
 @posix_only
 @needs_git
@@ -499,12 +436,10 @@ def test_the_shared_state_is_private_whatever_the_umask(tmp_path, umask):
     try:
         site = storage.ledger_site(repo.root)
         storage.append_jsonl(site.path, [{"v": 2, "k": 1}])
-        with storage.ledger_locked(repo.root):
-            pass
+        with storage.ledger_locked(repo.root): pass
         shared = storage.shared_state_dir(repo.root)
         storage.append_jsonl(shared / "events.jsonl", [{"v": 1}])
-        with storage.shared_locked(repo.root, "events.lock"):
-            pass
+        with storage.shared_locked(repo.root, "events.lock"): pass
     finally:
         os.umask(old)
     entries = [shared, *shared.rglob("*")]
@@ -513,66 +448,50 @@ def test_the_shared_state_is_private_whatever_the_umask(tmp_path, umask):
         want = 0o700 if path.is_dir() else 0o600
         assert _mode(path) == want, f"{path.relative_to(shared)} is {oct(_mode(path))}"
 
-
 @posix_only
 @needs_git
 def test_modes_report_counts_looser_entries_and_tightening_fixes_them(tmp_path):
     repo = hg.make_repo(tmp_path)
-    site = storage.ledger_site(repo.root)
+    site, shared = storage.ledger_site(repo.root), storage.shared_state_dir(repo.root)
     storage.append_jsonl(site.path, [{"v": 2}])
-    shared = storage.shared_state_dir(repo.root)
-    os.chmod(site.path, 0o644)
-    os.chmod(site.path.parent, 0o755)
+    os.chmod(site.path, 0o644); os.chmod(site.path.parent, 0o755)
     report = storage.shared_state_modes(repo.root)
     assert report.looser == 2 and report.checked >= 3 and report.fixed == 0
     assert "ledger" not in json.dumps(report.as_dict()), "counts only, never names"
     fixed = storage.shared_state_modes(repo.root, fix=True)
-    assert fixed.looser == 2 and fixed.fixed == 2
-    assert storage.shared_state_modes(repo.root).looser == 0
-    assert _mode(site.path) == 0o600 and _mode(site.path.parent) == 0o700
-    assert shared.is_dir()
-
+    assert fixed.looser == 2 and fixed.fixed == 2 and storage.shared_state_modes(repo.root).looser == 0
+    assert _mode(site.path) == 0o600 and _mode(site.path.parent) == 0o700 and shared.is_dir()
 
 @posix_only
 @needs_git
 def test_tightening_never_follows_a_symlink_out_of_the_state(tmp_path):
     repo = hg.make_repo(tmp_path)
-    shared = storage.shared_state_dir(repo.root)
-    outside = tmp_path / "outside.txt"
-    outside.write_text("x", encoding="utf-8")
-    os.chmod(outside, 0o644)
+    shared, outside = storage.shared_state_dir(repo.root), tmp_path / "outside.txt"
+    outside.write_text("x", encoding="utf-8"); os.chmod(outside, 0o644)
     os.symlink(outside, shared / "link")
-    with pytest.raises(Exception):
-        storage.shared_state_modes(repo.root, fix=True)
+    with pytest.raises(Exception): storage.shared_state_modes(repo.root, fix=True)
     assert _mode(outside) == 0o644
-
 
 @posix_only
 @needs_git
 def test_doctor_reports_how_many_entries_are_looser_without_naming_them(tmp_path, monkeypatch):
     from aegis_cli import doctor
-
     repo = hg.make_repo(tmp_path)
     (repo.root / ".aegis").mkdir(exist_ok=True)
     site = storage.ledger_site(repo.root)
     storage.append_jsonl(site.path, [{"v": 2}])
     os.chmod(site.path, 0o644)
     monkeypatch.setattr(human_gate, "default_gh_runner", lambda argv, stdin=None, cwd=None: None)
-    args = argparse.Namespace(workspace=str(repo.root), fix=False, yes=False, drivers=False, json=True,
-                              github=False, apply=False, tier=None)
+    args = argparse.Namespace(workspace=str(repo.root), fix=False, yes=False, drivers=False, json=True, github=False, apply=False, tier=None)
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        doctor.run_doctor(args)
+    with contextlib.redirect_stdout(out): doctor.run_doctor(args)
     payload = json.loads(out.getvalue())
-    assert payload["state_modes"]["looser"] == 1
-    assert "ledger.jsonl" not in json.dumps(payload["state_modes"])
-
+    assert payload["state_modes"]["looser"] == 1 and "ledger.jsonl" not in json.dumps(payload["state_modes"])
 
 @posix_only
 @needs_git
 def test_migrate_apply_tightens_the_shared_state(tmp_path):
     from aegis_cli import migrate as cli_migrate
-
     repo = hg.make_repo(tmp_path)
     (repo.root / ".aegis" / "rules" / "traps").mkdir(parents=True, exist_ok=True)
     site = storage.ledger_site(repo.root)
@@ -580,8 +499,6 @@ def test_migrate_apply_tightens_the_shared_state(tmp_path):
     os.chmod(site.path, 0o666)
     args = argparse.Namespace(workspace=str(repo.root), apply=True, dry_run=False, json=True)
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        cli_migrate.run_migrate(args)
+    with contextlib.redirect_stdout(out): cli_migrate.run_migrate(args)
     report = json.loads(out.getvalue())
-    assert report["state_modes"]["fixed"] >= 1
-    assert _mode(site.path) == 0o600
+    assert report["state_modes"]["fixed"] >= 1 and _mode(site.path) == 0o600

@@ -372,6 +372,7 @@ jobs:
           python-version: "3.12"
       - run: pip install aegis-guardrails=={__version__}
       - run: aegis check
+      - run: aegis check --ci
 """
 
 
@@ -875,18 +876,31 @@ def _steps(ctx: _Context, dry_run: bool, actions: Optional[List[Step]] = None) -
     actions.append(_ci_step(root, ctx.ci, dry_run))
 
     if not ctx.no_hooks:
+        from aegis_cli.hooks import commitmsg
+
         in_place = shared_hook_in_place(root)
         if in_place is not None:
             actions.append(Step("pre-commit hook", "unchanged",
                                 f"{in_place} already runs the Aegis hook (a shared hooks directory); left as it is"))
+            actions.append(Step("prepare-commit-msg hook", "unchanged",
+                                f"{in_place.parent / 'prepare-commit-msg'} (a shared hooks directory); left as it is"))
         else:
             refusal = hook_refusal(root)
             if refusal:
                 raise InstallError(f"pre-commit hook: {refusal}. Or re-run with --no-hooks to set up everything else.")
             hooked = install_hook(root, dry_run=dry_run)
-            if not hooked and resolve_git_hooks_dir(root):
+            hooks_dir = resolve_git_hooks_dir(root)
+            if not hooked and hooks_dir:
                 raise InstallError("the pre-commit hook could not be installed (see above); left unchanged")
             actions.append(Step("pre-commit hook", "installed" if hooked else "skipped (not a git repository)"))
+            if hooked and hooks_dir:
+                cm_res = commitmsg.install(hooks_dir, dry_run=dry_run)
+                if cm_res == "foreign":
+                    actions.append(Step("prepare-commit-msg hook", "kept", "existing hook is not Aegis's; left alone"))
+                else:
+                    actions.append(Step("prepare-commit-msg hook", cm_res))
+            else:
+                actions.append(Step("prepare-commit-msg hook", "skipped (not a git repository)"))
 
     actions.append(Step(REGISTRY_LABEL, register_workspace(ctx.home, root, ctx.selected, dry_run=dry_run)))
     actions.append(_link_key_step(ctx.home, dry_run))
@@ -984,7 +998,10 @@ def _print_actions(report: Report, actions: Sequence[Step], dry_run: bool, prese
         if action.target == "pre-commit hook" and action.result == "unchanged":
             report.say(f"    🪝 Pre-commit hook: {action.detail}")
             continue
-        if action.target in ("pre-commit hook", SCAFFOLD_LABEL):
+        if action.target == "prepare-commit-msg hook" and action.result == "unchanged" and action.detail:
+            report.say(f"    🪝 Prepare-commit-msg hook: {action.detail}")
+            continue
+        if action.target in ("pre-commit hook", "prepare-commit-msg hook", SCAFFOLD_LABEL):
             continue  # the hook is printed by _report_hook; the directories are in JSON only
         icon = _ICONS.get(action.result, "✅")
         if action.result == "manual":
@@ -1112,6 +1129,8 @@ def run_init(args: argparse.Namespace) -> int:
         _print_actions(report, plan, True, preset)
         if any(a.target == "pre-commit hook" and a.result == "installed" for a in plan):
             report.say("    🪝 Would install pre-commit hook")
+        if any(a.target == "prepare-commit-msg hook" and a.result == "installed" for a in plan):
+            report.say("    🪝 Would install prepare-commit-msg hook")
         report.say()
         report.say("  Dry run complete. No files were created.")
         report.finish("ok", scope, True, plan)
@@ -1206,6 +1225,13 @@ def _report_hook(report: Report, root: Path, actions: Sequence[Step]) -> None:
         return
     st = hook_status(root)
     report.say(f"    🪝 Pre-commit hook installed ({st['hook_file']})")
+    cm = next((a for a in actions if a.target == "prepare-commit-msg hook"), None)
+    if cm is not None:
+        if cm.result in ("installed", "unchanged") and st.get("git_hooks_dir"):
+            cm_file = Path(st["git_hooks_dir"]) / "prepare-commit-msg"
+            report.say(f"    🪝 Prepare-commit-msg hook installed ({cm_file})")
+        elif cm.result == "kept":
+            report.say("    ⚠️  Prepare-commit-msg hook kept (existing hook is not Aegis's; left alone)")
     if st["hooks_dir_in_work_tree"]:
         print(work_tree_warning(st["hook_file"]), file=sys.stderr)
 
