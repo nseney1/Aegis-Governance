@@ -291,7 +291,7 @@ Change a live lease's owner (and role) by compare-and-swap.
 
 Manage rule lifecycle (list, create, promote, demote, archive) and share rules as unsigned packs
 
-Category: Rule Evolution & Intelligence. Subcommands: `archive`, `create`, `demote`, `export`, `import`, `list`, `promote`.
+Category: Rule Evolution & Intelligence. Subcommands: `archive`, `create`, `demote`, `export`, `import`, `insight`, `list`, `promote`.
 
 ### `aegis rule archive`
 
@@ -351,6 +351,47 @@ Add the rules of PACK to the workspace's .aegis/rules. The pack is unsigned: its
 | `--rename` |  |  | Give a rule whose id is taken a free id (<id>-imported, -imported-2, ...) instead of refusing |
 | `--dry-run` |  |  | Check the pack and report what would be added; write nothing |
 
+### `aegis rule insight`
+
+Capture, review, and enable human correction insights (add, review, enable)
+
+Subcommands: `add`, `enable`, `review`.
+
+### `aegis rule insight add`
+
+Record an explicit human correction insight
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `text` | `TEXT` |  | Correction insight text (redacted and capped at 300 chars) (required) |
+| `--paths` | `[PATHS ...]` |  | Target file paths (default: git dirty set) |
+| `--kind` | `KIND` |  | Optional insight category or kind |
+| `--host` | `HOST` | `"cli"` | Host identifier (default: cli) |
+| `--session` | `SESSION` |  | Optional session identifier (stored as keyed hs) |
+
+### `aegis rule insight enable`
+
+Opt-in enable UserPromptSubmit insight capture for a host
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--host` | one of `claude-code`, `codex-cli` |  | Host to configure (claude-code or codex-cli) |
+| `--excerpts` |  |  | Also store redacted <=300 char excerpts on correction cues (default: counters/heartbeats only) |
+
+### `aegis rule insight review`
+
+Cluster and review insights or record a decision
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--decision` | one of `propose`, `reject`, `snooze`, `merge-into-rule`, `noise` |  | Record a review decision for a cluster |
+| `--cluster` | `CLUSTER_ID` |  | Cluster ID for --decision |
+| `--proposal-id` | `PROPOSAL_ID` |  | Proposal ID when --decision propose |
+| `--category` | `CATEGORY` | `"correctness"` | Proposal category when --decision propose |
+| `--summary` | `SUMMARY` |  | Closed-template summary bullet when --decision propose |
+| `--rule` | `RULE_ID` |  | Target rule ID for merge-into-rule or recurrence check |
+| `--reason` | `REASON` |  | Optional reason for the decision |
+
 ### `aegis rule list`
 
 List active rules and fitness metrics
@@ -379,6 +420,7 @@ Category: Rule Evolution & Intelligence.
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--apply` |  |  | Apply the suggested promote/demote/archive transitions (moves rule files) |
+| `--pr` |  |  | Apply decided transitions and open a pull request with the evidence report (never auto-merges) |
 
 ### `aegis benchmark`
 
@@ -492,6 +534,7 @@ The server speaks MCP over stdio. Its tools, as `tools/list` returns them:
 | `aegis_report_outcome` | Report Outcome |
 | `aegis_create_rule` | Create Rule |
 | `aegis_list_rules` | List Rules |
+| `aegis_capture_insight` | Capture Insight |
 
 ### `aegis_scan`
 
@@ -702,6 +745,43 @@ Input schema:
       "description": "Optional response projection: full (default), summary or ids."
     }
   },
+  "additionalProperties": false
+}
+```
+
+### `aegis_capture_insight`
+
+**Capture Insight**
+
+Record a user correction as an unconfirmed suggestion in user scope. Agent suggestions never count toward proposals or debits and never appear in aegis_scan; a suggestion upgrades to W2 only when its quote matches a hook-captured prompt in the same session.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `quote` | string | yes | Quote of the user's correction (redacted and capped at 300 chars). |
+| `paths` | array of string | no | Optional workspace-relative file paths this correction applies to. |
+
+Input schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "quote": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "Quote of the user's correction (redacted and capped at 300 chars)."
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional workspace-relative file paths this correction applies to."
+    }
+  },
+  "required": [
+    "quote"
+  ],
   "additionalProperties": false
 }
 ```

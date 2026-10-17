@@ -87,7 +87,7 @@ The adversary Aegis plans for is the coding agent itself: it runs as your user, 
 | A release passed CI on its exact SHA, with a signed attestation | ✔ | ✔ | ✘ (agent can edit the workflow) |
 | Local labels (`witness: aegis`) | label | label | label |
 
-The first row holds only where CI runs `aegis check --ci` as a required check; `aegis init --ci`'s workflow does not add it yet. The second row needs the CI reader that wave 4.3-b adds (`aegis sync --pr`); until then no rule gains confirmed credit. The third is what `aegis doctor --release <sha>` verifies, and it prints `UNVERIFIED` and exits non-zero when it cannot.
+The first row holds only where CI runs `aegis check --ci` as a required check; `aegis init --ci`'s workflow does not add it yet. The second row is read by `aegis sync` and `aegis sync --pr` (which opens an evidence-backed pull request with sampled examples and never auto-merges). The third is what `aegis doctor --release <sha>` verifies, and it prints `UNVERIFIED` and exits non-zero when it cannot.
 
 ## What Aegis does not claim
 

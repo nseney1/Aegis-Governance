@@ -17,6 +17,8 @@ In the repository, under `.aegis/state/` (git-ignored by `aegis init`):
 In your home directory:
 
 - `~/.aegis/workspaces.json`: the absolute paths of the repositories you ran `aegis init` in, and their hosts.
+- `~/.aegis/link.key`: 32 random bytes (`0600`) created by `aegis init` to pseudonymize host session IDs into keyed `hs` hashes.
+- `~/.aegis/insights/<workspace-id>.jsonl`: opt-in user-scope insight rows (`0600`) holding redacted correction excerpts (`<= 300` characters, with PEM blocks, tokens, credentials, emails, home paths and IPv4 addresses scrubbed) and text-free session heartbeats.
 - `~/.aegis/backups/`: copies of the host config files `aegis doctor --fix` changed (owner-only permissions; they can contain other servers' settings).
 - The `aegis` entry in each host's own config, written through that host's CLI or config file.
 
