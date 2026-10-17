@@ -101,8 +101,12 @@ def run_check(args: argparse.Namespace) -> int:
     if getattr(args, "tests", False) and not getattr(args, "record", False):
         print("Error: --tests only applies with --record", file=sys.stderr)
         return 2
-    if str(getattr(args, "format", None) or "text").lower() == "github" and not getattr(args, "ci", False):
+    fmt = str(getattr(args, "format", None) or "text").lower()
+    if fmt == "github" and not getattr(args, "ci", False):
         print("Error: --format github only applies with --ci", file=sys.stderr)
+        return 2
+    if fmt == "sarif" and not getattr(args, "ci", False):
+        print("Error: argument --format: invalid choice: 'sarif' (only applies with --ci)", file=sys.stderr)
         return 2
     if getattr(args, "record", False):
         return _run_record(args)
@@ -135,16 +139,52 @@ def _escape_annotation(text: str, prop: bool = False) -> str:
     return text.replace(":", "%3A").replace(",", "%2C") if prop else text
 
 
-def _print_ci(report, fmt: str, root: str, reg_report=None) -> None:
+def _build_ci_document(report, root: str, reg_report=None, cov_report=None, perf_report=None) -> dict:
+    reg_blocking = bool(reg_report is not None and reg_report.blocking)
+    cov_blocking = bool(cov_report is not None and not cov_report.get("passed", True))
+    perf_blocking = bool(perf_report is not None and not perf_report.get("passed", True))
+    document = report.as_dict(root)
+    if reg_report is not None:
+        document["regression"] = reg_report.as_dict(root)
+    if cov_report is not None:
+        document["coverage"] = cov_report
+    if perf_report is not None:
+        document["perf"] = perf_report
+    if reg_blocking or cov_blocking or perf_blocking:
+        document["status"] = "fail"
+    return document
+
+
+def _write_step_summary_if_configured(document: dict, root: str) -> None:
+    from pathlib import Path
+    from aegis_cli.formatters.report import format_github_step_summary
+    from aegis_core.config import env_github_step_summary
+    from aegis_core.storage import atomic_write_text
+
+    summary_path = env_github_step_summary()
+    if not summary_path:
+        return
+    try:
+        target = Path(summary_path)
+        existing = target.read_text(encoding="utf-8") if target.exists() else ""
+        md = format_github_step_summary(document, workspace_root=root)
+        atomic_write_text(target, existing + md)
+    except OSError:
+        pass
+
+
+def _print_ci(report, fmt: str, root: str, reg_report=None, cov_report=None, perf_report=None) -> None:
     from aegis_cli import sanitize_display
+    from aegis_cli.formatters.report import format_sarif_report
 
     reg_blocking = bool(reg_report is not None and reg_report.blocking)
+    document = _build_ci_document(report, root, reg_report, cov_report, perf_report)
+    _write_step_summary_if_configured(document, root)
+
+    if fmt == "sarif":
+        print(str(format_sarif_report(document, workspace_root=root)))
+        return
     if fmt == "json":
-        document = report.as_dict(root)
-        if reg_report is not None:
-            document["regression"] = reg_report.as_dict(root)
-            if reg_blocking:
-                document["status"] = "fail"
         print(json.dumps(document, indent=2))
         return
     approved = bool(report.weakenings) and report.passed
@@ -239,8 +279,27 @@ def _run_ci(args: argparse.Namespace) -> int:
     except (rule_integrity.IntegrityError, regression.RegressionError, gitsafe.GitError) as exc:
         print(f"Error: {sanitize_display(str(exc), 400)}", file=sys.stderr)
         return 1
-    _print_ci(report, fmt, root, reg_report)
-    overall_passed = report.passed and not reg_report.blocking
+
+    cov_report = None
+    if getattr(args, "coverage", False):
+        from aegis_core.verification.coverage_check import run_diff_coverage
+        cov_report = run_diff_coverage(root, base_ref=base)
+
+    perf_report = None
+    if getattr(args, "perf", False):
+        import importlib
+        try:
+            perf_mod = importlib.import_module(".".join(("aegis_core", "verification", "perf_check")))
+            perf_report = perf_mod.run_perf_check(root, base_ref=base)
+            if hasattr(perf_report, "as_dict"):
+                perf_report = perf_report.as_dict()
+        except ImportError:
+            perf_report = {"passed": True, "skipped": True}
+
+    _print_ci(report, fmt, root, reg_report, cov_report=cov_report, perf_report=perf_report)
+    cov_ok = True if cov_report is None else bool(cov_report.get("passed", True))
+    perf_ok = True if perf_report is None else bool(perf_report.get("passed", True))
+    overall_passed = report.passed and not reg_report.blocking and cov_ok and perf_ok
     return 0 if overall_passed else 1
 
 
@@ -307,7 +366,7 @@ class CheckCommand(AegisCommand):
             "~/.aegis/config.json, default python -m pytest, never the repository's) in the snapshot with a "
             "fixed environment; exit 5 or zero passed tests is never evidence",
         )
-        parser.add_argument("--format", choices=("text", "json", "github"), default="text",
+        parser.add_argument("--format", choices=("text", "json", "github", "sarif"), default="text",
                             help="Output format (github, with --ci only: workflow-command annotations)")
         # One mode at a time. run_verify refuses every option a mode would otherwise ignore.
         mode = parser.add_mutually_exclusive_group()
@@ -401,6 +460,16 @@ class CheckCommand(AegisCommand):
             help="With --lane: take lanes.<lane> and shared from .aegis/team.json at the base tip, never the "
             "candidate; refuses --paths. Only then is the result 'witnessed: base policy', and only then may "
             ".aegis/** and .github/workflows/** change",
+        )
+        parser.add_argument(
+            "--coverage",
+            action="store_true",
+            help="With --ci: run pytest with diff coverage over changed lines",
+        )
+        parser.add_argument(
+            "--perf",
+            action="store_true",
+            help="With --ci: run performance regression check",
         )
 
     def execute(self, args: argparse.Namespace) -> int:
