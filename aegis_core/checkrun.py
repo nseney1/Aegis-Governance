@@ -55,6 +55,7 @@ __all__ = [
     "record",
     "rerun_commit_snapshot",
     "user_test_command",
+    "verify_commit_trailers",
 ]
 
 DEFAULT_TIMEOUT_S = 1800.0
@@ -422,6 +423,12 @@ def rerun_commit_snapshot(
     return {"tree": commit_tree, "exit": 0 if passed else (raw_exit if raw_exit != 0 else 1)}
 
 
-from aegis_core import credit as _credit_mod  # noqa: E402
-_credit_mod._DEFAULT_SNAPSHOT_RERUN = rerun_commit_snapshot
+def verify_commit_trailers(
+    root: object, base: str, head: str = "HEAD", *,
+    rerun_fn: Optional[ Any ] = None, timeout: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Verify ``Aegis-Check`` trailers on commits in ``base..head`` by rerunning each commit's snapshot."""
+    from aegis_core import credit
 
+    runner = rerun_fn or (lambda c, _t: rerun_commit_snapshot(root, c, base, timeout=timeout))
+    return credit.verify_commit_trailers(root, base, head, rerun_fn=runner)

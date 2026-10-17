@@ -662,17 +662,19 @@ def test_trailer_rerun_executes_unchanged_tests_and_works_in_fresh_credit_only_p
     tree = hv.tree_now(repo.root)
     repo.commit(f"feat: break existing test while adding passing test\n\n{credit.format_trailer(tree, 0)}")
 
-    # 1. checkrun.rerun_commit_snapshot catches the broken unchanged test
-    rerun_res = checkrun.rerun_commit_snapshot(repo.root, "HEAD", "main")
-    assert rerun_res["tree"] == tree
-    assert rerun_res["exit"] != 0
+    # 1. Layer 2 `checkrun.verify_commit_trailers` runs all snapshot tests and catches the broken unchanged test
+    v_res = checkrun.verify_commit_trailers(repo.root, "main", "HEAD")
+    assert len(v_res) == 1
+    assert v_res[0]["result"] == "void"
+    assert v_res[0]["failed"] is True
 
-    # 2. Fresh Python process importing ONLY `aegis_core.credit` verifies trailers without RuntimeError
+    # 2. Layer 1 `credit.verify_commit_trailers` requires an explicit `rerun_fn` (no import-order hook or subprocess spawn)
     code = (
         "import json, sys\n"
         "from aegis_core import credit\n"
         "assert 'aegis_core.checkrun' not in sys.modules\n"
-        "res = credit.verify_commit_trailers(sys.argv[1], 'main', 'HEAD')\n"
+        "assert 'subprocess' not in credit.__dict__\n"
+        "res = credit.verify_commit_trailers(sys.argv[1], 'main', 'HEAD', rerun_fn=lambda _c, t: {'tree': t, 'exit': 1})\n"
         "print(json.dumps(res))\n"
     )
     proc = subprocess.run(

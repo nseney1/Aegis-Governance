@@ -287,7 +287,7 @@ def _run_ci(args: argparse.Namespace) -> int:
     try:
         report = rule_integrity.check_ci(root, base, head)
         reg_report = regression.check_ci_regressions(root, base, head, tier=reg_tier)
-        trailer_checks = credit.verify_commit_trailers(root, base, head, rerun_fn=lambda c, _t: checkrun.rerun_commit_snapshot(root, c, base))
+        trailer_checks = checkrun.verify_commit_trailers(root, base, head)
     except (rule_integrity.IntegrityError, regression.RegressionError, gitsafe.GitError) as exc:
         print(f"Error: {sanitize_display(str(exc), 400)}", file=sys.stderr)
         return 1
