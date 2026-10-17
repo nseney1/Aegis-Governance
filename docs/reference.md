@@ -597,7 +597,7 @@ Input schema:
 
 ### `aegis_report_outcome`
 
-**Report Outcome**
+**Report Outcome** (idempotent)
 
 Report whether the rules you were shown helped. The server ties the report to the tree it computes now: with an `aegis check --record` run of exactly that tree it credits the rules it showed you that match the change (your rules_used is not what is credited), and even then only CI on the landing commit makes it count; without one it records a single unwitnessed claim per session and tree that earns nothing. Reports per session are capped.
 

@@ -159,10 +159,10 @@ TOOL_DEFINITIONS = [
             "unwitnessed claim per session and tree that earns nothing. Reports per session are capped."
         ),
         "annotations": {
-            # Only readOnlyHint is declared: hosts treat annotations as untrusted hints and no host
-            # is documented to skip the prompt for a self-declared non-destructive write, so the
-            # write tool claims nothing beyond "not read-only" and the MCP defaults apply.
             "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
             "title": "Report Outcome",
         },
         "inputSchema": {
@@ -255,6 +255,9 @@ TOOL_DEFINITIONS = [
         ),
         "annotations": {
             "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": False,
             "title": "Capture Insight",
         },
         "inputSchema": {
