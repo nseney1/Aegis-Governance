@@ -139,6 +139,7 @@ class TestCollectionHooks:
     def test_conftest_watches_collection_variables_and_hooks(self):
         source = (
             b"collect_ignore = ['legacy.py']\n"
+            b"collect_ignore.append('second.py')\n"
             b"collect_ignore_glob = ['*_old.py']\n"
             b"pytest_plugins = ['my_plugin']\n"
             b"def pytest_collection_modifyitems(config, items):\n"
@@ -146,22 +147,32 @@ class TestCollectionHooks:
             b"def regular_helper():\n"
             b"    return 42\n"
         )
-        hooks = lane_ast.collection_hooks(source, hooks_only=False)
+        hooks = lane_ast.collection_hooks(source)
         assert set(hooks) == {
             "collect_ignore",
             "collect_ignore_glob",
             "pytest_plugins",
             "pytest_collection_modifyitems",
         }
+        assert len(hooks["collect_ignore"]) == 2
+        assert hooks["collect_ignore"] == tuple(sorted(hooks["collect_ignore"]))
+        assert all("collect_ignore" in d for d in hooks["collect_ignore"])
+        assert len(hooks["pytest_collection_modifyitems"]) == 1
+        assert "FunctionDef" in hooks["pytest_collection_modifyitems"][0]
 
-    def test_hooks_only_ignores_variables_and_imports(self):
+    def test_hooks_only_ignores_variables_and_non_hook_functions(self):
         source = (
             b"import pytest_Thing\n"
             b"collect_ignore = ['a.py']\n"
+            b"def helper():\n"
+            b"    return False\n"
             b"def pytest_ignore_collect(collection_path):\n"
             b"    return True\n"
         )
-        assert set(lane_ast.collection_hooks(source, hooks_only=True)) == {"pytest_ignore_collect"}
+        hooks = lane_ast.collection_hooks(source, hooks_only=True)
+        assert set(hooks) == {"pytest_ignore_collect"}
+        assert len(hooks["pytest_ignore_collect"]) == 1
+        assert "pytest_ignore_collect" in hooks["pytest_ignore_collect"][0]
 
     def test_syntax_error_raises(self):
         with pytest.raises(SyntaxError):

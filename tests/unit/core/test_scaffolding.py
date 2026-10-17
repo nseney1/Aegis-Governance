@@ -28,6 +28,8 @@ REPO_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.
 
 class TestPackagedDirAndRules:
     def test_packaged_dir_resolves_wheel_and_checkout(self, tmp_path: Path) -> None:
+        assert packaged_dir("rules") == REPO_ROOT / "rules"
+
         site = tmp_path / "site" / "aegis_core"
         (site / "_data" / "rules").mkdir(parents=True)
         assert packaged_dir("rules", base=site) == site / "_data" / "rules"
@@ -35,8 +37,13 @@ class TestPackagedDirAndRules:
         checkout = tmp_path / "checkout"
         (checkout / "aegis_core").mkdir(parents=True)
         (checkout / "rules").mkdir()
+        # Without pyproject.toml, falls back to installed (_data/rules)
+        assert packaged_dir("rules", base=checkout / "aegis_core") == checkout / "aegis_core" / "_data" / "rules"
+
         (checkout / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
         assert packaged_dir("rules", base=checkout / "aegis_core") == checkout / "rules"
+        # Missing named directory even with pyproject.toml falls back to installed (_data/missing)
+        assert packaged_dir("missing", base=checkout / "aegis_core") == checkout / "aegis_core" / "_data" / "missing"
 
     def test_packaged_rules_excludes_active_starters(self) -> None:
         guidance = packaged_rules()
