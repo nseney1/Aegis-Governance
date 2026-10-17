@@ -7,11 +7,76 @@ from aegis_core.errors import AegisError
 from aegis_core.ast.schema import (
     NormalizedAST, _SpellingIndex, _add_binding, _call_target, _decorator_name,
     _decorator_pattern, _extract_import_tuple, _extract_python_decorators_from_file,
-    _extract_python_decorators_from_tree, _import_aliases, _normalize_ast_token,
+    _extract_python_decorators_from_tree, _import_aliases, _normalize_ast_token, _spellings,
 )
 
-__all__ = ["ASTExtractionError", "_match_ImportNode_against_pattern", "evaluate_forbid_ast", "evaluate_forbid_ast_with_overrides", "extract_normalized_ast", "parse_allow_comments"]
+__all__ = ["ASTExtractionError", "_match_ImportNode_against_pattern", "evaluate_forbid_ast", "evaluate_forbid_ast_delta", "evaluate_forbid_ast_structured", "evaluate_forbid_ast_with_overrides", "extract_normalized_ast", "parse_allow_comments"]
 _ALLOW_COMMENT_RE = re.compile(r"#\s*aegis:\s*allow(?:\[([^\]]+)\])?(?:\s*[:\-]?\s*(.*))?$", re.IGNORECASE)
+_ABSENT = object()
+
+
+def _is_literal(val: Any) -> bool:
+    return isinstance(val, str) and val != "<expr>" and (val in ("True", "False", "None") or val[:1] in ("'", '"', "-", *"0123456789") or val[:2] in ("b'", 'b"'))
+
+
+def _unquote(val: str) -> str:
+    return val[2:-1] if val[:2] in ("b'", 'b"') and len(val) >= 3 else (val[1:-1] if val[:1] in ("'", '"') and len(val) >= 2 else val)
+
+
+def _cond(value: Any, cond: Any, has_splat: bool) -> Optional[bool]:
+    if not isinstance(cond, Mapping):
+        if value is _ABSENT:
+            return None if has_splat else False
+        if not _is_literal(value):
+            return True if isinstance(cond, str) and isinstance(value, str) and value != "<expr>" and (value == cond or value.endswith(f".{cond}")) else None
+        return value == repr(cond) or value == str(cond) or _unquote(value) == cond
+    res: Optional[bool] = True
+    for op, target in cond.items():
+        if op in ("not", "not_equals", "not_in"):
+            inner = _cond(value, {"in": target} if op == "not_in" else target, has_splat)
+            v = None if inner is None else not inner
+        elif op == "equals":
+            v = _cond(value, target, has_splat)
+        elif op in ("absent", "present"):
+            v = None if (value is _ABSENT and has_splat) else ((value is _ABSENT) if ((op == "absent") == bool(target)) else (value is not _ABSENT))
+        elif op in ("is_literal", "not_literal"):
+            v = (None if has_splat else False) if value is _ABSENT else (_is_literal(value) if ((op == "is_literal") == bool(target)) else not _is_literal(value))
+        elif op == "in":
+            opts = target if isinstance(target, (list, tuple, set, frozenset)) else ()
+            if value is _ABSENT or not isinstance(value, str) or value == "<expr>":
+                v = (None if has_splat else False) if value is _ABSENT else None
+            elif any(value == str(c) or value == repr(c) or _unquote(value) == str(c) or value.endswith(f".{c}") for c in opts):
+                v = True
+            else:
+                v = False if (_is_literal(value) or value.rpartition(".")[2][:1].isupper()) else None
+        elif op in ("contains", "not_contains"):
+            v = (None if has_splat else False) if value is _ABSENT else (None if not _is_literal(value) else ((str(target) in _unquote(value)) if op == "contains" else (str(target) not in _unquote(value))))
+        elif op == "matches":
+            v = (None if has_splat else False) if value is _ABSENT else (bool(re.search(str(target), _unquote(value))) if _is_literal(value) else (bool(re.search(str(target), value)) if isinstance(value, str) and value != "<expr>" and "." in value else None))
+        else:
+            v = None
+        if v is False:
+            return False
+        if v is None:
+            res = None
+    return res
+
+
+def _site_args(site: Any) -> Dict[str, Any]:
+    raw = site.get("args") if isinstance(site, Mapping) else getattr(site, "args", None)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _match_where(site: Any, where: Mapping[str, Any]) -> Optional[bool]:
+    args = _site_args(site)
+    has_splat, res = ("*" in args or "**" in args), True
+    for raw_key, cond in where.items():
+        v = _cond(next((args[k] for k in (p.strip() for p in str(raw_key).split("|")) if k in args), _ABSENT), cond, has_splat)
+        if v is False:
+            return False
+        if v is None:
+            res = None
+    return res
 
 
 def _add_allow(by_line: Dict[int, List[Dict[str, Any]]], line_no: int, text: str) -> None:
@@ -78,6 +143,32 @@ def _match_ImportNode_against_pattern(imp: Any, pattern: str) -> bool:
     return any(s == mod or s.startswith(f"{mod}.") or (src and (f"{src}.{s}" == mod or f"{src}.{s}".startswith(f"{mod}."))) for s in syms)
 
 
+def _eval_call_entry(raw_call: Any, raw_call_sites: Any, call_index: _SpellingIndex, imported_qual_map: Mapping[str, Any], aliases: Mapping[str, Any], defined_names: set[str]) -> Tuple[str, str, List[Tuple[Any, Optional[bool]]]]:
+    if isinstance(raw_call, str):
+        call, where, builtin_only, unknown_mode = _normalize_ast_token(raw_call), None, False, "report"
+    elif isinstance(raw_call, Mapping):
+        call = _normalize_ast_token(str(raw_call.get("name") or raw_call.get("call") or ""))
+        where = raw_call.get("where") if isinstance(raw_call.get("where"), Mapping) else None
+        builtin_only, unknown_mode = bool(raw_call.get("builtin")), str(raw_call.get("unknown") or "report")
+    else:
+        return "", "report", []
+    if not call:
+        return "", unknown_mode, []
+    hits: List[Tuple[Any, Optional[bool]]] = []
+    for site in raw_call_sites:
+        target = _call_target(site)
+        if not target or not call_index.matches(target, call):
+            continue
+        if builtin_only:
+            spelled = _spellings(target, imported_qual_map, aliases, qualify_heads=True)
+            if not (any(s in (f"builtins.{call}", f"__builtins__.{call}") for s in spelled) or (target == call and call not in imported_qual_map and call not in aliases and call not in defined_names)):
+                continue
+        verdict = _match_where(site, where) if where else True
+        if verdict is not False:
+            hits.append((site, verdict))
+    return call, unknown_mode, hits
+
+
 def _evaluate_forbid_ast_core(normalized_ast: NormalizedAST, forbid_spec: dict[str, Any], *, rule_id: Optional[str] = None, allow_map: Optional[Mapping[int, List[Dict[str, Any]]]] = None) -> Tuple[list[str], list[dict[str, Any]]]:
     if normalized_ast is None or not forbid_spec or not isinstance(forbid_spec, dict):
         return [], []
@@ -114,10 +205,11 @@ def _evaluate_forbid_ast_core(normalized_ast: NormalizedAST, forbid_spec: dict[s
             _record_hits([r for r, t in parsed_imports if _match_ImportNode_against_pattern(t, mod)], "imports", mod, "import")
 
     raw_call_sites, call_index = getattr(normalized_ast, "call_sites", ()) or (), _SpellingIndex(imported_qual_map, aliases, qualify_heads=True)
+    defined_names = {str(getattr(d, "name", "") if not isinstance(d, Mapping) else d.get("name", "")) for d in (getattr(normalized_ast, "definitions", ()) or ()) if (getattr(d, "kind", "") if not isinstance(d, Mapping) else d.get("kind", "")) in ("function", "class")}
     for raw_call in forbid_spec["calls"] if isinstance(forbid_spec.get("calls"), (list, tuple, set)) else ():
-        call = _normalize_ast_token(raw_call) if isinstance(raw_call, str) else ""
+        call, unknown_mode, hits = _eval_call_entry(raw_call, raw_call_sites, call_index, imported_qual_map, aliases, defined_names)
         if call:
-            _record_hits([s for s in raw_call_sites if _call_target(s) and call_index.matches(_call_target(s), _normalize_ast_token(call))], "calls", call, "call")
+            _record_hits([s for s, v in hits if v is True or (v is None and unknown_mode == "flag")], "calls", call, "call")
 
     forbidden_decs = forbid_spec.get("decorators")
     if not isinstance(forbidden_decs, (list, tuple, set)) or not forbidden_decs:
@@ -160,6 +252,64 @@ def evaluate_forbid_ast(normalized_ast: NormalizedAST, forbid_spec: dict[str, An
 def evaluate_forbid_ast_with_overrides(normalized_ast: NormalizedAST, forbid_spec: dict[str, Any], *, rule_id: Optional[str] = None, source: Optional[str] = None) -> Tuple[list[str], list[dict[str, Any]]]:
     allow_map = _resolve_allow_map(normalized_ast, source=source) if normalized_ast is not None else {}
     return (evaluate_forbid_ast(normalized_ast, forbid_spec), []) if not allow_map else _evaluate_forbid_ast_core(normalized_ast, forbid_spec, rule_id=rule_id, allow_map=allow_map)
+
+
+def evaluate_forbid_ast_structured(normalized_ast: NormalizedAST, forbid_spec: dict[str, Any], *, rule_id: Optional[str] = None, source: Optional[str] = None) -> Tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if normalized_ast is None or not forbid_spec or not isinstance(forbid_spec, dict):
+        return [], []
+    allows, fp = _resolve_allow_map(normalized_ast, source=source), str(getattr(normalized_ast, "file_path", "") or "")
+    imported_qual_map, aliases = {}, {}
+    for imp in getattr(normalized_ast, "imports", ()) or ():
+        src, syms = _extract_import_tuple(imp)
+        for name, originals in _import_aliases(imp).items():
+            for orig in originals:
+                _add_binding(aliases, name, orig)
+        for sym in syms if src else ():
+            if sym and sym != src:
+                _add_binding(imported_qual_map, sym, f"{src}.{sym}")
+    raw_call_sites, call_index = getattr(normalized_ast, "call_sites", ()) or (), _SpellingIndex(imported_qual_map, aliases, qualify_heads=True)
+    defined_names = {str(getattr(d, "name", "") if not isinstance(d, Mapping) else d.get("name", "")) for d in (getattr(normalized_ast, "definitions", ()) or ()) if (getattr(d, "kind", "") if not isinstance(d, Mapping) else d.get("kind", "")) in ("function", "class")}
+    confirmed: list[dict[str, Any]] = []
+    unverified: list[dict[str, Any]] = []
+    for raw_call in forbid_spec["calls"] if isinstance(forbid_spec.get("calls"), (list, tuple, set)) else ():
+        call, unknown_mode, hits = _eval_call_entry(raw_call, raw_call_sites, call_index, imported_qual_map, aliases, defined_names)
+        for site, verdict in hits:
+            ln = _line_of(site)
+            if _allow_reason_for_line(allows, ln, rule_id) is not None:
+                continue
+            args = _site_args(site)
+            rec = {"rule_id": rule_id or "", "file": fp, "line": ln or 0, "kind": "calls", "pattern": call, "call_name": call, "target": _call_target(site), "args": args, "args_signature": ",".join(f"{k}={args[k]}" for k in sorted(args))}
+            if verdict is True or (verdict is None and unknown_mode == "flag"):
+                confirmed.append(rec)
+            elif verdict is None and unknown_mode not in ("skip", "ignore"):
+                unverified.append({**rec, "status": "unverified"})
+    return confirmed, unverified
+
+
+def evaluate_forbid_ast_delta(spec: Any, head_ast: Any, base_ast: Any = None, *, rule_id: Optional[str] = None) -> list[dict[str, Any]]:
+    if isinstance(spec, NormalizedAST) and isinstance(head_ast, dict):
+        spec, head_ast = head_ast, spec
+    head_hits, _ = evaluate_forbid_ast_structured(head_ast, spec, rule_id=rule_id)
+    if base_ast is None or not head_hits:
+        return head_hits
+    base_hits, _ = evaluate_forbid_ast_structured(base_ast, spec, rule_id=rule_id)
+    key_of = lambda h: (h.get("rule_id", ""), h.get("pattern", ""), h.get("args_signature", ""))
+    exact_pool = [(key_of(b), b.get("line", 0)) for b in base_hits]
+    remaining: list[dict[str, Any]] = []
+    for h in head_hits:
+        pair = (key_of(h), h.get("line", 0))
+        (exact_pool.remove(pair) if pair in exact_pool else remaining.append(h))
+    counts: Dict[Tuple[str, str, str], int] = {}
+    for k, _ in exact_pool:
+        counts[k] = counts.get(k, 0) + 1
+    delta: list[dict[str, Any]] = []
+    for h in remaining:
+        k = key_of(h)
+        if counts.get(k, 0) > 0:
+            counts[k] -= 1
+        else:
+            delta.append(h)
+    return delta
 
 
 def extract_normalized_ast(file_path: Union[str, Path], workspace_root: Optional[Union[str, Path]] = None, code: Optional[str] = None, ast_runner: Any = None, confine_root: Optional[Union[str, Path]] = None) -> Optional[NormalizedAST]:
