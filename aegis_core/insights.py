@@ -199,13 +199,10 @@ def _served_rule_revs(workspace: Any) -> Dict[str, str]:
     if not (root / AEGIS_DIRNAME / "rules").is_dir(): return {}
     try: return {r.id: r.digest[:16] for r in load_rules(root).served}
     except Exception: return {}
-def _has_human_approval(workspace: Any, commit: Optional[str], base_ref: Optional[str]) -> bool:
-    root = Path(os.fspath(workspace)).resolve()
-    if (top := gitsafe.toplevel(root)) is None: return False
-    try:
-        if not (base := base_ref or gitsafe.resolve_base_ref(top)): return False
-        if commit: return human_gate.verify_approval(top, commit, human_gate.governance_tree_hash(top, commit), base).valid
-        return bool((v := human_gate.find_approval(top, "HEAD", base)) and v.valid)
+def _has_human_approval(workspace: Any, commit: Optional[str], base_ref: Optional[str], text: str = "") -> bool:
+    if workspace is None or not commit or not text: return False
+    if (top := gitsafe.toplevel(Path(os.fspath(workspace)).resolve())) is None: return False
+    try: return bool((base := base_ref or gitsafe.resolve_base_ref(top)) and human_gate.verify_insight_approval(top, commit, text, base).ok)
     except Exception: return False
 def _resolve_paths(workspace: Any, paths: Optional[Sequence[str]]) -> Tuple[List[str], str]:
     if paths is not None and len(paths) > 0:
@@ -227,8 +224,8 @@ def _build_insight_row(workspace: Any, level: str, text: str, paths: List[str], 
     return row
 def add_insight(workspace: Any, text: str, *, paths: Optional[Sequence[str]] = None, kind: Optional[str] = None, host: str = "cli", session: Optional[str] = None, commit: Optional[str] = None, base_ref: Optional[str] = None, home: Optional[Path] = None) -> Dict[str, Any]:
     if not isinstance(text, str) or not text.strip(): raise ValueError("insight text must be a non-empty string")
-    norm_paths, psrc = _resolve_paths(workspace, paths)
-    row = _build_insight_row(workspace, "H" if _has_human_approval(workspace, commit, base_ref) else "cli", redact_insight_text(text), norm_paths, psrc, host or "cli", _ensure_hs(host, session, home), kind=str(kind) if kind else None)
+    clean, (norm_paths, psrc) = redact_insight_text(text), _resolve_paths(workspace, paths)
+    row = _build_insight_row(workspace, "H" if _has_human_approval(workspace, commit, base_ref, clean) else "cli", clean, norm_paths, psrc, host or "cli", _ensure_hs(host, session, home), kind=str(kind) if kind else None)
     _append_user_insights(insights_path(workspace, home=home), [row])
     return row
 def capture_suggestion(workspace: Any, quote: str, paths: Optional[Sequence[str]] = None, *, host: str = "mcp", session: Optional[str] = None, home: Optional[Path] = None) -> Dict[str, Any]:

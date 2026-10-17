@@ -15,14 +15,16 @@ from aegis_core.storage import atomic_write_bytes
 from aegis_core.workspace.layout import AEGIS_DIRNAME, RULES_RELDIR
 
 __all__ = [
-    "ALLOWED_SIGNERS", "Approval", "COVERAGE_SAMPLES", "GhResult", "HumanGateError", "KeyCustody", "RULESET_NAME",
-    "SCHEMA", "SOURCE", "TierReport", "approval_message", "build_ruleset", "check_key_custody", "codeowners_coverage",
-    "codeowners_lines", "create_ruleset", "default_gh_runner", "detect_tier", "exemption_message", "find_approval",
-    "find_test_exemption", "governance_tree_hash", "ruleset_exists", "signed_empty_commit", "signers_setup",
-    "signing_config", "verify_approval", "verify_test_exemption", "workflow_contexts",
+    "ALLOWED_SIGNERS", "Approval", "COVERAGE_SAMPLES", "GhResult", "HumanGateError", "INSIGHT_APPROVE_TRAILER",
+    "KeyCustody", "RULESET_NAME", "SCHEMA", "SOURCE", "TierReport", "approval_message", "build_ruleset",
+    "check_key_custody", "codeowners_coverage", "codeowners_lines", "create_ruleset", "default_gh_runner",
+    "detect_tier", "exemption_message", "find_approval", "find_test_exemption", "governance_tree_hash",
+    "insight_text_hash", "ruleset_exists", "signed_empty_commit", "signers_setup", "signing_config",
+    "verify_approval", "verify_insight_approval", "verify_test_exemption", "workflow_contexts",
 ]
 
 SCHEMA, SOURCE, ALLOWED_SIGNERS, RULESET_NAME = "aegis.human_gate/v1", "aegis human_gate", "allowed_signers", "aegis-human-gate"
+INSIGHT_APPROVE_TRAILER = "Aegis-Approve-Insight"
 GH_TIMEOUT_SECONDS, SIGN_TIMEOUT_SECONDS, HASH_DOMAIN, MAX_SCANNED_COMMITS = 10.0, 300.0, b"aegis-governance-tree/v1\n", 500
 _LABELS = {"A": "separation of duties", "B": "solo, signed", "C": "self-attested"}
 _STATEMENTS = {
@@ -40,6 +42,7 @@ _OWNER = re.compile(r"\A(?:@[A-Za-z0-9][A-Za-z0-9-]*(?:/[A-Za-z0-9._-]+)?|[^@\s]
 _MAX_CODEOWNERS_LINES, _MAX_PATTERN = 5000, 300
 _ACCEPT_LINE = re.compile(r"^[ \t]*aegis-accept[ \t]*:", re.IGNORECASE | re.MULTILINE)
 _APPROVE_LINE = re.compile(r"^[ \t]*aegis-approve[ \t]*:[ \t]*(\S*)[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_APPROVE_INSIGHT_LINE = re.compile(r"^[ \t]*aegis-approve-insight[ \t]*:[ \t]*(\S*)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 _EXEMPT_TEST_LINE = re.compile(r"^[ \t]*Aegis-Exempt-Test:[ \t]*([0-9a-fA-F]{7,64})[ \t]+(\S[^\r\n]*?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 _JOB_ID = re.compile(r"^  ([A-Za-z0-9_-]+):[ \t]*(?:#.*)?$")
 _JOB_NAME = re.compile(r"""^    name:[ \t]*(?:"([^"]*)"|'([^']*)'|([^#\n]*?))[ \t]*(?:#.*)?$""")
@@ -107,12 +110,17 @@ def _codeowners_match(pattern: str, path: str) -> bool:
             if (end == len(parts) and not directory) or (end > start and directory): return True
     return False
 
-def codeowners_coverage(text: str, location: str = "CODEOWNERS") -> Tuple[List[str], List[str]]:
+def codeowners_coverage(text: str, location: str = "CODEOWNERS", *, repo_paths: Sequence[str] = ()) -> Tuple[List[str], List[str]]:
     entries, covered, uncovered = _parse_codeowners(text), [], []
-    for path in (*COVERAGE_SAMPLES, location):
+    unsupported = any(any(c in pat for c in "[]\\") for pat, _ in entries)
+    targets = dict.fromkeys((*COVERAGE_SAMPLES, location.lstrip("/"), *(p.lstrip("/") for p in repo_paths if p and p.lstrip("/"))))
+    for path in targets:
         owners: Tuple[str, ...] = ()
-        for pattern, found in entries:
-            if _codeowners_match(pattern, path): owners = found
+        if not unsupported:
+            for pattern, found in entries:
+                if pattern.startswith("!"):
+                    if not pattern[1:] or _codeowners_match(pattern[1:], path): owners = ()
+                elif _codeowners_match(pattern, path): owners = found
         (covered if owners else uncovered).append(path)
     return covered, uncovered
 
@@ -201,6 +209,7 @@ class TierReport:
     checked_at: str = field(default_factory=_utc_now)
     label = property(lambda self: _LABELS[self.tier])
     statement = property(lambda self: _STATEMENTS[self.tier])
+    codeowners_complete = property(lambda self: bool(isinstance(self.evidence.get("codeowners"), Mapping) and self.evidence["codeowners"].get("present") and not self.evidence["codeowners"].get("uncovered")))
     def text_lines(self) -> List[str]:
         return [f"Trust tier (human_gate): {self.tier} ({self.label}): {self.statement}", *(f"  - {r}" for r in self.reasons), *(f"  ! {c}" for c in self.caveats)]
     def as_dict(self) -> Dict[str, Any]:
@@ -265,13 +274,14 @@ def detect_tier(root: Any, gh: Optional[GhRunner] = None, environ: Optional[Mapp
 
     base = next((c for c in ([f"origin/{default_branch}", default_branch] if default_branch else []) if gitsafe.resolve_commit(top, c)), None) or gitsafe.resolve_base_ref(top)
     scope["base"] = base
-    codeowners: Dict[str, Any] = {"present": False, "path": None, "covered": [], "uncovered": list(COVERAGE_SAMPLES)}
+    tracked_gov = _tracked_governance_paths(top, base) if base is not None else ()
+    codeowners: Dict[str, Any] = {"present": False, "path": None, "covered": [], "uncovered": list(dict.fromkeys((*COVERAGE_SAMPLES, *tracked_gov)))}
     signers: Dict[str, Any] = {"present": False, "keys": 0}
     if base is not None:
         for location in _CODEOWNERS_LOCATIONS:
             blob = _blob(top, base, location)
             if blob is not None:
-                covered, uncovered = codeowners_coverage(blob.decode("utf-8", "replace"), location)
+                covered, uncovered = codeowners_coverage(blob.decode("utf-8", "replace"), location, repo_paths=tracked_gov)
                 codeowners = {"present": True, "path": location, "covered": covered, "uncovered": uncovered}
                 break
         blob = _blob(top, base, ALLOWED_SIGNERS)
@@ -317,6 +327,16 @@ def _top(root: Any) -> Path:
     if top is None: raise HumanGateError(f"{root} is not inside a git work tree")
     return top
 
+def _tracked_governance_paths(workspace: Any, rev: str) -> Tuple[str, ...]:
+    top = gitsafe.toplevel(Path(workspace))
+    commit = gitsafe.resolve_commit(top, rev) if top else None
+    if not top or not commit: return ()
+    try: res = gitsafe.run(["ls-tree", "-r", "-z", "--full-tree", commit], top, timeout=60.0)
+    except gitsafe.GitError: return ()
+    if res.returncode != 0: return ()
+    return tuple(os.fsdecode(raw) for entry in res.stdout.split(b"\0")
+                 if len((p := entry.partition(b"\t"))[0].split()) == 3 and (raw := p[2]) and governance.category_of(os.fsdecode(raw)) is not None)
+
 def governance_tree_hash(root: Any, rev: str = "HEAD") -> str:
     top = _top(root)
     commit = gitsafe.resolve_commit(top, rev)
@@ -324,30 +344,28 @@ def governance_tree_hash(root: Any, rev: str = "HEAD") -> str:
     try: res = gitsafe.run(["ls-tree", "-r", "-z", "--full-tree", commit], top, timeout=60.0)
     except gitsafe.GitError as exc: raise HumanGateError(str(exc)) from exc
     if res.returncode != 0: raise HumanGateError(f"git ls-tree failed for {rev}")
-    records: List[Tuple[bytes, bytes]] = []
-    for entry in res.stdout.split(b"\0"):
-        meta, _, raw_path = entry.partition(b"\t")
-        fields = meta.split()
-        if len(fields) == 3 and raw_path and governance.category_of(os.fsdecode(raw_path)):
-            records.append((raw_path, fields[0] + b" " + fields[2]))
+    records = [(raw, fields[0] + b" " + fields[2]) for entry in res.stdout.split(b"\0")
+               if len(fields := (p := entry.partition(b"\t"))[0].split()) == 3 and (raw := p[2]) and governance.category_of(os.fsdecode(raw))]
     digest = hashlib.sha256(HASH_DOMAIN)
     for raw_path, meta in sorted(records): digest.update(meta + b" " + raw_path + b"\n")
     return digest.hexdigest()
 
+def insight_text_hash(text: str) -> str:
+    return hashlib.sha256(f"aegis-insight/v1\n{' '.join(text.strip().split())}\n".encode("utf-8")).hexdigest()
+
 class Approval(NamedTuple):
     valid: bool; code: str; reason: str; commit: str; signer: Optional[str] = None
+    ok = property(lambda self: self.valid)
     def as_dict(self, workspace: Any = None) -> Dict[str, Any]:
         return {"schema": SCHEMA, "source": SOURCE, "aegis_version": __version__, "checked_at": _utc_now(),
                 "scope": {"machine": "local", "workspace": None if workspace is None else str(workspace), "commit": self.commit},
                 "valid": self.valid, "code": self.code, "reason": self.reason, "signer": self.signer}
 
-def approval_message(digest: str) -> str:
-    return f"chore: approve governance state\n\nAegis-Approve: {digest}\n"
+def approval_message(digest: str) -> str: return f"chore: approve governance state\n\nAegis-Approve: {digest}\n"
 
 def exemption_message(fix_commit: str, reason: str) -> str:
     commit, why = (fix_commit or "").strip(), (reason or "").strip()
-    if not commit: raise ValueError("fix_commit must be non-empty")
-    if not why: raise ValueError("reason must be non-empty")
+    if not commit or not why: raise ValueError("fix_commit and reason must be non-empty")
     return f"chore: approve test exemption for {commit[:12]}\n\nAegis-Exempt-Test: {commit} {why}\n"
 
 def _ssh_keygen() -> str:
@@ -367,22 +385,33 @@ def _verify_commit_sig(top: Path, oid: str, base: str, ok_reason: str) -> Approv
     if status == "E": return _no("unverifiable", "git could not check the signature", oid)
     return _no("bad_signature", f"the signature does not verify (git reports {status!r})", oid)
 
-def verify_approval(root: Any, commit: str, governance_hash: str, base_ref: str) -> Approval:
+def _verify_single_trailer(root: Any, commit: str, base_ref: Optional[str], rx: re.Pattern[str], name: str, expected: str, mismatch_msg: str, ok_msg: str) -> Approval:
     try:
         top = _top(root)
-        oid, base = gitsafe.resolve_commit(top, commit), gitsafe.resolve_commit(top, base_ref)
+        base_target = base_ref or gitsafe.resolve_base_ref(top)
+        oid, base = gitsafe.resolve_commit(top, commit), (gitsafe.resolve_commit(top, base_target) if base_target else None)
         if not oid or not base: return _no("unresolved", f"cannot resolve {commit!r} or the base {base_ref!r}", str(commit))
         raw = gitsafe.run(["cat-file", "commit", oid], top)
         if raw.returncode != 0: return _no("unresolved", f"cannot read commit {oid}", oid)
         message = raw.stdout.decode("utf-8", "replace").partition("\n\n")[2]
         if _ACCEPT_LINE.search(message): return _no("accept_reserved", "the message carries an Aegis-Accept line, which is reserved", oid)
-        values = _APPROVE_LINE.findall(message)
-        if not values: return _no("no_trailer", "no Aegis-Approve trailer", oid)
-        if len(values) > 1: return _no("multiple_trailers", "more than one Aegis-Approve trailer", oid)
-        if values[0].lower() != governance_hash.lower(): return _no("hash_mismatch", "the approved governance hash is not this governance state", oid)
-        return _verify_commit_sig(top, oid, base, "good signature by a key in the base allowed_signers")
+        values = rx.findall(message)
+        if not values: return _no("no_trailer", f"no {name} trailer", oid)
+        if len(values) > 1: return _no("multiple_trailers", f"more than one {name} trailer", oid)
+        if values[0].lower() != expected.lower(): return _no("hash_mismatch", mismatch_msg, oid)
+        return _verify_commit_sig(top, oid, base, ok_msg)
     except gitsafe.GitError as exc: return _no("unresolved", str(exc), str(commit))
     except HumanGateError as exc: return _no("unverifiable", str(exc), str(commit))
+
+def verify_approval(root: Any, commit: str, governance_hash: str, base_ref: str) -> Approval:
+    return _verify_single_trailer(root, commit, base_ref, _APPROVE_LINE, "Aegis-Approve", governance_hash,
+                                  "the approved governance hash is not this governance state", "good signature by a key in the base allowed_signers")
+
+def verify_insight_approval(workspace: Any, commit: str, text: str, base_ref: Optional[str] = None) -> Approval:
+    if not isinstance(commit, str) or not commit.strip() or not isinstance(text, str) or not text.strip():
+        return _no("invalid_input", "commit and insight text must be non-empty", str(commit or ""))
+    return _verify_single_trailer(workspace, commit, base_ref, _APPROVE_INSIGHT_LINE, INSIGHT_APPROVE_TRAILER,
+                                  insight_text_hash(text), "the approved insight hash does not match this insight text", "insight approval verified")
 
 def verify_test_exemption(root: Any, approval_commit: str, fix_commit: str, base_ref: str, expected_reason: Optional[str] = None) -> Approval:
     try:
