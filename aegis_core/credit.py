@@ -703,9 +703,9 @@ def _builtin_snapshot_rerun(root: Any, commit: str, base_ref: str, *, timeout: f
             "-c", _SNAPSHOT_RUNNER_CODE, str(snapshot.resolve()), str(workspace), json.dumps(ext_dirs),
             "-p", "no:cacheprovider", "-o", "addopts=", f"--junitxml={junit}", "--", *t_files,
         ]
+        sys_root = os.environ.get("SystemRoot", "C:\\Windows")
         env = (
-            {"PATH": rf"{os.environ.get('SystemRoot', r'C:\Windows')}\System32;{os.environ.get('SystemRoot', r'C:\Windows')}",
-             "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"), "HOME": str(home), "USERPROFILE": str(home), "TEMP": str(tmp), "TMP": str(tmp)}
+            {"PATH": f"{sys_root}\\System32;{sys_root}", "SystemRoot": sys_root, "HOME": str(home), "USERPROFILE": str(home), "TEMP": str(tmp), "TMP": str(tmp)}
             if os.name == "nt" else
             {"PATH": "/usr/bin:/bin", "HOME": str(home), "TMPDIR": str(tmp), "LC_ALL": "C"}
         )

@@ -116,6 +116,7 @@ SPAWN_SITES = {
     # private index, and runs the test command from the user-scope config (never the repository's) in a snapshot.
     "aegis_core/treeid.py": ("`git`",),
     "aegis_core/checkrun.py": ("your test command",),
+    "aegis_core/credit.py": ("your test command",),
     # `aegis doctor --release` asks `gh --version`, then `gh attestation verify` (read-only).
     "aegis_core/release_verify.py": ("`gh`",),
 }
