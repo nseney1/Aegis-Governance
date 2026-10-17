@@ -4,7 +4,7 @@ Covers the §9 T8 acceptance criteria:
 1. Redaction of secrets, PII, paths, IPs, and high-entropy tokens + 300-char cap + benign identifier preservation.
 2. Correction-cue detection precision/recall and user-scope hook storage (heartbeat vs cue-gated insight).
 3. 'Agent insights don't count': MCP aegis_capture_insight suggestions do not count toward proposals/debits and never enter aegis_scan; upgraded to W2 only when substring of hook prompt in same hs.
-4. Keyed hs pseudonymization (HMAC-SHA256 with ~/.aegis/link.key, mode 0600, O_EXCL, 32 random bytes).
+4. Keyed hs pseudonymization (HMAC-SHA256 with ~/.aegis/link.key, POSIX mode 0600, O_EXCL, 32 random bytes).
 5. Stdlib TF-IDF top-3 neighbour clustering, exposure-joined rule matching, and rejected-cluster cooldown (>= 2 new insights).
 6. Closed-template proposals in .aegis/proposals/<id>.md (never loaded by load_rules, no verbatim W0/W2 text) and post-activation recurrence measurement over heartbeat-alive sessions (burst collapse, 95% UCB, >= 3 alarm, per-rev reset).
 """
@@ -189,7 +189,8 @@ def test_correction_cue_detector_precision_and_recall_and_hook_storage(tmp_path:
     store = insights_path(repo, home=home)
     assert store.exists()
     assert not store.is_relative_to(repo)
-    assert stat.S_IMODE(store.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(store.stat().st_mode) == 0o600
 
     rows = [json.loads(line) for line in store.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(rows) == 1
@@ -285,7 +286,8 @@ def test_keyed_hs_pseudonymization_and_link_key_creation(tmp_path: Path, monkeyp
     key_path, created = create_link_key(home)
     assert created is True
     assert key_path == home / ".aegis" / "link.key"
-    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
     raw_key = read_link_key(home)
     assert raw_key is not None and len(raw_key) == KEY_SIZE == 32
 

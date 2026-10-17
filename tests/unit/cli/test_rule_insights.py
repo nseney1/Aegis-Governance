@@ -5,6 +5,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -60,7 +61,8 @@ def test_init_link_key_step_creates_0600_key_idempotently(tmp_path: Path):
     assert step1.result == "created"
     key_file = home / ".aegis" / "link.key"
     assert key_file.exists()
-    assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
     raw = read_link_key(home)
     assert raw is not None and len(raw) == 32
 
