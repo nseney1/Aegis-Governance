@@ -618,3 +618,30 @@ class TestModuleSwapStaging:
         assert swap.stage("x = 1\n") == swap.workdir + os.pathsep + "/opt/inherited"
         monkeypatch.delenv("PYTHONPATH")
         assert swap.stage("x = 1\n") == swap.workdir
+
+    def test_mutant_startup_timeout_retries_once_and_does_not_survive(self, tmp_path):
+        """A mutant run that times out before loading the target module retries once
+        and, if still timed out, is classified as timed-out/killed rather than survived."""
+        from aegis_core.verification import mutation_tester
+
+        src = tmp_path / "target.py"
+        src.write_text("def inc(x):\n    return x + 1\n", encoding="utf-8")
+        test = tmp_path / "test_target.py"
+        test.write_text("def test_inc():\n    assert True\n", encoding="utf-8")
+
+        baseline_ok = mutation_tester.TestRunResult(passed=True, status="pass", loaded=True)
+        startup_timeout = mutation_tester.TestRunResult(
+            passed=False, status="timeout", detail="timed out after 30s", loaded=False
+        )
+
+        with patch(
+            "aegis_core.verification.mutation_tester._check_tests",
+            side_effect=[baseline_ok, startup_timeout, startup_timeout],
+        ) as mock_check:
+            ev = mutation_tester.check(str(src), "inc", str(test), max_mutations=1)
+
+        assert mock_check.call_count == 3  # 1 baseline + 1 mutant + 1 startup-timeout retry
+        assert ev.verdict is True, ev.detail
+        assert ev.detail == "0/1 survived (1 test file ran)"
+        assert ev.lines == []
+

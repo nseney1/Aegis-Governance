@@ -2,6 +2,16 @@
 
 All notable changes to Aegis Guardrails are documented here. The project uses [Semantic Versioning](https://semver.org/). Releases before 1.0.0 are summarized at the end.
 
+## [4.3.1] - 2026-10-17
+
+### Fixed
+
+- **Pre-tool hook (`codex`) `apply_patch` command-guard bypass.** A Codex `Bash` call is classified as a pure edit (`command=None`) only when the entire command is a single `apply_patch`/`applypatch` invocation with no chained shell commands, pipelines, trailing lines after the heredoc delimiter, or unquoted `$(...)`/backtick command substitutions. Compound `apply_patch` shell commands now run both `command_safety` (with quoted patch bodies replaced by safe placeholders) and `scan_compliance` on the patched paths.
+- **Exact `CODEOWNERS` governance coverage (`aegis_core.human_gate`).** `codeowners_coverage()` and `detect_tier()` now verify ownership across every tracked governance and workflow file on the base branch in addition to `COVERAGE_SAMPLES`, and fail closed when `!pattern` negation, unowned rule overrides, or unsupported character-class/escape patterns leave any governance path unowned.
+- **Content-bound human insight approval (`aegis_core.insights`, `aegis_core.human_gate`).** `add_insight()` no longer reuses branch-wide `Aegis-Approve: <governance_tree_hash>` commits to grant `level="H"`. Human-approved insights require an explicit `--commit` carrying a valid base-trusted SSH signature over `Aegis-Approve-Insight: <sha256("aegis-insight/v1\n" + normalized_text)>`.
+- **Resilient exposure ledger writes in `aegis_scan` (`aegis_mcp.handlers.core`, `aegis_core.credit`).** `credit.record_exposure()` records in-memory session exposure before disk persistence, and `_record_exposure()` catches and logs ledger write failures so read-only or locked state files never fail `aegis_scan`.
+- **Mutation tester subprocess startup timeouts (`aegis_core.verification.mutation_tester`).** When a mutant test run times out before importing the target module (`status == "timeout"` and `not loaded`), the runner retries once and classifies persistent timeouts as `timeout` (killed) rather than a surviving mutant.
+
 ## [4.3.0] - 2026-10-17
 
 v4.3 makes each trust claim Aegis prints checkable, at a level it names: what Aegis sees locally is a label, CI on the landing commit confirms it, and approvals the agent cannot produce gate governance changes. Three changes are breaking; they are marked.

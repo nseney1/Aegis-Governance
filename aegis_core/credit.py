@@ -18,7 +18,7 @@ __all__ = [
     "confirm", "confirmed_outcome_rows", "derive", "exposed_rules", "format_trailer",
     "landed_lookup", "parse_trailer", "passing_check", "project_credits", "read_rows",
     "record_adjudication", "record_detection", "record_exposure", "record_override",
-    "record_void", "resolve_protected_branch", "select_ci_run", "submit_report",
+    "record_void", "resolve_protected_branch", "select_ci_run", "session_exposed_rules", "submit_report",
     "verify_commit_trailers",
 ]
 EVENTS = ("check", "claimed", "report", "ci", "void", "exposure", "detection", "adjudication", "override")
@@ -245,26 +245,33 @@ def record_exposure(
         return []
     stamp, s_id, h_id = ts or _now(), session or "", host or ""
     path_list = [str(p) for p in (paths or ()) if isinstance(p, str)]
-    try:
-        with ledger_locked(root):
-            seen = {(str(r.get("session") or ""), str(r.get("rule") or r.get("for_rule") or ""), r.get("scope_basis")) for r in _of(read_rows(root), "exposure")}
-            to_append: List[Dict[str, Any]] = []
-            for rule_id in rule_list:
-                if (s_id, rule_id, scope_basis) in seen:
-                    continue
-                seen.add((s_id, rule_id, scope_basis))
-                row: Dict[str, Any] = {"v": ledger.LEDGER_VERSION, "ts": stamp, "event": "exposure", "for_rule": rule_id, "session": s_id, "host": h_id, "paths": path_list, "rev": rev}
-                if scope_basis is not None:
-                    row["scope_basis"] = str(scope_basis)
-                if heartbeat is not None:
-                    row["heartbeat"] = bool(heartbeat)
-                to_append.append(row)
-            return [_normalize_event_row(r) for r in ledger.append_rows(root, to_append)] if to_append else []
-    except (PathTraversalError, OSError):
-        return []
+    with ledger_locked(root):
+        seen = {(str(r.get("session") or ""), str(r.get("rule") or r.get("for_rule") or ""), r.get("scope_basis")) for r in _of(read_rows(root), "exposure")}
+        to_append: List[Dict[str, Any]] = []
+        for rule_id in rule_list:
+            if (s_id, rule_id, scope_basis) in seen:
+                continue
+            seen.add((s_id, rule_id, scope_basis))
+            row: Dict[str, Any] = {"v": ledger.LEDGER_VERSION, "ts": stamp, "event": "exposure", "for_rule": rule_id, "session": s_id, "host": h_id, "paths": path_list, "rev": rev}
+            if scope_basis is not None:
+                row["scope_basis"] = str(scope_basis)
+            if heartbeat is not None:
+                row["heartbeat"] = bool(heartbeat)
+            to_append.append(row)
+        return [_normalize_event_row(r) for r in ledger.append_rows(root, to_append)] if to_append else []
 
 
-def exposed_rules(root: Any, host: Optional[str], session: Optional[str]) -> Set[str]:
+def exposed_rules(root: Any, host: Optional[str], session: Optional[str] = None) -> Set[str]:
+    if session is None:
+        s_id = host or ""
+        found = {r for (r_root, _h_id, r_sess), rules in _EXPOSED.items() if r_root == str(root) and r_sess == s_id for r in rules}
+        if s_id:
+            for row in _of(read_rows(root), "exposure"):
+                if str(row.get("session") or "") == s_id:
+                    rule_id = row.get("rule") or row.get("for_rule")
+                    if isinstance(rule_id, str) and rule_id:
+                        found.add(rule_id)
+        return found
     h_id, s_id = host or "", session or ""
     found = set(_EXPOSED.get((str(root), h_id, s_id), ()))
     if s_id:
@@ -274,6 +281,9 @@ def exposed_rules(root: Any, host: Optional[str], session: Optional[str]) -> Set
                 if isinstance(rule_id, str) and rule_id:
                     found.add(rule_id)
     return found
+
+
+session_exposed_rules = exposed_rules
 
 
 def record_detection(

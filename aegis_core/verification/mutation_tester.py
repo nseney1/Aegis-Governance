@@ -12,6 +12,7 @@ import atexit
 from dataclasses import dataclass
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
@@ -389,9 +390,13 @@ def _check_tests(
     env = dict(os.environ)
     # No bytecode and no cache: the runs leave the tree as they found it.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    sys_dirs = os.pathsep.join(p for p in sys.path if p and os.path.isdir(p))
     if swap is not None:
         cmd += ["-p", _SWAP_PLUGIN]
-        env["PYTHONPATH"] = swap.stage(source or "")
+        staged = swap.stage(source or "")
+        env["PYTHONPATH"] = staged + (os.pathsep + sys_dirs if sys_dirs else "")
+    elif sys_dirs and not env.get("PYTHONPATH"):
+        env["PYTHONPATH"] = sys_dirs
     cmd += list(test_files)
     try:
         result = subprocess.run(
@@ -653,9 +658,11 @@ def check(
             if mutated_source is None:
                 continue
             run = _check_tests(test_files, timeout, swap, mutated_source)
-            # Killed only by a failing (or hung) run that loaded the mutant; a run that
-            # never loaded it says nothing about the tests.
-            if run.passed or not run.loaded:
+            if run.status == "timeout" and not run.loaded:
+                run = _check_tests(test_files, timeout, swap, mutated_source)
+            # Killed only by a failing (or hung) run; a non-timeout run that
+            # never loaded the mutant says nothing about the tests.
+            if run.status != "timeout" and (run.passed or not run.loaded):
                 survived.append(mutation.lineno)
 
     return evidence(not survived, f"{len(survived)}/{total} survived ({note})", sorted(set(survived)))
