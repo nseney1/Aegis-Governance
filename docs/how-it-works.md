@@ -1,8 +1,8 @@
 # How Aegis works, end to end
 
-This page follows one change from an agent's first tool call to a merged commit, and explains each part of Aegis on the way: rules, just-in-time delivery over MCP, checks, the evidence ledger, hosts and enforcement. It describes Aegis 4.1: section 8 covers what 4.1 adds (agent hooks, teams and skills), and sections 9 and 10 describe planned work and say so.
+This page follows one change from an agent's first tool call to a merged commit, and explains each part of Aegis on the way: rules, just-in-time delivery over MCP, checks, the evidence ledger, hosts and enforcement. It describes Aegis 4.3: section 8 covers what 4.1 adds (agent hooks, teams and skills), section 9 covers what 4.2 adds (adoption tools), and section 10 covers what 4.3 adds (trust and evidence).
 
-For a two-minute setup, start with the [README](../README.md). For every command, flag and MCP tool schema, see the generated [reference](reference.md). For why Aegis is built this way, and what went wrong before v4, see [Why Aegis is built this way](why-aegis.md). The decisions behind this page are in ADR 0005.
+For a two-minute setup, start with the [README](../README.md). For every command, flag and MCP tool schema, see the generated [reference](reference.md). For why Aegis is built this way, and what went wrong before v4, see [Why Aegis is built this way](why-aegis.md). The decisions behind this page are in ADR 0005 and ADR 0006.
 
 ## 1. The loop
 
@@ -24,9 +24,9 @@ flowchart TD
 
 1. **Bootstrap.** `aegis init` writes a short marked block into `AGENTS.md` and registers the `aegis` MCP server with the hosts you name. The block holds no rule text; it tells the agent to call `aegis_scan` before editing and `aegis_report_outcome` after verifying.
 2. **Scan.** Before editing, the agent calls `aegis_scan` with the files it plans to change. Aegis returns the few rules whose `target_paths` match those files.
-3. **Edit and report.** The agent edits, runs its tests and calls `aegis_report_outcome` with the rules it used. The report is an advisory row in the local ledger.
-4. **Check.** `git commit` runs `aegis check --hook` (Layer 1 only, never a model call). CI runs `aegis check` on the pull request. CI is the strongest step, but it judges the pull request by the rules in the pull request itself, so changes under `.aegis/` and to the CI workflow need a person's review (section 5).
-5. **Learn.** `aegis sync` rebuilds each rule's fitness from the ledger and suggests promotions or demotions. Nothing changes until a person applies a suggestion and commits it.
+3. **Edit and report.** The agent edits, runs its tests and calls `aegis_report_outcome` with the rules it used. When a passing `aegis check --record` row exists for the exact git tree, it credits the rules served in that session; otherwise it records one `claimed` row that never counts as evidence.
+4. **Check.** `git commit` runs `aegis check --hook` (Layer 1 only, never a model call). CI runs `aegis check` and `aegis check --ci` on the pull request (section 5).
+5. **Learn.** `aegis sync` rebuilds each rule's standing from the ledger and suggests promotions or demotions. Nothing changes until a person applies a suggestion (`aegis sync --apply` or `aegis sync --pr`) and commits it.
 
 ## 2. What lives where
 
@@ -91,14 +91,15 @@ Never call `eval` or `exec` on data. Parse it with `json.loads` or `ast.literal_
 
 **The bootstrap.** The `AGENTS.md` block that `aegis init` writes is 572 bytes in a fresh repo. The MCP server sends the same guidance as its `initialize` instructions, which editing files cannot remove. Rule text is never inlined into an instructions file, so it never pushes a host past its size limit.
 
-**The four tools** (schemas in the [reference](reference.md)):
+**The five tools** (schemas in the [reference](reference.md)):
 
 | Tool | What it does |
 |---|---|
-| `aegis_scan` | the rules that apply to the files about to change (read-only) |
-| `aegis_report_outcome` | an advisory outcome row: `success`, `failure` or `partial` (and `tp`/`fp`/`pass`/`fail`) for the named rules, with an idempotency key so a retry is never counted twice |
+| `aegis_scan` | the rules that apply to the files about to change (read-only), serving mandatory rules from the reviewed base commit (`rules_base`) |
+| `aegis_report_outcome` | records an outcome for the rules served in this session: `recorded` when a passing `aegis check --record` row exists for the exact git tree, otherwise `claimed` (unwitnessed, never counted as rule evidence) |
 | `aegis_create_rule` | a prompt for drafting a rule; writes nothing |
 | `aegis_list_rules` | every rule with its type, hypothesis and ledger fitness, plus the rules edited since the last `aegis sync` |
+| `aegis_capture_insight` | records a redacted human correction at `~/.aegis/insights/<workspace-id>.jsonl` (`suggestion` level, upgraded to `W2` when matched to a hook-captured prompt in the same session) |
 
 **What a scan returns.** One loader reads every rule; if any file fails to load, the scan fails. Rules are matched to the files, then ranked: gates, invariants and other `enforcement: gate` rules first, but they take at most two of the three slots a scan has by default, so a broad mandatory rule cannot starve every advisory one. Mandatory rules that do not get a slot are named in `omitted_mandatory`. Advisory rules are ranked by ledger fitness. The whole response is clamped to the token budget, 2,000 estimated tokens by default (`AEGIS_MAX_JIT_TOKENS` or `jit.max_tokens`); a rule that does not fit is counted, never silently dropped. `view: "summary"` or `"ids"` returns less. For the rule above, a summary scan of `app.py` returns:
 
@@ -145,31 +146,31 @@ The CLI reads the same pin. A command run inside another workspace, or in a git 
 
 **Layer 2** is optional: `aegis check --full --plan "what the change should do" --llm-cmd 'claude -p'`. The plan comes from `--plan`, `--plan-file`, or else the first of `docs/plan.md`, `.aegis/plan.md` and `PLAN.md` in the repository; without one, Layer 2 refuses to run. Any command that reads a prompt on stdin and prints a reply works (`codex exec --skip-git-repo-check`, a script). Aegis builds two prompts that never see each other's input: a spec reviewer gets the plan and the function signatures and predicts what could go wrong; a code reviewer gets the implementation, the tests and the Layer 1 results and makes claims about them. An arbiter compares the two by risk category, using Layer 1 as the tiebreaker, without asking a model to judge, and returns `SHIP`, `REVISE` or `BLOCK`. The command runs in an empty temporary directory, never in the repository, so the code under review cannot steer its reviewer through project config; and it comes only from `--llm-cmd` or `AEGIS_LLM_CMD`, never from a file in the repository. **This sends your change to whichever vendor the command calls.**
 
-Use a reviewer from a different vendor than the agent that wrote the change. A model reviewing its own vendor's output tends to share its blind spots, and the Aegis release process itself requires a cross-vendor `--llm-cmd` review (ADR 0005 AD-10). The arbiter's verdict is not yet calibrated against outcomes; scoring it is v4.3 work (section 10).
+Use a reviewer from a different vendor than the agent that wrote the change. A model reviewing its own vendor's output tends to share its blind spots, and the Aegis release process itself requires a cross-vendor `--llm-cmd` review (ADR 0005 AD-10). `aegis check --calibration` scores the arbiter's logged predictions against outcomes with Wilson 95% confidence intervals and Brier skill scores (section 10); in v4.3 the arbiter's LLM predictions stay log-only until their calibrated record earns a binding gate.
 
 **The git hook.** `aegis init` installs a pre-commit hook (`aegis hook install|status|uninstall` manage it) that runs `aegis check --hook`: Layer 1 only, never a model, on the staged content, which is what `git commit` records, whatever the working tree holds. In an existing shell hook the Aegis block goes right after the shebang, so it runs before the hook's own lines (an `exec` or `exit` there would otherwise skip it), and the old file is first copied to `~/.aegis/backups/<UTC stamp>/`. A hook written in another language is refused, and `aegis init` then writes nothing: `aegis hook install --force` replaces it (keeping the copy), or call `aegis check --hook` from it yourself. `aegis hook status` and `aegis doctor` report a block git never reaches, such as a hook file that is not executable or an `exec` before the block. `git commit --no-verify` skips the hook, which is why CI matters.
 
-**CI.** On GitHub Actions, check out with `fetch-depth: 0` so the base branch is there, then run `pip install aegis-guardrails && aegis check` (the [README](../README.md) has a complete snippet). CI checks the pull request against the rules in the pull request itself: a pull request that deletes a rule and breaks it passes. Review changes under `.aegis/` and to the CI workflow like code; protecting the reviewed rules from the change they judge is v4.3 work.
+**CI.** On GitHub Actions, check out with `fetch-depth: 0` so the base branch is there, then run `pip install aegis-guardrails && aegis check` (the [README](../README.md) has a complete snippet). Plain `aegis check` checks the pull request against the rules in the pull request itself: a pull request that deletes a rule and breaks it passes. `aegis check --ci` catches that (section 10): it compares mandatory rules against the merge base and passes a rule weakening only when the branch carries a signed `aegis approve` commit. Review changes under `.aegis/` and to the CI workflow like code.
 
 ## 6. Evidence: the ledger and `aegis sync`
 
-**The ledger** is `.aegis/state/ledger.jsonl`, append-only, one JSON row per event. Two things write to it:
+**The ledger** is `<git common dir>/aegis/ledger.jsonl` (or `.aegis/state/ledger.jsonl` outside git), append-only, one JSON row per event:
 
-- `aegis check` (and the pre-commit hook) appends one row per matched rule per run: `tp` when the run passed, `fp` when it failed. When several rules apply to the same file, they share that file's credit.
-- `aegis_report_outcome` appends advisory rows (`success` counts as `tp`, `failure` as `fp`, `partial` as a trigger with no verdict), with a server-set `host` and `session`.
+- `aegis check` (and the pre-commit hook) appends one row per matched rule per run, and `aegis check --record [--tests]` binds the working tree to its exact git tree hash (`witness: aegis`).
+- `aegis_report_outcome` credits the rules served in that session when a passing check row exists for the exact tree; otherwise it records one `claimed` row per session and tree that never counts as evidence.
 
-**Fitness** is computed when it is read: the 90% Wilson lower bound of a rule's true-positive rate, halved every `expiry` days since the rule last fired (set per rule type in `.aegis/config.json`). A rule with no verdicts scores 0.
+**Fitness and sample-size states** are computed on read: `aegis sync` evaluates CI-confirmed checks, git detector replay over merged history for `forbid_ast` rules (`caught` vs `leaked`), and human-adjudicated labels, with session-count decay `w = 2^(-delta / H)` over heartbeat-alive eligible sessions. Each rule reports one of four sample-size states: `untestable`, `insufficient (n=K)` (no precision number shown below `n = 25`), `inconclusive` or `decided`.
 
-**`aegis sync`** is the one writer of derived state. Under the workspace lock it reads the rules and the ledger, writes `.aegis/state/derived.json` and prints a suggestion per rule:
+**`aegis sync`** is the one writer of derived state. Under the workspace lock it reads the rules and the ledger, writes `derived.json` and prints a suggestion per rule:
 
-- **promote** (trap to invariant, invariant to gate) with at least 20 verdicts, fitness of at least 0.85 and an age of at least 30 days;
-- **demote** or **archive** when the bound on the rule's false-positive rate is above 0.5.
+- **promote** (trap to invariant, invariant to gate) once independent evidence reaches the promotion threshold (`>= 25` labels with `0` FP or `>= 42` with `1` FP across `>= 3` sessions and `>= 2` repos or `>= 14` days; agent-only self-reports never promote);
+- **demote** or **archive** when the bound on the rule's false-positive rate exceeds the demotion threshold.
 
-`aegis sync --apply`, `aegis rule promote|demote RULE_ID` or `aegis rule archive` (every misfiring rule) moves the rule file; commit it and review it like code. `derived.json` also records a hash of each rule file, which is how `aegis_scan` and `aegis_list_rules` flag rules edited since the last sync. It is not a signature and never excludes a rule.
+`aegis sync --apply`, `aegis sync --pr` (which opens a human-reviewed pull request with up to 3 sampled examples per rule, never auto-merging), `aegis rule promote|demote RULE_ID` or `aegis rule archive` moves the rule file; commit it and review it like code. `derived.json` also records a hash of each rule file, which is how `aegis_scan` and `aegis_list_rules` flag rules edited since the last sync. It is not a signature and never excludes a rule.
 
 **Why Aegis never rewrites a rule file on its own.** v3 wrote fitness numbers back into each rule's frontmatter. Its integrity manifest then saw "edited" rules and dropped them, so a scan in the author's own session returned 0 rules, and unlocked rewrites lost about 80 of 120 updates under concurrency. In v4 the ledger is the only record of outcomes and rule files change only when a person changes them (the full account is in [Why Aegis is built this way](why-aegis.md)).
 
-**What the score means today.** The credit is coarse. Every rule matching a change's files gets that whole run's pass or fail, and agent self-reports count as much as check runs. For a gate this is backwards. In the README's quick start, after the pre-commit hook and `aegis check` both blocked the `eval`, `aegis sync` shows `no-eval` with 0 true positives and 2 false positives: the gate did its job and was scored as wrong. So fitness only ranks which rules agents see first, and promotion stays a reviewed human step. The fix, a per-rule credit model, is planned for v4.3 (section 10 and ADR 0005 §8b).
+**What the score means today.** When several rules apply to the same file in a check run, they share that check's pass or fail, while `forbid_ast` rules also get per-rule `caught` vs `leaked` replay over git history and `# aegis: allow` contested-override tracking (section 10 and ADR 0006). Unwitnessed agent self-reports (`claimed`) never count as evidence, and promotion stays a reviewed human step.
 
 **Compliance.** `aegis status --compliance` reports each host's scan-before-edit rate from `.aegis/state/activity.jsonl`: per session, how many edited files were scanned first. An edit is a file named in `aegis_report_outcome`, or a file in a commit made during exactly one session. The output states its own limits; a session with no observed edit counts as unknown, never as 0.
 
@@ -293,29 +294,30 @@ Each copy keeps only `name` and `description` in its frontmatter, renders the sl
 
 The commands above record what the prune conditions count in an events log: `<git common dir>/aegis/events.jsonl`, shared by every worktree of the repository (`.aegis/state/events.jsonl` outside git), under its own lock. Each row is `{"v":1,"ts","event","worktree","host"?,"result","detail"}`. 4.1 writes `lease_claimed` and `lease_denied` (`aegis team`), `lane_check` (`aegis check --lane`), `scan_gate` and `guard_match` (the hooks) and `skills_sync`. Fitness and `aegis status --compliance` never read it, and it is not the ledger. Rows written on a CI runner are lost with the runner unless you upload them.
 
-## 9. Planned for v4.2: adoption tools
+## 9. Adoption tools (v4.2)
 
-Not in 4.1. Each feature ships with a stated metric and a prune condition, and is removed if it does not earn its place.
+New in 4.2. Each feature ships with a stated metric and a prune condition, and is removed if it does not earn its place.
 
 - **Day-0 card**: `aegis check --card`, also printed at the end of `aegis init`: languages, drivers, rule counts, the Layer 1 pass rate and the files with the most findings, for an existing repository.
-- **Ratchet baseline**: `aegis check --write-baseline` records today's findings in `.aegis/baseline.json`, so `aegis check` fails only on new ones. With `--base`, the baseline is read from the base branch, never from the change under review.
+- **Ratchet baseline**: `aegis check --write-baseline` records today's findings in `.aegis/baseline.json`, so `aegis check` fails only on new ones (`--prune-baseline` drops entries that no longer match). With `--base`, the baseline is read from the base branch, never from the change under review.
 - **Rule packs**: `aegis rule export` and `aegis rule import` move rules between repositories in a bundle checked by sha256 digests. Packs are not signed.
 - **Benchmark**: `aegis benchmark` measures scan and hook latency, payload size and Layer 1 throughput. It measures speed, not whether rules help.
 - **Also**: a report of the call and import edges between planned lanes (`aegis check --partition`), experimental rows for Cursor, Copilot, Kiro and Windsurf, a ledger shared by all worktrees, and an experimental Claude Code plugin directory (`aegis package --host claude-code`; nothing is published).
 
-## 10. Planned for v4.3: trust and evidence
+## 10. Trust and evidence (v4.3)
 
-v4.0 removed claims the v3 code could not back, such as self-written release receipts and a manifest that excluded rules it should have protected. v4.3 plans to make those claims true, not to drop them. Its principle is to label locally, confirm externally and approve humanly. The planned work:
+v4.0 removed claims the v3 code could not back, such as self-written release receipts and a manifest that excluded rules it should have protected. v4.3 (ADR 0006, [SECURITY.md](../SECURITY.md#trust-tiers)) replaces them with verifiable guarantees across three trust tiers (`A` separation of duties, `B` solo and signed, `C` self-attested), which `aegis doctor` detects read-only and prints on every report:
 
-- **Witnessed checks**, what v3's self-written receipts claimed to be: credit a rule only for outcomes that CI confirmed on the landing commit; local runs are labels.
-- **Rule integrity**: the rules in force are the reviewed versions on the base branch, with git as the witness; weakening one needs approval the agent cannot produce.
-- **Per-rule credit model**: standing from evidence the agent cannot forge, always shown with its sample size.
-- **Regression discipline**: every fix ships with a test that fails without it.
-- **A calibrated Layer-2 arbiter**: its predictions are scored against outcomes, and it binds in CI only once its record earns it.
-- **Security checks**: a banned-API policy and established scanners, with SARIF output for code-scanning tools.
-- **Human insights**: corrections you make become reviewed rules, and recurrence of the problem is measured.
+- **Witnessed checks** (`aegis check --record [--tests]`): binds the work tree to its exact git tree hash, runs Layer 1 and (with `--tests`) `tests.command` from `~/.aegis/config.json` on an isolated snapshot export, and writes a `check` row (`witness: aegis`). `aegis_report_outcome` credits rules only when a passing check row exists for the tree; otherwise it records a `claimed` row that earns no credit.
+- **Rule integrity and human approvals** (`aegis_scan`, `aegis check --ci`, `aegis approve`): `aegis_scan` serves gates and invariants from the reviewed base commit (`rules_base`), listing branch-local mandatory edits only in `unreviewed_rules`. `aegis check --ci` flags rule weakenings and unowned governance/workflow files in `CODEOWNERS`, passing a governance change only when signed with `aegis approve` (`Aegis-Approve: <governance tree hash>`) by a key in the base branch's `allowed_signers`.
+- **Per-rule credit model** (`aegis sync [--pr]`): standing is computed from CI-confirmed checks, git detector replay (`caught` vs `leaked`), and human-adjudicated labels, with four sample-size states (`untestable`, `insufficient (n=K)`, `inconclusive`, `decided`), session-count decay `w = 2^(-delta / H)`, and inline `# aegis: allow` contested-override tracking. `aegis sync --pr` opens a human-reviewed pull request with sampled examples and never auto-merges.
+- **Regression discipline** (`aegis check --ci`): non-merge `fix` commits touching source files must include a test that fails on `base` and passes on `head` in an isolated snapshot, or carry a commit-scoped signed `Aegis-Exempt-Test: <fix-sha> <reason>` approval from `aegis approve --exempt-test`.
+- **Calibrated Layer-2 arbiter** (`aegis check --calibration`): logs falsifiable predictions and scores them against outcomes with Wilson 95% confidence intervals and Brier skill scores (log-only in v4.3; skill claims suppressed below `n_effective >= 100`).
+- **Security checks, coverage and perf** (`aegis check --ci [--format sarif] [--coverage] [--perf]`): delta-evaluated structured `forbid_ast.calls` predicates, an 8-rule Python security pack, known-format secret scanning, SARIF 2.1.0 output and ingest, diff coverage on changed executable lines (`--coverage`), and paired interleaved base-vs-head benchmarking (`--perf`).
+- **Human insights closed loop** (`aegis rule insight add|review|enable`, `aegis_capture_insight`): stores redacted corrections at `~/.aegis/insights/<workspace-id>.jsonl` (`0600`), verifies content-bound `Aegis-Approve-Insight` signatures for human-approved insights, clusters recurring corrections into `.aegis/proposals/`, and measures post-activation recurrence across heartbeat-alive sessions.
+- **Release verification** (`aegis doctor --release <sha>`): verifies the GitHub Actions `verdict` attestation with `gh attestation verify` (`gh >= 2.93.0`), failing closed at Tier C or when `gh` is missing or older.
 
-Why it waits for its own release is explained in [Why Aegis is built this way](why-aegis.md).
+The reasoning and sample-size limits behind these guarantees are in [Why Aegis is built this way](why-aegis.md).
 
 ## 11. Cheat sheet
 
@@ -325,14 +327,17 @@ Flags and defaults for every command are in the [reference](reference.md); this 
 |---|---|
 | set up a repo and register my hosts | `aegis init --host claude-code,codex-cli,antigravity` (or `--host auto`) |
 | see what `init` would do | `aegis init --dry-run` |
-| check that each host is wired | `aegis doctor` (`--json` for scripts, `--fix` to repair) |
+| check that each host is wired | `aegis doctor` (`--json` for scripts, `--fix` to repair, `--github` for Tier A/B setup, `--release <sha>` for release attestation) |
 | see the rules for files I am about to edit | `aegis scan FILE...` |
-| check my change | `aegis check` (`--strict` to fail on warnings too) |
-| add a model review | `aegis check --full --plan "..." --llm-cmd 'claude -p'` |
+| check my change | `aegis check` (`--strict` to fail on warnings too, `--record --tests` to bind the git tree) |
+| run the CI weakening, regression and SARIF checks | `aegis check --ci` (`--format github|sarif`, `--coverage`, `--perf`) |
+| sign a governance change or test exemption | `aegis approve` (or `aegis approve --exempt-test <sha> --reason "..."`) |
+| add a model review | `aegis check --full --plan "..." --llm-cmd 'claude -p'` (`aegis check --calibration` to score predictions) |
 | write a rule | `aegis rule create --type trap --name ID --hypothesis "..." --target-paths 'src/**/*.py' --body-file rule.md` |
+| capture or review human corrections | `aegis rule insight add "..."` / `aegis rule insight review` / `aegis rule insight enable --host claude-code` |
 | list rules and their fitness | `aegis rule list` or `aegis status` |
 | see how often agents scan before editing | `aegis status --compliance` |
-| rebuild fitness and get suggestions | `aegis sync` (`--apply` to apply them) |
+| rebuild fitness and get suggestions | `aegis sync` (`--apply` to apply locally, `--pr` to open an evidence-backed PR) |
 | promote or demote one rule | `aegis rule promote RULE_ID` / `aegis rule demote RULE_ID` |
 | manage the pre-commit hook | `aegis hook install` / `status` / `uninstall` |
 | add or remove a host's pre-tool hook | `aegis hook install --host claude-code` / `aegis hook uninstall --host claude-code` |

@@ -488,13 +488,65 @@ def test_the_readme_lists_every_command_the_cli_registers():
     assert int(match.group(1)) == len(named)
 
 
-def test_no_doc_calls_a_shipped_v41_feature_planned():
-    """Wave D shipped the team commands, the lane gate, the per-host hooks and skills sync:
-    the README and how-it-works no longer promise them for v4.1."""
-    for doc in (README, HOW):
+def _current_minor() -> Tuple[int, int]:
+    from aegis_core import _version
+
+    parts = [int(p) for p in re.findall(r"\d+", _version.__version__)[:2]]
+    return (parts[0], parts[1])
+
+
+def _registered_mcp_tools() -> List[str]:
+    data = json.loads((ROOT / "tests" / "contract" / "mcp_tools.json").read_text(encoding="utf-8"))
+    return sorted(entry["name"] for entry in data["tools"])
+
+
+def test_no_doc_calls_a_shipped_version_planned():
+    """No user-facing doc may describe a version <= the current minor version as planned,
+    future work, or unshipped, and no ADR targeting a shipped version may remain draft."""
+    current = _current_minor()
+    why = ROOT / "docs" / "why-aegis.md"
+    security = ROOT / "SECURITY.md"
+    versioned_patterns = (
+        re.compile(r"\b(?:planned for|plan for)\s+v?(\d+)\.(\d+)\b"),
+        re.compile(r"\bis\s+v?(\d+)\.(\d+)\s+work\b"),
+        re.compile(r"\bafter\s+v?(\d+)\.(\d+)(?:\.\d+)?\s+ships\b"),
+        re.compile(r"\bv?(\d+)\.(\d+)\s+plans to\b"),
+        re.compile(r"\bv?(\d+)\.(\d+)\s+roadmap\b"),
+    )
+    describes_pattern = re.compile(r"\bdescribes aegis\s+v?(\d+)\.(\d+)\b")
+    unconditional_stale = (
+        "planned, not shipped",
+        "not in this repository yet",
+        "until they ship",
+        "will copy the 15 packaged",
+    )
+    for doc in (README, HOW, why, security):
         text = _flat(doc.read_text(encoding="utf-8")).lower()
-        for phrase in ("planned for v4.1", "until they ship", "will copy the 15 packaged"):
+        for phrase in unconditional_stale:
             assert phrase not in text, (doc.name, phrase)
+        for pattern in versioned_patterns:
+            for match in pattern.finditer(text):
+                ver = (int(match.group(1)), int(match.group(2)))
+                assert ver > current, f"{doc.name} calls shipped v{ver[0]}.{ver[1]} planned: {match.group(0)!r}"
+        for match in describes_pattern.finditer(text):
+            ver = (int(match.group(1)), int(match.group(2)))
+            assert ver == current, f"{doc.name} describes v{ver[0]}.{ver[1]} instead of v{current[0]}.{current[1]}"
+
+    for adr in sorted((ROOT / "docs" / "adr").glob("*.md")):
+        adr_text = adr.read_text(encoding="utf-8")
+        title_line = adr_text.splitlines()[0] if adr_text else ""
+        ver_match = re.search(r"\bv(\d+)\.(\d+)\b", title_line)
+        if ver_match and (int(ver_match.group(1)), int(ver_match.group(2))) <= current:
+            assert not re.search(r"^- \*\*Status\*\*:\s*draft\b", adr_text, re.M | re.I), (
+                f"{adr.name} targets shipped v{ver_match.group(1)}.{ver_match.group(2)} but is still Status: draft"
+            )
+
+
+def test_how_it_works_lists_every_mcp_tool():
+    """Section 4 of how-it-works names every tool in the MCP contract snapshot."""
+    sec4 = _section(HOW.read_text(encoding="utf-8"), "4. Just-in-time delivery over MCP")
+    named = sorted(set(re.findall(r"`(aegis_[a-z_]+)`", sec4)))
+    assert named == _registered_mcp_tools()
 
 
 def test_the_best_effort_row_states_each_hosts_hook_tier_as_doctor_reports_it():

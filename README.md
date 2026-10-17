@@ -136,7 +136,7 @@ The gate is `aegis check --lane docs`: every path the lane changed since its mer
 
 A rule starts as a **trap** ("agents keep doing X here"). With evidence it can be promoted to an **invariant** (must always hold) and then to a **gate**. Invariants and gates are served before advisory rules in every scan, and a rule with `forbid_ast` patterns is enforced by `aegis check` whatever its type. `aegis sync` computes four sample-size states (`untestable`, `insufficient (n=K)` with no precision number shown until `n >= 25`, `inconclusive`, and `decided`) over CI-confirmed checks, git detector replay (`caught` vs `leaked`), and human-adjudicated labels, with session-count decay (`w = 2^(-delta / H)`) over heartbeat-alive eligible sessions. Inline `# aegis: allow` comments record `contested` overrides (never false positives) and flag rules with high override rates for review. Nothing moves until a person runs `aegis sync --apply`, `aegis sync --pr` (which opens a human-reviewed PR with up to 3 sampled examples per rule, never auto-merged), or `aegis rule promote`. Aegis never rewrites a rule file on its own.
 
-Be clear about what the score means today: every rule that matched a change's files shares that check's pass or fail. An agent's report without a recorded check counts for nothing (v4.3), and agent self-reports alone can never promote a rule to a gate. `aegis check --ci` checks rule weakening, fail-to-pass regression discipline on bug-fix commits, PR-native `--format github|sarif` output, and opt-in `--coverage` / `--perf` gates; `aegis rule insight` (`add`, `review`, `enable`) plus `aegis_capture_insight` close the loop from human corrections in `~/.aegis/insights/` to draft proposals in `.aegis/proposals/`; and the Layer-2 arbiter logs falsifiable predictions for `aegis check --calibration`. See the roadmap in [Why Aegis is built this way](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/why-aegis.md).
+Be clear about what the score means today: every rule that matched a change's files shares that check's pass or fail. An agent's report without a recorded check counts for nothing (v4.3), and agent self-reports alone can never promote a rule to a gate. `aegis check --ci` checks rule weakening, fail-to-pass regression discipline on bug-fix commits, PR-native `--format github|sarif` output, and opt-in `--coverage` / `--perf` gates; `aegis rule insight` (`add`, `review`, `enable`) plus `aegis_capture_insight` close the loop from human corrections in `~/.aegis/insights/` to draft proposals in `.aegis/proposals/`; and the Layer-2 arbiter logs falsifiable predictions for `aegis check --calibration`. Details are in [Why Aegis is built this way](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/why-aegis.md).
 
 ## What Aegis does not do
 
@@ -170,9 +170,9 @@ Aegis does not claim enforcement it lacks. `aegis doctor` reports these tiers, i
 ## Documentation, contributing, security, license
 
 - [How Aegis works](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/how-it-works.md): the loop, rules, MCP delivery, checks, the ledger, hosts and enforcement.
-- [Why Aegis is built this way](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/why-aegis.md): the evidence, what went wrong in v3, the v4.3 roadmap.
+- [Why Aegis is built this way](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/why-aegis.md): the evidence, what went wrong in v3, and the v4.3 trust and evidence model.
 - [Reference](https://github.com/nseney1/Aegis-Guardrails/blob/main/docs/reference.md): every command, flag and MCP tool, generated from the code.
-- Plan of record (ADR 0005) and the [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md).
+- Plan of record (ADR 0005, ADR 0006) and the [changelog](https://github.com/nseney1/Aegis-Guardrails/blob/main/CHANGELOG.md).
 - [Contributing](https://github.com/nseney1/Aegis-Guardrails/blob/main/CONTRIBUTING.md) and [privacy](https://github.com/nseney1/Aegis-Guardrails/blob/main/PRIVACY.md).
 - Security issues: report them privately as described in [SECURITY.md](SECURITY.md).
 
