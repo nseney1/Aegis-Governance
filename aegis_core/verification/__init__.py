@@ -6,7 +6,8 @@ pure set operations — no LLM judgment needed for comparison.
 """
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+import hashlib
+from typing import Any, Optional
 
 
 class RiskCategory(Enum):
@@ -69,11 +70,105 @@ class Verdict(Enum):
 @dataclass
 class Prediction:
     """Spec Agent output: what COULD go wrong (from spec + signatures only)."""
-    category: RiskCategory
-    severity: Severity
-    risk: str               # One-line description
-    mechanism: str           # How the bug would manifest
-    affected_function: str   # Function name (from signatures)
+    category: RiskCategory = RiskCategory.PERSISTENCE_GAP
+    severity: Severity = Severity.MEDIUM
+    risk: str = ""               # One-line description
+    mechanism: str = ""          # How the bug would manifest
+    affected_function: str = ""  # Function name (from signatures)
+    id: str = ""
+    verdict_id: str = ""
+    ts: float = 0.0
+    tree: str = ""
+    backend: str = ""
+    scope: str = ""
+    observable: str = "fix_touch_in_window"
+    window_days: int = 14
+    p: float = 0.5
+    disposition: str = "logged"
+    outcome: Optional[bool] = None
+    resolved_at: Optional[float] = None
+    resolving_commit: str = ""
+    claim_type: str = ""
+    target: str = ""
+    horizon_commits: int = 10
+
+    def __post_init__(self) -> None:
+        if isinstance(self.category, str):
+            try:
+                self.category = RiskCategory(self.category)
+            except ValueError:
+                pass
+        if isinstance(self.severity, str):
+            try:
+                self.severity = Severity(self.severity)
+            except ValueError:
+                pass
+        if not self.scope:
+            self.scope = self.target or self.affected_function
+        if not self.target and self.scope:
+            self.target = self.scope
+        if self.claim_type and self.observable == "fix_touch_in_window":
+            self.observable = self.claim_type
+        elif not self.claim_type:
+            self.claim_type = self.observable
+        if not self.id:
+            cat_val = getattr(self.category, "value", str(self.category))
+            raw = f"{self.verdict_id}:{cat_val}:{self.scope}:{self.risk}"
+            self.id = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "verdict_id": self.verdict_id,
+            "ts": self.ts,
+            "tree": self.tree,
+            "backend": self.backend,
+            "scope": self.scope,
+            "observable": self.observable,
+            "window_days": self.window_days,
+            "p": self.p,
+            "disposition": self.disposition,
+            "outcome": self.outcome,
+            "resolved_at": self.resolved_at,
+            "resolving_commit": self.resolving_commit,
+            "category": getattr(self.category, "value", str(self.category)),
+            "severity": getattr(self.severity, "value", str(self.severity)),
+            "risk": self.risk,
+            "mechanism": self.mechanism,
+            "affected_function": self.affected_function,
+            "claim_type": self.claim_type,
+            "target": self.target,
+            "horizon_commits": self.horizon_commits,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Prediction":
+        outcome = data.get("outcome")
+        if outcome is None and "correct" in data:
+            outcome = data.get("correct")
+        return cls(
+            category=data.get("category", RiskCategory.PERSISTENCE_GAP),
+            severity=data.get("severity", Severity.MEDIUM),
+            risk=data.get("risk", ""),
+            mechanism=data.get("mechanism", ""),
+            affected_function=data.get("affected_function", ""),
+            id=data.get("id", ""),
+            verdict_id=data.get("verdict_id", ""),
+            ts=float(data.get("ts", 0.0) or 0.0),
+            tree=data.get("tree", ""),
+            backend=data.get("backend", ""),
+            scope=data.get("scope", data.get("target", "")),
+            observable=data.get("observable", data.get("claim_type", "fix_touch_in_window")),
+            window_days=int(data.get("window_days", 14)),
+            p=float(data.get("p", data.get("confidence", 0.5))),
+            disposition=data.get("disposition", "logged"),
+            outcome=outcome if outcome is None else bool(outcome),
+            resolved_at=data.get("resolved_at"),
+            resolving_commit=data.get("resolving_commit", ""),
+            claim_type=data.get("claim_type", ""),
+            target=data.get("target", ""),
+            horizon_commits=int(data.get("horizon_commits", 10)),
+        )
 
 
 @dataclass
@@ -110,12 +205,46 @@ class Divergence:
 @dataclass
 class ArbitrationResult:
     """Final output of the two-layer verification."""
-    divergences: list[Divergence]
-    convergences: list[RiskCategory]   # Categories where prediction + claim + evidence align
-    verdict: Verdict
-    layer1_results: list[ToolEvidence]
-    predictions: list[Prediction]
-    claims: list[Claim]
+    divergences: list[Divergence] = field(default_factory=list)
+    convergences: list[RiskCategory] = field(default_factory=list)   # Categories where prediction + claim + evidence align
+    verdict: Verdict = Verdict.SHIP
+    layer1_results: list[ToolEvidence] = field(default_factory=list)
+    predictions: list[Prediction] = field(default_factory=list)
+    claims: list[Claim] = field(default_factory=list)
+    layer1_verdict: str = ""
+    infra_status: str = "ok"
+    llm_predictions: tuple[Prediction, ...] = ()
+    verdict_id: str = ""
+    decision: str = ""
+    confidence: float = 1.0
+    rationale: str = ""
+    structural_gaps: list[dict[str, Any]] = field(default_factory=list)
+    vendor_warning: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.layer1_verdict:
+            has_l1_fail = any(not e.verdict for e in self.layer1_results)
+            self.layer1_verdict = "FAIL" if has_l1_fail else "PASS"
+        if not self.llm_predictions and self.predictions:
+            self.llm_predictions = tuple(self.predictions)
+        elif self.llm_predictions and not self.predictions:
+            self.predictions = list(self.llm_predictions)
+        elif isinstance(self.llm_predictions, list):
+            self.llm_predictions = tuple(self.llm_predictions)
+        if not self.decision:
+            self.decision = (
+                self.verdict.value.upper()
+                if isinstance(self.verdict, Verdict)
+                else str(self.verdict).upper()
+            )
+        if not self.verdict_id:
+            raw = f"{self.layer1_verdict}:{self.decision}:{len(self.predictions)}:{len(self.divergences)}"
+            self.verdict_id = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+        if not self.rationale:
+            self.rationale = (
+                f"Layer 1: {self.layer1_verdict}; infra: {self.infra_status}; "
+                f"divergences: {len(self.divergences)}, convergences: {len(self.convergences)}"
+            )
 
 # ── Structured Output Schemas (for agent prompts) ─────────────────────────
 
