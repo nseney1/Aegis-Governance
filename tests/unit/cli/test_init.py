@@ -1007,7 +1007,7 @@ class TestActiveStarterRule:
         rule = next(r for r in load_rules(project).rules if r.id == "no-eval")
         assert (rule.ok, rule.type, rule.enforcement) == (True, "invariant", "gate")
         assert rule.target_paths == ("**/*.py",)
-        assert rule.meta["forbid_ast"] == {"calls": ["eval", "exec"]}
+        assert rule.meta["forbid_ast"] == {"calls": [{"name": "eval", "builtin": True}, {"name": "exec", "builtin": True}]}
         # The personas still apply to no file: no-eval is the one active rule.
         assert [r.id for r in load_rules(project).rules if r.target_paths] == ["no-eval"]
 
@@ -1019,8 +1019,11 @@ class TestActiveStarterRule:
     def test_aegis_check_enforces_it_on_day_one(self, project, capsys):
         assert run_init(_args(project)) == 0
         (project / "app.py").write_text("def load(text):\n    return eval(text)\n", encoding="utf-8")
-        (project / "ok.py").write_text("import json\n\n\ndef load(text):\n    return json.loads(text)\n",
-                                       encoding="utf-8")
+        (project / "ok.py").write_text(
+            "import json\n\n\ndef load(text, df, model):\n"
+            "    df.eval(\"a + b\")\n    model.eval()\n    return json.loads(text)\n",
+            encoding="utf-8",
+        )
         capsys.readouterr()
         assert _check(project, "app.py") == 1
         assert "Forbidden call 'eval'" in capsys.readouterr().out
@@ -1030,7 +1033,7 @@ class TestActiveStarterRule:
         assert run_init(_args(project)) == 0
         out = capsys.readouterr().out
         assert "Active rule in .aegis/rules/invariants/:" in out
-        assert "✅ no-eval: bans eval() and exec() in **/*.py, methods named eval or exec included (df.eval(), model.eval()); aegis check and the pre-commit hook enforce it" in out
+        assert "✅ no-eval: bans builtin eval() and exec() in **/*.py (method calls like df.eval() and model.eval() are allowed); aegis check and the pre-commit hook enforce it" in out
         assert "Next: add a rule for your own code with aegis rule create (aegis rule create --help)" in out
 
     def test_none_active_opts_out_and_keeps_the_standard_personas(self, project, capsys):

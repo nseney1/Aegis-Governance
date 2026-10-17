@@ -32,6 +32,9 @@ def test_aegis_capture_insight_schema_and_annotations():
     tool = next(t for t in TOOL_DEFINITIONS if t["name"] == "aegis_capture_insight")
     assert tool["annotations"] == {
         "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
         "title": "Capture Insight",
     }
     schema = tool["inputSchema"]

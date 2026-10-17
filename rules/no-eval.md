@@ -12,7 +12,11 @@ falsification: Most of the calls it stops over 20 verdicts are reviewed, safe us
 target_paths:
   - "**/*.py"
 forbid_ast:
-  calls: [eval, exec]
+  calls:
+    - name: eval
+      builtin: true
+    - name: exec
+      builtin: true
 ---
 # No eval or exec
 
@@ -22,8 +26,8 @@ code as text.
 
 `aegis init` seeds this rule into a new workspace so that `aegis check` and the pre-commit
 hook enforce something on day one.
-The match is by call name: a method named `eval` or `exec` (pandas `df.eval()`, PyTorch
-`model.eval()`, SQLModel `session.exec()`) fails the check too. Delete this file if that is wrong
-for your code. Test files are not checked unless `target_paths` names
+Because `builtin: true` is set, only Python's builtin `eval()` and `exec()` (including
+`builtins.eval` and `__builtins__.eval`) fail the check; method calls like pandas
+`df.eval()`, PyTorch `model.eval()`, and SQLModel `session.exec()` are allowed. Test files are not checked unless `target_paths` names
 them. If this repository needs `eval` somewhere, narrow `target_paths` or delete this file.
 Add rules for your own code with `aegis rule create`.

@@ -38,6 +38,9 @@
       "description": "Report whether the rules you were shown helped. The server ties the report to the tree it computes now: with an `aegis check --record` run of exactly that tree it credits the rules it showed you that match the change (your rules_used is not what is credited), and even then only CI on the landing commit makes it count; without one it records a single unwitnessed claim per session and tree that earns nothing. Reports per session are capped.",
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
         "title": "Report Outcome"
       },
       "inputSchema": {
@@ -188,6 +191,9 @@
       "description": "Record a user correction as an unconfirmed suggestion in user scope. Agent suggestions never count toward proposals or debits and never appear in aegis_scan; a suggestion upgrades to W2 only when its quote matches a hook-captured prompt in the same session.",
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
         "title": "Capture Insight"
       },
       "inputSchema": {

@@ -234,6 +234,8 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "unit" / "core" / "test_workspace.py")
     if stem == "server":
         candidates.append(test_dir / "test_mcp_dispatch.py")
+        candidates.append(test_dir / "test_mcp_session_stdio_contract.py")
+        candidates.append(test_dir / "test_mcp_protocol_hygiene.py")
     if stem == "tools":
         candidates.append(test_dir / "test_mcp_tools_contract.py")
     if parent_name == "skills" or stem in ("slots", "skills"):
@@ -247,6 +249,39 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
         candidates.append(test_dir / "test_outcomes.py")
     if parent_name == "hooks":
         candidates.append(test_dir / "test_hooks_lifecycle.py")
+    if parent_name == "formatters" or stem in ("base", "report"):
+        candidates.append(test_dir / "test_cli.py")
+        candidates.append(test_dir / "test_check_sarif.py")
+    if parent_name == "yaml_engine" or stem in ("document", "serializer"):
+        candidates.append(test_dir / "test_yaml_engine_roundtrip.py")
+        candidates.append(test_dir / "test_frontmatter_engine.py")
+    if stem in ("doctor_findings", "doctor_repair", "doctor_render"):
+        candidates.append(test_dir / "test_doctor.py")
+        candidates.append(test_dir / "test_doctor_fix.py")
+    if stem == "init_views":
+        candidates.append(test_dir / "test_init.py")
+        candidates.append(test_dir / "test_init_card.py")
+    if stem == "_version":
+        candidates.append(test_dir / "test_version.py")
+    if stem == "approve":
+        candidates.append(test_dir / "test_human_gate.py")
+        candidates.append(test_dir / "test_f_a1_human_gate_acceptance.py")
+    if stem == "bootstrap":
+        candidates.append(test_dir / "test_hosts_contract.py")
+        candidates.append(test_dir / "test_init_hosts.py")
+    if stem in ("checkrun", "treeid"):
+        candidates.append(test_dir / "test_verified_checks_units.py")
+        candidates.append(test_dir / "test_f_a2_verified_checks_acceptance.py")
+    if stem == "credit":
+        candidates.append(test_dir / "test_f_b2_credit_model_acceptance.py")
+    if stem == "hosts":
+        candidates.append(test_dir / "test_hosts_contract.py")
+        candidates.append(test_dir / "test_init_hosts.py")
+    if stem == "scan_compliance":
+        candidates.append(test_dir / "test_status_compliance.py")
+    if stem == "policy":
+        candidates.append(test_dir / "test_forbid_ast_rules.py")
+        candidates.append(test_dir / "test_forbid_ast_hardening.py")
 
     # 4. Flat root candidates
     candidates.append(test_dir / f"test_{stem}.py")
@@ -266,10 +301,11 @@ def _resolve_canonical_test_candidates(root: Path, source_file: Path) -> list[Pa
                 if cand_domain not in seen:
                     expanded.append(cand_domain)
                     seen.add(cand_domain)
-            cand_integration = test_dir / "integration" / c.name
-            if cand_integration not in seen:
-                expanded.append(cand_integration)
-                seen.add(cand_integration)
+            for subdir in ("integration", "contract"):
+                cand_sub = test_dir / subdir / c.name
+                if cand_sub not in seen:
+                    expanded.append(cand_sub)
+                    seen.add(cand_sub)
 
     return expanded
 
