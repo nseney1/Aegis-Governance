@@ -172,3 +172,34 @@ def test_the_4_1_0_entry_has_a_security_section():
     security = _subsection(_entry("4.1.0"), "Security")
     for phrase in ("guardrails, not a security boundary", "--scope project", "/hooks", "not an identity"):
         assert phrase in security, phrase
+
+
+def test_changelog_top_entry_matches_current_version_and_is_strictly_descending():
+    """The top CHANGELOG release heading must match aegis_core._version.__version__, and all
+    release headings must appear in strictly descending semantic version order with ISO dates."""
+    from aegis_core import _version
+
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    headings = re.findall(r"^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})$", text, re.M)
+    assert headings, "CHANGELOG.md has no dated release headings"
+    assert headings[0][0] == _version.__version__, (
+        f"top CHANGELOG entry is {headings[0][0]!r}, expected current version {_version.__version__!r}"
+    )
+    tuples = [tuple(int(part) for part in ver.split(".")) for ver, _ in headings]
+    for prev_ver, next_ver in zip(tuples, tuples[1:]):
+        assert prev_ver > next_ver, f"CHANGELOG versions out of descending order: {prev_ver} <= {next_ver}"
+
+
+def test_changelog_names_every_registered_cli_command_and_mcp_tool():
+    """Every CLI command and MCP tool in the contract snapshots must be documented in CHANGELOG.md."""
+    import json
+
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    cli_tree = json.loads((ROOT / "tests" / "contract" / "cli_tree.json").read_text(encoding="utf-8"))
+    mcp_tools = json.loads((ROOT / "tests" / "contract" / "mcp_tools.json").read_text(encoding="utf-8"))
+    for entry in cli_tree["registry"]:
+        name = entry["name"]
+        assert f"`aegis {name}" in text or f"`{name}`" in text, f"CLI command {name!r} missing from CHANGELOG.md"
+    for tool in mcp_tools["tools"]:
+        name = tool["name"]
+        assert f"`{name}`" in text or f"`{name}(" in text, f"MCP tool {name!r} missing from CHANGELOG.md"
