@@ -5,7 +5,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from aegis_core import pathlookup
 from aegis_core.errors import NoTestRunnerFoundError
@@ -168,8 +168,82 @@ def discover_test_evidence(target_files: list[str], repo_root: str) -> tuple[lis
     return (all_test_names, "\n\n".join(run_outputs))
 
 
+def run_external_cmd(
+    argv: Sequence[str],
+    cwd: Path | str,
+    env: Mapping[str, str] | None = None,
+    timeout: int | float = 60,
+) -> dict[str, Any]:
+    """Run an external command with shell=False and return structured execution status."""
+    import subprocess
+    import time
+
+    if not argv:
+        return {
+            "returncode": 127,
+            "stdout": "",
+            "stderr": "empty argv",
+            "missing_binary": True,
+            "timed_out": False,
+            "duration_s": 0.0,
+        }
+    t0 = time.perf_counter()
+    try:
+        res = subprocess.run(
+            [str(a) for a in argv],
+            cwd=str(cwd),
+            env=dict(env) if env is not None else None,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            shell=False,
+            check=False,
+        )
+        return {
+            "returncode": res.returncode,
+            "stdout": res.stdout or "",
+            "stderr": res.stderr or "",
+            "missing_binary": False,
+            "timed_out": False,
+            "duration_s": time.perf_counter() - t0,
+        }
+    except FileNotFoundError as exc:
+        return {
+            "returncode": 127,
+            "stdout": "",
+            "stderr": str(exc),
+            "missing_binary": True,
+            "timed_out": False,
+            "duration_s": time.perf_counter() - t0,
+        }
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        err = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        return {
+            "returncode": 124,
+            "stdout": out,
+            "stderr": err,
+            "missing_binary": False,
+            "timed_out": True,
+            "duration_s": time.perf_counter() - t0,
+        }
+    except OSError as exc:
+        return {
+            "returncode": 126,
+            "stdout": "",
+            "stderr": str(exc),
+            "missing_binary": False,
+            "timed_out": False,
+            "duration_s": time.perf_counter() - t0,
+        }
+
+
 __all__ = [
     "NoTestRunnerFoundError",
     "resolve_pytest_cmd",
     "discover_test_evidence",
+    "run_external_cmd",
 ]
+
