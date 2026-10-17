@@ -635,6 +635,100 @@ def check_ci_divergence(trailer: Any, rerun: Mapping[str, Any], second: Optional
     return {"result": "void", "failed": True, "reason": "outcomes still diverge on the same tree after a re-run"}
 
 
+_DEFAULT_SNAPSHOT_RERUN: Optional[Callable[[Any, str, str], Mapping[str, Any]]] = None
+_SNAPSHOT_RUNNER_CODE = (
+    "import json, os, sys\n"
+    "snap, ws, ext = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2]), json.loads(sys.argv[3])\n"
+    "within = lambda p, d: os.path.normcase(os.path.abspath(p)) == os.path.normcase(d) or os.path.normcase(os.path.abspath(p)).startswith(os.path.normcase(d) + os.sep)\n"
+    "sys.path[:] = [snap] + [p for p in (*sys.path, *ext) if p and p != snap and (within(p, snap) or not within(p, ws))]\n"
+    "import pytest\n"
+    "raise SystemExit(pytest.main(sys.argv[4:]))\n"
+)
+
+
+def _builtin_snapshot_rerun(root: Any, commit: str, base_ref: str, *, timeout: float = 120.0) -> Dict[str, Any]:
+    import ast, os, posixpath, shutil, subprocess, sys, tempfile, xml.etree.ElementTree as ET
+    from aegis_core import match, rule_integrity
+    from aegis_core.storage import atomic_write_bytes
+
+    workspace = Path(os.fspath(root)).resolve()
+    top = gitsafe.toplevel(workspace)
+    if top is None:
+        return {"tree": "", "exit": 1}
+    commit_tree = gitsafe.run(["rev-parse", f"{commit}^{{tree}}"], top).stdout.decode("ascii", "replace").strip()
+    base_commit = gitsafe.merge_base(top, base_ref, commit) or gitsafe.resolve_commit(top, base_ref) or commit
+    changed = [p for s, _o, _n, p in gitsafe.diff_entries(top, base_commit, commit) if s != "D"]
+    ls_res = gitsafe.run(["ls-tree", "-r", "-z", "--full-tree", commit], top)
+    if ls_res.returncode != 0:
+        return {"tree": commit_tree, "exit": 1}
+    tree_entries: Dict[str, Tuple[str, str]] = {}
+    for rec in ls_res.stdout.split(b"\0"):
+        meta, _, raw_p = rec.partition(b"\t")
+        flds = meta.split()
+        if len(flds) == 3 and raw_p:
+            mode, kind, oid = (f.decode("ascii", "replace") for f in flds)
+            if kind == "blob" and mode != "120000":
+                tree_entries[os.fsdecode(raw_p)] = (mode, oid)
+    try:
+        blobs = rule_integrity._read_blobs(str(top), {oid for _m, oid in tree_entries.values()})
+    except rule_integrity.IntegrityError:
+        return {"tree": commit_tree, "exit": 1}
+    scratch = Path(tempfile.mkdtemp(prefix="aegis-trailer-rerun-"))
+    try:
+        snapshot = scratch / "snapshot"
+        snapshot.mkdir(parents=True, exist_ok=True)
+        for rel, (mode, oid) in tree_entries.items():
+            norm = posixpath.normpath(match.normalize_path(rel))
+            if not norm or norm in (".", "..") or norm.startswith(("../", "/")) or oid not in blobs:
+                continue
+            target = snapshot.joinpath(*norm.split("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_bytes(target, blobs[oid], mode=0o755 if (mode == "100755" and os.name != "nt") else None)
+        for p in changed:
+            fp = snapshot / p
+            if fp.is_file() and p.endswith(".py"):
+                try:
+                    ast.parse(fp.read_bytes(), filename=p)
+                except (SyntaxError, OSError):
+                    return {"tree": commit_tree, "exit": 1}
+        t_files = sorted(p for p in tree_entries if match.is_test_path(p) and (snapshot / p).is_file())
+        if not t_files:
+            return {"tree": commit_tree, "exit": 0}
+        home, tmp, junit = scratch / "home", scratch / "tmp", scratch / "junit.xml"
+        home.mkdir(mode=0o700)
+        tmp.mkdir(mode=0o700)
+        ext_dirs = [str(Path(p).resolve()) for p in sys.path if p and Path(p).is_dir() and not rule_integrity._within(Path(p).resolve(), workspace)]
+        argv = [
+            sys.executable, "-I", "-S", "-B", "--check-hash-based-pycs", "always",
+            "-c", _SNAPSHOT_RUNNER_CODE, str(snapshot.resolve()), str(workspace), json.dumps(ext_dirs),
+            "-p", "no:cacheprovider", "-o", "addopts=", f"--junitxml={junit}", "--", *t_files,
+        ]
+        env = (
+            {"PATH": rf"{os.environ.get('SystemRoot', r'C:\Windows')}\System32;{os.environ.get('SystemRoot', r'C:\Windows')}",
+             "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"), "HOME": str(home), "USERPROFILE": str(home), "TEMP": str(tmp), "TMP": str(tmp)}
+            if os.name == "nt" else
+            {"PATH": "/usr/bin:/bin", "HOME": str(home), "TMPDIR": str(tmp), "LC_ALL": "C"}
+        )
+        proc = subprocess.run(argv, cwd=str(snapshot), env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, check=False)
+        passed = failed = col_err = 0
+        if junit.is_file():
+            try:
+                for case in ET.parse(junit).getroot().iter("testcase"):
+                    cls, name, err = (case.get("classname") or "").strip(), (case.get("name") or "").strip(), case.find("error")
+                    if err is not None and (not cls or err.get("message") == "collection failure"):
+                        col_err += 1
+                    elif name and (case.find("failure") is not None or err is not None):
+                        failed += 1
+                    elif name and case.find("skipped") is None:
+                        passed += 1
+            except (OSError, ET.ParseError):
+                passed = 0
+        ok = proc.returncode == 0 and passed > 0 and failed == 0 and col_err == 0
+        return {"tree": commit_tree, "exit": 0 if ok else (proc.returncode if proc.returncode != 0 else 1)}
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
 def verify_commit_trailers(
     root: Any, base: str, head: str = "HEAD", *, rerun_fn: Optional[Callable[[str, str], Mapping[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
@@ -652,9 +746,8 @@ def verify_commit_trailers(
     for chk in _of(rows, "check"):
         if isinstance(chk.get("tree"), str):
             checks_by_tree.setdefault(chk["tree"], []).append(chk)
-    eff_rerun: Optional[Callable[[str, str], Mapping[str, Any]]] = rerun_fn
-    if eff_rerun is None and _DEFAULT_SNAPSHOT_RERUN is not None:
-        eff_rerun = lambda c, _t: _DEFAULT_SNAPSHOT_RERUN(root, c, base)
+    snap_runner = _DEFAULT_SNAPSHOT_RERUN or _builtin_snapshot_rerun
+    eff_rerun: Callable[[str, str], Mapping[str, Any]] = rerun_fn or (lambda c, _t: snap_runner(root, c, base))
     results: List[Dict[str, Any]] = []
     for oid in rev.stdout.decode("ascii", "replace").split():
         msg = gitsafe.run(["log", "-1", "--format=%B", oid], top).stdout.decode("utf-8", "replace")
@@ -662,19 +755,18 @@ def verify_commit_trailers(
         trailers = [t for line in msg.splitlines() if (t := parse_trailer(line)) is not None]
         for tr in trailers:
             t_checks = checks_by_tree.get(tr["tree"], [])
-            if eff_rerun is not None:
+            if commit_tree != tr["tree"]:
+                verdict = check_ci_divergence(tr, {"tree": commit_tree, "exit": 1})
+            else:
                 first = eff_rerun(oid, commit_tree)
                 verdict = check_ci_divergence(tr, first)
                 if verdict["result"] == "rerun":
                     verdict = check_ci_divergence(tr, first, eff_rerun(oid, commit_tree))
-            elif commit_tree != tr["tree"]:
-                verdict = check_ci_divergence(tr, {"tree": commit_tree, "exit": 1})
-            else:
-                raise RuntimeError("verify_commit_trailers requires a snapshot rerunner (import aegis_core.checkrun or pass rerun_fn)")
             if verdict["failed"]:
                 for c in t_checks:
                     if isinstance(c.get("id"), str):
                         record_void(root, c["id"], "ci_divergence")
             results.append({"commit": oid, "trailer": tr, **verdict})
     return results
+
 

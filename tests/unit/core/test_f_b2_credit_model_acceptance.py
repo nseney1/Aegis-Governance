@@ -636,3 +636,90 @@ def test_detector_replay_ignores_unmerged_head_and_reconciles_leaked_to_caught_a
     assert fit_2.leaked == 0 and fit_2.caught == 1
 
 
+@needs_git
+def test_trailer_rerun_executes_unchanged_tests_and_works_in_fresh_credit_only_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a commit modifies `src/app.py` (breaking an existing unchanged test) and adds a new passing
+    test file, trailer verification runs all snapshot tests (catching the broken unchanged test) and works
+    in a fresh Python process that imports only `aegis_core.credit`."""
+    import sys
+    from aegis_core import checkrun
+    from tests import helpers_verified as hv
+
+    home = hg.Home(tmp_path / "home")
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(home.path))
+    repo = hg.Repo(tmp_path / "repo", home)
+    repo.write("src/app.py", "def value():\n    return 1\n")
+    repo.write("tests/test_existing.py", "from src.app import value\n\ndef test_existing():\n    assert value() == 1\n")
+    repo.commit("initial")
+
+    # Branch and make a commit that breaks `test_existing.py` (without touching it) and adds `test_new.py`
+    repo.branch("work")
+    repo.write("src/app.py", "def value():\n    return 2\n")
+    repo.write("tests/test_new.py", "def test_new():\n    assert True\n")
+    tree = hv.tree_now(repo.root)
+    repo.commit(f"feat: break existing test while adding passing test\n\n{credit.format_trailer(tree, 0)}")
+
+    # 1. checkrun.rerun_commit_snapshot catches the broken unchanged test
+    rerun_res = checkrun.rerun_commit_snapshot(repo.root, "HEAD", "main")
+    assert rerun_res["tree"] == tree
+    assert rerun_res["exit"] != 0
+
+    # 2. Fresh Python process importing ONLY `aegis_core.credit` verifies trailers without RuntimeError
+    code = (
+        "import json, sys\n"
+        "from aegis_core import credit\n"
+        "assert 'aegis_core.checkrun' not in sys.modules\n"
+        "res = credit.verify_commit_trailers(sys.argv[1], 'main', 'HEAD')\n"
+        "print(json.dumps(res))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code, str(repo.root)],
+        capture_output=True, text=True, check=True,
+    )
+    parsed = json.loads(proc.stdout.strip())
+    assert len(parsed) == 1
+    assert parsed[0]["result"] == "void"
+    assert parsed[0]["failed"] is True
+
+
+@needs_git
+def test_detector_replay_walks_commits_after_merge_and_prefers_ahead_remote_branch(
+    tmp_path: Path,
+) -> None:
+    """`replay_detector_history` detects violations introduced in ordinary commits after a merge commit
+    and prefers `refs/remotes/origin/main` when local `refs/heads/main` is behind."""
+    home = hg.Home(tmp_path / "home")
+    repo = hg.Repo(tmp_path / "repo", home)
+    _write_rule(
+        repo.root,
+        "gate",
+        "no-eval-exec",
+        target_paths=["src/*.py"],
+        forbid_calls=["eval", "exec"],
+    )
+    repo.write("src/app.py", "def f(x):\n    return x + 1\n")
+    repo.commit("initial")
+
+    # Create a harmless merge commit on `main`
+    repo.branch("harmless")
+    repo.write("README.md", "# docs\n")
+    repo.commit("docs: readme")
+    repo.git("checkout", "main")
+    repo.write("NOTES.md", "# notes\n")
+    repo.commit("docs: notes")
+    repo.git("merge", "--no-ff", "harmless", "-m", "Merge branch 'harmless'")
+    merge_oid = repo.git("rev-parse", "HEAD").strip()
+
+    # Introduce an ordinary commit with `eval(x)` after the merge commit
+    repo.write("src/app.py", "def f(x):\n    return eval(x)\n")
+    ahead_oid = repo.commit("feat: ordinary commit with eval after merge")
+
+    # Rewind local `refs/heads/main` to `merge_oid` while `refs/remotes/origin/main` points to `ahead_oid`
+    repo.git("update-ref", "refs/remotes/origin/main", ahead_oid)
+    repo.git("reset", "--hard", merge_oid)
+
+    detections = fitness.replay_detector_history(repo.root)
+    assert any(d["pattern"] == "eval" and d["disposition"] == "leaked" for d in detections)

@@ -411,9 +411,7 @@ def rerun_commit_snapshot(
             run = run_tests(argv, snapshot, _hermetic_env(home, tmp), timeout or 120.0, junit, scratch / "output.txt")
             tests_ok, raw_exit = run.evidence, run.exit
         else:
-            t_files = [p for p in changed if regression.is_test_file(p) and (snapshot / p).is_file()]
-            if not t_files:
-                t_files = [p for p in tree_entries if regression.is_test_file(p) and (snapshot / p).is_file()]
+            t_files = sorted(p for p in tree_entries if regression.is_test_file(p) and (snapshot / p).is_file())
             if t_files:
                 out = regression._run_pytest_in_snapshot(snapshot, t_files, workspace, scratch, timeout or 120.0)
                 tests_ok = out.exit_code == 0 and bool(out.passed_ids) and not out.failed_ids and not out.collection_errors

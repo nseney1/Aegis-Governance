@@ -460,11 +460,15 @@ def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = Non
     if not forbid_rules:
         return []
     target_branch = branch or credit.resolve_protected_branch(root) or "main"
-    target_rev = next(
-        (c for ref in (f"refs/heads/{target_branch}", f"refs/remotes/origin/{target_branch}", target_branch)
-         if (c := gitsafe.resolve_commit(root, ref))),
-        None,
-    )
+    remote_rev = gitsafe.resolve_commit(root, f"refs/remotes/origin/{target_branch}")
+    local_rev = gitsafe.resolve_commit(root, f"refs/heads/{target_branch}") or gitsafe.resolve_commit(root, target_branch)
+    if remote_rev and local_rev:
+        if remote_rev != local_rev and gitsafe.run(["merge-base", "--is-ancestor", remote_rev, local_rev], root).returncode == 0:
+            target_rev: Optional[str] = local_rev
+        else:
+            target_rev = remote_rev
+    else:
+        target_rev = remote_rev or local_rev
     if target_rev is None:
         if branch is not None:
             return []
@@ -488,25 +492,28 @@ def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = Non
 
     findings: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
     merge_commits = [parts for parts in commit_lines if len(parts) >= 3]
-    if merge_commits:
-        for parts in merge_commits:
-            merge_sha, p1, p2 = parts[0], parts[1], parts[2]
-            m_branch = _MERGE_BRANCH_RE.search(commit_subject(merge_sha))
-            b_label = m_branch.group(1) if m_branch else f"{target_branch}:{merge_sha[:8]}"
-            br_res = gitsafe.run(["rev-list", "--reverse", f"{p1}..{p2}"], root)
-            branch_shas = [s.strip() for s in br_res.stdout.decode("utf-8", "replace").splitlines() if s.strip()]
-            base_hits, merge_hits = hits_for(p1), hits_for(merge_sha)
-            for rid, rel, pat in sorted(merge_hits - base_hits):
-                findings[(rid, rel, pat, b_label)] = {"rule": rid, "file": rel, "pattern": pat, "disposition": "leaked", "weight": 1.0, "branch": b_label, "rev": merge_sha}
-            for b_sha in branch_shas:
-                for rid, rel, pat in sorted(hits_for(b_sha) - base_hits):
-                    key = (rid, rel, pat, b_label)
-                    if (rid, rel, pat) not in merge_hits and key not in findings:
-                        findings[key] = {"rule": rid, "file": rel, "pattern": pat, "disposition": "caught", "weight": 0.5, "branch": b_label, "rev": b_sha, "fix_rev": merge_sha}
-    else:
-        shas = [parts[0] for parts in commit_lines]
+    merge_shas = {parts[0] for parts in merge_commits}
+    for parts in merge_commits:
+        merge_sha, p1, p2 = parts[0], parts[1], parts[2]
+        m_branch = _MERGE_BRANCH_RE.search(commit_subject(merge_sha))
+        b_label = m_branch.group(1) if m_branch else f"{target_branch}:{merge_sha[:8]}"
+        br_res = gitsafe.run(["rev-list", "--reverse", f"{p1}..{p2}"], root)
+        branch_shas = [s.strip() for s in br_res.stdout.decode("utf-8", "replace").splitlines() if s.strip()]
+        base_hits, merge_hits = hits_for(p1), hits_for(merge_sha)
+        for rid, rel, pat in sorted(merge_hits - base_hits):
+            findings[(rid, rel, pat, b_label)] = {"rule": rid, "file": rel, "pattern": pat, "disposition": "leaked", "weight": 1.0, "branch": b_label, "rev": merge_sha}
+        for b_sha in branch_shas:
+            for rid, rel, pat in sorted(hits_for(b_sha) - base_hits):
+                key = (rid, rel, pat, b_label)
+                if (rid, rel, pat) not in merge_hits and key not in findings:
+                    findings[key] = {"rule": rid, "file": rel, "pattern": pat, "disposition": "caught", "weight": 0.5, "branch": b_label, "rev": b_sha, "fix_rev": merge_sha}
+    fp_res = gitsafe.run(["rev-list", "--first-parent", "--reverse", target_rev], root)
+    shas = [s.strip() for s in fp_res.stdout.decode("utf-8", "replace").splitlines() if s.strip()] if fp_res.returncode == 0 else [parts[0] for parts in commit_lines]
+    if shas:
         tip_hits = hits_for(shas[-1])
         for idx, sha in enumerate(shas):
+            if sha in merge_shas:
+                continue
             prev_hits = hits_for(shas[idx - 1]) if idx > 0 else set()
             for rid, rel, pat in sorted(hits_for(sha) - prev_hits):
                 key = (rid, rel, pat, target_branch)
