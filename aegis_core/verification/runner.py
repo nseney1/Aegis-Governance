@@ -26,6 +26,22 @@ VerificationResult = ToolEvidence
 
 
 _FORBID_AST_KEYS = ("imports", "calls", "decorators")
+_CALL_SPEC_KEYS = frozenset({"name", "call", "where", "builtin", "unknown"})
+_UNKNOWN_MODES = frozenset({"report", "skip", "flag", "ignore"})
+
+
+def _valid_call_spec(p: object) -> bool:
+    if isinstance(p, str):
+        return bool(p.strip())
+    if not isinstance(p, dict) or not p or not set(p).issubset(_CALL_SPEC_KEYS):
+        return False
+    name = p.get("name") if "name" in p else p.get("call")
+    return (
+        isinstance(name, str) and bool(name.strip())
+        and ("where" not in p or (isinstance(p["where"], dict) and bool(p["where"])))
+        and ("builtin" not in p or isinstance(p["builtin"], bool))
+        and ("unknown" not in p or p["unknown"] in _UNKNOWN_MODES)
+    )
 
 
 def _forbid_ast_spec_error(spec: object) -> Optional[str]:
@@ -42,7 +58,8 @@ def _forbid_ast_spec_error(spec: object) -> Optional[str]:
         return f"unknown forbid_ast key {listed} (allowed: {', '.join(_FORBID_AST_KEYS)})"
     patterns = 0
     for key, value in spec.items():
-        if not isinstance(value, list) or not all(isinstance(p, str) and p.strip() for p in value):
+        check = _valid_call_spec if key == "calls" else (lambda p: isinstance(p, str) and bool(p.strip()))
+        if not isinstance(value, list) or not all(check(p) for p in value):
             return f"forbid_ast.{key} must be a list of non-empty strings, not {type(value).__name__}"
         patterns += len(value)
     return None if patterns else "forbid_ast declares no patterns"
