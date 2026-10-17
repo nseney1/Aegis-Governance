@@ -74,6 +74,14 @@ def _print_text(args: argparse.Namespace, result: Any, rel_path: str) -> None:
     for action in result.applied:
         detail = f" ({action['from_type']} -> {action['to_type']})" if action.get("to_type") else ""
         print(f"  {action['action']} {sanitize_display(action['rule'])}: {action['status']}{detail}")
+    if result.pr is not None:
+        pr_status = result.pr.get("status")
+        if pr_status == "opened" and result.pr.get("url"):
+            print(f"  Opened PR: {result.pr['url']}")
+        elif pr_status == "failed" and result.pr.get("error"):
+            print(f"  ❌ PR creation failed: {result.pr['error']}")
+        elif pr_status == "no_transitions":
+            print("  No decided transitions to open a PR for.")
     if result.refused:
         print(f"  ❌ {result.refused}")
     pending = sum(1 for row in rows if row["suggestion"])
@@ -82,12 +90,12 @@ def _print_text(args: argparse.Namespace, result: Any, rel_path: str) -> None:
         print("Apply the suggestions with: aegis sync --apply")
 
 
-def run_sync(args: argparse.Namespace) -> int:
+def run_sync(args: argparse.Namespace, *, gh_runner: Any = None) -> int:
     from aegis_core.sync import sync
     from aegis_core.workspace.base import Workspace
     from aegis_core.workspace.layout import is_aegis_workspace
 
-    raw_ws = getattr(args, "workspace", None)
+    raw_ws = getattr(args, "workspace", None) or getattr(args, "_root", None)
     if raw_ws and not os.path.exists(raw_ws):
         print(f"Error: workspace path does not exist: {raw_ws}", file=sys.stderr)
         return EXIT_USAGE
@@ -100,22 +108,24 @@ def run_sync(args: argparse.Namespace) -> int:
         print(f"Error: not an Aegis workspace (no .aegis/ in {root}); run aegis init", file=sys.stderr)
         return EXIT_USAGE
 
+    apply_flag = bool(getattr(args, "apply", False))
+    pr_flag = bool(getattr(args, "pr", False))
     try:
-        result = sync(root, apply=args.apply)
+        result = sync(root, apply=apply_flag, pr=pr_flag, gh_runner=gh_runner)
     except (AegisError, RuntimeError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_PROBLEMS
 
     rel_path = result.path.relative_to(root).as_posix()
     failed = [a for a in result.applied if a["status"] not in _APPLIED_OK]
-    rc = EXIT_PROBLEMS if (result.refused or result.derived["errors"] or failed) else EXIT_OK
+    pr_failed = bool(result.pr and result.pr.get("status") == "failed")
+    rc = EXIT_PROBLEMS if (result.refused or result.derived["errors"] or failed or pr_failed) else EXIT_OK
     from aegis_core.credit import claimed_summary
 
     # Unwitnessed aegis_report_outcome claims: their own count, never a rule's evidence.
     claimed = claimed_summary(root)
-    # Both are always set: --apply is this parser's flag, AegisParser.parse_args sets json.
-    if args.json:
-        print(json.dumps({
+    if getattr(args, "json", False):
+        payload: Dict[str, Any] = {
             "status": _status(result),
             "path": rel_path,
             "synced_at": result.derived["synced_at"],
@@ -127,7 +137,10 @@ def run_sync(args: argparse.Namespace) -> int:
             "untargeted": result.derived["untargeted"],
             "ledger": result.derived["ledger"],
             "claimed": claimed,
-        }, indent=2, default=str))
+        }
+        if result.pr is not None:
+            payload["pr"] = result.pr
+        print(json.dumps(payload, indent=2, default=str))
     else:
         _print_text(args, result, rel_path)
         if claimed["claimed"]:
@@ -147,6 +160,10 @@ class SyncCommand(AegisCommand):
         parser.add_argument(
             "--apply", action="store_true",
             help="Apply the suggested promote/demote/archive transitions (moves rule files)",
+        )
+        parser.add_argument(
+            "--pr", action="store_true",
+            help="Apply decided transitions and open a pull request with the evidence report (never auto-merges)",
         )
 
     def execute(self, args: argparse.Namespace) -> int:

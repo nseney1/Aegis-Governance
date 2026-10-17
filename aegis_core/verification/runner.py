@@ -428,7 +428,12 @@ def run_layer1(
                 results.append(_tool_failure("import_guard", filepath, exc))
 
     # ── Declarative Rule-Level forbid_ast ─────────────────────────────
-    from aegis_core.ast.policy import ASTExtractionError, evaluate_forbid_ast, extract_normalized_ast
+    from aegis_core import credit
+    from aegis_core.ast.policy import (
+        ASTExtractionError,
+        evaluate_forbid_ast_with_overrides,
+        extract_normalized_ast,
+    )
 
     try:
         forbid_rules, broken_rules = _discover_forbid_ast_rules(repo_root_str)
@@ -478,9 +483,12 @@ def run_layer1(
                     if norm_ast is None:  # no AST driver for this file type: rule does not apply
                         continue
                     violations: list[str] = []
+                    overrides: list[dict[str, Any]] = []
                     if not isinstance(norm_ast, ASTExtractionError):
                         try:
-                            violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                            violations, overrides = evaluate_forbid_ast_with_overrides(
+                                norm_ast, forbid_spec, rule_id=rule_id
+                            )
                         except ASTExtractionError as exc:  # decorators had to be re-read from disk
                             norm_ast = exc
                 except Exception as exc:
@@ -497,6 +505,17 @@ def run_layer1(
                         )
                     )
                     continue
+                for ov in overrides:
+                    try:
+                        credit.record_override(
+                            repo_root_str,
+                            rule_id,
+                            rel_path,
+                            int(ov["line"]),
+                            reason=str(ov.get("reason") or ""),
+                        )
+                    except Exception:
+                        pass
                 if violations:
                     results.append(
                         VerificationResult(
@@ -732,7 +751,12 @@ def _layer1_on_snapshot(
     A file in ``too_large`` was not read: a forbid_ast gate rule that covers it fails
     closed; otherwise the call_graph and import_guard checks it would get are skipped,
     and passing INDEX_NOTE_TOOL evidence says so."""
-    from aegis_core.ast.policy import ASTExtractionError, evaluate_forbid_ast, extract_normalized_ast
+    from aegis_core import credit
+    from aegis_core.ast.policy import (
+        ASTExtractionError,
+        evaluate_forbid_ast_with_overrides,
+        extract_normalized_ast,
+    )
 
     results: list[ToolEvidence] = []
     checked = [
@@ -809,9 +833,12 @@ def _layer1_on_snapshot(
             tool = f"forbid_ast:{rule.id}"
             failure = norm_ast if isinstance(norm_ast, ASTExtractionError) else None
             violations: list[str] = []
+            overrides: list[dict[str, Any]] = []
             if failure is None:
                 try:
-                    violations = evaluate_forbid_ast(norm_ast, forbid_spec)
+                    violations, overrides = evaluate_forbid_ast_with_overrides(
+                        norm_ast, forbid_spec, rule_id=rule.id
+                    )
                 except ASTExtractionError as exc:  # decorators had to be re-read from the file
                     failure = exc
                 except Exception as exc:
@@ -822,7 +849,19 @@ def _layer1_on_snapshot(
                 results.append(ToolEvidence(
                     tool=tool, target=rel, verdict=False, detail=f"forbid_ast: cannot verify {rel}: {failure.reason}",
                 ))
-            elif violations:
+                continue
+            for ov in overrides:
+                try:
+                    credit.record_override(
+                        repo_root,
+                        rule.id,
+                        rel,
+                        int(ov["line"]),
+                        reason=str(ov.get("reason") or ""),
+                    )
+                except Exception:
+                    pass
+            if violations:
                 results.append(ToolEvidence(tool=tool, target=rel, verdict=False, detail="; ".join(violations)))
     return results
 
