@@ -127,9 +127,8 @@ def test_ci_json_reports_exempted_fix_and_passing_status(
     human, human_pub = hg.keygen(tmp_path / "keys", "human")
     repo = make_repo(tmp_path, signer_pub=human_pub)
     repo.write("src/app.py", "def app(x: int = 1) -> int:\n    return x + 1\n")
-    repo.commit("fix: hotfix without test\n\nAegis-No-Test: verified manually")
-    digest = human_gate.governance_tree_hash(repo.root, "HEAD")
-    repo.commit(f"chore: approve\n\nAegis-Approve: {digest}\n", sign_key=human, allow_empty=True)
+    fix_oid = repo.commit("fix: hotfix without test\n\nAegis-No-Test: verified manually")
+    repo.commit(human_gate.exemption_message(fix_oid, "verified manually"), sign_key=human, allow_empty=True)
 
     rc, out, _err = run_ci(repo, capsys, "--strict", "--format", "json")
     assert rc == 0

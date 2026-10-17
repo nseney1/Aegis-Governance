@@ -49,7 +49,7 @@ def run_rule(args: argparse.Namespace) -> int:
     handlers = {
         "list": _run_list, "create": _run_create, "promote": _run_promote,
         "demote": _run_demote, "archive": _run_archive, "export": _run_export,
-        "import": _run_import, "insight": _run_insight,
+        "import": _run_import, "insight": _run_insight, "adjudicate": _run_adjudicate,
     }
     if action not in handlers:
         print(f"Unknown rule subcommand: {action}", file=sys.stderr)
@@ -722,8 +722,37 @@ class RuleCommand(AegisCommand):
         p_ins_en.add_argument("--excerpts", action="store_true", default=False,
                               help="Also store redacted <=300 char excerpts on correction cues (default: counters/heartbeats only)")
 
+        p_adj = sub.add_parser("adjudicate", parents=[common], help="Record a human adjudication verdict (tp or fp) for a rule")
+        p_adj.add_argument("rule_id", metavar="RULE_ID", help="Rule identifier to adjudicate")
+        p_adj.add_argument("verdict", choices=["tp", "fp"], metavar="VERDICT", help="Adjudication verdict (tp or fp)")
+        p_adj.add_argument("--ref", default=None, help="Optional commit SHA, PR number, or issue reference")
+        p_adj.add_argument("--summary", default=None, help="Optional one-line summary of the adjudicated example")
+        p_adj.add_argument("--file", default=None, help="Optional file path where the rule applied")
+        p_adj.add_argument("--line", type=int, default=None, help="Optional line number in --file")
+        p_adj.add_argument("--session", default=None, help="Optional session identifier")
+        p_adj.add_argument("--repo", default=None, help="Optional repository identifier")
+
     def execute(self, args: argparse.Namespace) -> int:
         return run_rule(args)
+
+
+def _run_adjudicate(args: argparse.Namespace) -> int:
+    from aegis_core import credit
+    root = _resolve_workspace_root(args)
+    try:
+        row = credit.record_adjudication(
+            root, str(args.rule_id), str(args.verdict), adjudicator="human",
+            ref=getattr(args, "ref", None), summary=getattr(args, "summary", None),
+            file=getattr(args, "file", None), line=getattr(args, "line", None),
+            session=getattr(args, "session", None), repo=getattr(args, "repo", None),
+        )
+    except Exception as exc:
+        return _emit_error(args, str(exc))
+    if getattr(args, "json", False):
+        print(json.dumps(row, indent=2))
+    else:
+        print(f"Recorded adjudication ({row['verdict']}) for {row['rule']}")
+    return 0
 
 
 def _normalize_paths_arg(raw_paths: Any) -> Optional[List[str]]:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import json, re, sys
+import json, re
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
@@ -13,19 +13,24 @@ from aegis_core.storage import ledger_locked, read_jsonl
 from aegis_core.telemetry_engine import ledger
 
 __all__ = [
-    "EVENTS", "MAX_REPORT_ROWS_PER_SESSION", "CIUnavailable", "Credit", "GhRestClient",
-    "ReportConflict", "check_ci_divergence", "claimed_summary", "confirm",
-    "confirmed_outcome_rows", "derive", "exposed_rules", "format_trailer", "landed_lookup",
-    "parse_trailer", "passing_check", "read_rows", "record_adjudication", "record_detection",
-    "record_exposure", "record_override", "record_void", "select_ci_run", "submit_report",
+    "EVENTS", "MAX_REPORT_ROWS_PER_SESSION", "CIUnavailable", "Credit", "CreditProjection",
+    "GhRestClient", "ReportConflict", "approval_lookup", "check_ci_divergence", "claimed_summary",
+    "confirm", "confirmed_outcome_rows", "derive", "exposed_rules", "format_trailer",
+    "landed_lookup", "parse_trailer", "passing_check", "project_credits", "read_rows",
+    "record_adjudication", "record_detection", "record_exposure", "record_override",
+    "record_void", "resolve_protected_branch", "select_ci_run", "submit_report",
+    "verify_commit_trailers",
 ]
 EVENTS = ("check", "claimed", "report", "ci", "void", "exposure", "detection", "adjudication", "override")
 MAX_REPORT_ROWS_PER_SESSION = 200
 CI_EVENTS = ("push", "workflow_dispatch", "release")
 CI_FAILED = ("failure", "timed_out", "startup_failure")
+DEFAULT_WORKFLOW = "validate.yml"
 _RESULT = {"success": "tp", "tp": "tp", "pass": "tp", "failure": "fp", "fp": "fp", "fail": "fp", "partial": "trigger"}
 _TRAILER = re.compile(r"\s*Aegis-Check:\s*tree=([0-9a-f]{40,64})\s+exit=(-?\d+)\s*")
 _REV_LIMIT = 5000
+_VERIFIED_CI: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_UNAVAILABLE_CI: Set[Tuple[str, str]] = set()
 
 
 class CIUnavailable(AegisError):
@@ -34,6 +39,13 @@ class CIUnavailable(AegisError):
 
 class ReportConflict(ValueError):
     """An idempotency key was already used by this server session for a different report."""
+
+
+def _canon_root(root: Any) -> str:
+    try:
+        return str(Path(str(root)).resolve())
+    except OSError:
+        return str(root)
 
 
 def _normalize_event_row(row: Mapping[str, Any]) -> Dict[str, Any]:
@@ -45,12 +57,18 @@ def _normalize_event_row(row: Mapping[str, Any]) -> Dict[str, Any]:
     return item
 
 
-def read_rows(root: Any) -> List[Dict[str, Any]]:
+def _read_ledger_events(root: Any) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     try:
-        raw = read_jsonl(ledger.ledger_path(root)).rows
-    except (PathTraversalError, OSError):
-        return []
-    return [_normalize_event_row(r) for r in raw if isinstance(r, dict) and r.get("v") == ledger.LEDGER_VERSION and r.get("event") in EVENTS]
+        res = read_jsonl(ledger.ledger_path(root))
+    except (PathTraversalError, OSError) as exc:
+        return [], str(exc)
+    err = res.error or (f"{len(res.skipped_lines)} unreadable line(s)" if res.skipped_lines else None)
+    rows = [_normalize_event_row(r) for r in res.rows if isinstance(r, dict) and r.get("v") == ledger.LEDGER_VERSION and r.get("event") in EVENTS]
+    return rows, err
+
+
+def read_rows(root: Any) -> List[Dict[str, Any]]:
+    return _read_ledger_events(root)[0]
 
 
 def _of(rows: Iterable[Mapping[str, Any]], event: str) -> List[Mapping[str, Any]]:
@@ -78,7 +96,28 @@ def _workflow_path(run: Mapping[str, Any]) -> str:
     return str(run.get("path") or "").split("@", 1)[0]
 
 
-def select_ci_run(runs: Iterable[Mapping[str, Any]], commit: str, workflow: str) -> Optional[Mapping[str, Any]]:
+def resolve_protected_branch(root: Any) -> Optional[str]:
+    top = gitsafe.toplevel(Path(str(root)))
+    if top is None:
+        return None
+    sym = gitsafe.run(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], top)
+    if sym.returncode == 0:
+        target = sym.stdout.decode("utf-8", "replace").strip()
+        if target.startswith("refs/remotes/origin/"):
+            branch = target[len("refs/remotes/origin/"):].strip()
+            if branch and branch != "HEAD":
+                return branch
+    for cand in ("main", "master"):
+        if gitsafe.resolve_commit(top, f"refs/remotes/origin/{cand}") or gitsafe.resolve_commit(top, f"refs/heads/{cand}"):
+            return cand
+    return None
+
+
+def select_ci_run(
+    runs: Iterable[Mapping[str, Any]], commit: str, workflow: str, *, branch: Optional[str] = "main",
+) -> Optional[Mapping[str, Any]]:
+    if not branch:
+        return None
     wanted = f".github/workflows/{workflow}"
     best, best_key = None, None
     for run in runs:
@@ -86,10 +125,13 @@ def select_ci_run(runs: Iterable[Mapping[str, Any]], commit: str, workflow: str)
             continue
         head = (run.get("head_repository") or {}).get("full_name") if isinstance(run.get("head_repository"), Mapping) else None
         home = (run.get("repository") or {}).get("full_name") if isinstance(run.get("repository"), Mapping) else None
-        if (_workflow_path(run) != wanted or run.get("head_sha") != commit or run.get("event") not in CI_EVENTS
+        run_branch = run.get("head_branch")
+        if (not isinstance(run_branch, str) or not run_branch or run_branch != branch
+                or _workflow_path(run) != wanted or run.get("head_sha") != commit or run.get("event") not in CI_EVENTS
                 or not head or head != home or run.get("conclusion") == "cancelled"):
             continue
-        key = (str(run.get("created_at") or ""), int(run.get("run_attempt") or 0), int(run.get("id") or 0))
+        started = str(run.get("run_started_at") or run.get("updated_at") or run.get("created_at") or "")
+        key = (started, str(run.get("created_at") or ""), int(run.get("run_attempt") or 0), int(run.get("id") or 0))
         if best_key is None or key > best_key:
             best, best_key = run, key
     return best
@@ -126,32 +168,58 @@ class GhRestClient:
         return [r for r in runs if isinstance(r, dict)]
 
 
-def landed_lookup(root: Any, refs: Sequence[str] = ("HEAD",), limit: int = _REV_LIMIT) -> Callable[[str], Optional[str]]:
-    top = gitsafe.toplevel(Path(str(root)))
-    table: Optional[Dict[str, str]] = None
+def _call_landed(landed: Callable[..., Optional[str]], tree: str, head: Optional[str] = None) -> Optional[str]:
+    if isinstance(head, str) and head:
+        try:
+            return landed(tree, head)
+        except TypeError:
+            return landed(tree)
+    return landed(tree)
 
-    def load() -> Dict[str, str]:
-        found: Dict[str, str] = {}
-        resolved = [r for r in refs if top is not None and gitsafe.resolve_commit(top, r)]
-        if top is None or not resolved:
-            return found
+
+def landed_lookup(
+    root: Any, refs: Optional[Sequence[str]] = None, limit: int = _REV_LIMIT,
+) -> Callable[..., Optional[str]]:
+    top = gitsafe.toplevel(Path(str(root)))
+    entries: Optional[List[Tuple[str, str]]] = None
+
+    def load() -> List[Tuple[str, str]]:
+        if top is None:
+            return []
+        if refs is None:
+            branch = resolve_protected_branch(top)
+            target_refs: Sequence[str] = (f"refs/remotes/origin/{branch}", f"refs/heads/{branch}") if branch else ()
+        else:
+            target_refs = refs
+        resolved = [r for r in target_refs if gitsafe.resolve_commit(top, r)]
+        if not resolved:
+            return []
         res = gitsafe.run(["rev-list", f"--max-count={limit}", "--format=%T", *resolved], top)
         if res.returncode != 0:
-            return found
+            return []
+        out: List[Tuple[str, str]] = []
         commit = None
         for line in res.stdout.decode("ascii", "replace").splitlines():
             if line.startswith("commit "):
                 commit = line.split()[1]
             elif commit and line.strip():
-                found[line.strip()], commit = commit, None
-        return found
+                out.append((commit, line.strip()))
+                commit = None
+        return out
 
-    def lookup(tree: str) -> Optional[str]:
-        nonlocal table
-        if table is None:
-            table = load()
-        return table.get(tree)
+    def lookup(tree: str, head: Optional[str] = None) -> Optional[str]:
+        nonlocal entries
+        if entries is None:
+            entries = load()
+        for commit, commit_tree in entries:
+            if commit_tree != tree:
+                continue
+            if head and top is not None and gitsafe.run(["merge-base", "--is-ancestor", head, commit], top).returncode != 0:
+                continue
+            return commit
+        return None
 
+    setattr(lookup, "_aegis_root", _canon_root(root))
     return lookup
 
 
@@ -166,21 +234,14 @@ def _now() -> str:
 def record_exposure(
     root: Any, host: Optional[str], session: Optional[str], rules: Iterable[str], *,
     paths: Optional[Iterable[str]] = None, rev: Optional[str] = None, scope_basis: Optional[str] = None,
-    heartbeat: Optional[bool] = None, ts: Optional[str] = None, persist: Optional[bool] = None,
+    heartbeat: Optional[bool] = None, ts: Optional[str] = None, persist: bool = True,
 ) -> List[Dict[str, Any]]:
     rule_list = [r for r in dict.fromkeys(rules) if isinstance(r, str) and r]
     key = (str(root), host or "", session or "")
     if key not in _EXPOSED and len(_EXPOSED) >= _MAX_EXPOSED_SESSIONS:
         _EXPOSED.pop(next(iter(_EXPOSED)))
     _EXPOSED.setdefault(key, set()).update(rule_list)
-    if persist is None:
-        if any(v is not None for v in (paths, rev, scope_basis, heartbeat, ts)):
-            should_persist = True
-        else:
-            should_persist = (sys._getframe(1).f_code.co_name if hasattr(sys, "_getframe") else "") != "_record_exposure"
-    else:
-        should_persist = bool(persist)
-    if not should_persist or not rule_list:
+    if not persist or not rule_list:
         return []
     stamp, s_id, h_id = ts or _now(), session or "", host or ""
     path_list = [str(p) for p in (paths or ()) if isinstance(p, str)]
@@ -204,7 +265,15 @@ def record_exposure(
 
 
 def exposed_rules(root: Any, host: Optional[str], session: Optional[str]) -> Set[str]:
-    return set(_EXPOSED.get((str(root), host or "", session or ""), ()))
+    h_id, s_id = host or "", session or ""
+    found = set(_EXPOSED.get((str(root), h_id, s_id), ()))
+    if s_id:
+        for row in _of(read_rows(root), "exposure"):
+            if str(row.get("session") or "") == s_id and str(row.get("host") or "") == h_id:
+                rule_id = row.get("rule") or row.get("for_rule")
+                if isinstance(rule_id, str) and rule_id:
+                    found.add(rule_id)
+    return found
 
 
 def record_detection(
@@ -268,34 +337,49 @@ def record_void(root: Any, check_id: str, reason: str) -> Dict[str, Any]:
         return ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "void", "check": check_id, "reason": reason}])[0]
 
 
-def confirm(root: Any, *, client: Any, workflow: str, landed: Optional[Callable[[str], Optional[str]]] = None) -> Dict[str, Any]:
+def confirm(
+    root: Any, *, client: Any, workflow: str = DEFAULT_WORKFLOW,
+    landed: Optional[Callable[..., Optional[str]]] = None, branch: Optional[str] = None,
+) -> Dict[str, Any]:
+    c_root = _canon_root(root)
     rows, look = read_rows(root), landed or landed_lookup(root)
+    if landed is not None:
+        try:
+            setattr(landed, "_aegis_root", c_root)
+        except AttributeError:
+            pass
+    target_branch = branch if branch is not None else resolve_protected_branch(root)
     voided_checks = {r.get("check") for r in _of(rows, "void")}
-    known = {str(r.get("commit")): str(r.get("ci_conclusion")) for r in _of(rows, "ci")}
+    latest_ci = {str(r.get("commit")): (str(r.get("ci_conclusion")), r.get("run_id"), r.get("ci_run_attempt")) for r in _of(rows, "ci")}
     by_id = {r["id"]: r for r in _of(rows, "check") if isinstance(r.get("id"), str)}
     summary: Dict[str, Any] = {"asked": 0, "confirmed": 0, "voided": 0, "errors": []}
     commits: Dict[str, List[str]] = {}
     for check_id in sorted({r.get("check") for r in _of(rows, "report")}):
         if check_id not in voided_checks and check_id in by_id:
-            commit = look(str(by_id[check_id].get("tree")))
-            if commit and known.get(commit) != "success":
+            chk = by_id[check_id]
+            commit = _call_landed(look, str(chk.get("tree")), chk.get("head"))
+            if commit:
                 commits.setdefault(commit, []).append(check_id)
     for commit, checks in commits.items():
         try:
             runs = client.runs_for(commit)
         except CIUnavailable as exc:
+            _VERIFIED_CI.pop((c_root, commit), None)
+            _UNAVAILABLE_CI.add((c_root, commit))
             summary["errors"].append(str(exc))
             continue
+        _UNAVAILABLE_CI.discard((c_root, commit))
         summary["asked"] += 1
-        run = select_ci_run(runs, commit, workflow)
+        run = select_ci_run(runs, commit, workflow, branch=target_branch)
         conclusion = ci_conclusion(run)
-        if known.get(commit) != conclusion:
-            ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "ci", "commit": commit, "workflow": workflow, "ci_conclusion": conclusion, "run_id": run.get("id") if run else None, "ci_run_attempt": run.get("run_attempt") if run else None}])
+        run_id = run.get("id") if run else None
+        run_attempt = run.get("run_attempt") if run else None
+        _VERIFIED_CI[(c_root, commit)] = {"conclusion": conclusion, "workflow": workflow, "branch": target_branch, "run_id": run_id, "run_attempt": run_attempt}
+        if latest_ci.get(commit) != (conclusion, run_id, run_attempt):
+            ledger.append_rows(root, [{"v": ledger.LEDGER_VERSION, "ts": _now(), "event": "ci", "commit": commit, "workflow": workflow, "ci_conclusion": conclusion, "run_id": run_id, "ci_run_attempt": run_attempt}])
         if conclusion == "success":
             summary["confirmed"] += len(checks)
         elif conclusion in CI_FAILED:
-            for check_id in checks:
-                record_void(root, check_id, "ci_failed")
             summary["voided"] += len(checks)
     return summary
 
@@ -351,12 +435,14 @@ class Credit:
 
 
 def derive(
-    rows: Sequence[Mapping[str, Any]], *, landed: Callable[[str], Optional[str]],
+    rows: Sequence[Mapping[str, Any]], *, landed: Callable[..., Optional[str]],
     approved: Optional[Callable[[str, Sequence[str]], bool]] = None,
+    verified_ci: Optional[Mapping[str, str]] = None,
 ) -> List[Credit]:
     checks = {r["id"]: r for r in _of(rows, "check") if isinstance(r.get("id"), str)}
     voids = {str(r.get("check")): str(r.get("reason") or "voided") for r in _of(rows, "void")}
-    ci = {str(r.get("commit")): str(r.get("ci_conclusion")) for r in _of(rows, "ci")}
+    ci_rows = {str(r.get("commit")): r for r in _of(rows, "ci") if r.get("commit")}
+    c_root = getattr(landed, "_aegis_root", None)
     flaky, credits, seen = flaky_keys(rows), [], set()
     for report in _of(rows, "report"):
         identity = (str(report.get("check")), str(report.get("for_rule")))
@@ -365,15 +451,29 @@ def derive(
             continue
         seen.add(identity)
         tree = str(check.get("tree"))
-        commit = landed(tree)
-        conclusion = ci.get(commit) if commit else None
+        commit = _call_landed(landed, tree, check.get("head"))
+        ci_row = ci_rows.get(commit) if commit else None
+        ledger_conc = str(ci_row.get("ci_conclusion")) if ci_row is not None else None
+        unavail = bool(commit and c_root and (c_root, commit) in _UNAVAILABLE_CI)
+        v_conc: Optional[str] = None
+        if commit and not unavail:
+            if verified_ci is not None and commit in verified_ci:
+                v_conc = verified_ci[commit]
+            elif c_root and (c_root, commit) in _VERIFIED_CI:
+                v_entry = _VERIFIED_CI[(c_root, commit)]
+                if ci_row is None or (ci_row.get("run_id") == v_entry.get("run_id") and ci_row.get("ci_run_attempt") == v_entry.get("run_attempt")):
+                    v_conc = str(v_entry.get("conclusion") or "")
         reason = ""
         if identity[0] in voids:
             state, reason = "voided", voids[identity[0]]
-        elif commit and conclusion in CI_FAILED:
+        elif commit and unavail:
+            state, reason = "landed", "ci_unavailable"
+        elif commit and (v_conc in CI_FAILED or (v_conc is None and ledger_conc in CI_FAILED)):
             state, reason = "voided", "ci_failed"
-        elif commit and conclusion == "success":
+        elif commit and v_conc == "success" and ledger_conc == "success":
             state = "confirmed"
+        elif commit and ledger_conc == "success" and v_conc != "success":
+            state, reason = "landed", "unverified_ci"
         else:
             state = "landed" if commit else "witnessed"
         is_flaky = (check.get("tree"), check.get("cmd_digest"), check.get("env_class")) in flaky
@@ -388,7 +488,100 @@ def derive(
 
 
 def confirmed_outcome_rows(credits: Iterable[Credit]) -> List[Dict[str, Any]]:
-    return [{"v": ledger.LEDGER_VERSION, "ts": c.ts, "rule": c.rule, "outcome": c.result, "source": "ci", "key": f"credit:{c.check}", "host": None, "session": None} for c in credits if c.counts]
+    seen: Set[Tuple[str, str]] = set()
+    out: List[Dict[str, Any]] = []
+    for c in credits:
+        if c.counts and (c.check, c.rule) not in seen:
+            seen.add((c.check, c.rule))
+            out.append({"v": ledger.LEDGER_VERSION, "ts": c.ts, "rule": c.rule, "outcome": c.result, "source": "ci", "key": f"credit:{c.check}:{c.rule}", "host": None, "session": None})
+    return out
+
+
+def approval_lookup(
+    root: Any, rows: Sequence[Mapping[str, Any]], landed: Optional[Callable[..., Optional[str]]] = None,
+) -> Callable[[str, Sequence[str]], bool]:
+    top = gitsafe.toplevel(Path(str(root)))
+    look = landed or landed_lookup(root)
+    checks = {r["id"]: r for r in _of(rows, "check") if isinstance(r.get("id"), str)}
+    cache: Dict[str, bool] = {}
+
+    def is_approved(check_id: str, _categories: Sequence[str] = ()) -> bool:
+        if check_id in cache:
+            return cache[check_id]
+        check = checks.get(check_id)
+        if top is None or check is None:
+            cache[check_id] = False
+            return False
+        commit = _call_landed(look, str(check.get("tree") or ""), check.get("head"))
+        base_ref = str(check.get("base") or "") or gitsafe.resolve_base_ref(top) or "main"
+        if not commit:
+            cache[check_id] = False
+            return False
+        try:
+            gov_hash = human_gate.governance_tree_hash(top, commit)
+            p_branch = resolve_protected_branch(top)
+            tips = [commit] + ([f"refs/heads/{p_branch}", f"refs/remotes/origin/{p_branch}"] if p_branch else []) + ["HEAD"]
+            ok = any(
+                (app := human_gate.find_approval(top, tip, base_ref, governance_hash=gov_hash)) is not None and app.valid
+                for tip in dict.fromkeys(tips)
+            )
+        except Exception:
+            ok = False
+        cache[check_id] = ok
+        return ok
+
+    return is_approved
+
+
+@dataclass(frozen=True)
+class CreditProjection:
+    credits: Tuple[Credit, ...]
+    outcome_rows: Tuple[Dict[str, Any], ...]
+    available: bool = True
+    error: Optional[str] = None
+
+
+def project_credits(
+    root: Any, *, view: Any = None, client: Any = None, workflow: str = DEFAULT_WORKFLOW,
+    attestation_runner: Optional[Callable[..., Any]] = None,
+    landed: Optional[Callable[..., Optional[str]]] = None,
+    approved: Optional[Callable[[str, Sequence[str]], bool]] = None,
+) -> CreditProjection:
+    from aegis_core import release_verify
+    c_root = _canon_root(root)
+    look = landed or landed_lookup(root)
+    if landed is not None:
+        try:
+            setattr(landed, "_aegis_root", c_root)
+        except AttributeError:
+            pass
+    p_branch = resolve_protected_branch(root)
+    if client is not None:
+        confirm(root, client=client, workflow=workflow, landed=look, branch=p_branch)
+    rows, read_err = _read_ledger_events(root)
+    view_err = getattr(view, "incomplete", None) if view is not None else None
+    err = view_err or read_err
+    if err:
+        return CreditProjection((), (), available=False, error=str(err))
+    v_map: Dict[str, str] = {}
+    if attestation_runner is not None and p_branch:
+        for ci_row in _of(rows, "ci"):
+            commit = str(ci_row.get("commit") or "")
+            if not commit or (c_root, commit) in _UNAVAILABLE_CI or (c_root, commit) in _VERIFIED_CI:
+                continue
+            if ci_row.get("ci_conclusion") == "success":
+                rid, ratt = ci_row.get("run_id"), ci_row.get("ci_run_attempt")
+                exp_run = f"{rid}/{ratt}" if rid is not None and ratt is not None else None
+                wf = str(ci_row.get("workflow") or workflow)
+                rep = release_verify.verify_release(
+                    root, commit, run=attestation_runner,
+                    source_ref=f"refs/heads/{p_branch}", workflow=f".github/workflows/{wf}", expected_run=exp_run,
+                )
+                if rep.verified:
+                    v_map[commit] = "success"
+    app_fn = approved or approval_lookup(root, rows, landed=look)
+    derived = derive(rows, landed=look, approved=app_fn, verified_ci=v_map or None)
+    return CreditProjection(tuple(derived), tuple(confirmed_outcome_rows(derived)), available=True, error=None)
 
 
 def claimed_summary(root: Any) -> Dict[str, Any]:
@@ -421,3 +614,49 @@ def check_ci_divergence(trailer: Any, rerun: Mapping[str, Any], second: Optional
     if again.get("tree") == given["tree"] and (again.get("exit") == 0) == claimed_pass:
         return {"result": "agree", "failed": False, "reason": "flaky: the re-run agrees with the trailer"}
     return {"result": "void", "failed": True, "reason": "outcomes still diverge on the same tree after a re-run"}
+
+
+def verify_commit_trailers(
+    root: Any, base: str, head: str = "HEAD", *, rerun_fn: Optional[Callable[[str, str], Mapping[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    top = gitsafe.toplevel(Path(str(root)))
+    if top is None:
+        return []
+    mb, tip = gitsafe.merge_base(top, base, head), gitsafe.resolve_commit(top, head)
+    if not mb or not tip:
+        return []
+    rev = gitsafe.run(["rev-list", "--reverse", f"{mb}..{tip}"], top)
+    if rev.returncode != 0:
+        return []
+    rows = read_rows(root)
+    checks_by_tree: Dict[str, List[Mapping[str, Any]]] = {}
+    for chk in _of(rows, "check"):
+        if isinstance(chk.get("tree"), str):
+            checks_by_tree.setdefault(chk["tree"], []).append(chk)
+    results: List[Dict[str, Any]] = []
+    for oid in rev.stdout.decode("ascii", "replace").split():
+        msg = gitsafe.run(["log", "-1", "--format=%B", oid], top).stdout.decode("utf-8", "replace")
+        commit_tree = gitsafe.run(["rev-parse", f"{oid}^{{tree}}"], top).stdout.decode("ascii", "replace").strip()
+        trailers = [t for line in msg.splitlines() if (t := parse_trailer(line)) is not None]
+        for tr in trailers:
+            t_checks = checks_by_tree.get(tr["tree"], [])
+            if rerun_fn is not None:
+                first = rerun_fn(oid, commit_tree)
+                verdict = check_ci_divergence(tr, first)
+                if verdict["result"] == "rerun":
+                    verdict = check_ci_divergence(tr, first, rerun_fn(oid, commit_tree))
+            elif commit_tree != tr["tree"]:
+                verdict = check_ci_divergence(tr, {"tree": commit_tree, "exit": 0})
+            elif t_checks:
+                exits = [{"tree": tr["tree"], "exit": int(c.get("exit", 0 if c.get("passed") else 1))} for c in t_checks]
+                first = exits[0]
+                verdict = check_ci_divergence(tr, first, exits[1] if len(exits) > 1 else exits[0])
+            else:
+                verdict = check_ci_divergence(tr, {"tree": commit_tree, "exit": tr["exit"]})
+            if verdict["failed"]:
+                for c in t_checks:
+                    if isinstance(c.get("id"), str):
+                        record_void(root, c["id"], "ci_divergence")
+            results.append({"commit": oid, "trailer": tr, **verdict})
+    return results
+

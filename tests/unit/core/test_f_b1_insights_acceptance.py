@@ -4,7 +4,7 @@ Covers the §9 T8 acceptance criteria:
 1. Redaction of secrets, PII, paths, IPs, and high-entropy tokens + 300-char cap + benign identifier preservation.
 2. Correction-cue detection precision/recall and user-scope hook storage (heartbeat vs cue-gated insight).
 3. 'Agent insights don't count': MCP aegis_capture_insight suggestions do not count toward proposals/debits and never enter aegis_scan; upgraded to W2 only when substring of hook prompt in same hs.
-4. Keyed hs pseudonymization (HMAC-SHA256 with ~/.aegis/link.key, mode 0600, O_EXCL, 32 random bytes).
+4. Keyed hs pseudonymization (HMAC-SHA256 with ~/.aegis/link.key, POSIX mode 0600, O_EXCL, 32 random bytes).
 5. Stdlib TF-IDF top-3 neighbour clustering, exposure-joined rule matching, and rejected-cluster cooldown (>= 2 new insights).
 6. Closed-template proposals in .aegis/proposals/<id>.md (never loaded by load_rules, no verbatim W0/W2 text) and post-activation recurrence measurement over heartbeat-alive sessions (burst collapse, 95% UCB, >= 3 alarm, per-rev reset).
 """
@@ -579,3 +579,240 @@ def test_closed_template_proposals_and_recurrence_alarm(tmp_path: Path, monkeypa
     rec_reset = measure_recurrence(repo, "trap-validate-rmtree", home=home, reset_on_rev_change=True)
     assert rec_reset["recurrences"] == 0
     assert rec_reset["alarm"] is False
+
+
+def test_same_rule_dissimilar_insights_stay_separate_through_rejection_and_resurfacing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    repo = _init_git_repo(tmp_path / "repo")
+
+    _write_rule(
+        repo,
+        "trap-broad-security",
+        ["src/*.py"],
+        "Never invoke subprocess with shell=True command execution and never call pickle.loads on untrusted socket payloads.",
+    )
+
+    ins_shell = add_insight(
+        repo,
+        "Stop invoking subprocess with shell=True command execution",
+        paths=["src/app.py"],
+        host="claude-code",
+        session="sess-shell-1",
+        home=home,
+    )
+    ins_pickle = add_insight(
+        repo,
+        "Never call pickle.loads on untrusted socket payload bytes",
+        paths=["src/app.py"],
+        host="claude-code",
+        session="sess-pickle-1",
+        home=home,
+    )
+
+    rev = review_insights(repo, home=home)
+    clusters = rev["clusters"]
+    assert len(clusters) == 2
+    assert {c["matched_rule"] for c in clusters} == {"trap-broad-security"}
+    assert len({c["cluster_id"] for c in clusters}) == 2
+
+    cluster_shell = next(c for c in clusters if ins_shell["id"] in c["insight_ids"])
+    cluster_pickle = next(c for c in clusters if ins_pickle["id"] in c["insight_ids"])
+    assert cluster_shell["cluster_id"] != cluster_pickle["cluster_id"]
+
+    # Reject cluster 1 (shell) -> cluster 1 is suppressed while cluster 2 (pickle) remains active
+    record_decision(
+        repo,
+        cluster_id=cluster_shell["cluster_id"],
+        decision="reject",
+        insight_ids=cluster_shell["insight_ids"],
+        reason="Handled by separate lint check",
+        home=home,
+    )
+
+    rev_after_reject = review_insights(repo, home=home)
+    active_ids_after_reject = [c["cluster_id"] for c in rev_after_reject["clusters"]]
+    assert cluster_pickle["cluster_id"] in active_ids_after_reject
+    assert cluster_shell["cluster_id"] not in active_ids_after_reject
+    assert len(rev_after_reject["clusters"]) == 1
+    assert len(rev_after_reject["suppressed_clusters"]) == 1
+
+    # Add 2 more insights similar to cluster 1 -> cluster 1 resurfaces alongside cluster 2
+    add_insight(
+        repo,
+        "Do not invoke subprocess with shell=True command execution",
+        paths=["src/app.py"],
+        host="claude-code",
+        session="sess-shell-2",
+        home=home,
+    )
+    add_insight(
+        repo,
+        "Avoid invoking subprocess with shell=True command execution",
+        paths=["src/app.py"],
+        host="claude-code",
+        session="sess-shell-3",
+        home=home,
+    )
+
+    rev_resurfaced = review_insights(repo, home=home)
+    assert len(rev_resurfaced["clusters"]) == 2
+    resurfaced_shell = next(c for c in rev_resurfaced["clusters"] if ins_shell["id"] in c["insight_ids"])
+    resurfaced_pickle = next(c for c in rev_resurfaced["clusters"] if ins_pickle["id"] in c["insight_ids"])
+    assert len(resurfaced_shell["insight_ids"]) == 3
+    assert len(resurfaced_pickle["insight_ids"]) == 1
+
+
+def test_recurrence_reports_insufficient_session_identity_when_hs_is_missing_and_never_inflates_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    repo = _init_git_repo(tmp_path / "repo")
+
+    _write_rule(
+        repo,
+        "trap-validate-rmtree",
+        ["src/*.py"],
+        "Always check path confinement before recursive directory removal.",
+    )
+
+    # Emit 10 heartbeats without session_id (missing hs)
+    for _ in range(10):
+        record_hook_prompt(
+            repo,
+            "claude-code",
+            {"prompt": "Please run the unit tests.", "cwd": str(repo)},
+            home=home,
+        )
+
+    rec_missing = measure_recurrence(repo, "trap-validate-rmtree", home=home)
+    assert rec_missing["status"] == "insufficient_session_identity"
+    assert rec_missing["sessions"] == 0
+    assert rec_missing["unidentified_heartbeats"] == 10
+    assert rec_missing["alarm"] is False
+
+    # Now add 2 identified sessions (hs present) -> sessions must be 2, not 12
+    for s_idx in (1, 2):
+        record_hook_prompt(
+            repo,
+            "claude-code",
+            {"prompt": "Please run the unit tests.", "session_id": f"identified-sess-{s_idx}", "cwd": str(repo)},
+            home=home,
+        )
+
+    rec_mixed = measure_recurrence(repo, "trap-validate-rmtree", home=home)
+    assert rec_mixed["sessions"] == 2
+    assert rec_mixed["unidentified_heartbeats"] == 10
+    assert rec_mixed["status"] == "ok"
+
+
+def test_insights_file_created_with_0600_mode_before_first_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    repo = _init_git_repo(tmp_path / "repo")
+    store = insights_path(repo, home=home)
+
+    real_open = os.open
+    real_write = os.write
+    open_modes: list[int] = []
+    write_modes: list[int] = []
+    tracked_fds: set[int] = set()
+
+    def spy_open(path: Any, flags: int, mode: int = 0o777, *args: Any, **kwargs: Any) -> int:
+        fd = real_open(path, flags, mode, *args, **kwargs)
+        if Path(str(path)) == store:
+            open_modes.append(stat.S_IMODE(mode))
+            tracked_fds.add(fd)
+        return fd
+
+    def spy_write(fd: int, data: Any) -> int:
+        if fd in tracked_fds and os.name == "posix":
+            write_modes.append(stat.S_IMODE(os.fstat(fd).st_mode))
+        return real_write(fd, data)
+
+    monkeypatch.setattr(os, "open", spy_open)
+    monkeypatch.setattr(os, "write", spy_write)
+
+    saved_umask = os.umask(0o022) if os.name == "posix" else None
+    try:
+        add_insight(
+            repo,
+            "Never leave new user insight files world-readable during write.",
+            paths=["src/app.py"],
+            host="claude-code",
+            session="sess-mode-1",
+            home=home,
+        )
+    finally:
+        if saved_umask is not None:
+            os.umask(saved_umask)
+
+    assert open_modes == [0o600]
+    if os.name == "posix":
+        assert write_modes and all(m == 0o600 for m in write_modes)
+        assert stat.S_IMODE(store.stat().st_mode) == 0o600
+
+
+def test_ordinary_mcp_aegis_scan_records_exposure_for_review_insights_without_outcome_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from aegis_core import credit
+    from aegis_mcp.tools import execute_tool
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    repo = _init_git_repo(tmp_path / "repo")
+
+    _write_rule(
+        repo,
+        "trap-no-shell-true",
+        ["src/*.py"],
+        "Never pass shell=True to subprocess calls in src modules.",
+    )
+
+    scan_res = execute_tool(
+        "aegis_scan",
+        {
+            "workspace": str(repo),
+            "files": ["src/app.py"],
+            "_host": "claude-code",
+            "_session": "session-exposed-1",
+        },
+    )
+    assert scan_res.get("status") != "FAIL"
+    assert ledger.read(repo).rows == []
+
+    add_insight(
+        repo,
+        "Do not pass shell=True to subprocess calls in src/app.py",
+        paths=["src/app.py"],
+        host="claude-code",
+        session="session-exposed-1",
+        home=home,
+    )
+
+    rev_in_mem = review_insights(repo, home=home)
+    assert len(rev_in_mem["clusters"]) == 1
+    assert rev_in_mem["clusters"][0]["matched_rule"] == "trap-no-shell-true"
+    assert rev_in_mem["clusters"][0]["match_status"] == "exposed_and_ignored"
+
+    # Simulate a fresh CLI process where in-memory _EXPOSED is empty: persisted exposure still matches
+    credit._EXPOSED.clear()
+    rev_persisted = review_insights(repo, home=home)
+    assert len(rev_persisted["clusters"]) == 1
+    assert rev_persisted["clusters"][0]["matched_rule"] == "trap-no-shell-true"
+    assert rev_persisted["clusters"][0]["match_status"] == "exposed_and_ignored"
+

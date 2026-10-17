@@ -160,6 +160,8 @@ class Fitness:
     days_span: float = 0.0
     samples: Tuple[Dict[str, Any], ...] = ()
     suggestion: Optional[str] = None
+    evidence_available: bool = True
+    evidence_error: Optional[str] = None
 
     @property
     def verdicts(self) -> float:
@@ -167,6 +169,8 @@ class Fitness:
 
     @property
     def status_label(self) -> Optional[str]:
+        if not self.evidence_available:
+            return "evidence unavailable"
         n = self.adjudicated_n if self.adjudicated_n > 0 else int(self.verdicts)
         if self.state == "untestable":
             return "untestable (insufficient trigger volume)"
@@ -183,6 +187,7 @@ def compute(
     epsilon: float = DEFAULT_ARCHIVE_EPSILON, rule_type: str = "trap", pinned: bool = False, contested: int = 0,
     caught: int = 0, leaked: int = 0, adjudicated_tp: int = 0, adjudicated_fp: int = 0, sessions_count: int = 0,
     repos_count: int = 0, days_span: float = 0.0, samples: Sequence[Mapping[str, Any]] = (), silence_lr: float = 1.0,
+    evidence_available: bool = True, evidence_error: Optional[str] = None,
 ) -> Fitness:
     base_tp, base_fp = _num(totals.get("tp", 0) or 0), _num(totals.get("fp", 0) or 0)
     adj_n = int(adjudicated_tp) + int(adjudicated_fp)
@@ -216,7 +221,9 @@ def compute(
     else:
         promote_ready = bool(rule_type == "trap" and n >= 20 and score >= 0.85)
     suggestion: Optional[str] = None
-    if mde is not None and mde > MDE_UNTESTABLE_THRESHOLD:
+    if not evidence_available:
+        state, suggestion = "evidence_unavailable", None
+    elif mde is not None and mde > MDE_UNTESTABLE_THRESHOLD:
         state = "untestable"
     elif demote_ready:
         state, suggestion = "decided", ("demote" if rule_type in ("gate", "invariant") else "archive")
@@ -236,6 +243,7 @@ def compute(
         decay_factor=round(combined_decay, 6), effective_weight=effective_weight, archive_candidate=archive_candidate,
         silence_lr=round(float(silence_lr), 6), sessions_count=int(sessions_count), repos_count=int(repos_count),
         days_span=round(float(days_span), 2), samples=tuple(dict(s) for s in list(samples)[:3]), suggestion=suggestion,
+        evidence_available=evidence_available, evidence_error=evidence_error,
     )
 
 
@@ -251,7 +259,7 @@ def _read_session_expiry_config(workspace: Any) -> Tuple[float, float]:
                 half_life = float(exp["half_life_sessions"])
             if isinstance(exp.get("epsilon"), (int, float)) and exp["epsilon"] > 0:
                 epsilon = float(exp["epsilon"])
-    except Exception:
+    except (OSError, ValueError):
         pass
     return half_life, epsilon
 
@@ -275,8 +283,11 @@ def _extract_rule_trigger_rate(rule: Any) -> Optional[float]:
     return None
 
 
-def _collect_t4_events_for_rules(workspace: Any, rules: Sequence[Any], now: Optional[datetime] = None) -> Dict[str, Dict[str, Any]]:
+def _collect_t4_events_for_rules(
+    workspace: Any, rules: Sequence[Any], now: Optional[datetime] = None, *, proj_credits: Any = None,
+) -> Dict[str, Dict[str, Any]]:
     from aegis_core import credit
+    from aegis_core.errors import PathTraversalError
     from aegis_core.storage import read_jsonl
     from aegis_core.telemetry_engine import ledger
     rule_map = {r.id: r for r in rules}
@@ -286,15 +297,10 @@ def _collect_t4_events_for_rules(workspace: Any, rules: Sequence[Any], now: Opti
     }
     try:
         raw_rows = read_jsonl(ledger.ledger_path(workspace)).rows
-    except Exception:
+    except (PathTraversalError, OSError):
         return info
-    event_rows = [credit._normalize_event_row(r) for r in raw_rows if isinstance(r, dict) and r.get("v") == ledger.LEDGER_VERSION and r.get("event") in credit.EVENTS]
-    confirmed_checks: Set[Tuple[str, str]] = set()
-    if any(r.get("event") == "ci" for r in event_rows):
-        try:
-            confirmed_checks = {(c.check, c.rule) for c in credit.derive(event_rows, landed=credit.landed_lookup(workspace)) if c.counts and c.result == "tp"}
-        except Exception:
-            pass
+    proj = proj_credits if proj_credits is not None else credit.project_credits(workspace)
+    confirmed_checks = {(c.check, c.rule) for c in proj.credits if c.counts and c.result == "tp"}
     for raw in raw_rows:
         if not isinstance(raw, dict):
             continue
@@ -307,6 +313,8 @@ def _collect_t4_events_for_rules(workspace: Any, rules: Sequence[Any], now: Opti
                 b["post_reinforce_exposures"] = {}
         elif ev == "report" and (str(raw.get("check")), rid) in confirmed_checks:
             b["post_reinforce_exposures"] = {}
+            if isinstance(ts, str) and ts and (b["last_ts"] is None or ts > b["last_ts"]):
+                b["last_ts"] = ts
         elif ev == "adjudication":
             verdict = raw.get("verdict")
             if verdict == "tp":
@@ -354,6 +362,7 @@ def _collect_t4_events_for_rules(workspace: Any, rules: Sequence[Any], now: Opti
 
 
 def for_rules(workspace: Any, rules: Iterable[Any], now: Optional[datetime] = None, view: Any = None) -> Dict[str, Fitness]:
+    from aegis_core import credit
     from aegis_core.config import ConfigError, RepoConfig
     from aegis_core.telemetry_engine import ledger
     rule_list = list(rules)
@@ -362,8 +371,19 @@ def for_rules(workspace: Any, rules: Iterable[Any], now: Optional[datetime] = No
     except ConfigError:
         config = RepoConfig()
     half_life_sessions, epsilon = _read_session_expiry_config(workspace)
-    totals = ledger.aggregate_rows((view if view is not None else ledger.read(workspace)).rows)
-    t4_by_rule = _collect_t4_events_for_rules(workspace, rule_list, now=now)
+    view_obj = view if view is not None else ledger.read(workspace)
+    proj_credits = credit.project_credits(workspace, view=view_obj)
+    combined_rows: List[Dict[str, Any]] = []
+    seen_keys: Set[Tuple[str, str]] = set()
+    for r in list(view_obj.rows) + list(proj_credits.outcome_rows):
+        k, rid = r.get("key"), r.get("rule")
+        if isinstance(k, str) and k and isinstance(rid, str):
+            if (k, rid) in seen_keys:
+                continue
+            seen_keys.add((k, rid))
+        combined_rows.append(r)
+    totals = ledger.aggregate_rows(combined_rows)
+    t4_by_rule = _collect_t4_events_for_rules(workspace, rule_list, now=now, proj_credits=proj_credits)
     out: Dict[str, Fitness] = {}
     for rule in rule_list:
         rid, rtype, meta = rule.id, (getattr(rule, "type", "trap") or "trap"), (getattr(rule, "meta", {}) or {})
@@ -378,6 +398,7 @@ def for_rules(workspace: Any, rules: Iterable[Any], now: Optional[datetime] = No
             caught=int(t4.get("caught", 0)), leaked=int(t4.get("leaked", 0)), adjudicated_tp=int(t4.get("adjudicated_tp", 0)),
             adjudicated_fp=int(t4.get("adjudicated_fp", 0)), sessions_count=len(t4.get("sessions", ())),
             repos_count=len(t4.get("repos", ())), days_span=float(t4.get("days_span", 0.0)), samples=t4.get("samples", ()),
+            evidence_available=proj_credits.available, evidence_error=proj_credits.error,
         )
     return out
 
@@ -427,7 +448,11 @@ def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = Non
     if not commit_lines:
         return []
     hits_cache: Dict[str, Set[Tuple[str, str, str]]] = {}
-    hits_for = lambda sha: hits_cache.setdefault(sha, _violations_at_commit(root, sha, forbid_rules))
+
+    def hits_for(sha: str) -> Set[Tuple[str, str, str]]:
+        if sha not in hits_cache:
+            hits_cache[sha] = _violations_at_commit(root, sha, forbid_rules)
+        return hits_cache[sha]
 
     def commit_subject(sha: str) -> str:
         r = gitsafe.run(["log", "-1", "--format=%s", sha], root)
@@ -467,4 +492,5 @@ def replay_detector_history(workspace: Any, rules: Optional[Iterable[Any]] = Non
         credit.record_detection(root, i["rule"], i["file"], i["pattern"], disposition=i["disposition"], rev=i.get("rev"), branch=i["branch"], fix_rev=i.get("fix_rev"), weight=i["weight"])
         for i in findings.values()
     ]
+
 

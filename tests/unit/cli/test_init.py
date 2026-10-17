@@ -331,8 +331,38 @@ class TestHookRefusal:
     def test_outside_a_git_repository_the_hook_is_skipped(self, project, capsys):
         assert main(["--json", "init", "--workspace", str(project), "--yes", "--rules", "minimal"]) == 0
         payload = json.loads(capsys.readouterr().out)
-        assert {a["target"]: a["result"] for a in payload["actions"]}["pre-commit hook"] == \
-            "skipped (not a git repository)"
+        targets = {a["target"]: a["result"] for a in payload["actions"]}
+        assert targets["pre-commit hook"] == "skipped (not a git repository)"
+        assert targets["prepare-commit-msg hook"] == "skipped (not a git repository)"
+
+    def test_git_repository_installs_and_reports_both_hooks(self, project, hooks, capsys):
+        assert run_init(_args(project, "--dry-run", hooks=True)) == 0
+        dry_out = capsys.readouterr().out
+        assert "Would install pre-commit hook" in dry_out
+        assert "Would install prepare-commit-msg hook" in dry_out
+        assert not (hooks / "pre-commit").exists() and not (hooks / "prepare-commit-msg").exists()
+
+        assert run_init(_args(project, hooks=True)) == 0
+        out = capsys.readouterr().out
+        assert (hooks / "pre-commit").is_file() and (hooks / "prepare-commit-msg").is_file()
+        assert f"Pre-commit hook installed ({hooks / 'pre-commit'})" in out
+        assert f"Prepare-commit-msg hook installed ({hooks / 'prepare-commit-msg'})" in out
+
+    def test_existing_foreign_prepare_commit_msg_hook_is_kept(self, project, hooks, capsys):
+        foreign = hooks / "prepare-commit-msg"
+        foreign.write_text("#!/bin/sh\necho custom\n", encoding="utf-8")
+        assert main(["--json", "init", "--workspace", str(project), "--yes", "--rules", "minimal"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        steps = {a["target"]: a for a in payload["actions"]}
+        assert steps["pre-commit hook"]["result"] == "installed"
+        assert steps["prepare-commit-msg hook"]["result"] == "kept"
+        assert foreign.read_text(encoding="utf-8") == "#!/bin/sh\necho custom\n"
+
+        assert run_init(_args(project, hooks=True)) == 0
+        out = capsys.readouterr().out
+        assert "Prepare-commit-msg hook kept (existing hook is not Aegis's; left alone)" in out
+        assert foreign.read_text(encoding="utf-8") == "#!/bin/sh\necho custom\n"
+
 
 
 GIT = shutil.which("git")
@@ -1111,6 +1141,7 @@ class TestCiWorkflow:
         assert "fetch-depth: 0" in text  # aegis check diffs the pull request against its base
         assert f"pip install aegis-guardrails=={__version__}" in text
         assert "      - run: aegis check\n" in text
+        assert "      - run: aegis check --ci\n" in text
         assert "permissions:\n  contents: read\n" in text
         assert "\t" not in text and text.endswith("\n")
 

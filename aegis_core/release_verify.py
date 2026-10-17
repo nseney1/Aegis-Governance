@@ -58,6 +58,7 @@ TIER_C_CAVEAT = "attestation present, but the workflow is agent-editable"
 GH_TIMEOUT_SECONDS = 180.0
 
 _SHA = re.compile(r"\A[0-9a-f]{40}\Z")
+_RUN_ID_ATTEMPT = re.compile(r"\A\d+/\d+\Z")
 _VERSION = re.compile(r"gh version (\d+)\.(\d+)\.(\d+)")
 _REMOTE = re.compile(
     r"(?:https?://(?:[^/@]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?\Z")
@@ -182,57 +183,65 @@ def _default_source_ref(root: Path) -> str:
 
 
 def _recheck(output: str, commit: str, tree: str, subject_digest: str, repository: str,
-             source_ref: str) -> Tuple[bool, str]:
+             source_ref: str, *, workflow: str = WORKFLOW, expected_run: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
     """Whether gh's JSON holds at least one attestation that says exactly what was asked."""
     try:
         records = json.loads(output)
     except ValueError:
-        return False, "gh printed no JSON to re-check"
+        return False, "gh printed no JSON to re-check", None
     if not isinstance(records, list) or not records:
-        return False, "gh reported no attestation for this commit"
+        return False, "gh reported no attestation for this commit", None
     reasons: List[str] = []
     for record in records:
-        problem = _record_problem(record, commit, tree, subject_digest, repository, source_ref)
+        problem, run_str = _record_problem(
+            record, commit, tree, subject_digest, repository, source_ref,
+            workflow=workflow, expected_run=expected_run,
+        )
         if problem is None:
-            return True, ""
+            return True, "", run_str
         reasons.append(problem)
-    return False, "; ".join(dict.fromkeys(reasons))
+    return False, "; ".join(dict.fromkeys(reasons)), None
 
 
 def _record_problem(record: Any, commit: str, tree: str, subject_digest: str, repository: str,
-                    source_ref: str) -> Optional[str]:
+                    source_ref: str, *, workflow: str = WORKFLOW, expected_run: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     result = record.get("verificationResult") if isinstance(record, dict) else None
     statement = result.get("statement") if isinstance(result, dict) else None
     signature = result.get("signature") if isinstance(result, dict) else None
     cert = signature.get("certificate") if isinstance(signature, dict) else None
     if not isinstance(statement, dict) or not isinstance(cert, dict):
-        return "the verification result lacks its statement or certificate"
+        return "the verification result lacks its statement or certificate", None
     if statement.get("predicateType") != PREDICATE_TYPE:
-        return "the predicate type is not the Aegis CI verdict"
+        return "the predicate type is not the Aegis CI verdict", None
     subjects = statement.get("subject")
     if not isinstance(subjects, list) or not any(
             isinstance(s, dict) and isinstance(s.get("digest"), dict) and s["digest"].get("sha256") == subject_digest
             for s in subjects):
-        return "the attested subject is not this commit's verdict"
+        return "the attested subject is not this commit's verdict", None
     predicate = statement.get("predicate")
     if not isinstance(predicate, dict) or predicate.get("commit") != commit or predicate.get("tree") != tree:
-        return "the predicate names another commit or tree"
+        return "the predicate names another commit or tree", None
+    run_val = predicate.get("run")
+    if not isinstance(run_val, str) or not _RUN_ID_ATTEMPT.match(run_val):
+        return "the predicate lacks a valid run id and attempt", None
+    if expected_run is not None and run_val != expected_run:
+        return f"the predicate run {run_val!r} does not match expected {expected_run!r}", None
     jobs = predicate.get("jobs")
     if not isinstance(jobs, dict) or not jobs or any(value != "success" for value in jobs.values()):
-        return "the predicate does not say every job succeeded"
+        return "the predicate does not say every job succeeded", None
     if cert.get("sourceRepositoryDigest") != commit or cert.get("buildSignerDigest") != commit:
-        return "the certificate is for another commit"
+        return "the certificate is for another commit", None
     if cert.get("runnerEnvironment") != "github-hosted":
-        return "the build did not run on a GitHub-hosted runner"
+        return "the build did not run on a GitHub-hosted runner", None
     uri = cert.get("sourceRepositoryURI")
     if not isinstance(uri, str) or uri.lower().rstrip("/") != f"https://github.com/{repository.lower()}":
-        return "the certificate is for another repository"
+        return "the certificate is for another repository", None
     if cert.get("sourceRepositoryRef") != source_ref:
-        return f"the certificate is for another ref than {source_ref}"
+        return f"the certificate is for another ref than {source_ref}", None
     signer = cert.get("buildSignerURI")
-    if not isinstance(signer, str) or not signer.lower().startswith(f"https://github.com/{repository.lower()}/{WORKFLOW}@"):
-        return f"the signer is not {repository}/{WORKFLOW}"
-    return None
+    if not isinstance(signer, str) or not signer.lower().startswith(f"https://github.com/{repository.lower()}/{workflow.lower()}@"):
+        return f"the signer is not {repository}/{workflow}", None
+    return None, run_val
 
 
 def _tier(root: Path, tier_runner: Optional[Callable[..., Any]]) -> Optional[str]:
@@ -245,7 +254,8 @@ def _tier(root: Path, tier_runner: Optional[Callable[..., Any]]) -> Optional[str
 
 
 def verify_release(root: Any, sha: str, run: Optional[GhRun] = None, tier_runner: Optional[Callable[..., Any]] = None,
-                   environ: Optional[Mapping[str, str]] = None) -> ReleaseReport:
+                   environ: Optional[Mapping[str, str]] = None, *, source_ref: Optional[str] = None,
+                   workflow: Optional[str] = None, expected_run: Optional[str] = None) -> ReleaseReport:
     """Verify the CI-verdict attestation of ``sha`` (a commit id or a ref of the repository in ``root``)."""
     top = Path(root)
     env = os.environ if environ is None else environ
@@ -268,29 +278,35 @@ def verify_release(root: Any, sha: str, run: Optional[GhRun] = None, tier_runner
     if not repository:
         return ReleaseReport(sha, False, "no_repository", "origin is not a github.com repository, so there is nothing to pin "
                              "the attestation to", gh_version=shown)
-    source_ref = _default_source_ref(top)
+    eff_ref = source_ref or _default_source_ref(top)
+    eff_workflow = workflow or WORKFLOW
     body = subject_bytes(commit, tree)
     digest = hashlib.sha256(body).hexdigest()
     with tempfile.TemporaryDirectory(prefix="aegis-release-") as directory:
         subject = Path(directory) / "subject.txt"
         subject.write_bytes(body)
         argv = ["attestation", "verify", str(subject), "--repo", repository, "--predicate-type", PREDICATE_TYPE,
-                "--signer-workflow", f"{repository}/{WORKFLOW}", "--signer-digest", commit,
-                "--source-ref", source_ref, "--source-digest", commit, "--deny-self-hosted-runners", "--format", "json"]
+                "--signer-workflow", f"{repository}/{eff_workflow}", "--signer-digest", commit,
+                "--source-ref", eff_ref, "--source-digest", commit, "--deny-self-hosted-runners", "--format", "json"]
         result = gh(argv, GH_TIMEOUT_SECONDS)
-    pins = {"repository": repository, "signer_workflow": f"{repository}/{WORKFLOW}", "source_ref": source_ref,
-            "digest": commit, "tree": tree, "subject_sha256": digest}
+    pins: Dict[str, Any] = {"repository": repository, "signer_workflow": f"{repository}/{eff_workflow}",
+                            "source_ref": eff_ref, "digest": commit, "tree": tree, "subject_sha256": digest}
     if result is None:
         return ReleaseReport(sha, False, "gh_missing", "gh disappeared during verification", gh_version=shown)
     if result[0] != 0:
         detail = " ".join(result[2].split())[:300] or "no detail"
         return ReleaseReport(commit, False, "rejected", f"gh attestation verify failed: {detail}", repository=repository,
                              gh_version=shown, details=pins)
-    ok, reason = _recheck(result[1], commit, tree, digest, repository, source_ref)
+    ok, reason, verified_run = _recheck(
+        result[1], commit, tree, digest, repository, eff_ref,
+        workflow=eff_workflow, expected_run=expected_run,
+    )
+    if verified_run is not None:
+        pins["run"] = verified_run
     if not ok:
         return ReleaseReport(commit, False, "bad_output", f"gh exited 0 but its output does not check out: {reason}",
                              repository=repository, gh_version=shown, details=pins)
-    signed = f"signed by {pins['signer_workflow']} at {commit[:12]} on {source_ref}"
+    signed = f"signed by {pins['signer_workflow']} at {commit[:12]} on {eff_ref}"
     tier = _tier(top, tier_runner)
     if tier not in ("A", "B"):
         # Spec T2 precondition and the SECURITY.md truth table: at tier C the agent can edit the

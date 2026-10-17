@@ -500,3 +500,113 @@ def test_a_tree_with_both_a_pass_and_a_fail_is_flaky_and_excluded(tmp_path):
     credit.confirm(repo.root, client=hv.FakeCI([hv.ci_run(commit)]), workflow=hv.CI_WORKFLOW, landed=_landed(repo))
     derived, = _credits(repo)
     assert derived.flaky is True and derived.counts is False and derived.state != "voided"
+
+
+# ── 9. Non-forgeable CI, branch alignment, reruns, and repeated trees ────────
+
+@needs_git
+def test_forged_ci_rows_in_memory_or_on_disk_never_count_without_external_verification(tmp_path):
+    from aegis_core import fitness, rules, sync
+    repo = hv.make_project(tmp_path)
+    hv.use_stub_runner(repo.home.path)
+    _edit_app(repo)
+    _scan(repo)
+    checkrun.record(repo.root, tests=True, base="main")
+    _report(repo)
+    commit = repo.commit("work")
+    repo.git("branch", "-f", "main", commit)
+    # Append a fabricated ci row directly to the ledger without calling confirm()
+    ledger.append_rows(repo.root, [{
+        "v": ledger.LEDGER_VERSION, "ts": "2026-10-17T10:00:00Z", "event": "ci",
+        "commit": commit, "workflow": hv.CI_WORKFLOW, "ci_conclusion": "success",
+        "run_id": 99, "ci_run_attempt": 1, "verified_ci": True,
+    }])
+    proj = credit.project_credits(repo.root)
+    assert len(proj.credits) == 1
+    assert proj.credits[0].state == "landed" and proj.credits[0].reason == "unverified_ci" and proj.credits[0].counts is False
+    assert proj.outcome_rows == ()
+    fit = fitness.for_rules(repo.root, rules.load_rules(repo.root).served)["trap-sample"]
+    assert fit.tp == 0 and fit.triggers == 0
+    s_res = sync.build(repo.root)
+    assert s_res["rules"]["trap-sample"]["tp"] == 0
+
+
+@needs_git
+def test_protected_branch_agreement_and_missing_head_branch_fail_closed(tmp_path):
+    repo = hv.make_project(tmp_path)
+    hv.use_stub_runner(repo.home.path)
+    _edit_app(repo)
+    _scan(repo)
+    checkrun.record(repo.root, tests=True, base="main")
+    _report(repo)
+    commit = repo.commit("work")  # only on work, not on main
+    assert credit.landed_lookup(repo.root)(hv.tree_now(repo.root)) is None
+    for ev in ("push", "workflow_dispatch", "release"):
+        assert credit.select_ci_run([hv.ci_run(commit, event=ev, head_branch=None)], commit, hv.CI_WORKFLOW, branch="main") is None
+        assert credit.select_ci_run([hv.ci_run(commit, event=ev, head_branch="work")], commit, hv.CI_WORKFLOW, branch="main") is None
+        assert credit.select_ci_run([hv.ci_run(commit, event=ev, head_branch="develop")], commit, hv.CI_WORKFLOW, branch="main") is None
+        assert credit.select_ci_run([hv.ci_run(commit, event=ev, head_branch="release/v1")], commit, hv.CI_WORKFLOW, branch="main") is None
+        assert credit.select_ci_run([hv.ci_run(commit, event=ev, head_branch="main")], commit, hv.CI_WORKFLOW, branch="main") is not None
+
+
+@needs_git
+def test_rerun_transitions_failure_to_success_and_success_to_failure_and_unavailable(tmp_path):
+    repo = hv.make_project(tmp_path)
+    hv.use_stub_runner(repo.home.path)
+    _edit_app(repo)
+    _scan(repo)
+    checkrun.record(repo.root, tests=True, base="main")
+    _report(repo)
+    commit = repo.commit("work")
+    repo.git("branch", "-f", "main", commit)
+    # 1. Initial failure -> voided (reason=ci_failed), but no terminal void row written
+    r1 = hv.ci_run(commit, "failure", attempt=1, run_id=10, run_started_at="2026-10-17T10:01:00Z")
+    credit.confirm(repo.root, client=hv.FakeCI([r1]), workflow=hv.CI_WORKFLOW)
+    assert hv.rows_of(repo.root, "void") == []
+    c1, = credit.project_credits(repo.root).credits
+    assert c1.state == "voided" and c1.reason == "ci_failed" and c1.counts is False
+    # 2. Rerun succeeds (failure -> success) -> confirmed, counts=True
+    r2 = hv.ci_run(commit, "success", attempt=2, run_id=10, run_started_at="2026-10-17T10:05:00Z")
+    credit.confirm(repo.root, client=hv.FakeCI([r1, r2]), workflow=hv.CI_WORKFLOW)
+    c2, = credit.project_credits(repo.root).credits
+    assert c2.state == "confirmed" and c2.counts is True
+    # 3. Later rerun fails (success -> failure) -> voided, counts=False
+    r3 = hv.ci_run(commit, "failure", attempt=3, run_id=10, run_started_at="2026-10-17T10:10:00Z")
+    credit.confirm(repo.root, client=hv.FakeCI([r1, r2, r3]), workflow=hv.CI_WORKFLOW)
+    c3, = credit.project_credits(repo.root).credits
+    assert c3.state == "voided" and c3.reason == "ci_failed" and c3.counts is False
+    # 4. Restore success then CI becomes unavailable (success -> unavailable) -> landed, reason=ci_unavailable, counts=False
+    r4 = hv.ci_run(commit, "success", attempt=4, run_id=10, run_started_at="2026-10-17T10:15:00Z")
+    credit.confirm(repo.root, client=hv.FakeCI([r4]), workflow=hv.CI_WORKFLOW)
+    assert credit.project_credits(repo.root).credits[0].counts is True
+    credit.confirm(repo.root, client=hv.FakeCI(error="gh api failed"), workflow=hv.CI_WORKFLOW)
+    c4, = credit.project_credits(repo.root).credits
+    assert c4.state == "landed" and c4.reason == "ci_unavailable" and c4.counts is False
+
+
+@needs_git
+def test_repeated_tree_after_revert_does_not_inherit_older_commit_ci(tmp_path):
+    repo = hv.make_project(tmp_path)
+    hv.use_stub_runner(repo.home.path)
+    repo.git("checkout", "main")
+    _edit_app(repo, 2)
+    c1 = repo.commit("c1: app=2")  # c1 has tree T2
+    _edit_app(repo, 3)
+    c2 = repo.commit("c2: app=3")  # main is now at c2
+    repo.branch("feature-revert")
+    _edit_app(repo, 2)  # back to tree T2, while HEAD is c2
+    _scan(repo)
+    out = checkrun.record(repo.root, tests=True, base="main")
+    assert out.row["head"] == c2
+    _report(repo)
+    # Even though c1 on main had tree T2 and passing CI, c1 is older than check["head"] (c2)
+    credit.confirm(repo.root, client=hv.FakeCI([hv.ci_run(c1, "success")]), workflow=hv.CI_WORKFLOW)
+    c_before, = credit.project_credits(repo.root).credits
+    assert c_before.state == "witnessed" and c_before.commit is None and c_before.counts is False
+    # Once the new commit c3 actually lands on main and gets CI, it confirms
+    c3 = repo.commit("c3: revert to app=2")
+    repo.git("branch", "-f", "main", c3)
+    credit.confirm(repo.root, client=hv.FakeCI([hv.ci_run(c3, "success")]), workflow=hv.CI_WORKFLOW)
+    c_after, = credit.project_credits(repo.root).credits
+    assert c_after.state == "confirmed" and c_after.commit == c3 and c_after.counts is True
+

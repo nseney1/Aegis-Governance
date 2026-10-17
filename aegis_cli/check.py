@@ -139,10 +139,11 @@ def _escape_annotation(text: str, prop: bool = False) -> str:
     return text.replace(":", "%3A").replace(",", "%2C") if prop else text
 
 
-def _build_ci_document(report, root: str, reg_report=None, cov_report=None, perf_report=None) -> dict:
+def _build_ci_document(report, root: str, reg_report=None, cov_report=None, perf_report=None, trailer_checks=None) -> dict:
     reg_blocking = bool(reg_report is not None and reg_report.blocking)
     cov_blocking = bool(cov_report is not None and not cov_report.get("passed", True))
     perf_blocking = bool(perf_report is not None and not perf_report.get("passed", True))
+    trailer_blocking = bool(trailer_checks and any(t.get("failed") for t in trailer_checks))
     document = report.as_dict(root)
     if reg_report is not None:
         document["regression"] = reg_report.as_dict(root)
@@ -150,7 +151,9 @@ def _build_ci_document(report, root: str, reg_report=None, cov_report=None, perf
         document["coverage"] = cov_report
     if perf_report is not None:
         document["perf"] = perf_report
-    if reg_blocking or cov_blocking or perf_blocking:
+    if trailer_checks:
+        document["trailer_checks"] = trailer_checks
+    if reg_blocking or cov_blocking or perf_blocking or trailer_blocking:
         document["status"] = "fail"
     return document
 
@@ -173,12 +176,13 @@ def _write_step_summary_if_configured(document: dict, root: str) -> None:
         pass
 
 
-def _print_ci(report, fmt: str, root: str, reg_report=None, cov_report=None, perf_report=None) -> None:
+def _print_ci(report, fmt: str, root: str, reg_report=None, cov_report=None, perf_report=None, trailer_checks=None) -> None:
     from aegis_cli import sanitize_display
     from aegis_cli.formatters.report import format_sarif_report
 
     reg_blocking = bool(reg_report is not None and reg_report.blocking)
-    document = _build_ci_document(report, root, reg_report, cov_report, perf_report)
+    trailer_blocking = bool(trailer_checks and any(t.get("failed") for t in trailer_checks))
+    document = _build_ci_document(report, root, reg_report, cov_report, perf_report, trailer_checks=trailer_checks)
     _write_step_summary_if_configured(document, root)
 
     if fmt == "sarif":
@@ -207,11 +211,13 @@ def _print_ci(report, fmt: str, root: str, reg_report=None, cov_report=None, per
     if not report.weakenings:
         if reg_blocking:
             print(f"aegis check --ci: FAILED: regression check failed ({len(reg_report.findings)} finding(s), {span})")
+        elif trailer_blocking:
+            print(f"aegis check --ci: FAILED: Aegis-Check trailer divergence ({span})")
         else:
             print(f"aegis check --ci: PASSED, no rule weakened ({report.rules_checked} binding rule(s) at the merge base, {span})")
     else:
         count = len(report.weakenings)
-        if approved and not reg_blocking:
+        if approved and not reg_blocking and not trailer_blocking:
             signer = report.approval.signer or "a key in the base allowed_signers"
             print(f"aegis check --ci: PASSED, {count} weakening(s) approved by {sanitize_display(signer, 120)} ({span})")
         else:
@@ -221,6 +227,8 @@ def _print_ci(report, fmt: str, root: str, reg_report=None, cov_report=None, per
         if not approved:
             print("  A weakening passes only with a signed approval: aegis approve (a key listed in allowed_signers on the base branch).")
     if reg_report is not None:
+        if reg_report.findings and reg_report.tier != "gate":
+            print('  regression tier: warning (advisory; blocking at gate tier via --strict or regression.tier="gate")')
         for finding in reg_report.findings:
             tag = "FAIL" if reg_report.tier == "gate" else "WARN"
             print(sanitize_display(f"  [{tag}:regression/{finding.code}] ({finding.path}): {finding.message}", 400))
@@ -242,12 +250,15 @@ def _print_ci(report, fmt: str, root: str, reg_report=None, cov_report=None, per
                     400,
                 )
             )
+    for t_chk in trailer_checks or ():
+        if t_chk.get("failed"):
+            print(sanitize_display(f"  [FAIL:trailer-divergence] {t_chk['commit'][:10]}: {t_chk.get('reason', '')}", 400))
 
 
 def _run_ci(args: argparse.Namespace) -> int:
     """`aegis check --ci`: 0 nothing weakened or every weakening approved, 1 otherwise, 2 usage."""
     from aegis_cli import sanitize_display
-    from aegis_core import gitsafe, regression, rule_integrity
+    from aegis_core import credit, gitsafe, regression, rule_integrity
 
     stray = [flag for flag, given in (
         ("FILES", bool(getattr(args, "files", None))), ("--full", bool(getattr(args, "full", False))),
@@ -276,6 +287,7 @@ def _run_ci(args: argparse.Namespace) -> int:
     try:
         report = rule_integrity.check_ci(root, base, head)
         reg_report = regression.check_ci_regressions(root, base, head, tier=reg_tier)
+        trailer_checks = credit.verify_commit_trailers(root, base, head)
     except (rule_integrity.IntegrityError, regression.RegressionError, gitsafe.GitError) as exc:
         print(f"Error: {sanitize_display(str(exc), 400)}", file=sys.stderr)
         return 1
@@ -294,11 +306,11 @@ def _run_ci(args: argparse.Namespace) -> int:
         elif isinstance(perf_report, dict) and "passed" not in perf_report:
             perf_report["passed"] = perf_report.get("status") != "fail"
 
-
-    _print_ci(report, fmt, root, reg_report, cov_report=cov_report, perf_report=perf_report)
+    _print_ci(report, fmt, root, reg_report, cov_report=cov_report, perf_report=perf_report, trailer_checks=trailer_checks)
     cov_ok = True if cov_report is None else bool(cov_report.get("passed", True))
     perf_ok = True if perf_report is None else bool(perf_report.get("passed", True))
-    overall_passed = report.passed and not reg_report.blocking and cov_ok and perf_ok
+    trailer_ok = not any(t.get("failed") for t in trailer_checks)
+    overall_passed = report.passed and not reg_report.blocking and cov_ok and perf_ok and trailer_ok
     return 0 if overall_passed else 1
 
 
@@ -416,7 +428,8 @@ class CheckCommand(AegisCommand):
             "archive, a rank decrease, lost coverage of existing files, a forbid_ast pattern no longer covered, "
             "a new or unknown key, any applies_to change, or a mandatory rule added past the scan's slot cap). A "
             "flagged change passes only with a signed Aegis-Approve commit (aegis approve) by a key in the base "
-            "branch's allowed_signers. Exit 0 pass, 1 fail",
+            "branch's allowed_signers. Also runs T5 fix-commit regression checks (advisory at default warning tier; "
+            'blocking at gate tier via --strict or user config regression.tier="gate"). Exit 0 pass, 1 fail',
         )
         parser.add_argument(
             "--head",

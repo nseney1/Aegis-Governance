@@ -78,6 +78,40 @@ jobs:
           name: aegis-wheel
           path: dist/
 
+  aegis-check:
+    needs: [dependency-audit, build-wheel, validate, test-windows]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify upstream jobs succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 -c 'import json, os, sys; needs = json.loads(os.environ["NEEDS_JSON"]); bad = {k: v.get("result") for k, v in needs.items() if v.get("result") != "success"}; sys.exit(f"Upstream jobs did not succeed: {bad}" if bad else 0)'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Download wheel artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: aegis-wheel
+          path: dist/
+      - name: Verify artifact digests
+        run: python .github/scripts/verify_dist.py verify dist
+      - name: Install wheel and test runner
+        run: |
+          pip install pytest==8.3.4 pyyaml==6.0.2
+          pip install dist/*.whl
+      - name: Run Layer 1 Deterministic Verification
+        run: python3 -m aegis_cli.cli check
+      - name: Run CI Governance & Regression Check
+        run: python3 -m aegis_cli.cli check --ci
+
   validate:
     needs: [build-wheel, dependency-audit]
     strategy:
@@ -125,6 +159,9 @@ jobs:
 
       - name: Run Layer 1 Deterministic Verification
         run: python3 -m aegis_cli.cli check
+
+      - name: Run CI Governance & Regression Check
+        run: python3 -m aegis_cli.cli check --ci
 
       - name: Run test suite
         id: test
@@ -207,7 +244,7 @@ jobs:
   # "built here", not "green"; this one proves the whole workflow passed. Keep `needs`
   # equal to every other job: tests/unit/core/test_release_verify.py checks it.
   verdict:
-    needs: [dependency-audit, build-wheel, validate, test-windows]
+    needs: [dependency-audit, build-wheel, aegis-check, validate, test-windows]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

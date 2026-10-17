@@ -37,7 +37,8 @@ def build(workspace: Any, ruleset: Optional[RuleSet] = None, now: Optional[datet
         entry: Dict[str, Any] = {
             "path": rule.path, "sha256": rule.digest, "type": rule.type, "fitness": fit.score,
             "triggers": fit.triggers, "tp": fit.tp, "fp": fit.fp, "last_ts": fit.last_ts,
-            "suggestion": suggest(rule, fit, now), "state": fit.state,
+            "suggestion": None if not fit.evidence_available else suggest(rule, fit, now), "state": fit.state,
+            "evidence_available": fit.evidence_available,
             "effective_weight": fit.effective_weight, "decay_factor": fit.decay_factor,
             "eligible_sessions": fit.eligible_sessions, "contested": fit.contested,
             "override_rate": fit.override_rate, "flagged_for_review": fit.flagged_for_review,
@@ -46,6 +47,8 @@ def build(workspace: Any, ruleset: Optional[RuleSet] = None, now: Optional[datet
             "precision_hi": fit.precision_hi, "sessions_count": fit.sessions_count,
             "repos_count": fit.repos_count, "samples": list(fit.samples),
         }
+        if fit.evidence_error:
+            entry["evidence_error"] = fit.evidence_error
         if fit.prior_disclosure:
             entry["prior_disclosure"] = fit.prior_disclosure
         if rule.expired:
@@ -169,14 +172,29 @@ def _default_gh_runner(argv: List[str], cwd: Optional[str] = None) -> Any:
 def sync(
     workspace: Any, apply: bool = False, now: Optional[datetime] = None, *,
     pr: bool = False, gh_runner: Optional[Callable[..., Any]] = None,
+    ci_client: Any = None, workflow: str = "validate.yml",
 ) -> SyncResult:
     """Rebuild derived state under the workspace lock; optionally apply transitions or open a PR."""
+    from aegis_core import credit
+    from aegis_core.fitness import replay_detector_history
     ws = literal_workspace(workspace)
     path = WorkspaceLayout(ws.root).derived_file
     should_apply = bool(apply or pr)
     pr_info: Optional[Dict[str, Any]] = None
     with locked(ws.root):
         ruleset = load_rules(ws)
+        loaded_ok = [r for r in ruleset.rules if r.ok]
+        try:
+            replay_detector_history(ws.root, loaded_ok)
+        except (OSError, ValueError):
+            pass
+        if ci_client is not None:
+            credit.confirm(ws.root, client=ci_client, workflow=workflow)
+        else:
+            c_root = credit._canon_root(ws.root)
+            ev_rows = credit.read_rows(ws.root)
+            if any(r.get("event") == "report" for r in ev_rows) and not any(k[0] == c_root for k in credit._VERIFIED_CI):
+                credit.confirm(ws.root, client=credit.GhRestClient(cwd=str(ws.root)), workflow=workflow)
         derived = build(ws, ruleset, now, ledger.read(ws))
         missing = ledger.incomplete(derived["ledger"])
         applied, refused = [], None
@@ -209,3 +227,4 @@ def sync(
             else:
                 pr_info = {"status": "failed", "url": None, "title": title, "body": body, "error": err_s or f"gh exited with status {rc}", "transitions": applied}
     return SyncResult(derived=derived, path=path, applied=applied, refused=refused, pr=pr_info)
+

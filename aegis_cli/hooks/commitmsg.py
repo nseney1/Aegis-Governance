@@ -76,7 +76,7 @@ def _ours(text: str) -> bool:
     return _START in text and _END in text
 
 
-def install(hooks_dir: Path) -> str:
+def install(hooks_dir: Path, *, dry_run: bool = False) -> str:
     """``installed``, ``unchanged`` or ``foreign`` (a hook that is not ours is left alone)."""
     target = Path(hooks_dir) / HOOK_NAME
     script = generate_script()
@@ -88,18 +88,21 @@ def install(hooks_dir: Path) -> str:
             return "foreign"
         if current == script:
             return "unchanged"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(script.encode("utf-8"))
-    target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    if not dry_run:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(script.encode("utf-8"))
+        target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return "installed"
 
 
-def uninstall(hooks_dir: Path) -> str:
+def uninstall(hooks_dir: Path, *, dry_run: bool = False) -> str:
     """``removed``, ``absent`` or ``foreign``."""
     target = Path(hooks_dir) / HOOK_NAME
     if not target.exists() and not target.is_symlink():
         return "absent"
     if target.is_symlink() or not _ours(target.read_text(encoding="utf-8", errors="replace")):
         return "foreign"
-    target.unlink()
+    if not dry_run:
+        target.unlink()
     return "removed"
+

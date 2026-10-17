@@ -404,3 +404,87 @@ def test_sync_pr_writes_transitions_with_three_sampled_examples_and_never_auto_m
     assert len(gh_calls) == 1
     assert gh_calls[0][:2] == ["pr", "create"]
     assert not any("merge" in call for call in gh_calls)
+
+
+@needs_git
+def test_end_to_end_claimed_to_recorded_to_landed_to_confirmed_to_scored_and_approved_protected_change(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end lifecycle: claimed -> recorded -> landed -> confirmed -> scored in fitness/status/sync,
+    plus signed human approval unlocking protected-change credit, trailer divergence in check --ci,
+    unavailable evidence state, and `aegis rule adjudicate` CLI."""
+    from aegis_cli.cli import main
+    from aegis_core import checkrun, human_gate
+    from tests import helpers_verified as hv
+
+    repo = hv.make_project(tmp_path)
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(repo.home.path))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    hv.use_stub_runner(repo.home.path)
+    priv_key, pub_key = hg.keygen(tmp_path / "keys", "human")
+    repo.git("checkout", "main")
+    repo.write("allowed_signers", hg.allowed_signers_text(pub_key))
+    repo.commit("add allowed_signers on main")
+    repo.git("checkout", "work")
+    repo.git("merge", "main")
+
+    # 1. Claimed (before checkrun.record)
+    repo.write("src/app.py", "def app():\n    return 2\n")
+    hv.mcp_call("aegis_scan", repo.root, session="s1", files=["src/app.py"])
+    claim_res = hv.mcp_call("aegis_report_outcome", repo.root, session="s1", outcome="success",
+                            rules_used=["trap-sample"], idempotency_key="k1")
+    assert claim_res["status"] == "claimed"
+
+    # 2. Recorded (witnessed) with protected conftest.py change
+    repo.write("conftest.py", "# protected change\n")
+    chk = checkrun.record(repo.root, tests=True, base="main")
+    assert chk.status == "recorded" and chk.row["passed"] is True and chk.row["protected_changed"] is True
+    rec_res = hv.mcp_call("aegis_report_outcome", repo.root, session="s1", outcome="success",
+                          rules_used=["trap-sample"], idempotency_key="k2")
+    assert rec_res["status"] == "recorded"
+    assert credit.project_credits(repo.root).credits[0].state == "witnessed"
+
+    # 3. Landed on main
+    c_land = repo.commit("feat: update app and conftest")
+    repo.git("branch", "-f", "main", c_land)
+    assert credit.project_credits(repo.root).credits[0].state == "landed"
+
+    # 4. Confirmed by CI, but withheld until conftest.py governance state is approved
+    ci = hv.FakeCI([hv.ci_run(c_land, "success", head_branch="main")])
+    credit.confirm(repo.root, client=ci, workflow=hv.CI_WORKFLOW)
+    withheld = credit.project_credits(repo.root).credits[0]
+    assert withheld.state == "confirmed" and withheld.counts is False and withheld.reason == "protected_changed"
+
+    # 5. Signed governance approval unlocks credit and scores in fitness, status, and sync (deduplicated once)
+    gov_hash = human_gate.governance_tree_hash(repo.root, c_land)
+    c_app = repo.commit(human_gate.approval_message(gov_hash), sign_key=priv_key, allow_empty=True)
+    repo.git("branch", "-f", "main", c_app)
+    approved_proj = credit.project_credits(repo.root, client=hv.FakeCI([hv.ci_run(c_app, "success", head_branch="main")]),
+                                           workflow=hv.CI_WORKFLOW)
+    assert approved_proj.credits[0].state == "confirmed" and approved_proj.credits[0].counts is True
+    assert len(approved_proj.outcome_rows) == 1
+
+    s_res = sync.sync(repo.root, ci_client=hv.FakeCI([hv.ci_run(c_land, "success", head_branch="main"),
+                                                      hv.ci_run(c_app, "success", head_branch="main")]))
+    assert s_res.derived["rules"]["trap-sample"]["tp"] == 1
+    assert s_res.derived["rules"]["trap-sample"]["triggers"] == 1
+
+    # 6. CLI `aegis rule adjudicate` adds human adjudication
+    monkeypatch.chdir(repo.root)
+    capsys.readouterr()
+    assert main(["rule", "adjudicate", "trap-sample", "tp", "--ref", "PR-1", "--summary", "good catch", "--json"]) == 0
+    adj_out = json.loads(capsys.readouterr().out)
+    assert adj_out["event"] == "adjudication" and adj_out["verdict"] == "tp"
+
+    # 7. Corrupt ledger line -> evidence unavailable in fitness, status, and sync refuses transitions
+    hv.ledger_path(repo.root).open("ab").write(b"{corrupt json line\n")
+    capsys.readouterr()
+    run_status(argparse.Namespace(_root=repo.root, plain=True))
+    status_text = capsys.readouterr().out
+    assert "evidence unavailable" in status_text
+    refused_sync = sync.sync(repo.root, apply=True)
+    assert refused_sync.refused is not None and "incomplete" in refused_sync.refused
+    assert refused_sync.derived["rules"]["trap-sample"]["evidence_available"] is False
+

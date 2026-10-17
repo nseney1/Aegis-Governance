@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import hashlib, hmac, json, math, os, re, secrets, stat
 from pathlib import Path, PurePath
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 from aegis_core import credit, gitsafe, human_gate
 from aegis_core.errors import PathTraversalError
 from aegis_core.match import first_match
@@ -136,7 +136,7 @@ def _append_user_insights(path: Path, rows: Sequence[Dict[str, Any]]) -> None:
     if rows:
         _ensure_private_dir(path.parent.parent)
         _ensure_private_dir(path.parent)
-        append_jsonl(path, rows)
+        append_jsonl(path, rows, mode=0o600)
         _chmod_quiet(path, 0o600)
 def read_insight_rows(workspace: Any, home: Optional[Path] = None) -> List[Dict[str, Any]]:
     try: return list(read_jsonl(insights_path(workspace, home=home)).rows)
@@ -315,13 +315,19 @@ def _load_md_rules(workspace: Any, folder: Path, *, recursive: bool = False) -> 
         items.append(Rule(id=str(meta.get("id") or md.stem), path=md.relative_to(root_path).as_posix(), type=str(meta.get("type") or "trap"), meta=meta, body=body, digest=hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()))
     return items
 def _rule_was_exposed(workspace: Any, rule: Rule, cluster_rows: Sequence[Mapping[str, Any]], home: Optional[Path] = None) -> bool:
-    root, link_key = Path(os.fspath(workspace)).resolve(), read_link_key(home)
-    scan_hs = {(str(a.get("host") or ""), hs) for a in read_jsonl(activity_path(root)).rows if a.get("event") == "scan" and a.get("session") and (hs := session_hs(str(a.get("host") or ""), str(a.get("session") or ""), link_key, home=home))}
-    exposed_hs: Set[Tuple[str, str]] = set()
+    root, link_key, scan_hs, exposed_hs = Path(os.fspath(workspace)).resolve(), read_link_key(home), set(), set()
+    for a in read_jsonl(activity_path(root)).rows:
+        sh, ss = str(a.get("host") or ""), str(a.get("session") or "")
+        if a.get("event") == "scan" and ss and (shs := session_hs(sh, ss, link_key, home=home)):
+            scan_hs.add((sh, shs))
+            if rule.id in credit.exposed_rules(root, sh, ss): exposed_hs.add((sh, shs))
+    for erow in credit.read_rows(root):
+        eh, es = str(erow.get("host") or ""), str(erow.get("session") or "")
+        if erow.get("event") == "exposure" and (erow.get("rule") or erow.get("for_rule")) == rule.id and not (isinstance(erow.get("rev"), str) and erow["rev"] and not rule.digest.startswith(erow["rev"])) and es and (ehs := session_hs(eh, es, link_key, home=home)):
+            exposed_hs.add((eh, ehs))
     for lrow in ledger.read(root).rows:
-        if lrow.get("rule") != rule.id: continue
         rev = (lrow.get("meta") if isinstance(lrow.get("meta"), Mapping) else {}).get("rev")
-        if isinstance(rev, str) and rev and not rule.digest.startswith(rev): continue
+        if lrow.get("rule") != rule.id or (isinstance(rev, str) and rev and not rule.digest.startswith(rev)): continue
         lh, ls = str(lrow.get("host") or ""), str(lrow.get("session") or "")
         if (lhs := session_hs(lh, ls, link_key, home=home) if ls else None) and (rule.id in credit.exposed_rules(root, lh, ls) or (lh, lhs) in scan_hs or lrow.get("outcome") in ("trigger", "tp", "fp")):
             exposed_hs.add((lh, lhs))
@@ -329,10 +335,15 @@ def _rule_was_exposed(workspace: Any, rule: Rule, cluster_rows: Sequence[Mapping
 def _paths_overlap_rule(paths: Iterable[str], rule: Rule) -> bool:
     plist = [p for p in paths if p]
     return not plist or not rule.target_paths or any(rule.applies_to(p) or first_match(rule.target_paths, p) is not None for p in plist)
+class _RuleMatch(NamedTuple):
+    kind: str
+    rule: Rule
+    similarity: float
+
 def _cluster_signature_id(tokens: Sequence[str], matched_id: Optional[str]) -> str:
-    if matched_id: return f"cluster-{matched_id}"
     top = [t for t, _ in Counter(tokens).most_common(4)]
-    return f"cluster-{hashlib.sha256(('-'.join(sorted(top)) if top else 'misc').encode('utf-8')).hexdigest()[:8]}"
+    sig = hashlib.sha256(("-".join(sorted(top)) if top else "misc").encode("utf-8")).hexdigest()[:8]
+    return f"cluster-{matched_id}-{sig}" if matched_id else f"cluster-{sig}"
 def record_decision(workspace: Any, *, cluster_id: str, decision: str, insight_ids: Sequence[str], reason: Optional[str] = None, rule_id: Optional[str] = None, home: Optional[Path] = None) -> Dict[str, Any]:
     if decision not in DECISIONS: raise ValueError(f"decision must be one of {list(DECISIONS)}, got {decision!r}")
     if not isinstance(cluster_id, str) or not cluster_id.strip(): raise ValueError("cluster_id must be a non-empty string")
@@ -341,6 +352,55 @@ def record_decision(workspace: Any, *, cluster_id: str, decision: str, insight_i
     if rule_id: row["rule_id"] = str(rule_id)
     _append_user_insights(insights_path(workspace, home=home), [row])
     return row
+
+def _match_insights_to_rules(countable: Sequence[Tuple[int, Dict[str, Any]]], ins_vecs: Sequence[Mapping[str, float]], rule_entries: Sequence[Tuple[str, Rule, List[str]]], rule_vecs: Sequence[Mapping[str, float]]) -> List[Optional[_RuleMatch]]:
+    matches: List[Optional[_RuleMatch]] = []
+    for i, (_, row) in enumerate(countable):
+        paths_i, best = set(row.get("paths") or []), None
+        for r_idx, (kind, robj, _) in enumerate(rule_entries):
+            sim = _cosine(ins_vecs[i], rule_vecs[r_idx])
+            if ((_paths_overlap_rule(paths_i, robj) and sim >= 0.15) or sim >= 0.30) and (best is None or sim > best.similarity):
+                best = _RuleMatch(kind=kind, rule=robj, similarity=sim)
+        matches.append(best)
+    return matches
+
+def _should_merge_insights(paths_i: Set[str], paths_j: Set[str], rid_i: Optional[str], rid_j: Optional[str], sim: float) -> bool:
+    if rid_i != rid_j: return False
+    path_overlap = bool(not paths_i or not paths_j or (paths_i & paths_j))
+    return (path_overlap and sim >= 0.22) or sim >= 0.35
+
+def _cluster_countable_insights(countable: Sequence[Tuple[int, Dict[str, Any]]], ins_vecs: Sequence[Mapping[str, float]], ins_best_rule: Sequence[Optional[_RuleMatch]]) -> List[List[int]]:
+    n_ins = len(countable)
+    parent = list(range(n_ins))
+    def find(x: int) -> int:
+        while parent[x] != x: parent[x] = x = parent[parent[x]]
+        return x
+    for i in range(n_ins):
+        paths_i, rid_i = set(countable[i][1].get("paths") or []), (ins_best_rule[i].rule.id if ins_best_rule[i] else None)
+        for j in range(i + 1, n_ins):
+            rid_j = ins_best_rule[j].rule.id if ins_best_rule[j] else None
+            sim, paths_j = _cosine(ins_vecs[i], ins_vecs[j]), set(countable[j][1].get("paths") or [])
+            if _should_merge_insights(paths_i, paths_j, rid_i, rid_j, sim):
+                ri, rj = find(i), find(j)
+                if ri != rj: parent[max(ri, rj)] = min(ri, rj)
+    groups: Dict[int, List[int]] = {}
+    for i in range(n_ins): groups.setdefault(find(i), []).append(i)
+    return list(groups.values())
+
+def _build_cluster_entry(root: Path, members: Sequence[int], countable: Sequence[Tuple[int, Dict[str, Any]]], ins_tokens: Sequence[Sequence[str]], ins_best_rule: Sequence[Optional[_RuleMatch]], rejections: Sequence[Tuple[int, Dict[str, Any]]], neighbours: Mapping[str, List[Dict[str, Any]]], *, home: Optional[Path] = None) -> Tuple[Dict[str, Any], bool]:
+    m_rows, m_row_idxs = [countable[m][1] for m in members], [countable[m][0] for m in members]
+    m_ids, c_tokens = [str(r.get("id") or "") for r in m_rows], [t for m in members for t in ins_tokens[m]]
+    c_paths = {p for m in members for p in (countable[m][1].get("paths") or [])}
+    best_m = max((ins_best_rule[m] for m in members if ins_best_rule[m] is not None), key=lambda x: x.similarity, default=None)
+    if best_m is None: matched_id, status, best_score = None, "no_rule", 0.0
+    else:
+        matched_id, best_score = best_m.rule.id, best_m.similarity
+        status = ("exposed_and_ignored" if _rule_was_exposed(root, best_m.rule, m_rows, home=home) else "not_exposed") if best_m.kind == "active" else ("matches_proposal" if best_m.kind == "proposal" else "matches_archived")
+    cid = _cluster_signature_id(c_tokens, matched_id)
+    latest_rej = max((d_idx for d_idx, d_row in rejections if d_row.get("cluster_id") == cid or set(d_row.get("insight_ids") or []).intersection(m_ids)), default=None)
+    is_sup = latest_rej is not None and sum(1 for r_idx in m_row_idxs if r_idx > latest_rej) < REJECTION_RESURFACE_COUNT
+    info = {"cluster_id": cid, "insight_ids": m_ids, "count": len(m_ids), "paths": sorted(c_paths), "excerpts": [str(r.get("text") or "") for r in m_rows], "levels": sorted({str(r.get("level") or "") for r in m_rows}), "match_status": status, "matched_rule": matched_id, "similarity": round(best_score, 4), "neighbours": {mid: neighbours.get(mid, []) for mid in m_ids}}
+    return info, is_sup
 
 def review_insights(workspace: Any, *, home: Optional[Path] = None, include_suppressed: bool = False) -> Dict[str, Any]:
     all_rows = read_insight_rows(workspace, home=home)
@@ -370,43 +430,10 @@ def review_insights(workspace: Any, *, home: Optional[Path] = None, include_supp
     n_ins = len(countable)
     ins_vecs, rule_vecs = all_vecs[:n_ins], all_vecs[n_ins:]
     neighbours = {str(countable[i][1].get("id") or f"row-{countable[i][0]}"): [{"id": nid, "similarity": round(sim, 4)} for sim, nid in sorted(((_cosine(ins_vecs[i], ins_vecs[j]), str(countable[j][1].get("id") or f"row-{countable[j][0]}")) for j in range(n_ins) if i != j), key=lambda x: (-x[0], x[1]))[:3] if sim > 0.0] for i in range(n_ins)}
-    ins_best_rule: List[Optional[Tuple[str, Rule, float]]] = []
-    for i in range(n_ins):
-        paths_i, best = set(countable[i][1].get("paths") or []), None
-        for r_idx, (kind, robj, _) in enumerate(rule_entries):
-            sim = _cosine(ins_vecs[i], rule_vecs[r_idx])
-            if ((_paths_overlap_rule(paths_i, robj) and sim >= 0.15) or sim >= 0.30) and (best is None or sim > best[2]):
-                best = (kind, robj, sim)
-        ins_best_rule.append(best)
-    parent = list(range(n_ins))
-    def find(x: int) -> int:
-        while parent[x] != x: parent[x] = x = parent[parent[x]]
-        return x
-    for i in range(n_ins):
-        paths_i, rid_i = set(countable[i][1].get("paths") or []), (ins_best_rule[i][1].id if ins_best_rule[i] else None)
-        for j in range(i + 1, n_ins):
-            if rid_i != (ins_best_rule[j][1].id if ins_best_rule[j] else None): continue
-            sim, paths_j = _cosine(ins_vecs[i], ins_vecs[j]), set(countable[j][1].get("paths") or [])
-            if rid_i is not None or (bool(not paths_i or not paths_j or (paths_i & paths_j)) and sim >= 0.22) or sim >= 0.35:
-                ri, rj = find(i), find(j)
-                if ri != rj: parent[max(ri, rj)] = min(ri, rj)
-    groups: Dict[int, List[int]] = {}
-    for i in range(n_ins): groups.setdefault(find(i), []).append(i)
+    ins_best_rule = _match_insights_to_rules(countable, ins_vecs, rule_entries, rule_vecs)
     clusters, suppressed = [], []
-    for members in groups.values():
-        m_rows, m_row_idxs = [countable[m][1] for m in members], [countable[m][0] for m in members]
-        m_ids, c_tokens = [str(r.get("id") or "") for r in m_rows], [t for m in members for t in ins_tokens[m]]
-        c_paths = {p for m in members for p in (countable[m][1].get("paths") or [])}
-        best_m = max((ins_best_rule[m] for m in members if ins_best_rule[m] is not None), key=lambda x: x[2], default=None)
-        if best_m is None: matched_id, status, best_score = None, "no_rule", 0.0
-        else:
-            kind, robj, best_score = best_m
-            matched_id = robj.id
-            status = ("exposed_and_ignored" if _rule_was_exposed(root, robj, m_rows, home=home) else "not_exposed") if kind == "active" else ("matches_proposal" if kind == "proposal" else "matches_archived")
-        cid = _cluster_signature_id(c_tokens, matched_id)
-        latest_rej = max((d_idx for d_idx, d_row in rejections if d_row.get("cluster_id") == cid or set(d_row.get("insight_ids") or []).intersection(m_ids)), default=None)
-        is_sup = latest_rej is not None and sum(1 for r_idx in m_row_idxs if r_idx > latest_rej) < REJECTION_RESURFACE_COUNT
-        info = {"cluster_id": cid, "insight_ids": m_ids, "count": len(m_ids), "paths": sorted(c_paths), "excerpts": [str(r.get("text") or "") for r in m_rows], "levels": sorted({str(r.get("level") or "") for r in m_rows}), "match_status": status, "matched_rule": matched_id, "similarity": round(best_score, 4), "neighbours": {mid: neighbours.get(mid, []) for mid in m_ids}}
+    for members in _cluster_countable_insights(countable, ins_vecs, ins_best_rule):
+        info, is_sup = _build_cluster_entry(root, members, countable, ins_tokens, ins_best_rule, rejections, neighbours, home=home)
         if is_sup:
             suppressed.append(info)
             if include_suppressed: clusters.append(info)
@@ -438,32 +465,44 @@ def _wilson_ucb95(k: int, n: int) -> float:
     if n <= 0: return 1.0
     z, phat, z2 = 1.6448536269514722, min(1.0, max(0.0, k / n)), 2.705543454095404
     return min(1.0, round(((phat + z2 / (2.0 * n)) + z * math.sqrt((phat * (1.0 - phat) + z2 / (4.0 * n)) / n)) / (1.0 + z2 / n), 6))
-def measure_recurrence(workspace: Any, rule_id: str, *, home: Optional[Path] = None, reset_on_rev_change: bool = True) -> Dict[str, Any]:
-    root = Path(os.fspath(workspace)).resolve()
-    if (rule := load_rules(root).get(rule_id)) is None: raise ValueError(f"unknown rule {rule_id!r}")
-    cur_rev, rule_tokens = rule.digest[:16], _tokenize(f"{rule.id} {rule.meta.get('hypothesis', '')} {rule.body}")
-    alive, matching = set(), []
-    for idx, row in enumerate(read_insight_rows(root, home=home)):
-        revs = row.get("revs") if isinstance(row.get("revs"), Mapping) else {}
-        if reset_on_rev_change and revs.get(rule_id) != cur_rev: continue
-        if (ev := row.get("event")) == "heartbeat": alive.add(str(row.get("hs") or f"hb-{idx}"))
-        elif ev == "insight" and row.get("level") in COUNTABLE_LEVELS and _paths_overlap_rule(row.get("paths") or [], rule):
-            if (itoks := _tokenize(str(row.get("text") or ""))) and rule_tokens and _cosine(*_tfidf_vectors([itoks, rule_tokens])) >= 0.12:
-                matching.append(row)
-    if not (n_sess := len(alive)):
-        return {"rule": rule_id, "rev": cur_rev, "sessions": 0, "recurrences": 0, "rate": 0.0, "rate_ucb95": 1.0, "alarm": False, "status": "no_prompt_traffic"}
+
+def _count_recurrence_episodes(matching: Sequence[Mapping[str, Any]]) -> int:
     episodes, seen_hs, last_ts = 0, set(), None
     for ins in matching:
-        if isinstance(hs_val := ins.get("hs"), str) and hs_val:
-            if hs_val not in seen_hs:
-                seen_hs.add(hs_val)
+        if isinstance(hs_val := ins.get("hs"), str) and hs_val.strip():
+            clean_hs = hs_val.strip()
+            if clean_hs not in seen_hs:
+                seen_hs.add(clean_hs)
                 episodes += 1
         else:
             ts = _parse_ts(ins.get("ts"))
             if ts is not None and last_ts is not None and abs((ts - last_ts).total_seconds()) <= BURST_WINDOW_SECONDS: continue
             last_ts, episodes = ts, episodes + 1
+    return episodes
+
+def measure_recurrence(workspace: Any, rule_id: str, *, home: Optional[Path] = None, reset_on_rev_change: bool = True) -> Dict[str, Any]:
+    root = Path(os.fspath(workspace)).resolve()
+    if (rule := load_rules(root).get(rule_id)) is None: raise ValueError(f"unknown rule {rule_id!r}")
+    cur_rev, rule_tokens = rule.digest[:16], _tokenize(f"{rule.id} {rule.meta.get('hypothesis', '')} {rule.body}")
+    alive: Set[str] = set()
+    unidentified_heartbeats = 0
+    matching: List[Dict[str, Any]] = []
+    for row in read_insight_rows(root, home=home):
+        revs = row.get("revs") if isinstance(row.get("revs"), Mapping) else {}
+        if reset_on_rev_change and revs.get(rule_id) != cur_rev: continue
+        if (ev := row.get("event")) == "heartbeat":
+            if isinstance(hs_val := row.get("hs"), str) and hs_val.strip(): alive.add(hs_val.strip())
+            else: unidentified_heartbeats += 1
+        elif ev == "insight" and row.get("level") in COUNTABLE_LEVELS and _paths_overlap_rule(row.get("paths") or [], rule):
+            if (itoks := _tokenize(str(row.get("text") or ""))) and rule_tokens and _cosine(*_tfidf_vectors([itoks, rule_tokens])) >= 0.12:
+                matching.append(row)
+    episodes = _count_recurrence_episodes(matching)
+    if not (n_sess := len(alive)):
+        if unidentified_heartbeats > 0 or episodes > 0:
+            return {"rule": rule_id, "rev": cur_rev, "sessions": 0, "unidentified_heartbeats": unidentified_heartbeats, "recurrences": episodes, "rate": 0.0, "rate_ucb95": 1.0, "alarm": False, "status": "insufficient_session_identity"}
+        return {"rule": rule_id, "rev": cur_rev, "sessions": 0, "unidentified_heartbeats": 0, "recurrences": 0, "rate": 0.0, "rate_ucb95": 1.0, "alarm": False, "status": "no_prompt_traffic"}
     alarm = episodes >= RECURRENCE_ALARM_COUNT
-    return {"rule": rule_id, "rev": cur_rev, "sessions": n_sess, "recurrences": episodes, "rate": round(episodes / n_sess, 6), "rate_ucb95": _wilson_ucb95(episodes, n_sess), "alarm": alarm, "status": "not_working" if alarm else "ok"}
+    return {"rule": rule_id, "rev": cur_rev, "sessions": n_sess, "unidentified_heartbeats": unidentified_heartbeats, "recurrences": episodes, "rate": round(episodes / n_sess, 6), "rate_ucb95": _wilson_ucb95(episodes, n_sess), "alarm": alarm, "status": "not_working" if alarm else "ok"}
 
 def _host_config_path(host: str, home: Path) -> Path:
     env_var, default_dir, fname = ("CLAUDE_CONFIG_DIR", ".claude", "settings.json") if host == "claude-code" else ("CODEX_HOME", ".codex", "hooks.json")
