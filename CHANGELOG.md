@@ -12,6 +12,7 @@ All notable changes to Aegis Guardrails are documented here. The project uses [S
 
 ### Fixed
 
+- **Explicit MCP tool annotation hints across all 5 tools (`aegis_mcp.registry`, `tests/contract/mcp_tools.json`).** `aegis_report_outcome` and `aegis_capture_insight` now explicitly declare all four boolean MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) matching their handler behavior (`idempotentHint: True` for `idempotency_key`-deduplicated `aegis_report_outcome`; `idempotentHint: False` for append-per-call `aegis_capture_insight`), satisfying strict MCP directory validators.
 - **Canonical test-suite candidate resolution (`aegis_core.verification.checkpoint_checks`).** Expanded `_resolve_canonical_test_candidates` to include `tests/contract/` and mapped domain test suites so `aegis check` no longer emits false-positive missing-test warnings.
 
 ## [4.3.1] - 2026-10-17
