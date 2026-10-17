@@ -243,6 +243,36 @@ def test_the_quick_start_check_fails_as_shown_once_the_new_file_is_tracked(quick
     assert which_files and "untracked" in which_files.group(0).lower()
 
 
+def test_the_quick_start_no_eval_rule_allows_method_calls_via_builtin_true(quick_start, capsys):
+    """The README and how-it-works no-eval rule examples use `builtin: true` so method calls
+    such as `model.eval()` pass `aegis check` while builtin `eval("1")` fails."""
+    for doc in (README, HOW):
+        text = doc.read_text(encoding="utf-8")
+        assert "builtin: true" in text, f"{doc.name} no-eval example is missing builtin: true"
+
+    (quick_start / "app.py").write_text("def infer(model):\n    model.eval()\n    return 1\n", encoding="utf-8")
+    _git(quick_start, "add", "app.py")
+    code, out = _aegis(capsys, "check", "--workspace", str(quick_start))
+    assert code == 0 and "forbid_ast:no-eval" not in out, out
+
+    (quick_start / "app.py").write_text('x = eval("1")\n', encoding="utf-8")
+    _git(quick_start, "add", "app.py")
+    code, out = _aegis(capsys, "check", "--workspace", str(quick_start))
+    assert code == 1 and "forbid_ast:no-eval" in out, out
+
+
+def test_the_readme_uses_progressive_disclosure_and_three_step_quick_start():
+    """The README leads Quick start with a 3-step loop and wraps advanced internals in
+    collapsible <details> blocks."""
+    readme = README.read_text(encoding="utf-8")
+    quick = _section(readme, "Quick start")
+    for step in ("Step 1", "Step 2", "Step 3"):
+        assert step in quick, f"Quick start is missing {step}"
+    details_blocks = re.findall(r"<details>\s*<summary>.*?</summary>.*?</details>", readme, re.S)
+    assert len(details_blocks) >= 3, "expected at least 3 progressive-disclosure <details> blocks in README.md"
+
+
+
 RETRACTED_ENFORCEMENT = (
     "only tier an agent cannot skip",
     "only step an agent cannot skip",
